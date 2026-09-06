@@ -12,7 +12,7 @@
     "start": "node dist/main.js",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "tsx --test tests/*.test.ts && node --test scripts/google-sheets-scopes.test.mjs",
     "migrate": "tsx src/migrate.ts",
     "check": "npm run typecheck && npm test",
     "format": "prettier --write .",

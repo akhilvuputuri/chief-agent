@@ -1,4 +1,5 @@
 // One-time local OAuth bootstrap. Never prints credentials, codes or token responses.
+import { validateSheetsScopes } from "./google-sheets-scopes.mjs";
 import { createServer } from "node:http";
 import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
@@ -55,16 +56,8 @@ const server = createServer(async (req, res) => {
     });
     if (!response.ok) throw new Error("Token exchange failed");
     const t = await response.json();
-    const granted = new Set((t.scope || "").split(" "));
-    if (
-      granted.size !== 3 ||
-      scope.split(" ").some((s) => !granted.has(s)) ||
-      !t.refresh_token ||
-      !t.access_token
-    )
-      throw new Error(
-        "Expected only app-created file access, identity and offline access",
-      );
+    validateSheetsScopes(t.scope);
+    if (!t.refresh_token || !t.access_token) throw new Error("Offline authorization was not returned. Restart consent.");
     const profile = await fetch(
       "https://www.googleapis.com/oauth2/v2/userinfo",
       {
@@ -91,9 +84,11 @@ const server = createServer(async (req, res) => {
     );
     res.end("App-created Sheets authorization saved. You can close this tab.");
     console.log("App-created Sheets authorization saved successfully.");
-  } catch {
-    res.writeHead(400).end("Authorization did not complete. Return to setup.");
-    console.error("Authorization failed; no credentials printed.");
+  } catch (error) {
+    const safeMessages = ["Missing file permission. Select the files-you-use-with-this-app checkbox on Google consent.", "Unexpected Google permissions. Setup stopped without saving credentials.", "Offline authorization was not returned. Restart consent.", "Consent not completed", "Token exchange failed", "Wrong Google account"];
+    const message = safeMessages.includes(error?.message) ? error.message : "Authorization failed during account verification or credential storage. Restart setup.";
+    res.writeHead(400).end(message);
+    console.error(message);
   } finally {
     clearTimeout(timer);
     server.close();
