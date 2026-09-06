@@ -1,3 +1,4 @@
+import { formatTelegram } from "./telegram-format.js";
 import { Bot, InputFile } from "grammy";
 import { randomUUID } from "node:crypto";
 import type { Config } from "./config.js";
@@ -92,11 +93,12 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
           } else {
             await ctx.replyWithChatAction("typing");
             const reply = await assistant.respond(user, message);
-            for (let i = 0; i < reply.length; i += 3500)
-              await ctx.reply(reply.slice(i, i + 3500));
+            const formatted = formatTelegram(reply);
+            for (const part of formatted)
+              await ctx.reply(part.text, { entities: part.entities, link_preview_options: { is_disabled: true } });
             if (ctx.message.voice && c.VOICE_REPLIES === "true") {
               try {
-                const audio = await voice.speak(reply);
+                const audio = await voice.speak(formatted.map(part => part.text).join(""));
                 await ctx.replyWithVoice(
                   new InputFile(audio.bytes, audio.filename),
                   { caption: "AI-generated voice" },
