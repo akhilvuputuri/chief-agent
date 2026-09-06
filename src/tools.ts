@@ -1,3 +1,4 @@
+import { SkillTools } from "./skills.js";
 import { PreparationTools } from "./preparation.js";
 import type { SheetsTools } from "./sheets.js";
 import type { GmailTools } from "./gmail.js";
@@ -35,6 +36,15 @@ export class JobTools {
     a: ReturnType<typeof action.parse>,
   ): Promise<unknown> {
     const db = this.db;
+    if (
+      a.operation === "skill_list" ||
+      a.operation === "skill_read" ||
+      a.operation === "skill_history" ||
+      a.operation === "skill_draft" ||
+      a.operation === "skill_evaluate" ||
+      a.operation === "skill_activate"
+    )
+      return new SkillTools(db).call(user, run, a);
     if (
       a.operation === "prep_list" ||
       a.operation === "prep_save" ||
@@ -147,17 +157,35 @@ export class JobTools {
     };
   }
   async decide(user: string, id: string, approve: boolean) {
-    // One statement: consume approval and delete exactly its owner-scoped payload atomically.
+    // Lock the owner while checking expected head and consuming the approval.
+    // Skill revisions and evaluations are append-only through the application.
     const result = await this.db.query(
-      `WITH decision AS (
-   UPDATE approvals SET status=$3 WHERE id=$1 AND user_id=$2 AND status='pending' AND expires_at>now() RETURNING *
-  ), removed AS (
-   DELETE FROM jobs USING decision WHERE jobs.id=(decision.payload->>'id')::uuid AND jobs.user_id=$2 AND decision.status='approved' RETURNING jobs.id
-  ) SELECT decision.id,decision.status,(SELECT count(*) FROM removed) AS deleted FROM decision`,
+      `WITH owner_lock AS MATERIALIZED (SELECT id FROM users WHERE id=$2 FOR UPDATE),
+       decision AS (
+        UPDATE approvals SET status=$3 FROM owner_lock
+        WHERE approvals.id=$1 AND user_id=$2 AND status='pending' AND expires_at>now()
+        AND (operation='job_delete' OR $3='denied' OR
+          (COALESCE((SELECT version_id::text FROM skill_heads WHERE user_id=$2 AND key=payload->>'key'),'')=COALESCE(payload->>'previous','')))
+        RETURNING approvals.*
+       ), removed AS (
+        DELETE FROM jobs USING decision WHERE jobs.id=(decision.payload->>'id')::uuid AND jobs.user_id=$2 AND decision.status='approved' AND decision.operation='job_delete' RETURNING jobs.id
+       ), activated AS (
+        INSERT INTO skill_heads(user_id,key,version_id)
+        SELECT user_id,payload->>'key',(payload->>'versionId')::uuid FROM decision WHERE status='approved' AND operation='skill_activate'
+        ON CONFLICT(user_id,key) DO UPDATE SET version_id=EXCLUDED.version_id,updated_at=now()
+        WHERE skill_heads.version_id::text=(SELECT payload->>'previous' FROM decision)
+        RETURNING version_id
+       ) SELECT decision.id,decision.status,decision.operation,(SELECT count(*) FROM removed) AS deleted,(SELECT version_id FROM activated) AS version_id FROM decision`,
       [id, user, approve ? "approved" : "denied"],
     );
     if (!result.rows[0])
       throw new Error("Approval unavailable, expired, or already used");
+    if (
+      approve &&
+      result.rows[0].operation === "skill_activate" &&
+      !result.rows[0].version_id
+    )
+      throw new Error("Skill changed concurrently; request a fresh approval");
     return result.rows[0];
   }
 }

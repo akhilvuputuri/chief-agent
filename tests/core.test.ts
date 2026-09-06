@@ -28,6 +28,9 @@ before(async () => {
       "utf8",
     ),
   );
+  await pg.exec(
+    await readFile(new URL("../db/003_skills.sql", import.meta.url), "utf8"),
+  );
   db = pg as unknown as Database;
   tools = new JobTools(db, {
     call: async () => ({ untrusted: true, content: "test" }),

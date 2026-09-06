@@ -34,6 +34,8 @@ services:
         "/migrations/001_initial.sql",
         "-f",
         "/migrations/002_preparation.sql",
+        "-f",
+        "/migrations/003_skills.sql",
       ]
     depends_on:
       postgres: { condition: service_healthy }

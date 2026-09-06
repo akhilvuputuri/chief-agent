@@ -10,7 +10,33 @@ export const status = z.enum([
   "rejected",
   "archived",
 ]);
+const skillKey = z.string().regex(/^[a-z][a-z0-9_-]{0,49}$/);
 export const action = z.discriminatedUnion("operation", [
+  z.object({ operation: z.literal("skill_list") }).strict(),
+  z
+    .object({
+      operation: z.literal("skill_read"),
+      key: skillKey,
+      id: id.optional(),
+    })
+    .strict(),
+  z.object({ operation: z.literal("skill_history"), key: skillKey }).strict(),
+  z
+    .object({
+      operation: z.literal("skill_draft"),
+      key: skillKey,
+      content: z.string().trim().min(1).max(12000),
+      reason: z.string().trim().min(1).max(1000),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("skill_evaluate"),
+      id,
+      report: z.string().trim().min(40).max(6000),
+    })
+    .strict(),
+  z.object({ operation: z.literal("skill_activate"), id }).strict(),
   z.object({ operation: z.literal("prep_list"), id: id.optional() }).strict(),
   z
     .object({

@@ -146,3 +146,9 @@ This project is independent of Nous Research, Telegram and the model providers. 
 ## Preparation and Google Sheets
 
 Hermes can research public role pages, save evidence-backed requirements, distinguish unknown experience from confirmed gaps, and track shared preparation tasks. A private three-tab Google Sheet serves as a viewing mirror of Postgres. See [setup and boundaries](docs/preparation.md). Gmail remains read-only.
+
+## Versioned skills — September 6 update
+
+The current skill implementation is documented in [Versioned skills](docs/versioned-skills.md). It adds immutable text drafts, evaluation reports, explicit Telegram activation and rollback using existing Postgres storage. The exact companion-tool allowlist remains enforced; native filesystem skill tools and shell execution remain disabled. Frontier review and automatic periodic cleanup are not enabled.
+
+The separate development server proposal was declined. Development-to-PR code was preserved in a local Git stash named `Deferred development-to-PR work; user chose versioned skills`; it is not deployed. The active implementation branch is `feature/versioned-skills`, based on the preparation/Sheets branch.
