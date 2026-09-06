@@ -191,23 +191,21 @@ export class SheetsTools {
       throw new Error("Sheet snapshot exceeds the supported 5000 rows per tab");
     const read = async (r: Response) =>
       JSON.parse(new TextDecoder().decode(await boundedBytes(r, 1000000)));
-    const token = z
-      .object({ access_token: z.string().min(1) })
-      .parse(
-        await read(
-          await this.request("https://oauth2.googleapis.com/token", {
-            method: "POST",
-            body: new URLSearchParams({
-              client_id: c.clientId,
-              client_secret: c.clientSecret,
-              refresh_token: c.refreshToken,
-              grant_type: "refresh_token",
-            }),
-            redirect: "error",
-            signal: AbortSignal.timeout(15000),
+    const token = z.object({ access_token: z.string().min(1) }).parse(
+      await read(
+        await this.request("https://oauth2.googleapis.com/token", {
+          method: "POST",
+          body: new URLSearchParams({
+            client_id: c.clientId,
+            client_secret: c.clientSecret,
+            refresh_token: c.refreshToken,
+            grant_type: "refresh_token",
           }),
-        ),
-      );
+          redirect: "error",
+          signal: AbortSignal.timeout(15000),
+        }),
+      ),
+    );
     await read(
       await this.request(
         `https://sheets.googleapis.com/v4/spreadsheets/${c.spreadsheetId}:batchUpdate`,

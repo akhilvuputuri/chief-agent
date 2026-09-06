@@ -57,7 +57,10 @@ const server = createServer(async (req, res) => {
     if (!response.ok) throw new Error("Token exchange failed");
     const t = await response.json();
     validateSheetsScopes(t.scope);
-    if (!t.refresh_token || !t.access_token) throw new Error("Offline authorization was not returned. Restart consent.");
+    if (!t.refresh_token || !t.access_token)
+      throw new Error(
+        "Offline authorization was not returned. Restart consent.",
+      );
     const profile = await fetch(
       "https://www.googleapis.com/oauth2/v2/userinfo",
       {
@@ -85,8 +88,17 @@ const server = createServer(async (req, res) => {
     res.end("App-created Sheets authorization saved. You can close this tab.");
     console.log("App-created Sheets authorization saved successfully.");
   } catch (error) {
-    const safeMessages = ["Missing file permission. Select the files-you-use-with-this-app checkbox on Google consent.", "Unexpected Google permissions. Setup stopped without saving credentials.", "Offline authorization was not returned. Restart consent.", "Consent not completed", "Token exchange failed", "Wrong Google account"];
-    const message = safeMessages.includes(error?.message) ? error.message : "Authorization failed during account verification or credential storage. Restart setup.";
+    const safeMessages = [
+      "Missing file permission. Select the files-you-use-with-this-app checkbox on Google consent.",
+      "Unexpected Google permissions. Setup stopped without saving credentials.",
+      "Offline authorization was not returned. Restart consent.",
+      "Consent not completed",
+      "Token exchange failed",
+      "Wrong Google account",
+    ];
+    const message = safeMessages.includes(error?.message)
+      ? error.message
+      : "Authorization failed during account verification or credential storage. Restart setup.";
     res.writeHead(400).end(message);
     console.error(message);
   } finally {
