@@ -2,6 +2,8 @@
 
 Operator and successor-agent guide: [HANDOVER.md](HANDOVER.md) (deployment state, voice integration plan, and remaining work).
 
+Voice provider configuration: [voice setup](docs/voice-setup.md). OpenAI, ElevenLabs, and Groq transcription are implemented; OpenAI and ElevenLabs speech replies are supported. Live speech still requires credentials and an audio acceptance test.
+
 **A persistent personal assistant you can talk to from your phone.** Built around Hermes, with Telegram as the first client and conversational job search as the first domain.
 
 “Find agent engineering roles, compare them with my background, and keep the promising ones.” The assistant decides which tools to use, asks for missing context, and carries the conversation forward. There is no fixed listing-to-report pipeline.

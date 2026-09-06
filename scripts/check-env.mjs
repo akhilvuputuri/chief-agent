@@ -19,6 +19,12 @@ if (missing.length) {
     "Required settings are present. This checks presence only; live authentication still needs testing.",
   );
 }
-for (const key of ["OPENAI_API_KEY", "TAVILY_API_KEY"]) {
+for (const key of [
+  "OPENAI_API_KEY",
+  "ELEVENLABS_API_KEY",
+  "ELEVENLABS_VOICE_ID",
+  "GROQ_API_KEY",
+  "TAVILY_API_KEY",
+]) {
   console.log(`${key}: ${env[key]?.trim() ? "configured" : "not configured"}`);
 }

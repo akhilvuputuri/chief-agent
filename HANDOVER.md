@@ -1,6 +1,11 @@
 # Hermes Companion — agent handover
 
-Prepared 6 September 2026. This document describes the state at handover, not a claim that the entire product vision is complete. Start here, then read the source. Do not recreate the server or re-pair the user unnecessarily.
+Prepared 6 September 2026.
+
+## Continuation update
+
+The initial local commit is `4dba0ed`; GitHub creation awaits sign-in. Local source now implements independently selected OpenAI/ElevenLabs/Groq transcription and OpenAI/ElevenLabs synthesis. ElevenLabs output uses MP3 with the correct filename, supported by Telegram sendVoice. Speech credentials and a live audio acceptance test remain pending. The sections below preserve the initial deployment snapshot; consult `docs/voice-setup.md` and Git history for subsequent voice work.
+This document describes the state at handover, not a claim that the entire product vision is complete. Start here, then read the source. Do not recreate the server or re-pair the user unnecessarily.
 
 ## 1. Product intent and decisions
 

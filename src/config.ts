@@ -7,6 +7,17 @@ const schema = z.object({
   INTERNAL_API_TOKEN: z.string().min(32),
   HERMES_URL: z.string().url().default("http://localhost:8000"),
   PORT: z.coerce.number().int().default(3000),
+  STT_PROVIDER: z.enum(["openai", "elevenlabs", "groq"]).default("openai"),
+  TTS_PROVIDER: z.enum(["openai", "elevenlabs"]).default("openai"),
+  ELEVENLABS_API_KEY: z.string().default(""),
+  ELEVENLABS_VOICE_ID: z
+    .string()
+    .regex(/^[a-zA-Z0-9_-]*$/)
+    .default(""),
+  ELEVENLABS_STT_MODEL: z.string().default("scribe_v2"),
+  ELEVENLABS_TTS_MODEL: z.string().default("eleven_flash_v2_5"),
+  GROQ_API_KEY: z.string().default(""),
+  GROQ_STT_MODEL: z.string().default("whisper-large-v3-turbo"),
   OPENAI_API_KEY: z.string().default(""),
   TAVILY_API_KEY: z.string().default(""),
   STT_MODEL: z.string().default("whisper-1"),

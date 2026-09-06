@@ -30,21 +30,73 @@ export async function boundedBytes(
   }
   return result;
 }
-export class Voice {
+export interface SpeechToText {
+  transcribe(bytes: Uint8Array): Promise<string>;
+}
+export type SpeechAudio = {
+  bytes: Uint8Array;
+  filename: string;
+  mimeType: string;
+};
+export interface TextToSpeech {
+  speak(text: string): Promise<SpeechAudio>;
+}
+export class Voice implements SpeechToText, TextToSpeech {
   constructor(private c: Config) {}
+  get transcriptionReady() {
+    return Boolean(
+      this.c.STT_PROVIDER === "elevenlabs"
+        ? this.c.ELEVENLABS_API_KEY
+        : this.c.STT_PROVIDER === "groq"
+          ? this.c.GROQ_API_KEY
+          : this.c.OPENAI_API_KEY,
+    );
+  }
+  get synthesisReady() {
+    return Boolean(
+      this.c.TTS_PROVIDER === "elevenlabs"
+        ? this.c.ELEVENLABS_API_KEY && this.c.ELEVENLABS_VOICE_ID
+        : this.c.OPENAI_API_KEY,
+    );
+  }
   async transcribe(bytes: Uint8Array) {
-    if (!this.c.OPENAI_API_KEY)
+    if (!this.transcriptionReady)
       throw new Error("Voice provider is not configured");
+    if (!bytes.length || bytes.length > 10 * 1024 * 1024)
+      throw new Error("Invalid audio size");
+    const eleven = this.c.STT_PROVIDER === "elevenlabs";
+    const groq = this.c.STT_PROVIDER === "groq";
     const form = new FormData();
-    form.set("model", this.c.STT_MODEL);
+    form.set(
+      eleven ? "model_id" : "model",
+      eleven
+        ? this.c.ELEVENLABS_STT_MODEL
+        : groq
+          ? this.c.GROQ_STT_MODEL
+          : this.c.STT_MODEL,
+    );
     form.set(
       "file",
       new Blob([new Uint8Array(bytes)], { type: "audio/ogg" }),
       "voice.ogg",
     );
-    const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    if (eleven) {
+      form.set("tag_audio_events", "false");
+      form.set("timestamps_granularity", "none");
+    }
+    const headers: Record<string, string> = eleven
+      ? { "xi-api-key": this.c.ELEVENLABS_API_KEY }
+      : {
+          Authorization: `Bearer ${groq ? this.c.GROQ_API_KEY : this.c.OPENAI_API_KEY}`,
+        };
+    const endpoint = eleven
+      ? "https://api.elevenlabs.io/v1/speech-to-text"
+      : groq
+        ? "https://api.groq.com/openai/v1/audio/transcriptions"
+        : "https://api.openai.com/v1/audio/transcriptions";
+    const res = await fetch(endpoint, {
       method: "POST",
-      headers: { Authorization: `Bearer ${this.c.OPENAI_API_KEY}` },
+      headers,
       body: form,
       signal: AbortSignal.timeout(60000),
     });
@@ -59,24 +111,43 @@ export class Voice {
       throw new Error("Invalid transcript");
     return data.text as string;
   }
-  async speak(text: string) {
-    if (!this.c.OPENAI_API_KEY)
+  async speak(text: string): Promise<SpeechAudio> {
+    if (!this.synthesisReady)
       throw new Error("Voice provider is not configured");
-    const res = await fetch("https://api.openai.com/v1/audio/speech", {
+    if (!text.trim()) throw new Error("Empty speech");
+    const eleven = this.c.TTS_PROVIDER === "elevenlabs";
+    const endpoint = eleven
+      ? `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(this.c.ELEVENLABS_VOICE_ID)}?output_format=mp3_44100_128`
+      : "https://api.openai.com/v1/audio/speech";
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...(eleven
+        ? { "xi-api-key": this.c.ELEVENLABS_API_KEY }
+        : { Authorization: `Bearer ${this.c.OPENAI_API_KEY}` }),
+    };
+    const input = text.slice(0, 4000);
+    const res = await fetch(endpoint, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.c.OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: this.c.TTS_MODEL,
-        voice: this.c.TTS_VOICE,
-        input: text.slice(0, 4000),
-        response_format: "opus",
-      }),
+      headers,
+      body: JSON.stringify(
+        eleven
+          ? { text: input, model_id: this.c.ELEVENLABS_TTS_MODEL }
+          : {
+              model: this.c.TTS_MODEL,
+              voice: this.c.TTS_VOICE,
+              input,
+              response_format: "opus",
+            },
+      ),
       signal: AbortSignal.timeout(60000),
     });
-    return boundedBytes(res, 10 * 1024 * 1024);
+    const bytes = await boundedBytes(res, 10 * 1024 * 1024);
+    if (!bytes.length) throw new Error("Empty speech response");
+    return {
+      bytes,
+      filename: eleven ? "reply.mp3" : "reply.ogg",
+      mimeType: eleven ? "audio/mpeg" : "audio/ogg",
+    };
   }
 }
 export class WebTools {

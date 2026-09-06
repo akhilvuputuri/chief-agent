@@ -41,7 +41,7 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
           );
         } else if (message === "/start") {
           await ctx.reply(
-            "Tell me what you want to work on. I can research roles, save opportunities, compare them with your background, and remember preferences you ask me to keep. Send text or a voice note. /voice explains audio replies. Deleting a role requires your approval. I cannot send applications or emails.",
+            `Tell me what you want to work on. I can save roles, compare them with your background, and remember preferences you ask me to keep. Web search is ${c.TAVILY_API_KEY ? "available" : "not configured yet"}. Voice notes are ${voice.transcriptionReady ? "available" : "not configured yet"}. /voice explains audio replies. Deleting a role requires your approval. I cannot send applications or emails.`,
           );
         } else if (message === "/reset") {
           await db.query("DELETE FROM conversations WHERE user_id=$1", [user]);
@@ -50,10 +50,20 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
           );
         } else if (message === "/voice") {
           await ctx.reply(
-            `Voice notes are transcribed by the configured speech provider. Audio is held in memory, not saved. Transcripts become conversation history. AI-generated voice replies are ${c.VOICE_REPLIES === "true" ? "enabled" : "disabled"} by the server setting.`,
+            `Voice transcription is ${voice.transcriptionReady ? `configured with ${c.STT_PROVIDER}` : "not configured yet"}. Audio is held in memory, not saved. Transcripts become conversation history. AI-generated voice replies are ${c.VOICE_REPLIES === "true" && voice.synthesisReady ? "enabled" : "disabled"} by the server setting.`,
           );
         } else {
           if (ctx.message.voice) {
+            if (!voice.transcriptionReady) {
+              await ctx.reply(
+                "Voice transcription is not configured yet. Please send text for now.",
+              );
+              await db.query(
+                "UPDATE inbound_updates SET status='completed' WHERE update_id=$1",
+                [ctx.update.update_id],
+              );
+              return;
+            }
             if (
               ctx.message.voice.duration > 180 ||
               (ctx.message.voice.file_size ?? 0) > 10 * 1024 * 1024
@@ -86,8 +96,9 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
               await ctx.reply(reply.slice(i, i + 3500));
             if (ctx.message.voice && c.VOICE_REPLIES === "true") {
               try {
+                const audio = await voice.speak(reply);
                 await ctx.replyWithVoice(
-                  new InputFile(await voice.speak(reply), "reply.ogg"),
+                  new InputFile(audio.bytes, audio.filename),
                   { caption: "AI-generated voice" },
                 );
               } catch {
