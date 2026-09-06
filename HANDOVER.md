@@ -10,7 +10,7 @@ Build a useful general personal assistant and an AI engineering portfolio projec
 
 - Source: `/Users/akhilvuputuri/Dev/hermes-companion`
 - Private operations directory: `/Users/akhilvuputuri/Dev/hermes-companion-ops`
-- Repository: https://github.com/akhilvuputuri/hermes-companion
+- Repository: https://github.com/akhilvuputuri/personal-agent
 - Existing DigitalOcean host: `188.166.246.143`, `/opt/hermes-companion`, $24/month, Singapore.
 - SSH identity: private ops `hermes_do`, with pinned `known_hosts`.
 
@@ -44,3 +44,7 @@ The previous detailed Hermes handover is retained under `docs/history/hermes-han
 ## Live cutover results
 
 All 22 roles remain. Task `aaf59b66-dc61-4c1c-8afa-bdc50d8ff850` remains paused at revision 3 with 26 done and 21 pending steps. Its previous history is archived. Live Sol, Telegram bot authentication, read-only Gmail/Calendar, both three-tab Sheet mirrors and an ElevenLabs speech/transcription round trip passed. No automatic resumption was performed. A fresh user-sent Telegram voice note remains a useful hands-on acceptance check after the automated and provider checks.
+
+## Repository rename and progress visibility
+
+GitHub is now `akhilvuputuri/personal-agent`; the local Git remote points there. The existing local source directory and server `/opt/hermes-companion` remain unchanged, preserving Docker project/volume identity. Background tasks forward model-written progress through the same Telegram renderer as ordinary turns. A typing indicator shows active processing, and `/status` bypasses conversational queues.

@@ -1,8 +1,8 @@
-# Hermes Companion
+# Personal Agent
 
 **A personal assistant with a TypeScript agent runtime we own.** Talk to it through Telegram text or voice, ask it to research, maintain notes, plan preparation, and manage reminders. Postgres is the durable source of truth; Google Sheets gives you a familiar viewing surface.
 
-The repository keeps its original name. Hermes informed the first prototype and remains a reference, but is no longer a production dependency.
+Repository: https://github.com/akhilvuputuri/personal-agent. Hermes informed the first prototype and remains a reference, but is no longer a production dependency.
 
 ```mermaid
 flowchart LR
