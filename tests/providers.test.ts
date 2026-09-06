@@ -43,7 +43,7 @@ test("voice uses multipart OGG ingestion and Opus synthesis; propagates failures
     globalThis.fetch = async () =>
       new Response("secret provider detail", { status: 401 });
     await assert.rejects(() => voice.transcribe(new Uint8Array([1])), {
-      message: "Provider request failed",
+      message: "Provider request failed (HTTP 401)",
     });
   } finally {
     globalThis.fetch = original;
@@ -105,7 +105,7 @@ test("ElevenLabs routes credentials correctly and preserves MP3 output", async (
     globalThis.fetch = async () =>
       new Response("provider secret", { status: 429 });
     await assert.rejects(() => v.speak("Hello"), {
-      message: "Provider request failed",
+      message: "Provider request failed (HTTP 429)",
     });
   } finally {
     globalThis.fetch = original;
