@@ -36,6 +36,22 @@ class BridgeTests(unittest.TestCase):
             bridge.run_turn(self.data, UnsafeAgent)
         self.assertIsNone(bridge._active_capability)
 
+    def test_runtime_limit_is_structured_and_synthetic_instruction_is_removed(self):
+        class LimitedAgent:
+            tools = [{"function": {"name": "companion_action"}}]
+            iteration_budget = type("Budget", (), {"remaining": 0})()
+            def __init__(self, **kwargs): pass
+            def run_conversation(self, **kwargs):
+                return {"final_response": "Partial result", "messages": [
+                    {"role": "user", "content": "Help me compare roles"},
+                    {"role": "user", "content": "You've reached the maximum number of tool-calling iterations allowed. Stop now."},
+                    {"role": "assistant", "content": "Partial result"}]}
+        with patch.dict(os.environ, {"HERMES_MODEL": "test"}):
+            result = bridge.run_turn(self.data, LimitedAgent)
+        self.assertTrue(result["interrupted"])
+        self.assertEqual(len(result["history"]), 2)
+        self.assertEqual(result["history"][0]["content"], self.data["message"])
+
     def test_no_tool_outside_turn(self):
         self.assertIn('No active turn', bridge.tool_handler({"operation": "job_list"}))
 

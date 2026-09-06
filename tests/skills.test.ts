@@ -17,6 +17,15 @@ test("skills preserve drafts, enforce ownership/evaluation/approval, and restore
       await pg.exec(
         await readFile(new URL(`../db/${file}`, import.meta.url), "utf8"),
       );
+    await pg.exec(
+      await readFile(
+        new URL("../db/002_preparation.sql", import.meta.url),
+        "utf8",
+      ),
+    );
+    await pg.exec(
+      await readFile(new URL("../db/005_work.sql", import.meta.url), "utf8"),
+    );
     const db = pg as unknown as Database;
     await ensureUser(db, "a");
     await ensureUser(db, "b");
@@ -32,7 +41,10 @@ test("skills preserve drafts, enforce ownership/evaluation/approval, and restore
       content: "Ask about missing evidence before claiming a gap.",
       reason: "Avoid unsupported conclusions",
     });
-    assert.deepEqual(await call("skill_list"), []);
+    assert.equal(
+      (await call("skill_list")).some((s: any) => s.key === "prep"),
+      false,
+    );
     await assert.rejects(
       () => call("skill_activate", { id: first.id }),
       /Evaluate/,

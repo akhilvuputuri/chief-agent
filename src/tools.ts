@@ -1,3 +1,5 @@
+import { WorkTools } from "./work.js";
+import { toolError } from "./tool-errors.js";
 import type { DailyTools, DailyAction } from "./daily.js";
 import { SkillTools } from "./skills.js";
 import { PreparationTools } from "./preparation.js";
@@ -16,19 +18,57 @@ export class JobTools {
     private sheets?: Pick<SheetsTools, "sync">,
     private daily?: DailyTools,
   ) {}
-  async execute(user: string, run: string, input: unknown) {
+  async execute(
+    user: string,
+    run: string,
+    input: unknown,
+    withReceipt = false,
+  ) {
     const a = action.parse(input);
     await event(this.db, user, run, "tool.started", { operation: a.operation });
+    let dispatched = false;
     try {
       const result = await this.dispatch(user, run, a);
+      dispatched = true;
       await event(this.db, user, run, "tool.completed", {
         operation: a.operation,
       });
-      return result;
+      if (!a.operation.startsWith("work_")) {
+        const receiptId = randomUUID();
+        const r = result as any;
+        const details = {
+          id: r?.id,
+          sourceId: r?.sourceId,
+          synced: r?.synced,
+          url: r?.url,
+          counts: r?.counts,
+        };
+        await this.db.query(
+          `INSERT INTO tool_receipts(id,user_id,run_id,task_id,operation,status,details) VALUES($1,$2,$3,(SELECT task_id FROM work_turns WHERE run_id=$3),$4,'success',$5::jsonb)`,
+          [receiptId, user, run, a.operation, JSON.stringify(details)],
+        );
+        if (withReceipt) return { result, receiptId };
+      }
+      return withReceipt ? { result } : result;
     } catch (error) {
+      if (dispatched)
+        throw new Error(
+          "Result recording failed after tool execution; inspect state before retrying",
+        );
       await event(this.db, user, run, "tool.failed", {
         operation: a.operation,
       });
+      if (!a.operation.startsWith("work_"))
+        await this.db.query(
+          `INSERT INTO tool_receipts(id,user_id,run_id,task_id,operation,status,details) VALUES($1,$2,$3,(SELECT task_id FROM work_turns WHERE run_id=$3),$4,'failed',$5::jsonb)`,
+          [
+            randomUUID(),
+            user,
+            run,
+            a.operation,
+            JSON.stringify(toolError(error)),
+          ],
+        );
       throw error;
     }
   }
@@ -38,6 +78,16 @@ export class JobTools {
     a: ReturnType<typeof action.parse>,
   ): Promise<unknown> {
     const db = this.db;
+    if (
+      a.operation === "work_start" ||
+      a.operation === "work_revise" ||
+      a.operation === "work_status" ||
+      a.operation === "work_step" ||
+      a.operation === "work_evidence" ||
+      a.operation === "work_yield" ||
+      a.operation === "work_cancel"
+    )
+      return new WorkTools(db).call(user, run, a);
     if (
       a.operation === "item_save" ||
       a.operation === "item_list" ||

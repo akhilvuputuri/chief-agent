@@ -2,13 +2,13 @@
 
 Operator and successor-agent guide: [HANDOVER.md](HANDOVER.md) (deployment state, voice integration plan, and remaining work).
 
-Voice provider configuration: [voice setup](docs/voice-setup.md). OpenAI, ElevenLabs, and Groq transcription are implemented; OpenAI and ElevenLabs speech replies are supported. Live speech still requires credentials and an audio acceptance test.
+Voice provider configuration: [voice setup](docs/voice-setup.md). OpenAI, ElevenLabs, and Groq transcription are implemented; OpenAI and ElevenLabs speech replies are supported. The deployed assistant uses ElevenLabs Scribe v2 and Flash v2.5; Telegram voice has been tested.
 
 **A persistent personal assistant you can talk to from your phone.** Built around Hermes, with Telegram as the first client and conversational job search as the first domain.
 
 “Find agent engineering roles, compare them with my background, and keep the promising ones.” The assistant decides which tools to use, asks for missing context, and carries the conversation forward. There is no fixed listing-to-report pipeline.
 
-> Status: functional starter implementation. Local automated tests run without API keys. Live Telegram, paid model/speech/search calls, Docker image builds, and cloud deployment require separate verification. This is a personal-project foundation, not a production multi-tenant service.
+> Status: deployed personal assistant on DigitalOcean with Telegram text/voice, read-only Gmail/Calendar, research, tasks, reminders and Google Sheets mirrors. Local automated tests run without API keys. This is a single-owner project, not a production multi-tenant service. See [reliable execution](docs/reliable-execution.md) for task tracking, repo skills, validation and current limits.
 
 ## What is implemented
 
@@ -19,13 +19,15 @@ Voice provider configuration: [voice setup](docs/voice-setup.md). OpenAI, Eleven
 | Agent reasoning   | Real Hermes `AIAgent` in an isolated Python service, pinned upstream revision                   |
 | Job-search tools  | Save, list/filter, update, retrieve evidence for semantic fit analysis, approval-gated delete   |
 | Research          | Hosted Tavily search and read-only page extraction; no authenticated browser sessions           |
+| Work tracking     | Persistent scope/steps, evidence and action receipts, bounded continuation and cancellation     |
+| Repo skills       | Research, synthesis, task execution and personal assistance; approved private overrides         |
 | Durable state     | Postgres roles, preferences, conversation history, approvals, inbound IDs and event records     |
 | Authorization     | User identity comes from Telegram; short-lived run capability scopes every tool call            |
 | Approval gates    | Exact role preview, owner-scoped approval, 15-minute expiry, atomic single use                  |
 | Observability     | Metadata-only turn/tool/approval events; transcripts remain in protected conversation storage   |
 | Local development | Docker Compose, environment template, SQL schema, TypeScript build, Python bridge tests, CI     |
 
-Application submission, recruiter messaging, arbitrary shell execution, autonomous scheduled work, web UI, realtime voice, and interactive browser automation are intentionally **not implemented** in this milestone. They appear in the [roadmap](docs/roadmap.md).
+Application submission, recruiter messaging, arbitrary shell execution, web UI, realtime voice, and interactive browser automation are **not implemented**. User-requested reminders and briefings are supported. They appear in the [roadmap](docs/roadmap.md).
 
 ## Architecture
 

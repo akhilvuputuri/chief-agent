@@ -31,6 +31,15 @@ before(async () => {
   await pg.exec(
     await readFile(new URL("../db/003_skills.sql", import.meta.url), "utf8"),
   );
+  await pg.exec(
+    await readFile(
+      new URL("../db/002_preparation.sql", import.meta.url),
+      "utf8",
+    ),
+  );
+  await pg.exec(
+    await readFile(new URL("../db/005_work.sql", import.meta.url), "utf8"),
+  );
   db = pg as unknown as Database;
   tools = new JobTools(db, {
     call: async () => ({ untrusted: true, content: "test" }),
@@ -195,7 +204,7 @@ test("conversation survives assistant recreation and run capability expires afte
   );
   assert.ok(!traces.includes("A private sentence"));
   assert.ok(!traces.includes(oldCapability));
-  assert.match(traces, /turn.completed/);
+  assert.match(traces, /turn.responded/);
 });
 test("failure revokes capabilities and persists a failure event", async () => {
   const assistant = new Assistant(

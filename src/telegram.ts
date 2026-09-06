@@ -42,9 +42,27 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
                 : "Approved. The saved role was deleted."
               : "Denied. The role was kept.",
           );
+        } else if (message === "/continue") {
+          const result = await db.query(
+            `UPDATE work_tasks SET status='queued',passes=0,next_run=now(),updated_at=now() WHERE user_id=$1 AND status IN ('active','paused') RETURNING id`,
+            [user],
+          );
+          await ctx.reply(
+            result.rows.length
+              ? "Queued up to three continuation passes. I will report recorded progress."
+              : "No paused task to continue.",
+          );
+        } else if (message === "/workcancel") {
+          await db.query(
+            `UPDATE work_tasks SET status='cancelled',lease=NULL WHERE user_id=$1 AND status NOT IN ('done','cancelled')`,
+            [user],
+          );
+          await ctx.reply(
+            "Current tracked work cancelled. Completed external actions are retained.",
+          );
         } else if (message === "/start") {
           await ctx.reply(
-            `Tell me what you want to work on. I can save roles, compare them with your background, and remember preferences you ask me to keep. Web search is ${c.TAVILY_API_KEY ? "available" : "not configured yet"}. Voice notes are ${voice.transcriptionReady ? "available" : "not configured yet"}. /voice explains audio replies. Deleting a role requires your approval. I cannot send applications or emails.`,
+            `Tell me what you want to work on. I can research, manage tasks and notes, set reminders, compare roles, and remember preferences you ask me to keep. Use /continue for paused tracked work or /workcancel to cancel it. Web search is ${c.TAVILY_API_KEY || c.OPENROUTER_API_KEY ? "available" : "not configured yet"}. Voice notes are ${voice.transcriptionReady ? "available" : "not configured yet"}. /voice explains audio replies. Deleting a role requires your approval. I cannot send applications or emails.`,
           );
         } else if (message === "/reset") {
           await db.query("DELETE FROM conversations WHERE user_id=$1", [user]);

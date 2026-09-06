@@ -1,3 +1,4 @@
+import { baselineSkills } from "./baseline-skills.js";
 import { randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
 import type { Action } from "./protocol.js";
@@ -7,13 +8,20 @@ export class SkillTools {
   constructor(private db: Database) {}
   async call(user: string, run: string, a: SkillAction): Promise<unknown> {
     const db = this.db;
-    if (a.operation === "skill_list")
-      return (
+    if (a.operation === "skill_list") {
+      const custom = (
         await db.query(
           `SELECT v.key,v.id,v.reason,h.updated_at FROM skill_heads h JOIN skill_versions v ON v.id=h.version_id WHERE h.user_id=$1 ORDER BY v.key LIMIT 100`,
           [user],
         )
       ).rows;
+      return [
+        ...custom,
+        ...baselineSkills
+          .filter((b) => !custom.some((c) => c.key === b.key))
+          .map(({ content, ...b }) => b),
+      ];
+    }
     if (a.operation === "skill_history")
       return (
         await db.query(
@@ -28,6 +36,16 @@ export class SkillTools {
           [user, a.key, a.id ?? null],
         )
       ).rows[0];
+      if (!version && !a.id) {
+        const baseline = baselineSkills.find((b) => b.key === a.key);
+        if (baseline)
+          return {
+            version: baseline,
+            evaluations: [],
+            notice:
+              "Repository default. Personal drafts only override it after approval.",
+          };
+      }
       if (!version) throw new Error("Skill version not found");
       const evaluations = (
         await db.query(

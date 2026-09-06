@@ -12,6 +12,15 @@ test("Telegram handles natural text once and ignores unauthorized users and grou
   await pg.exec(
     await readFile(new URL("../db/001_initial.sql", import.meta.url), "utf8"),
   );
+  await pg.exec(
+    await readFile(
+      new URL("../db/002_preparation.sql", import.meta.url),
+      "utf8",
+    ),
+  );
+  await pg.exec(
+    await readFile(new URL("../db/005_work.sql", import.meta.url), "utf8"),
+  );
   const db = pg as unknown as Database;
   let turns = 0;
   const replies: string[] = [];

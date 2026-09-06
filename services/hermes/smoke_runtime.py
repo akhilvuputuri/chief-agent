@@ -5,6 +5,8 @@ Run with the pinned checkout's Python and PYTHONPATH pointing to that checkout.
 import json
 import os
 import tempfile
+import subprocess
+from pathlib import Path
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from uuid import uuid4
@@ -73,12 +75,14 @@ os.environ['GATEWAY_URL'] = base
 try:
     import bridge
     bridge.prepare_runtime()
-    from run_agent import AIAgent
-    from tools.registry import registry
-    registry.register(name='companion_action', toolset='companion', schema=bridge.SCHEMA, handler=bridge.tool_handler)
+    runtime=json.loads(subprocess.check_output(['node','--input-type=module','-e',"import {runtimeContext} from './dist/runtime.js'; console.log(JSON.stringify(runtimeContext({},null)))"],cwd=Path(__file__).resolve().parents[2]))
     with bridge.TURN_LOCK:
-        result = bridge.run_turn({'runId': str(uuid4()), 'capability': 'c' * 64, 'message': 'List my saved roles', 'history': [], 'memories': []})
+        result = bridge.run_turn({'runId': str(uuid4()), 'capability': 'c' * 64, 'message': 'List my saved roles', 'history': [], 'memories': [], 'runtime':runtime})
     assert 'AI Engineer' in result['reply'], result
+    # Re-registration of the turn-specific schema must remain safe.
+    with bridge.TURN_LOCK:
+        again = bridge.run_turn({'runId': str(uuid4()), 'capability': 'c' * 64, 'message': 'List my saved roles', 'history': [], 'memories': [], 'runtime': runtime})
+    assert 'AI Engineer' in again['reply']
     assert any(path == '/internal/tools' for path, _ in calls), calls
     assert bridge._active_capability is None
     print('PASS: real pinned Hermes invoked companion_action, received tool evidence and produced a final reply.')
