@@ -49,6 +49,10 @@ export class CustomAgent implements Agent {
           const remaining = await execution.consume("models");
           const start = Date.now();
           try {
+            await execution.trace("model.started", {
+              model: this.model.model ?? null,
+              attempt,
+            });
             const input = context(req, messages);
             if (input.omitted)
               await execution.trace("context.omitted", {

@@ -22,6 +22,7 @@ export type Generation = {
   model?: string;
 };
 export interface ModelAdapter {
+  readonly model?: string;
   generate(input: {
     messages: Message[];
     tools: ToolDefinition[];
@@ -110,7 +111,7 @@ export class OpenRouter implements ModelAdapter {
           : {}),
       },
       provider: data.provider,
-      model: data.model,
+      model: data.model ?? this.model,
       usage: data.usage,
     };
   }

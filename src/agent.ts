@@ -93,7 +93,8 @@ export class Assistant {
     this.capabilities.set(capability, {
       user,
       run,
-      expires: Date.now() + this.budget.ms + 60000,
+      // In-process capability lives until this turn exits; task allocations may exceed one default budget.
+      expires: Number.POSITIVE_INFINITY,
     });
     try {
       const work = new WorkTools(this.db);

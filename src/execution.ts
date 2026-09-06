@@ -138,7 +138,7 @@ export class Execution {
     );
   }
   async trace(type: string, data: Record<string, unknown>) {
-    if (type === "model.completed")
+    if (type === "model.completed" || type === "model.started")
       await this.db.query("UPDATE runtime_runs SET model=$2 WHERE id=$1", [
         this.run,
         data.model ?? null,
