@@ -1,3 +1,4 @@
+import { boundedBytes } from "../src/providers.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PGlite } from "@electric-sql/pglite";
@@ -445,7 +446,8 @@ test("read retry is bounded, counted and returns its observation", async () => {
   });
   try {
     f.assistant.tools.execute = async () => {
-      if (++reads < 3) throw new Error("503 transient");
+      if (++reads < 3)
+        await boundedBytes(new Response("", { status: 503 }), 1024);
       return { result: [] };
     };
     assert.equal(
