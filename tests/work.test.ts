@@ -85,6 +85,18 @@ test("cross-domain provenance: mismatched product/location, fabricated quote, an
         }),
       /Quote/,
     );
+    await assert.rejects(
+      () =>
+        f.call("work_evidence", {
+          id,
+          sourceId: source,
+          claim: "Empty proof",
+          sourceQuote: "   ",
+          applicability: "matched",
+          reason: "Should reject",
+        }),
+      /Quote/,
+    );
     for (const applicability of ["mismatch", "unverified"]) {
       const ev = await f.call("work_evidence", {
         id,
