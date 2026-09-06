@@ -1,3 +1,4 @@
+import type { DailyTools, DailyAction } from "./daily.js";
 import { SkillTools } from "./skills.js";
 import { PreparationTools } from "./preparation.js";
 import type { SheetsTools } from "./sheets.js";
@@ -13,6 +14,7 @@ export class JobTools {
     private web: Pick<WebTools, "call">,
     private gmail?: Pick<GmailTools, "call">,
     private sheets?: Pick<SheetsTools, "sync">,
+    private daily?: DailyTools,
   ) {}
   async execute(user: string, run: string, input: unknown) {
     const a = action.parse(input);
@@ -36,6 +38,19 @@ export class JobTools {
     a: ReturnType<typeof action.parse>,
   ): Promise<unknown> {
     const db = this.db;
+    if (
+      a.operation === "item_save" ||
+      a.operation === "item_list" ||
+      a.operation === "item_update" ||
+      a.operation === "schedule_create" ||
+      a.operation === "schedule_list" ||
+      a.operation === "schedule_update" ||
+      a.operation === "calendar_list" ||
+      a.operation === "daily_sync"
+    ) {
+      if (!this.daily) throw new Error("Daily assistant not configured");
+      return this.daily.call(user, a as DailyAction);
+    }
     if (
       a.operation === "skill_list" ||
       a.operation === "skill_read" ||
