@@ -44,3 +44,7 @@ Remaining limitations:
 ### Observed evaluation — 6 September 2026
 
 Both synthetic Gemini 3.8 cases passed against the pinned Hermes runtime. The product-version case initially omitted a source ID and later attempted to complete an analysis from mismatched evidence. The fixture rejected both; the model retrieved the source, recorded the mismatch and left the unsupported work blocked. The background-experience case asked questions and preserved uncertainty without writes. This is evidence of recovery under enforcement, not flawless first-attempt model behavior. The initial looser fixture was corrected to require retrieval and the returned source ID before accepting evidence.
+
+### Deployment verification
+
+PR #4 was merged and deployed to the existing DigitalOcean host. Migration 005 succeeded; gateway, Hermes and Postgres health checks passed. A direct authenticated model/bridge health turn recognized the generated work and Sheets capabilities, without Telegram delivery or production task writes. The work table was empty after deployment; older conversations are not retroactively converted into tracked tasks. A follow-up validation fix rejects whitespace-only source quotations.

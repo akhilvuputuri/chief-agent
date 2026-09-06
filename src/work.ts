@@ -114,7 +114,10 @@ export class WorkTools {
       ).rows[0];
       if (!source) throw new Error("Source not found");
       const norm = (s: string) => s.replace(/\s+/g, " ").trim();
-      if (!norm(source.content).includes(norm(a.sourceQuote)))
+      if (
+        !norm(a.sourceQuote) ||
+        !norm(source.content).includes(norm(a.sourceQuote))
+      )
         throw new Error("Quote must appear in retrieved source");
       return (
         await this.db.query(
