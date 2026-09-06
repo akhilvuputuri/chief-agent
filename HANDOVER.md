@@ -4,7 +4,7 @@ Prepared 6 September 2026.
 
 ## Continuation update
 
-The initial local commit is `4dba0ed`; GitHub creation awaits sign-in. Local source now implements independently selected OpenAI/ElevenLabs/Groq transcription and OpenAI/ElevenLabs synthesis. ElevenLabs output uses MP3 with the correct filename, supported by Telegram sendVoice. Speech credentials and a live audio acceptance test remain pending. The sections below preserve the initial deployment snapshot; consult `docs/voice-setup.md` and Git history for subsequent voice work.
+The initial local commit is `4dba0ed`; voice changes are committed as `4792561`. Private GitHub repository: https://github.com/akhilvuputuri/hermes-companion. GitHub CLI authentication on this Mac is complete; main has been pushed and tracks origin/main. Local source now implements independently selected OpenAI/ElevenLabs/Groq transcription and OpenAI/ElevenLabs synthesis. ElevenLabs output uses MP3 with the correct filename, supported by Telegram sendVoice. Speech credentials and a live audio acceptance test remain pending. The sections below preserve the initial deployment snapshot; consult `docs/voice-setup.md` and Git history for subsequent voice work.
 This document describes the state at handover, not a claim that the entire product vision is complete. Start here, then read the source. Do not recreate the server or re-pair the user unnecessarily.
 
 ## 1. Product intent and decisions
@@ -31,7 +31,7 @@ Source archive:
 
 `/Users/akhilvuputuri/Dev/hermes-companion.zip`.
 
-**Git state:** initialized on `main`, but no initial commit and no remote. Source files are currently untracked. There is no GitHub repository URL. The deployed files were transferred over SSH, not built from a published Git commit. Establish a reviewed initial commit and a private remote before building PR-based self-development. Do not publish credentials or claim a remote exists.
+**Git state:** `main` tracks the private remote https://github.com/akhilvuputuri/hermes-companion. The initial foundation and voice integration are committed and pushed. GitHub CLI is authenticated on this Mac. Deployment currently transfers source over SSH; an automated deployment pipeline remains unfinished. Never publish credentials.
 
 The archive excludes `.env`, pairing state, `.git`, dependencies and generated build folders. It cannot deploy independently without separately supplied credentials. This handover includes infrastructure identifiers and local access paths, so review it before making the repository public.
 
