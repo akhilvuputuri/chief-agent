@@ -1,3 +1,4 @@
+import type { GmailTools } from "./gmail.js";
 import { randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
 import { event } from "./db.js";
@@ -7,6 +8,7 @@ export class JobTools {
   constructor(
     private db: Database,
     private web: Pick<WebTools, "call">,
+    private gmail?: Pick<GmailTools, "call">,
   ) {}
   async execute(user: string, run: string, input: unknown) {
     const a = action.parse(input);
@@ -30,6 +32,10 @@ export class JobTools {
     a: ReturnType<typeof action.parse>,
   ): Promise<unknown> {
     const db = this.db;
+    if(a.operation === "gmail_search" || a.operation === "gmail_read") {
+      if(!this.gmail) throw new Error("Gmail is not configured");
+      return this.gmail.call(user,a.operation,a.operation === "gmail_search" ? a.query : a.messageId,a.operation === "gmail_search" ? a.pageToken : undefined);
+    }
     if (a.operation === "job_save")
       return (
         await db.query(

@@ -1,6 +1,11 @@
 import "dotenv/config";
 import { z } from "zod";
 const schema = z.object({
+  GMAIL_OWNER_USER_ID: z.string().regex(/^\d*$/).default(""),
+  GMAIL_EMAIL: z.string().default(""),
+  GOOGLE_CLIENT_ID: z.string().default(""),
+  GOOGLE_CLIENT_SECRET: z.string().default(""),
+  GOOGLE_REFRESH_TOKEN: z.string().default(""),
   DATABASE_URL: z.string().url(),
   TELEGRAM_BOT_TOKEN: z.string().min(10),
   TELEGRAM_ALLOWED_USER_IDS: z.string().regex(/^\d+(,\d+)*$/),

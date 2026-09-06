@@ -1,3 +1,4 @@
+import { GmailTools } from "./gmail.js";
 import { readConfig } from "./config.js";
 import { connect } from "./db.js";
 import { JobTools } from "./tools.js";
@@ -11,7 +12,7 @@ await db.query("SELECT 1");
 const assistant = new Assistant(
   db,
   new Hermes(c.HERMES_URL, c.INTERNAL_API_TOKEN),
-  new JobTools(db, new WebTools(c.TAVILY_API_KEY)),
+  new JobTools(db, new WebTools(c.TAVILY_API_KEY), new GmailTools({owner:c.GMAIL_OWNER_USER_ID,email:c.GMAIL_EMAIL,clientId:c.GOOGLE_CLIENT_ID,clientSecret:c.GOOGLE_CLIENT_SECRET,refreshToken:c.GOOGLE_REFRESH_TOKEN})),
 );
 const app = server(assistant, c.INTERNAL_API_TOKEN);
 const bot = telegram(c, assistant, db);
