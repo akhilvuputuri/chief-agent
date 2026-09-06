@@ -15,7 +15,7 @@ This release addresses shared execution failures across research, synthesis and 
 
 ## Continuation
 
-The model checkpoints steps and calls `work_yield` when work can continue without user input. A Postgres-backed worker runs up to three additional passes, each retaining the existing 12-iteration turn ceiling. It reports recorded progress to Telegram. These are execution bounds, not a measured dollar budget.
+The model checkpoints steps; the gateway queues unfinished, unblocked work at the end of a tracked turn, including iteration exhaustion. `work_yield` is an optional checkpoint signal, not a prerequisite for continuation. A Postgres-backed worker runs up to three additional passes, each retaining the existing 12-iteration turn ceiling. It reports recorded progress to Telegram. These are execution bounds, not a measured dollar budget.
 
 `/continue` queues a further bounded set of passes for active/paused work. `/workcancel` stops future work; it cannot undo an external action already in progress. Background passes use the recorded task rather than overwriting the user's conversational history, and cannot revise the scope themselves.
 
@@ -48,3 +48,7 @@ Both synthetic Gemini 3.8 cases passed against the pinned Hermes runtime. The pr
 ### Deployment verification
 
 PR #4 was merged and deployed to the existing DigitalOcean host. Migration 005 succeeded; gateway, Hermes and Postgres health checks passed. A direct authenticated model/bridge health turn recognized the generated work and Sheets capabilities, without Telegram delivery or production task writes. The work table was empty after deployment; older conversations are not retroactively converted into tracked tasks. A follow-up validation fix rejects whitespace-only source quotations.
+
+### Continuation correction
+
+The first real 22-role run exposed an orchestration bug: iteration exhaustion unconditionally paused work with zero background passes used. The runtime now queues unblocked pending work independently of a model yield call and preserves the three-pass ceiling. Integration regressions exercise the original turn plus all three exhausted continuation passes and a user-input blocker. Planning guidance requires one research checkpoint per enumerated target and keeps research/write steps distinct from analysis; plan classification still requires model judgment.

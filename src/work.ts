@@ -214,11 +214,13 @@ export function renderWork(s: any) {
     `${state}.`,
     s.task.objective,
     ...rows,
-    "Evidence applicability is agent-assessed; completion counts track recorded steps, not independent factual certification.",
+    "Counts refer to recorded steps; source assessments remain agent judgments.",
     s.task.status === "queued"
-      ? "Continuing in a bounded background pass."
+      ? `Continuing automatically (${s.task.passes}/3 background passes used).`
       : c.pending || c.blocked
-        ? "Ask me to continue, revise the scope, or resolve a blocker."
+        ? s.task.passes >= 3
+          ? "Automatic continuation budget reached (3/3). Send /continue for up to three more passes."
+          : "Paused for a blocker or interruption. Resolve the blocker, then send /continue."
         : "",
   ]
     .filter(Boolean)
