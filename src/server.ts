@@ -1,6 +1,7 @@
 import Fastify from "fastify";
 import type { Assistant } from "./agent.js";
 import { authorized } from "./security.js";
+import { toolError } from "./tool-errors.js";
 import { TOOL_DESCRIPTION } from "./protocol.js";
 export function server(assistant: Assistant, token: string) {
   const app = Fastify({ logger: false, bodyLimit: 256000 });
@@ -13,12 +14,9 @@ export function server(assistant: Assistant, token: string) {
   app.post("/internal/tools", async (req, reply) => {
     const capability = req.headers.authorization?.replace(/^Bearer /, "") ?? "";
     try {
-      return { result: await assistant.call(capability, req.body) };
-    } catch {
-      return reply.code(400).send({
-        error:
-          "Tool rejected: invalid input, unavailable role/provider, or expired run",
-      });
+      return await assistant.call(capability, req.body);
+    } catch (error) {
+      return reply.code(400).send({ error: toolError(error) });
     }
   });
   return app;

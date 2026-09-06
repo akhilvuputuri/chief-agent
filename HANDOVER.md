@@ -2,6 +2,12 @@
 
 Prepared 6 September 2026.
 
+## Reliability foundation update — 6 September 2026
+
+The current release adds generic durable work tracking, source applicability records, operation-specific completion receipts, bounded continuation, generated capability schemas and four repo baseline skills. Read [reliable execution](docs/reliable-execution.md) before extending it. Run migrations through `005_work.sql` before starting the updated gateway. Gemini 3.8 remains configured; no new server or delegation was added. `/continue` and `/workcancel` control tracked work. Source matching and semantic synthesis still require model judgment; do not present ledger counts as factual certification. Existing Google read-only boundaries and skill approval/version history remain intact.
+
+The sections below include historical snapshots; voice, research, Google integrations, versioned skills and daily assistance have since been wired. Consult the dedicated documents and Git history for current implementations.
+
 ## Continuation update
 
 The initial local commit is `4dba0ed`; voice changes are committed as `4792561`. Private GitHub repository: https://github.com/akhilvuputuri/hermes-companion. GitHub CLI authentication on this Mac is complete; main has been pushed and tracks origin/main. Local source now implements independently selected OpenAI/ElevenLabs/Groq transcription and OpenAI/ElevenLabs synthesis. ElevenLabs output uses MP3 with the correct filename, supported by Telegram sendVoice. ElevenLabs credentials are now saved privately on the Mac and DigitalOcean server. Scribe v2, Flash v2.5, and stock River voice (`SAz9YHcvj6GT2YYXdXww`) are enabled. A live server-side synthesis/transcription round trip passed. The user then tested Telegram voice successfully; database events confirm voice transcription, memory_set and memory_list completed, with one persistent memory. Encrypted nightly Postgres backups are now active, and an isolated restore passed. See `docs/backups.md`; automatic off-server cloud upload remains pending. The sections below preserve the initial deployment snapshot; consult `docs/voice-setup.md` and Git history for subsequent voice work.

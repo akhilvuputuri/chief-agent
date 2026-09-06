@@ -1,3 +1,4 @@
+import { WorkWorker } from "./work-worker.js";
 import { DailyTools, DailyWorker, ScheduleParser } from "./daily.js";
 import { CalendarTools } from "./calendar.js";
 import { DailySheet } from "./daily-sheet.js";
@@ -49,6 +50,13 @@ const assistant = new Assistant(
     }),
     daily,
   ),
+  {
+    web: !!(c.TAVILY_API_KEY || c.OPENROUTER_API_KEY),
+    gmail: !!c.GOOGLE_REFRESH_TOKEN,
+    calendar: !!c.CALENDAR_REFRESH_TOKEN,
+    preparationSheet: !!(c.SHEETS_REFRESH_TOKEN && c.SHEETS_SPREADSHEET_ID),
+    dailySheet: !!(c.SHEETS_REFRESH_TOKEN && c.DAILY_SPREADSHEET_ID),
+  },
 );
 const app = server(assistant, c.INTERNAL_API_TOKEN);
 const bot = telegram(c, assistant, db);
@@ -133,6 +141,22 @@ const worker = new DailyWorker(
   },
   (user) => mirror.sync(user),
 );
+const workWorker = new WorkWorker(
+  db,
+  (user, id) => assistant.resume(user, id),
+  async (user, text) => {
+    if (!allowed.has(user)) throw new Error("Unauthorized delivery");
+    await bot.api.sendMessage(user, text.slice(0, 3900), {
+      link_preview_options: { is_disabled: true },
+    });
+  },
+);
+const workTimer = setInterval(() => {
+  void workWorker
+    .tick()
+    .catch(() => console.error(JSON.stringify({ event: "work.tick_failed" })));
+}, 15000);
+workTimer.unref();
 const scheduleTimer = setInterval(() => {
   void worker
     .tick()
@@ -146,6 +170,7 @@ for (const signal of ["SIGINT", "SIGTERM"])
   process.once(signal, () => {
     void (async () => {
       clearInterval(scheduleTimer);
+      clearInterval(workTimer);
       if (bot.isRunning()) await bot.stop();
       await app.close();
       await db.end();

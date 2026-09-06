@@ -45,3 +45,7 @@ Run the Compose stack on an always-on VM with persistent disk; use a managed Pos
 ## Future client boundary
 
 A web/PWA should authenticate a session, resolve it to the same internal user, then call the application service. Never expose the internal capability or Telegram token to a browser. Add a durable run resource and SSE events for response/progress streaming. Realtime voice should translate authenticated audio sessions into the same run/tool model and share approval controls. See the roadmap for prerequisites.
+
+## Durable execution
+
+See [reliable execution](reliable-execution.md) for the Postgres work ledger, evidence/receipt checks, bounded continuation worker and generated tool schema. Repo baseline skills are versioned with code; approved personal overrides remain in Postgres. These extend the existing gateway/Hermes boundary without adding a server.

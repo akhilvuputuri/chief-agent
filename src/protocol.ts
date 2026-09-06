@@ -11,7 +11,72 @@ export const status = z.enum([
   "archived",
 ]);
 const skillKey = z.string().regex(/^[a-z][a-z0-9_-]{0,49}$/);
+const workKey = z.string().regex(/^[a-z0-9_-]{1,60}$/);
+const workSteps = z
+  .array(
+    z
+      .object({
+        key: workKey,
+        title: z.string().min(1).max(300),
+        verification: z.enum(["evidence", "action", "analysis"]),
+        expectedOperation: z
+          .string()
+          .regex(/^[a-z_]{1,60}$/)
+          .optional(),
+      })
+      .strict(),
+  )
+  .min(1)
+  .max(100)
+  .refine(
+    (steps) =>
+      steps.every((s) => s.verification !== "action" || !!s.expectedOperation),
+    "Action steps require expectedOperation",
+  )
+  .refine(
+    (x) => new Set(x.map((s) => s.key)).size === x.length,
+    "Unique step keys required",
+  );
 export const action = z.discriminatedUnion("operation", [
+  z
+    .object({
+      operation: z.literal("work_start"),
+      objective: z.string().min(1).max(4000),
+      steps: workSteps,
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("work_revise"),
+      id,
+      objective: z.string().min(1).max(4000),
+      steps: workSteps,
+    })
+    .strict(),
+  z.object({ operation: z.literal("work_status") }).strict(),
+  z
+    .object({
+      operation: z.literal("work_step"),
+      id,
+      key: workKey,
+      status: z.enum(["pending", "done", "blocked"]),
+      result: z.string().max(6000),
+      proofs: z.array(id).max(30).default([]),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("work_evidence"),
+      id,
+      sourceId: id,
+      claim: z.string().min(1).max(2000),
+      sourceQuote: z.string().min(1).max(4000),
+      applicability: z.enum(["matched", "unverified", "mismatch"]),
+      reason: z.string().min(1).max(2000),
+    })
+    .strict(),
+  z.object({ operation: z.literal("work_yield"), id }).strict(),
+  z.object({ operation: z.literal("work_cancel"), id }).strict(),
   z
     .object({
       operation: z.literal("item_save"),
@@ -176,12 +241,15 @@ export interface AgentRequest {
   message: string;
   history: unknown[];
   memories: { key: string; value: string }[];
+  runtime?: { schema: Record<string, unknown>; context: string };
 }
 export interface AgentResponse {
   reply: string;
   history: unknown[];
+  interrupted?: boolean;
 }
 export const agentResponse = z.object({
+  interrupted: z.boolean().optional(),
   reply: z.string().max(50000),
   history: z.array(z.unknown()).max(1000),
 });

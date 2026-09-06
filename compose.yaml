@@ -38,6 +38,8 @@ services:
         "/migrations/003_skills.sql",
         "-f",
         "/migrations/004_daily.sql",
+        "-f",
+        "/migrations/005_work.sql",
       ]
     depends_on:
       postgres: { condition: service_healthy }
