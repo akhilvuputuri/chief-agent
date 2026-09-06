@@ -74,7 +74,7 @@ export function runtimeContext(
     name: "companion_action",
     description:
       TOOL_DESCRIPTION +
-      " Work: work_start(objective,steps[{key,title,verification:evidence/action/analysis,expectedOperation:required-for-action}]), work_revise(id,objective,steps), work_status(), work_evidence(id,sourceId,claim,sourceQuote,applicability:matched/unverified/mismatch,reason), work_step(id,key,status:pending/done/blocked,result,proofs:[UUID]), work_yield(id), work_cancel(id). Successful tools return receiptId. Use source evidence IDs and action receipts for completion.",
+      " Work: work_start(objective,steps[{key,title,verification:evidence/action/analysis,expectedOperation:required-for-action}]), work_revise(id,objective,steps), work_status(), work_evidence(id,sourceId,claim,sourceQuote,applicability:matched/unverified/mismatch,reason), work_step(id,key,status:pending/done/blocked,result,proofs:[UUID]), work_yield(id), work_cancel(id). Successful tools return receiptId. Use source evidence IDs and action receipts for completion. Use one evidence step per researched target, with its record ID in the key. Writes and exports must be action steps with expectedOperation; analysis is only synthesis, not external verification or persistence.",
     parameters: {
       type: "object",
       properties,

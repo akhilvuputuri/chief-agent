@@ -146,14 +146,10 @@ export class Assistant {
         ).rows.length > 0;
       const snapshot =
         linked && touched ? await work.snapshot(user, linked) : null;
-      if (
-        output.interrupted &&
-        snapshot &&
-        !["done", "cancelled"].includes(snapshot.task.status)
-      )
+      if (snapshot && !["done", "cancelled"].includes(snapshot.task.status))
         await this.db.query(
-          `UPDATE work_tasks SET status='paused',lease=NULL,updated_at=now() WHERE id=$1`,
-          [linked],
+          `UPDATE work_tasks SET status=CASE WHEN passes<3 AND EXISTS(SELECT 1 FROM work_steps WHERE task_id=$1 AND status='pending') THEN 'queued' ELSE 'paused' END,next_run=now()+interval '15 seconds',updated_at=now() WHERE id=$1 AND revision=$2 AND status NOT IN ('done','cancelled')`,
+          [linked, snapshot.task.revision],
         );
       // Tracked work reports its persisted state rather than an unconstrained completion narrative.
       return [

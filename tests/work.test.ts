@@ -341,7 +341,7 @@ test("worker is bounded, resumes persisted queued work, and does not replay stal
   }
 });
 
-test("tracked response cannot claim completion from model prose and interrupted work is paused", async () => {
+test("tracked response cannot claim completion and exhaustion queues unfinished work without model yield", async () => {
   const f = await fixture();
   try {
     let assistant: Assistant;
@@ -372,7 +372,8 @@ test("tracked response cannot claim completion from model prose and interrupted 
     const response = await assistant.respond("owner", "Research every option");
     assert.match(response, /Incomplete: 0\/1/);
     assert.equal(response.includes("All options researched"), false);
-    assert.equal((await f.work.current("owner")).status, "paused");
+    assert.equal((await f.work.current("owner")).status, "queued");
+    assert.match(response, /Continuing/);
     assert.equal(assistant.capabilities.size, 0);
   } finally {
     await f.pg.close();
@@ -438,6 +439,138 @@ test("cancellation revokes an in-flight turn including attempts to start replace
     await assistant.respond("owner", "Research");
     assert.equal((await f.db.query("SELECT * FROM work_tasks")).rows.length, 1);
     assert.equal((await f.db.query("SELECT * FROM memories")).rows.length, 0);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("runtime owns continuation across exhausted passes and stops at the budget without work_yield", async () => {
+  const f = await fixture();
+  try {
+    let assistant: Assistant;
+    let calls = 0;
+    assistant = new Assistant(
+      f.db,
+      {
+        run: async (req) => {
+          calls++;
+          if (calls === 1)
+            await assistant.call(req.capability, {
+              operation: "work_start",
+              objective: "Research several targets",
+              steps: [
+                {
+                  key: "a",
+                  title: "Research target",
+                  verification: "evidence",
+                },
+              ],
+            });
+          return { reply: "Partial work", history: [], interrupted: true };
+        },
+      },
+      f.tools,
+    );
+    await assistant.respond(
+      "owner",
+      "Research several targets and continue automatically",
+    );
+    const worker = new WorkWorker(
+      f.db,
+      (u, id) => assistant.resume(u, id),
+      async () => {},
+    );
+    for (let i = 0; i < 4; i++) {
+      await f.db.query("UPDATE work_tasks SET next_run=now()");
+      await worker.tick();
+    }
+    assert.equal(calls, 4); // original turn + three bounded continuation passes
+    const task = await f.work.current("owner");
+    assert.equal(task.status, "paused");
+    assert.equal(task.passes, 3);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("a user-input blocker pauses instead of scheduling speculative continuation", async () => {
+  const f = await fixture();
+  try {
+    let assistant: Assistant;
+    assistant = new Assistant(
+      f.db,
+      {
+        run: async (req) => {
+          const { result: s }: any = await assistant.call(req.capability, {
+            operation: "work_start",
+            objective: "Research target",
+            steps: [
+              {
+                key: "a",
+                title: "Confirm target identity",
+                verification: "evidence",
+              },
+            ],
+          });
+          await assistant.call(req.capability, {
+            operation: "work_step",
+            id: s.task.id,
+            key: "a",
+            status: "blocked",
+            result: "Which product version do you mean?",
+          });
+          return { reply: "Need your input", history: [], interrupted: false };
+        },
+      },
+      f.tools,
+    );
+    const reply = await assistant.respond("owner", "Research this product");
+    assert.equal((await f.work.current("owner")).status, "paused");
+    assert.match(reply, /Which product version/);
+    assert.doesNotMatch(reply, /Continuing/);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("one blocked target does not stop unrelated pending targets", async () => {
+  const f = await fixture();
+  try {
+    let assistant: Assistant;
+    assistant = new Assistant(
+      f.db,
+      {
+        run: async (req) => {
+          const { result: s }: any = await assistant.call(req.capability, {
+            operation: "work_start",
+            objective: "Compare two products",
+            steps: [
+              {
+                key: "a",
+                title: "Unavailable product A",
+                verification: "evidence",
+              },
+              {
+                key: "b",
+                title: "Independent product B",
+                verification: "evidence",
+              },
+            ],
+          });
+          await assistant.call(req.capability, {
+            operation: "work_step",
+            id: s.task.id,
+            key: "a",
+            status: "blocked",
+            result: "No applicable public source for product A",
+          });
+          return { reply: "Partial", history: [], interrupted: true };
+        },
+      },
+      f.tools,
+    );
+    await assistant.respond("owner", "Compare two products");
+    assert.equal((await f.work.current("owner")).status, "queued");
   } finally {
     await f.pg.close();
   }
