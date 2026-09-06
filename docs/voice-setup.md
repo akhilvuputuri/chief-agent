@@ -1,6 +1,6 @@
 # Voice setup
 
-Transcription and speech can be selected independently. The existing deployment stays text-only until credentials are configured. No provider key is included in Git.
+Transcription and speech can be selected independently. The cloud deployment now has ElevenLabs Scribe v2 and Flash v2.5 configured, with the stock River voice and voice replies enabled. A live server-side synthesis/transcription round trip passed on 2026-09-06. A real user Telegram voice note remains the final acceptance test. No provider key is included in Git.
 
 For ElevenLabs, set these values in the private `.env`:
 
