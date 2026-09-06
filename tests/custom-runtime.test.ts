@@ -509,3 +509,42 @@ test("unrelated conversation does not spend or restart a paused task", async () 
     await f.pg.close();
   }
 });
+
+test("background resumes forward model-written progress unchanged", async () => {
+  let n = 0;
+  const f = await fixture({
+    generate: async () => {
+      n++;
+      if (n === 1)
+        return call("work_start", {
+          objective: "Research",
+          steps: [{ key: "a", title: "Research", verification: "evidence" }],
+        });
+      if (n === 2) return text("I have established the scope.");
+      if (n === 3) {
+        const g = call("job_list", {});
+        return {
+          message: {
+            ...g.message,
+            content:
+              "I’m checking the saved roles before comparing their sources.",
+          },
+        };
+      }
+      return text("The saved roles have been checked.");
+    },
+  });
+  try {
+    await f.assistant.respond("owner", "Research");
+    const id = (await f.db.query("SELECT id FROM work_tasks")).rows[0].id;
+    const progress: string[] = [];
+    await f.assistant.resume("owner", id, async (s) => {
+      progress.push(s);
+    });
+    assert.deepEqual(progress, [
+      "I’m checking the saved roles before comparing their sources.",
+    ]);
+  } finally {
+    await f.pg.close();
+  }
+});

@@ -92,3 +92,85 @@ test("Telegram handles natural text once and ignores unauthorized users and grou
     await pg.close();
   }
 });
+
+test("status responds while a conversation is still running", async () => {
+  const pg = new PGlite();
+  for (const f of [
+    "001_initial",
+    "002_preparation",
+    "003_skills",
+    "005_work",
+    "006_runtime",
+  ])
+    await pg.exec(
+      await readFile(new URL("../db/" + f + ".sql", import.meta.url), "utf8"),
+    );
+  const db = pg as unknown as Database;
+  let entered!: () => void, release!: () => void;
+  const started = new Promise<void>((r) => (entered = r)),
+    held = new Promise<void>((r) => (release = r));
+  const assistant = new Assistant(
+    db,
+    {
+      run: async (req) => {
+        entered();
+        await held;
+        return { reply: "Finished", history: [], stopReason: "answer" };
+      },
+    },
+    new JobTools(db, { call: async () => ({}) }),
+  );
+  const c = readConfig({
+    DATABASE_URL: "postgres://x:x@localhost/x",
+    TELEGRAM_BOT_TOKEN: "123:long-test-token",
+    TELEGRAM_ALLOWED_USER_IDS: "123",
+  });
+  const bot = telegram(c, assistant, db);
+  const replies: string[] = [];
+  bot.api.config.use(async (_prev, method, payload) => {
+    if (method === "getMe")
+      return {
+        ok: true,
+        result: {
+          id: 999,
+          is_bot: true,
+          first_name: "Test",
+          username: "test_bot",
+        },
+      };
+    if (method === "sendMessage") replies.push((payload as any).text);
+    return { ok: true, result: true } as any;
+  });
+  await bot.init();
+  const update = (id: number, text: string) =>
+    ({
+      update_id: id,
+      message: {
+        message_id: id,
+        date: 0,
+        chat: { id: 123, type: "private" },
+        from: { id: 123, is_bot: false, first_name: "Test" },
+        text,
+      },
+    }) as any;
+  const running = bot.handleUpdate(update(1, "Research this"));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await started;
+    await Promise.race([
+      bot.handleUpdate(update(2, "/status")),
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("Status waited behind conversation")),
+          2000,
+        );
+      }),
+    ]);
+    assert.deepEqual(replies, ["No active tracked task."]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    release();
+    await running;
+    await pg.close();
+  }
+});

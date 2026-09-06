@@ -63,7 +63,11 @@ export class Assistant {
       this.turn(user, message, false, progress),
     );
   }
-  async resume(user: string, id: string) {
+  async resume(
+    user: string,
+    id: string,
+    progress?: (text: string) => Promise<void>,
+  ) {
     return this.queue.run(user, async () => {
       const task = await new WorkTools(this.db).snapshot(user, id);
       if (!task || ["done", "cancelled"].includes(task.task.status))
@@ -74,6 +78,7 @@ export class Assistant {
         user,
         "Continue the existing task from its recorded steps and original request in runtime context. Do not expand its scope.",
         true,
+        progress,
       );
     });
   }

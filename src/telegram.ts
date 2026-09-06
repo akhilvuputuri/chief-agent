@@ -32,6 +32,28 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
       );
       return;
     }
+    if (ctx.message.text === "/status") {
+      await ensureUser(db, user);
+      const claimed = await db.query(
+        "INSERT INTO inbound_updates(update_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING update_id",
+        [ctx.update.update_id, user],
+      );
+      if (!claimed.rows.length) return;
+      const latest = (
+        await db.query(
+          "SELECT id FROM work_tasks WHERE user_id=$1 ORDER BY created_at DESC LIMIT 1",
+          [user],
+        )
+      ).rows[0];
+      const snapshot = await new WorkTools(db).snapshot(user, latest?.id);
+      for (const part of formatTelegram(renderWork(snapshot)))
+        await ctx.reply(part.text, { entities: part.entities });
+      await db.query(
+        "UPDATE inbound_updates SET status='completed' WHERE update_id=$1",
+        [ctx.update.update_id],
+      );
+      return;
+    }
     await queue.run(user, async () => {
       await ensureUser(db, user);
       const claimed = await db.query(

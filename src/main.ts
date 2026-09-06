@@ -159,17 +159,33 @@ const worker = new DailyWorker(
   },
   (user) => mirror.sync(user),
 );
+async function sendWorkMessage(user: string, text: string) {
+  if (!allowed.has(user)) throw new Error("Unauthorized delivery");
+  for (const part of formatTelegram(text))
+    await bot.api.sendMessage(user, part.text, {
+      entities: part.entities,
+      link_preview_options: { is_disabled: true },
+    });
+}
 const workWorker = new WorkWorker(
   db,
-  (user, id) => assistant.resume(user, id),
-  async (user, text) => {
+  async (user, id) => {
     if (!allowed.has(user)) throw new Error("Unauthorized delivery");
-    for (const part of formatTelegram(text))
-      await bot.api.sendMessage(user, part.text, {
-        entities: part.entities,
-        link_preview_options: { is_disabled: true },
-      });
+    const typing = () => {
+      void bot.api.sendChatAction(user, "typing").catch(() => {});
+    };
+    typing();
+    const timer = setInterval(typing, 4500);
+    timer.unref();
+    try {
+      return await assistant.resume(user, id, (text) =>
+        sendWorkMessage(user, text),
+      );
+    } finally {
+      clearInterval(timer);
+    }
   },
+  sendWorkMessage,
 );
 const workTimer = setInterval(() => {
   void workWorker
