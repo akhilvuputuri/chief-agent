@@ -70,7 +70,7 @@ export function runtimeContext(
       name: o.shape.operation.value,
       description:
         o.shape.operation.value === "skill_read"
-          ? "Load the approved active skill by key. Normally omit id. Optional id must be a private-version UUID returned by skill_history; repo version labels are not IDs."
+          ? "Load the approved active skill or repository default using only its catalogue key."
           : `Execute ${o.shape.operation.value}. Arguments are validated; identity comes from the authenticated session.`,
       parameters: jsonSchema((o as z.AnyZodObject).omit({ operation: true })),
     })),

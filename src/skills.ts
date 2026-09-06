@@ -29,14 +29,15 @@ export class SkillTools {
           [user, a.key],
         )
       ).rows;
-    if (a.operation === "skill_read") {
+    if (a.operation === "skill_read" || a.operation === "skill_version_read") {
+      const versionId = a.operation === "skill_version_read" ? a.id : null;
       const version = (
         await db.query(
           `SELECT v.* FROM skill_versions v LEFT JOIN skill_heads h ON h.user_id=v.user_id AND h.key=v.key WHERE v.user_id=$1 AND v.key=$2 AND v.id=COALESCE($3::uuid,h.version_id)`,
-          [user, a.key, a.id ?? null],
+          [user, a.key, versionId],
         )
       ).rows[0];
-      if (!version && !a.id) {
+      if (!version && a.operation === "skill_read") {
         const baseline = baselineSkills.find((b) => b.key === a.key);
         if (baseline)
           return {

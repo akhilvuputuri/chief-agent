@@ -104,6 +104,7 @@ export class JobTools {
     if (
       a.operation === "skill_list" ||
       a.operation === "skill_read" ||
+      a.operation === "skill_version_read" ||
       a.operation === "skill_history" ||
       a.operation === "skill_draft" ||
       a.operation === "skill_evaluate" ||
