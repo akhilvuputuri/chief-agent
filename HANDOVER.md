@@ -10,7 +10,7 @@ Build a useful general personal assistant and an AI engineering portfolio projec
 
 - Source: `/Users/akhilvuputuri/Dev/hermes-companion`
 - Private operations directory: `/Users/akhilvuputuri/Dev/hermes-companion-ops`
-- Repository: https://github.com/akhilvuputuri/personal-agent
+- Repository: https://github.com/akhilvuputuri/companion-agent
 - Existing DigitalOcean host: `188.166.246.143`, `/opt/hermes-companion`, $24/month, Singapore.
 - SSH identity: private ops `hermes_do`, with pinned `known_hosts`.
 
@@ -47,4 +47,10 @@ All 22 roles remain. Task `aaf59b66-dc61-4c1c-8afa-bdc50d8ff850` remains paused 
 
 ## Repository rename and progress visibility
 
-GitHub is now `akhilvuputuri/personal-agent`; the local Git remote points there. The existing local source directory and server `/opt/hermes-companion` remain unchanged, preserving Docker project/volume identity. Background tasks forward model-written progress through the same Telegram renderer as ordinary turns. A typing indicator shows active processing, and `/status` bypasses conversational queues.
+GitHub is now `akhilvuputuri/companion-agent`; the local Git remote points there. The existing local source directory and server `/opt/hermes-companion` remain unchanged, preserving Docker project/volume identity. Background tasks forward model-written progress through the same Telegram renderer as ordinary turns. A typing indicator shows active processing, and `/status` bypasses conversational queues.
+
+## Selective fresh start — 7 September 2026
+
+The chosen repository name is `companion-agent`. The local directory and server/Docker project paths remain unchanged. Old conversations, runtime calls, task checkpoints, research sources and generated preparation data were copied into Postgres schema `reset_archive_20260907` before being cleared from live tables. The archive is private and recoverable; do not run the reset again. All 22 listings, six explicit memories, credentials and connections were retained. There were no private skill versions to migrate. Old inbound update IDs remain to prevent Telegram replay. Pending old approvals, if any, were expired.
+
+The progress and skill-schema fixes are included in this release. A two-role check is used to assess fresh behavior before another full batch; do not automatically recreate the old 47-step task.
