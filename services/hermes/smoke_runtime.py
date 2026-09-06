@@ -43,6 +43,9 @@ class MockProvider(BaseHTTPRequestHandler):
             result = {'result': [{'title': 'AI Engineer', 'company': 'Example'}]}
         else:
             assert self.path.endswith('/chat/completions'), self.path
+            assert data.get('reasoning',{}).get('effort') == 'medium', data.get('reasoning')
+            assert data.get('provider',{}).get('sort') == 'price', data.get('provider')
+            assert data['provider']['max_price'] == {'prompt':2.0,'completion':10.0}
             has_result = any(m.get('role') == 'tool' for m in data['messages'])
             message = {'role': 'assistant', 'content': 'You have an AI Engineer role at Example.' if has_result else None}
             if not has_result:

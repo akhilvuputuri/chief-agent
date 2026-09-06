@@ -1,23 +1,10 @@
 import Fastify from "fastify";
-import type { Assistant } from "./agent.js";
-import { authorized } from "./security.js";
-import { toolError } from "./tool-errors.js";
-import { TOOL_DESCRIPTION } from "./protocol.js";
-export function server(assistant: Assistant, token: string) {
+/** No public or internal tool callback. All dispatch is in-process and owner-scoped. */
+export function server(..._legacy: unknown[]) {
   const app = Fastify({ logger: false, bodyLimit: 256000 });
-  app.get("/healthz", async () => ({ status: "ok" }));
-  app.get("/internal/tool-description", async (req, reply) => {
-    if (!authorized(req.headers.authorization, token))
-      return reply.code(401).send({ error: "Unauthorized" });
-    return { description: TOOL_DESCRIPTION };
-  });
-  app.post("/internal/tools", async (req, reply) => {
-    const capability = req.headers.authorization?.replace(/^Bearer /, "") ?? "";
-    try {
-      return await assistant.call(capability, req.body);
-    } catch (error) {
-      return reply.code(400).send({ error: toolError(error) });
-    }
-  });
+  app.get("/healthz", async () => ({
+    status: "ok",
+    runtime: "personal-agent",
+  }));
   return app;
 }

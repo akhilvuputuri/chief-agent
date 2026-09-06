@@ -6,16 +6,11 @@ let template = await readFile(
   "utf8",
 );
 const password = randomBytes(32).toString("hex");
-template = template
-  .replaceAll("replace-with-random-password", password)
-  .replace(
-    "INTERNAL_API_TOKEN=\n",
-    `INTERNAL_API_TOKEN=${randomBytes(32).toString("hex")}\n`,
-  );
+template = template.replaceAll("replace-with-random-password", password);
 try {
   await writeFile(path, template, { flag: "wx", mode: 0o600 });
   console.log(
-    "Created private .env with generated database and internal service secrets. Fill in provider keys and Telegram identity locally.",
+    "Created private .env with generated database credentials. Fill in provider keys and Telegram identity locally.",
   );
 } catch (error) {
   if (error.code !== "EEXIST") throw error;

@@ -26,6 +26,12 @@ test("skills preserve drafts, enforce ownership/evaluation/approval, and restore
     await pg.exec(
       await readFile(new URL("../db/005_work.sql", import.meta.url), "utf8"),
     );
+    await pg.exec(
+      await readFile(new URL("../db/003_skills.sql", import.meta.url), "utf8"),
+    );
+    await pg.exec(
+      await readFile(new URL("../db/006_runtime.sql", import.meta.url), "utf8"),
+    );
     const db = pg as unknown as Database;
     await ensureUser(db, "a");
     await ensureUser(db, "b");

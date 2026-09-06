@@ -4,10 +4,9 @@ const env = parse(await readFile(new URL("../.env", import.meta.url), "utf8"));
 const required = [
   "POSTGRES_PASSWORD",
   "DATABASE_URL",
-  "INTERNAL_API_TOKEN",
   "TELEGRAM_BOT_TOKEN",
   "TELEGRAM_ALLOWED_USER_IDS",
-  "HERMES_MODEL",
+  "AGENT_MODEL",
   "OPENROUTER_API_KEY",
 ];
 const missing = required.filter((key) => !env[key]?.trim());

@@ -1,54 +1,23 @@
-# Reliable execution foundation
+# Durable execution and recovery
 
-This release addresses shared execution failures across research, synthesis and personal assistance. It does not encode the user's recent job-search conversation as a workflow. Gemini 3.8 Flash remains the daily model, on the existing server.
+The custom TypeScript runtime replaces the former three-pass bridge. Defaults are `AGENT_BUDGET_MS=900000`, `AGENT_BUDGET_MODEL_CALLS=40`, and `AGENT_BUDGET_TOOL_CALLS=100`. A task retains limits and consumption in Postgres; `/continue` adds another allocation, not a fresh task. Model retries and retried reads count. Provider cost is recorded when returned, but these are execution-count/time limits, not a dollar-based budget.
 
-## Runtime responsibilities
+`runtime_runs` stores versioned message checkpoints, counters and stop reasons. `runtime_calls` stores tool identity, arguments and state before dispatch, then the actual outcome. `events` stores model/provider/latency/usage when available. Do not export private checkpoint contents or arguments to public telemetry.
 
-- The gateway derives the tool schema from the same Zod operation definitions it validates. Current connection availability accompanies each turn; stale conversation claims do not define capabilities. A configured connection may still need renewed authorization.
-- Substantial tasks can have a durable objective, original user request, scope revisions, steps, results, source evidence and tool receipts in Postgres. One active task per user is supported initially.
-- Research completion requires a stored passage, a source owned by the user and an explicit applicability assessment. Mismatched or unverified evidence cannot satisfy an evidence step. Search discovery alone is insufficient.
-- Write/export completion requires a successful receipt for the step's specified operation. A memory or preparation save cannot satisfy a Sheet export step. Analysis links its underlying evidence or receipts.
-- Scope revision resets completion conservatively while retaining source evidence, receipts and the objective/request revision history. Workers from an older revision cannot continue making tool calls. The model must inspect existing outputs before repeating writes.
-- Tracked responses render persisted step counts and results rather than the model's unconstrained completion narrative. Ordinary conversation remains conversational.
-- Turn exhaustion is an explicit interruption, not success. Framework-generated stop instructions are removed from newly persisted chat history.
-- Structured tool errors distinguish invalid inputs, missing connections, authorization, unavailable records, and unrecorded results. Raw provider errors and credentials are not returned to the model.
+Only transient model errors and recognized transient read failures retry, at most twice. Writes have a single dispatch. A write whose result could not be recorded is uncertain, and later writes are blocked until an operator inspects it. Restart recovery never replays an invocation. It pauses active tasks and marks started writes uncertain. Interrupted active time is charged conservatively, capped by the task allocation; downtime may therefore consume the remaining time allocation after a crash.
 
-## Continuation
+Cancellation bypasses Telegram's conversation queue, aborts the model request and checks again before subsequent tools. A tool already dispatched can complete and is recorded; cancellation cannot undo a completed external action. The Telegram runner accepts updates concurrently while per-user queues serialize ordinary turns.
 
-The model checkpoints steps; the gateway queues unfinished, unblocked work at the end of a tracked turn, including iteration exhaustion. `work_yield` is an optional checkpoint signal, not a prerequisite for continuation. A Postgres-backed worker runs up to three additional passes, each retaining the existing 12-iteration turn ceiling. It reports recorded progress to Telegram. These are execution bounds, not a measured dollar budget.
+Approvals remain exact saved actions with ownership, expiry and single-consumption checks. Required input/approval pauses dependent work; the model is instructed to complete independent runnable steps first. Approved actions can release an approval pause if budget remains. No tool can approve its own action.
 
-`/continue` queues a further bounded set of passes for active/paused work. `/workcancel` stops future work; it cannot undo an external action already in progress. Background passes use the recorded task rather than overwriting the user's conversational history, and cannot revise the scope themselves.
+## Cutover
 
-Queued work survives process restart. A running lease stale for five minutes pauses for inspection instead of blindly replaying uncertain writes. Saved task results remain available through `work_status`. There is no separate development server or shell access.
+Migration 006 is additive and applies its cutover once. It archives original Hermes conversation JSON unchanged, seeds text-only user/assistant history, and pauses active work with `runtime_cutover`. It preserves steps, evidence, receipts, memories, approvals, skills and schedule next-run timestamps. It does not resume the existing 22-role task.
 
-## Repo skills and personal overrides
+## Inspecting uncertain writes
 
-Four small baseline packs live in `skills/`: research, synthesis, task-execution and personal-assistance. They guide source applicability, uncertainty, full-scope planning, checkpointing and use of general task tools. They ship with the application and are versioned through Git.
+Inspect the owner's `runtime_calls` joined to `runtime_runs`, the matching `tool_receipts`, and the destination state. Determine whether the action occurred. Record the verified result and resolve that invocation explicitly; never clear an uncertainty flag merely to retry. Then the owner may grant more budget with `/continue`. Keep this operator-only until a review UI exists.
 
-Personal skill versions remain private in Postgres. A relevant approved version can override the baseline guidance; drafts remain inactive until evaluation and owner approval. Skills cannot grant permissions or bypass the gateway's validation. Repo skills supply reusable reasoning guidance; completion checks and permissions belong in code.
+## Evidence limitations
 
-## Validation and practical limits
-
-Deterministic regressions cover cross-domain version/location mismatches, invented quotes, owner isolation, failed exports, wrong-operation receipts, expanded scope, stale/background revisions, continuation limits, interrupted turns and configuration-derived schemas. The pinned Hermes runtime smoke exercises the actual registry, authenticated tool callback and repeated turn-specific schema registration against a local fake model.
-
-`services/hermes/evaluate_behavior.py` is an optional paid-model evaluation using synthetic tools and no production data. It checks version-specific research and preservation of uncertainty about a user's experience. Build first and run with the pinned Hermes Python and model credentials in the environment. Results are examples of observed behavior, not a broad benchmark or a guarantee.
-
-Remaining limitations:
-
-- Task decomposition, whether substantial work gets tracked, source applicability, claim entailment and semantic deduplication still involve model judgment. A stored quote is not independent factual verification.
-- Receipts validate ownership, task and operation, but do not independently prove that the returned content fully satisfies the user's intent. Step selection itself is agent-authored.
-- A Sheet export remains a separate explicit tool action. A failed tracked export stays incomplete and can be resumed; there is no standalone export outbox or exactly-once guarantee across external services.
-- A bounded continuation is not an unlimited background workflow engine. Paused work and expired OAuth connections can still need user intervention.
-- No frontier delegation, autonomous code deployment, arbitrary shell, authenticated browser, Gmail sending, Calendar writing or realtime voice is enabled by this release.
-
-### Observed evaluation — 6 September 2026
-
-Both synthetic Gemini 3.8 cases passed against the pinned Hermes runtime. The product-version case initially omitted a source ID and later attempted to complete an analysis from mismatched evidence. The fixture rejected both; the model retrieved the source, recorded the mismatch and left the unsupported work blocked. The background-experience case asked questions and preserved uncertainty without writes. This is evidence of recovery under enforcement, not flawless first-attempt model behavior. The initial looser fixture was corrected to require retrieval and the returned source ID before accepting evidence.
-
-### Deployment verification
-
-PR #4 was merged and deployed to the existing DigitalOcean host. Migration 005 succeeded; gateway, Hermes and Postgres health checks passed. A direct authenticated model/bridge health turn recognized the generated work and Sheets capabilities, without Telegram delivery or production task writes. The work table was empty after deployment; older conversations are not retroactively converted into tracked tasks. A follow-up validation fix rejects whitespace-only source quotations.
-
-### Continuation correction
-
-The first real 22-role run exposed an orchestration bug: iteration exhaustion unconditionally paused work with zero background passes used. The runtime now queues pending work independently of a model yield call and preserves the three-pass ceiling. Integration regressions exercise the original turn plus all three exhausted continuation passes and user-input blockers. A blocked target does not stop unrelated pending targets; dependent work must also be marked blocked. Planning guidance requires one research checkpoint per enumerated target and keeps research/write steps distinct from analysis; plan classification still requires model judgment.
+Completion guards require matched recorded evidence or successful receipts for the declared operation. Applicability labels and semantic coverage are still model judgments. A completed ledger is not independent factual certification. `/status` reports these records; ordinary Telegram answers remain model-written.

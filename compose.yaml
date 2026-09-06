@@ -40,44 +40,17 @@ services:
         "/migrations/004_daily.sql",
         "-f",
         "/migrations/005_work.sql",
+        "-f",
+        "/migrations/006_runtime.sql",
       ]
     depends_on:
       postgres: { condition: service_healthy }
-  hermes:
-    build:
-      context: .
-      dockerfile: services/hermes/Dockerfile
-    environment:
-      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?Set INTERNAL_API_TOKEN}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?Set OPENROUTER_API_KEY}
-      HERMES_TIMEZONE: Asia/Singapore
-      HERMES_MODEL: ${HERMES_MODEL:-google/gemini-3.8-flash}
-      LLM_BASE_URL: ${LLM_BASE_URL:-https://openrouter.ai/api/v1}
-      GATEWAY_URL: http://gateway:3000
-    volumes: ["hermes-data:/data/hermes"]
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "/opt/hermes/.venv/bin/python",
-          "-c",
-          "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=2)",
-        ]
-      interval: 10s
-      timeout: 3s
-      retries: 12
-      start_period: 30s
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-    restart: unless-stopped
   gateway:
     build: .
     environment:
       DATABASE_URL: postgres://companion:${POSTGRES_PASSWORD}@postgres:5432/companion
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?Set TELEGRAM_BOT_TOKEN}
       TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS:?Set TELEGRAM_ALLOWED_USER_IDS}
-      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?Set INTERNAL_API_TOKEN}
-      HERMES_URL: http://hermes:8000
       STT_PROVIDER: ${STT_PROVIDER:-openai}
       TTS_PROVIDER: ${TTS_PROVIDER:-openai}
       ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
@@ -98,7 +71,14 @@ services:
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_REFRESH_TOKEN: ${GOOGLE_REFRESH_TOKEN:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?Set OPENROUTER_API_KEY}
-      HERMES_MODEL: ${HERMES_MODEL:-google/gemini-3.8-flash}
+      AGENT_MODEL: ${AGENT_MODEL:-openai/gpt-5.6-sol}
+      AGENT_REASONING_EFFORT: ${AGENT_REASONING_EFFORT:-medium}
+      OPENROUTER_MAX_INPUT_PRICE: ${OPENROUTER_MAX_INPUT_PRICE:-2}
+      OPENROUTER_MAX_OUTPUT_PRICE: ${OPENROUTER_MAX_OUTPUT_PRICE:-10}
+      AGENT_BUDGET_MS: ${AGENT_BUDGET_MS:-900000}
+      AGENT_BUDGET_MODEL_CALLS: ${AGENT_BUDGET_MODEL_CALLS:-40}
+      AGENT_BUDGET_TOOL_CALLS: ${AGENT_BUDGET_TOOL_CALLS:-100}
+      SEARCH_MODEL: ${SEARCH_MODEL:-google/gemini-3.8-flash}
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       STT_MODEL: ${STT_MODEL:-whisper-1}
       TTS_MODEL: ${TTS_MODEL:-tts-1}
@@ -107,7 +87,6 @@ services:
     ports: ["127.0.0.1:3000:3000"]
     depends_on:
       migrate: { condition: service_completed_successfully }
-      hermes: { condition: service_healthy }
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
@@ -126,4 +105,3 @@ services:
     restart: unless-stopped
 volumes:
   postgres-data:
-  hermes-data:

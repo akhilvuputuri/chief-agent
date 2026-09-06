@@ -136,7 +136,7 @@ export class WorkTools {
     }
     if (a.operation === "work_yield") {
       await this.db.query(
-        `UPDATE work_tasks SET status=CASE WHEN passes>=3 THEN 'paused' ELSE 'queued' END,next_run=now()+interval '15 seconds',updated_at=now() WHERE id=$1 AND status!='done'`,
+        `UPDATE work_tasks SET status='queued',next_run=now()+interval '15 seconds',updated_at=now() WHERE id=$1 AND status!='done'`,
         [a.id],
       );
       return { checkpointed: true, automaticPassLimit: 3 };
@@ -198,7 +198,7 @@ export class WorkTools {
   }
 }
 export function renderWork(s: any) {
-  if (!s) return "";
+  if (!s) return "No active tracked task.";
   const c = s.counts;
   const state =
     s.task.status === "cancelled"
@@ -215,13 +215,13 @@ export function renderWork(s: any) {
     s.task.objective,
     ...rows,
     "Counts refer to recorded steps; source assessments remain agent judgments.",
+    `Execution used: ${s.task.used_models ?? 0}/${s.task.budget_models ?? 40} model calls, ${s.task.used_tools ?? 0}/${s.task.budget_tools ?? 100} tool calls, ${Math.ceil(Number(s.task.used_ms ?? 0) / 1000)}/${Math.ceil(Number(s.task.budget_ms ?? 900000) / 1000)} active seconds.`,
     s.task.status === "queued"
-      ? `Continuing automatically (${s.task.passes}/3 background passes used).`
-      : c.pending || c.blocked
-        ? s.task.passes >= 3
-          ? "Automatic continuation budget reached (3/3). Send /continue for up to three more passes."
-          : "Paused for a blocker or interruption. Resolve the blocker, then send /continue."
-        : "",
+      ? "Continuing automatically."
+      : `State: ${s.task.status}${s.task.pause_reason ? " (" + s.task.pause_reason + ")" : ""}.`,
+    s.task.status === "paused"
+      ? "Use /continue to grant another allocation after resolving any blocker. Uncertain writes require operator inspection."
+      : "",
   ]
     .filter(Boolean)
     .join("\n\n");

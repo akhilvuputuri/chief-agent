@@ -8,12 +8,12 @@ Use an isolated database, a test Telegram bot and synthetic personal information
 4. **Grounded comparison.** Ask “Where do I match, where am I weak, and what do you still need to know?” Show the role/profile evidence and unknowns rather than a made-up numeric score.
 5. **Voice.** Send a short voice note asking to mark the role as interested. Show the same saved state through a follow-up text query.
 6. **Control.** Ask to delete it, show the precise approval preview, deny, verify it remains, then approve a fresh request if desired.
-7. **Trace.** Show metadata events and explain that domain tools, permissions and state are owned by the app while Hermes supplies the reasoning loop.
+7. **Trace.** Show metadata events and explain that domain tools, permissions and state are owned by the app and the TypeScript runtime owns the reasoning loop.
 
 Before recording: verify live provider access, keep keys out of the terminal, redact personal data, and label synthesized speech. After recording: document one real failure and how it informed the roadmap.
 
 Suggested project description:
 
-> Built a persistent Telegram personal assistant using Hermes, TypeScript and Postgres, with voice-note input, conversational job-search tools, per-run authorization and database-enforced approvals. Separated the agent runtime from durable product state to support future clients and tool providers.
+> Built a persistent Telegram personal assistant with an owned TypeScript runtime and Postgres, with voice-note input, conversational job-search tools, per-run authorization and database-enforced approvals. Separated the agent runtime from durable product state to support future clients and tool providers.
 
 Only add performance, usage or quality numbers after measuring them. Pair the demo with the architecture diagram and an explanation of the current delivery/recovery tradeoff.

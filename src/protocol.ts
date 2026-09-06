@@ -241,12 +241,17 @@ export interface AgentRequest {
   message: string;
   history: unknown[];
   memories: { key: string; value: string }[];
-  runtime?: { schema: Record<string, unknown>; context: string };
+  runtime?: { context: string; tools?: import("./model.js").ToolDefinition[] };
+  execution?: import("./execution.js").Execution;
+  execute?: (input: unknown) => Promise<unknown>;
+  signal?: AbortSignal;
+  progress?: (text: string) => Promise<void>;
 }
 export interface AgentResponse {
   reply: string;
   history: unknown[];
   interrupted?: boolean;
+  stopReason?: import("./execution.js").StopReason;
 }
 export const agentResponse = z.object({
   interrupted: z.boolean().optional(),

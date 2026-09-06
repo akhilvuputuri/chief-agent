@@ -1,3 +1,4 @@
+import { recoverRuntime } from "../src/execution.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -21,6 +22,12 @@ async function fixture() {
     await pg.exec(
       await readFile(new URL("../db/" + f, import.meta.url), "utf8"),
     );
+  await pg.exec(
+    await readFile(new URL("../db/003_skills.sql", import.meta.url), "utf8"),
+  );
+  await pg.exec(
+    await readFile(new URL("../db/006_runtime.sql", import.meta.url), "utf8"),
+  );
   const db = pg as unknown as Database;
   await ensureUser(db, "owner");
   await ensureUser(db, "other");
@@ -314,6 +321,9 @@ test("worker is bounded, resumes persisted queued work, and does not replay stal
       f.db,
       async () => {
         calls++;
+        await f.db.query(
+          "UPDATE work_tasks SET used_models=used_models+1,budget_models=3",
+        );
         return "Incomplete";
       },
       async () => {
@@ -330,6 +340,7 @@ test("worker is bounded, resumes persisted queued work, and does not replay stal
     await f.db.query(
       "UPDATE work_tasks SET status='running',updated_at=now()-interval '6 minutes'",
     );
+    await recoverRuntime(f.db);
     await worker.tick();
     assert.equal(calls, 3);
     assert.equal((await f.work.current("owner")).status, "paused");
@@ -341,7 +352,7 @@ test("worker is bounded, resumes persisted queued work, and does not replay stal
   }
 });
 
-test("tracked response cannot claim completion and exhaustion queues unfinished work without model yield", async () => {
+test("tracked responses retain model-written prose while status uses recorded evidence", async () => {
   const f = await fixture();
   try {
     let assistant: Assistant;
@@ -361,7 +372,7 @@ test("tracked response cannot claim completion and exhaustion queues unfinished 
             ],
           });
           return {
-            reply: "All options researched and exported!",
+            reply: "I started the research; the sources still need checking.",
             history: [],
             interrupted: true,
           };
@@ -370,10 +381,16 @@ test("tracked response cannot claim completion and exhaustion queues unfinished 
       f.tools,
     );
     const response = await assistant.respond("owner", "Research every option");
-    assert.match(response, /Incomplete: 0\/1/);
-    assert.equal(response.includes("All options researched"), false);
+    assert.equal(
+      response,
+      "I started the research; the sources still need checking.",
+    );
+    assert.match(
+      renderWork(await f.work.snapshot("owner")),
+      /Incomplete: 0\/1/,
+    );
     assert.equal((await f.work.current("owner")).status, "queued");
-    assert.match(response, /Continuing/);
+    assert.doesNotMatch(response, /background passes/);
     assert.equal(assistant.capabilities.size, 0);
   } finally {
     await f.pg.close();
@@ -382,15 +399,15 @@ test("tracked response cannot claim completion and exhaustion queues unfinished 
 
 test("capability schema exposes configured operations and structured work arguments", () => {
   const off = runtimeContext({}, null);
-  const schema = off.schema.parameters as any;
-  assert.equal(schema.properties.operation.enum.includes("gmail_read"), false);
-  assert.equal(schema.properties.operation.enum.includes("sheet_sync"), false);
-  assert.equal(schema.properties.operation.enum.includes("work_start"), true);
-  assert.equal(schema.properties.steps.type, "array");
-  const on = runtimeContext({ gmail: true, preparationSheet: true }, null);
-  assert.equal(
-    on.schema.parameters.properties.operation.enum.includes("sheet_sync"),
-    true,
+  assert.ok(
+    !off.tools.some((t) => t.name === "gmail_read" || t.name === "sheet_sync"),
+  );
+  const start = off.tools.find((t) => t.name === "work_start")!;
+  assert.equal((start.parameters.properties as any).steps.type, "array");
+  assert.ok(
+    runtimeContext({ gmail: true, preparationSheet: true }, null).tools.some(
+      (t) => t.name === "sheet_sync",
+    ),
   );
 });
 
@@ -454,6 +471,7 @@ test("runtime owns continuation across exhausted passes and stops at the budget 
       {
         run: async (req) => {
           calls++;
+          await req.execution!.consume("models");
           if (calls === 1)
             await assistant.call(req.capability, {
               operation: "work_start",
@@ -466,6 +484,8 @@ test("runtime owns continuation across exhausted passes and stops at the budget 
                 },
               ],
             });
+          await req.execution!.attach();
+          await f.db.query("UPDATE work_tasks SET budget_models=4");
           return { reply: "Partial work", history: [], interrupted: true };
         },
       },
@@ -526,7 +546,7 @@ test("a user-input blocker pauses instead of scheduling speculative continuation
     );
     const reply = await assistant.respond("owner", "Research this product");
     assert.equal((await f.work.current("owner")).status, "paused");
-    assert.match(reply, /Which product version/);
+    assert.equal(reply, "Need your input");
     assert.doesNotMatch(reply, /Continuing/);
   } finally {
     await f.pg.close();

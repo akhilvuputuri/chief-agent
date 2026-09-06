@@ -25,6 +25,9 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(result["reply"], "Let's compare")
         self.assertEqual(seen["enabled_toolsets"], ["companion"])
         self.assertTrue(seen["skip_memory"])
+        self.assertEqual(seen["request_overrides"]["extra_body"]["provider"], {"sort": "price", "max_price": {"prompt": 2.0, "completion": 10.0}, "require_parameters": True})
+        self.assertEqual(seen["reasoning_config"], {"enabled": True, "effort": "medium"})
+        self.assertIn("Telegram on a phone is your primary output surface", seen["ephemeral_system_prompt"])
         self.assertIsNone(bridge._active_capability)
 
     def test_unexpected_native_tool_fails_closed(self):
@@ -51,6 +54,14 @@ class BridgeTests(unittest.TestCase):
         self.assertTrue(result["interrupted"])
         self.assertEqual(len(result["history"]), 2)
         self.assertEqual(result["history"][0]["content"], self.data["message"])
+
+    def test_invalid_reasoning_effort_fails_closed(self):
+        with patch.dict(os.environ, {"HERMES_REASONING_EFFORT": "typo"}), self.assertRaises(ValueError):
+            bridge.reasoning_config()
+
+    def test_invalid_price_cap_fails_closed(self):
+        with patch.dict(os.environ, {"OPENROUTER_MAX_INPUT_PRICE": "nan"}), self.assertRaises(ValueError):
+            bridge.provider_routing()
 
     def test_no_tool_outside_turn(self):
         self.assertIn('No active turn', bridge.tool_handler({"operation": "job_list"}))

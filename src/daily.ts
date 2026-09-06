@@ -8,28 +8,8 @@ export type DailyAction = Extract<
       `item_${string}` | `schedule_${string}` | "calendar_list" | "daily_sync";
   }
 >;
-export class ScheduleParser {
-  constructor(
-    private url: string,
-    private token: string,
-  ) {}
-  async next(schedule: string, parsed?: unknown) {
-    const r = await fetch(new URL("/v1/schedule", this.url), {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(parsed ? { parsed } : { schedule }),
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!r.ok)
-      throw new Error(
-        "Schedule rejected; use in 30m, an explicit ISO date, or every day at 9am (Singapore time)",
-      );
-    return (await r.json()) as { parsed: any; next: string | null };
-  }
-}
+export { ScheduleParser } from "./schedule.js";
+import { ScheduleParser } from "./schedule.js";
 export class DailyTools {
   constructor(
     private db: Database,

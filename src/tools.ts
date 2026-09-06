@@ -209,7 +209,7 @@ export class JobTools {
         instruction: `User must type /approve ${id} or /deny ${id} within 15 minutes. Do not claim deletion.`,
       };
     }
-    // Supply evidence to Hermes for semantic analysis, with no fabricated fit score.
+    // Supply evidence to the model for semantic analysis, with no fabricated fit score.
     return {
       role: job,
       profile: (

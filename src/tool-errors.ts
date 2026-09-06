@@ -16,6 +16,9 @@ export function toolError(error: unknown) {
     return { code: "RESULT_UNRECORDED", retryable: false, message };
   const known = [
     /Only a user follow-up can revise scope/,
+    /uncertain write requires inspection/,
+    /Task cancelled/,
+    /Task paused for cutover/,
     /Quote must appear/,
     /Source not found/,
     /Task scope changed/,
