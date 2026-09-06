@@ -11,3 +11,7 @@ coverage/
 compose.local.yaml
 *.dump
 .telegram-pairing.json
+
+# Private backup material
+*.pem
+*.cms

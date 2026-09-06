@@ -1,0 +1,9 @@
+[Unit]
+Description=Encrypted Hermes database backup
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/hermes-companion/deploy/backup-database.sh
+UMask=0077
