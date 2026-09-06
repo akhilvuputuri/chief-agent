@@ -4,7 +4,18 @@ const schema = z.object({
   CALENDAR_REFRESH_TOKEN: z.string().default(""),
   DAILY_SPREADSHEET_ID: z.string().default(""),
   OPENROUTER_API_KEY: z.string().default(""),
-  HERMES_MODEL: z.string().default("google/gemini-3.8-flash"),
+  AGENT_MODEL: z.string().default("openai/gpt-5.6-sol"),
+  AGENT_REASONING_EFFORT: z.literal("medium").default("medium"),
+  AGENT_BUDGET_MS: z.coerce.number().int().positive().default(900000),
+  AGENT_BUDGET_MODEL_CALLS: z.coerce.number().int().positive().default(40),
+  AGENT_BUDGET_TOOL_CALLS: z.coerce.number().int().positive().default(100),
+  OPENROUTER_MAX_INPUT_PRICE: z.coerce.number().positive().finite().default(2),
+  OPENROUTER_MAX_OUTPUT_PRICE: z.coerce
+    .number()
+    .positive()
+    .finite()
+    .default(10),
+  SEARCH_MODEL: z.string().default("google/gemini-3.8-flash"),
   SHEETS_OWNER_USER_ID: z.string().regex(/^\d*$/).default(""),
   SHEETS_REFRESH_TOKEN: z.string().default(""),
   SHEETS_SPREADSHEET_ID: z.string().default(""),
@@ -16,8 +27,8 @@ const schema = z.object({
   DATABASE_URL: z.string().url(),
   TELEGRAM_BOT_TOKEN: z.string().min(10),
   TELEGRAM_ALLOWED_USER_IDS: z.string().regex(/^\d+(,\d+)*$/),
-  INTERNAL_API_TOKEN: z.string().min(32),
-  HERMES_URL: z.string().url().default("http://localhost:8000"),
+  INTERNAL_API_TOKEN: z.string().default(""),
+
   PORT: z.coerce.number().int().default(3000),
   STT_PROVIDER: z.enum(["openai", "elevenlabs", "groq"]).default("openai"),
   TTS_PROVIDER: z.enum(["openai", "elevenlabs"]).default("openai"),

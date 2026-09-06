@@ -1,3 +1,5 @@
+> Runtime update: production now uses our TypeScript loop and scheduler. Hermes-specific architecture and pass limits below describe the earlier prototype; [current architecture](architecture.md) and [execution/recovery](reliable-execution.md) take precedence. Integration-specific permission boundaries remain enforced.
+
 # Operating model and self-development
 
 ## Daily assistant

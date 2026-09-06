@@ -1,3 +1,8 @@
+import { run as runTelegram } from "@grammyjs/runner";
+import { CustomAgent } from "./custom-agent.js";
+import { OpenRouter } from "./model.js";
+import { recoverRuntime } from "./execution.js";
+import { formatTelegram } from "./telegram-format.js";
 import { WorkWorker } from "./work-worker.js";
 import { DailyTools, DailyWorker, ScheduleParser } from "./daily.js";
 import { CalendarTools } from "./calendar.js";
@@ -8,12 +13,13 @@ import { readConfig } from "./config.js";
 import { connect } from "./db.js";
 import { JobTools } from "./tools.js";
 import { WebTools } from "./providers.js";
-import { Assistant, Hermes } from "./agent.js";
+import { Assistant } from "./agent.js";
 import { server } from "./server.js";
 import { telegram } from "./telegram.js";
 const c = readConfig();
 const db = connect(c.DATABASE_URL);
 await db.query("SELECT 1");
+await recoverRuntime(db);
 const google = {
   owner: c.GMAIL_OWNER_USER_ID,
   email: c.GMAIL_EMAIL,
@@ -32,14 +38,21 @@ const mirror = new DailySheet(db, {
   refreshToken: c.SHEETS_REFRESH_TOKEN,
   spreadsheetId: c.DAILY_SPREADSHEET_ID,
 });
-const parser = new ScheduleParser(c.HERMES_URL, c.INTERNAL_API_TOKEN);
+const parser = new ScheduleParser();
 const daily = new DailyTools(db, parser, calendar, mirror);
 const assistant = new Assistant(
   db,
-  new Hermes(c.HERMES_URL, c.INTERNAL_API_TOKEN),
+  new CustomAgent(
+    new OpenRouter(
+      c.OPENROUTER_API_KEY,
+      c.AGENT_MODEL,
+      c.OPENROUTER_MAX_INPUT_PRICE,
+      c.OPENROUTER_MAX_OUTPUT_PRICE,
+    ),
+  ),
   new JobTools(
     db,
-    new WebTools(c.TAVILY_API_KEY, c.OPENROUTER_API_KEY, c.HERMES_MODEL),
+    new WebTools(c.TAVILY_API_KEY, c.OPENROUTER_API_KEY, c.SEARCH_MODEL),
     gmail,
     new SheetsTools(db, {
       owner: c.SHEETS_OWNER_USER_ID,
@@ -57,8 +70,13 @@ const assistant = new Assistant(
     preparationSheet: !!(c.SHEETS_REFRESH_TOKEN && c.SHEETS_SPREADSHEET_ID),
     dailySheet: !!(c.SHEETS_REFRESH_TOKEN && c.DAILY_SPREADSHEET_ID),
   },
+  {
+    ms: c.AGENT_BUDGET_MS,
+    models: c.AGENT_BUDGET_MODEL_CALLS,
+    tools: c.AGENT_BUDGET_TOOL_CALLS,
+  },
 );
-const app = server(assistant, c.INTERNAL_API_TOKEN);
+const app = server();
 const bot = telegram(c, assistant, db);
 const allowed = new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(","));
 const worker = new DailyWorker(
@@ -146,9 +164,11 @@ const workWorker = new WorkWorker(
   (user, id) => assistant.resume(user, id),
   async (user, text) => {
     if (!allowed.has(user)) throw new Error("Unauthorized delivery");
-    await bot.api.sendMessage(user, text.slice(0, 3900), {
-      link_preview_options: { is_disabled: true },
-    });
+    for (const part of formatTelegram(text))
+      await bot.api.sendMessage(user, part.text, {
+        entities: part.entities,
+        link_preview_options: { is_disabled: true },
+      });
   },
 );
 const workTimer = setInterval(() => {
@@ -171,12 +191,17 @@ for (const signal of ["SIGINT", "SIGTERM"])
     void (async () => {
       clearInterval(scheduleTimer);
       clearInterval(workTimer);
-      if (bot.isRunning()) await bot.stop();
+      assistant.shutdown();
+      await runner.stop();
       await app.close();
       await db.end();
     })();
   });
-await bot.start({
-  allowed_updates: ["message"],
-  onStart: () => console.log(JSON.stringify({ event: "gateway.started" })),
+await bot.init();
+const runner = runTelegram(bot, {
+  runner: { silent: true, fetch: { allowed_updates: ["message"] } },
+  sink: { concurrency: 8 },
 });
+console.log(
+  JSON.stringify({ event: "gateway.started", runtime: "personal-agent" }),
+);

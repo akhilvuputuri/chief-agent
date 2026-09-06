@@ -40,6 +40,12 @@ before(async () => {
   await pg.exec(
     await readFile(new URL("../db/005_work.sql", import.meta.url), "utf8"),
   );
+  await pg.exec(
+    await readFile(new URL("../db/003_skills.sql", import.meta.url), "utf8"),
+  );
+  await pg.exec(
+    await readFile(new URL("../db/006_runtime.sql", import.meta.url), "utf8"),
+  );
   db = pg as unknown as Database;
   tools = new JobTools(db, {
     call: async () => ({ untrusted: true, content: "test" }),
@@ -223,69 +229,12 @@ test("failure revokes capabilities and persists a failure event", async () => {
       .length > 0,
   );
 });
-test("internal routes reject static-token tool execution and identity injection", async () => {
-  const assistant = new Assistant(
-    db,
-    { run: async () => ({ reply: "ok", history: [] }) },
-    tools,
-  );
-  const token = "s".repeat(64);
-  const app = server(assistant, token);
-  try {
-    assert.equal(
-      (await app.inject({ url: "/internal/tool-description" })).statusCode,
-      401,
-    );
-    assert.equal(
-      (
-        await app.inject({
-          url: "/internal/tool-description",
-          headers: { authorization: `Bearer ${token}` },
-        })
-      ).statusCode,
-      200,
-    );
-    assert.equal(
-      (
-        await app.inject({
-          method: "POST",
-          url: "/internal/tools",
-          headers: { authorization: `Bearer ${token}` },
-          payload: { operation: "job_list" },
-        })
-      ).statusCode,
-      400,
-    );
-    assistant.capabilities.set("valid", {
-      user: "alice",
-      run: run(),
-      expires: Date.now() + 10000,
-    });
-    assert.equal(
-      (
-        await app.inject({
-          method: "POST",
-          url: "/internal/tools",
-          headers: { authorization: "Bearer valid" },
-          payload: { operation: "job_list", user: "bob" },
-        })
-      ).statusCode,
-      400,
-    );
-    assert.equal(
-      (
-        await app.inject({
-          method: "POST",
-          url: "/internal/tools",
-          headers: { authorization: "Bearer valid" },
-          payload: { operation: "job_list" },
-        })
-      ).statusCode,
-      200,
-    );
-  } finally {
-    await app.close();
-  }
+test("production has no HTTP tool callback", async () => {
+  const app = server();
+  assert.equal((await app.inject({ url: "/healthz" })).statusCode, 200);
+  for (const url of ["/internal/tool-description", "/internal/tools"])
+    assert.equal((await app.inject({ url, method: "POST" })).statusCode, 404);
+  await app.close();
 });
 test("private-chat identity allowlist and constant-time token comparison", () => {
   assert.ok(allowedChat(123, "private", new Set(["123"])));

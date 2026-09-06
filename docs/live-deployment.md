@@ -1,3 +1,5 @@
+> Runtime update: production now uses our TypeScript loop and scheduler. Hermes-specific architecture and pass limits below describe the earlier prototype; [current architecture](architecture.md) and [execution/recovery](reliable-execution.md) take precedence. Integration-specific permission boundaries remain enforced.
+
 # Initial live deployment — 2026-09-06
 
 DigitalOcean Droplet `hermes-companion-sgp1` (ID 598161491), Singapore, Ubuntu 24.04, 2 vCPU / 4 GB RAM / 80 GB SSD, $24/month before applicable taxes. No paid backups or managed database were added.

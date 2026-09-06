@@ -1,0 +1,192 @@
+import { randomUUID } from "node:crypto";
+import type { Database } from "./db.js";
+import { event } from "./db.js";
+import type { Message } from "./model.js";
+export type StopReason =
+  | "answer"
+  | "awaiting_user"
+  | "awaiting_approval"
+  | "budget_exhausted"
+  | "cancelled"
+  | "failed";
+export type Budget = { ms: number; models: number; tools: number };
+export const defaultBudget: Budget = { ms: 900000, models: 40, tools: 100 };
+export class Stop extends Error {
+  constructor(readonly reason: StopReason) {
+    super(reason);
+  }
+}
+export const readOperations = new Set([
+  "finish_turn",
+  "work_status",
+  "item_list",
+  "schedule_list",
+  "calendar_list",
+  "skill_list",
+  "skill_read",
+  "skill_history",
+  "prep_list",
+  "gmail_search",
+  "gmail_read",
+  "job_list",
+  "job_analyze",
+  "memory_list",
+  "web_search",
+  "web_read",
+]);
+export class Execution {
+  private task?: string;
+  private used = { ms: 0, models: 0, tools: 0 };
+  constructor(
+    readonly db: Database,
+    readonly user: string,
+    readonly run: string,
+    readonly signal: AbortSignal,
+    private limits: Budget = defaultBudget,
+  ) {}
+  async start() {
+    await this.db.query("INSERT INTO runtime_runs(id,user_id) VALUES($1,$2)", [
+      this.run,
+      this.user,
+    ]);
+    await this.attach();
+  }
+  async attach(force = false) {
+    const id = (
+      await this.db.query(
+        "SELECT task_id FROM work_turns WHERE run_id=$1 AND user_id=$2 AND ($3 OR background OR EXISTS(SELECT 1 FROM events WHERE run_id=$1 AND type='tool.completed' AND data->>'operation' IN ('work_start','work_revise','work_step','work_evidence','work_yield')))",
+        [this.run, this.user, force],
+      )
+    ).rows[0]?.task_id;
+    if (id && id !== this.task) {
+      await this.db.query(
+        `UPDATE work_tasks SET budget_ms=CASE WHEN budget_initialized THEN budget_ms ELSE $2 END,budget_models=CASE WHEN budget_initialized THEN budget_models ELSE $3 END,budget_tools=CASE WHEN budget_initialized THEN budget_tools ELSE $4 END,budget_initialized=true,used_ms=used_ms+$5,used_models=used_models+$6,used_tools=used_tools+$7 WHERE id=$1 AND user_id=$8`,
+        [
+          id,
+          this.limits.ms,
+          this.limits.models,
+          this.limits.tools,
+          this.used.ms,
+          this.used.models,
+          this.used.tools,
+          this.user,
+        ],
+      );
+      this.task = id;
+      await this.db.query("UPDATE runtime_runs SET task_id=$2 WHERE id=$1", [
+        this.run,
+        id,
+      ]);
+    }
+  }
+  async remaining() {
+    await this.attach();
+    if (this.signal.aborted) throw new Stop("cancelled");
+    if (this.task) {
+      const t = (
+        await this.db.query(
+          "SELECT * FROM work_tasks WHERE id=$1 AND user_id=$2",
+          [this.task, this.user],
+        )
+      ).rows[0];
+      if (t.status === "cancelled") throw new Stop("cancelled");
+      return {
+        ms: Number(t.budget_ms) - Number(t.used_ms),
+        models: t.budget_models - t.used_models,
+        tools: t.budget_tools - t.used_tools,
+      };
+    }
+    return {
+      ms: this.limits.ms - this.used.ms,
+      models: this.limits.models - this.used.models,
+      tools: this.limits.tools - this.used.tools,
+    };
+  }
+  async consume(kind: "models" | "tools") {
+    const left = await this.remaining();
+    if (left.ms <= 0 || left[kind] <= 0) throw new Stop("budget_exhausted");
+    const column = kind === "models" ? "used_models" : "used_tools";
+    if (this.task)
+      await this.db.query(
+        `UPDATE work_tasks SET ${column}=${column}+1,updated_at=now() WHERE id=$1`,
+        [this.task],
+      );
+    this.used[kind]++;
+    await this.db.query(
+      `UPDATE runtime_runs SET ${column}=${column}+1,updated_at=now() WHERE id=$1`,
+      [this.run],
+    );
+    return left.ms;
+  }
+  async elapsed(ms: number) {
+    ms = Math.max(0, Math.ceil(ms));
+    this.used.ms += ms;
+    if (this.task)
+      await this.db.query(
+        "UPDATE work_tasks SET used_ms=used_ms+$2,updated_at=now() WHERE id=$1",
+        [this.task, ms],
+      );
+    await this.db.query(
+      "UPDATE runtime_runs SET used_ms=used_ms+$2,updated_at=now() WHERE id=$1",
+      [this.run, ms],
+    );
+  }
+  async checkpoint(messages: Message[]) {
+    await this.db.query(
+      "UPDATE runtime_runs SET messages=$2::jsonb,updated_at=now() WHERE id=$1",
+      [this.run, JSON.stringify(messages)],
+    );
+  }
+  async trace(type: string, data: Record<string, unknown>) {
+    if (type === "model.completed")
+      await this.db.query("UPDATE runtime_runs SET model=$2 WHERE id=$1", [
+        this.run,
+        data.model ?? null,
+      ]);
+    await event(this.db, this.user, this.run, type, data);
+  }
+  async beginCall(callId: string, operation: string, args: unknown) {
+    const id = randomUUID();
+    await this.db.query(
+      "INSERT INTO runtime_calls(id,run_id,call_id,operation,arguments,is_write) VALUES($1,$2,$3,$4,$5::jsonb,$6)",
+      [
+        id,
+        this.run,
+        callId,
+        operation,
+        JSON.stringify(args),
+        !readOperations.has(operation),
+      ],
+    );
+    return id;
+  }
+  async endCall(id: string, result: unknown, state = "success") {
+    await this.db.query(
+      "UPDATE runtime_calls SET result=$2::jsonb,state=$3,finished_at=now() WHERE id=$1",
+      [id, JSON.stringify(result), state],
+    );
+  }
+  async finish(reason: StopReason) {
+    await this.db.query(
+      "UPDATE runtime_runs SET state='stopped',stop_reason=$2,updated_at=now() WHERE id=$1",
+      [this.run, reason],
+    );
+    await this.trace("runtime.stopped", { stopReason: reason });
+  }
+}
+// Startup recovery is deliberately conservative. No old invocation is replayed.
+export async function recoverRuntime(db: Database) {
+  // Charge interrupted active execution conservatively, capped at remaining allocation.
+  await db.query(
+    `UPDATE work_tasks t SET used_ms=LEAST(t.budget_ms,t.used_ms+COALESCE((SELECT sum(GREATEST(0,EXTRACT(EPOCH FROM now()-r.updated_at)*1000))::bigint FROM runtime_runs r WHERE r.task_id=t.id AND r.state='running'),0)) WHERE EXISTS(SELECT 1 FROM runtime_runs r WHERE r.task_id=t.id AND r.state='running')`,
+  );
+  await db.query(
+    "UPDATE runtime_calls SET state=CASE WHEN is_write THEN 'uncertain' ELSE 'interrupted' END WHERE state='started'",
+  );
+  await db.query(
+    `UPDATE work_tasks SET status='paused',lease=NULL,pause_reason=CASE WHEN EXISTS(SELECT 1 FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id WHERE r.task_id=work_tasks.id AND c.state='uncertain') THEN 'uncertain_write' ELSE 'restart' END WHERE status IN ('active','queued','running')`,
+  );
+  await db.query(
+    "UPDATE runtime_runs SET state='stopped',stop_reason='failed' WHERE state='running'",
+  );
+}
