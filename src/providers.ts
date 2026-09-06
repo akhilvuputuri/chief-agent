@@ -4,7 +4,8 @@ export async function boundedBytes(
   response: Response,
   max: number,
 ): Promise<Uint8Array> {
-  if (!response.ok) throw new Error("Provider request failed");
+  if (!response.ok)
+    throw new Error(`Provider request failed (HTTP ${response.status})`);
   if (Number(response.headers.get("content-length")) > max)
     throw new Error("Response too large");
   const reader = response.body?.getReader();

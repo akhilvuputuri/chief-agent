@@ -1,6 +1,6 @@
 # Personal-agent handover
 
-Updated 6 September 2026. The project is transitioning to its own TypeScript runtime. See the verification record for the deployment/check status; do not infer deployment merely from this document.
+Updated 6 September 2026. The owned TypeScript runtime is deployed on the existing DigitalOcean server. PR #7 introduced the cutover (`f1664bb`); consult server `RELEASE` for subsequent revisions. The gateway and Postgres are healthy, and the Hermes container has been removed without deleting its volume.
 
 ## Intent and constraints
 
@@ -40,3 +40,7 @@ Run `npm run check`, `npm run build`, `npm run format:check`. `npm run smoke:run
 Improve from actual daily conversations: context selection, memory retrieval, deduplication, tracing and voice responsiveness. Realtime voice, subagents, sandbox execution, self-deployment and a web client remain later milestones.
 
 The previous detailed Hermes handover is retained under `docs/history/hermes-handover.md` as historical context. Its architecture and model defaults are obsolete. Do not deploy the historical bridge as a prerequisite.
+
+## Live cutover results
+
+All 22 roles remain. Task `aaf59b66-dc61-4c1c-8afa-bdc50d8ff850` remains paused at revision 3 with 26 done and 21 pending steps. Its previous history is archived. Live Sol, Telegram bot authentication, read-only Gmail/Calendar, both three-tab Sheet mirrors and an ElevenLabs speech/transcription round trip passed. No automatic resumption was performed. A fresh user-sent Telegram voice note remains a useful hands-on acceptance check after the automated and provider checks.

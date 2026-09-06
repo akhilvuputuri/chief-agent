@@ -150,7 +150,12 @@ export class CustomAgent implements Agent {
                   if (
                     !readOperations.has(op) ||
                     attempt >= 2 ||
-                    !/429|502|503|504|ETIMEDOUT|ECONNRESET/.test(String(error))
+                    !(
+                      error instanceof TypeError ||
+                      (error instanceof Error &&
+                        error.name === "TimeoutError") ||
+                      /429|502|503|504|ETIMEDOUT|ECONNRESET/.test(String(error))
+                    )
                   )
                     throw error;
                   await execution.consume("tools");
