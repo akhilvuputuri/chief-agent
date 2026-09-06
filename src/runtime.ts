@@ -16,7 +16,18 @@ export function jsonSchema(v: z.ZodTypeAny): any {
     );
   if (v instanceof z.ZodNullable)
     return { anyOf: [jsonSchema(v.unwrap()), { type: "null" }] };
-  if (v instanceof z.ZodString) return { type: "string" };
+  if (v instanceof z.ZodString) {
+    const schema: Record<string, unknown> = { type: "string" };
+    for (const check of v._def.checks) {
+      if (check.kind === "uuid") schema.format = "uuid";
+      if (check.kind === "url") schema.format = "uri";
+      if (check.kind === "datetime") schema.format = "date-time";
+      if (check.kind === "min") schema.minLength = check.value;
+      if (check.kind === "max") schema.maxLength = check.value;
+      if (check.kind === "regex") schema.pattern = check.regex.source;
+    }
+    return schema;
+  }
   if (v instanceof z.ZodNumber) return { type: "number" };
   if (v instanceof z.ZodBoolean) return { type: "boolean" };
   if (v instanceof z.ZodLiteral)
@@ -57,7 +68,10 @@ export function runtimeContext(
   return {
     tools: options.map((o) => ({
       name: o.shape.operation.value,
-      description: `Execute ${o.shape.operation.value}. Arguments are validated; identity comes from the authenticated session.`,
+      description:
+        o.shape.operation.value === "skill_read"
+          ? "Load the approved active skill by key. Normally omit id. Optional id must be a private-version UUID returned by skill_history; repo version labels are not IDs."
+          : `Execute ${o.shape.operation.value}. Arguments are validated; identity comes from the authenticated session.`,
       parameters: jsonSchema((o as z.AnyZodObject).omit({ operation: true })),
     })),
     context: JSON.stringify({
