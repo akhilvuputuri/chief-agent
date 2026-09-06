@@ -56,7 +56,7 @@ test("skills preserve drafts, enforce ownership/evaluation/approval, and restore
       /Evaluate/,
     );
     await assert.rejects(
-      () => call("skill_read", { key: "prep", id: first.id }, "b"),
+      () => call("skill_version_read", { key: "prep", id: first.id }, "b"),
       /not found/,
     );
     await assert.rejects(

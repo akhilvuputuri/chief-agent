@@ -43,7 +43,7 @@ The previous detailed Hermes handover is retained under `docs/history/hermes-han
 
 ## Live cutover results
 
-All 22 roles remain. Task `aaf59b66-dc61-4c1c-8afa-bdc50d8ff850` remains paused at revision 3 with 26 done and 21 pending steps. Its previous history is archived. Live Sol, Telegram bot authentication, read-only Gmail/Calendar, both three-tab Sheet mirrors and an ElevenLabs speech/transcription round trip passed. No automatic resumption was performed. A fresh user-sent Telegram voice note remains a useful hands-on acceptance check after the automated and provider checks.
+Historical cutover result (superseded by the selective reset below): all 22 roles remained, and task `aaf59b66-dc61-4c1c-8afa-bdc50d8ff850` was paused at revision 3 with 26 done and 21 pending steps. That task is now archived, not active. Live Sol, Telegram bot authentication, read-only Gmail/Calendar, both three-tab Sheet mirrors and an ElevenLabs speech/transcription round trip passed. No automatic resumption was performed. A fresh user-sent Telegram voice note remains a useful hands-on acceptance check after the automated and provider checks.
 
 ## Repository rename and progress visibility
 
@@ -54,3 +54,5 @@ GitHub is now `akhilvuputuri/companion-agent`; the local Git remote points there
 The chosen repository name is `companion-agent`. The local directory and server/Docker project paths remain unchanged. Old conversations, runtime calls, task checkpoints, research sources and generated preparation data were copied into Postgres schema `reset_archive_20260907` before being cleared from live tables. The archive is private and recoverable; do not run the reset again. All 22 listings, six explicit memories, credentials and connections were retained. There were no private skill versions to migrate. Old inbound update IDs remain to prevent Telegram replay. Pending old approvals, if any, were expired.
 
 The progress and skill-schema fixes are included in this release. A two-role check is used to assess fresh behavior before another full batch; do not automatically recreate the old 47-step task.
+
+Current skill loading uses `skill_read(key)` with no version argument. Reading an explicit private revision uses `skill_version_read(key,id)` with an owner-scoped UUID. This avoids placeholder IDs preventing repository defaults from loading.

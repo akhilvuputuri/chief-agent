@@ -549,12 +549,18 @@ test("background resumes forward model-written progress unchanged", async () => 
   }
 });
 
-test("skill schema distinguishes version labels from optional UUIDs and key-only loading works", async () => {
+test("current skills use key-only loading and historical versions require UUIDs", async () => {
   const schema = runtimeContext({}, null).tools.find(
     (t) => t.name === "skill_read",
   )!;
-  assert.equal((schema.parameters.properties as any).id.format, "uuid");
-  assert.match(schema.description, /Normally omit id/);
+  assert.deepEqual(Object.keys(schema.parameters.properties as object), [
+    "key",
+  ]);
+  const historical = runtimeContext({}, null).tools.find(
+    (t) => t.name === "skill_version_read",
+  )!;
+  assert.equal((historical.parameters.properties as any).id.format, "uuid");
+  assert.deepEqual(historical.parameters.required, ["key", "id"]);
   let n = 0;
   const f = await fixture({
     generate: async (input) => {
