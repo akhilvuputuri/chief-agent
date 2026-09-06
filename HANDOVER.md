@@ -314,3 +314,7 @@ The current skill implementation is documented in [Versioned skills](docs/versio
 The separate development server proposal was declined. Development-to-PR code was preserved in a local Git stash named `Deferred development-to-PR work; user chose versioned skills`; it is not deployed. The active implementation branch is `feature/versioned-skills`, based on the preparation/Sheets branch.
 
 Release verification: functional release `b770cf8` was deployed to the existing server on September 6. Formatting cleanup follows on the same feature branch. All 36 TypeScript tests, 2 OAuth tests, 4 Python bridge tests, typecheck, build and formatting checks passed locally. No additional VM was provisioned.
+
+## Daily assistant expansion
+
+See [Daily assistant](docs/daily-assistant.md) for general tasks and notes, native Hermes schedule parsing with companion delivery, fixed source-selectable briefings, read-only Calendar, and the separate Tasks/Notes/Schedules workbook. Source and delivery limitations are explicit there. This release does not enable arbitrary scheduled agent execution, frontier review, calendar event writes, or automatic skill cleanup.

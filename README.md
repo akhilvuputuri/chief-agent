@@ -152,3 +152,7 @@ Hermes can research public role pages, save evidence-backed requirements, distin
 The current skill implementation is documented in [Versioned skills](docs/versioned-skills.md). It adds immutable text drafts, evaluation reports, explicit Telegram activation and rollback using existing Postgres storage. The exact companion-tool allowlist remains enforced; native filesystem skill tools and shell execution remain disabled. Frontier review and automatic periodic cleanup are not enabled.
 
 The separate development server proposal was declined. Development-to-PR code was preserved in a local Git stash named `Deferred development-to-PR work; user chose versioned skills`; it is not deployed. The active implementation branch is `feature/versioned-skills`, based on the preparation/Sheets branch.
+
+## Daily assistant expansion
+
+See [Daily assistant](docs/daily-assistant.md) for general tasks and notes, native Hermes schedule parsing with companion delivery, fixed source-selectable briefings, read-only Calendar, and the separate Tasks/Notes/Schedules workbook. Source and delivery limitations are explicit there. This release does not enable arbitrary scheduled agent execution, frontier review, calendar event writes, or automatic skill cleanup.

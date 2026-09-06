@@ -36,6 +36,8 @@ services:
         "/migrations/002_preparation.sql",
         "-f",
         "/migrations/003_skills.sql",
+        "-f",
+        "/migrations/004_daily.sql",
       ]
     depends_on:
       postgres: { condition: service_healthy }
@@ -46,6 +48,7 @@ services:
     environment:
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?Set INTERNAL_API_TOKEN}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?Set OPENROUTER_API_KEY}
+      HERMES_TIMEZONE: Asia/Singapore
       HERMES_MODEL: ${HERMES_MODEL:-google/gemini-3.8-flash}
       LLM_BASE_URL: ${LLM_BASE_URL:-https://openrouter.ai/api/v1}
       GATEWAY_URL: http://gateway:3000
@@ -82,6 +85,8 @@ services:
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       GROQ_STT_MODEL: ${GROQ_STT_MODEL:-whisper-large-v3-turbo}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      CALENDAR_REFRESH_TOKEN: ${CALENDAR_REFRESH_TOKEN:-}
+      DAILY_SPREADSHEET_ID: ${DAILY_SPREADSHEET_ID:-}
       SHEETS_OWNER_USER_ID: ${SHEETS_OWNER_USER_ID:-}
       SHEETS_REFRESH_TOKEN: ${SHEETS_REFRESH_TOKEN:-}
       SHEETS_SPREADSHEET_ID: ${SHEETS_SPREADSHEET_ID:-}

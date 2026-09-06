@@ -1,6 +1,8 @@
 import "dotenv/config";
 import { z } from "zod";
 const schema = z.object({
+  CALENDAR_REFRESH_TOKEN: z.string().default(""),
+  DAILY_SPREADSHEET_ID: z.string().default(""),
   OPENROUTER_API_KEY: z.string().default(""),
   HERMES_MODEL: z.string().default("google/gemini-3.8-flash"),
   SHEETS_OWNER_USER_ID: z.string().regex(/^\d*$/).default(""),
