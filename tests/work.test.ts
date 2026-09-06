@@ -532,3 +532,46 @@ test("a user-input blocker pauses instead of scheduling speculative continuation
     await f.pg.close();
   }
 });
+
+test("one blocked target does not stop unrelated pending targets", async () => {
+  const f = await fixture();
+  try {
+    let assistant: Assistant;
+    assistant = new Assistant(
+      f.db,
+      {
+        run: async (req) => {
+          const { result: s }: any = await assistant.call(req.capability, {
+            operation: "work_start",
+            objective: "Compare two products",
+            steps: [
+              {
+                key: "a",
+                title: "Unavailable product A",
+                verification: "evidence",
+              },
+              {
+                key: "b",
+                title: "Independent product B",
+                verification: "evidence",
+              },
+            ],
+          });
+          await assistant.call(req.capability, {
+            operation: "work_step",
+            id: s.task.id,
+            key: "a",
+            status: "blocked",
+            result: "No applicable public source for product A",
+          });
+          return { reply: "Partial", history: [], interrupted: true };
+        },
+      },
+      f.tools,
+    );
+    await assistant.respond("owner", "Compare two products");
+    assert.equal((await f.work.current("owner")).status, "queued");
+  } finally {
+    await f.pg.close();
+  }
+});
