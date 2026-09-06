@@ -37,7 +37,9 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
           });
           await ctx.reply(
             result.status === "approved"
-              ? "Approved. The saved role was deleted."
+              ? result.operation === "skill_activate"
+                ? "Approved. The selected skill version is now active. Previous versions remain available for rollback."
+                : "Approved. The saved role was deleted."
               : "Denied. The role was kept.",
           );
         } else if (message === "/start") {
@@ -95,10 +97,15 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
             const reply = await assistant.respond(user, message);
             const formatted = formatTelegram(reply);
             for (const part of formatted)
-              await ctx.reply(part.text, { entities: part.entities, link_preview_options: { is_disabled: true } });
+              await ctx.reply(part.text, {
+                entities: part.entities,
+                link_preview_options: { is_disabled: true },
+              });
             if (ctx.message.voice && c.VOICE_REPLIES === "true") {
               try {
-                const audio = await voice.speak(formatted.map(part => part.text).join(""));
+                const audio = await voice.speak(
+                  formatted.map((part) => part.text).join(""),
+                );
                 await ctx.replyWithVoice(
                   new InputFile(audio.bytes, audio.filename),
                   { caption: "AI-generated voice" },

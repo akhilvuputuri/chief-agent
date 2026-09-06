@@ -79,14 +79,14 @@ export class Assistant {
       await event(this.db, user, run, "turn.completed");
       const approvals = (
         await this.db.query(
-          "SELECT id,payload FROM approvals WHERE user_id=$1 AND run_id=$2 AND status='pending' AND expires_at>now() ORDER BY created_at",
+          "SELECT id,operation,payload FROM approvals WHERE user_id=$1 AND run_id=$2 AND status='pending' AND expires_at>now() ORDER BY created_at",
           [user, run],
         )
       ).rows;
       // Render the authoritative preview ourselves; never rely on model wording.
       const notices = approvals.map(
         (a) =>
-          `Approval required — saved action\nDelete role ${a.payload.id}: ${JSON.stringify(a.payload.title)} at ${JSON.stringify(a.payload.company)}\nWithin 15 minutes, send /approve ${a.id} or /deny ${a.id}`,
+          `Approval required — saved action\n${a.operation === "skill_activate" ? a.payload.preview + "\nAgent evaluation: " + a.payload.evaluation : `Delete role ${a.payload.id}: ${JSON.stringify(a.payload.title)} at ${JSON.stringify(a.payload.company)}`}\nWithin 15 minutes, send /approve ${a.id} or /deny ${a.id}`,
       );
       return [output.reply, ...notices].join("\n\n");
     } catch (error) {
