@@ -1,16 +1,18 @@
 // One-time local OAuth bootstrap. Never prints credentials, codes or token responses.
+import { validateSheetsScopes } from "./google-sheets-scopes.mjs";
 import { createServer } from "node:http";
 import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 const [clientPath, outputPath, email] = process.argv.slice(2);
 if (!clientPath || !outputPath || !email)
   throw new Error(
-    "Usage: node scripts/connect-gmail.mjs CLIENT_JSON OUTPUT_JSON EMAIL",
+    "Usage: node scripts/connect-sheets.mjs CLIENT_JSON OUTPUT_JSON EMAIL",
   );
 const client = JSON.parse(await readFile(clientPath, "utf8")).installed;
 if (!client?.client_id || !client?.client_secret)
   throw new Error("Desktop OAuth client required");
-const scope = "https://www.googleapis.com/auth/gmail.readonly";
+const scope =
+  "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/drive.file";
 const state = randomBytes(32).toString("base64url"),
   verifier = randomBytes(48).toString("base64url");
 let busy = false,
@@ -54,10 +56,13 @@ const server = createServer(async (req, res) => {
     });
     if (!response.ok) throw new Error("Token exchange failed");
     const t = await response.json();
-    if (t.scope !== scope || !t.refresh_token || !t.access_token)
-      throw new Error("Expected only read-only Gmail scope and offline access");
+    validateSheetsScopes(t.scope);
+    if (!t.refresh_token || !t.access_token)
+      throw new Error(
+        "Offline authorization was not returned. Restart consent.",
+      );
     const profile = await fetch(
-      "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+      "https://www.googleapis.com/oauth2/v2/userinfo",
       {
         headers: { Authorization: `Bearer ${t.access_token}` },
         redirect: "error",
@@ -66,9 +71,9 @@ const server = createServer(async (req, res) => {
     );
     if (
       !profile.ok ||
-      (await profile.json()).emailAddress?.toLowerCase() !== email.toLowerCase()
+      (await profile.json()).email?.toLowerCase() !== email.toLowerCase()
     )
-      throw new Error("Wrong mailbox");
+      throw new Error("Wrong Google account");
     await writeFile(
       outputPath,
       JSON.stringify({
@@ -80,11 +85,22 @@ const server = createServer(async (req, res) => {
       }),
       { mode: 0o600, flag: "wx" },
     );
-    res.end("Read-only Gmail authorization saved. You can close this tab.");
-    console.log("Read-only Gmail authorization saved successfully.");
-  } catch {
-    res.writeHead(400).end("Authorization did not complete. Return to setup.");
-    console.error("Authorization failed; no credentials printed.");
+    res.end("App-created Sheets authorization saved. You can close this tab.");
+    console.log("App-created Sheets authorization saved successfully.");
+  } catch (error) {
+    const safeMessages = [
+      "Missing file permission. Select the files-you-use-with-this-app checkbox on Google consent.",
+      "Unexpected Google permissions. Setup stopped without saving credentials.",
+      "Offline authorization was not returned. Restart consent.",
+      "Consent not completed",
+      "Token exchange failed",
+      "Wrong Google account",
+    ];
+    const message = safeMessages.includes(error?.message)
+      ? error.message
+      : "Authorization failed during account verification or credential storage. Restart setup.";
+    res.writeHead(400).end(message);
+    console.error(message);
   } finally {
     clearTimeout(timer);
     server.close();
@@ -101,6 +117,7 @@ server.listen(0, "127.0.0.1", () => {
     scope,
     access_type: "offline",
     prompt: "consent",
+    include_granted_scopes: "false",
     login_hint: email,
     state,
     code_challenge: createHash("sha256").update(verifier).digest("base64url"),

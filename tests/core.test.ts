@@ -22,6 +22,15 @@ before(async () => {
   await pg.exec(
     await readFile(new URL("../db/001_initial.sql", import.meta.url), "utf8"),
   );
+  await pg.exec(
+    await readFile(
+      new URL("../db/002_preparation.sql", import.meta.url),
+      "utf8",
+    ),
+  );
+  await pg.exec(
+    await readFile(new URL("../db/003_skills.sql", import.meta.url), "utf8"),
+  );
   db = pg as unknown as Database;
   tools = new JobTools(db, {
     call: async () => ({ untrusted: true, content: "test" }),
@@ -348,4 +357,78 @@ test("concurrent approval consumption deletes only once", async () => {
   ]);
   assert.equal(results.filter((x) => x.status === "fulfilled").length, 1);
   assert.equal(results.filter((x) => x.status === "rejected").length, 1);
+});
+
+test("preparation enforces role/source ownership, real quotes, and explicit uncertainty", async () => {
+  const role = await save();
+  const base = {
+    operation: "prep_save",
+    id: role.id,
+    topic: "Python",
+    importance: "required",
+    sourceQuote: "Build Python agents",
+    assessment: "unknown",
+    question: "Have you shipped Python agents?",
+  };
+  await assert.rejects(() => tools.execute("bob", run(), base));
+  await assert.rejects(() =>
+    tools.execute("alice", run(), {
+      ...base,
+      sourceQuote: "Invented requirement",
+    }),
+  );
+  await assert.rejects(() =>
+    tools.execute("alice", run(), { ...base, assessment: "gap" }),
+  );
+  await assert.rejects(() =>
+    tools.execute("alice", run(), { ...base, question: "" }),
+  );
+  const first = (await tools.execute("alice", run(), base)) as any;
+  const second = (await tools.execute("alice", run(), {
+    ...base,
+    assessment: "strength",
+    evidence: "User reports building Python agents",
+  })) as any;
+  assert.equal(first.id, second.id);
+  const source = (await tools.execute("alice", run(), {
+    operation: "web_read",
+    url: "https://example.com/jobs",
+  })) as any;
+  const other = await save("bob");
+  await assert.rejects(() =>
+    tools.execute("bob", run(), {
+      ...base,
+      id: other.id,
+      sourceId: source.sourceId,
+      sourceQuote: "test",
+    }),
+  );
+  const listed = (await tools.execute("alice", run(), {
+    operation: "prep_list",
+    id: role.id,
+  })) as any;
+  assert.equal(listed.requirements.length, 1);
+  assert.equal(listed.requirements[0].assessment, "strength");
+});
+test("shared preparation tasks upsert without resetting progress", async () => {
+  const task = {
+    operation: "prep_task_save",
+    topic: "RAG",
+    exercise: "Build retrieval baseline",
+    completionCriteria: "Report recall on 20 queries",
+    priority: "high",
+    status: "doing",
+  };
+  const first = (await tools.execute("alice", run(), task)) as any;
+  const second = (await tools.execute("alice", run(), {
+    ...task,
+    status: undefined,
+    exercise: "Add reranking",
+  })) as any;
+  assert.equal(first.id, second.id);
+  assert.equal(second.status, "doing");
+  const bob = (await tools.execute("bob", run(), {
+    operation: "prep_list",
+  })) as any;
+  assert.deepEqual(bob.tasks, []);
 });
