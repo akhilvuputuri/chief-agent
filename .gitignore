@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+__pycache__/
+.venv/
+*.log
+coverage/
+.DS_Store
+compose.local.yaml
+*.dump
+.telegram-pairing.json

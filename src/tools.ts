@@ -1,0 +1,131 @@
+import { randomUUID } from "node:crypto";
+import type { Database } from "./db.js";
+import { event } from "./db.js";
+import { action } from "./protocol.js";
+import type { WebTools } from "./providers.js";
+export class JobTools {
+  constructor(
+    private db: Database,
+    private web: Pick<WebTools, "call">,
+  ) {}
+  async execute(user: string, run: string, input: unknown) {
+    const a = action.parse(input);
+    await event(this.db, user, run, "tool.started", { operation: a.operation });
+    try {
+      const result = await this.dispatch(user, run, a);
+      await event(this.db, user, run, "tool.completed", {
+        operation: a.operation,
+      });
+      return result;
+    } catch (error) {
+      await event(this.db, user, run, "tool.failed", {
+        operation: a.operation,
+      });
+      throw error;
+    }
+  }
+  private async dispatch(
+    user: string,
+    run: string,
+    a: ReturnType<typeof action.parse>,
+  ): Promise<unknown> {
+    const db = this.db;
+    if (a.operation === "job_save")
+      return (
+        await db.query(
+          "INSERT INTO jobs(id,user_id,title,company,url,description) VALUES($1,$2,$3,$4,$5,$6) RETURNING *",
+          [
+            randomUUID(),
+            user,
+            a.title,
+            a.company,
+            a.url ?? null,
+            a.description ?? "",
+          ],
+        )
+      ).rows[0];
+    if (a.operation === "job_list")
+      return (
+        await db.query(
+          "SELECT * FROM jobs WHERE user_id=$1 AND ($2::text IS NULL OR status=$2) ORDER BY created_at DESC LIMIT 50",
+          [user, a.status ?? null],
+        )
+      ).rows;
+    if (a.operation === "memory_list")
+      return (
+        await db.query(
+          "SELECT key,value FROM memories WHERE user_id=$1 ORDER BY key",
+          [user],
+        )
+      ).rows;
+    if (a.operation === "memory_set") {
+      await db.query(
+        "INSERT INTO memories(user_id,key,value) VALUES($1,$2,$3) ON CONFLICT(user_id,key) DO UPDATE SET value=$3,updated_at=now()",
+        [user, a.key, a.value],
+      );
+      return { saved: true };
+    }
+    if (a.operation === "web_search" || a.operation === "web_read")
+      return this.web.call(
+        a.operation,
+        a.operation === "web_search" ? a.query : a.url,
+      );
+    const job = (
+      await db.query("SELECT * FROM jobs WHERE id=$1 AND user_id=$2", [
+        a.id,
+        user,
+      ])
+    ).rows[0];
+    if (!job) throw new Error("Role not found");
+    if (a.operation === "job_update")
+      return (
+        await db.query(
+          "UPDATE jobs SET status=COALESCE($3,status),notes=COALESCE($4,notes),updated_at=now() WHERE id=$1 AND user_id=$2 RETURNING *",
+          [a.id, user, a.status ?? null, a.notes ?? null],
+        )
+      ).rows[0];
+    if (a.operation === "job_delete") {
+      const id = randomUUID();
+      await db.query(
+        "INSERT INTO approvals(id,user_id,operation,payload,run_id) VALUES($1,$2,'job_delete',$3::jsonb,$4)",
+        [
+          id,
+          user,
+          JSON.stringify({ id: a.id, title: job.title, company: job.company }),
+          run,
+        ],
+      );
+      return {
+        approvalRequired: true,
+        id,
+        preview: `Delete saved role: ${job.title} at ${job.company}`,
+        instruction: `User must type /approve ${id} or /deny ${id} within 15 minutes. Do not claim deletion.`,
+      };
+    }
+    // Supply evidence to Hermes for semantic analysis, with no fabricated fit score.
+    return {
+      role: job,
+      profile: (
+        await db.query("SELECT key,value FROM memories WHERE user_id=$1", [
+          user,
+        ])
+      ).rows,
+      analysisInstruction:
+        "Analyze fit using only this evidence. Separate strengths, gaps, unknowns, and next steps. Cite the role text and profile facts. If the profile is missing, ask the user for their background. Do not invent experience or give a numeric hiring probability.",
+    };
+  }
+  async decide(user: string, id: string, approve: boolean) {
+    // One statement: consume approval and delete exactly its owner-scoped payload atomically.
+    const result = await this.db.query(
+      `WITH decision AS (
+   UPDATE approvals SET status=$3 WHERE id=$1 AND user_id=$2 AND status='pending' AND expires_at>now() RETURNING *
+  ), removed AS (
+   DELETE FROM jobs USING decision WHERE jobs.id=(decision.payload->>'id')::uuid AND jobs.user_id=$2 AND decision.status='approved' RETURNING jobs.id
+  ) SELECT decision.id,decision.status,(SELECT count(*) FROM removed) AS deleted FROM decision`,
+      [id, user, approve ? "approved" : "denied"],
+    );
+    if (!result.rows[0])
+      throw new Error("Approval unavailable, expired, or already used");
+    return result.rows[0];
+  }
+}

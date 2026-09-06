@@ -1,0 +1,41 @@
+{
+  "name": "hermes-companion",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A persistent, voice-enabled personal agent with conversational job-search tools",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "migrate": "tsx src/migrate.ts",
+    "check": "npm run typecheck && npm test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "setup": "node scripts/setup.mjs",
+    "check:env": "node scripts/check-env.mjs",
+    "pair": "node scripts/pair-telegram.mjs",
+    "pair:finish": "node scripts/pair-telegram.mjs --finish"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "fastify": "^5.2.1",
+    "grammy": "^1.35.0",
+    "pg": "^8.13.3",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.3.0",
+    "@types/node": "^22.13.10",
+    "@types/pg": "^8.11.11",
+    "prettier": "^3.9.6",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,120 @@
+import { Bot, InputFile } from "grammy";
+import { randomUUID } from "node:crypto";
+import type { Config } from "./config.js";
+import type { Assistant } from "./agent.js";
+import type { Database } from "./db.js";
+import { ensureUser, event } from "./db.js";
+import { allowedChat, SerialQueue } from "./security.js";
+import { Voice, boundedBytes } from "./providers.js";
+export function telegram(c: Config, assistant: Assistant, db: Database) {
+  const bot = new Bot(c.TELEGRAM_BOT_TOKEN);
+  const voice = new Voice(c);
+  const queue = new SerialQueue();
+  const ids = new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(","));
+  bot.on("message", async (ctx) => {
+    if (!allowedChat(ctx.from?.id, ctx.chat.type, ids)) return;
+    const user = String(ctx.from.id);
+    await queue.run(user, async () => {
+      await ensureUser(db, user);
+      const claimed = await db.query(
+        "INSERT INTO inbound_updates(update_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING update_id",
+        [ctx.update.update_id, user],
+      );
+      if (!claimed.rows.length) return;
+      try {
+        let message = ctx.message.text ?? "";
+        const decision = /^\/(approve|deny) ([0-9a-f-]{36})$/i.exec(message);
+        if (decision) {
+          const result = await assistant.tools.decide(
+            user,
+            decision[2]!,
+            decision[1] === "approve",
+          );
+          await event(db, user, randomUUID(), "approval.decided", {
+            id: decision[2],
+            status: result.status,
+          });
+          await ctx.reply(
+            result.status === "approved"
+              ? "Approved. The saved role was deleted."
+              : "Denied. The role was kept.",
+          );
+        } else if (message === "/start") {
+          await ctx.reply(
+            "Tell me what you want to work on. I can research roles, save opportunities, compare them with your background, and remember preferences you ask me to keep. Send text or a voice note. /voice explains audio replies. Deleting a role requires your approval. I cannot send applications or emails.",
+          );
+        } else if (message === "/reset") {
+          await db.query("DELETE FROM conversations WHERE user_id=$1", [user]);
+          await ctx.reply(
+            "Conversation reset. Saved roles and preferences are still available.",
+          );
+        } else if (message === "/voice") {
+          await ctx.reply(
+            `Voice notes are transcribed by the configured speech provider. Audio is held in memory, not saved. Transcripts become conversation history. AI-generated voice replies are ${c.VOICE_REPLIES === "true" ? "enabled" : "disabled"} by the server setting.`,
+          );
+        } else {
+          if (ctx.message.voice) {
+            if (
+              ctx.message.voice.duration > 180 ||
+              (ctx.message.voice.file_size ?? 0) > 10 * 1024 * 1024
+            )
+              throw new Error("Voice note too long");
+            const file = await ctx.getFile();
+            if (
+              !file.file_path ||
+              !/^voice\/[a-zA-Z0-9_.-]+$/.test(file.file_path)
+            )
+              throw new Error("Unexpected file path");
+            const audio = await boundedBytes(
+              await fetch(
+                `https://api.telegram.org/file/bot${c.TELEGRAM_BOT_TOKEN}/${file.file_path}`,
+                { signal: AbortSignal.timeout(30000) },
+              ),
+              10 * 1024 * 1024,
+            );
+            message = await voice.transcribe(audio);
+            await event(db, user, randomUUID(), "voice.transcribed", {
+              bytes: audio.length,
+            });
+          }
+          if (!message) {
+            await ctx.reply("Please send text or a voice note.");
+          } else {
+            await ctx.replyWithChatAction("typing");
+            const reply = await assistant.respond(user, message);
+            for (let i = 0; i < reply.length; i += 3500)
+              await ctx.reply(reply.slice(i, i + 3500));
+            if (ctx.message.voice && c.VOICE_REPLIES === "true") {
+              try {
+                await ctx.replyWithVoice(
+                  new InputFile(await voice.speak(reply), "reply.ogg"),
+                  { caption: "AI-generated voice" },
+                );
+              } catch {
+                await ctx.reply(
+                  "The text reply is ready; audio generation is unavailable.",
+                );
+              }
+            }
+          }
+        }
+        await db.query(
+          "UPDATE inbound_updates SET status='completed' WHERE update_id=$1",
+          [ctx.update.update_id],
+        );
+      } catch {
+        await db.query(
+          "UPDATE inbound_updates SET status='failed' WHERE update_id=$1",
+          [ctx.update.update_id],
+        );
+        await ctx.reply(
+          "I could not finish that request. A tool may already have saved changes; ask me to list your roles before retrying. Voice notes must be under 3 minutes and 10 MB.",
+        );
+      }
+    });
+  });
+  bot.catch(() =>
+    console.error(JSON.stringify({ event: "telegram.handler_failed" })),
+  );
+  return bot;
+}
