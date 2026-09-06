@@ -548,3 +548,28 @@ test("background resumes forward model-written progress unchanged", async () => 
     await f.pg.close();
   }
 });
+
+test("skill schema distinguishes version labels from optional UUIDs and key-only loading works", async () => {
+  const schema = runtimeContext({}, null).tools.find(
+    (t) => t.name === "skill_read",
+  )!;
+  assert.equal((schema.parameters.properties as any).id.format, "uuid");
+  assert.match(schema.description, /Normally omit id/);
+  let n = 0;
+  const f = await fixture({
+    generate: async (input) => {
+      if (++n === 1) return call("skill_read", { key: "research" });
+      const observation = JSON.parse(input.messages.at(-1)!.content!);
+      assert.ok(observation.result.version.content.length > 50);
+      return text("Research guidance loaded.");
+    },
+  });
+  try {
+    assert.equal(
+      await f.assistant.respond("owner", "Load research guidance"),
+      "Research guidance loaded.",
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
