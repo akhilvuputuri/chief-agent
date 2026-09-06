@@ -142,3 +142,7 @@ The interesting engineering is in the boundaries: putting an existing agent runt
 - [Tavily API](https://docs.tavily.com/documentation/api-reference/introduction): hosted research boundary.
 
 This project is independent of Nous Research, Telegram and the model providers. Review dependencies and their licenses before publishing. The application source is MIT licensed; upstream Hermes and dependencies retain their own licenses.
+
+## Preparation and Google Sheets
+
+Hermes can research public role pages, save evidence-backed requirements, distinguish unknown experience from confirmed gaps, and track shared preparation tasks. A private three-tab Google Sheet serves as a viewing mirror of Postgres. See [setup and boundaries](docs/preparation.md). Gmail remains read-only.

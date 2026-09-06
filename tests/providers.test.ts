@@ -164,3 +164,34 @@ test("Missing speech configuration fails before upload; input audio is bounded",
     globalThis.fetch = original;
   }
 });
+
+test("keyless reader uses the fixed hosted endpoint; search requires real citations", async () => {
+  const original = globalThis.fetch;
+  try {
+    let calls = 0;
+    globalThis.fetch = async (url, init) => {
+      calls++;
+      if (String(url).startsWith("https://r.jina.ai/"))
+        return Response.json({
+          code: 200,
+          data: { content: "Required: Python" },
+        });
+      const body = JSON.parse(init!.body as string);
+      assert.equal(body.plugins[0].max_results, 3);
+      assert.equal(body.messages.length, 1);
+      return Response.json({
+        choices: [{ message: { content: "An uncited invented answer" } }],
+      });
+    };
+    const web = new WebTools("", "test-key", "test-model");
+    assert.equal(
+      (await web.call("web_read", "https://example.com/job")).content,
+      "Required: Python",
+    );
+    await assert.rejects(() => web.call("web_read", "https://127.0.0.1"));
+    assert.equal(calls, 1);
+    await assert.rejects(() => web.call("web_search", "Python jobs"));
+  } finally {
+    globalThis.fetch = original;
+  }
+});

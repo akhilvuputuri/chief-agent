@@ -1,3 +1,5 @@
+import { PreparationTools } from "./preparation.js";
+import type { SheetsTools } from "./sheets.js";
 import type { GmailTools } from "./gmail.js";
 import { randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
@@ -9,6 +11,7 @@ export class JobTools {
     private db: Database,
     private web: Pick<WebTools, "call">,
     private gmail?: Pick<GmailTools, "call">,
+    private sheets?: Pick<SheetsTools, "sync">,
   ) {}
   async execute(user: string, run: string, input: unknown) {
     const a = action.parse(input);
@@ -32,9 +35,24 @@ export class JobTools {
     a: ReturnType<typeof action.parse>,
   ): Promise<unknown> {
     const db = this.db;
-    if(a.operation === "gmail_search" || a.operation === "gmail_read") {
-      if(!this.gmail) throw new Error("Gmail is not configured");
-      return this.gmail.call(user,a.operation,a.operation === "gmail_search" ? a.query : a.messageId,a.operation === "gmail_search" ? a.pageToken : undefined);
+    if (
+      a.operation === "prep_list" ||
+      a.operation === "prep_save" ||
+      a.operation === "prep_task_save"
+    )
+      return new PreparationTools(db).call(user, a);
+    if (a.operation === "sheet_sync") {
+      if (!this.sheets) throw new Error("Google Sheets is not configured");
+      return this.sheets.sync(user);
+    }
+    if (a.operation === "gmail_search" || a.operation === "gmail_read") {
+      if (!this.gmail) throw new Error("Gmail is not configured");
+      return this.gmail.call(
+        user,
+        a.operation,
+        a.operation === "gmail_search" ? a.query : a.messageId,
+        a.operation === "gmail_search" ? a.pageToken : undefined,
+      );
     }
     if (a.operation === "job_save")
       return (
@@ -71,11 +89,19 @@ export class JobTools {
       );
       return { saved: true };
     }
-    if (a.operation === "web_search" || a.operation === "web_read")
-      return this.web.call(
+    if (a.operation === "web_search" || a.operation === "web_read") {
+      const result = await this.web.call(
         a.operation,
         a.operation === "web_search" ? a.query : a.url,
       );
+      if (a.operation === "web_search") return result;
+      const sourceId = randomUUID();
+      await db.query(
+        "INSERT INTO research_sources(id,user_id,url,content) VALUES($1,$2,$3,$4)",
+        [sourceId, user, a.url, result.content],
+      );
+      return { ...result, sourceId, sourceUrl: a.url };
+    }
     const job = (
       await db.query("SELECT * FROM jobs WHERE id=$1 AND user_id=$2", [
         a.id,

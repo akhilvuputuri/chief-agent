@@ -292,3 +292,12 @@ Gmail LIVE update: Google consent completed by user; exact gmail.readonly scope 
 
 ### Telegram presentation fix — 2026-09-06
 User reported raw Markdown and dense Telegram replies. Added src/telegram-format.ts: safe text/entities rendering for headings, bullets, bold, italic, inline/fenced code, HTTP(S) links, paragraph-aware splitting and UTF-16 offsets. Disabled link previews on generated replies. Voice synthesis receives the rendered plain text. Hermes prompt now favors concise paragraphs, limited questions and avoids tables/nested lists. All 29 Node tests and 4 Python tests passed; build/typecheck passed. Web research, Sheets and preparation skill remain our implementation responsibility and are NOT yet completed; do not imply ongoing background work.
+
+
+## 2026-09-06 preparation implementation
+
+Added migration 002, owner-scoped retrieved sources, role requirements/assessments, shared preparation tasks, strict prep tools, and the three-tab Sheets adapter. Both local and Compose migration paths apply 001 then 002. Public reading falls back to Jina without a key; search falls back to OpenRouter/Exa using the existing model account. Tavily remains an optional override. Source quotes are checked against saved text; semantic evidence is still agent/user responsibility. Sheets sync is agent-triggered and failure must be reported, not claimed as success.
+
+Google Sheets API enabled in the existing project. Separate Sheets OAuth consent prepared with drive.file and identity scopes; Gmail token untouched. See docs/preparation.md for provisioning and resume instructions. Do not claim live Sheets until token provisioning and first sync are verified. Tests at this point: 35 Node + 4 Python; typecheck/build pass. Live Jina retrieval returned ElevenLabs careers content. Live search and final deployment status will be appended below.
+
+Deployment verified: gateway, Hermes and Postgres healthy; migration 002 present. Live OpenRouter/Exa search returned 3 citations. The 22 saved roles exist, but description values are mostly 6–7-character placeholders or empty; research is needed before substantive gap analysis. Sheets OAuth is pending user consent. Direct main push was rejected by automatic approval review; integration is being saved on feature branch feature/preparation-sheets-research.
