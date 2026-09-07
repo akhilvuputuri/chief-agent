@@ -74,3 +74,5 @@ PRs #14/#15 are merged and deployed at application revision `1a43301b6504da99a4f
 ## Token efficiency and usage visibility
 
 The cost-efficiency follow-up is documented in [cost controls](docs/cost-controls.md). It adds stable prompt prefixes, same-task search reuse, lower context volume and additive usage migration 008. The user declined dollar caps: do not add one or change /continue to grant monetary budgets. The proposed cap was removed before deployment. Search/main-model usage is tracked; speech remains separate. Full eval work stays deferred.
+
+Cost-efficiency release verified: PR #16, application `a31813bd167e3916c1914966a386a4a480f54320`. Health and migration 008 passed; 22 jobs preserved, paused work not resumed, and no dollar-cap schema present. 78 tests and CI passed. No paid eval was run.

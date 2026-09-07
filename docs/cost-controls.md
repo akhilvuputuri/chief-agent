@@ -32,3 +32,7 @@ References used during analysis:
 
 - [OpenRouter caching and cache-write pricing](https://openrouter.ai/docs/guides/best-practices/prompt-caching)
 - [OpenRouter search/plugin pricing](https://openrouter.ai/docs/guides/features/plugins/web-search)
+
+## Release
+
+PR #16 passed CI and merged. Application revision `a31813bd167e3916c1914966a386a4a480f54320` is deployed on the existing server. Health passed; the usage table exists, all 22 jobs remain, and the existing task remains paused. Verified that no `budget_dollars` column exists. No paid test request or full analysis was triggered. Cache-hit rate and cost improvement will be measured from subsequent ordinary usage.
