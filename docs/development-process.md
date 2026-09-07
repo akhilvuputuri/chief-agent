@@ -70,3 +70,7 @@ All are single stochastic trials. Fixture and final-answer grader were unchanged
 ## Checkpoint and deferral
 
 At the user’s request, work stopped before deployment. The final live trial was interrupted; no final-candidate success claim is made. Local checks passed 76 tests. The detailed [checkpoint](checkpoints/runtime-evaluations.md) records completed work, trial caveats, unresolved correctness issues and a narrow resumption path. This effort expanded beyond the intended small baseline; future iterations should constrain the regression, mechanism and comparison before broadening coverage.
+
+## Focused follow-up after deferral
+
+The user then requested practical response optimization. Released a smaller branch without migration 007 or new scope/finding tools: compact observations, fresh inventory context, clearer retrieval-versus-analysis semantics, natural Telegram guidance and the successful-read receipt fix. Local checks and CI passed 75 tests. A read-only deployment check exposed that the latest collection could be empty; a second focused regression and PR preserve the initial inventory alongside the latest one. Final production inspection recovers the incident's original 22 records in compact context. This is operational verification, not a new live-model benchmark result. The extensive eval candidate remains checkpointed; no further paid trials were started.

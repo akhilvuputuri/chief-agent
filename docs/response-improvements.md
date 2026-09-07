@@ -21,3 +21,9 @@ Existing explicit memories are key/value facts and preferences in Postgres; rece
 ## Verification
 
 Use `npm run check`, formatting and build checks. New deterministic checks cover compact inventory size, all 22 identities, owner/task isolation, resumed-task retrieval, preserved source identifiers and successful read-step proof. Existing tests retain authorization and write-proof checks. No further paid eval is needed for this focused checkpoint; end-to-end improvement in real conversation remains to be observed, not asserted.
+
+## Release verification
+
+PRs #14 and #15 merged after CI passed. Application revision `1a43301b6504da99a4f9c0af9dd56fa663e5fac7` is deployed on the existing DigitalOcean server. Health passed; 22 jobs and six memories remain. No database migration or data reset was performed.
+
+A read-only check against the actual incident run retrieved the original 22-record inventory alongside its later empty inventory in 4,405 characters. This verifies availability of the correct starting records after the previous context-loss incident; it does not certify a new model-generated analysis. The full 22-role task was not rerun. The previous application image remains tagged for rollback.

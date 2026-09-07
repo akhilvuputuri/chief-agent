@@ -66,3 +66,7 @@ Removed the obsolete `services/hermes` Python adapter, unused internal service-t
 ## Deferred runtime evaluation candidate — 7 September 2026
 
 Work on `feature/runtime-evaluations` is checkpointed, not deployed. The user requested deferral. See [checkpoint and resume checklist](docs/checkpoints/runtime-evaluations.md), [candidate architecture](docs/runtime-hardening.md) and [development process](docs/development-process.md). Do not treat the branch as a validated release or rerun paid evals automatically.
+
+## Focused response release
+
+PRs #14/#15 are merged and deployed at application revision `1a43301b6504da99a4f9c0af9dd56fa663e5fac7`. This release adds compact observations, owner-scoped observation retrieval, refreshed task/record context and natural Telegram output guidance. All 75 tests and CI passed. Health and preserved data counts passed. Read-only inspection confirms the original incident's 22 IDs can be supplied alongside its later filtered result. No paid eval or full production analysis was rerun after deferral. See [response improvements](docs/response-improvements.md). The broader migration-007 scope/finding candidate remains deferred on its separate branch.
