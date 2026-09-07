@@ -2,7 +2,7 @@
 
 **A personal assistant with a TypeScript agent runtime we own.** Talk to it through Telegram text or voice, ask it to research, maintain notes, plan preparation, and manage reminders. Postgres is the durable source of truth; Google Sheets gives you a familiar viewing surface.
 
-Repository: https://github.com/akhilvuputuri/companion-agent. Hermes informed the first prototype and remains a reference, but is no longer a production dependency.
+Repository: https://github.com/akhilvuputuri/companion-agent.
 
 ```mermaid
 flowchart LR
@@ -93,4 +93,4 @@ Daily usage drives the next changes: better context selection, memory retrieval,
 
 ## References and attribution
 
-The initial prototype used [Nous Research Hermes Agent](https://github.com/NousResearch/hermes-agent/tree/9c4c548cd555905563b146a6974932b0c5eb8a01). Its adapter and optional smoke scripts remain under `services/hermes` for reference; production does not call them. Historical deployment context is archived under `docs/history`. Upstream projects retain their licenses. This application is independently developed and MIT licensed.
+The initial prototype used [Nous Research Hermes Agent](https://github.com/NousResearch/hermes-agent/tree/9c4c548cd555905563b146a6974932b0c5eb8a01). The obsolete Python adapter has been removed; its implementation remains available in Git history at commit `489f73e`. Historical deployment context is archived under `docs/history`. Upstream projects retain their licenses. This application is independently developed and MIT licensed.

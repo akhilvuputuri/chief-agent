@@ -1,5 +1,3 @@
-> Runtime update: production now uses our TypeScript loop and scheduler. Hermes-specific architecture and pass limits below describe the earlier prototype; [current architecture](architecture.md) and [execution/recovery](reliable-execution.md) take precedence. Integration-specific permission boundaries remain enforced.
-
 # Daily assistant
 
 General tasks/notes, reminders, fixed briefings and a separate viewing workbook live alongside the job tools. Everything runs on the existing server. Calendar is read-only; Gmail remains read-only.
@@ -19,7 +17,7 @@ Times default to Asia/Singapore. The reply must confirm the actual next firing t
 
 ## Scheduling design
 
-The pinned native Hermes `cron.jobs.parse_schedule` and `compute_next_run` functions run behind an authenticated internal endpoint. The companion owns persistence and delivery because its per-turn tool capabilities and custom Telegram gateway do not use the native Hermes gateway daemon. The native scheduler daemon and arbitrary scheduled agent/script execution are not enabled.
+The TypeScript scheduler accepts explicit once, interval and cron arguments. `cron-parser` computes recurring times in Asia/Singapore; the model translates conversational requests into supported arguments. There is no Python endpoint or arbitrary scheduled script execution.
 
 Postgres holds schedules and delivery state. A worker ticks every 15 seconds, atomically claims due rows, delivers one bounded Telegram message and computes the next run. Recurrences are at most hourly. Missed recurring occurrences coalesce into one message, then restart from the current time. Pending one-shot reminders survive restarts.
 
@@ -31,8 +29,8 @@ Briefings in this release use no model call: up to 10 open tasks, optional upcom
 
 Use `scripts/connect-calendar.mjs CLIENT_JSON OUTPUT_JSON EMAIL` for a separate PKCE loopback OAuth flow. It requires exactly openid, userinfo.email and calendar.readonly, verifies the account and stores the credential with mode 0600. Enable Calendar API in the existing Google project. Configure CALENDAR_REFRESH_TOKEN in private local/cloud environment files. OAuth testing-mode credentials can expire and require reconnection.
 
-DAILY_SPREADSHEET_ID identifies the separate workbook with numeric tab IDs 0/1/2 named Tasks/Notes/Schedules. It reuses the existing drive.file-scoped Sheets token. Use daily_sync after changes; the bridge requests this automatically, but it is not a durable synchronization outbox. Schedule deliveries also attempt synchronization. If Sheets is unavailable, Postgres retains all state. Managed tabs overwrite manual edits. Cells are literal strings; UTC timestamps are labelled, scheduling intent uses Singapore time. Snapshot size is bounded at 5000 rows per tab.
+DAILY_SPREADSHEET_ID identifies the separate workbook with numeric tab IDs 0/1/2 named Tasks/Notes/Schedules. It reuses the existing drive.file-scoped Sheets token. Use daily_sync after changes; the agent is instructed to request this, but it is not a durable synchronization outbox. Schedule deliveries also attempt synchronization. If Sheets is unavailable, Postgres retains all state. Managed tabs overwrite manual edits. Cells are literal strings; UTC timestamps are labelled, scheduling intent uses Singapore time. Snapshot size is bounded at 5000 rows per tab.
 
 ## Tests
 
-Database tests exercise owner isolation, task updates, cancellation, due delivery, recurring progression, worker recreation and ambiguous-delivery failure handling. Calendar tests enforce owner identity, bounded ranges, account verification and GET-only event access. Native parser was tested against the pinned Hermes environment for relative, daily and weekly schedules and the frequency limit. No new cloud VM or Google event-writing scope is required.
+Database tests exercise owner isolation, task updates, cancellation, due delivery, recurring progression, worker recreation and ambiguous-delivery failure handling. Calendar tests enforce owner identity, bounded ranges, account verification and GET-only event access. TypeScript scheduler tests cover stored schedule formats, recurring times and the minimum hourly recurrence restriction. No new cloud VM or Google event-writing scope is required.

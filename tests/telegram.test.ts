@@ -47,7 +47,6 @@ test("Telegram handles natural text once and ignores unauthorized users and grou
     DATABASE_URL: "postgres://x:x@localhost/x",
     TELEGRAM_BOT_TOKEN: "123:long-test-token",
     TELEGRAM_ALLOWED_USER_IDS: "123",
-    INTERNAL_API_TOKEN: "s".repeat(64),
   });
   const bot = telegram(c, assistant, db);
   bot.api.config.use(async (_prev, method, payload) => {

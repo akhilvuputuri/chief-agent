@@ -1,32 +1,23 @@
-> Runtime update: production now uses our TypeScript loop and scheduler. Hermes-specific architecture and pass limits below describe the earlier prototype; [current architecture](architecture.md) and [execution/recovery](reliable-execution.md) take precedence. Integration-specific permission boundaries remain enforced.
-
 # Security and data handling
 
-## Trust model
+## Trust and authorization
 
-This milestone targets a personal allowlisted deployment. Telegram identifies the user; the application enforces ownership. Model outputs, role listings and web pages are untrusted. Credentials belong to server processes and never enter prompts. Authorization is enforced in application code and SQL rather than delegated to a system prompt.
+This is a personal, allowlisted deployment. Private Telegram chats establish identity before transcription or inference. Model output, listings, email and retrieved pages are untrusted. Zod schemas and owner-scoped SQL enforce tool boundaries; model arguments cannot choose an owner.
 
-- Use private Telegram chats only. Unknown user IDs and group messages are ignored before transcription or inference.
-- No terminal, code execution, file-edit, email, application-submission or interactive browser tools are exposed. The bridge checks the exact exposed tool set before every conversation.
-- Sensitive deletion requires the owner to send an exact command. The model cannot approve its own proposal.
-- The sidecar has only the model key and service token; Node holds database, Telegram, search and speech credentials.
-- Compose publishes gateway and Postgres to loopback only. Hermes has no host port by default. Never put the internal routes behind a public reverse proxy.
-- Services drop Linux capabilities and cannot gain new privileges. No Docker socket or host project directory is mounted in the runtime.
-- Read-only page extraction happens at the hosted provider. URL validation rejects local names, literal IPs and embedded credentials. DNS rebinding and provider-side network policy remain responsibilities of the hosted provider; this is not a general safe-fetch implementation.
-- Input bodies, audio downloads and provider outputs are bounded. Runtime tool iterations and network timeouts limit individual requests but are not a daily spending budget.
+The Node process holds the integration credentials and calls tools directly. There is no internal HTTP tool callback, Python sidecar, shell execution, self-deployment or authenticated browser tool. Gmail and Calendar are read-only. Role deletion and skill activation require an exact owner approval; the model cannot approve its own proposal.
+
+The gateway container drops capabilities, disallows privilege escalation, has a read-only filesystem and temporary storage, and does not mount the Docker socket. Gateway and Postgres ports bind to loopback. These controls are not a claim of production multi-tenant isolation.
+
+Public page extraction uses hosted providers. URL checks reject local names, literal IPs and embedded credentials; provider network policy remains part of the trust boundary. No user cookies are forwarded.
 
 ## Persistence and privacy
 
-Postgres stores job text, notes, preferences and conversation history—including voice transcripts and tool results. Traces omit message bodies, tool arguments, provider responses and credentials. Hermes may retain its own runtime/session artifacts in its private volume; `save_trajectories=False` is not a guarantee that every upstream storage path is disabled. Treat both volumes and backups as sensitive.
+Postgres stores conversations, voice transcripts, memories, domain records, model-response checkpoints and tool arguments/results. Execution records can contain personal data: treat the database, reset archives and backups as sensitive. Credentials are kept in private environment files and must never be injected into prompts or diagnostic logs.
 
-Audio is not written to application storage, but Telegram and external providers process it under their own retention policies. Do not promise end-to-end encryption or zero retention. `/reset` deletes application conversation history only. Full erasure also requires administrator deletion of the user's database row (cascades domain data), review of Hermes runtime artifacts, provider retention settings and backups. A user-facing export/erase flow is roadmap work.
+Audio passes through Telegram and speech providers. Provider retention policies apply; do not promise end-to-end encryption or zero retention. `/reset` clears current conversation history, not every task, memory, trace or archive. Complete erasure requires an operator-reviewed data and provider retention procedure; a user export/erase flow remains future work.
 
-Keep `.env` out of source control. Use separate scoped provider credentials and account-level spending limits. Rotate any exposed token and restart both services. For a shared cloud deployment use a secret manager, encrypted disks/backups, TLS for remote Postgres, and a non-owner database role with explicit grants.
+## Recovery and limits
 
-## Known limits
+Persisted time/call budgets bound work; cancellation aborts model requests and prevents subsequent dispatch. Already-started external actions may complete. An interrupted write with an uncertain outcome pauses for inspection rather than replay. Read/model retries are bounded. These are not account-wide dollar spending limits.
 
-The single Python process lock protects its shared turn capability. Do not increase its concurrency or deploy a shared runtime pool without explicit per-run worker isolation. The internal service token is a trusted-service boundary; compromise permits impersonating requests to that service. Long-running provider calls may continue after the gateway timeout, although subsequent gateway tool calls lose authority.
-
-Prompt injection can still influence ordinary assistant text or permitted low-risk mutations such as role saves and preference updates. It cannot create nonexistent tool capabilities or bypass deletion approval. Memory writes are validated and owner-scoped, but explicit-user-intent detection currently relies on the agent instruction. A stricter deployment should gate memory writes or separate them into an authenticated user command.
-
-Do not claim production tenant isolation, comprehensive audit integrity, guaranteed delivery, or safe autonomous external actions from this starter.
+Prompt injection can still affect prose or permitted low-risk mutations. Explicit memory intent is instructed to the model and is not independently proven. Source quote checks establish recorded support, not semantic truth. Keep existing approval boundaries and use provider spending limits. See [execution and recovery](reliable-execution.md).
