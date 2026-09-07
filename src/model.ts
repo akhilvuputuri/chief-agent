@@ -1,3 +1,4 @@
+import { spending } from "./spending.js";
 export type Message = {
   role: "system" | "user" | "assistant" | "tool";
   content: string | null;
@@ -28,6 +29,7 @@ export interface ModelAdapter {
     tools: ToolDefinition[];
     reasoning: "medium";
     signal: AbortSignal;
+    sessionId?: string;
   }): Promise<Generation>;
 }
 export class ModelError extends Error {
@@ -52,6 +54,17 @@ export class OpenRouter implements ModelAdapter {
   async generate(
     input: Parameters<ModelAdapter["generate"]>[0],
   ): Promise<Generation> {
+    const ledger = spending.getStore();
+    const estimate =
+      ((Buffer.byteLength(
+        JSON.stringify(input.messages) + JSON.stringify(input.tools),
+      ) +
+        4096) *
+        this.inputPrice *
+        1.25) /
+        1e6 +
+      (8000 * this.outputPrice) / 1e6;
+    const charge = await ledger?.begin("openrouter-main", estimate);
     const response = await this.transport(
       "https://openrouter.ai/api/v1/chat/completions",
       {
@@ -63,6 +76,7 @@ export class OpenRouter implements ModelAdapter {
         },
         body: JSON.stringify({
           model: this.model,
+          ...(input.sessionId ? { session_id: input.sessionId } : {}),
           messages: input.messages,
           tools: input.tools.map((f) => ({ type: "function", function: f })),
           reasoning: { enabled: true, effort: input.reasoning },
@@ -87,6 +101,7 @@ export class OpenRouter implements ModelAdapter {
         response.status === 429 || response.status >= 500,
       );
     const data: any = await response.json();
+    if (charge) await ledger!.settle(charge, data.usage);
     const m = data.choices?.[0]?.message;
     if (!m || (typeof m.content !== "string" && !Array.isArray(m.tool_calls)))
       throw new ModelError("Model returned no usable answer");

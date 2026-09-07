@@ -104,6 +104,7 @@ for (const name of live ? selected : []) {
       "004_daily",
       "005_work",
       "006_runtime",
+      "008_costs",
     ])
       await pg.exec(
         await readFile(new URL(`../db/${f}.sql`, import.meta.url), "utf8"),
