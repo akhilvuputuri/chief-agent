@@ -4,11 +4,14 @@ import type { Database } from "./db.js";
 export async function recordContext(db: Database, user: string, run: string) {
   const rows = (
     await db.query(
-      `SELECT DISTINCT ON (c.operation) c.id,c.operation,c.result,c.started_at
-     FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id
-     WHERE r.user_id=$1 AND c.state='success' AND c.operation IN ('job_list','item_list')
-       AND (r.id=$2 OR (r.task_id IS NOT NULL AND r.task_id=(SELECT task_id FROM runtime_runs WHERE id=$2 AND user_id=$1)))
-     ORDER BY c.operation,(r.id=$2) DESC,c.started_at DESC`,
+      `WITH eligible AS (
+       SELECT c.id,c.operation,c.result,c.started_at,
+         row_number() OVER (PARTITION BY c.operation ORDER BY c.started_at,c.id) AS first_rank,
+         row_number() OVER (PARTITION BY c.operation ORDER BY c.started_at DESC,c.id DESC) AS last_rank
+       FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id
+       WHERE r.user_id=$1 AND c.state='success' AND c.operation IN ('job_list','item_list')
+         AND (r.id=$2 OR (r.task_id IS NOT NULL AND r.task_id=(SELECT task_id FROM runtime_runs WHERE id=$2 AND user_id=$1)))
+     ) SELECT * FROM eligible WHERE first_rank=1 OR last_rank=1 ORDER BY operation,started_at`,
       [user, run],
     )
   ).rows;
@@ -17,6 +20,7 @@ export async function recordContext(db: Database, user: string, run: string) {
       const records = row.result?.result;
       if (!Array.isArray(records)) return null;
       return {
+        position: Number(row.first_rank) === 1 ? "initial" : "latest",
         operation: row.operation,
         observationId: row.id,
         retrievedAt: row.started_at,
