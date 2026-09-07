@@ -30,6 +30,7 @@ async function fixture(
     "004_daily",
     "005_work",
     "006_runtime",
+    "007_task_scope",
   ])
     await pg.exec(
       await readFile(new URL("../db/" + f + ".sql", import.meta.url), "utf8"),
@@ -620,4 +621,112 @@ test("stored observations can be retrieved only by their owner", async () => {
   } finally {
     await f.pg.close();
   }
+});
+
+test("durable scope refreshes model context and rejected findings remain repairable", async () => {
+  let n = 0,
+    task = "",
+    source = "",
+    target = randomUUID();
+  let f: Awaited<ReturnType<typeof fixture>>;
+  f = await fixture({
+    generate: async (input) => {
+      n++;
+      const last =
+        input.messages.at(-1)?.role === "tool"
+          ? JSON.parse(input.messages.at(-1)!.content!)
+          : null;
+      if (n === 1)
+        return call("work_start", {
+          objective: "Review exact record",
+          steps: [
+            { key: "review", title: "Review record", verification: "analysis" },
+          ],
+        });
+      if (n === 2) {
+        task = last.result.task.id;
+        return call("job_list", {});
+      }
+      if (n === 3)
+        return call("work_scope", {
+          id: task,
+          observationId: last.observationId,
+          targetIds: [target],
+        });
+      if (n === 4) {
+        assert.ok(input.messages[0]!.content!.includes(target));
+        assert.ok(input.messages[0]!.content!.includes('"scope":'));
+        return call("job_analyze", { id: target });
+      }
+      if (n === 5) {
+        source = last.observationId;
+        return call("work_finding", {
+          id: task,
+          targetId: target,
+          summary: "Unsupported",
+          status: "complete",
+          observationIds: [],
+        });
+      }
+      if (n === 6) {
+        assert.equal(last.error.code, "VALIDATION_FAILED");
+        return call("work_finding", {
+          id: task,
+          targetId: target,
+          summary: "Experience unknown",
+          status: "complete",
+          observationIds: [source],
+        });
+      }
+      assert.ok(input.messages[0]!.content!.includes("Experience unknown"));
+      return call("finish_turn", {
+        reason: "answer",
+        targetIds: [target],
+        reply: "Experience remains unknown for the saved role.",
+      });
+    },
+  });
+  try {
+    await f.db.query("INSERT INTO users(id) VALUES('scope-user')");
+    await f.db.query(
+      "INSERT INTO jobs(id,user_id,title,company,url,description) VALUES($1,'scope-user','Engineer','Example','https://example.com/role','Requires experience')",
+      [target],
+    );
+    assert.equal(
+      await f.assistant.respond("scope-user", "Review this saved role"),
+      "Experience remains unknown for the saved role.",
+    );
+    assert.equal(
+      (await f.db.query("SELECT 1 FROM runtime_calls WHERE state='uncertain'"))
+        .rows.length,
+      0,
+    );
+    assert.equal(
+      (await f.db.query("SELECT * FROM task_findings")).rows.length,
+      1,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("empty provider responses are retryable but explicit authorization errors are not", async () => {
+  const input = {
+    messages: [],
+    tools: [],
+    reasoning: "medium" as const,
+    signal: new AbortController().signal,
+  };
+  const empty = new OpenRouter("test", undefined, 2, 10, (async () =>
+    Response.json({ choices: [] })) as typeof fetch);
+  await assert.rejects(
+    () => empty.generate(input),
+    (e: any) => e instanceof ModelError && e.transient,
+  );
+  const denied = new OpenRouter("test", undefined, 2, 10, (async () =>
+    Response.json({ error: { code: 401 } })) as typeof fetch);
+  await assert.rejects(
+    () => denied.generate(input),
+    (e: any) => e instanceof ModelError && !e.transient,
+  );
 });

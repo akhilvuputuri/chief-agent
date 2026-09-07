@@ -40,6 +40,36 @@ const workSteps = z
 export const action = z.discriminatedUnion("operation", [
   z
     .object({
+      operation: z.literal("work_scope_read"),
+      id,
+      offset: z.number().int().min(0).default(0),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("work_scope"),
+      id,
+      observationId: id,
+      targetIds: z
+        .array(z.string().min(1).max(200))
+        .min(1)
+        .max(500)
+        .refine((x) => new Set(x).size === x.length, "Unique targets required"),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("work_finding"),
+      id,
+      targetId: z.string().min(1).max(200),
+      summary: z.string().min(1).max(4000),
+      status: z.enum(["complete", "blocked"]),
+      observationIds: z.array(id).max(10),
+    })
+    .strict(),
+
+  z
+    .object({
       operation: z.literal("observation_read"),
       id,
       offset: z.number().int().min(0).default(0),
@@ -252,6 +282,7 @@ export interface AgentRequest {
   memories: { key: string; value: string }[];
   runtime?: { context: string; tools?: import("./model.js").ToolDefinition[] };
   refreshContext?: () => Promise<void>;
+  validateCompletion?: (refs: string[]) => Promise<void>;
   execution?: import("./execution.js").Execution;
   execute?: (input: unknown) => Promise<unknown>;
   signal?: AbortSignal;

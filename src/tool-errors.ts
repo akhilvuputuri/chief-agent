@@ -1,6 +1,10 @@
 import { ZodError } from "zod";
+/** A known rejection before mutation, safe for the model to correct. */
+export class ValidationError extends Error {}
 export function toolError(error: unknown) {
   const message = error instanceof Error ? error.message : "";
+  if (error instanceof ValidationError)
+    return { code: "VALIDATION_FAILED", retryable: false, message };
   if (error instanceof ZodError)
     return {
       code: "INVALID_INPUT",

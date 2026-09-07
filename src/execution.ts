@@ -19,6 +19,7 @@ export class Stop extends Error {
 export const readOperations = new Set([
   "finish_turn",
   "work_status",
+  "work_scope_read",
   "item_list",
   "schedule_list",
   "calendar_list",

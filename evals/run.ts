@@ -5,7 +5,12 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { Assistant } from "../src/agent.js";
 import { CustomAgent } from "../src/custom-agent.js";
-import { OpenRouter, type ModelAdapter, type Message } from "../src/model.js";
+import {
+  OpenRouter,
+  ModelError,
+  type ModelAdapter,
+  type Message,
+} from "../src/model.js";
 import { JobTools } from "../src/tools.js";
 import { boundHistory } from "../src/context.js";
 import type { Database } from "../src/db.js";
@@ -104,6 +109,7 @@ for (const name of live ? selected : []) {
       "004_daily",
       "005_work",
       "006_runtime",
+      "007_task_scope",
     ])
       await pg.exec(
         await readFile(new URL(`../db/${f}.sql`, import.meta.url), "utf8"),
@@ -160,9 +166,12 @@ for (const name of live ? selected : []) {
           )
             charged += actual - reserve;
           return result;
-        } catch {
-          entry.error = "Model request failed";
-          throw new Error("Evaluation model request failed");
+        } catch (error) {
+          entry.error =
+            error instanceof ModelError
+              ? error.message
+              : "Model request failed";
+          throw error;
         }
       },
     };

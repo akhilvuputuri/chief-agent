@@ -87,9 +87,14 @@ export class OpenRouter implements ModelAdapter {
         response.status === 429 || response.status >= 500,
       );
     const data: any = await response.json();
+    if (data.error)
+      throw new ModelError(
+        "Model provider returned an error response; price limits remain enforced.",
+        [429, 500, 502, 503, 504].includes(Number(data.error.code)),
+      );
     const m = data.choices?.[0]?.message;
     if (!m || (typeof m.content !== "string" && !Array.isArray(m.tool_calls)))
-      throw new ModelError("Model returned no usable answer");
+      throw new ModelError("Model returned no usable answer", true);
     if (
       m.tool_calls &&
       !m.tool_calls.every(

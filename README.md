@@ -98,3 +98,5 @@ The initial prototype used [Nous Research Hermes Agent](https://github.com/NousR
 ## Evaluations and development
 
 See [evaluation guide](docs/evals/guide.md) and [development process](docs/development-process.md). `npm run eval` is an offline diagnostic; `npm run eval -- --live` runs bounded paid model scenarios in isolated synthetic databases. Production runtime fixes are evaluated separately from the tooling.
+
+Runtime development: [durable scope and evidence](docs/runtime-hardening.md), [evaluation guide](docs/evals/guide.md), and [experiment/process log](docs/development-process.md).

@@ -30,3 +30,23 @@ test("collection projections retain identities while omitting long descriptions"
   assert.equal(result.result[21].id, "21");
   assert.equal(result.result[0].descriptionTruncated, true);
 });
+
+test("large source bodies preserve source identifiers and retrieval pointers", () => {
+  const projected = projectObservation(
+    "web_read",
+    {
+      result: {
+        content: "x".repeat(50000),
+        sourceId: "source",
+        sourceUrl: "https://example.com",
+        untrusted: true,
+      },
+    },
+    "observation",
+  );
+  assert.equal(projected.result.sourceId, "source");
+  assert.equal(projected.result.sourceUrl, "https://example.com");
+  assert.equal(projected.observationId, "observation");
+  assert.equal(projected.result.untrusted, true);
+  assert.ok(JSON.stringify(projected).length < 12000);
+});

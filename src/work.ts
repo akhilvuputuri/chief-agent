@@ -1,3 +1,5 @@
+import { ValidationError } from "./tool-errors.js";
+import { TaskScope } from "./task-scope.js";
 import { randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
 import type { Action } from "./protocol.js";
@@ -54,6 +56,20 @@ export class WorkTools {
     };
   }
   async call(user: string, run: string, a: WorkAction): Promise<any> {
+    if (a.operation === "work_scope_read") {
+      const s = await new TaskScope(this.db).view(user, a.id);
+      if (!s) throw new Error("Scope unavailable");
+      const targets = s.targets.slice(a.offset, a.offset + 25);
+      return {
+        revision: s.revision,
+        total: s.targets.length,
+        targets,
+        findings: s.findings.filter((f: any) =>
+          targets.some((t: any) => t.id === f.target_id),
+        ),
+        nextOffset: a.offset + 25 < s.targets.length ? a.offset + 25 : null,
+      };
+    }
     if (a.operation === "work_status") return this.snapshot(user);
     const turn = (
       await this.db.query(
@@ -82,6 +98,28 @@ export class WorkTools {
     ).rows[0];
     if (!task || ["cancelled", "done"].includes(task.status))
       throw new Error("Task unavailable");
+    if (
+      ["work_scope", "work_finding"].includes(a.operation) &&
+      (turn.task_id !== task.id || turn.revision !== task.revision)
+    )
+      throw new ValidationError("Task scope changed; inspect current work");
+    if (a.operation === "work_scope")
+      return new TaskScope(this.db).bind(
+        user,
+        run,
+        a.id,
+        a.observationId,
+        a.targetIds,
+      );
+    if (a.operation === "work_finding")
+      return new TaskScope(this.db).finding(
+        user,
+        a.id,
+        a.targetId,
+        a.summary,
+        a.status,
+        a.observationIds,
+      );
     if (a.operation === "work_cancel") {
       await this.db.query(
         `UPDATE work_tasks SET status='cancelled',lease=NULL,updated_at=now() WHERE id=$1 AND user_id=$2`,
@@ -92,6 +130,33 @@ export class WorkTools {
     if (a.operation === "work_revise") {
       if (turn.background)
         throw new Error("Only a user follow-up can revise scope");
+      const established = (
+        await this.db.query(
+          "SELECT request FROM work_revisions WHERE task_id=$1 ORDER BY id DESC LIMIT 1",
+          [a.id],
+        )
+      ).rows[0];
+      const existing = (
+        await this.db.query(
+          "SELECT key,verification,expected_operation FROM work_steps WHERE task_id=$1",
+          [a.id],
+        )
+      ).rows;
+      if (
+        established?.request === turn.request &&
+        existing.some(
+          (s) =>
+            !a.steps.some(
+              (n) =>
+                n.key === s.key &&
+                n.verification === s.verification &&
+                (n.expectedOperation ?? null) === s.expected_operation,
+            ),
+        )
+      )
+        throw new ValidationError(
+          "Cannot weaken or remove requirements within the same user instruction; preserve them and report the blocker",
+        );
       // Preserve audit history, conservatively invalidate prior completion against revised scope.
       await this.db.query(
         `WITH revised AS (UPDATE work_tasks SET objective=$3,request=request || E'\nFollow-up: ' || $4,revision=revision+1,status='active',passes=0,lease=NULL,updated_at=now() WHERE id=$1 AND user_id=$2 RETURNING *), removed AS (DELETE FROM work_steps USING revised WHERE work_steps.task_id=revised.id AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements($5::jsonb) x WHERE x->>'key'=work_steps.key)), added AS (INSERT INTO work_steps(task_id,key,title,verification,expected_operation) SELECT revised.id,x.key,x.title,x.verification,x."expectedOperation" FROM revised,jsonb_to_recordset($5::jsonb) x(key text,title text,verification text,"expectedOperation" text) ON CONFLICT(task_id,key) DO UPDATE SET title=EXCLUDED.title,verification=EXCLUDED.verification,expected_operation=EXCLUDED.expected_operation,status='pending',result='',proofs='{}') INSERT INTO work_revisions(task_id,revision,request,objective) SELECT id,revision,request,objective FROM revised`,
@@ -150,6 +215,16 @@ export class WorkTools {
     if (!step) throw new Error("Step not found");
     if (a.status === "done") {
       if (!a.result.trim()) throw new Error("Result required");
+      const collection = (
+        await this.db.query(
+          "SELECT 1 FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id WHERE r.task_id=$1 AND c.operation IN ('job_list','item_list') AND c.state='success' LIMIT 1",
+          [a.id],
+        )
+      ).rows.length;
+      if (collection && !(await new TaskScope(this.db).view(user, a.id)))
+        throw new ValidationError(
+          "Bind the requested record collection with work_scope before marking steps complete",
+        );
       const e = (
         await this.db.query(
           `SELECT id FROM work_evidence WHERE task_id=$1 AND id=ANY($2::uuid[]) AND applicability='matched'`,
@@ -168,11 +243,7 @@ export class WorkTools {
         );
       if (
         step.verification === "action" &&
-        !r.some(
-          (x) =>
-            x.operation === step.expected_operation &&
-            /(_save|_update|_sync|_set|_create)$/.test(x.operation),
-        )
+        !r.some((x) => x.operation === step.expected_operation)
       )
         throw new Error("Successful action receipt required");
       if (step.verification === "analysis" && !a.proofs.length)

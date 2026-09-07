@@ -1,3 +1,4 @@
+import { TaskScope } from "./task-scope.js";
 import { compactWork } from "./observations.js";
 import {
   Execution,
@@ -166,10 +167,42 @@ export class Assistant {
         execution,
         signal: controller.signal,
         execute: (input) => this.call(capability, input),
+        validateCompletion: async (refs) => {
+          const linked = (
+            await this.db.query(
+              "SELECT task_id FROM work_turns WHERE run_id=$1 AND user_id=$2",
+              [run, user],
+            )
+          ).rows[0]?.task_id;
+          if (linked) await new TaskScope(this.db).validate(user, linked, refs);
+        },
         refreshContext: async () => {
+          const linked = (
+            await this.db.query(
+              "SELECT task_id FROM work_turns WHERE run_id=$1 AND user_id=$2",
+              [run, user],
+            )
+          ).rows[0]?.task_id;
+          const scope = linked
+            ? await new TaskScope(this.db).view(user, linked)
+            : null;
           runtime.context = JSON.stringify({
             ...JSON.parse(runtime.context),
-            work: compactWork(await work.snapshot(user)),
+            work: compactWork(await work.snapshot(user, linked ?? undefined)),
+            scope: scope
+              ? {
+                  revision: scope.revision,
+                  total: scope.targets.length,
+                  targets: scope.targets.slice(0, 50),
+                  findings: scope.findings.slice(0, 50).map((f: any) => ({
+                    ...f,
+                    summary: f.summary.slice(0, 500),
+                  })),
+                  truncated: scope.targets.length > 50,
+                  notice:
+                    "Use work_scope_read for further pages. Membership and saved outcomes are authoritative; summaries are agent-authored.",
+                }
+              : null,
           });
         },
       });

@@ -18,6 +18,7 @@ try {
     "004_daily",
     "005_work",
     "006_runtime",
+    "007_task_scope",
   ])
     await pg.exec(
       await readFile(new URL("../db/" + f + ".sql", import.meta.url), "utf8"),

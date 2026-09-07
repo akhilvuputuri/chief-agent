@@ -10,7 +10,7 @@ import {
   type ToolDefinition,
 } from "./model.js";
 import { Stop, readOperations, type StopReason } from "./execution.js";
-import { toolError } from "./tool-errors.js";
+import { ValidationError, toolError } from "./tool-errors.js";
 const finishTool: ToolDefinition = {
   name: "finish_turn",
   description:
@@ -23,6 +23,12 @@ const finishTool: ToolDefinition = {
         enum: ["answer", "awaiting_user", "awaiting_approval"],
       },
       reply: { type: "string" },
+      targetIds: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "For a scoped collection, every target covered by the answer, including explicitly blocked targets.",
+      },
     },
     required: ["reason", "reply"],
     additionalProperties: false,
@@ -32,6 +38,7 @@ export class CustomAgent implements Agent {
   constructor(private model: ModelAdapter) {}
   async run(req: AgentRequest): Promise<AgentResponse> {
     const execution = req.execution;
+    let completionRepairs = 0;
     if (!execution || !req.execute || !req.signal)
       throw new Error("Owner-scoped execution is required");
     const messages = [
@@ -40,6 +47,7 @@ export class CustomAgent implements Agent {
     ];
     const tools = [...(req.runtime?.tools ?? []), finishTool];
     const enabled = new Set(tools.map((t) => t.name));
+    const repeatedFailures = new Map<string, number>();
     let reply = "",
       reason: StopReason = "answer";
     await execution.checkpoint(messages);
@@ -56,6 +64,11 @@ export class CustomAgent implements Agent {
             });
             await req.refreshContext?.();
             const input = context(req, messages);
+            await execution.trace("context.manifest", {
+              messages: input.messages.length,
+              characters: JSON.stringify(input.messages).length,
+              omitted: input.omitted,
+            });
             if (input.omitted)
               await execution.trace("context.omitted", {
                 messages: input.omitted,
@@ -109,6 +122,29 @@ export class CustomAgent implements Agent {
           }
         }
         if (!calls.length) {
+          try {
+            await req.validateCompletion?.([]);
+          } catch (error) {
+            if (
+              !(error instanceof ValidationError) ||
+              ++completionRepairs > 2 ||
+              !req.runtime
+            )
+              throw error;
+            req.runtime.context = JSON.stringify({
+              ...JSON.parse(req.runtime.context),
+              completionFeedback: {
+                message: error.message,
+                instruction:
+                  "The proposed answer was not delivered. Resolve missing outcomes, then use finish_turn with the exact targetIds or pause honestly.",
+              },
+            });
+            await execution.trace("completion.rejected", {
+              message: error.message,
+              attempt: completionRepairs,
+            });
+            continue;
+          }
           reply = generation.message.content ?? "";
           break;
         }
@@ -136,6 +172,10 @@ export class CustomAgent implements Agent {
                 typeof args.reply !== "string"
               )
                 throw new Error("Invalid finish arguments");
+              if (args.reason === "answer")
+                await req.validateCompletion?.(
+                  Array.isArray(args.targetIds) ? args.targetIds : [],
+                );
               finish = { reply: args.reply, reason: args.reason };
               result = { recorded: true };
             } else {
@@ -181,6 +221,17 @@ export class CustomAgent implements Agent {
               uncertain ? "uncertain" : "failed",
             );
             if (uncertain) throw new Stop("failed");
+            const signature =
+              op + call.function.arguments + JSON.stringify(result);
+            const failures = (repeatedFailures.get(signature) ?? 0) + 1;
+            repeatedFailures.set(signature, failures);
+            if (failures >= 3) {
+              await execution.trace("repair.exhausted", {
+                operation: op,
+                failures,
+              });
+              throw new Stop("failed");
+            }
           } finally {
             await execution.elapsed(Date.now() - start);
           }

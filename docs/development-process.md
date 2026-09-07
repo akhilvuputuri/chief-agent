@@ -50,3 +50,23 @@ Community reports informed failure hypotheses, not measured claims about our sys
 Full operation results remain in runtime_calls. Model-facing observations now omit repeated owner metadata and large role descriptions, and expose an observation ID. observation_read performs an owner-scoped read of a successful persisted call, with bounded pagination. Work updates omit accumulated receipt/evidence payloads. The current task snapshot is refreshed before each model request instead of remaining frozen at turn start.
 
 Regression coverage includes cross-owner observation denial, bounded task-update size and preservation of collection identities. This stage reduces context pressure; it does not yet enforce immutable collection membership or certify semantic completion. The raw-history context-pressure probe is deliberately unchanged and can still fail: it does not exercise the new observation projection.
+
+## Stage 2 — scope, findings and completion
+
+Implemented additive scope/finding storage, owner-scoped binding from actual collection observations, same-turn membership protection, refreshed scope context, per-target checkpoints, declared final coverage checks and a guard against weakening step verification within an instruction. Added actionable validation and an exact repeated-error stop. See [runtime hardening](runtime-hardening.md) for the contracts and explicit limitations.
+
+The first stage-two trial exposed an integration bug: a finding included the ID of an observation-read page rather than the original target observation. The validation correctly rejected its applicability, but a generic error incorrectly classified the rejection as an uncertain write. Added a typed pre-mutation validation error. Large source previews were also capable of losing source identifiers behind a serialization cutoff; payload fields now shorten before identifiers are projected. These were runtime fixes prompted by inspecting failed traces, not by changing expected answers.
+
+## Experiment log
+
+| Trial                | Collection                     | Missing evidence | Scope change  | Interpretation                                      |
+| -------------------- | ------------------------------ | ---------------- | ------------- | --------------------------------------------------- |
+| Baseline             | Fail, 15 model / 39 tool calls | Pass, 12 / 21    | Pass, 18 / 27 | Final artifact missing under budget                 |
+| Compact observations | Fail, 16 / 100                 | Pass, 9 / 19     | Pass, 18 / 31 | Smaller observations alone insufficient             |
+| First durable scope  | Fail, 5 / 22                   | Pass, 20 / 38    | Fail, 18 / 22 | Validation/error integration failure; do not deploy |
+
+All are single stochastic trials. Fixture and final-answer grader were unchanged after the finalized baseline. The runner's additive migration changed with the candidate by design. The fingerprint currently covers fixture and grader source, not every runner dependency; review runner diffs as well as fingerprints. No pass-rate or statistically significant improvement is claimed. The evaluation budget includes bookkeeping, so correctness that consumes all available calls is still an unsuccessful user outcome.
+
+## Checkpoint and deferral
+
+At the user’s request, work stopped before deployment. The final live trial was interrupted; no final-candidate success claim is made. Local checks passed 76 tests. The detailed [checkpoint](checkpoints/runtime-evaluations.md) records completed work, trial caveats, unresolved correctness issues and a narrow resumption path. This effort expanded beyond the intended small baseline; future iterations should constrain the regression, mechanism and comparison before broadening coverage.

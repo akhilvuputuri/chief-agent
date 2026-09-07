@@ -19,9 +19,34 @@ export function projectObservation(
         "These are analysis inputs, not a completed assessment. Use explicit memories from current context; retrieve the full observation if needed.",
     };
   }
+  // Trim payload fields before serialization so identifiers at the end survive.
+  if (projected && !Array.isArray(projected) && typeof projected === "object") {
+    projected = { ...projected };
+    for (const key of ["content", "description", "text"]) {
+      if (typeof projected[key] === "string" && projected[key].length > 8000) {
+        projected[key] = projected[key].slice(0, 8000);
+        projected.truncated = true;
+      }
+    }
+  }
   const serialized = JSON.stringify(projected);
   if (serialized && serialized.length > 12000)
     projected = {
+      ...(projected && !Array.isArray(projected)
+        ? Object.fromEntries(
+            [
+              "id",
+              "sourceId",
+              "sourceUrl",
+              "url",
+              "revision",
+              "total",
+              "nextOffset",
+            ]
+              .filter((k) => projected[k] !== undefined)
+              .map((k) => [k, projected[k]]),
+          )
+        : {}),
       excerpt: serialized.slice(0, 10000),
       truncated: true,
       notice:

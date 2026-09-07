@@ -98,6 +98,9 @@ export class JobTools {
       a.operation === "work_start" ||
       a.operation === "work_revise" ||
       a.operation === "work_status" ||
+      a.operation === "work_scope" ||
+      a.operation === "work_scope_read" ||
+      a.operation === "work_finding" ||
       a.operation === "work_step" ||
       a.operation === "work_evidence" ||
       a.operation === "work_yield" ||

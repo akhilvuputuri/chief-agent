@@ -71,7 +71,19 @@ export function runtimeContext(
       description:
         o.shape.operation.value === "skill_read"
           ? "Load the approved active skill or repository default using only its catalogue key."
-          : `Execute ${o.shape.operation.value}. Arguments are validated; identity comes from the authenticated session.`,
+          : ((
+              {
+                work_scope:
+                  "Bind exact requested target IDs from a job_list or item_list observationId before completing collection steps. Scope is fixed until a later user correction.",
+                work_finding:
+                  "Persist analysis for one scoped target. observationIds must identify that target; missing information stays unknown. blocked requires a reason.",
+                work_scope_read:
+                  "Read canonical targets and findings in pages for final synthesis.",
+                observation_read:
+                  "Read the full stored result by observationId and offset when a preview was truncated.",
+              } as Record<string, string>
+            )[o.shape.operation.value] ??
+            `Execute ${o.shape.operation.value}. Arguments are validated; identity comes from the authenticated session.`),
       parameters: jsonSchema((o as z.AnyZodObject).omit({ operation: true })),
     })),
     context: JSON.stringify({
