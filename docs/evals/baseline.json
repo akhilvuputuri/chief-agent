@@ -1,0 +1,102 @@
+{
+  "revision": "ca2c04a01eac462b8ade3dd7b6a4f880556b456d",
+  "dirty": true,
+  "fixtureVersion": "1",
+  "graderVersion": "1",
+  "fingerprint": "70aae54a077da7bca450f7b3cea46558d47ceb55b1bd5b4b35c7b8bd66084022",
+  "mode": "live-model-controlled-tools",
+  "settings": {
+    "model": "openai/gpt-5.6-sol",
+    "reasoning": "medium",
+    "priceCeilings": {
+      "input": 2,
+      "output": 10
+    },
+    "maxDollars": 2
+  },
+  "admissionChargedDollars": 0.9979045000000003,
+  "probe": {
+    "name": "inventory-survives-bookkeeping",
+    "pass": false,
+    "omitted": 2
+  },
+  "summaries": [
+    {
+      "name": "collection",
+      "score": {
+        "structureValid": false,
+        "coverage": 0,
+        "missing": [
+          "10000000-0000-4000-8000-000000000001",
+          "10000000-0000-4000-8000-000000000002",
+          "10000000-0000-4000-8000-000000000003",
+          "10000000-0000-4000-8000-000000000004",
+          "10000000-0000-4000-8000-000000000005",
+          "10000000-0000-4000-8000-000000000006",
+          "10000000-0000-4000-8000-000000000007",
+          "10000000-0000-4000-8000-000000000008",
+          "10000000-0000-4000-8000-000000000009",
+          "10000000-0000-4000-8000-000000000010",
+          "10000000-0000-4000-8000-000000000011",
+          "10000000-0000-4000-8000-000000000012",
+          "10000000-0000-4000-8000-000000000013",
+          "10000000-0000-4000-8000-000000000014",
+          "10000000-0000-4000-8000-000000000015",
+          "10000000-0000-4000-8000-000000000016",
+          "10000000-0000-4000-8000-000000000017",
+          "10000000-0000-4000-8000-000000000018",
+          "10000000-0000-4000-8000-000000000019",
+          "10000000-0000-4000-8000-000000000020",
+          "10000000-0000-4000-8000-000000000021",
+          "10000000-0000-4000-8000-000000000022"
+        ],
+        "unexpected": [],
+        "duplicates": 0,
+        "identityErrors": 0,
+        "unknownsPreserved": false,
+        "falseCompletion": false,
+        "pass": false,
+        "semanticSupport": "requires human review"
+      },
+      "modelCalls": 15,
+      "toolCalls": 39,
+      "elapsedMs": 559944
+    },
+    {
+      "name": "missing-evidence",
+      "score": {
+        "structureValid": true,
+        "coverage": 1,
+        "missing": [],
+        "unexpected": [],
+        "duplicates": 0,
+        "identityErrors": 0,
+        "unknownsPreserved": true,
+        "falseCompletion": false,
+        "pass": true,
+        "semanticSupport": "requires human review"
+      },
+      "modelCalls": 12,
+      "toolCalls": 21,
+      "elapsedMs": 67159
+    },
+    {
+      "name": "scope-change",
+      "score": {
+        "structureValid": true,
+        "coverage": 1,
+        "missing": [],
+        "unexpected": [],
+        "duplicates": 0,
+        "identityErrors": 0,
+        "unknownsPreserved": true,
+        "falseCompletion": false,
+        "pass": true,
+        "semanticSupport": "requires human review"
+      },
+      "modelCalls": 18,
+      "toolCalls": 27,
+      "elapsedMs": 94269
+    }
+  ]
+}

@@ -24,6 +24,7 @@ export const readOperations = new Set([
   "calendar_list",
   "skill_list",
   "skill_read",
+  "observation_read",
   "skill_version_read",
   "skill_history",
   "prep_list",

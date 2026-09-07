@@ -1,3 +1,5 @@
+import { recordContext } from "./record-context.js";
+import { compactWork } from "./observations.js";
 import {
   Execution,
   defaultBudget,
@@ -165,6 +167,13 @@ export class Assistant {
         execution,
         signal: controller.signal,
         execute: (input) => this.call(capability, input),
+        refreshContext: async () => {
+          runtime.context = JSON.stringify({
+            ...JSON.parse(runtime.context),
+            work: compactWork(await work.snapshot(user)),
+            retrievedCollections: await recordContext(this.db, user, run),
+          });
+        },
       });
       if (!background)
         await this.db.query(

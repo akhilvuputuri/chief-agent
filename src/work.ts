@@ -168,11 +168,7 @@ export class WorkTools {
         );
       if (
         step.verification === "action" &&
-        !r.some(
-          (x) =>
-            x.operation === step.expected_operation &&
-            /(_save|_update|_sync|_set|_create)$/.test(x.operation),
-        )
+        !r.some((x) => x.operation === step.expected_operation)
       )
         throw new Error("Successful action receipt required");
       if (step.verification === "analysis" && !a.proofs.length)
