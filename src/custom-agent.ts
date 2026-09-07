@@ -1,3 +1,4 @@
+import { projectObservation } from "./observations.js";
 import { action } from "./protocol.js";
 import type { AgentRequest, AgentResponse } from "./protocol.js";
 import type { Agent } from "./agent.js";
@@ -53,6 +54,7 @@ export class CustomAgent implements Agent {
               model: this.model.model ?? null,
               attempt,
             });
+            await req.refreshContext?.();
             const input = context(req, messages);
             if (input.omitted)
               await execution.trace("context.omitted", {
@@ -185,7 +187,11 @@ export class CustomAgent implements Agent {
           messages.push({
             role: "tool",
             tool_call_id: call.id,
-            content: JSON.stringify(result),
+            content: JSON.stringify(
+              result && typeof result === "object" && "error" in result
+                ? result
+                : projectObservation(op, result, journal),
+            ),
           });
           await execution.checkpoint(messages);
           await execution.attach();

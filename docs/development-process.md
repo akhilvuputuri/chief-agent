@@ -44,3 +44,9 @@ Automated graders check explicit IDs, exact titles, missing and duplicate target
 - https://docs.langchain.com/oss/python/deepagents/context-engineering — offloading and targeted retrieval.
 
 Community reports informed failure hypotheses, not measured claims about our system. We retain our own implementation and test the techniques against our actual boundaries.
+
+## Stage 1 — compact observations and live checkpoints
+
+Full operation results remain in runtime_calls. Model-facing observations now omit repeated owner metadata and large role descriptions, and expose an observation ID. observation_read performs an owner-scoped read of a successful persisted call, with bounded pagination. Work updates omit accumulated receipt/evidence payloads. The current task snapshot is refreshed before each model request instead of remaining frozen at turn start.
+
+Regression coverage includes cross-owner observation denial, bounded task-update size and preservation of collection identities. This stage reduces context pressure; it does not yet enforce immutable collection membership or certify semantic completion. The raw-history context-pressure probe is deliberately unchanged and can still fail: it does not exercise the new observation projection.

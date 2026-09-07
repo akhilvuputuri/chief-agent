@@ -40,6 +40,13 @@ const workSteps = z
 export const action = z.discriminatedUnion("operation", [
   z
     .object({
+      operation: z.literal("observation_read"),
+      id,
+      offset: z.number().int().min(0).default(0),
+    })
+    .strict(),
+  z
+    .object({
       operation: z.literal("work_start"),
       objective: z.string().min(1).max(4000),
       steps: workSteps,
@@ -244,6 +251,7 @@ export interface AgentRequest {
   history: unknown[];
   memories: { key: string; value: string }[];
   runtime?: { context: string; tools?: import("./model.js").ToolDefinition[] };
+  refreshContext?: () => Promise<void>;
   execution?: import("./execution.js").Execution;
   execute?: (input: unknown) => Promise<unknown>;
   signal?: AbortSignal;

@@ -579,3 +579,45 @@ test("current skills use key-only loading and historical versions require UUIDs"
     await f.pg.close();
   }
 });
+
+test("stored observations can be retrieved only by their owner", async () => {
+  const f = await fixture({ generate: async () => text("hello") });
+  try {
+    await f.assistant.respond("owner", "hello");
+    await f.assistant.respond("other", "hello");
+    const run = (
+      await f.db.query(
+        "SELECT id FROM runtime_runs WHERE user_id='owner' LIMIT 1",
+      )
+    ).rows[0].id;
+    const id = randomUUID();
+    await f.db.query(
+      "INSERT INTO runtime_calls(id,run_id,call_id,operation,arguments,is_write,state,result) VALUES($1,$2,'stored','memory_list','{}',false,'success',$3)",
+      [id, run, JSON.stringify({ private: "owner-only content" })],
+    );
+    const tools = new JobTools(f.db, {
+      call: async () => ({ untrusted: true, content: "" }),
+    });
+    assert.match(
+      JSON.stringify(
+        await tools.execute("owner", run, {
+          operation: "observation_read",
+          id,
+        }),
+      ),
+      /owner-only content/,
+    );
+    const otherRun = (
+      await f.db.query(
+        "SELECT id FROM runtime_runs WHERE user_id='other' LIMIT 1",
+      )
+    ).rows[0].id;
+    await assert.rejects(
+      () =>
+        tools.execute("other", otherRun, { operation: "observation_read", id }),
+      /Observation not found/,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});

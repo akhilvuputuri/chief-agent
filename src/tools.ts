@@ -78,6 +78,22 @@ export class JobTools {
     a: ReturnType<typeof action.parse>,
   ): Promise<unknown> {
     const db = this.db;
+    if (a.operation === "observation_read") {
+      const found = (
+        await db.query(
+          "SELECT c.result FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id WHERE c.id=$1 AND r.user_id=$2 AND c.state='success'",
+          [a.id, user],
+        )
+      ).rows[0];
+      if (!found) throw new Error("Observation not found");
+      const text = JSON.stringify(found.result);
+      return {
+        content: text.slice(a.offset, a.offset + 8000),
+        offset: a.offset,
+        nextOffset: a.offset + 8000 < text.length ? a.offset + 8000 : null,
+        totalCharacters: text.length,
+      };
+    }
     if (
       a.operation === "work_start" ||
       a.operation === "work_revise" ||

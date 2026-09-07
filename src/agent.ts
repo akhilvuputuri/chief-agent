@@ -1,3 +1,4 @@
+import { compactWork } from "./observations.js";
 import {
   Execution,
   defaultBudget,
@@ -165,6 +166,12 @@ export class Assistant {
         execution,
         signal: controller.signal,
         execute: (input) => this.call(capability, input),
+        refreshContext: async () => {
+          runtime.context = JSON.stringify({
+            ...JSON.parse(runtime.context),
+            work: compactWork(await work.snapshot(user)),
+          });
+        },
       });
       if (!background)
         await this.db.query(
