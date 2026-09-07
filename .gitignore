@@ -15,3 +15,6 @@ compose.local.yaml
 # Private backup material
 *.pem
 *.cms
+
+# Local evaluation traces and outputs
+eval-results/

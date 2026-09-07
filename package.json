@@ -11,7 +11,7 @@
     "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",
     "build": "tsc",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.evals.json",
     "test": "tsx --test tests/*.test.ts && node --test scripts/google-sheets-scopes.test.mjs",
     "migrate": "tsx src/migrate.ts",
     "check": "npm run typecheck && npm test",
@@ -21,7 +21,9 @@
     "check:env": "node scripts/check-env.mjs",
     "pair": "node scripts/pair-telegram.mjs",
     "pair:finish": "node scripts/pair-telegram.mjs --finish",
-    "smoke:runtime": "tsx scripts/smoke-custom.ts"
+    "smoke:runtime": "tsx scripts/smoke-custom.ts",
+    "eval": "tsx evals/run.ts",
+    "eval:compare": "tsx evals/compare.ts"
   },
   "dependencies": {
     "@grammyjs/runner": "^2.0.3",
