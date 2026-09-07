@@ -630,3 +630,68 @@ test("stored observations can be retrieved only by their owner", async () => {
     await f.pg.close();
   }
 });
+
+test("empty provider responses retry before tools and preserve safe diagnostics", async () => {
+  let attempts = 0;
+  const model = new OpenRouter("test", undefined, 2, 10, (async () => {
+    attempts++;
+    return Response.json(
+      attempts === 1
+        ? {
+            id: "gen-test",
+            provider: "test",
+            choices: [{ message: { content: null }, finish_reason: "stop" }],
+          }
+        : { choices: [{ message: { content: "There are 31 saved roles." } }] },
+    );
+  }) as typeof fetch);
+  const f = await fixture(model);
+  try {
+    await f.assistant.respond("owner", "How many roles?");
+    assert.equal(attempts, 2);
+    const failure = (
+      await f.db.query("SELECT data FROM events WHERE type='model.failed'")
+    ).rows[0].data;
+    assert.equal(failure.transient, true);
+    assert.equal(failure.diagnostics.responseId, "gen-test");
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("provider error envelopes and exhausted reasoning are classified without exposing raw errors", async () => {
+  for (const [body, transient] of [
+    [{ error: { code: 503, message: "secret-provider-detail" } }, true],
+    [{ error: { code: 401, message: "secret-provider-detail" } }, false],
+    [
+      {
+        choices: [
+          { message: { content: "", tool_calls: [] }, finish_reason: "length" },
+        ],
+      },
+      false,
+    ],
+    [
+      { choices: [{ message: { content: "   " }, finish_reason: "stop" }] },
+      true,
+    ],
+  ] as const) {
+    const model = new OpenRouter("test", undefined, 2, 10, (async () =>
+      Response.json(body)) as typeof fetch);
+    await assert.rejects(
+      () =>
+        model.generate({
+          messages: [],
+          tools: [],
+          reasoning: "medium",
+          signal: new AbortController().signal,
+        }),
+      (e: any) => {
+        assert.ok(e instanceof ModelError);
+        assert.equal(e.transient, transient);
+        assert.ok(!JSON.stringify(e).includes("secret-provider-detail"));
+        return true;
+      },
+    );
+  }
+});

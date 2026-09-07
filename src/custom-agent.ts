@@ -82,6 +82,9 @@ export class CustomAgent implements Agent {
             break;
           } catch (error) {
             await execution.trace("model.failed", {
+              ...(error instanceof ModelError
+                ? { diagnostics: error.diagnostics, transient: error.transient }
+                : {}),
               attempt,
               latencyMs: Date.now() - start,
             });

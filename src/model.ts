@@ -36,6 +36,7 @@ export class ModelError extends Error {
   constructor(
     message: string,
     readonly transient = false,
+    readonly diagnostics: Record<string, unknown> = {},
   ) {
     super(message);
   }
@@ -101,10 +102,40 @@ export class OpenRouter implements ModelAdapter {
         response.status === 429 || response.status >= 500,
       );
     const data: any = await response.json();
-    if (charge) await ledger!.settle(charge, data.usage);
-    const m = data.choices?.[0]?.message;
-    if (!m || (typeof m.content !== "string" && !Array.isArray(m.tool_calls)))
-      throw new ModelError("Model returned no usable answer");
+    if (charge) await ledger!.settle(charge, data?.usage);
+    const choice = data?.choices?.[0];
+    const m = choice?.message;
+    // Keep structural diagnostics only; never log response text or provider raw errors.
+    const diagnostics = {
+      provider:
+        typeof data?.provider === "string" ? data.provider.slice(0, 100) : null,
+      responseId: typeof data?.id === "string" ? data.id.slice(0, 160) : null,
+      finishReason:
+        typeof choice?.finish_reason === "string"
+          ? choice.finish_reason.slice(0, 60)
+          : null,
+      errorCode: Number.isInteger(Number(data?.error?.code))
+        ? Number(data.error.code)
+        : null,
+      hasUsage: !!data?.usage,
+    };
+    if (data?.error) {
+      const code = diagnostics.errorCode;
+      throw new ModelError(
+        "The model provider could not complete the request. Please try again shortly.",
+        code === 429 || (code !== null && code >= 500 && code <= 599),
+        diagnostics,
+      );
+    }
+    const hasText =
+      typeof m?.content === "string" && m.content.trim().length > 0;
+    const hasTools = Array.isArray(m?.tool_calls) && m.tool_calls.length > 0;
+    if (!hasText && !hasTools)
+      throw new ModelError(
+        "The model provider returned an empty response. Please try again shortly.",
+        !["length", "content_filter"].includes(choice?.finish_reason),
+        diagnostics,
+      );
     if (
       m.tool_calls &&
       !m.tool_calls.every(
