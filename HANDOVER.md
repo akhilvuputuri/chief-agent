@@ -70,3 +70,7 @@ Work on `feature/runtime-evaluations` is checkpointed, not deployed. The user re
 ## Focused response release
 
 PRs #14/#15 are merged and deployed at application revision `1a43301b6504da99a4f9c0af9dd56fa663e5fac7`. This release adds compact observations, owner-scoped observation retrieval, refreshed task/record context and natural Telegram output guidance. All 75 tests and CI passed. Health and preserved data counts passed. Read-only inspection confirms the original incident's 22 IDs can be supplied alongside its later filtered result. No paid eval or full production analysis was rerun after deferral. See [response improvements](docs/response-improvements.md). The broader migration-007 scope/finding candidate remains deferred on its separate branch.
+
+## Token efficiency and usage visibility
+
+The cost-efficiency follow-up is documented in [cost controls](docs/cost-controls.md). It adds stable prompt prefixes, same-task search reuse, lower context volume and additive usage migration 008. The user declined dollar caps: do not add one or change /continue to grant monetary budgets. The proposed cap was removed before deployment. Search/main-model usage is tracked; speech remains separate. Full eval work stays deferred.

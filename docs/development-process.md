@@ -74,3 +74,7 @@ At the user’s request, work stopped before deployment. The final live trial wa
 ## Focused follow-up after deferral
 
 The user then requested practical response optimization. Released a smaller branch without migration 007 or new scope/finding tools: compact observations, fresh inventory context, clearer retrieval-versus-analysis semantics, natural Telegram guidance and the successful-read receipt fix. Local checks and CI passed 75 tests. A read-only deployment check exposed that the latest collection could be empty; a second focused regression and PR preserve the initial inventory alongside the latest one. Final production inspection recovers the incident's original 22 records in compact context. This is operational verification, not a new live-model benchmark result. The extensive eval candidate remains checkpointed; no further paid trials were started.
+
+## Token efficiency follow-up — 8 September 2026
+
+Read-only trace analysis found 326,051 cumulative input tokens across 16 Sol calls, zero cache hits, repeated searches and untracked search-helper cost. Implemented a stable opening prompt, per-run routing session ID, smaller bounded history, owner/task-scoped one-hour search reuse and persisted usage reporting. The initially proposed $1 allocation was removed immediately after the user declined dollar caps; no monetary stopping condition or additional /continue allocation remains. Focused tests pass 78 cases, including non-blocking costs above $1. No paid eval suite was resumed. See [cost/usage design](cost-controls.md).

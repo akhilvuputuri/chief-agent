@@ -64,6 +64,7 @@ export class CustomAgent implements Agent {
               messages: input.messages,
               tools,
               reasoning: "medium",
+              sessionId: req.runId,
               signal: AbortSignal.any([
                 req.signal,
                 AbortSignal.timeout(Math.max(1, remaining)),

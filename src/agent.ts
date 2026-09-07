@@ -1,3 +1,4 @@
+import { spending, Spending } from "./spending.js";
 import { recordContext } from "./record-context.js";
 import { compactWork } from "./observations.js";
 import {
@@ -156,25 +157,28 @@ export class Assistant {
         ...JSON.parse(runtime.context),
         skillCatalogue: catalogue,
       });
-      const output = await this.agent.run({
-        runId: run,
-        capability,
-        message,
-        history,
-        memories,
-        runtime,
-        progress,
-        execution,
-        signal: controller.signal,
-        execute: (input) => this.call(capability, input),
-        refreshContext: async () => {
-          runtime.context = JSON.stringify({
-            ...JSON.parse(runtime.context),
-            work: compactWork(await work.snapshot(user)),
-            retrievedCollections: await recordContext(this.db, user, run),
-          });
-        },
-      });
+      const output = await spending.run(new Spending(this.db, user, run), () =>
+        this.agent.run({
+          runId: run,
+          capability,
+          message,
+          history,
+          memories,
+          runtime,
+          progress,
+          execution,
+          signal: controller.signal,
+          execute: (input) => this.call(capability, input),
+          refreshContext: async () => {
+            runtime.context = JSON.stringify({
+              ...JSON.parse(runtime.context),
+              work: compactWork(await work.snapshot(user)),
+              costUsage: await spending.getStore()!.summary(),
+              retrievedCollections: await recordContext(this.db, user, run),
+            });
+          },
+        }),
+      );
       if (!background)
         await this.db.query(
           "INSERT INTO conversations(user_id,history,runtime_version) VALUES($1,$2::jsonb,1) ON CONFLICT(user_id) DO UPDATE SET history=$2::jsonb,runtime_version=1,updated_at=now()",

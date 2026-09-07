@@ -1,3 +1,4 @@
+import { spending } from "./spending.js";
 import type { Config } from "./config.js";
 import { publicHttps } from "./security.js";
 export async function boundedBytes(
@@ -158,6 +159,22 @@ export class WebTools {
     private model = "",
   ) {}
   async call(operation: "web_search" | "web_read", input: string) {
+    const scope = spending.getStore();
+    if (scope && operation === "web_search") {
+      const normalized = input.trim().replace(/\s+/g, " ").toLowerCase();
+      const cached = (
+        await scope.db.query(
+          `SELECT c.result FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id
+        WHERE r.user_id=$1 AND c.operation='web_search' AND c.state='success' AND c.started_at>now()-interval '1 hour' AND COALESCE((c.result->'result'->>'cacheHit')::boolean,false)=false
+        AND (r.id=$2 OR (r.task_id IS NOT NULL AND r.task_id=(SELECT task_id FROM runtime_runs WHERE id=$2 AND user_id=$1)))
+        AND lower(trim(regexp_replace((c.arguments->>'raw')::jsonb->>'query','\\s+',' ','g')))=$3
+        ORDER BY c.started_at DESC LIMIT 1`,
+          [scope.user, scope.run, normalized],
+        )
+      ).rows[0];
+      if (cached?.result?.result)
+        return { ...cached.result.result, cacheHit: true };
+    }
     if (!this.key) {
       if (operation === "web_read") {
         const url = publicHttps(input);
@@ -186,6 +203,8 @@ export class WebTools {
       }
       if (!this.openrouterKey || !this.model)
         throw new Error("Search provider is not configured");
+      const ledger = spending.getStore();
+      const charge = await ledger?.begin("openrouter-search-exa", 0.1);
       // Isolated search request: no private profile/history or agent tools are sent.
       const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
@@ -210,6 +229,7 @@ export class WebTools {
       const data = JSON.parse(
         new TextDecoder().decode(await boundedBytes(res, 500000)),
       );
+      if (charge) await ledger!.settle(charge, data.usage);
       const citations = data.choices?.[0]?.message?.annotations
         ?.filter(
           (a: any) =>
@@ -229,6 +249,8 @@ export class WebTools {
           "Search excerpts only. Read the original page before recording exact requirements.",
       };
     }
+    const ledger = spending.getStore();
+    await ledger?.begin("tavily", 0.05); // Usage price is unavailable: retain estimate.
     const payload =
       operation === "web_search"
         ? { query: input, max_results: 5, include_raw_content: false }

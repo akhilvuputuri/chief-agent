@@ -30,6 +30,7 @@ async function fixture(
     "004_daily",
     "005_work",
     "006_runtime",
+    "008_costs",
   ])
     await pg.exec(
       await readFile(new URL("../db/" + f + ".sql", import.meta.url), "utf8"),
@@ -77,8 +78,10 @@ test("actual OpenRouter wire preserves Sol, medium reasoning and price-first cei
     messages: [{ role: "user", content: "hello" }],
     tools: [],
     reasoning: "medium",
+    sessionId: "stable-session",
     signal: new AbortController().signal,
   });
+  assert.equal(sent.session_id, "stable-session");
   assert.equal(sent.model, "openai/gpt-5.6-sol");
   assert.deepEqual(sent.reasoning, { enabled: true, effort: "medium" });
   assert.deepEqual(sent.provider, {
@@ -114,7 +117,8 @@ test("custom conversation persists model and tool records, observes real results
       if (n === 1)
         return call("memory_set", { key: "style", value: "Concise" });
       assert.equal(
-        JSON.parse(input.messages.at(-1)!.content!).result.saved,
+        JSON.parse(input.messages.findLast((m) => m.role === "tool")!.content!)
+          .result.saved,
         true,
       );
       const records = (
@@ -152,7 +156,10 @@ test("invalid identities and unauthorized operations cannot reach dispatcher", a
       n++;
       if (n === 1)
         return call("memory_set", { key: "x", value: "x", user: "victim" });
-      assert.match(input.messages.at(-1)!.content!, /INVALID_INPUT/);
+      assert.match(
+        input.messages.findLast((m) => m.role === "tool")!.content!,
+        /INVALID_INPUT/,
+      );
       return text("Could not save those arguments.");
     },
   });
@@ -565,7 +572,9 @@ test("current skills use key-only loading and historical versions require UUIDs"
   const f = await fixture({
     generate: async (input) => {
       if (++n === 1) return call("skill_read", { key: "research" });
-      const observation = JSON.parse(input.messages.at(-1)!.content!);
+      const observation = JSON.parse(
+        input.messages.findLast((m) => m.role === "tool")!.content!,
+      );
       assert.ok(observation.result.version.content.length > 50);
       return text("Research guidance loaded.");
     },
