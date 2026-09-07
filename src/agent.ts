@@ -1,3 +1,4 @@
+import { recordContext } from "./record-context.js";
 import { compactWork } from "./observations.js";
 import {
   Execution,
@@ -170,6 +171,7 @@ export class Assistant {
           runtime.context = JSON.stringify({
             ...JSON.parse(runtime.context),
             work: compactWork(await work.snapshot(user)),
+            retrievedCollections: await recordContext(this.db, user, run),
           });
         },
       });

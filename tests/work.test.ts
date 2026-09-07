@@ -595,3 +595,31 @@ test("one blocked target does not stop unrelated pending targets", async () => {
     await f.pg.close();
   }
 });
+
+test("a successful read can prove a retrieval step without claiming a write", async () => {
+  const f = await fixture();
+  try {
+    const task = await f.call("work_start", {
+      objective: "Load saved records",
+      steps: [
+        {
+          key: "load",
+          title: "Load records",
+          verification: "action",
+          expectedOperation: "job_list",
+        },
+      ],
+    });
+    const listed = await f.call("job_list");
+    const result = await f.call("work_step", {
+      id: task.result.task.id,
+      key: "load",
+      status: "done",
+      result: "Records loaded",
+      proofs: [listed.receiptId],
+    });
+    assert.equal(result.result.counts.done, 1);
+  } finally {
+    await f.pg.close();
+  }
+});

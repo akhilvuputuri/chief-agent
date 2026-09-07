@@ -62,3 +62,7 @@ The two-role acceptance task completed all five recorded steps: six preparation 
 ## Repository cleanup — 7 September 2026
 
 Removed the obsolete `services/hermes` Python adapter, unused internal service-token setting and stale setup instructions. Current security, Google, scheduling, skill and operating-model docs describe the owned runtime. Git history and explicitly historical documents retain attribution. Existing server paths, backup unit names and database migration history remain unchanged to preserve operational identity.
+
+## Deferred runtime evaluation candidate — 7 September 2026
+
+Work on `feature/runtime-evaluations` is checkpointed, not deployed. The user requested deferral. See [checkpoint and resume checklist](docs/checkpoints/runtime-evaluations.md), [candidate architecture](docs/runtime-hardening.md) and [development process](docs/development-process.md). Do not treat the branch as a validated release or rerun paid evals automatically.

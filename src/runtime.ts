@@ -71,7 +71,19 @@ export function runtimeContext(
       description:
         o.shape.operation.value === "skill_read"
           ? "Load the approved active skill or repository default using only its catalogue key."
-          : `Execute ${o.shape.operation.value}. Arguments are validated; identity comes from the authenticated session.`,
+          : ((
+              {
+                job_analyze:
+                  "Read role and profile inputs for analysis. Does not perform or save an assessment. Use the exact saved ID.",
+                observation_read:
+                  "Read a full persisted observation by observationId and character offset; results are owner-scoped.",
+                work_step:
+                  "Record a step outcome with actual proofs. Read receipts prove retrieval only; source applicability and analysis must be assessed separately.",
+                web_read:
+                  "Retrieve a public source. Returned sourceId is for source evidence; recommended records are not the requested posting.",
+              } as Record<string, string>
+            )[o.shape.operation.value] ??
+            `Execute ${o.shape.operation.value}. Arguments are validated; identity comes from the authenticated session.`),
       parameters: jsonSchema((o as z.AnyZodObject).omit({ operation: true })),
     })),
     context: JSON.stringify({
