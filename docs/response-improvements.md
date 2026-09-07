@@ -5,7 +5,7 @@ The broader durable-scope/eval candidate is checkpointed on `feature/runtime-eva
 ## Changes
 
 - Refresh the current task before each model request. A checkpoint should not remain frozen for an entire long turn.
-- Preserve a compact inventory of successfully retrieved records in current model context. IDs, titles, companies and URLs come from stored tool results for this run or its attached task. Other owners and unrelated tasks are excluded. Up to 60 records per collection are included; larger results retain a retrieval pointer.
+- Preserve a compact inventory of successfully retrieved records in current model context. IDs, titles, companies and URLs come from stored tool results for this run or its attached task. Other owners and unrelated tasks are excluded. The initial and latest collection observations are both retained so a later empty/filtered retrieval cannot erase the starting inventory. Up to 60 records per observation are included; larger results retain a retrieval pointer.
 - Shorten large observations and repeated work responses. Complete results remain in Postgres and are retrievable through owner-scoped `observation_read`. Keep source IDs visible even when page bodies are shortened.
 - Budget instructions, memories, tools and current state before selecting recent history. Preserve complete tool-call/result groups and trace omissions.
 - Explain Telegram delivery to the model: lead with useful outcomes, report meaningful changes rather than repeat the ledger, hide internal bookkeeping unless asked, and summarize confirmed Sheet changes with a link. No forced visual template or bullet count is added.

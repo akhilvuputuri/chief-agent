@@ -62,6 +62,14 @@ test("record inventory survives restart and excludes other owners and unrelated 
     assert.equal(result[0]!.records[0].title, "Exact");
     assert.ok(JSON.stringify(result).length < 5000);
     assert.equal((await recordContext(db, "b", resumed)).length, 0);
+    await db.query(
+      "INSERT INTO runtime_calls(id,run_id,call_id,operation,arguments,is_write,state,result,started_at) VALUES($1,$2,'empty','job_list','{}',false,'success',$3,now()+interval '1 second')",
+      [randomUUID(), resumed, JSON.stringify({ result: [] })],
+    );
+    const refreshed = await recordContext(db, "a", resumed);
+    assert.equal(refreshed.length, 2);
+    assert.equal(refreshed[0]!.records.length, 22);
+    assert.equal(refreshed[1]!.records.length, 0);
   } finally {
     await pg.close();
   }
