@@ -58,3 +58,7 @@ The progress and skill-schema fixes are included in this release. A two-role che
 Current skill loading uses `skill_read(key)` with no version argument. Reading an explicit private revision uses `skill_version_read(key,id)` with an owner-scoped UUID. This avoids placeholder IDs preventing repository defaults from loading.
 
 The two-role acceptance task completed all five recorded steps: six preparation findings and three shared exercises were saved, and the preparation Sheet synced with counts 22 roles / 6 findings / 3 exercises. Across the initial pass and resumed pass it used 30 model calls and 60 tool calls; the deliberately smaller first allocation exposed and preserved a budget pause. The other 20 roles were not processed.
+
+## Repository cleanup — 7 September 2026
+
+Removed the obsolete `services/hermes` Python adapter, unused internal service-token setting and stale setup instructions. Current security, Google, scheduling, skill and operating-model docs describe the owned runtime. Git history and explicitly historical documents retain attribution. Existing server paths, backup unit names and database migration history remain unchanged to preserve operational identity.

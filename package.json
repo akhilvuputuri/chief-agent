@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "A persistent, voice-enabled personal agent with conversational job-search tools",
+  "description": "A personal AI assistant with an owned TypeScript runtime, Telegram voice, memory, research and durable tasks",
   "engines": {
     "node": ">=22"
   },

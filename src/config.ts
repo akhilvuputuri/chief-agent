@@ -27,7 +27,6 @@ const schema = z.object({
   DATABASE_URL: z.string().url(),
   TELEGRAM_BOT_TOKEN: z.string().min(10),
   TELEGRAM_ALLOWED_USER_IDS: z.string().regex(/^\d+(,\d+)*$/),
-  INTERNAL_API_TOKEN: z.string().default(""),
 
   PORT: z.coerce.number().int().default(3000),
   STT_PROVIDER: z.enum(["openai", "elevenlabs", "groq"]).default("openai"),

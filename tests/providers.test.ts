@@ -6,7 +6,6 @@ const config = readConfig({
   DATABASE_URL: "postgres://x:x@localhost/x",
   TELEGRAM_BOT_TOKEN: "123:long-test-token",
   TELEGRAM_ALLOWED_USER_IDS: "123",
-  INTERNAL_API_TOKEN: "s".repeat(64),
   OPENAI_API_KEY: "test",
 });
 test("bounded download handles streams and rejects oversized or failed responses", async () => {

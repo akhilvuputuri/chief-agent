@@ -1,6 +1,6 @@
 # Conversational preparation and Sheets
 
-Postgres is authoritative. Hermes chooses the tools conversationally. The Google workbook is a one-way viewing mirror with three managed tabs: Target roles, Preparation gaps, Preparation tasks. User edits inside those tabs are overwritten on the next successful sync; extra tabs are untouched. No application submission or email sending is available.
+Postgres is authoritative. The TypeScript agent chooses tools conversationally. The Google workbook is a one-way viewing mirror with three managed tabs: Target roles, Preparation gaps, Preparation tasks. User edits inside those tabs are overwritten on the next successful sync; extra tabs are untouched. No application submission or email sending is available.
 
 ## Tools and evidence
 

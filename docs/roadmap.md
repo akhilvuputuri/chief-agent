@@ -1,14 +1,12 @@
-> Runtime update: production now uses our TypeScript loop and scheduler. Hermes-specific architecture and pass limits below describe the earlier prototype; [current architecture](architecture.md) and [execution/recovery](reliable-execution.md) take precedence. Integration-specific permission boundaries remain enforced.
-
 # Roadmap
 
 ## 0.1 — Foundation (this repository)
 
-Telegram text/voice; Hermes runtime boundary; roles, preferences and conversations in Postgres; tool events; exact-action deletion approvals; hosted search/page reading; local checks and Compose.
+Telegram text/voice; owned TypeScript runtime, durable execution checkpoints and task budgets; roles, preferences and conversations in Postgres; tool events; exact-action deletion approvals; hosted search/page reading; local checks and Compose.
 
 ## 0.2 — Reliable daily use
 
-- Durable inbox, resumable run queue, idempotent tool mutations and Telegram reply outbox. Acceptance: kill a worker after a save and recover without duplicating the role or silently losing the reply.
+- Extend the existing resumable run queue with a durable inbox, idempotent tool mutations and Telegram reply outbox. Acceptance: kill a worker after a save and recover without duplicating the role or silently losing the reply.
 - Per-user budget, queue depth and rate limits. Acceptance: request bursts remain bounded and limit messages explain recovery.
 - Summaries with provenance, paginated role listing, user memory review/edit/export/erase. Acceptance: a long conversation preserves explicitly stored facts while keeping context bounded.
 - OpenTelemetry spans, latency/token/cost metrics and safe diagnostic categories. Acceptance: locate the failing dependency without logging user text or credentials.
