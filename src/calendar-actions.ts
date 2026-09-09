@@ -95,31 +95,23 @@ export class CalendarActions {
         ? result.htmlLink
         : undefined;
     await this.db.query(
-      "UPDATE approvals SET payload=payload || $3::jsonb WHERE id=$1 AND user_id=$2",
-      [
-        approval.id,
-        approval.user_id,
-        JSON.stringify({
-          execution: "created",
-          result: { id: result.id, url },
-        }),
-      ],
-    );
-    await this.db.query(
-      "INSERT INTO tool_receipts(id,user_id,run_id,task_id,operation,status,details) VALUES($1,$2,$3,(SELECT task_id FROM work_turns WHERE run_id=$3),'calendar_create','success',$4::jsonb) ON CONFLICT(id) DO NOTHING",
+      `WITH saved AS (
+        UPDATE approvals SET payload=payload || $4::jsonb WHERE id=$1 AND user_id=$2 AND payload->>'execution'<>'created' RETURNING id
+      ), receipt AS (
+        INSERT INTO tool_receipts(id,user_id,run_id,task_id,operation,status,details)
+        SELECT $1,$2,$3,(SELECT task_id FROM work_turns WHERE run_id=$3),'calendar_create','success',$5::jsonb FROM saved
+        ON CONFLICT(id) DO NOTHING
+      ) INSERT INTO events(user_id,run_id,type,data) SELECT $2,$3,'calendar.created',$5::jsonb FROM saved`,
       [
         approval.id,
         approval.user_id,
         approval.run_id,
+        JSON.stringify({
+          execution: "created",
+          result: { id: result.id, url },
+        }),
         JSON.stringify({ id: result.id, url, approvalId: approval.id }),
       ],
-    );
-    await event(
-      this.db,
-      approval.user_id,
-      approval.run_id,
-      "calendar.created",
-      { approvalId: approval.id, eventId: result.id },
     );
     return { status: "created", url };
   }
