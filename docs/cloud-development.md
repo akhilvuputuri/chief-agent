@@ -73,3 +73,9 @@ Run `npm run doctor:cloud` at the start of a cloud task that needs to ship or in
 Do not put a broad GitHub token, Google refresh token or unrestricted SSH key in repository files to remove a blocker. A future GitHub App or explicitly reviewed migration service could extend remote operations, but neither is currently installed. This setup supports everyday cloud bug fixes and automatic code deployment; it does not claim complete parity with local account administration.
 
 Calendar's first approval-enabled release uses the [reviewed additive procedure](calendar-approval.md). Its new consent is a one-time account step; subsequent ordinary Calendar code fixes use automatic releases.
+
+## Standing direction: converge cloud and local capabilities
+
+Owner preference recorded 9 September 2026: a cloud task should increasingly be able to do the same incident investigation, trace review, regression testing, implementation and verified release work as a local task. Current limitations above describe today, not the desired end state. Close gaps during relevant development rather than repeatedly sending the owner back to the Mac.
+
+Priorities are a shared private trace inspection/export interface, reproducible incident fixtures, reliable scoped GitHub mutation/workflow access, and eventually a reviewed remote migration/operations path. Preserve account consent, explicit Calendar approval and credential boundaries. Prefer narrowly scoped services and shared scripts over giving cloud tasks root SSH or copying OAuth tokens. Verify capabilities from an actual cloud task before claiming parity; local preflight results do not prove cloud access.
