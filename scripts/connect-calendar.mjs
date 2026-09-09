@@ -1,5 +1,5 @@
 // One-time local OAuth bootstrap. Never prints credentials, codes or token responses.
-function validateSheetsScopes(scope) {
+function validateCalendarScopes(scope) {
   const got = new Set(
     String(scope)
       .split(/\s+/)
@@ -11,11 +11,11 @@ function validateSheetsScopes(scope) {
   const expected = [
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
-    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/calendar.events.owned",
   ];
   if (got.size !== 3 || expected.some((s) => !got.has(s)))
     throw new Error(
-      "Select Calendar read-only permission. Unexpected scopes rejected.",
+      "Select permission to manage events on calendars you own. Unexpected scopes rejected.",
     );
 }
 import { createServer } from "node:http";
@@ -30,7 +30,7 @@ const client = JSON.parse(await readFile(clientPath, "utf8")).installed;
 if (!client?.client_id || !client?.client_secret)
   throw new Error("Desktop OAuth client required");
 const scope =
-  "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/calendar.readonly";
+  "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/calendar.events.owned";
 const state = randomBytes(32).toString("base64url"),
   verifier = randomBytes(48).toString("base64url");
 let busy = false,
@@ -74,7 +74,7 @@ const server = createServer(async (req, res) => {
     });
     if (!response.ok) throw new Error("Token exchange failed");
     const t = await response.json();
-    validateSheetsScopes(t.scope);
+    validateCalendarScopes(t.scope);
     if (!t.refresh_token || !t.access_token)
       throw new Error(
         "Offline authorization was not returned. Restart consent.",
@@ -103,8 +103,8 @@ const server = createServer(async (req, res) => {
       }),
       { mode: 0o600, flag: "wx" },
     );
-    res.end("App-created Sheets authorization saved. You can close this tab.");
-    console.log("Read-only Calendar authorization saved successfully.");
+    res.end("Calendar authorization saved. You can close this tab.");
+    console.log("Calendar authorization saved successfully.");
   } catch (error) {
     const safeMessages = [
       "Missing file permission. Select the files-you-use-with-this-app checkbox on Google consent.",

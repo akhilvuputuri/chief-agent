@@ -58,7 +58,8 @@ export function runtimeContext(
 ) {
   const disabled = (op: string) =>
     (op.startsWith("gmail_") && !availability.gmail) ||
-    (op === "calendar_list" && !availability.calendar) ||
+    (["calendar_list", "calendar_draft"].includes(op) &&
+      !availability.calendar) ||
     (op === "sheet_sync" && !availability.preparationSheet) ||
     (op === "daily_sync" && !availability.dailySheet) ||
     (op.startsWith("web_") && !availability.web);

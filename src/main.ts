@@ -5,6 +5,7 @@ import { recoverRuntime } from "./execution.js";
 import { formatTelegram } from "./telegram-format.js";
 import { WorkWorker } from "./work-worker.js";
 import { DailyTools, DailyWorker, ScheduleParser } from "./daily.js";
+import { CalendarActions } from "./calendar-actions.js";
 import { CalendarTools } from "./calendar.js";
 import { DailySheet } from "./daily-sheet.js";
 import { SheetsTools } from "./sheets.js";
@@ -15,7 +16,7 @@ import { JobTools } from "./tools.js";
 import { WebTools } from "./providers.js";
 import { Assistant } from "./agent.js";
 import { server } from "./server.js";
-import { telegram } from "./telegram.js";
+import { telegram, sendCalendarApprovals } from "./telegram.js";
 const c = readConfig();
 const db = connect(c.DATABASE_URL);
 await db.query("SELECT 1");
@@ -62,6 +63,7 @@ const assistant = new Assistant(
       spreadsheetId: c.SHEETS_SPREADSHEET_ID,
     }),
     daily,
+    new CalendarActions(db, calendar, c.GMAIL_OWNER_USER_ID),
   ),
   {
     web: !!(c.TAVILY_API_KEY || c.OPENROUTER_API_KEY),
@@ -166,6 +168,7 @@ async function sendWorkMessage(user: string, text: string) {
       entities: part.entities,
       link_preview_options: { is_disabled: true },
     });
+  await sendCalendarApprovals(bot, db, user);
 }
 const workWorker = new WorkWorker(
   db,
@@ -215,7 +218,10 @@ for (const signal of ["SIGINT", "SIGTERM"])
   });
 await bot.init();
 const runner = runTelegram(bot, {
-  runner: { silent: true, fetch: { allowed_updates: ["message"] } },
+  runner: {
+    silent: true,
+    fetch: { allowed_updates: ["message", "callback_query"] },
+  },
   sink: { concurrency: 8 },
 });
 console.log(

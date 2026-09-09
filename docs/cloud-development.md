@@ -54,3 +54,22 @@ This supports initial failure/cost triage. If a bug requires the exact prompt, c
 ## Development process
 
 On 9 September 2026 we inspected the remote branch, CI, server and handover before adding this path. The previous process used the local Mac's operations SSH identity and manual archive/build commands. This change adds project instructions, GitHub-triggered releases, bounded remote diagnostics and a distinct restricted SSH key. The runtime model, provider settings and user data are unchanged. Validate the initial setup by observing one real GitHub release and one diagnostics workflow; document any remaining limitations rather than claiming full cloud/local parity.
+
+## Capability preflight and remaining boundaries
+
+Run `npm run doctor:cloud` at the start of a cloud task that needs to ship or investigate production. It checks Node, Git, GitHub CLI, repository read/write permission and Actions-log access without printing tokens or mutating anything. These checks describe that task's actual environment, not another desktop session. Write access does not prove workflow dispatch scope; the first required dispatch may still return a permission error.
+
+| Work                                          | Cloud path                                                           | Remaining requirement                                         |
+| --------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------- |
+| Implement and test app changes                | Repository, Node 22, mocked tests                                    | No production keys                                            |
+| Open a PR                                     | Cloud PR UI or authenticated GitHub CLI                              | Repository connection                                         |
+| Merge a passing PR                            | GitHub write-capable identity or user merges on phone                | Do not assume the CLI inherits browser login                  |
+| Deploy ordinary app code                      | Passing main → checks → release                                      | No Mac or cloud-task SSH key needed                           |
+| Inspect failures/costs                        | production-diagnostics workflow + Actions logs                       | Actions access; bounded metadata only                         |
+| Debug exact conversations                     | User supplies incident text/screenshot, or local operator inspection | Raw private content is intentionally absent from Actions      |
+| Database/Compose changes                      | Reviewed migration procedure                                         | Current restricted deploy service cannot perform these        |
+| OAuth consent, secret rotation, server repair | Account owner/operator                                               | Browser sessions and root SSH are not copied into cloud tasks |
+
+Do not put a broad GitHub token, Google refresh token or unrestricted SSH key in repository files to remove a blocker. A future GitHub App or explicitly reviewed migration service could extend remote operations, but neither is currently installed. This setup supports everyday cloud bug fixes and automatic code deployment; it does not claim complete parity with local account administration.
+
+Calendar's first approval-enabled release uses the [reviewed additive procedure](calendar-approval.md). Its new consent is a one-time account step; subsequent ordinary Calendar code fixes use automatic releases.

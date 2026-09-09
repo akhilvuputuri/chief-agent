@@ -14,7 +14,7 @@ flowchart LR
   A <--> P[(Postgres history / checkpoints / budgets)]
   D <--> P
   D --> W[Public research · Gemini Flash helper]
-  D --> R[Read-only Gmail / Calendar]
+  D --> R[Gmail reads / Calendar queries and approved creation]
   D --> S[Preparation and daily Sheets]
 ```
 
@@ -24,7 +24,7 @@ flowchart LR
 - General tasks, notes, reminders and source-selectable daily briefings.
 - Public web research and evidence-backed role preparation, including questions about unknown experience.
 - Telegram voice notes through ElevenLabs Scribe v2, with optional Flash v2.5 spoken replies.
-- Read-only Gmail and Calendar; separate preparation and daily-assistant Sheet mirrors.
+- Read-only Gmail; Calendar queries and [button-approved event creation](docs/calendar-approval.md); separate preparation and daily-assistant Sheet mirrors.
 - Durable task steps, source evidence, action receipts, execution budgets and cancellation.
 - Approval-gated role deletion and skill activation. No email sending, arbitrary shell execution or self-deployment.
 

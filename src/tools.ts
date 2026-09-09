@@ -10,6 +10,7 @@ import type { Database } from "./db.js";
 import { event } from "./db.js";
 import { action } from "./protocol.js";
 import type { WebTools } from "./providers.js";
+import type { CalendarActions } from "./calendar-actions.js";
 export class JobTools {
   constructor(
     private db: Database,
@@ -17,6 +18,7 @@ export class JobTools {
     private gmail?: Pick<GmailTools, "call">,
     private sheets?: Pick<SheetsTools, "sync">,
     private daily?: DailyTools,
+    private calendarActions?: CalendarActions,
   ) {}
   async execute(
     user: string,
@@ -78,6 +80,12 @@ export class JobTools {
     a: ReturnType<typeof action.parse>,
   ): Promise<unknown> {
     const db = this.db;
+    if (a.operation === "calendar_draft") {
+      if (!this.calendarActions)
+        throw new Error("Calendar creation is not configured");
+      const { operation, ...draft } = a;
+      return this.calendarActions.draft(user, run, draft);
+    }
     if (a.operation === "observation_read") {
       const found = (
         await db.query(
@@ -238,6 +246,11 @@ export class JobTools {
         "Analyze fit using only this evidence. Separate strengths, gaps, unknowns, and next steps. Cite the role text and profile facts. If the profile is missing, ask the user for their background. Do not invent experience or give a numeric hiring probability.",
     };
   }
+  async decideCalendar(user: string, id: string, approve: boolean) {
+    if (!this.calendarActions)
+      throw new Error("Calendar creation is not configured");
+    return this.calendarActions.decide(user, id, approve);
+  }
   async decide(user: string, id: string, approve: boolean) {
     // Lock the owner while checking expected head and consuming the approval.
     // Skill revisions and evaluations are append-only through the application.
@@ -246,6 +259,7 @@ export class JobTools {
        decision AS (
         UPDATE approvals SET status=$3 FROM owner_lock
         WHERE approvals.id=$1 AND user_id=$2 AND status='pending' AND expires_at>now()
+        AND operation IN ('job_delete','skill_activate')
         AND (operation='job_delete' OR $3='denied' OR
           (COALESCE((SELECT version_id::text FROM skill_heads WHERE user_id=$2 AND key=payload->>'key'),'')=COALESCE(payload->>'previous','')))
         RETURNING approvals.*
