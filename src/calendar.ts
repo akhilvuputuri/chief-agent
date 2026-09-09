@@ -1,3 +1,4 @@
+import { type CalendarDraft, validateDraft } from "./calendar-draft.js";
 import { boundedBytes } from "./providers.js";
 export async function googleJson(r: Response) {
   if (!r.ok) throw new Error(`Google request failed (${r.status})`);
@@ -37,6 +38,69 @@ export class CalendarTools {
     private c: GoogleConfig,
     private request: typeof fetch = fetch,
   ) {}
+  private async headers(user: string) {
+    if (!this.c.owner || user !== this.c.owner)
+      throw new Error("Calendar is not connected for this user");
+    const token = await googleToken(this.c, this.request);
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    };
+    const profile = await googleJson(
+      await this.request("https://www.googleapis.com/oauth2/v2/userinfo", {
+        headers,
+        redirect: "error",
+        signal: AbortSignal.timeout(15000),
+      }),
+    );
+    if (profile.email?.toLowerCase() !== this.c.email.toLowerCase())
+      throw new Error("Wrong Google account");
+    return headers;
+  }
+  async create(user: string, approval: string, input: CalendarDraft) {
+    const draft = validateDraft(input);
+    const headers = await this.headers(user);
+    const id = approval.replaceAll("-", "");
+    if (!/^[0-9a-f]{32}$/.test(id)) throw new Error("Invalid approval ID");
+    return googleJson(
+      await this.request(
+        "https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=none",
+        {
+          method: "POST",
+          headers,
+          redirect: "error",
+          signal: AbortSignal.timeout(20000),
+          body: JSON.stringify({
+            id,
+            summary: draft.title,
+            description: draft.description,
+            location: draft.location,
+            start: { dateTime: draft.start, timeZone: "Asia/Singapore" },
+            end: { dateTime: draft.end, timeZone: "Asia/Singapore" },
+            extendedProperties: { private: { companionApproval: approval } },
+          }),
+        },
+      ),
+    );
+  }
+  async findCreated(user: string, approval: string) {
+    if (!/^[0-9a-f-]{36}$/.test(approval))
+      throw new Error("Invalid approval ID");
+    const headers = await this.headers(user);
+    const response = await this.request(
+      "https://www.googleapis.com/calendar/v3/calendars/primary/events/" +
+        approval.replaceAll("-", ""),
+      { headers, redirect: "error", signal: AbortSignal.timeout(15000) },
+    );
+    if (response.status === 404) return null;
+    const result = await googleJson(response);
+    if (
+      result.extendedProperties?.private?.companionApproval !== approval ||
+      result.status === "cancelled"
+    )
+      throw new Error("Event identity mismatch");
+    return result;
+  }
   async list(user: string, start: string, end: string) {
     if (!this.c.owner || user !== this.c.owner)
       throw new Error("Calendar is not connected for this user");

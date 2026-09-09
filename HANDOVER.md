@@ -4,7 +4,7 @@ Updated 9 September 2026. Read [cloud development and deployment](docs/cloud-dev
 
 ## Intent and constraints
 
-Build a useful general personal assistant and an AI engineering portfolio project. Telegram text and voice are the initial interface; job preparation is one domain. The user chose our own runtime and accepts iterative conversational bugs. Protect credentials, ownership and approvals. Keep Gmail and Calendar read-only. No extra paid infrastructure. No automatic shell execution, delegation or self-deployment.
+Build a useful general personal assistant and an AI engineering portfolio project. Telegram text and voice are the initial interface; job preparation is one domain. The user chose our own runtime and accepts iterative conversational bugs. Protect credentials, ownership and approvals. Keep Gmail read-only. Calendar timed-event creation requires explicit Telegram button approval; see [Calendar release procedure](docs/calendar-approval.md). No extra paid infrastructure. No automatic shell execution, delegation or self-deployment.
 
 ## Locations
 
@@ -23,7 +23,7 @@ Secrets live only in private environment/operations files and server configurati
 - Main model: `openai/gpt-5.6-sol`, explicit medium reasoning, OpenRouter price-first, default ceilings $2/M input and $10/M output.
 - Search helper: `google/gemini-3.8-flash`.
 - Voice: ElevenLabs `scribe_v2`, `eleven_flash_v2_5`, existing stock River voice. The audio-provider boundary remains unchanged.
-- Read-only Gmail/Calendar, preparation Sheet and daily Sheet integrations are retained.
+- Read-only Gmail, Calendar queries plus approval-gated event creation, preparation Sheet and daily Sheet integrations are retained.
 - Skills: repository catalogue plus owner-approved immutable private versions, loaded on demand.
 - Telegram output: model-written prose guided by phone delivery context; existing renderer only. `/status` is the separate deterministic ledger.
 

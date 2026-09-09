@@ -1,5 +1,6 @@
 import { WorkTools, renderWork } from "./work.js";
 import { formatTelegram } from "./telegram-format.js";
+import { calendarPreview, validateDraft } from "./calendar-draft.js";
 import { Bot, InputFile } from "grammy";
 import { randomUUID } from "node:crypto";
 import type { Config } from "./config.js";
@@ -13,6 +14,53 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
   const voice = new Voice(c);
   const queue = new SerialQueue();
   const ids = new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(","));
+  bot.callbackQuery(/^cal:(yes|no):([0-9a-f-]{36})$/, async (ctx) => {
+    if (!allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids)) return;
+    const user = String(ctx.from.id);
+    await ctx.answerCallbackQuery();
+    await queue.run(user, async () => {
+      try {
+        const result = await assistant.tools.decideCalendar(
+          user,
+          ctx.match[2]!,
+          ctx.match[1] === "yes",
+        );
+        const text =
+          result.status === "created"
+            ? `Calendar event created.${result.url ? "\n" + result.url : ""}`
+            : result.status === "denied"
+              ? "Draft declined. No event was created."
+              : "The event's outcome is uncertain. I will not create it again. Click Check status to look for the existing event.";
+        await ctx.reply(text, {
+          reply_markup: {
+            inline_keyboard:
+              result.status === "uncertain"
+                ? [
+                    [
+                      {
+                        text: "Check status",
+                        callback_data: `cal:yes:${ctx.match[2]}`,
+                      },
+                    ],
+                  ]
+                : [],
+          },
+        });
+        await ctx.editMessageReplyMarkup({
+          reply_markup: { inline_keyboard: [] },
+        });
+        if (result.status === "created" || result.status === "denied")
+          await db.query(
+            "UPDATE work_tasks SET status='queued',pause_reason=NULL,next_run=now() WHERE user_id=$1 AND id IN (SELECT w.task_id FROM work_turns w JOIN approvals a ON a.run_id=w.run_id AND a.user_id=w.user_id WHERE a.id=$2 AND a.user_id=$1) AND status='paused' AND pause_reason='awaiting_approval' AND used_ms<budget_ms AND used_models<budget_models AND used_tools<budget_tools",
+            [user, ctx.match[2]],
+          );
+      } catch {
+        await ctx.reply(
+          "This calendar approval is unavailable, expired, or could not be checked. No new creation request will be retried automatically.",
+        );
+      }
+    });
+  });
   bot.on("message", async (ctx) => {
     if (!allowedChat(ctx.from?.id, ctx.chat.type, ids)) return;
     const user = String(ctx.from.id);
@@ -160,6 +208,7 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
                   });
               },
             );
+            await sendCalendarApprovals(bot, db, user);
             const formatted = formatTelegram(reply);
             for (const part of formatted)
               await ctx.reply(part.text, {
@@ -202,4 +251,37 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
     console.error(JSON.stringify({ event: "telegram.handler_failed" })),
   );
   return bot;
+}
+
+export async function sendCalendarApprovals(
+  bot: Bot,
+  db: Database,
+  user: string,
+) {
+  const rows = (
+    await db.query(
+      "SELECT id,payload FROM approvals WHERE user_id=$1 AND operation='calendar_create' AND status='pending' AND expires_at>now() AND NOT (payload ? 'telegramMessageId') ORDER BY created_at",
+      [user],
+    )
+  ).rows;
+  for (const row of rows) {
+    const message = await bot.api.sendMessage(
+      user,
+      calendarPreview(validateDraft(row.payload.draft)),
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "Approve event", callback_data: `cal:yes:${row.id}` },
+              { text: "Decline", callback_data: `cal:no:${row.id}` },
+            ],
+          ],
+        },
+      },
+    );
+    await db.query(
+      "UPDATE approvals SET payload=jsonb_set(payload,'{telegramMessageId}',$3::jsonb) WHERE id=$1 AND user_id=$2",
+      [row.id, user, JSON.stringify(message.message_id)],
+    );
+  }
 }

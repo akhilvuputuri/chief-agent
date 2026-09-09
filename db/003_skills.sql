@@ -1,6 +1,6 @@
 BEGIN;
 ALTER TABLE approvals DROP CONSTRAINT IF EXISTS approvals_operation_check;
-ALTER TABLE approvals ADD CONSTRAINT approvals_operation_check CHECK(operation IN ('job_delete','skill_activate'));
+ALTER TABLE approvals ADD CONSTRAINT approvals_operation_check CHECK(operation IN ('job_delete','skill_activate','calendar_create'));
 CREATE TABLE IF NOT EXISTS skill_versions (
  id uuid PRIMARY KEY, user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
  key text NOT NULL, content text NOT NULL, reason text NOT NULL,

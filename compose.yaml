@@ -44,6 +44,8 @@ services:
         "/migrations/006_runtime.sql",
         "-f",
         "/migrations/008_costs.sql",
+        "-f",
+        "/migrations/009_calendar_approval.sql",
       ]
     depends_on:
       postgres: { condition: service_healthy }

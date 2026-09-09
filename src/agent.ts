@@ -156,6 +156,12 @@ export class Assistant {
       runtime.context = JSON.stringify({
         ...JSON.parse(runtime.context),
         skillCatalogue: catalogue,
+        calendarApprovals: (
+          await this.db.query(
+            "SELECT id,status,expires_at,payload->'draft' AS draft,payload->>'execution' AS execution,payload->'result' AS result FROM approvals WHERE user_id=$1 AND operation='calendar_create' ORDER BY created_at DESC LIMIT 10",
+            [user],
+          )
+        ).rows,
       });
       const output = await spending.run(new Spending(this.db, user, run), () =>
         this.agent.run({
@@ -195,10 +201,12 @@ export class Assistant {
         )
       ).rows;
       // Render the authoritative preview ourselves; never rely on model wording.
-      const notices = approvals.map(
-        (a) =>
-          `Approval required — saved action\n${a.operation === "skill_activate" ? a.payload.preview + "\nAgent evaluation: " + a.payload.evaluation : `Delete role ${a.payload.id}: ${JSON.stringify(a.payload.title)} at ${JSON.stringify(a.payload.company)}`}\nWithin 15 minutes, send /approve ${a.id} or /deny ${a.id}`,
-      );
+      const notices = approvals
+        .filter((a) => a.operation !== "calendar_create")
+        .map(
+          (a) =>
+            `Approval required — saved action\n${a.operation === "skill_activate" ? a.payload.preview + "\nAgent evaluation: " + a.payload.evaluation : `Delete role ${a.payload.id}: ${JSON.stringify(a.payload.title)} at ${JSON.stringify(a.payload.company)}`}\nWithin 15 minutes, send /approve ${a.id} or /deny ${a.id}`,
+        );
       const linked = (
         await this.db.query("SELECT task_id FROM work_turns WHERE run_id=$1", [
           run,

@@ -23,7 +23,8 @@
     "pair:finish": "node scripts/pair-telegram.mjs --finish",
     "smoke:runtime": "tsx scripts/smoke-custom.ts",
     "eval": "tsx evals/run.ts",
-    "eval:compare": "tsx evals/compare.ts"
+    "eval:compare": "tsx evals/compare.ts",
+    "doctor:cloud": "node scripts/cloud-doctor.mjs"
   },
   "dependencies": {
     "@grammyjs/runner": "^2.0.3",
