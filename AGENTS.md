@@ -32,3 +32,7 @@ A push/merge to `main` triggers `checks`, then `release`. A pushed feature branc
 Run `npm run doctor:cloud` early when a task needs GitHub or production access; report missing capabilities rather than discovering them only after implementation.
 
 For runtime failures, use the manual `production-diagnostics` GitHub workflow if your GitHub access permits it. This returns bounded metadata rather than raw conversations. Never invent production findings when access is unavailable. Local browser sessions and SSH credentials are not inherited by cloud tasks.
+
+## Development journal
+
+For meaningful runtime changes, incidents or experiments, add or update docs/journey using its template. Link evidence and PRs, distinguish hypotheses from measurements, and record deployment status and unresolved limitations. Never copy private production traces or credentials into journal entries.

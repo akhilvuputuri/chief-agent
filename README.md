@@ -102,3 +102,7 @@ See [evaluation guide](docs/evals/guide.md) and [development process](docs/devel
 ## Developing from Codex cloud
 
 Use the connected `akhilvuputuri/companion-agent` environment and read [AGENTS.md](AGENTS.md). The [cloud development guide](docs/cloud-development.md) covers testing, PRs, automatic production releases after passing main checks, bounded diagnostics and operational limits. Live credentials remain on DigitalOcean.
+
+## Engineering journey
+
+The [development journal](docs/journey/README.md) records runtime decisions, production incidents, cost investigation, experiments and remaining evidence gaps. Start with [token cost](docs/journey/03-token-cost.md) for a concrete example. [Claude cloud setup](docs/claude-cloud.md) describes using another coding client with the same repository and release pipeline.
