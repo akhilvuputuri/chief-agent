@@ -1,0 +1,23 @@
+name: production-diagnostics
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  inspect:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Read bounded production diagnostics
+        env:
+          DEPLOY_KEY: ${{ secrets.COMPANION_DEPLOY_KEY }}
+          KNOWN_HOSTS: ${{ secrets.COMPANION_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_KEY"
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/companion
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/companion ~/.ssh/known_hosts
+          trap 'rm -f ~/.ssh/companion' EXIT
+          ssh -i ~/.ssh/companion -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes root@188.166.246.143 diagnose

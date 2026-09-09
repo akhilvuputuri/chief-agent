@@ -98,3 +98,7 @@ The initial prototype used [Nous Research Hermes Agent](https://github.com/NousR
 ## Evaluations and development
 
 See [evaluation guide](docs/evals/guide.md) and [development process](docs/development-process.md). `npm run eval` is an offline diagnostic; `npm run eval -- --live` runs bounded paid model scenarios in isolated synthetic databases. Production runtime fixes are evaluated separately from the tooling.
+
+## Developing from Codex cloud
+
+Use the connected `akhilvuputuri/companion-agent` environment and read [AGENTS.md](AGENTS.md). The [cloud development guide](docs/cloud-development.md) covers testing, PRs, automatic production releases after passing main checks, bounded diagnostics and operational limits. Live credentials remain on DigitalOcean.

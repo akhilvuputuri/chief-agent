@@ -1,6 +1,6 @@
 # Personal-agent handover
 
-Updated 6 September 2026. The owned TypeScript runtime is deployed on the existing DigitalOcean server. PR #7 introduced the cutover (`f1664bb`); consult server `RELEASE` for subsequent revisions. The gateway and Postgres are healthy, and the Hermes container has been removed without deleting its volume.
+Updated 9 September 2026. Read [cloud development and deployment](docs/cloud-development.md) and [agent instructions](AGENTS.md) for current operating procedures. The owned TypeScript runtime is deployed on the existing DigitalOcean server. PR #7 introduced the cutover (`f1664bb`); consult server `RELEASE` for subsequent revisions. The gateway and Postgres are healthy, and the Hermes container has been removed without deleting its volume.
 
 ## Intent and constraints
 
@@ -76,3 +76,9 @@ PRs #14/#15 are merged and deployed at application revision `1a43301b6504da99a4f
 The cost-efficiency follow-up is documented in [cost controls](docs/cost-controls.md). It adds stable prompt prefixes, same-task search reuse, lower context volume and additive usage migration 008. The user declined dollar caps: do not add one or change /continue to grant monetary budgets. The proposed cap was removed before deployment. Search/main-model usage is tracked; speech remains separate. Full eval work stays deferred.
 
 Cost-efficiency release verified: PR #16, application `a31813bd167e3916c1914966a386a4a480f54320`. Health and migration 008 passed; 22 jobs preserved, paused work not resumed, and no dollar-cap schema present. 78 tests and CI passed. No paid eval was run.
+
+## Current operating snapshot — 9 September 2026
+
+The last manually deployed application fix is `0ef13bc` (empty model response recovery). Nine exact LinkedIn saved postings were imported on 8 September, making 31 roles, all saved/unapplied; the preparation Sheet was synced. Existing assessments were retained. See [model response recovery](docs/model-response-recovery.md). Earlier 22-role counts above are historical.
+
+Cloud development uses the connected GitHub environment. Main changes now have a release workflow and a manual bounded diagnostics workflow; see [cloud development](docs/cloud-development.md) for setup verification and limits. Deployment authority belongs to GitHub Actions, not the personal-assistant runtime: this is distinct from the deferred runtime self-deployment capability. Model, speech and Google credentials remain on the server. Automated releases refuse database/Compose changes and active runtime work. Cloud tasks must verify release results before claiming the bot is live.
