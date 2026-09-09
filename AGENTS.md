@@ -23,6 +23,8 @@ Node 22. `npm ci`, `npm run check`, `npm run build`, `npm run format:check`. Tes
 
 ## Cloud work and release
 
+Cloud/local capability parity is a standing owner priority. Cloud tasks should progressively gain the ability to inspect useful private traces, reproduce incidents, implement and evaluate fixes, and ship verified releases without the Mac. Treat current access gaps as engineering work to close where practical, not permanent product restrictions. Prefer shared tooling usable from both environments, scoped authenticated access and explicit release controls; do not copy unrestricted production credentials into cloud tasks. When proposing work, identify relevant remaining gaps and opportunities to close them.
+
 The user permits merging passing ordinary changes and deploying them. Keep changes reviewable in a PR, wait for checks, and merge when the requested task is complete. Never merge the deferred `feature/runtime-evaluations` branch incidentally. If GitHub mutation credentials are unavailable, open the PR through the cloud task UI and clearly report that it needs merging.
 
 A push/merge to `main` triggers `checks`, then `release`. A pushed feature branch is NOT live. Watch the release result and report deployed SHA, health, tests and limitations. Production releases refuse active runtime work and database/Compose changes. Follow `docs/cloud-development.md` for these cases; never bypass the restriction or claim deployment succeeded from CI alone.
