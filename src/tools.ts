@@ -83,6 +83,8 @@ export class JobTools {
     if (
       a.operation === "research_delegate" ||
       a.operation === "research_report" ||
+      a.operation === "media_delegate" ||
+      a.operation === "media_report" ||
       a.operation === "job_alignment_start" ||
       a.operation === "job_alignment_resume" ||
       a.operation === "job_alignment_read" ||

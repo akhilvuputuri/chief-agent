@@ -21,6 +21,8 @@ export const readOperations = new Set([
   "finish_turn",
   "research_delegate",
   "research_report",
+  "media_delegate",
+  "media_report",
   "job_alignment_start",
   "job_alignment_resume",
   "job_alignment_read",

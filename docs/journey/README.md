@@ -13,6 +13,7 @@ A chronological account of building and operating a personal assistant, with evi
 | [05 — Development from anywhere](05-cloud-development.md)      | How can a coding task ship changes without a developer's laptop?                     | Release/metadata path released; parity work ongoing     |
 | [06 — Observable memory](06-observable-memory.md)              | Which conversation created a memory, and when was it supplied to a model?            | Implementation in progress; not a release claim         |
 | [07 — Reading photos and PDFs](07-attachments.md)              | How should a text-only Telegram agent accept files without bloating cost or history? | Released; production quality unmeasured                 |
+| [11 — Media specialist](11-media-specialist.md)                | How should file reading get focused context without retaining raw bytes?             | Implemented; release pending review                     |
 
 ## Keep the record useful
 

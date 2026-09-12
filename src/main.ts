@@ -50,6 +50,17 @@ const assistant = new Assistant(
       c.OPENROUTER_MAX_INPUT_PRICE,
       c.OPENROUTER_MAX_OUTPUT_PRICE,
     ),
+    // Optional task-specific vision/document model; the main model is used when unset.
+    c.MEDIA_MODEL
+      ? {
+          media: new OpenRouter(
+            c.OPENROUTER_API_KEY,
+            c.MEDIA_MODEL,
+            c.OPENROUTER_MAX_INPUT_PRICE,
+            c.OPENROUTER_MAX_OUTPUT_PRICE,
+          ),
+        }
+      : {},
   ),
   new JobTools(
     db,

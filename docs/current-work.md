@@ -39,3 +39,7 @@ Implemented on `feature/research-specialist`: isolated public research, exact ta
 ## Foundation review fixes
 
 Independent Astra review of v0.2.0 found delegated search-cache isolation from its parent and a restart gap in child elapsed-time accounting. `fix/specialist-architecture-review` addresses both with focused tests. See [review journal](journey/10-foundation-review.md). Require Astra re-review of the fixed head and successful deployment before treating the fixes as live; incorporate them into dependent MR #30 before its final review/release.
+
+## Media specialist — issue #27, phase 2
+
+`feature/media-specialist` routes image reading and targeted document questions through the read-only specialist runner: per-turn attachment IDs, `media_delegate`/`media_report`, stored image extractions, content-hash result reuse, image-free traces and an optional `MEDIA_MODEL`. See [media processing](media-specialist.md) and [journey 11](journey/11-media-specialist.md). No migration. Requires independent review of the exact head, passing checks and a verified release before it is live; then check one real photo and one PDF question in Telegram. OCR for scanned PDFs remains open.

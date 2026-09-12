@@ -1,6 +1,7 @@
 import { runAlignment } from "./alignment.js";
 import { randomUUID } from "node:crypto";
 import { delegateResearch } from "./research.js";
+import { delegateMedia } from "./media.js";
 import { projectObservation } from "./observations.js";
 import { action } from "./protocol.js";
 import type { AgentRequest, AgentResponse } from "./protocol.js";
@@ -10,6 +11,7 @@ import {
   ModelError,
   type ModelAdapter,
   type Message,
+  type ModelMessage,
   type ToolDefinition,
 } from "./model.js";
 import { Stop, readOperations, type StopReason } from "./execution.js";
@@ -31,9 +33,36 @@ const finishTool: ToolDefinition = {
     additionalProperties: false,
   },
 };
+/** Image parts are replaced before tracing so model-input records never retain raw bytes. */
+export function omitImages(messages: ModelMessage[]) {
+  return messages.map((m) =>
+    Array.isArray(m.content)
+      ? {
+          ...m,
+          content: m.content.map((part) =>
+            part.type === "image_url"
+              ? {
+                  type: "image_url" as const,
+                  image_url: {
+                    url: `[image omitted from trace: ${part.image_url.url.length} characters]`,
+                  },
+                }
+              : part,
+          ),
+        }
+      : m,
+  );
+}
 export class CustomAgent implements Agent {
-  constructor(private model: ModelAdapter) {}
+  constructor(
+    private model: ModelAdapter,
+    private specialists: { media?: ModelAdapter } = {},
+  ) {}
   async run(req: AgentRequest): Promise<AgentResponse> {
+    const model =
+      req.specialist === "media" && this.specialists.media
+        ? this.specialists.media
+        : this.model;
     const execution = req.execution;
     if (!execution || !req.execute || !req.signal)
       throw new Error("Owner-scoped execution is required");
@@ -57,7 +86,7 @@ export class CustomAgent implements Agent {
           try {
             await execution.trace("model.started", {
               invocationId,
-              model: this.model.model ?? null,
+              model: model.model ?? null,
               attempt,
             });
             await req.refreshContext?.();
@@ -70,12 +99,12 @@ export class CustomAgent implements Agent {
               await execution.trace("research.model_input", {
                 version: 1,
                 invocationId,
-                messages: input.messages,
+                messages: omitImages(input.messages),
                 tools,
                 reasoning: "medium",
                 omitted: input.omitted,
               });
-            generation = await this.model.generate({
+            generation = await model.generate({
               messages: input.messages,
               tools,
               reasoning: "medium",
@@ -90,7 +119,7 @@ export class CustomAgent implements Agent {
             await execution.checkpoint(messages);
             await execution.trace("model.completed", {
               invocationId,
-              model: generation.model ?? this.model.model,
+              model: generation.model ?? model.model,
               provider: generation.provider,
               usage: generation.usage ?? null,
               latencyMs: Date.now() - start,
@@ -177,16 +206,24 @@ export class CustomAgent implements Agent {
                       ? await delegateResearch(req, input, (child) =>
                           this.run(child),
                         )
-                      : [
-                            "job_alignment_start",
-                            "job_alignment_resume",
-                            "job_alignment_read",
-                          ].includes(op)
-                        ? await runAlignment(req, input, (child) =>
+                      : op === "media_delegate"
+                        ? await delegateMedia(req, input, (child) =>
                             this.run(child),
                           )
-                        : await req.execute(input);
-                  if (op === "research_report" || op === "job_alignment_report")
+                        : [
+                              "job_alignment_start",
+                              "job_alignment_resume",
+                              "job_alignment_read",
+                            ].includes(op)
+                          ? await runAlignment(req, input, (child) =>
+                              this.run(child),
+                            )
+                          : await req.execute(input);
+                  if (
+                    op === "research_report" ||
+                    op === "media_report" ||
+                    op === "job_alignment_report"
+                  )
                     finish = {
                       reply: JSON.stringify(result),
                       reason: "answer",
@@ -197,6 +234,7 @@ export class CustomAgent implements Agent {
                   if (
                     !readOperations.has(op) ||
                     op === "research_delegate" ||
+                    op === "media_delegate" ||
                     op.startsWith("job_alignment_") ||
                     attempt >= 2 ||
                     !(
