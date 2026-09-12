@@ -36,3 +36,7 @@ References used during analysis:
 ## Release
 
 PR #16 passed CI and merged. Application revision `a31813bd167e3916c1914966a386a4a480f54320` is deployed on the existing server. Health passed; the usage table exists, all 22 jobs remain, and the existing task remains paused. Verified that no `budget_dollars` column exists. No paid test request or full analysis was triggered. Cache-hit rate and cost improvement will be measured from subsequent ordinary usage.
+
+## Context allowance follow-up — 13 September 2026
+
+The 48,000-character allowance is unchanged, but it is now a history budget rather than a turn precondition. Tool schemas and runtime state have grown to roughly 30,000 characters before any message, so a user turn carrying a document excerpt could push the fixed part over the allowance; the guard then threw and the user saw a generic execution error (production run on 12 September, 18:46 UTC, failed 36 ms after its first model allocation). The request now proceeds with history dropped, records a `context.over_budget` event with the measured size, and refuses only above a 120,000-character hard limit. The inline PDF excerpt shrank from 6,000 to 4,000 characters because the media specialist and `source_read` cover the rest. Compacting tool descriptions is the next lever if `context.over_budget` events appear regularly.

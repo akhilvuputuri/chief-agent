@@ -9,7 +9,7 @@ import {
   limits,
   validFilePath,
 } from "../src/attachments.js";
-import { context } from "../src/context.js";
+import { context, contextBudget, contextHardLimit } from "../src/context.js";
 import { IMAGE_TOKEN_ALLOWANCE, estimateInputBytes } from "../src/model.js";
 import type { Message } from "../src/model.js";
 /** A minimal valid PDF with one Helvetica text object per page; enough for text extraction tests. */
@@ -249,4 +249,42 @@ test("only the media specialist's model input carries image parts, and costs are
     [],
   );
   assert.equal(plain.messages.find((m) => m.role === "user")!.content, "hello");
+});
+
+test("an oversized fixed prompt drops history instead of failing the turn, up to a hard limit", () => {
+  const history: Message[] = [
+    { role: "user", content: "earlier" },
+    { role: "assistant", content: "ok" },
+  ];
+  const base = { runId: "r", capability: "c", history, memories: [] };
+  const normal = context({ ...base, message: "hello" }, history);
+  assert.equal(normal.overBudget, false);
+  assert.equal(normal.omitted, 0);
+  // Runtime state large enough to consume the whole allowance on its own.
+  const heavy = context(
+    {
+      ...base,
+      message: "when is this for?",
+      runtime: { context: "x".repeat(contextBudget), tools: [] },
+    },
+    history,
+  );
+  assert.equal(heavy.overBudget, true);
+  assert.ok(heavy.fixedSize > contextBudget);
+  assert.equal(heavy.omitted, 2);
+  const users = heavy.messages.filter((m) => m.role === "user");
+  assert.equal(users.length, 1);
+  assert.equal(users[0]!.content, "when is this for?");
+  assert.throws(
+    () =>
+      context(
+        {
+          ...base,
+          message: "hello",
+          runtime: { context: "x".repeat(contextHardLimit), tools: [] },
+        },
+        history,
+      ),
+    /hard request limit/,
+  );
 });

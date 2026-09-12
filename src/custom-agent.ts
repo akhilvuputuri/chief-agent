@@ -8,7 +8,7 @@ import { projectObservation } from "./observations.js";
 import { action } from "./protocol.js";
 import type { AgentRequest, AgentResponse } from "./protocol.js";
 import type { Agent } from "./agent.js";
-import { context } from "./context.js";
+import { context, contextBudget } from "./context.js";
 import {
   ModelError,
   type ModelAdapter,
@@ -86,6 +86,11 @@ export class CustomAgent implements Agent {
             if (input.omitted)
               await execution.trace("context.omitted", {
                 messages: input.omitted,
+              });
+            if (input.overBudget)
+              await execution.trace("context.over_budget", {
+                fixedSize: input.fixedSize,
+                budget: contextBudget,
               });
             if (req.specialist)
               await execution.trace("research.model_input", {

@@ -57,6 +57,10 @@ export function boundHistory(
   const messages = selected.flat();
   return { messages, omitted: history.length - messages.length };
 }
+/** Total character allowance for one request; history gets whatever the fixed part leaves. */
+export const contextBudget = 48000;
+/** Beyond this the request is refused rather than sent; a turn should never legitimately reach it. */
+export const contextHardLimit = 120000;
 export function context(request: AgentRequest, messages: Message[]) {
   const fixedSize =
     (request.systemInstructions ?? instructions).length +
@@ -65,11 +69,17 @@ export function context(request: AgentRequest, messages: Message[]) {
     JSON.stringify(request.runtime?.tools ?? []).length +
     reqSize(request.message) +
     2000;
-  if (fixedSize >= 48000)
+  if (fixedSize >= contextHardLimit)
     throw new Error(
-      "Current context exceeds the request budget; narrow the active batch",
+      "Current context exceeds the hard request limit; narrow the active batch",
     );
-  const bounded = boundHistory(messages, 20, 48000 - fixedSize);
+  // A large fixed part (schemas, state, an attachment excerpt) drops history instead of failing the turn.
+  const overBudget = fixedSize >= contextBudget;
+  const bounded = boundHistory(
+    messages,
+    20,
+    Math.max(0, contextBudget - fixedSize),
+  );
   if (
     !bounded.messages.some(
       (m) => m.role === "user" && m.content === request.message,
@@ -98,6 +108,8 @@ export function context(request: AgentRequest, messages: Message[]) {
   }
   return {
     omitted: bounded.omitted,
+    overBudget,
+    fixedSize,
     messages: [
       {
         role: "system",
