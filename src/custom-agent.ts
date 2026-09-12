@@ -194,12 +194,13 @@ export class CustomAgent implements Agent {
                       ? await delegateResearch(req, input, (child) =>
                           this.run(child),
                         )
-                      : op === "media_delegate"
-                        ? await delegateMedia(
-                            req,
-                            input,
-                            (child) => this.run(child),
-                            (this.specialists.media ?? this.model).model ?? "",
+                      : [
+                            "job_alignment_start",
+                            "job_alignment_resume",
+                            "job_alignment_read",
+                          ].includes(op)
+                        ? await runAlignment(req, input, (child) =>
+                            this.run(child),
                           )
                         : op === "media_delegate"
                           ? await delegateMedia(
