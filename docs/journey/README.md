@@ -12,7 +12,7 @@ A chronological account of building and operating a personal assistant, with evi
 | [04 — Empty response recovery](04-empty-responses.md)          | What should happen when a provider returns no usable answer?                         | Released                                                |
 | [05 — Development from anywhere](05-cloud-development.md)      | How can a coding task ship changes without a developer's laptop?                     | Release/metadata path released; parity work ongoing     |
 | [06 — Observable memory](06-observable-memory.md)              | Which conversation created a memory, and when was it supplied to a model?            | Implementation in progress; not a release claim         |
-| [07 — Reading photos and PDFs](07-attachments.md)              | How should a text-only Telegram agent accept files without bloating cost or history? | Implemented and tested; release pending PR              |
+| [07 — Reading photos and PDFs](07-attachments.md)              | How should a text-only Telegram agent accept files without bloating cost or history? | Released; production quality unmeasured                 |
 
 ## Keep the record useful
 
