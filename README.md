@@ -120,3 +120,7 @@ The [development journal](docs/journey/README.md) records runtime decisions, pro
 ## Research specialist
 
 The main agent can delegate bounded public research to an isolated, read-only specialist. It returns exact-target, source-linked findings; the main agent remains responsible for synthesis and authorized changes. Runs share execution limits and retain linked model/tool traces and separate charges. See [architecture, limits and inspection](docs/research-specialist.md). Media processing remains in the main runtime; a media specialist is deferred.
+
+## Job alignment
+
+Ask about selected roles or all saved roles. The [job-alignment specialist](docs/job-alignment.md) assesses requirements, established experience, qualified interview evidence and minimum useful preparation. It retains the exact requested scope across internal batches, keeps unknowns explicit, and returns detailed persisted reports for the main agent to synthesize and save using existing tools. General research remains available for other tasks.

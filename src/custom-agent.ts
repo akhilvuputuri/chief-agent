@@ -1,3 +1,4 @@
+import { runAlignment } from "./alignment.js";
 import { randomUUID } from "node:crypto";
 import { delegateResearch } from "./research.js";
 import { projectObservation } from "./observations.js";
@@ -176,8 +177,16 @@ export class CustomAgent implements Agent {
                       ? await delegateResearch(req, input, (child) =>
                           this.run(child),
                         )
-                      : await req.execute(input);
-                  if (op === "research_report")
+                      : [
+                            "job_alignment_start",
+                            "job_alignment_resume",
+                            "job_alignment_read",
+                          ].includes(op)
+                        ? await runAlignment(req, input, (child) =>
+                            this.run(child),
+                          )
+                        : await req.execute(input);
+                  if (op === "research_report" || op === "job_alignment_report")
                     finish = {
                       reply: JSON.stringify(result),
                       reason: "answer",
@@ -188,6 +197,7 @@ export class CustomAgent implements Agent {
                   if (
                     !readOperations.has(op) ||
                     op === "research_delegate" ||
+                    op.startsWith("job_alignment_") ||
                     attempt >= 2 ||
                     !(
                       error instanceof TypeError ||

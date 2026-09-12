@@ -1,3 +1,10 @@
+import {
+  alignmentStart,
+  alignmentResume,
+  alignmentRead,
+  alignmentInput,
+  alignmentReport,
+} from "./alignment-schema.js";
 import { researchAssignment, researchReport } from "./research-schema.js";
 import { calendarDraft } from "./calendar-draft.js";
 import { z } from "zod";
@@ -40,6 +47,11 @@ const workSteps = z
     "Unique step keys required",
   );
 export const action = z.discriminatedUnion("operation", [
+  alignmentStart,
+  alignmentResume,
+  alignmentRead,
+  alignmentInput,
+  alignmentReport,
   researchAssignment,
   researchReport,
   calendarDraft.extend({ operation: z.literal("calendar_draft") }).strict(),
@@ -271,7 +283,7 @@ export interface AgentRequest {
   history: unknown[];
   memories: { key: string; value: string }[];
   runtime?: { context: string; tools?: import("./model.js").ToolDefinition[] };
-  specialist?: "research";
+  specialist?: "research" | "job_alignment";
   systemInstructions?: string;
   executeResearch?: (run: string, input: unknown) => Promise<unknown>;
   refreshContext?: () => Promise<void>;
