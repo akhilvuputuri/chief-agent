@@ -481,7 +481,7 @@ test("an actual approval stops with awaiting_approval and retains authoritative 
         : text("Please approve deleting that role."),
   });
   try {
-    await f.db.query("INSERT INTO users(id) VALUES('owner')");
+    await f.db.query("INSERT INTO users(id) VALUES('owner'),('other')");
     id = randomUUID();
     await f.db.query(
       "INSERT INTO jobs(id,user_id,title,company) VALUES($1,'owner','Test role','Test company')",
@@ -502,7 +502,7 @@ test("an actual approval stops with awaiting_approval and retains authoritative 
 test("unrelated conversation does not spend or restart a paused task", async () => {
   const f = await fixture({ generate: async () => text("Hello!") });
   try {
-    await f.db.query("INSERT INTO users(id) VALUES('owner')");
+    await f.db.query("INSERT INTO users(id) VALUES('owner'),('other')");
     await f.db.query(
       "INSERT INTO work_tasks(id,user_id,objective,request,status,pause_reason,used_models,budget_models) VALUES($1,'owner','old','old','paused','runtime_cutover',40,40)",
       [randomUUID()],
@@ -747,7 +747,7 @@ test("finish envelope is validated and persisted before delivery, while progress
         await f.db.query(
           "SELECT history FROM conversations WHERE user_id='owner'",
         )
-      ).rows[0].history.at(-1).content,
+      ).rows[0].history.at(-2).content,
       envelope.reply,
     );
   } finally {
@@ -784,6 +784,112 @@ test("invalid finish envelope is an observed tool failure, never dispatched or a
       await f.db.query("SELECT state FROM runtime_calls ORDER BY started_at")
     ).rows.map((r) => r.state);
     assert.deepEqual(states, ["failed", "success"]);
+  } finally {
+    await f.pg.close();
+  }
+});
+test("follow-up retrieves the exact saved answer after its large tool group leaves bounded context", async () => {
+  let turn = 0;
+  let observation: string | undefined;
+  let retrieved = "";
+  let omitted = false;
+  const sections = [
+    { title: "First", body: "A".repeat(10000) + "FIRST_DETAIL_MARKER" },
+    { title: "Second", body: "B".repeat(10000) + "SECOND_DETAIL_MARKER" },
+  ];
+  const f = await fixture({
+    generate: async (input) => {
+      if (!turn++)
+        return call("finish_turn", {
+          reason: "answer",
+          reply: "Both detailed sections are ready.",
+          sections,
+        });
+      const messages = JSON.stringify(input.messages);
+      if (!observation) {
+        assert.doesNotMatch(
+          messages,
+          /FIRST_DETAIL_MARKER|SECOND_DETAIL_MARKER/,
+        );
+        omitted = true;
+        observation =
+          /Saved answer details: observationId=([0-9a-f-]{36})/.exec(
+            messages,
+          )?.[1];
+        assert.ok(observation, "compact retrieval reference survives");
+        return call("observation_read", { id: observation, offset: 0 });
+      }
+      const result = JSON.parse(
+        String(input.messages.findLast((m) => m.role === "tool")!.content),
+      ).result;
+      retrieved += result.content;
+      if (result.nextOffset !== null)
+        return call("observation_read", {
+          id: observation,
+          offset: result.nextOffset,
+        });
+      assert.deepEqual(JSON.parse(retrieved).answer.sections, sections);
+      return text("Recovered both original details.");
+    },
+  });
+  try {
+    await f.db.query("INSERT INTO users(id) VALUES('owner'),('other')");
+    await f.db.query(
+      "INSERT INTO memories(user_id,key,value) VALUES('owner','context',$1),('owner','background',$1)",
+      ["known ".repeat(500)],
+    );
+    await f.assistant.respond("owner", "Give the details");
+    assert.equal(
+      await f.assistant.respond("owner", "What did the second section say?"),
+      "Recovered both original details.",
+    );
+    assert.ok(omitted);
+    await assert.rejects(
+      () =>
+        f.assistant.tools.execute("other", randomUUID(), {
+          operation: "observation_read",
+          id: observation,
+          offset: 0,
+        }),
+      /Observation not found/,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+test("a finish result that fails persistence is not returned as a successful envelope", async () => {
+  let calls = 0;
+  const f = await fixture({
+    generate: async () =>
+      call("finish_turn", {
+        reason: "answer",
+        reply: calls++ ? "Saved answer" : "Unrecorded answer",
+        sections: [{ title: "Details", body: "Details" }],
+      }),
+  });
+  const query = f.db.query.bind(f.db);
+  let fail = true;
+  f.db.query = async (sql, values) => {
+    if (
+      fail &&
+      sql.startsWith("UPDATE runtime_calls SET result=") &&
+      values?.[2] === "success"
+    ) {
+      fail = false;
+      throw new Error("Synthetic persistence failure");
+    }
+    return query(sql, values);
+  };
+  try {
+    assert.equal(await f.assistant.respond("owner", "Answer"), "Saved answer");
+    const rows = (
+      await query("SELECT state,result FROM runtime_calls ORDER BY started_at")
+    ).rows;
+    assert.deepEqual(
+      rows.map((r) => r.state),
+      ["failed", "success"],
+    );
+    assert.equal(rows[1].result.answer.reply, "Saved answer");
   } finally {
     await f.pg.close();
   }

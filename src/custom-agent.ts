@@ -126,9 +126,11 @@ export class CustomAgent implements Agent {
           break;
         }
         let finish: (Answer & { reason: StopReason }) | undefined;
+        let finishObservation: string | undefined;
         for (const call of calls) {
           const op = call.function.name;
           let result: unknown;
+          let candidate: typeof finish;
           const start = Date.now();
           if (req.signal.aborted) throw new Stop("cancelled");
           if (op.startsWith("work_") && op !== "work_status")
@@ -148,8 +150,9 @@ export class CustomAgent implements Agent {
             if (!enabled.has(op)) throw new Error("Operation unavailable");
             const args = JSON.parse(call.function.arguments);
             if (op === "finish_turn") {
-              finish = finishSchema.parse(args);
-              result = { recorded: true };
+              candidate = finishSchema.parse(args);
+              const { reason: _reason, ...envelope } = candidate;
+              result = { recorded: true, answer: envelope };
             } else {
               if (Object.hasOwn(args, "operation"))
                 throw new Error("Operation must come from the tool name");
@@ -172,7 +175,7 @@ export class CustomAgent implements Agent {
                           )
                         : await req.execute(input);
                   if (op === "research_report" || op === "job_alignment_report")
-                    finish = {
+                    candidate = {
                       reply: JSON.stringify(result),
                       reason: "answer",
                     };
@@ -197,6 +200,10 @@ export class CustomAgent implements Agent {
               }
             }
             await execution.endCall(journal, result);
+            if (candidate) {
+              finish = candidate;
+              finishObservation = op === "finish_turn" ? journal : undefined;
+            }
           } catch (error) {
             if (error instanceof Stop) throw error;
             result = { error: toolError(error) };
@@ -233,6 +240,20 @@ export class CustomAgent implements Agent {
           reply = finish.reply;
           reason = finish.reason;
           messages.push({ role: "assistant", content: reply });
+          if (
+            finishObservation &&
+            (finish.sections?.length ||
+              finish.records?.length ||
+              finish.sources?.length ||
+              finish.numbers?.length ||
+              reply.length > 1800)
+          ) {
+            // A separate compact group survives omission of the large finish call/reply.
+            messages.push({
+              role: "assistant",
+              content: `[Saved answer details: observationId=${finishObservation}. Use observation_read with offsets to retrieve the original answer envelope for follow-up questions.]`,
+            });
+          }
           await execution.checkpoint(messages);
           break;
         }

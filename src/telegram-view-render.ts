@@ -99,8 +99,21 @@ async function records(
     // Check ownership and existence before presenting each reference; model labels never supply identities.
     rows = [];
     for (const ref of refs.slice(p.page * pageSize, (p.page + 1) * pageSize)) {
-      const text = await detail(db, user, ref);
-      rows.push({ ref, title: text.split("\n")[0] });
+      if (ref.kind === "role") {
+        const row = (
+          await db.query(
+            "SELECT company,title FROM jobs WHERE user_id=$1 AND id=$2",
+            [user, ref.id],
+          )
+        ).rows[0];
+        rows.push({
+          ref,
+          title: row ? `${row.company} — ${row.title}` : "Record unavailable.",
+        });
+      } else {
+        const text = await detail(db, user, ref);
+        rows.push({ ref, title: text.split("\n")[0] });
+      }
     }
     more = refs.length > (p.page + 1) * pageSize;
     title = "Referenced records";
@@ -110,7 +123,7 @@ async function records(
       roles: {
         table: "jobs",
         kind: "role",
-        title: "title",
+        title: "company || ' — ' || title",
         filter: "status<>'archived'",
         order: "company,title,id",
       },

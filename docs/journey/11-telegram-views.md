@@ -11,3 +11,9 @@ New tests reconstruct an entire long emoji/formatted reply through navigation, e
 Delivery and interaction events support a later before/after analysis: message counts per reply/run, baseline formatter chunk counts, taps, first-tap latency and errors. The existing restricted diagnostics script gains aggregate fields so cloud and local tasks can examine the same metadata once the reviewed handler is installed. Private answer snapshots remain in Postgres; no raw trace export is added.
 
 No domain, Mini App, tunnel or infrastructure is provisioned. Phase 3 remains an owner decision. The next candidate is v0.3.1; from this release onward the owner requested patch-only version increments. Release status must come from exact-head independent review, CI and verified deployment, not this journal entry. Real-phone review of ten conversations remains an acceptance follow-up, and no measured UX/cost gain is claimed yet.
+
+## Independent review corrections
+
+Astra’s first MR #32 review requested two changes. Full section bodies existed only in finish arguments, while the available observation reader exposes results; once the large tool group left bounded context, a follow-up could not recover those details. The corrected runtime stores the envelope as a retrievable result, projects a compact observation and retains a separate short answer reference. A regression omits a two-section tool group from context and retrieves both exact bodies across multiple observation pages, including owner rejection. Finish output is accepted only after successful result persistence.
+
+The reviewer also found identical role titles ambiguous in lists. Saved employer/title identities now appear in both collection and answer-reference labels, with a duplicate-title regression. These fixes still require exact-head independent re-review before merge.

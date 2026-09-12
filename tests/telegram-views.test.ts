@@ -173,7 +173,7 @@ test("record paging/filter/detail refreshes saved state and keeps approval views
       "123",
       "123",
       1,
-      button(f.edited.at(-1), "1. Role 0"),
+      button(f.edited.at(-1), "1. Company — Role 0"),
     );
     assert.match(f.edited.at(-1).text, /No saved description/);
     await f.db.query(
@@ -486,6 +486,42 @@ test("task views show recorded support, model/research costs including unknowns 
       ).rows[0].data.view.id,
       task,
     );
+  } finally {
+    await f.pg.close();
+  }
+});
+test("same-titled roles are distinguished by authoritative company in lists and answer references", async () => {
+  const f = await fixture();
+  try {
+    const ids = [randomUUID(), randomUUID()];
+    for (let i = 0; i < 2; i++)
+      await f.db.query(
+        "INSERT INTO jobs(id,user_id,title,company) VALUES($1,'123','Applied AI Engineer',$2)",
+        [ids[i], i ? "Beta" : "Alpha"],
+      );
+    for (const view of [
+      { kind: "records" as const, collection: "roles" as const },
+      {
+        kind: "answer" as const,
+        answer: {
+          reply: "Two roles",
+          records: ids.map((id) => ({ kind: "role" as const, id })),
+        },
+      },
+    ]) {
+      const rendered = await renderView(f.db, "123", view, {
+        ...initialPosition(),
+        tab: view.kind === "answer" ? "records" : "main",
+      });
+      assert.match(rendered.text, /Alpha — Applied AI Engineer/);
+      assert.match(rendered.text, /Beta — Applied AI Engineer/);
+      const labels = rendered.actions
+        .flat()
+        .map((a) => a.label)
+        .join("\n");
+      assert.match(labels, /Alpha — Applied AI Engineer/);
+      assert.match(labels, /Beta — Applied AI Engineer/);
+    }
   } finally {
     await f.pg.close();
   }
