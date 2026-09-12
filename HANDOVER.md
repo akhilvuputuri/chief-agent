@@ -81,7 +81,7 @@ Cost-efficiency release verified: PR #16, application `a31813bd167e3916c1914966a
 
 ## Attachments — 12 September 2026
 
-Telegram photos, image files and PDF documents are accepted on `feature/attachments`. Images are sent to the main model as OpenAI-style `image_url` parts for the current turn only; persisted history, checkpoints and memory sources keep a text note without bytes. PDF text is extracted in-process with `unpdf`, stored in the existing `research_sources` table and read with the new read-only `source_read(id,offset?)` tool, which also works for earlier `web_read` sources. No migration or Compose change is required, so the ordinary automatic release applies once merged. Scanned PDFs are reported as unreadable rather than OCRed. See [journey 07](docs/journey/07-attachments.md).
+Telegram photos, image files and PDF documents are accepted; PR #22 is deployed at application `eb501b3c4fdf0bf1e1b0743c2b3772c0101225b3` with a passing health check. Images are sent to the main model as OpenAI-style `image_url` parts for the current turn only; persisted history, checkpoints and memory sources keep a text note without bytes. PDF text is extracted in-process with `unpdf`, stored in the existing `research_sources` table and read with the new read-only `source_read(id,offset?)` tool, which also works for earlier `web_read` sources. No migration or Compose change was required. Real-photo and real-PDF behavior with the production model has not been checked yet. Scanned PDFs are reported as unreadable rather than OCRed. See [journey 07](docs/journey/07-attachments.md).
 
 ## Current operating snapshot — 9 September 2026
 

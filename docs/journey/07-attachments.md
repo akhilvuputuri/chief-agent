@@ -1,7 +1,7 @@
 # 07 — Reading photos and PDFs sent on Telegram
 
 Work date: 2026-09-12. Written: 2026-09-12.
-Status: implemented and tested on `feature/attachments`; not released. Release SHA and PR to be added when verified.
+Status: released. PR #22, application `eb501b3c4fdf0bf1e1b0743c2b3772c0101225b3`, deployed 12 September 2026 with a passing health check. Production conversational quality with a real photo and PDF is not yet measured.
 
 ## User-visible problem
 
@@ -33,7 +33,7 @@ No database migration or Compose change; the Docker image gains only the pure-Ja
 
 ## Verification and outcome
 
-Synthetic verification only: 91 mocked tests pass, plus typecheck, build and format checks. No paid model call was made, so end-to-end vision quality with the production model and provider routing is unmeasured. Deployment status: not merged, not deployed.
+Synthetic verification: 91 mocked tests pass, plus typecheck, build and format checks; PR checks passed. Release workflow run 34671433515 reported `{"deployed": "eb501b3c...", "healthy": true}` after recreating the gateway. No paid model call was made, so end-to-end vision quality and cost with the production model and provider routing remain unmeasured until the owner sends a real photo and PDF.
 
 ## Follow-up and learning
 

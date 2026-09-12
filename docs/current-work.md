@@ -16,7 +16,7 @@ Known remaining issues include pre-mutation error classification, dedicated prov
 
 1. Python trace analysis consuming versioned exports from the actual TypeScript runtime.
 2. One narrow evaluation/improvement/comparison cycle with sanitized fixtures; no broad paid eval project.
-3. Image/PDF ingestion: implemented on `feature/attachments` (Telegram photos and image files to the vision model for the current turn; PDF text extraction into `research_sources` with `source_read`). Not merged or deployed until its PR passes review; see [journey 07](journey/07-attachments.md). Remaining: OCR or page rendering for scanned PDFs, other document types, and a production Telegram check with a real photo and PDF.
+3. Image/PDF ingestion: released in PR #22 at application `eb501b3` (Telegram photos and image files to the vision model for the current turn; PDF text extraction into `research_sources` with `source_read`). See [journey 07](journey/07-attachments.md). Remaining: owner check with a real photo and PDF, OCR or page rendering for scanned PDFs, other document types.
 
 ## Deferred work
 
