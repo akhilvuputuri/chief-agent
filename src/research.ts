@@ -79,6 +79,8 @@ export type ResearchProfile = {
   validate: (candidate: any, childRun: string) => Promise<void>;
   /** Read operations this specialist may dispatch; defaults to public research reads. */
   reads?: Set<string>;
+  /** Optional per-call check restricting reads to the assignment (for example assigned source IDs). */
+  allowRead?: (input: any) => boolean;
   inputTool?: { name: string; description: string; parameters: any };
   readInput?: (input: any) => Promise<unknown>;
 };
@@ -190,6 +192,8 @@ export async function runResearchSpecialist(
           }
           if (!reads.has(input.operation))
             invalid("operation outside specialist permissions");
+          if (profile?.allowRead && !profile.allowRead(input))
+            invalid("read outside this specialist's assignment");
           if (req.signal!.aborted) throw new Stop("cancelled");
           return req.executeResearch!(childRun, input);
         },

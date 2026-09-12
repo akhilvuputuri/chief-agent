@@ -10,7 +10,7 @@ import type { Database } from "../src/db.js";
 import type { ModelAdapter } from "../src/model.js";
 import type { ImageAttachment } from "../src/protocol.js";
 import { imageMessage } from "../src/attachments.js";
-import { mediaCacheKey, sha256 } from "../src/media.js";
+import { mediaCacheKey, reusable, sha256 } from "../src/media.js";
 const text = (content: string) => ({
   message: { role: "assistant" as const, content },
 });
@@ -150,7 +150,7 @@ test("images reach only the media specialist; the coordinator gets compact facts
     const dump = JSON.stringify(
       (
         await f.db.query(
-          "SELECT (SELECT json_agg(e) FROM events e) AS events,(SELECT json_agg(r.messages) FROM runtime_runs r) AS runs,(SELECT json_agg(s) FROM research_sources s) AS sources",
+          "SELECT (SELECT json_agg(e) FROM events e) AS events,(SELECT json_agg(r.messages) FROM runtime_runs r) AS runs,(SELECT json_agg(s) FROM research_sources s) AS sources,(SELECT json_agg(c.history) FROM conversations c) AS conversations,(SELECT json_agg(x) FROM runtime_calls x) AS calls",
         )
       ).rows[0],
     );
@@ -263,6 +263,19 @@ test("identical content and question reuse the stored result; stale attachment I
       mediaCacheKey("What does this sign say?", [first], []),
       mediaCacheKey("Is it red?", [first], []),
     );
+    assert.notEqual(
+      mediaCacheKey("q", [first], [], "main-model"),
+      mediaCacheKey("q", [first], [], "vision-model"),
+    );
+    assert.equal(
+      reusable([{ status: "complete" }, { status: "partial" }]),
+      true,
+    );
+    assert.equal(
+      reusable([{ status: "complete" }, { status: "blocked" }]),
+      false,
+    );
+    assert.equal(reusable([]), false);
   } finally {
     await f.pg.close();
   }
@@ -270,7 +283,8 @@ test("identical content and question reuse the stored result; stale attachment I
 
 test("document questions require the specialist to read the stored text and quote it exactly; writes are denied", async () => {
   let childCalls = 0;
-  const sourceId = randomUUID();
+  const sourceId = randomUUID(),
+    otherSourceId = randomUUID();
   const f = await fixture({
     generate: async (input) => {
       if (isChild(input)) {
@@ -299,32 +313,40 @@ test("document questions require the specialist to read the stored text and quot
             },
           ],
         });
+        // Six child model calls is the specialist's own limit; every step below is one call.
         if (childCalls === 1)
           return call("memory_set", { key: "notice", value: "two months" });
         if (childCalls === 2) {
           assert.ok(observation(input).error);
+          // A child cannot delegate again: the operation is outside its tool set.
+          return call("media_delegate", {
+            objective: "nested",
+            context: "",
+            attachmentIds: [],
+            sourceIds: [sourceId],
+          });
+        }
+        if (childCalls === 3) {
+          assert.ok(observation(input).error);
           // Quoting before any read is rejected: the source was not read by this child.
           return call("media_report", report("two (2) months"));
         }
-        if (childCalls === 3) {
+        if (childCalls === 4) {
           assert.match(
             observation(input).error.message,
             /read by this specialist/,
           );
           return call("source_read", { id: sourceId, offset: 0 });
         }
-        if (childCalls === 4) {
-          assert.match(observation(input).result.content, /two \(2\) months/);
-          return call("media_report", report("three months"));
-        }
         if (childCalls === 5) {
-          assert.equal(observation(input).error.code, "VALIDATION_FAILED");
-          return call(
-            "media_report",
-            report("two (2) months", { kind: "image" }),
-          );
+          assert.match(observation(input).result.content, /two \(2\) months/);
+          // Reads outside the assignment are refused even though the source belongs to the owner.
+          return call("source_read", { id: otherSourceId, offset: 0 });
         }
-        assert.match(observation(input).error.message, /kind must match/);
+        assert.match(
+          observation(input).error.message,
+          /read outside this specialist's assignment/,
+        );
         return call("media_report", report("two (2) months"));
       }
       if (fresh(input))
@@ -350,11 +372,23 @@ test("document questions require the specialist to read the stored text and quot
         "--- Page 1 ---\nEmployment agreement. Clause 12 governs termination.\n\n--- Page 2 ---\nEither party may terminate with two (2) months written notice.",
       ],
     );
+    await f.db.query(
+      "INSERT INTO research_sources(id,user_id,url,content) VALUES($1,'owner','https://example.com/other','Unrelated owner page')",
+      [otherSourceId],
+    );
     assert.equal(
       await f.assistant.respond("owner", "What is the notice period?"),
       "Two months, per page 2.",
     );
     assert.equal(childCalls, 6);
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT count(*)::int n FROM events WHERE type='research.child_started'",
+        )
+      ).rows[0].n,
+      1,
+    );
     assert.equal(
       (await f.db.query("SELECT count(*)::int n FROM memories")).rows[0].n,
       0,
@@ -362,7 +396,83 @@ test("document questions require the specialist to read the stored text and quot
     assert.equal(
       (await f.db.query("SELECT count(*)::int n FROM research_sources")).rows[0]
         .n,
-      1,
+      2,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("blocked readings are neither stored nor reused, so resending the same photo runs the specialist again", async () => {
+  let childCalls = 0;
+  const first = image(),
+    second = image();
+  const blocked = (targetId: string) => ({
+    targets: [
+      {
+        targetId,
+        kind: "image",
+        status: "blocked",
+        summary: "Too dark to read.",
+        facts: [],
+        quotes: [],
+        omissions: "Entire image unreadable.",
+        uncertainty: "",
+      },
+    ],
+  });
+  const f = await fixture({
+    generate: async (input) => {
+      if (isChild(input)) {
+        childCalls++;
+        const id = assignment(input).targets[0].targetId;
+        return call(
+          "media_report",
+          childCalls === 1 ? blocked(id) : imageReport(id),
+        );
+      }
+      const user = String(
+        input.messages.findLast((m: any) => m.role === "user")!.content,
+      );
+      const id = /attachmentId=([0-9a-f-]{36})/.exec(user)?.[1];
+      if (fresh(input) && id)
+        return call("media_delegate", {
+          objective: "Read the label",
+          context: "",
+          attachmentIds: [id],
+          sourceIds: [],
+        });
+      const o = observation(input).result;
+      return text(
+        `cacheHit=${o.cacheHit} status=${o.targets[0].status} stored=${o.targets[0].extractionSourceId ?? "none"}`,
+      );
+    },
+  });
+  try {
+    assert.equal(
+      await f.assistant.respond("owner", imageMessage("", [first]), undefined, [
+        first,
+      ]),
+      "cacheHit=false status=blocked stored=none",
+    );
+    assert.equal(
+      await f.assistant.respond(
+        "owner",
+        imageMessage("", [second]),
+        undefined,
+        [second],
+      ),
+      "cacheHit=false status=complete stored=" +
+        (await f.db.query("SELECT id FROM research_sources")).rows[0]!.id,
+    );
+    assert.equal(childCalls, 2);
+    assert.deepEqual(
+      (
+        await f.db.query(
+          "SELECT (data->>'reusable')::boolean AS reusable FROM events WHERE type='media.processed' ORDER BY id",
+        )
+      ).rows.map((r) => r.reusable),
+      [false, true],
     );
   } finally {
     await f.pg.close();
@@ -386,6 +496,10 @@ test("a configured media model handles only specialist calls, and incomplete pro
       const o = observation(input).result;
       assert.equal(o.status, "incomplete");
       assert.equal(o.targets[0].status, "blocked");
+      assert.equal(o.targets[0].kind, "image");
+      assert.deepEqual(o.targets[0].facts, []);
+      assert.deepEqual(o.targets[0].quotes, []);
+      assert.match(o.targets[0].omissions, /stopped before/);
       assert.match(o.notice, /resends/);
       return text("I could not read the receipt; please resend it.");
     },
