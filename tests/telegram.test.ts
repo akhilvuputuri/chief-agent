@@ -166,7 +166,8 @@ test("status responds while a conversation is still running", async () => {
         );
       }),
     ]);
-    assert.deepEqual(replies, ["No active tracked task."]);
+    assert.equal(replies.length, 1);
+    assert.match(replies[0]!, /No tracked task yet/);
   } finally {
     if (timer) clearTimeout(timer);
     release();

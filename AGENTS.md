@@ -8,7 +8,7 @@ Node 22. `npm ci`, `npm run check`, `npm run build`, `npm run format:check`. Tes
 
 ## Architecture
 
-`src/telegram.ts` is the client; `agent.ts` manages conversations; `custom-agent.ts` runs the loop; `model.ts` calls OpenRouter. `context.ts`, `record-context.ts`, `execution.ts`, and `work.ts` handle context and durable work. Tools run through owner-scoped `tools.ts` and Zod `protocol.ts`. Read the domain module before changing a tool. `alignment.ts` manages frozen job-alignment scopes and reports; `research.ts` runs isolated read-only specialists. No production Hermes dependency.
+`src/telegram.ts` is the client; `agent.ts` manages conversations; `custom-agent.ts` runs the loop; `model.ts` calls OpenRouter. `context.ts`, `record-context.ts`, `execution.ts`, and `work.ts` handle context and durable work. Tools run through owner-scoped `tools.ts` and Zod `protocol.ts`. Read the domain module before changing a tool. `answer.ts` defines optional presentation data; `telegram-views.ts` owns read-only callback state/delivery and `telegram-view-render.ts` reads saved records. Views must never invoke the model or authorize an action. `alignment.ts` manages frozen job-alignment scopes and reports; `research.ts` runs isolated read-only specialists. No production Hermes dependency.
 
 ## Product and safety constraints
 
@@ -46,6 +46,8 @@ For each implemented feature or runtime behavior change:
 The reviewer should remain independent of implementation. Findings can be discussed with evidence; approval must reflect the final code rather than a promise to fix it later. If subagent tools or a suitable reviewer model are unavailable, report the limitation and leave the MR ready for independent review; do not silently self-approve. This workflow does not authorize merging unrelated checkpoints, changing production permissions, or running paid model evaluations.
 
 ## Development journal
+
+All future versioned releases increment only the patch component (including new features), unless the owner explicitly changes this policy. Preserve existing immutable tags. See docs/releases.md.
 
 For meaningful runtime changes, incidents or experiments, add or update docs/journey using its template. Link evidence and PRs, distinguish hypotheses from measurements, and record deployment status and unresolved limitations. Never copy private production traces or credentials into journal entries.
 

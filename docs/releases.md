@@ -9,9 +9,9 @@ Use immutable semantic-version tags for meaningful, verified shipped milestones.
 ## Version policy
 
 - Start with v0.1.0 as the verified baseline when publishing the first release.
-- Patch (v0.1.1): compatible fixes. Minor (v0.2.0): new capability or a breaking change while the project remains pre-1.0. Reserve v1.0.0 for an explicitly chosen stable contract.
+- From 13 September 2026, increment **only the patch** for every new versioned release, including features: v0.3.0 → v0.3.1 → v0.3.2. Do not increment minor or major without a new explicit owner decision. Existing v0.1.0/v0.2.x/v0.3.0 tags remain unchanged. Describe compatibility changes in the notes; patch numbering does not replace migration review.
 - Do not tag every documentation commit or unsuccessful candidate. Do not move/reuse tags. Keep checkpoint and experiment branches untagged as production releases.
-- package.json currently says 0.1.0. For subsequent versioned milestones update package.json and package-lock.json in the PR before merging, without creating a local tag (`npm version VERSION --no-git-tag-version`).
+- Update package.json and package-lock.json in the PR before merging, without creating a local tag (`npm version patch --no-git-tag-version`). Check the latest integrated version first to avoid concurrent release collisions.
 
 ## Publish a verified release
 

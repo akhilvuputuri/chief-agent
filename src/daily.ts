@@ -119,13 +119,13 @@ export class DailyTools {
     ).rows[0];
   }
 }
-export class DailyWorker {
+export class DailyWorker<T = string> {
   private busy = false;
   constructor(
     private db: Database,
     private parser: Pick<ScheduleParser, "next">,
-    private send: (user: string, text: string) => Promise<unknown>,
-    private briefing: (job: any) => Promise<string>,
+    private send: (user: string, text: string | T) => Promise<unknown>,
+    private briefing: (job: any) => Promise<T>,
     private sync: (user: string) => Promise<unknown>,
   ) {}
   async tick() {
