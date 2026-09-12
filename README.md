@@ -99,7 +99,7 @@ Tests cover the actual request body, conversation/tool/observation loop, ownersh
 
 ## Roadmap
 
-Daily usage drives the next changes: better context selection, memory retrieval, semantic deduplication, richer tracing and faster voice responses. Realtime voice, delegation, sandbox/shell tools, self-deployment and a web client are separate milestones. The runtime and normalized message boundary allow those clients to be added without moving ownership or permissions into model prompts.
+Daily usage drives the next changes: better context selection, memory retrieval, semantic deduplication, richer tracing and faster voice responses. Realtime voice, parallel specialist teams, sandbox/shell tools, self-deployment and a web client are separate milestones. The runtime and normalized message boundary allow those clients to be added without moving ownership or permissions into model prompts.
 
 ## References and attribution
 
@@ -116,3 +116,7 @@ Use the connected `akhilvuputuri/companion-agent` environment and read [AGENTS.m
 ## Engineering journey
 
 The [development journal](docs/journey/README.md) records runtime decisions, production incidents, cost investigation, experiments and remaining evidence gaps. Start with [token cost](docs/journey/03-token-cost.md) for a concrete example. [Claude cloud setup](docs/claude-cloud.md) describes using another coding client with the same repository and release pipeline.
+
+## Research specialist
+
+The main agent can delegate bounded public research to an isolated, read-only specialist. It returns exact-target, source-linked findings; the main agent remains responsible for synthesis and authorized changes. Runs share execution limits and retain linked model/tool traces and separate charges. See [architecture, limits and inspection](docs/research-specialist.md). Media processing remains in the main runtime; a media specialist is deferred.

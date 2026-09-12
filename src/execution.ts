@@ -1,3 +1,4 @@
+import { scrubTrace } from "./trace-scrub.js";
 import { randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
 import { event } from "./db.js";
@@ -18,6 +19,8 @@ export class Stop extends Error {
 }
 export const readOperations = new Set([
   "finish_turn",
+  "research_delegate",
+  "research_report",
   "work_status",
   "item_list",
   "schedule_list",
@@ -46,6 +49,7 @@ export class Execution {
     readonly run: string,
     readonly signal: AbortSignal,
     private limits: Budget = defaultBudget,
+    private parent?: Execution,
   ) {}
   async start() {
     await this.db.query("INSERT INTO runtime_runs(id,user_id) VALUES($1,$2)", [
@@ -55,6 +59,7 @@ export class Execution {
     await this.attach();
   }
   async attach(force = false) {
+    if (this.parent) return;
     const id = (
       await this.db.query(
         "SELECT task_id FROM work_turns WHERE run_id=$1 AND user_id=$2 AND ($3 OR background OR EXISTS(SELECT 1 FROM events WHERE run_id=$1 AND type='tool.completed' AND data->>'operation' IN ('work_start','work_revise','work_step','work_evidence','work_yield')))",
@@ -82,9 +87,17 @@ export class Execution {
       ]);
     }
   }
-  async remaining() {
+  async remaining(): Promise<Budget> {
     await this.attach();
     if (this.signal.aborted) throw new Stop("cancelled");
+    if (this.parent) {
+      const root = await this.parent.remaining();
+      return {
+        ms: Math.min(this.limits.ms - this.used.ms, root.ms - this.used.ms),
+        models: Math.min(this.limits.models - this.used.models, root.models),
+        tools: Math.min(this.limits.tools - this.used.tools, root.tools),
+      };
+    }
     if (this.task) {
       const t = (
         await this.db.query(
@@ -108,6 +121,7 @@ export class Execution {
   async consume(kind: "models" | "tools") {
     const left = await this.remaining();
     if (left.ms <= 0 || left[kind] <= 0) throw new Stop("budget_exhausted");
+    if (this.parent) await this.parent.consume(kind);
     const column = kind === "models" ? "used_models" : "used_tools";
     if (this.task)
       await this.db.query(
@@ -146,7 +160,7 @@ export class Execution {
         this.run,
         data.model ?? null,
       ]);
-    await event(this.db, this.user, this.run, type, data);
+    await event(this.db, this.user, this.run, type, scrubTrace(data));
   }
   async beginCall(callId: string, operation: string, args: unknown) {
     const id = randomUUID();

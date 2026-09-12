@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { delegateResearch } from "./research.js";
 import { projectObservation } from "./observations.js";
 import { action } from "./protocol.js";
 import type { AgentRequest, AgentResponse } from "./protocol.js";
@@ -46,11 +48,14 @@ export class CustomAgent implements Agent {
     try {
       while (true) {
         let generation;
+        let invocationId = "";
         for (let attempt = 0; ; attempt++) {
           const remaining = await execution.consume("models");
           const start = Date.now();
+          invocationId = randomUUID();
           try {
             await execution.trace("model.started", {
+              invocationId,
               model: this.model.model ?? null,
               attempt,
             });
@@ -59,6 +64,15 @@ export class CustomAgent implements Agent {
             if (input.omitted)
               await execution.trace("context.omitted", {
                 messages: input.omitted,
+              });
+            if (req.specialist)
+              await execution.trace("research.model_input", {
+                version: 1,
+                invocationId,
+                messages: input.messages,
+                tools,
+                reasoning: "medium",
+                omitted: input.omitted,
               });
             generation = await this.model.generate({
               messages: input.messages,
@@ -74,7 +88,8 @@ export class CustomAgent implements Agent {
             messages.push(generation.message);
             await execution.checkpoint(messages);
             await execution.trace("model.completed", {
-              model: generation.model,
+              invocationId,
+              model: generation.model ?? this.model.model,
               provider: generation.provider,
               usage: generation.usage ?? null,
               latencyMs: Date.now() - start,
@@ -82,6 +97,7 @@ export class CustomAgent implements Agent {
             break;
           } catch (error) {
             await execution.trace("model.failed", {
+              invocationId,
               ...(error instanceof ModelError
                 ? { diagnostics: error.diagnostics, transient: error.transient }
                 : {}),
@@ -128,6 +144,12 @@ export class CustomAgent implements Agent {
           const journal = await execution.beginCall(call.id, op, {
             raw: call.function.arguments,
           });
+          await execution.trace("tool.linked", {
+            invocationId,
+            observationId: journal,
+            callId: call.id,
+            operation: op,
+          });
           let dispatched = false;
           try {
             if (!enabled.has(op)) throw new Error("Operation unavailable");
@@ -149,12 +171,23 @@ export class CustomAgent implements Agent {
               for (let attempt = 0; ; attempt++) {
                 try {
                   dispatched = true;
-                  result = await req.execute(input);
+                  result =
+                    op === "research_delegate"
+                      ? await delegateResearch(req, input, (child) =>
+                          this.run(child),
+                        )
+                      : await req.execute(input);
+                  if (op === "research_report")
+                    finish = {
+                      reply: JSON.stringify(result),
+                      reason: "answer",
+                    };
                   break;
                 } catch (error) {
                   // Only retry known transient reads; all writes have a single dispatch.
                   if (
                     !readOperations.has(op) ||
+                    op === "research_delegate" ||
                     attempt >= 2 ||
                     !(
                       error instanceof TypeError ||

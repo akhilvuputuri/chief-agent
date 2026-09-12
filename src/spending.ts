@@ -27,7 +27,7 @@ export class Spending {
         `SELECT COALESCE(sum(c.actual_usd),0) AS reported_usd,
     COALESCE(sum(c.estimated_usd) FILTER(WHERE c.actual_usd IS NULL),0) AS estimated_unknown_usd,
     count(c.id) FILTER(WHERE c.actual_usd IS NULL) AS unknown_requests
-    FROM runtime_runs current JOIN runtime_runs r ON r.user_id=current.user_id AND (r.id=current.id OR(current.task_id IS NOT NULL AND r.task_id=current.task_id))
+    FROM runtime_runs current JOIN runtime_runs r ON r.user_id=current.user_id AND (r.id=current.id OR(current.task_id IS NOT NULL AND r.task_id=current.task_id) OR EXISTS(SELECT 1 FROM events e JOIN runtime_runs parent ON parent.id::text=e.data->>'parentRunId' WHERE e.run_id=r.id AND e.user_id=current.user_id AND e.type='research.child_started' AND parent.user_id=current.user_id AND (parent.id=current.id OR(current.task_id IS NOT NULL AND parent.task_id=current.task_id))))
     LEFT JOIN provider_charges c ON c.run_id=r.id WHERE current.id=$1 AND current.user_id=$2`,
         [this.run, this.user],
       )
