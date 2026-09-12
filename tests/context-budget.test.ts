@@ -74,7 +74,8 @@ test("an over-budget turn keeps its own tool results, records the condition and 
     assert.equal(events.length, 2);
     assert.ok(events[0].data.fixedSize > contextBudget);
     assert.equal(events[0].data.budget, contextBudget);
-    assert.ok(events[1].data.currentTurnSize > 0);
+    assert.equal(events[0].data.reservedSize, 0);
+    assert.ok(events[1].data.reservedSize > 0);
     assert.equal(
       (
         await db.query(

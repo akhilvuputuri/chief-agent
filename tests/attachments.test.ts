@@ -310,7 +310,7 @@ test("an oversized fixed prompt drops prior history but keeps the current turn, 
   assert.equal(heavy.messages[3]!.content, toolResult.content);
   assert.match(
     String(heavy.messages.at(-1)!.content),
-    /2 older\/incomplete messages omitted because the current request/,
+    /2 older messages or tool results omitted; the current request/,
   );
   // Without the current message in history (specialist path), it is still supplied exactly once.
   const fresh = context({ ...base, message: "hello", history: [] }, []);

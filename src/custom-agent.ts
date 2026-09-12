@@ -90,7 +90,7 @@ export class CustomAgent implements Agent {
             if (input.overBudget)
               await execution.trace("context.over_budget", {
                 fixedSize: input.fixedSize,
-                currentTurnSize: input.currentTurnSize,
+                reservedSize: input.reservedSize,
                 budget: contextBudget,
               });
             if (req.specialist)
@@ -131,7 +131,7 @@ export class CustomAgent implements Agent {
                 : error instanceof ContextLimitError
                   ? { contextSizes: error.sizes, budget: contextBudget }
                   : {
-                      // Bounded internal error identity; provider text never reaches traces.
+                      // Bounded error identity; no user content is parsed on this path.
                       error:
                         error instanceof Error
                           ? `${error.name}: ${error.message.slice(0, 300)}`
