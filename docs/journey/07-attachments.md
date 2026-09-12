@@ -44,4 +44,4 @@ Synthetic verification: 91 mocked tests pass, plus typecheck, build and format c
 
 ## Follow-up — 13 September 2026
 
-Issue #27 phase 2 moved image reading behind the specialist boundary. The coordinator no longer receives image bytes; `media_delegate` processes current-turn attachments and stored documents and returns compact referenced facts. See [journey 11](11-media-specialist.md) and [media processing](../media-specialist.md).
+Issue #27 phase 2 moved image reading behind the specialist boundary. The coordinator no longer receives image bytes; `media_delegate` processes current-turn attachments and stored documents and returns compact referenced facts. See [journey 11](12-media-specialist.md) and [media processing](../media-specialist.md).

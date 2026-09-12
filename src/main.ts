@@ -2,7 +2,8 @@ import { run as runTelegram } from "@grammyjs/runner";
 import { CustomAgent } from "./custom-agent.js";
 import { OpenRouter } from "./model.js";
 import { recoverRuntime } from "./execution.js";
-import { formatTelegram } from "./telegram-format.js";
+import { TelegramViews } from "./telegram-views.js";
+import type { Delivery } from "./answer.js";
 import { WorkWorker } from "./work-worker.js";
 import { DailyTools, DailyWorker, ScheduleParser } from "./daily.js";
 import { CalendarActions } from "./calendar-actions.js";
@@ -91,35 +92,35 @@ const assistant = new Assistant(
 );
 const app = server();
 const bot = telegram(c, assistant, db);
+const views = new TelegramViews(db, bot.api);
 const allowed = new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(","));
-const worker = new DailyWorker(
+const worker = new DailyWorker<Delivery>(
   db,
   parser,
   async (user, text) => {
     if (!allowed.has(user)) throw new Error("Unauthorized delivery");
-    // One bounded plain-text message, avoiding model-generated markup and partial multi-message sends.
-    await bot.api.sendMessage(user, text.slice(0, 3900), {
-      link_preview_options: { is_disabled: true },
-    });
+    await views.deliver(user, user, text, "schedule");
   },
   async (j) => {
-    const lines = [
-      `Daily brief — ${new Date().toLocaleDateString("en-SG", { timeZone: "Asia/Singapore" })}`,
-    ];
+    const title = `Daily brief — ${new Date().toLocaleDateString("en-SG", { timeZone: "Asia/Singapore" })}`;
+    const sections: NonNullable<Delivery["sections"]> = [];
     const tasks = (
       await db.query(
         `SELECT title,due_at FROM daily_items WHERE user_id=$1 AND kind='task' AND status='open' ORDER BY due_at NULLS LAST,created_at LIMIT 10`,
         [j.user_id],
       )
     ).rows;
-    lines.push(
-      "\nOpen tasks",
-      ...tasks.map(
-        (t) =>
-          `• ${t.title}${t.due_at ? " — due " + new Date(t.due_at).toLocaleString("en-SG", { timeZone: "Asia/Singapore" }) : ""}`,
-      ),
-    );
-    if (!tasks.length) lines.push("No open tasks.");
+    sections.push({
+      title: "Open tasks (up to 10)",
+      body: tasks.length
+        ? tasks
+            .map(
+              (t) =>
+                `• ${t.title}${t.due_at ? " — due " + new Date(t.due_at).toLocaleString("en-SG", { timeZone: "Asia/Singapore" }) : ""}`,
+            )
+            .join("\n")
+        : "No open tasks.",
+    });
     if (j.include_calendar) {
       try {
         const r = await calendar.list(
@@ -127,19 +128,26 @@ const worker = new DailyWorker(
           new Date().toISOString(),
           new Date(Date.now() + 86400000).toISOString(),
         );
-        lines.push(
-          "\nCalendar — next 24 hours",
-          ...r.events
-            .slice(0, 8)
-            .map(
-              (e: any) =>
-                `• ${e.title} — ${e.start?.dateTime ?? e.start?.date}`,
-            ),
-        );
-        if (!r.events.length) lines.push("No events.");
-        if (r.truncated) lines.push("More events available in Calendar.");
+        sections.push({
+          title: "Calendar — next 24 hours (up to 8)",
+          body: r.events.length
+            ? r.events
+                .slice(0, 8)
+                .map(
+                  (e: any) =>
+                    `• ${e.title} — ${e.start?.dateTime ?? e.start?.date}`,
+                )
+                .join("\n") +
+              (r.truncated || r.events.length > 8
+                ? "\nMore events available in Calendar."
+                : "")
+            : "No events.",
+        });
       } catch {
-        lines.push("\nCalendar unavailable; reconnect or enable Calendar API.");
+        sections.push({
+          title: "Calendar",
+          body: "Calendar unavailable; reconnect or enable Calendar API.",
+        });
       }
     }
     if (j.include_email) {
@@ -149,7 +157,7 @@ const worker = new DailyWorker(
           "gmail_search",
           "in:inbox is:unread newer_than:1d",
         );
-        lines.push("\nUnread inbox — past 24 hours (up to 5)");
+        const lines: string[] = [];
         for (const m of r.messages.slice(0, 5)) {
           const mail: any = await gmail.call(j.user_id, "gmail_read", m.id);
           lines.push(
@@ -161,24 +169,32 @@ const worker = new DailyWorker(
               ).slice(0, 160),
           );
         }
-        if (!r.messages.length) lines.push("No matching messages.");
+        sections.push({
+          title: "Unread inbox — past 24 hours (up to 5)",
+          body: lines.join("\n") || "No matching messages.",
+        });
       } catch {
-        lines.push(
-          "\nGmail unavailable; existing read-only authorization may need renewal.",
-        );
+        sections.push({
+          title: "Gmail",
+          body: "Gmail unavailable; existing read-only authorization may need renewal.",
+        });
       }
     }
-    return lines.join("\n");
+    return {
+      reply: `${title}\n\nOpen Sections to browse ${sections.map((s) => s.title).join(", ")}.`,
+      sections,
+    };
   },
   (user) => mirror.sync(user),
 );
-async function sendWorkMessage(user: string, text: string) {
+async function sendWorkMessage(user: string, text: string | Delivery) {
   if (!allowed.has(user)) throw new Error("Unauthorized delivery");
-  for (const part of formatTelegram(text))
-    await bot.api.sendMessage(user, part.text, {
-      entities: part.entities,
-      link_preview_options: { is_disabled: true },
-    });
+  await views.deliver(
+    user,
+    user,
+    text,
+    typeof text === "string" ? "progress" : "answer",
+  );
   await sendCalendarApprovals(bot, db, user);
 }
 const workWorker = new WorkWorker(
@@ -192,8 +208,8 @@ const workWorker = new WorkWorker(
     const timer = setInterval(typing, 4500);
     timer.unref();
     try {
-      return await assistant.resume(user, id, (text) =>
-        sendWorkMessage(user, text),
+      return await assistant.resumeDetailed(user, id, (text, runId) =>
+        views.deliver(user, user, { reply: text, runId }, "progress"),
       );
     } finally {
       clearInterval(timer);

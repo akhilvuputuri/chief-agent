@@ -27,7 +27,7 @@ Secrets live only in private environment/operations files and server configurati
 - Voice: ElevenLabs `scribe_v2`, `eleven_flash_v2_5`, existing stock River voice. The audio-provider boundary remains unchanged.
 - Read-only Gmail, Calendar queries plus approval-gated event creation, preparation Sheet and daily Sheet integrations are retained.
 - Skills: repository catalogue plus owner-approved immutable private versions, loaded on demand.
-- Telegram output: model-written prose guided by phone delivery context; existing renderer only. `/status` is the separate deterministic ledger.
+- Telegram output: model-written prose with optional sections/sources/record references; long answers use inline navigation. `/status` opens recorded steps/evidence/costs; `/roles`, `/items`, `/schedules`, `/drafts`, `/briefing` open read-only state views. See [Telegram views](docs/telegram-views.md).
 
 ## Durable execution
 

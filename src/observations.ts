@@ -6,7 +6,15 @@ export function projectObservation(
 ): any {
   const result = value?.result ?? value;
   let projected: any = result;
-  if (operation.startsWith("work_") && result?.task) {
+  if (operation === "finish_turn" && result?.answer) {
+    projected = {
+      recorded: true,
+      sectionCount: result.answer.sections?.length ?? 0,
+      recordCount: result.answer.records?.length ?? 0,
+      notice:
+        "Full answer envelope is stored. Use observation_read with this observationId and offsets for follow-ups.",
+    };
+  } else if (operation.startsWith("work_") && result?.task) {
     projected = compactWork(result);
   } else if (Array.isArray(result)) {
     projected = result.map((item) =>

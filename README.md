@@ -20,6 +20,7 @@ flowchart LR
 
 ## What it does
 
+- Read-only interactive Telegram views: `/roles`, `/items`, `/schedules`, `/drafts`, `/briefing` and `/status`; long answers expand within one message. See [views and answer envelopes](docs/telegram-views.md).
 - Natural conversation, explicit memories and on-demand versioned text skills.
 - General tasks, notes, reminders and source-selectable daily briefings.
 - Public web research and evidence-backed role preparation, including questions about unknown experience.

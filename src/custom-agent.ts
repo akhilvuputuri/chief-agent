@@ -1,3 +1,5 @@
+import { finishSchema, type Answer } from "./answer.js";
+import { jsonSchema } from "./runtime.js";
 import { runAlignment } from "./alignment.js";
 import { randomUUID } from "node:crypto";
 import { delegateResearch } from "./research.js";
@@ -20,18 +22,7 @@ const finishTool: ToolDefinition = {
   name: "finish_turn",
   description:
     "Pause with your natural reply and an explicit reason after completing any independent runnable work.",
-  parameters: {
-    type: "object",
-    properties: {
-      reason: {
-        type: "string",
-        enum: ["answer", "awaiting_user", "awaiting_approval"],
-      },
-      reply: { type: "string" },
-    },
-    required: ["reason", "reply"],
-    additionalProperties: false,
-  },
+  parameters: jsonSchema(finishSchema),
 };
 /** Image parts are replaced before tracing so model-input records never retain raw bytes. */
 export function omitImages(messages: ModelMessage[]) {
@@ -72,6 +63,7 @@ export class CustomAgent implements Agent {
     ];
     const tools = [...(req.runtime?.tools ?? []), finishTool];
     const enabled = new Set(tools.map((t) => t.name));
+    let answer: Answer | undefined;
     let reply = "",
       reason: StopReason = "answer";
     await execution.checkpoint(messages);
@@ -162,10 +154,12 @@ export class CustomAgent implements Agent {
           reply = generation.message.content ?? "";
           break;
         }
-        let finish: { reply: string; reason: StopReason } | undefined;
+        let finish: (Answer & { reason: StopReason }) | undefined;
+        let finishObservation: string | undefined;
         for (const call of calls) {
           const op = call.function.name;
           let result: unknown;
+          let candidate: typeof finish;
           const start = Date.now();
           if (req.signal.aborted) throw new Stop("cancelled");
           if (op.startsWith("work_") && op !== "work_status")
@@ -185,15 +179,9 @@ export class CustomAgent implements Agent {
             if (!enabled.has(op)) throw new Error("Operation unavailable");
             const args = JSON.parse(call.function.arguments);
             if (op === "finish_turn") {
-              if (
-                !["answer", "awaiting_user", "awaiting_approval"].includes(
-                  args.reason,
-                ) ||
-                typeof args.reply !== "string"
-              )
-                throw new Error("Invalid finish arguments");
-              finish = { reply: args.reply, reason: args.reason };
-              result = { recorded: true };
+              candidate = finishSchema.parse(args);
+              const { reason: _reason, ...envelope } = candidate;
+              result = { recorded: true, answer: envelope };
             } else {
               if (Object.hasOwn(args, "operation"))
                 throw new Error("Operation must come from the tool name");
@@ -213,13 +201,13 @@ export class CustomAgent implements Agent {
                             (child) => this.run(child),
                             (this.specialists.media ?? this.model).model ?? "",
                           )
-                        : [
-                              "job_alignment_start",
-                              "job_alignment_resume",
-                              "job_alignment_read",
-                            ].includes(op)
-                          ? await runAlignment(req, input, (child) =>
-                              this.run(child),
+                        : op === "media_delegate"
+                          ? await delegateMedia(
+                              req,
+                              input,
+                              (child) => this.run(child),
+                              (this.specialists.media ?? this.model).model ??
+                                "",
                             )
                           : await req.execute(input);
                   if (
@@ -227,7 +215,7 @@ export class CustomAgent implements Agent {
                     op === "media_report" ||
                     op === "job_alignment_report"
                   )
-                    finish = {
+                    candidate = {
                       reply: JSON.stringify(result),
                       reason: "answer",
                     };
@@ -253,6 +241,10 @@ export class CustomAgent implements Agent {
               }
             }
             await execution.endCall(journal, result);
+            if (candidate) {
+              finish = candidate;
+              finishObservation = op === "finish_turn" ? journal : undefined;
+            }
           } catch (error) {
             if (error instanceof Stop) throw error;
             result = { error: toolError(error) };
@@ -285,9 +277,24 @@ export class CustomAgent implements Agent {
           await execution.attach();
         }
         if (finish) {
+          answer = finish;
           reply = finish.reply;
           reason = finish.reason;
           messages.push({ role: "assistant", content: reply });
+          if (
+            finishObservation &&
+            (finish.sections?.length ||
+              finish.records?.length ||
+              finish.sources?.length ||
+              finish.numbers?.length ||
+              reply.length > 1800)
+          ) {
+            // A separate compact group survives omission of the large finish call/reply.
+            messages.push({
+              role: "assistant",
+              content: `[Saved answer details: observationId=${finishObservation}. Use observation_read with offsets to retrieve the original answer envelope for follow-up questions.]`,
+            });
+          }
           await execution.checkpoint(messages);
           break;
         }
@@ -320,6 +327,6 @@ export class CustomAgent implements Agent {
     )
       reason = "awaiting_approval";
     await execution.finish(reason);
-    return { reply, history: messages, stopReason: reason };
+    return { ...answer, reply, history: messages, stopReason: reason };
   }
 }

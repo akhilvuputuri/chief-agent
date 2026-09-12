@@ -1,4 +1,5 @@
-import { WorkTools, renderWork } from "./work.js";
+import { TelegramViews, viewCallback } from "./telegram-views.js";
+import type { Collection, View } from "./telegram-view-render.js";
 import { formatTelegram } from "./telegram-format.js";
 import { calendarPreview, validateDraft } from "./calendar-draft.js";
 import { Bot, InputFile } from "grammy";
@@ -23,9 +24,24 @@ import {
 import type { ImageAttachment } from "./protocol.js";
 export function telegram(c: Config, assistant: Assistant, db: Database) {
   const bot = new Bot(c.TELEGRAM_BOT_TOKEN);
+  const views = new TelegramViews(db, bot.api);
   const voice = new Voice(c);
   const queue = new SerialQueue();
   const ids = new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(","));
+  bot.callbackQuery(viewCallback, async (ctx) => {
+    if (!allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids)) return;
+    // Clear Telegram's spinner before loading data; do not queue behind a long agent turn.
+    await ctx.answerCallbackQuery();
+    const message = ctx.callbackQuery.message;
+    if (!message) return;
+    const notice = await views.navigate(
+      String(ctx.from.id),
+      String(message.chat.id),
+      message.message_id,
+      ctx.callbackQuery.data,
+    );
+    if (notice) await ctx.reply(notice);
+  });
   bot.callbackQuery(/^cal:(yes|no):([0-9a-f-]{36})$/, async (ctx) => {
     if (!allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids)) return;
     const user = String(ctx.from.id);
@@ -92,26 +108,43 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
       );
       return;
     }
-    if (ctx.message.text === "/status") {
+    const command = ctx.message.text;
+    if (
+      command &&
+      [
+        "/status",
+        "/roles",
+        "/items",
+        "/schedules",
+        "/drafts",
+        "/briefing",
+      ].includes(command)
+    ) {
       await ensureUser(db, user);
       const claimed = await db.query(
         "INSERT INTO inbound_updates(update_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING update_id",
         [ctx.update.update_id, user],
       );
       if (!claimed.rows.length) return;
-      const latest = (
+      try {
+        const view: View =
+          command === "/status"
+            ? { kind: "task" }
+            : command === "/briefing"
+              ? { kind: "briefing" }
+              : { kind: "records", collection: command.slice(1) as Collection };
+        await views.open(user, String(ctx.chat.id), view);
         await db.query(
-          "SELECT id FROM work_tasks WHERE user_id=$1 ORDER BY created_at DESC LIMIT 1",
-          [user],
-        )
-      ).rows[0];
-      const snapshot = await new WorkTools(db).snapshot(user, latest?.id);
-      for (const part of formatTelegram(renderWork(snapshot)))
-        await ctx.reply(part.text, { entities: part.entities });
-      await db.query(
-        "UPDATE inbound_updates SET status='completed' WHERE update_id=$1",
-        [ctx.update.update_id],
-      );
+          "UPDATE inbound_updates SET status='completed' WHERE update_id=$1",
+          [ctx.update.update_id],
+        );
+      } catch {
+        await db.query(
+          "UPDATE inbound_updates SET status='failed' WHERE update_id=$1",
+          [ctx.update.update_id],
+        );
+        await ctx.reply("Could not open that view. Try again shortly.");
+      }
       return;
     }
     await queue.run(user, async () => {
@@ -153,13 +186,9 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
               ? "Another execution budget allocation is queued. Completed steps are preserved."
               : "No paused task can be continued. An uncertain write requires inspection first.",
           );
-        } else if (message === "/status") {
-          const snapshot = await new WorkTools(db).snapshot(user);
-          for (const part of formatTelegram(renderWork(snapshot)))
-            await ctx.reply(part.text, { entities: part.entities });
         } else if (message === "/start") {
           await ctx.reply(
-            `Tell me what you want to work on. I can research, manage tasks and notes, set reminders, compare roles, and remember preferences you ask me to keep. Use /continue for paused tracked work or /workcancel to cancel it. Web search is ${c.TAVILY_API_KEY || c.OPENROUTER_API_KEY ? "available" : "not configured yet"}. Voice notes are ${voice.transcriptionReady ? "available" : "not configured yet"}. /voice explains audio replies. You can also send photos and PDF documents for me to read. Deleting a role requires your approval. I cannot send applications or emails.`,
+            `Tell me what you want to work on. I can research, manage tasks and notes, set reminders, compare roles, and remember preferences you ask me to keep. Browse /roles, /items, /schedules, /drafts or /briefing without a model call. Use /status for tracked steps, evidence and costs. Use /continue for paused tracked work or /workcancel to cancel it. Web search is ${c.TAVILY_API_KEY || c.OPENROUTER_API_KEY ? "available" : "not configured yet"}. Voice notes are ${voice.transcriptionReady ? "available" : "not configured yet"}. /voice explains audio replies. You can also send photos and PDF documents for me to read. Deleting a role requires your approval. I cannot send applications or emails.`,
           );
         } else if (message === "/reset") {
           await db.query("DELETE FROM conversations WHERE user_id=$1", [user]);
@@ -284,25 +313,21 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
             );
           } else {
             await ctx.replyWithChatAction("typing");
-            const reply = await assistant.respond(
+            const reply = await assistant.respondDetailed(
               user,
               message,
-              async (text) => {
-                for (const part of formatTelegram(text))
-                  await ctx.reply(part.text, {
-                    entities: part.entities,
-                    link_preview_options: { is_disabled: true },
-                  });
-              },
+              (text, runId) =>
+                views.deliver(
+                  user,
+                  String(ctx.chat.id),
+                  { reply: text, runId },
+                  "progress",
+                ),
               images,
             );
             await sendCalendarApprovals(bot, db, user);
-            const formatted = formatTelegram(reply);
-            for (const part of formatted)
-              await ctx.reply(part.text, {
-                entities: part.entities,
-                link_preview_options: { is_disabled: true },
-              });
+            await views.deliver(user, String(ctx.chat.id), reply);
+            const formatted = formatTelegram(reply.reply);
             if (ctx.message.voice && c.VOICE_REPLIES === "true") {
               try {
                 const audio = await voice.speak(
