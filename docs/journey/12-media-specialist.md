@@ -14,4 +14,4 @@ Mocked PGlite tests cover isolation, permissions, quote enforcement, caching, st
 
 ## Release process
 
-Pull request, independent review of the exact head, fixes and re-review until approval, merge on passing checks, then the ordinary release and verification of the deployed commit. No migration or infrastructure change. See [media processing](../media-specialist.md) for the contract and inspection procedure.
+PR #33. Independent review by a Claude Fable 5.1 subagent (GPT-6 Astra was unavailable in that environment): the first pass requested changes because blocked readings were cached and stored and an incomplete child returned research-shaped targets; both were fixed with regression tests and the second pass approved `8da472a`. A merge with main (#32) was re-reviewed and approved at `d466621`. Released as v0.3.2, deployed commit `10a2716b589783972a9f3f00e279a0e1d30971cf`, release run 34709810663 healthy. No migration or infrastructure change. See [media processing](../media-specialist.md) for the contract and inspection procedure.

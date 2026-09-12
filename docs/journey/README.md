@@ -14,7 +14,7 @@ A chronological account of building and operating a personal assistant, with evi
 | [06 — Observable memory](06-observable-memory.md)              | Which conversation created a memory, and when was it supplied to a model?                       | Implementation in progress; not a release claim         |
 | [07 — Reading photos and PDFs](07-attachments.md)              | How should a text-only Telegram agent accept files without bloating cost or history?            | Released; production quality unmeasured                 |
 | [11 — Telegram views](11-telegram-views.md)                    | How can replies stay short and explorable inside Telegram without images or new infrastructure? | Implemented; see PR #32 for release status              |
-| [12 — Media specialist](12-media-specialist.md)                | How should file reading get focused context without retaining raw bytes?                        | Implemented; release pending review                     |
+| [12 — Media specialist](12-media-specialist.md)                | How should file reading get focused context without retaining raw bytes?                        | Released as v0.3.2; real-photo quality unmeasured       |
 
 ## Keep the record useful
 
