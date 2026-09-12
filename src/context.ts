@@ -57,10 +57,18 @@ export function boundHistory(
   const messages = selected.flat();
   return { messages, omitted: history.length - messages.length };
 }
-/** Total character allowance for one request; history gets whatever the fixed part leaves. */
+/** Total character allowance for one request; prior history gets whatever the fixed part and current turn leave. */
 export const contextBudget = 48000;
 /** Beyond this the request is refused rather than sent; a turn should never legitimately reach it. */
 export const contextHardLimit = 120000;
+/** Thrown with measured sizes so the failure is traceable instead of a bare execution error. */
+export class ContextLimitError extends Error {
+  constructor(readonly sizes: Record<string, number>) {
+    super(
+      "Current context exceeds the hard request limit; narrow the active batch",
+    );
+  }
+}
 export function context(request: AgentRequest, messages: Message[]) {
   const fixedSize =
     (request.systemInstructions ?? instructions).length +
@@ -70,23 +78,34 @@ export function context(request: AgentRequest, messages: Message[]) {
     reqSize(request.message) +
     2000;
   if (fixedSize >= contextHardLimit)
-    throw new Error(
-      "Current context exceeds the hard request limit; narrow the active batch",
-    );
-  // A large fixed part (schemas, state, an attachment excerpt) drops history instead of failing the turn.
-  const overBudget = fixedSize >= contextBudget;
-  const bounded = boundHistory(
-    messages,
-    20,
-    Math.max(0, contextBudget - fixedSize),
+    throw new ContextLimitError({ fixedSize, currentTurnSize: 0 });
+  // The current turn starts at the current user message and always stays in the request:
+  // dropping its own tool results would make the model repeat the same calls.
+  const start = messages.findLastIndex(
+    (m) => m.role === "user" && m.content === request.message,
   );
-  if (
-    !bounded.messages.some(
-      (m) => m.role === "user" && m.content === request.message,
-    )
-  )
-    bounded.messages.push({ role: "user", content: request.message });
-  const current: ModelMessage[] = bounded.messages;
+  const prior = start >= 0 ? messages.slice(0, start) : messages;
+  const currentUser: Message =
+    start >= 0 ? messages[start]! : { role: "user", content: request.message };
+  const turnTail = boundHistory(
+    start >= 0 ? messages.slice(start + 1) : [],
+    Number.POSITIVE_INFINITY,
+    Math.max(0, contextHardLimit - fixedSize),
+  );
+  const currentTurnSize = JSON.stringify(turnTail.messages).length;
+  // A large fixed part (schemas, state, an attachment excerpt) squeezes prior history instead of failing the turn.
+  const overBudget = fixedSize + currentTurnSize >= contextBudget;
+  const bounded = boundHistory(
+    prior,
+    20,
+    Math.max(0, contextBudget - fixedSize - currentTurnSize),
+  );
+  const omitted = bounded.omitted + turnTail.omitted;
+  const current: ModelMessage[] = [
+    ...bounded.messages,
+    currentUser,
+    ...turnTail.messages,
+  ];
   // Only the media specialist receives image bytes; the coordinator sees the note and delegates.
   const images = request.specialist === "media" ? (request.images ?? []) : [];
   if (images.length) {
@@ -107,9 +126,10 @@ export function context(request: AgentRequest, messages: Message[]) {
       };
   }
   return {
-    omitted: bounded.omitted,
+    omitted,
     overBudget,
     fixedSize,
+    currentTurnSize,
     messages: [
       {
         role: "system",
@@ -126,7 +146,7 @@ export function context(request: AgentRequest, messages: Message[]) {
           (request.runtime?.context ?? "") +
           "\nSingapore time: " +
           new Date().toLocaleString("en-SG", { timeZone: "Asia/Singapore" }) +
-          `\n${bounded.omitted} older/incomplete messages omitted. Retrieve exact evidence via observation_read; never infer missing results.`,
+          `\n${omitted} older/incomplete messages omitted${overBudget ? " because the current request, state and schemas fill the allowance; earlier conversation is unavailable this turn" : ""}. Retrieve exact evidence via observation_read; never infer missing results.`,
       } as ModelMessage,
     ],
   };

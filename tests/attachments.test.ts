@@ -9,7 +9,12 @@ import {
   limits,
   validFilePath,
 } from "../src/attachments.js";
-import { context, contextBudget, contextHardLimit } from "../src/context.js";
+import {
+  context,
+  contextBudget,
+  contextHardLimit,
+  ContextLimitError,
+} from "../src/context.js";
 import { IMAGE_TOKEN_ALLOWANCE, estimateInputBytes } from "../src/model.js";
 import type { Message } from "../src/model.js";
 /** A minimal valid PDF with one Helvetica text object per page; enough for text extraction tests. */
@@ -251,20 +256,45 @@ test("only the media specialist's model input carries image parts, and costs are
   assert.equal(plain.messages.find((m) => m.role === "user")!.content, "hello");
 });
 
-test("an oversized fixed prompt drops history instead of failing the turn, up to a hard limit", () => {
+test("an oversized fixed prompt drops prior history but keeps the current turn, up to a hard limit", () => {
+  const message = "when is this for?";
+  const toolCall = {
+    role: "assistant" as const,
+    content: null,
+    tool_calls: [
+      {
+        id: "call-1",
+        type: "function" as const,
+        function: { name: "source_read", arguments: "{}" },
+      },
+    ],
+  };
+  const toolResult = {
+    role: "tool" as const,
+    tool_call_id: "call-1",
+    content: JSON.stringify({ result: { content: "page two text" } }),
+  };
+  // Production shape: prior turns, then the current message, then this turn's own tool group.
   const history: Message[] = [
     { role: "user", content: "earlier" },
     { role: "assistant", content: "ok" },
+    { role: "user", content: message },
+    toolCall,
+    toolResult,
   ];
   const base = { runId: "r", capability: "c", history, memories: [] };
-  const normal = context({ ...base, message: "hello" }, history);
+  const normal = context({ ...base, message }, history);
   assert.equal(normal.overBudget, false);
   assert.equal(normal.omitted, 0);
+  assert.deepEqual(
+    normal.messages.map((m) => m.role),
+    ["system", "user", "assistant", "user", "assistant", "tool", "system"],
+  );
   // Runtime state large enough to consume the whole allowance on its own.
   const heavy = context(
     {
       ...base,
-      message: "when is this for?",
+      message,
       runtime: { context: "x".repeat(contextBudget), tools: [] },
     },
     history,
@@ -272,9 +302,22 @@ test("an oversized fixed prompt drops history instead of failing the turn, up to
   assert.equal(heavy.overBudget, true);
   assert.ok(heavy.fixedSize > contextBudget);
   assert.equal(heavy.omitted, 2);
-  const users = heavy.messages.filter((m) => m.role === "user");
-  assert.equal(users.length, 1);
-  assert.equal(users[0]!.content, "when is this for?");
+  assert.deepEqual(
+    heavy.messages.map((m) => m.role),
+    ["system", "user", "assistant", "tool", "system"],
+  );
+  assert.equal(heavy.messages[1]!.content, message);
+  assert.equal(heavy.messages[3]!.content, toolResult.content);
+  assert.match(
+    String(heavy.messages.at(-1)!.content),
+    /2 older\/incomplete messages omitted because the current request/,
+  );
+  // Without the current message in history (specialist path), it is still supplied exactly once.
+  const fresh = context({ ...base, message: "hello", history: [] }, []);
+  assert.deepEqual(
+    fresh.messages.map((m) => m.role),
+    ["system", "user", "system"],
+  );
   assert.throws(
     () =>
       context(
@@ -285,6 +328,8 @@ test("an oversized fixed prompt drops history instead of failing the turn, up to
         },
         history,
       ),
-    /hard request limit/,
+    (error: unknown) =>
+      error instanceof ContextLimitError &&
+      error.sizes.fixedSize! > contextHardLimit,
   );
 });

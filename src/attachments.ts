@@ -7,7 +7,7 @@ export const limits = {
   pdfBytes: 20 * 1024 * 1024,
   pdfPages: 50,
   pdfCharacters: 200000,
-  pdfExcerpt: 4000,
+  pdfExcerpt: 6000,
   pdfMs: 20000,
 };
 const imageTypes = new Map([

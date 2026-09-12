@@ -8,7 +8,7 @@ import { projectObservation } from "./observations.js";
 import { action } from "./protocol.js";
 import type { AgentRequest, AgentResponse } from "./protocol.js";
 import type { Agent } from "./agent.js";
-import { context, contextBudget } from "./context.js";
+import { context, contextBudget, ContextLimitError } from "./context.js";
 import {
   ModelError,
   type ModelAdapter,
@@ -90,6 +90,7 @@ export class CustomAgent implements Agent {
             if (input.overBudget)
               await execution.trace("context.over_budget", {
                 fixedSize: input.fixedSize,
+                currentTurnSize: input.currentTurnSize,
                 budget: contextBudget,
               });
             if (req.specialist)
@@ -127,7 +128,15 @@ export class CustomAgent implements Agent {
               invocationId,
               ...(error instanceof ModelError
                 ? { diagnostics: error.diagnostics, transient: error.transient }
-                : {}),
+                : error instanceof ContextLimitError
+                  ? { contextSizes: error.sizes, budget: contextBudget }
+                  : {
+                      // Bounded internal error identity; provider text never reaches traces.
+                      error:
+                        error instanceof Error
+                          ? `${error.name}: ${error.message.slice(0, 300)}`
+                          : "unknown",
+                    }),
               attempt,
               latencyMs: Date.now() - start,
             });
