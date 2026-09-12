@@ -79,3 +79,9 @@ Calendar's first approval-enabled release uses the [reviewed additive procedure]
 Owner preference recorded 9 September 2026: a cloud task should increasingly be able to do the same incident investigation, trace review, regression testing, implementation and verified release work as a local task. Current limitations above describe today, not the desired end state. Close gaps during relevant development rather than repeatedly sending the owner back to the Mac.
 
 Priorities are a shared private trace inspection/export interface, reproducible incident fixtures, reliable scoped GitHub mutation/workflow access, and eventually a reviewed remote migration/operations path. Preserve account consent, explicit Calendar approval and credential boundaries. Prefer narrowly scoped services and shared scripts over giving cloud tasks root SSH or copying OAuth tokens. Verify capabilities from an actual cloud task before claiming parity; local preflight results do not prove cloud access.
+
+## Portable agents and release identity
+
+Use the same pipeline from a fresh local checkout or another cloud coding provider. See [portable setup](portable-development.md), [current work](current-work.md) and [release/version policy](releases.md). GitHub already stores COMPANION_DEPLOY_KEY and COMPANION_KNOWN_HOSTS; their values must not be exported to developer .env files. GitHub triggers deployment, while Docker build/start/health checks run on DigitalOcean. A local Mac does not participate in ordinary app releases.
+
+The latest verified release at the time of the 12 September handover was e6837c0; inspect fresh Actions results for current status. The private trace export candidate is checkpointed, not installed. Account-level branch protection and environment approvals are separate GitHub settings, not guaranteed by these workflow files.

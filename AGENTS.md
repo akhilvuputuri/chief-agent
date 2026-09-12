@@ -1,6 +1,6 @@
 # Companion Agent development
 
-Read `HANDOVER.md`, `docs/cloud-development.md`, and the relevant source before modifying behavior. Historical incident reports and deferred candidates describe earlier states; current code and verified production diagnostics take precedence.
+Read `docs/current-work.md`, `HANDOVER.md`, `docs/portable-development.md`, `docs/cloud-development.md`, and the relevant source before modifying behavior. Historical incident reports and deferred candidates describe earlier states; current code and verified production diagnostics take precedence.
 
 ## Commands
 
@@ -36,3 +36,12 @@ For runtime failures, use the manual `production-diagnostics` GitHub workflow if
 ## Development journal
 
 For meaningful runtime changes, incidents or experiments, add or update docs/journey using its template. Link evidence and PRs, distinguish hypotheses from measurements, and record deployment status and unresolved limitations. Never copy private production traces or credentials into journal entries.
+
+## Portable checkout and concurrent development
+
+- GitHub main is the integrated source of truth; the latest successful release SHA identifies production. Fetch origin and inspect status before work. Preserve other people's uncommitted changes; use an isolated branch/worktree for unrelated tasks. Never reset or clean a shared checkout to make it convenient.
+- Current work and checkpoint branches are indexed in docs/current-work.md. Claim a bounded task in a GitHub issue/PR when collaboration requires it; use draft PRs for work in progress. A checkpoint is not a tested release. Push resumable work with exact remaining checks instead of leaving the only copy on one laptop.
+- Mocked tests need no .env or external account. Optional local integration credentials belong in an ignored .env with owner-only permissions. Never copy production tokens or the deployment key into a development checkout. Use a distinct test bot to avoid competing production polling.
+- Each new machine needs its own authorized GitHub login. Run doctor:cloud to inspect capabilities; repository read access alone does not prove merge or Actions permission. Use the shared GitHub deployment path from local and cloud tasks alike.
+- Before merging, incorporate relevant main changes, rerun affected checks and verify the PR's current head. Serialize releases and retry a skipped/stale or busy release through the documented workflow; do not cancel user runtime work.
+- Update docs/current-work.md, the relevant handover and docs/journey when status changes. Put release notes and immutable semantic-version tags on verified shipped milestones per docs/releases.md. Tags do not trigger deployment and must never be moved to disguise a failed release.

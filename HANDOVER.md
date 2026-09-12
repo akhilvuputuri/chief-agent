@@ -1,5 +1,7 @@
 # Personal-agent handover
 
+Start with [current work](docs/current-work.md) and [portable development](docs/portable-development.md). The unfinished observable-memory code is now on GitHub at `checkpoint/observable-memory` (`2a85839`), not just on the original Mac. It is not deployed. Read its checkpoint before resuming. GitHub main is integrated source; successful release SHA is deployed source. See [versions and release notes](docs/releases.md).
+
 Updated 9 September 2026. Read [cloud development and deployment](docs/cloud-development.md) and [agent instructions](AGENTS.md) for current operating procedures. The owned TypeScript runtime is deployed on the existing DigitalOcean server. PR #7 introduced the cutover (`f1664bb`); consult server `RELEASE` for subsequent revisions. The gateway and Postgres are healthy, and the Hermes container has been removed without deleting its volume.
 
 ## Intent and constraints
