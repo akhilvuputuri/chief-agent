@@ -6,7 +6,7 @@ Updated 9 September 2026. Read [cloud development and deployment](docs/cloud-dev
 
 ## Intent and constraints
 
-The application is a general personal assistant. Telegram text and voice are the initial interface; job preparation is one domain. Protect credentials, ownership and approvals. Keep Gmail read-only. Calendar timed-event creation requires explicit Telegram button approval; see [Calendar release procedure](docs/calendar-approval.md). No extra paid infrastructure. No automatic shell execution, delegation or self-deployment.
+The application is a general personal assistant. Telegram text and voice are the initial interface; job preparation is one domain. Protect credentials, ownership and approvals. Keep Gmail read-only. Calendar timed-event creation requires explicit Telegram button approval; see [Calendar release procedure](docs/calendar-approval.md). No extra paid infrastructure. No automatic shell execution or self-deployment. Bounded research delegation is implemented; see [specialist handover](docs/research-specialist.md).
 
 ## Locations
 
@@ -39,7 +39,7 @@ Migration `006_runtime.sql` archives old histories, seeds text-only context and 
 
 Run `npm run check`, `npm run build`, `npm run format:check`. `npm run smoke:runtime` makes bounded paid Sol calls against a synthetic PGlite database, never the production user's records. Check deployment status in `docs/verification.md` and server `RELEASE`.
 
-Improve from actual daily conversations: context selection, memory retrieval, deduplication, tracing and voice responsiveness. Realtime voice, subagents, sandbox execution, self-deployment and a web client remain later milestones.
+Improve from actual daily conversations: context selection, memory retrieval, deduplication, tracing and voice responsiveness. Realtime voice, parallel specialist teams, sandbox execution, self-deployment and a web client remain later milestones.
 
 The previous detailed Hermes handover is retained under `docs/history/hermes-handover.md` as historical context. Its architecture and model defaults are obsolete. Do not deploy the historical bridge as a prerequisite.
 

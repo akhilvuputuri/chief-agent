@@ -1,3 +1,4 @@
+import { researchReads } from "./research-schema.js";
 import { spending, Spending } from "./spending.js";
 import { recordContext } from "./record-context.js";
 import { compactWork } from "./observations.js";
@@ -182,6 +183,18 @@ export class Assistant {
           execution,
           signal: controller.signal,
           execute: (input) => this.call(capability, input),
+          executeResearch: async (childRun, input) => {
+            const op = (input as any)?.operation;
+            if (!researchReads.has(op))
+              throw new Error("Operation unavailable");
+            const child = await this.db.query(
+              "SELECT 1 FROM runtime_runs r JOIN events e ON e.run_id=r.id AND e.user_id=r.user_id WHERE r.id=$1 AND r.user_id=$2 AND r.state='running' AND e.type='research.child_started' AND e.data->>'parentRunId'=$3",
+              [childRun, user, run],
+            );
+            if (!child.rows.length)
+              throw new Error("Research scope unavailable");
+            return this.call(capability, input, childRun);
+          },
           refreshContext: async () => {
             runtime.context = JSON.stringify({
               ...JSON.parse(runtime.context),
@@ -251,7 +264,7 @@ export class Assistant {
       this.controllers.delete(user);
     }
   }
-  async call(capability: string, input: unknown) {
+  async call(capability: string, input: unknown, childRun?: string) {
     const scope = this.capabilities.get(capability);
     if (scope && this.controllers.get(scope.user)?.signal.aborted)
       throw new Error("Task cancelled");
@@ -288,6 +301,6 @@ export class Assistant {
           "An uncertain write requires inspection before further writes",
         );
     }
-    return this.tools.execute(scope.user, scope.run, input, true);
+    return this.tools.execute(scope.user, childRun ?? scope.run, input, true);
   }
 }

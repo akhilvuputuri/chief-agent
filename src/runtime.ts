@@ -57,6 +57,8 @@ export function runtimeContext(
   skills: typeof baselineSkills = baselineSkills,
 ) {
   const disabled = (op: string) =>
+    op === "research_report" ||
+    (op === "research_delegate" && !availability.web) ||
     (op.startsWith("gmail_") && !availability.gmail) ||
     (["calendar_list", "calendar_draft"].includes(op) &&
       !availability.calendar) ||
@@ -74,6 +76,8 @@ export function runtimeContext(
           ? "Load the approved active skill or repository default using only its catalogue key."
           : ((
               {
+                research_delegate:
+                  "Delegate a bounded public research assignment to an isolated read-only specialist. First retrieve exact saved job IDs if relevant. Supply only necessary context and up to six total jobs/URLs; use empty arrays for general research. Returns source-linked results, not saved assessments. Use direct tools for simple lookups.",
                 job_analyze:
                   "Read role and profile inputs for analysis. Does not perform or save an assessment. Use the exact saved ID.",
                 observation_read:

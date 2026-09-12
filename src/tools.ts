@@ -80,6 +80,13 @@ export class JobTools {
     a: ReturnType<typeof action.parse>,
   ): Promise<unknown> {
     const db = this.db;
+    if (
+      a.operation === "research_delegate" ||
+      a.operation === "research_report"
+    )
+      throw new Error(
+        "Research validation: operation requires the scoped agent runtime",
+      );
     if (a.operation === "calendar_draft") {
       if (!this.calendarActions)
         throw new Error("Calendar creation is not configured");

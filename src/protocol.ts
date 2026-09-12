@@ -1,3 +1,4 @@
+import { researchAssignment, researchReport } from "./research-schema.js";
 import { calendarDraft } from "./calendar-draft.js";
 import { z } from "zod";
 const id = z.string().uuid();
@@ -39,6 +40,8 @@ const workSteps = z
     "Unique step keys required",
   );
 export const action = z.discriminatedUnion("operation", [
+  researchAssignment,
+  researchReport,
   calendarDraft.extend({ operation: z.literal("calendar_draft") }).strict(),
   z
     .object({
@@ -268,6 +271,9 @@ export interface AgentRequest {
   history: unknown[];
   memories: { key: string; value: string }[];
   runtime?: { context: string; tools?: import("./model.js").ToolDefinition[] };
+  specialist?: "research";
+  systemInstructions?: string;
+  executeResearch?: (run: string, input: unknown) => Promise<unknown>;
   refreshContext?: () => Promise<void>;
   execution?: import("./execution.js").Execution;
   execute?: (input: unknown) => Promise<unknown>;

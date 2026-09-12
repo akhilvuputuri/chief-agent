@@ -15,6 +15,7 @@ export function toolError(error: unknown) {
   if (message.startsWith("Result recording failed"))
     return { code: "RESULT_UNRECORDED", retryable: false, message };
   const known = [
+    /^Research validation:/,
     /Only a user follow-up can revise scope/,
     /uncertain write requires inspection/,
     /Task cancelled/,
