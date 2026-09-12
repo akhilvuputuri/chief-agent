@@ -2,6 +2,10 @@
 
 Use immutable semantic-version tags for meaningful, verified shipped milestones. Keep continuous app deployment from main. Tags identify releases; they do not trigger deployment. There were no existing Git tags when this policy was prepared on 12 September 2026. Do not invent retrospective version history.
 
+## First published baseline
+
+[v0.1.0](https://github.com/akhilvuputuri/companion-agent/releases/tag/v0.1.0) labels already deployed commit `e6837c0ab0061d768ea752a42548c3921ca3c095`, verified by [release run 34370129968](https://github.com/akhilvuputuri/companion-agent/actions/runs/34370129968). It includes release notes and explicitly excludes unfinished memory and Python evaluation work. Creating the tag did not deploy the checkpoint.
+
 ## Version policy
 
 - Start with v0.1.0 as the verified baseline when publishing the first release.
