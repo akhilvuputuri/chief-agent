@@ -18,6 +18,10 @@ Known remaining issues include pre-mutation error classification, dedicated prov
 2. One narrow evaluation/improvement/comparison cycle with sanitized fixtures; no broad paid eval project.
 3. Proposed image/PDF ingestion: not implemented, confirm scope before beginning it.
 
+## AWS deployment — explicitly deferred
+
+The owner wants the agent to drive an AWS deployment/migration later, primarily to build relevant cloud operations experience. See [scope and checklist](backlog/aws-deployment.md). Resume only on request after quota is available; no automatic wakeup, provisioning or spend. Service selection and costs remain unapproved.
+
 ## Deferred work
 
 `feature/runtime-evaluations` is an earlier, explicitly deferred candidate. Its migration 007 is not production schema. Do not merge or run paid experiments incidentally. See [checkpoint](checkpoints/runtime-evaluations.md).
