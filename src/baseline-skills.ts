@@ -1,5 +1,11 @@
 import { readFileSync } from "node:fs";
-const keys = ["research", "synthesis", "task-execution", "personal-assistance"];
+const keys = [
+  "job-alignment",
+  "research",
+  "synthesis",
+  "task-execution",
+  "personal-assistance",
+];
 export const baselineSkills = keys.map((key) => ({
   key,
   version: `repo:${key}:${["task-execution", "personal-assistance"].includes(key) ? 2 : 1}`,

@@ -8,7 +8,7 @@ Node 22. `npm ci`, `npm run check`, `npm run build`, `npm run format:check`. Tes
 
 ## Architecture
 
-`src/telegram.ts` is the client; `agent.ts` manages conversations; `custom-agent.ts` runs the loop; `model.ts` calls OpenRouter. `context.ts`, `record-context.ts`, `execution.ts`, and `work.ts` handle context and durable work. Tools run through owner-scoped `tools.ts` and Zod `protocol.ts`. Read the domain module before changing a tool. No production Hermes dependency.
+`src/telegram.ts` is the client; `agent.ts` manages conversations; `custom-agent.ts` runs the loop; `model.ts` calls OpenRouter. `context.ts`, `record-context.ts`, `execution.ts`, and `work.ts` handle context and durable work. Tools run through owner-scoped `tools.ts` and Zod `protocol.ts`. Read the domain module before changing a tool. `alignment.ts` manages frozen job-alignment scopes and reports; `research.ts` runs isolated read-only specialists. No production Hermes dependency.
 
 ## Product and safety constraints
 

@@ -88,3 +88,7 @@ Telegram photos, image files and PDF documents are accepted; PR #22 is deployed 
 The last manually deployed application fix is `0ef13bc` (empty model response recovery). Nine exact LinkedIn saved postings were imported on 8 September, making 31 roles, all saved/unapplied; the preparation Sheet was synced. Existing assessments were retained. See [model response recovery](docs/model-response-recovery.md). Earlier 22-role counts above are historical.
 
 Cloud development uses the connected GitHub environment. Main changes now have a release workflow and a manual bounded diagnostics workflow; see [cloud development](docs/cloud-development.md) for setup verification and limits. Deployment authority belongs to GitHub Actions, not the personal-assistant runtime: this is distinct from the deferred runtime self-deployment capability. Model, speech and Google credentials remain on the server. Automated releases refuse database/Compose changes and active runtime work. Cloud tasks must verify release results before claiming the bot is live.
+
+## Job-alignment specialist
+
+See [job alignment](docs/job-alignment.md) for flexible saved-role scopes, versioned background/skill snapshots, assessment validation, report retrieval and recovery. The coordinator handles pending batches and authorized downstream updates; the specialist remains read-only. Preserve current scope IDs when continuing work. Check the merge request/release for deployment status.

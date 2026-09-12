@@ -1,3 +1,4 @@
+import { alignmentContext } from "./alignment.js";
 import { researchReads } from "./research-schema.js";
 import { spending, Spending } from "./spending.js";
 import { recordContext } from "./record-context.js";
@@ -163,6 +164,7 @@ export class Assistant {
       runtime.context = JSON.stringify({
         ...JSON.parse(runtime.context),
         skillCatalogue: catalogue,
+        alignmentScopes: await alignmentContext(this.db, user),
         calendarApprovals: (
           await this.db.query(
             "SELECT id,status,expires_at,payload->'draft' AS draft,payload->>'execution' AS execution,payload->'result' AS result FROM approvals WHERE user_id=$1 AND operation='calendar_create' ORDER BY created_at DESC LIMIT 10",
@@ -200,6 +202,7 @@ export class Assistant {
               ...JSON.parse(runtime.context),
               work: compactWork(await work.snapshot(user)),
               costUsage: await spending.getStore()!.summary(),
+              alignmentScopes: await alignmentContext(this.db, user),
               retrievedCollections: await recordContext(this.db, user, run),
             });
           },

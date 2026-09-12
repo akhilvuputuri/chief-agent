@@ -31,3 +31,7 @@ At each checkpoint record the branch and commit, objective, implemented behavior
 ## Research specialist — issue #27, phase 1
 
 Implemented on `feature/research-specialist`: isolated public research, exact targets, validated source quotations, parent/child execution and cost traces, shared cancellation and budgets. No database migration or new infrastructure. See [handover](research-specialist.md) and [journal](journey/08-research-specialist.md). Verify the PR/release result before treating it as live. Media specialist and Python weekly analysis (#28) remain separate work.
+
+## Job-alignment refinement
+
+`feature/job-alignment` implements the clarified purpose in issue #27: any selected scope of saved roles, source-backed fit/interview findings and minimum useful preparation. See [contract and operation](job-alignment.md) and [journey 09](journey/09-job-alignment.md). No migration; standalone memory/Python checkpoints remain untouched. The owner requires an Astra subagent review and approval before merge/release. Verify the PR and exact release rather than assuming this branch is live.

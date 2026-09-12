@@ -82,7 +82,12 @@ export class JobTools {
     const db = this.db;
     if (
       a.operation === "research_delegate" ||
-      a.operation === "research_report"
+      a.operation === "research_report" ||
+      a.operation === "job_alignment_start" ||
+      a.operation === "job_alignment_resume" ||
+      a.operation === "job_alignment_read" ||
+      a.operation === "job_alignment_report" ||
+      a.operation === "job_alignment_input"
     )
       throw new Error(
         "Research validation: operation requires the scoped agent runtime",
