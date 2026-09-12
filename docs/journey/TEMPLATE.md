@@ -23,10 +23,6 @@ Link relevant code, tests and design notes. Explain how the change addresses the
 
 What passed/failed? Was it deployed? What does the evidence establish, and what remains unmeasured? Use equivalent workloads for comparisons.
 
-## Follow-up and learning
+## Follow-up
 
 Next narrow check, remaining risks and process lessons. Preserve failures and reversals.
-
-## Interview explanation
-
-A short truthful account of the problem, your decision, validation and limitations. Acknowledge assistance and do not invent metrics.

@@ -45,3 +45,7 @@ For meaningful runtime changes, incidents or experiments, add or update docs/jou
 - Each new machine needs its own authorized GitHub login. Run doctor:cloud to inspect capabilities; repository read access alone does not prove merge or Actions permission. Use the shared GitHub deployment path from local and cloud tasks alike.
 - Before merging, incorporate relevant main changes, rerun affected checks and verify the PR's current head. Serialize releases and retry a skipped/stale or busy release through the documented workflow; do not cancel user runtime work.
 - Update docs/current-work.md, the relevant handover and docs/journey when status changes. Put release notes and immutable semantic-version tags on verified shipped milestones per docs/releases.md. Tags do not trigger deployment and must never be moved to disguise a failed release.
+
+## Documentation scope
+
+Keep repository documentation specific to application behavior, architecture, technical decisions, incidents, tests and operations. Exclude the owner’s career goals, interview preparation narratives, portfolio positioning and personal motivations for technology choices. Conversation alignment is not repository content. Apply this rule to README, handovers, journal entries, templates and pending task documents.

@@ -43,7 +43,3 @@ No controlled post-change production comparison was run. We can claim reduced co
 ## Next measurement
 
 Compare equivalent target sets, model/provider settings and task outcomes. Capture calls, input/output/cache tokens, actual main/search cost, unknown charges, elapsed time, duplicate searches and useful completion. Include quality review: a cheaper incomplete result is not a win. Start with ordinary usage; do not automatically restart paid evals.
-
-## Interview explanation
-
-“I traced an expensive agent run and found repeated input dominated the recorded bill, while search costs were missing from our accounting. I bounded context, reused identical task-local searches and added usage visibility. I preserved reasoning quality settings and kept unknown costs explicit. I have mechanism-level tests; a controlled savings claim still needs measurement.”

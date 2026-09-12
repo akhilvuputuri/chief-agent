@@ -15,7 +15,7 @@ This document describes the state at handover, not a claim that the entire produ
 
 ## 1. Product intent and decisions
 
-Akhil wants a useful personal assistant and a credible AI engineering portfolio project. Telegram is the first client for conversational text and voice notes. Job search is the initial domain, but interaction should be natural requests, not a rigid listing-processing workflow. The project should eventually support a web/PWA client and realtime voice. Voice engineering is particularly important for applications to companies such as ElevenLabs and Sierra.
+The project is a general personal assistant. Telegram is the first client for conversational text and voice notes. Job search is the initial domain, but interaction should be natural requests, not a rigid listing-processing workflow. The project should eventually support a web/PWA client and realtime voice.
 
 The user wants a strong base first, then to ask Hermes through Telegram to develop new skills and features for itself. The desired model roles are Gemini 3.8 Flash for daily conversation, GPT-6 Astra for development orchestration/review, and GLM 5.3 Flash for cheaper development workers. Only the daily model is wired up. Do not tell the user that self-development is available yet.
 
@@ -189,12 +189,12 @@ The gateway always sends text first. For voice-note input with `VOICE_REPLIES=tr
 
 “OpenAPI speech” in earlier discussion meant **OpenAI speech**. OpenAPI is a specification term, not the speech provider. The OpenRouter key used for reasoning does not configure our speech endpoints. An OpenAI key is needed only if OpenAI is selected for speech. STT and TTS can use different vendors.
 
-| Option                    | Practical role in this project                                                                                  | Work still needed                                                                                                   |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| OpenAI                    | Fastest activation because adapter already exists; useful comparison baseline                                   | Add a dedicated speech key securely, confirm current model/format support, run real audio tests                     |
-| ElevenLabs                | Recommended portfolio experiment for user's voice-company interest; separate STT and expressive TTS integration | Implement adapters, obtain key and voice ID, test actual Telegram output format and account access                  |
-| Groq transcription        | Useful inexpensive STT baseline paired with OpenAI or ElevenLabs TTS                                            | Implement OpenAI-compatible STT endpoint with separate key; measure accuracy on user's speech                       |
-| Self-hosted transcription | Future privacy/cost experiment                                                                                  | Benchmark CPU/RAM/latency separately; do not assume a 4 GB shared production VM can carry this workload comfortably |
+| Option                    | Practical role in this project                                                | Work still needed                                                                                                   |
+| ------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| OpenAI                    | Fastest activation because adapter already exists; useful comparison baseline | Add a dedicated speech key securely, confirm current model/format support, run real audio tests                     |
+| ElevenLabs                | Separate STT and expressive TTS integration                                   | Implement adapters, obtain key and voice ID, test actual Telegram output format and account access                  |
+| Groq transcription        | Useful inexpensive STT baseline paired with OpenAI or ElevenLabs TTS          | Implement OpenAI-compatible STT endpoint with separate key; measure accuracy on user's speech                       |
+| Self-hosted transcription | Future privacy/cost experiment                                                | Benchmark CPU/RAM/latency separately; do not assume a 4 GB shared production VM can carry this workload comfortably |
 
 Recommendation: implement independent provider selection and compare ElevenLabs against the existing OpenAI path using the same consented voice-note examples. Keep the first release asynchronous. Do not rebuild the agent runtime just to add speech. Voice quality, end-to-end latency and recovery behavior must be measured; a vendor's model-latency claim is not Telegram round-trip latency. Prices change, so verify account-specific pricing before choosing paid plans rather than relying on promotional figures from old messages.
 
@@ -228,7 +228,7 @@ Groq offers an OpenAI-compatible transcription endpoint at `https://api.groq.com
 - A spoken deletion request creates the same authoritative approval as text; speech never approves it.
 - Record model/provider, p50/p95 latency, cost estimate, transcription/intent errors and tool task success on a small consented evaluation set. Clearly separate mocked tests from live evaluation results.
 
-## 9. Realtime voice and portfolio path
+## 9. Realtime voice roadmap
 
 Telegram voice notes demonstrate asynchronous multimodal input. They do not demonstrate streaming turn-taking, barge-in or conversational realtime audio. Keep that distinction clear in README/demo claims.
 
@@ -287,7 +287,7 @@ Additional caveats: conversation size is bounded but no sophisticated history co
 
 ## 13. Suggested first message to a successor agent
 
-Read this entire HANDOVER.md and inspect the existing source before changing anything. Preserve the live DigitalOcean deployment and completed Telegram pairing. Start by verifying a real Telegram memory/job turn, then prioritize provider-neutral voice-note STT/TTS with ElevenLabs as a portfolio experiment and OpenAI as the existing baseline. Ask only for missing provider credentials/preferences, not for previously approved DigitalOcean/SSH setup. Keep secrets out of output, keep the daily agent's tools constrained, and distinguish implemented behavior from plans. The next major milestone after voice is isolated Astra-orchestrated development with GLM workers, reviewed artifacts, spending limits and user-approved deployment.
+Read this entire HANDOVER.md and inspect the existing source before changing anything. Preserve the live DigitalOcean deployment and completed Telegram pairing. Start by verifying a real Telegram memory/job turn, then prioritize provider-neutral voice-note STT/TTS with ElevenLabs as an alternative provider and OpenAI as the existing baseline. Ask only for missing provider credentials/preferences, not for previously approved DigitalOcean/SSH setup. Keep secrets out of output, keep the daily agent's tools constrained, and distinguish implemented behavior from plans. The next major milestone after voice is isolated Astra-orchestrated development with GLM workers, reviewed artifacts, spending limits and user-approved deployment.
 
 ### Google integrations in progress — 2026-09-06
 

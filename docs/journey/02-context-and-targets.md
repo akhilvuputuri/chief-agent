@@ -19,7 +19,3 @@ A broader scope/finding/evaluation candidate was checkpointed when the user requ
 [PR #14](https://github.com/akhilvuputuri/companion-agent/pull/14) and [PR #15](https://github.com/akhilvuputuri/companion-agent/pull/15) shipped the focused changes. Read-only inspection recovered the incident's original 22 identities in 4,405 characters alongside the later empty inventory. That verifies availability, not a correct new model answer.
 
 See [response improvements](../response-improvements.md), [experiment history](../development-process.md) and [deferred checkpoint](../checkpoints/runtime-evaluations.md). Do not describe the deferred migration-007 candidate as deployed.
-
-## Interview explanation
-
-“Persisting the task was not enough: the model could still lose the original target set from its working context. I separated durable observations from compact model context and added regression coverage for later filtered retrievals erasing the initial inventory.”

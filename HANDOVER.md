@@ -6,7 +6,7 @@ Updated 9 September 2026. Read [cloud development and deployment](docs/cloud-dev
 
 ## Intent and constraints
 
-Build a useful general personal assistant and an AI engineering portfolio project. Telegram text and voice are the initial interface; job preparation is one domain. The user chose our own runtime and accepts iterative conversational bugs. Protect credentials, ownership and approvals. Keep Gmail read-only. Calendar timed-event creation requires explicit Telegram button approval; see [Calendar release procedure](docs/calendar-approval.md). No extra paid infrastructure. No automatic shell execution, delegation or self-deployment.
+The application is a general personal assistant. Telegram text and voice are the initial interface; job preparation is one domain. Protect credentials, ownership and approvals. Keep Gmail read-only. Calendar timed-event creation requires explicit Telegram button approval; see [Calendar release procedure](docs/calendar-approval.md). No extra paid infrastructure. No automatic shell execution, delegation or self-deployment.
 
 ## Locations
 

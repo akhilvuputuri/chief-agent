@@ -35,13 +35,9 @@ No database migration or Compose change; the Docker image gains only the pure-Ja
 
 Synthetic verification: 91 mocked tests pass, plus typecheck, build and format checks; PR checks passed. Release workflow run 34671433515 reported `{"deployed": "eb501b3c...", "healthy": true}` after recreating the gateway. No paid model call was made, so end-to-end vision quality and cost with the production model and provider routing remain unmeasured until the owner sends a real photo and PDF.
 
-## Follow-up and learning
+## Follow-up
 
 - Production check after release: send one photo with a caption and one text PDF; confirm the reply, the `image.received` and `document.extracted` events and a plausible reported cost.
 - If price-first routing selects a provider without vision, the request fails with the existing provider error; consider a modality hint in provider preferences if this is observed.
 - Deferred: OCR or page rendering for scanned PDFs, DOCX and spreadsheets, multiple photos in one album treated as one request, and retaining a model-written image description in history automatically.
 - Lesson: the expensive part of multimodal input is not the model call but everything downstream that assumes messages are small strings (history bounds, checkpoints, memory sources, cost estimates). Keeping bytes out of persistence was the central design decision.
-
-## Interview explanation
-
-The assistant could only read text and voice. I added photo and PDF intake on Telegram: images go to the existing vision-capable model as content parts for that turn only, and PDF text is extracted in-process and stored as an owner-scoped source the model can page through with a read-only tool. The main tradeoff was keeping image bytes out of persisted history, checkpoints and cost estimates, and choosing a small pure-JavaScript PDF library over one with native dependencies. It is covered by mocked tests, built with AI coding assistance, and not yet validated against the production model, so quality and cost are unmeasured.

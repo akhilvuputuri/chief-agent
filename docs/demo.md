@@ -1,4 +1,4 @@
-# Five-minute portfolio demo
+# Five-minute application demo
 
 Use an isolated database, a test Telegram bot and synthetic personal information. The goal is to demonstrate inspectable behavior, not imply successful real job applications.
 
