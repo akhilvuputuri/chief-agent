@@ -35,3 +35,7 @@ Implemented on `feature/research-specialist`: isolated public research, exact ta
 ## Job-alignment refinement
 
 `feature/job-alignment` implements the clarified purpose in issue #27: any selected scope of saved roles, source-backed fit/interview findings and minimum useful preparation. See [contract and operation](job-alignment.md) and [journey 09](journey/09-job-alignment.md). No migration; standalone memory/Python checkpoints remain untouched. The owner requires an Astra subagent review and approval before merge/release. Verify the PR and exact release rather than assuming this branch is live.
+
+## Foundation review fixes
+
+Independent Astra review of v0.2.0 found delegated search-cache isolation from its parent and a restart gap in child elapsed-time accounting. `fix/specialist-architecture-review` addresses both with focused tests. See [review journal](journey/10-foundation-review.md). Require Astra re-review of the fixed head and successful deployment before treating the fixes as live; incorporate them into dependent MR #30 before its final review/release.

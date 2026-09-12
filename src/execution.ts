@@ -47,6 +47,7 @@ export const readOperations = new Set([
 ]);
 export class Execution {
   private task?: string;
+  private delegatedMs = 0;
   private used = { ms: 0, models: 0, tools: 0 };
   constructor(
     readonly db: Database,
@@ -98,7 +99,7 @@ export class Execution {
     if (this.parent) {
       const root = await this.parent.remaining();
       return {
-        ms: Math.min(this.limits.ms - this.used.ms, root.ms - this.used.ms),
+        ms: Math.min(this.limits.ms - this.used.ms, root.ms),
         models: Math.min(this.limits.models - this.used.models, root.models),
         tools: Math.min(this.limits.tools - this.used.tools, root.tools),
       };
@@ -141,17 +142,30 @@ export class Execution {
     return left.ms;
   }
   async elapsed(ms: number) {
-    ms = Math.max(0, Math.ceil(ms));
-    this.used.ms += ms;
-    if (this.task)
+    // Child time is charged durably as it is observed. The enclosing parent tool
+    // later charges only its remaining overhead, never the same child time twice.
+    ms = Math.max(0, Math.ceil(ms) - this.delegatedMs);
+    if (this.parent) {
       await this.db.query(
-        "UPDATE work_tasks SET used_ms=used_ms+$2,updated_at=now() WHERE id=$1",
-        [this.task, ms],
+        `WITH child_charge AS (
+        UPDATE runtime_runs SET used_ms=used_ms+$2,updated_at=now() WHERE id=$1 AND user_id=$4 RETURNING id
+      ), parent_charge AS (
+        UPDATE runtime_runs SET used_ms=used_ms+$2,updated_at=now() WHERE id=$3 AND user_id=$4 AND EXISTS(SELECT 1 FROM child_charge) RETURNING task_id,user_id
+      ) UPDATE work_tasks t SET used_ms=t.used_ms+$2,updated_at=now() FROM parent_charge p WHERE t.id=p.task_id AND t.user_id=p.user_id`,
+        [this.run, ms, this.parent.run, this.user],
       );
-    await this.db.query(
-      "UPDATE runtime_runs SET used_ms=used_ms+$2,updated_at=now() WHERE id=$1",
-      [this.run, ms],
-    );
+      this.parent.used.ms += ms;
+      this.parent.delegatedMs += ms;
+    } else {
+      await this.db.query(
+        `WITH charge AS (
+        UPDATE runtime_runs SET used_ms=used_ms+$2,updated_at=now() WHERE id=$1 AND user_id=$3 RETURNING task_id,user_id
+      ) UPDATE work_tasks t SET used_ms=t.used_ms+$2,updated_at=now() FROM charge r WHERE t.id=r.task_id AND t.user_id=r.user_id`,
+        [this.run, ms, this.user],
+      );
+    }
+    this.used.ms += ms;
+    this.delegatedMs = 0;
   }
   async checkpoint(messages: Message[]) {
     await this.db.query(
