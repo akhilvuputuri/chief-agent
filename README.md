@@ -38,6 +38,17 @@ Tools have individual names and Zod-validated argument schemas. Identity comes f
 
 Telegram replies are model-written, guided by the mobile delivery context. The renderer handles supported Markdown and Telegram length limits. `/status` is the separate deterministic view of recorded task state; no ledger template replaces conversational answers.
 
+## Start here: a new developer or coding agent
+
+GitHub `main` is the source of truth for integrated code. The last successful `release` workflow and server `RELEASE` identify what is live; main may be ahead after a failed or pending deployment. The production branch is **main**, not master.
+
+1. Read [AGENTS.md](AGENTS.md), [current work](docs/current-work.md), then [HANDOVER.md](HANDOVER.md).
+2. Follow [portable development](docs/portable-development.md): clone, use Node 22, install dependencies, and run the mocked checks without production keys.
+3. Develop on an independent branch or worktree, open a PR, verify checks and merge. Passing main changes deploy through GitHub Actions; no local production SSH key is needed for ordinary app releases.
+4. Watch the release and report its SHA and health. Database/Compose changes, secret rotation and trusted server-command changes still require the documented operator procedure.
+
+[Release/version policy](docs/releases.md) explains tags and notes. [Cloud development](docs/cloud-development.md) explains deployment security and remaining access gaps. Do not rely on another chat's context, unpushed local files or a developer's absolute filesystem path.
+
 ## Local setup
 
 Requires Node 22+ and Docker Compose.
