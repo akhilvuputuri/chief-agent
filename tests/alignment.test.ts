@@ -505,3 +505,93 @@ test("full frozen input and skill version remain auditable; missing evidence sta
     await f.pg.close();
   }
 });
+
+test("compact summaries and coverage pages report their own omitted records accurately", async () => {
+  const f = await fixture({ generate: async () => answer("unused") });
+  try {
+    const ids = await addJobs(f.db, 25);
+    const ex = new Execution(
+      f.db,
+      "owner",
+      randomUUID(),
+      new AbortController().signal,
+      { ms: 10000, models: 1, tools: 100 },
+    );
+    await ex.start();
+    const req = {
+      execution: ex,
+      signal: ex.signal,
+      executeResearch: async () => ({}),
+    } as any;
+    const never = async () => {
+      throw Error("must reserve the last model call");
+    };
+    const start: any = await runAlignment(
+      req,
+      {
+        operation: "job_alignment_start",
+        objective: "All roles",
+        allSaved: true,
+        jobIds: [],
+        memoryKeys: [],
+      },
+      never,
+    );
+    assert.equal(start.roles.length, 12);
+    assert.equal(start.counts.total, 25);
+    assert.equal(start.truncated, true);
+    const first: any = await runAlignment(
+      req,
+      {
+        operation: "job_alignment_read",
+        scopeId: start.scopeId,
+        jobId: null,
+        offset: 0,
+      },
+      never,
+    );
+    assert.equal(first.roles.length, 20);
+    assert.equal(first.nextOffset, 20);
+    assert.equal(first.truncated, true);
+    const last: any = await runAlignment(
+      req,
+      {
+        operation: "job_alignment_read",
+        scopeId: start.scopeId,
+        jobId: null,
+        offset: 20,
+      },
+      never,
+    );
+    assert.equal(last.roles.length, 5);
+    assert.equal(last.nextOffset, null);
+    assert.equal(last.offset, 20);
+    assert.equal(last.truncated, true);
+    const subset: any = await runAlignment(
+      req,
+      {
+        operation: "job_alignment_start",
+        objective: "Thirteen roles",
+        allSaved: false,
+        jobIds: ids.slice(0, 13),
+        memoryKeys: [],
+      },
+      never,
+    );
+    const whole: any = await runAlignment(
+      req,
+      {
+        operation: "job_alignment_read",
+        scopeId: subset.scopeId,
+        jobId: null,
+        offset: 0,
+      },
+      never,
+    );
+    assert.equal(whole.roles.length, 13);
+    assert.equal(whole.truncated, false);
+    assert.equal(whole.nextOffset, null);
+  } finally {
+    await f.pg.close();
+  }
+});

@@ -86,7 +86,7 @@ async function summary(req: AgentRequest, scope: Scope) {
   return {
     scopeId: scope.scopeId,
     counts,
-    roles: scope.targets.slice(0, 40).map((t) => ({
+    roles: scope.targets.slice(0, 12).map((t) => ({
       jobId: t.id,
       title: t.title,
       company: t.company,
@@ -189,6 +189,8 @@ export async function runAlignment(
               company: t.company,
               status: found.get(t.id)?.report.status ?? "pending",
             })),
+          offset: read.offset,
+          truncated: read.offset > 0 || read.offset + 20 < scope.targets.length,
           nextOffset:
             read.offset + 20 < scope.targets.length ? read.offset + 20 : null,
         };
