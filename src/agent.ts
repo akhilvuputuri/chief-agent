@@ -1,3 +1,4 @@
+import { Memory } from "./memory.js";
 import { spending, Spending } from "./spending.js";
 import { recordContext } from "./record-context.js";
 import { compactWork } from "./observations.js";
@@ -132,12 +133,11 @@ export class Assistant {
               [user],
             )
           ).rows[0]?.history ?? []);
-      const memories = (
-        await this.db.query(
-          "SELECT key,value FROM memories WHERE user_id=$1 ORDER BY key",
-          [user],
-        )
-      ).rows;
+      const memory = new Memory(this.db);
+      const sourceId = background
+        ? null
+        : await memory.source(user, run, "user", message);
+      const memories = await memory.select(user, run, message);
       const execution = new Execution(
         this.db,
         user,
@@ -156,6 +156,7 @@ export class Assistant {
       runtime.context = JSON.stringify({
         ...JSON.parse(runtime.context),
         skillCatalogue: catalogue,
+        currentUserSourceId: sourceId,
         calendarApprovals: (
           await this.db.query(
             "SELECT id,status,expires_at,payload->'draft' AS draft,payload->>'execution' AS execution,payload->'result' AS result FROM approvals WHERE user_id=$1 AND operation='calendar_create' ORDER BY created_at DESC LIMIT 10",
@@ -185,6 +186,7 @@ export class Assistant {
           },
         }),
       );
+      await memory.source(user, run, "assistant", output.reply);
       if (!background)
         await this.db.query(
           "INSERT INTO conversations(user_id,history,runtime_version) VALUES($1,$2::jsonb,1) ON CONFLICT(user_id) DO UPDATE SET history=$2::jsonb,runtime_version=1,updated_at=now()",

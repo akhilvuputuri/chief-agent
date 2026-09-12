@@ -1,3 +1,4 @@
+import { MemoryTrace } from "./memory-trace.js";
 import { projectObservation } from "./observations.js";
 import { action } from "./protocol.js";
 import type { AgentRequest, AgentResponse } from "./protocol.js";
@@ -34,6 +35,7 @@ export class CustomAgent implements Agent {
     const execution = req.execution;
     if (!execution || !req.execute || !req.signal)
       throw new Error("Owner-scoped execution is required");
+    const tracer = new MemoryTrace(execution.db, execution.user, execution.run);
     const messages = [
       ...(req.history as Message[]),
       { role: "user", content: req.message } as Message,
@@ -46,9 +48,11 @@ export class CustomAgent implements Agent {
     try {
       while (true) {
         let generation;
+        let generationInvocation: string | undefined;
         for (let attempt = 0; ; attempt++) {
           const remaining = await execution.consume("models");
           const start = Date.now();
+          let invocation: string | undefined;
           try {
             await execution.trace("model.started", {
               model: this.model.model ?? null,
@@ -60,6 +64,18 @@ export class CustomAgent implements Agent {
               await execution.trace("context.omitted", {
                 messages: input.omitted,
               });
+            invocation = await tracer.begin(
+              {
+                messages: input.messages,
+                tools,
+                reasoning: "medium",
+                contextOmitted: input.omitted,
+                traceVersion: 1,
+              },
+              this.model.model,
+              attempt,
+              req.memories,
+            );
             generation = await this.model.generate({
               messages: input.messages,
               tools,
@@ -70,6 +86,15 @@ export class CustomAgent implements Agent {
                 AbortSignal.timeout(Math.max(1, remaining)),
               ]),
             });
+            generationInvocation = invocation;
+            await tracer.end(
+              invocation,
+              "completed",
+              generation.message,
+              Date.now() - start,
+              generation.usage ?? null,
+              generation.provider ?? null,
+            );
             // Save the complete model response before dispatching any requested operation.
             messages.push(generation.message);
             await execution.checkpoint(messages);
@@ -81,6 +106,20 @@ export class CustomAgent implements Agent {
             });
             break;
           } catch (error) {
+            if (invocation)
+              await tracer.end(
+                invocation,
+                "failed",
+                {
+                  kind:
+                    error instanceof ModelError
+                      ? "model_error"
+                      : "runtime_error",
+                  diagnostics:
+                    error instanceof ModelError ? error.diagnostics : {},
+                },
+                Date.now() - start,
+              );
             await execution.trace("model.failed", {
               ...(error instanceof ModelError
                 ? { diagnostics: error.diagnostics, transient: error.transient }
@@ -125,9 +164,14 @@ export class CustomAgent implements Agent {
           if (op.startsWith("work_") && op !== "work_status")
             await execution.attach(true);
           await execution.consume("tools");
-          const journal = await execution.beginCall(call.id, op, {
-            raw: call.function.arguments,
-          });
+          const journal = await execution.beginCall(
+            call.id,
+            op,
+            {
+              raw: call.function.arguments,
+            },
+            generationInvocation,
+          );
           let dispatched = false;
           try {
             if (!enabled.has(op)) throw new Error("Operation unavailable");

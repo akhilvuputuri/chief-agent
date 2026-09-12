@@ -27,6 +27,9 @@ test("Telegram handles natural text once and ignores unauthorized users and grou
   await pg.exec(
     await readFile(new URL("../db/006_runtime.sql", import.meta.url), "utf8"),
   );
+  await pg.exec(
+    await readFile(new URL("../db/010_memory.sql", import.meta.url), "utf8"),
+  );
   const db = pg as unknown as Database;
   let turns = 0;
   const replies: string[] = [];
@@ -105,6 +108,9 @@ test("status responds while a conversation is still running", async () => {
     await pg.exec(
       await readFile(new URL("../db/" + f + ".sql", import.meta.url), "utf8"),
     );
+  await pg.exec(
+    await readFile(new URL("../db/010_memory.sql", import.meta.url), "utf8"),
+  );
   const db = pg as unknown as Database;
   let entered!: () => void, release!: () => void;
   const started = new Promise<void>((r) => (entered = r)),

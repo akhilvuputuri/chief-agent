@@ -1,0 +1,42 @@
+name: memory-trace
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Run UUID, or recent for the latest ten runs
+        required: true
+        default: recent
+      content:
+        description: Include private source text and prompt snapshots in the artifact
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  inspect:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Export owner-scoped trace
+        env:
+          DEPLOY_KEY: ${{ secrets.COMPANION_DEPLOY_KEY }}
+          KNOWN_HOSTS: ${{ secrets.COMPANION_KNOWN_HOSTS }}
+          TARGET: ${{ inputs.run_id }}
+          CONTENT: ${{ inputs.content }}
+        run: |
+          set -euo pipefail
+          [[ "$TARGET" == recent || "$TARGET" =~ ^[0-9a-f-]{36}$ ]]
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/companion
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/companion ~/.ssh/known_hosts
+          trap 'rm -f ~/.ssh/companion' EXIT
+          mode=metadata
+          if [[ "$CONTENT" == true ]]; then mode=full; fi
+          ssh -i ~/.ssh/companion -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes root@188.166.246.143 "memory-trace $TARGET $mode" > memory-trace.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: memory-trace
+          path: memory-trace.json
+          retention-days: 1

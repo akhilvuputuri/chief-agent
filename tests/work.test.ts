@@ -1,3 +1,4 @@
+import { Memory } from "../src/memory.js";
 import { recoverRuntime } from "../src/execution.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -30,6 +31,9 @@ async function fixture() {
   );
   await pg.exec(
     await readFile(new URL("../db/008_costs.sql", import.meta.url), "utf8"),
+  );
+  await pg.exec(
+    await readFile(new URL("../db/010_memory.sql", import.meta.url), "utf8"),
   );
   const db = pg as unknown as Database;
   await ensureUser(db, "owner");
@@ -180,6 +184,16 @@ test("writes and exports have distinct receipts; failed export cannot complete t
     const saved = await f.call("memory_set", {
       key: "preference",
       value: "Concise replies",
+      sourceId: await new Memory(f.db).source(
+        "owner",
+        f.run,
+        "user",
+        "Concise replies",
+      ),
+      sourceQuote: "Concise replies",
+      reason: "Explicit preference",
+      expectedRevision: 0,
+      core: true,
     });
     await f.call("work_step", {
       id,
@@ -249,6 +263,16 @@ test("scope revision invalidates completion, keeps receipts, and rejects stale a
     const saved = await f.call("memory_set", {
       key: "preference",
       value: "Concise",
+      sourceId: await new Memory(f.db).source(
+        "owner",
+        f.run,
+        "user",
+        "Concise",
+      ),
+      sourceQuote: "Concise",
+      reason: "Explicit preference",
+      expectedRevision: 0,
+      core: true,
     });
     await f.call("work_step", {
       id,

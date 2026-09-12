@@ -1,3 +1,4 @@
+import { Memory } from "../src/memory.js";
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -46,6 +47,9 @@ before(async () => {
   await pg.exec(
     await readFile(new URL("../db/006_runtime.sql", import.meta.url), "utf8"),
   );
+  await pg.exec(
+    await readFile(new URL("../db/010_memory.sql", import.meta.url), "utf8"),
+  );
   db = pg as unknown as Database;
   tools = new JobTools(db, {
     call: async () => ({ untrusted: true, content: "test" }),
@@ -71,6 +75,16 @@ test("save, list, update and analyze persisted roles with profile evidence", asy
     operation: "memory_set",
     key: "background",
     value: "Python developer",
+    sourceId: await new Memory(db).source(
+      "alice",
+      run(),
+      "user",
+      "Remember I am a Python developer",
+    ),
+    sourceQuote: "Python developer",
+    reason: "Explicit request",
+    expectedRevision: 0,
+    core: true,
   });
   const changed = (await tools.execute("alice", run(), {
     operation: "job_update",

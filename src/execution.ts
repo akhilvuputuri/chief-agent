@@ -33,6 +33,10 @@ export const readOperations = new Set([
   "job_list",
   "job_analyze",
   "memory_list",
+  "memory_search",
+  "memory_history",
+  "conversation_search",
+  "conversation_read",
   "web_search",
   "web_read",
 ]);
@@ -147,10 +151,15 @@ export class Execution {
       ]);
     await event(this.db, this.user, this.run, type, data);
   }
-  async beginCall(callId: string, operation: string, args: unknown) {
+  async beginCall(
+    callId: string,
+    operation: string,
+    args: unknown,
+    invocation?: string,
+  ) {
     const id = randomUUID();
     await this.db.query(
-      "INSERT INTO runtime_calls(id,run_id,call_id,operation,arguments,is_write) VALUES($1,$2,$3,$4,$5::jsonb,$6)",
+      "INSERT INTO runtime_calls(id,run_id,call_id,operation,arguments,is_write,invocation_id) VALUES($1,$2,$3,$4,$5::jsonb,$6,$7)",
       [
         id,
         this.run,
@@ -158,6 +167,7 @@ export class Execution {
         operation,
         JSON.stringify(args),
         !readOperations.has(operation),
+        invocation ?? null,
       ],
     );
     return id;
@@ -178,6 +188,9 @@ export class Execution {
 }
 // Startup recovery is deliberately conservative. No old invocation is replayed.
 export async function recoverRuntime(db: Database) {
+  await db.query(
+    "UPDATE model_invocations SET state='interrupted',finished_at=now() WHERE state='started'",
+  );
   // Charge interrupted active execution conservatively, capped at remaining allocation.
   await db.query(
     `UPDATE work_tasks t SET used_ms=LEAST(t.budget_ms,t.used_ms+COALESCE((SELECT sum(GREATEST(0,EXTRACT(EPOCH FROM now()-r.updated_at)*1000))::bigint FROM runtime_runs r WHERE r.task_id=t.id AND r.state='running'),0)) WHERE EXISTS(SELECT 1 FROM runtime_runs r WHERE r.task_id=t.id AND r.state='running')`,

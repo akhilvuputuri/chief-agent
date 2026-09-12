@@ -1,3 +1,4 @@
+import { Memory } from "./memory.js";
 import { WorkTools } from "./work.js";
 import { toolError } from "./tool-errors.js";
 import type { DailyTools, DailyAction } from "./daily.js";
@@ -175,20 +176,15 @@ export class JobTools {
           [user, a.status ?? null],
         )
       ).rows;
-    if (a.operation === "memory_list")
-      return (
-        await db.query(
-          "SELECT key,value FROM memories WHERE user_id=$1 ORDER BY key",
-          [user],
-        )
-      ).rows;
-    if (a.operation === "memory_set") {
-      await db.query(
-        "INSERT INTO memories(user_id,key,value) VALUES($1,$2,$3) ON CONFLICT(user_id,key) DO UPDATE SET value=$3,updated_at=now()",
-        [user, a.key, a.value],
-      );
-      return { saved: true };
-    }
+    const memory = new Memory(db);
+    if (a.operation === "memory_list") return memory.list(user);
+    if (a.operation === "memory_set") return memory.save(user, run, a);
+    if (a.operation === "memory_search")
+      return memory.search(user, run, a.query);
+    if (a.operation === "conversation_search")
+      return memory.search(user, run, a.query, true);
+    if (a.operation === "conversation_read") return memory.read(user, a.id);
+    if (a.operation === "memory_history") return memory.history(user, a.key);
     if (a.operation === "web_search" || a.operation === "web_read") {
       const result = await this.web.call(
         a.operation,

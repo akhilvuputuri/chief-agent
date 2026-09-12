@@ -31,6 +31,7 @@ async function fixture(
     "005_work",
     "006_runtime",
     "008_costs",
+    "010_memory",
   ])
     await pg.exec(
       await readFile(new URL("../db/" + f + ".sql", import.meta.url), "utf8"),
@@ -115,7 +116,19 @@ test("custom conversation persists model and tool records, observes real results
     generate: async (input) => {
       n++;
       if (n === 1)
-        return call("memory_set", { key: "style", value: "Concise" });
+        return call("memory_set", {
+          key: "style",
+          value: "Concise",
+          sourceId: (
+            await f.db.query(
+              "SELECT id FROM memory_sources WHERE role='user' ORDER BY created_at DESC LIMIT 1",
+            )
+          ).rows[0].id,
+          sourceQuote: "I prefer concise replies",
+          reason: "Explicit preference",
+          expectedRevision: 0,
+          core: true,
+        });
       assert.equal(
         JSON.parse(input.messages.findLast((m) => m.role === "tool")!.content!)
           .result.saved,
@@ -425,7 +438,7 @@ test("ambiguous write is never retried and later writes require inspection", asy
   const f = await fixture({
     generate: async () => {
       requests++;
-      return call("memory_set", { key: "x", value: "x" });
+      return call("job_save", { title: "Engineer", company: "Example" });
     },
   });
   try {

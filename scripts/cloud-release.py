@@ -27,6 +27,13 @@ def healthy():
 
 def main():
     command = os.environ.get('SSH_ORIGINAL_COMMAND', '')
+    trace = re.fullmatch(r'memory-trace (recent|[0-9a-f-]{36}) (metadata|full)', command)
+    if trace:
+        result = compose('exec', '-T', 'gateway', 'node', 'scripts/inspect-memory.mjs', trace.group(1), trace.group(2), capture_output=True, text=True)
+        # Contents go to a private workflow artifact, not Actions console logs.
+        if len(result.stdout) > 8*1024*1024: raise RuntimeError('Trace export too large; select one run')
+        print(result.stdout)
+        return
     if command == 'diagnose':
         print(json.dumps({'release': (LIVE/'RELEASE').read_text().strip(), 'runs': query("SELECT id,state,stop_reason,model,used_models,used_tools,used_ms,started_at FROM runtime_runs ORDER BY started_at DESC LIMIT 15"), 'model_failures': query("SELECT run_id,created_at,data FROM events WHERE type='model.failed' ORDER BY created_at DESC LIMIT 15"), 'tools': query("SELECT operation,state,count(*)::int FROM runtime_calls WHERE started_at > now()-interval '24 hours' GROUP BY operation,state"), 'costs': query("SELECT run_id,count(*)::int requests,sum(actual_usd) reported_usd,count(*) FILTER(WHERE actual_usd IS NULL)::int unknown_charges FROM provider_charges WHERE created_at > now()-interval '24 hours' GROUP BY run_id"), 'jobs': query('SELECT status,count(*)::int FROM jobs GROUP BY status')}))
         return
