@@ -1,10 +1,10 @@
 # Deferred: operate Companion Agent on AWS
 
-Recorded 12 September 2026. Status: backlog only. The owner is defining todos while usage quota is limited; resume when they explicitly ask. No automatic schedule, provisioning, migration or infrastructure spend is authorized by this record.
+Recorded 12 September 2026. Status: backlog only. Resume only on explicit request. No automatic schedule, provisioning, migration or infrastructure spend is authorized by this record.
 
-## Motivation
+## Target
 
-Gain practical AWS deployment and operations experience relevant to job applications. The aim is to operate the personal assistant and explain infrastructure, IAM, deployment, observability and recovery decisions. Avoid turning this into an oversized migration or adopting services just for a résumé. AWS is the preferred direction; GCP was considered as an alternative. Final service selection is pending a concrete costed design.
+Deploy the existing personal assistant on AWS while preserving data, integrations and the checked GitHub release process. Final service selection is pending a costed design.
 
 ## Scope for the agent when resumed
 
@@ -24,6 +24,6 @@ No runtime rewrite, Kubernetes, new model hosting or GPU infrastructure is requi
 
 ## Completion evidence
 
-Reproducible infrastructure source; scoped deployment authentication; passing checks; verified deployed SHA and health; preserved data; successful behavioral checks; documented rollback; cost estimate and observed charges clearly distinguished; an honest engineering-journal entry describing what was learned.
+Reproducible infrastructure source; scoped deployment authentication; passing checks; verified deployed SHA and health; preserved data; successful behavioral checks; documented rollback; cost estimate and observed charges clearly distinguished; an engineering-journal entry documenting the implementation and verification.
 
 Next action on resumption: inspect current state and produce the costed AWS design. Do not provision directly from this backlog document.

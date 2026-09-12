@@ -20,7 +20,7 @@ Known remaining issues include pre-mutation error classification, dedicated prov
 
 ## AWS deployment — explicitly deferred
 
-The owner wants the agent to drive an AWS deployment/migration later, primarily to build relevant cloud operations experience. See [scope and checklist](backlog/aws-deployment.md). Resume only on request after quota is available; no automatic wakeup, provisioning or spend. Service selection and costs remain unapproved.
+AWS deployment/migration is a deferred infrastructure task. See [scope and checklist](backlog/aws-deployment.md). Resume only on explicit request; no automatic wakeup, provisioning or spend. Service selection and costs remain unapproved.
 
 ## Deferred work
 
