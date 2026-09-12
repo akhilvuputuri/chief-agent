@@ -1,0 +1,14 @@
+# HTTPS foundation only. Do not proxy private routes until Mini App authentication
+# and owner-scoped API checks have been implemented and independently reviewed.
+companion.188-166-246-143.sslip.io {
+	header {
+		-Server
+		Content-Security-Policy "default-src 'none'; base-uri 'none'; form-action 'none'"
+		Referrer-Policy no-referrer
+		X-Content-Type-Options nosniff
+		Cache-Control no-store
+	}
+	@root path /
+	respond @root "Companion Mini App is being prepared. Continue using the Telegram bot." 200
+	respond "Not found" 404
+}
