@@ -74,7 +74,7 @@ export async function delegateResearch(
   let output: AgentResponse | undefined;
   let report: ReturnType<typeof researchReport.parse> | undefined;
   try {
-    // Share research-cache task identity without attaching the child to task budget accounting.
+    // Preserve task context for inspection. Search-cache identity resolves the trusted parent link independently of budget attachment.
     await db.query(
       "INSERT INTO work_turns(run_id,user_id,request,task_id,revision,background) SELECT $1,user_id,$3,task_id,revision,false FROM work_turns WHERE run_id=$2 AND user_id=$4",
       [childRun, parent.run, a.objective, user],
