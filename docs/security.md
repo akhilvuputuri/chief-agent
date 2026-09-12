@@ -2,7 +2,7 @@
 
 ## Trust and authorization
 
-This is a personal, allowlisted deployment. Private Telegram chats establish identity before transcription or inference. Model output, listings, email, retrieved pages and user-sent files are untrusted. Telegram file paths are validated against the media directories we handle before download, downloads are size-bounded, PDF text is extracted in-process without font, script or rendering evaluation, and only stored text or a bounded image is ever passed to a model. Zod schemas and owner-scoped SQL enforce tool boundaries; model arguments cannot choose an owner.
+This is a personal, allowlisted deployment. Private Telegram chats establish identity before transcription or inference. Model output, listings, email, retrieved pages and user-sent files are untrusted. Telegram file paths are validated against the media directories we handle before download, downloads are size-bounded, PDF text is extracted in-process without font, script or rendering evaluation. Image bytes reach only the media specialist's model input during the turn they arrive; they are never persisted and are replaced by a placeholder in model-input traces. Zod schemas and owner-scoped SQL enforce tool boundaries; model arguments cannot choose an owner.
 
 The Node process holds the integration credentials and calls tools directly. There is no internal HTTP tool callback, Python sidecar, shell execution, self-deployment or authenticated browser tool. Gmail and Calendar are read-only. Role deletion and skill activation require an exact owner approval; the model cannot approve its own proposal.
 

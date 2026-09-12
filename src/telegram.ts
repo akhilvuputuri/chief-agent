@@ -236,6 +236,8 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
             await event(db, user, randomUUID(), "image.received", {
               bytes: image.bytes,
               mimeType: image.mimeType,
+              attachmentId: image.id,
+              sha256: image.sha256,
             });
           } else if (file?.kind === "pdf") {
             if (file.bytes > limits.pdfBytes)

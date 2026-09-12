@@ -1,7 +1,11 @@
 import type { z } from "zod";
 import type { Budget } from "./execution.js";
 import { randomUUID } from "node:crypto";
-import type { AgentRequest, AgentResponse } from "./protocol.js";
+import type {
+  AgentRequest,
+  AgentResponse,
+  ImageAttachment,
+} from "./protocol.js";
 import {
   researchAssignment,
   researchReport,
@@ -66,15 +70,19 @@ export async function delegateResearch(
 }
 
 export type ResearchProfile = {
-  role: "job_alignment";
+  role: "job_alignment" | "media";
   instructions: string;
   reportSchema: z.AnyZodObject;
   reportName: string;
   limits: Budget;
   metadata: Record<string, unknown>;
   validate: (candidate: any, childRun: string) => Promise<void>;
-  inputTool: { name: string; description: string; parameters: any };
-  readInput: (input: any) => Promise<unknown>;
+  /** Read operations this specialist may dispatch; defaults to public research reads. */
+  reads?: Set<string>;
+  /** Optional per-call check restricting reads to the assignment (for example assigned source IDs). */
+  allowRead?: (input: any) => boolean;
+  inputTool?: { name: string; description: string; parameters: any };
+  readInput?: (input: any) => Promise<unknown>;
 };
 export async function runResearchSpecialist(
   req: AgentRequest,
@@ -83,6 +91,8 @@ export async function runResearchSpecialist(
     a: { objective: string; context: unknown };
     targets: any[];
     profile?: ResearchProfile;
+    /** Current-turn images supplied to the child model input only; never persisted. */
+    images?: ImageAttachment[];
   },
 ) {
   if (req.specialist || !req.executeResearch || !req.execution || !req.signal)
@@ -91,6 +101,7 @@ export async function runResearchSpecialist(
     db = parent.db,
     user = parent.user;
   const { a, targets, profile } = options;
+  const reads = profile?.reads ?? researchReads;
   const invalid = (message: string): never => {
     throw new Error("Research validation: " + message);
   };
@@ -124,16 +135,14 @@ export async function runResearchSpecialist(
       childRunId: childRun,
       targetIds: targets.map((t) => t.targetId),
     });
-    const toolset = (req.runtime?.tools ?? []).filter((t) =>
-      researchReads.has(t.name),
-    );
+    const toolset = (req.runtime?.tools ?? []).filter((t) => reads.has(t.name));
     toolset.push({
       name: reportName,
       description:
         "Return the final source-linked report for every assigned target.",
       parameters: jsonSchema(schema.omit({ operation: true })),
     });
-    if (profile) toolset.push(profile.inputTool);
+    if (profile?.inputTool) toolset.push(profile.inputTool);
     output = await spending.run(new Spending(db, user, childRun), () =>
       runAgent({
         runId: childRun,
@@ -145,6 +154,7 @@ export async function runResearchSpecialist(
           context: a.context,
           targets,
         }),
+        ...(options.images?.length ? { images: options.images } : {}),
         history: [],
         memories: [],
         runtime: {
@@ -158,8 +168,8 @@ export async function runResearchSpecialist(
         signal: req.signal,
         execution: child,
         execute: async (input: any) => {
-          if (profile && input.operation === profile.inputTool.name)
-            return profile.readInput(input);
+          if (profile?.inputTool && input.operation === profile.inputTool.name)
+            return profile.readInput!(input);
           if (input.operation === reportName) {
             const candidate = schema.parse(input);
             const ids = candidate.targets.map((t: any) => t.targetId);
@@ -180,8 +190,10 @@ export async function runResearchSpecialist(
             report = candidate;
             return { recorded: true, targets: candidate.targets };
           }
-          if (!researchReads.has(input.operation))
+          if (!reads.has(input.operation))
             invalid("operation outside specialist permissions");
+          if (profile?.allowRead && !profile.allowRead(input))
+            invalid("read outside this specialist's assignment");
           if (req.signal!.aborted) throw new Stop("cancelled");
           return req.executeResearch!(childRun, input);
         },

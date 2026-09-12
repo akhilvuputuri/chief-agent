@@ -41,3 +41,7 @@ Synthetic verification: 91 mocked tests pass, plus typecheck, build and format c
 - If price-first routing selects a provider without vision, the request fails with the existing provider error; consider a modality hint in provider preferences if this is observed.
 - Deferred: OCR or page rendering for scanned PDFs, DOCX and spreadsheets, multiple photos in one album treated as one request, and retaining a model-written image description in history automatically.
 - Lesson: the expensive part of multimodal input is not the model call but everything downstream that assumes messages are small strings (history bounds, checkpoints, memory sources, cost estimates). Keeping bytes out of persistence was the central design decision.
+
+## Follow-up — 13 September 2026
+
+Issue #27 phase 2 moved image reading behind the specialist boundary. The coordinator no longer receives image bytes; `media_delegate` processes current-turn attachments and stored documents and returns compact referenced facts. See [journey 11](12-media-specialist.md) and [media processing](../media-specialist.md).

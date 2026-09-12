@@ -25,7 +25,7 @@ flowchart LR
 - General tasks, notes, reminders and source-selectable daily briefings.
 - Public web research and evidence-backed role preparation, including questions about unknown experience.
 - Telegram voice notes through ElevenLabs Scribe v2, with optional Flash v2.5 spoken replies.
-- Photos and PDF documents sent on Telegram: images go to the vision-capable main model for the current turn; PDF text is extracted in-process, stored as an owner-scoped source and readable page by page with `source_read`. Scanned PDFs without selectable text are reported, not guessed. See [attachments](docs/journey/07-attachments.md).
+- Photos and PDF documents sent on Telegram: an isolated media specialist reads current-turn images and answers targeted questions over stored documents, returning referenced facts and uncertainty; PDF text is extracted in-process, stored as an owner-scoped source and readable page by page with `source_read`. Image bytes are never retained. Scanned PDFs without selectable text are reported, not guessed. See [media processing](docs/media-specialist.md).
 - Read-only Gmail; Calendar queries and [button-approved event creation](docs/calendar-approval.md); separate preparation and daily-assistant Sheet mirrors.
 - Durable task steps, source evidence, action receipts, execution budgets and cancellation.
 - Approval-gated role deletion and skill activation. No email sending, arbitrary shell execution or self-deployment.
@@ -120,7 +120,7 @@ The [development journal](docs/journey/README.md) records runtime decisions, pro
 
 ## Research specialist
 
-The main agent can delegate bounded public research to an isolated, read-only specialist. It returns exact-target, source-linked findings; the main agent remains responsible for synthesis and authorized changes. Runs share execution limits and retain linked model/tool traces and separate charges. See [architecture, limits and inspection](docs/research-specialist.md). Media processing remains in the main runtime; a media specialist is deferred.
+The main agent can delegate bounded public research to an isolated, read-only specialist. It returns exact-target, source-linked findings; the main agent remains responsible for synthesis and authorized changes. Runs share execution limits and retain linked model/tool traces and separate charges. See [architecture, limits and inspection](docs/research-specialist.md). A [media specialist](docs/media-specialist.md) reuses the same boundary for images and stored documents, optionally on a separate `MEDIA_MODEL`.
 
 ## Job alignment
 

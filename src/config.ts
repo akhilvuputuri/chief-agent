@@ -16,6 +16,7 @@ const schema = z.object({
     .finite()
     .default(10),
   SEARCH_MODEL: z.string().default("google/gemini-3.8-flash"),
+  MEDIA_MODEL: z.string().default(""),
   SHEETS_OWNER_USER_ID: z.string().regex(/^\d*$/).default(""),
   SHEETS_REFRESH_TOKEN: z.string().default(""),
   SHEETS_SPREADSHEET_ID: z.string().default(""),
