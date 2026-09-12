@@ -1,3 +1,4 @@
+import type { Delivery } from "./answer.js";
 import { alignmentContext } from "./alignment.js";
 import { researchReads } from "./research-schema.js";
 import { spending, Spending } from "./spending.js";
@@ -66,7 +67,16 @@ export class Assistant {
   async respond(
     user: string,
     message: string,
-    progress?: (text: string) => Promise<void>,
+    progress?: (text: string, runId?: string) => Promise<void>,
+    images?: ImageAttachment[],
+  ) {
+    const out = await this.respondDetailed(user, message, progress, images);
+    return [out.reply, ...(out.notices ?? [])].filter(Boolean).join("\n\n");
+  }
+  async respondDetailed(
+    user: string,
+    message: string,
+    progress?: (text: string, runId?: string) => Promise<void>,
     images?: ImageAttachment[],
   ) {
     return this.queue.run(user, () =>
@@ -76,14 +86,25 @@ export class Assistant {
   async resume(
     user: string,
     id: string,
-    progress?: (text: string) => Promise<void>,
+    progress?: (text: string, runId?: string) => Promise<void>,
   ) {
+    const out = await this.resumeDetailed(user, id, progress);
+    return [out.reply, ...(out.notices ?? [])].filter(Boolean).join("\n\n");
+  }
+  async resumeDetailed(
+    user: string,
+    id: string,
+    progress?: (text: string, runId?: string) => Promise<void>,
+  ): Promise<Delivery> {
     return this.queue.run(user, async () => {
       const task = await new WorkTools(this.db).snapshot(user, id);
       if (!task || ["done", "cancelled"].includes(task.task.status))
-        return "No runnable task.";
+        return { reply: "No runnable task." };
       if (task.task.pause_reason === "uncertain_write")
-        return "A write has an uncertain outcome; operator inspection is required.";
+        return {
+          reply:
+            "A write has an uncertain outcome; operator inspection is required.",
+        };
       return this.turn(
         user,
         "Continue the existing task from its recorded steps and original request in runtime context. Do not expand its scope.",
@@ -96,7 +117,7 @@ export class Assistant {
     user: string,
     message: string,
     background = false,
-    progress?: (text: string) => Promise<void>,
+    progress?: (text: string, runId?: string) => Promise<void>,
     images?: ImageAttachment[],
   ) {
     if (!message.trim() || message.length > 20000)
@@ -181,7 +202,7 @@ export class Assistant {
           history,
           memories,
           runtime,
-          progress,
+          progress: progress ? (text) => progress(text, run) : undefined,
           execution,
           signal: controller.signal,
           execute: (input) => this.call(capability, input),
@@ -254,7 +275,16 @@ export class Assistant {
           [linked, snapshot.task.revision, reason],
         );
       }
-      return [output.reply, ...notices].filter(Boolean).join("\n\n");
+      return {
+        reply: output.reply,
+        records: output.records,
+        numbers: output.numbers,
+        sections: output.sections,
+        sources: output.sources,
+        runId: run,
+        // Approval notices also get their own always-visible delivery; views never authorize them.
+        notices,
+      };
     } catch (error) {
       await this.db.query(
         "UPDATE runtime_runs SET state='stopped',stop_reason='failed' WHERE id=$1",

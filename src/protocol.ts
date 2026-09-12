@@ -1,3 +1,4 @@
+import type { Answer } from "./answer.js";
 import {
   alignmentStart,
   alignmentResume,
@@ -292,7 +293,7 @@ export interface AgentRequest {
   signal?: AbortSignal;
   progress?: (text: string) => Promise<void>;
 }
-export interface AgentResponse {
+export interface AgentResponse extends Answer {
   reply: string;
   history: unknown[];
   interrupted?: boolean;

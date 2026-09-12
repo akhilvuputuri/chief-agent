@@ -695,3 +695,96 @@ test("provider error envelopes and exhausted reasoning are classified without ex
     );
   }
 });
+
+test("finish envelope is validated and persisted before delivery, while progress keeps the parent run ID", async () => {
+  let count = 0;
+  const envelope = {
+    reason: "answer",
+    reply: "The saved findings are ready.",
+    sections: [{ title: "Details", body: "This is the recorded analysis." }],
+    sources: [{ label: "Source", url: "https://example.com" }],
+    numbers: [{ label: "Roles", value: "2" }],
+  };
+  const f = await fixture({
+    generate: async (input) => {
+      const finish = input.tools.find((t) => t.name === "finish_turn")!;
+      assert.ok((finish.parameters as any).properties.sections);
+      if (!count++)
+        return {
+          ...call("memory_list", {}),
+          message: {
+            ...call("memory_list", {}).message,
+            content: "Checking the saved context.",
+          },
+        };
+      return call("finish_turn", envelope);
+    },
+  });
+  try {
+    let progressRun: string | undefined;
+    const delivered = await f.assistant.respondDetailed(
+      "owner",
+      "Show detailed findings",
+      async (_text, run) => {
+        progressRun = run;
+      },
+    );
+    assert.deepEqual(delivered.sections, envelope.sections);
+    assert.deepEqual(delivered.numbers, envelope.numbers);
+    assert.equal(progressRun, delivered.runId);
+    const stored = (
+      await f.db.query(
+        "SELECT arguments,state FROM runtime_calls WHERE operation='finish_turn'",
+      )
+    ).rows[0];
+    assert.equal(stored.state, "success");
+    assert.deepEqual(
+      JSON.parse(stored.arguments.raw).sections,
+      envelope.sections,
+    );
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT history FROM conversations WHERE user_id='owner'",
+        )
+      ).rows[0].history.at(-1).content,
+      envelope.reply,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+test("invalid finish envelope is an observed tool failure, never dispatched or accepted as an answer", async () => {
+  let count = 0;
+  const f = await fixture({
+    generate: async (input) => {
+      if (!count++)
+        return call("finish_turn", {
+          reason: "answer",
+          reply: "Wrong",
+          sources: [{ label: "Bad", url: "javascript:alert(1)" }],
+        });
+      assert.ok(
+        input.messages.some(
+          (m) => m.role === "tool" && String(m.content).includes("error"),
+        ),
+      );
+      return call("finish_turn", {
+        reason: "answer",
+        reply: "Corrected plain reply",
+      });
+    },
+  });
+  try {
+    assert.equal(
+      await f.assistant.respond("owner", "Answer"),
+      "Corrected plain reply",
+    );
+    const states = (
+      await f.db.query("SELECT state FROM runtime_calls ORDER BY started_at")
+    ).rows.map((r) => r.state);
+    assert.deepEqual(states, ["failed", "success"]);
+  } finally {
+    await f.pg.close();
+  }
+});

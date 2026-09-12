@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
-export class WorkWorker {
+export class WorkWorker<T = string> {
   private busy = false;
   constructor(
     private db: Database,
-    private resume: (user: string, id: string) => Promise<string>,
-    private notify: (user: string, text: string) => Promise<unknown>,
+    private resume: (user: string, id: string) => Promise<T>,
+    private notify: (user: string, text: T) => Promise<unknown>,
   ) {}
   async tick() {
     if (this.busy) return;

@@ -1,3 +1,5 @@
+import { finishSchema, type Answer } from "./answer.js";
+import { jsonSchema } from "./runtime.js";
 import { runAlignment } from "./alignment.js";
 import { randomUUID } from "node:crypto";
 import { delegateResearch } from "./research.js";
@@ -18,18 +20,7 @@ const finishTool: ToolDefinition = {
   name: "finish_turn",
   description:
     "Pause with your natural reply and an explicit reason after completing any independent runnable work.",
-  parameters: {
-    type: "object",
-    properties: {
-      reason: {
-        type: "string",
-        enum: ["answer", "awaiting_user", "awaiting_approval"],
-      },
-      reply: { type: "string" },
-    },
-    required: ["reason", "reply"],
-    additionalProperties: false,
-  },
+  parameters: jsonSchema(finishSchema),
 };
 export class CustomAgent implements Agent {
   constructor(private model: ModelAdapter) {}
@@ -43,6 +34,7 @@ export class CustomAgent implements Agent {
     ];
     const tools = [...(req.runtime?.tools ?? []), finishTool];
     const enabled = new Set(tools.map((t) => t.name));
+    let answer: Answer | undefined;
     let reply = "",
       reason: StopReason = "answer";
     await execution.checkpoint(messages);
@@ -133,7 +125,7 @@ export class CustomAgent implements Agent {
           reply = generation.message.content ?? "";
           break;
         }
-        let finish: { reply: string; reason: StopReason } | undefined;
+        let finish: (Answer & { reason: StopReason }) | undefined;
         for (const call of calls) {
           const op = call.function.name;
           let result: unknown;
@@ -156,14 +148,7 @@ export class CustomAgent implements Agent {
             if (!enabled.has(op)) throw new Error("Operation unavailable");
             const args = JSON.parse(call.function.arguments);
             if (op === "finish_turn") {
-              if (
-                !["answer", "awaiting_user", "awaiting_approval"].includes(
-                  args.reason,
-                ) ||
-                typeof args.reply !== "string"
-              )
-                throw new Error("Invalid finish arguments");
-              finish = { reply: args.reply, reason: args.reason };
+              finish = finishSchema.parse(args);
               result = { recorded: true };
             } else {
               if (Object.hasOwn(args, "operation"))
@@ -244,6 +229,7 @@ export class CustomAgent implements Agent {
           await execution.attach();
         }
         if (finish) {
+          answer = finish;
           reply = finish.reply;
           reason = finish.reason;
           messages.push({ role: "assistant", content: reply });
@@ -279,6 +265,6 @@ export class CustomAgent implements Agent {
     )
       reason = "awaiting_approval";
     await execution.finish(reason);
-    return { reply, history: messages, stopReason: reason };
+    return { ...answer, reply, history: messages, stopReason: reason };
   }
 }

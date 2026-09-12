@@ -39,3 +39,9 @@ Implemented on `feature/research-specialist`: isolated public research, exact ta
 ## Foundation review fixes
 
 Independent Astra review of v0.2.0 found delegated search-cache isolation from its parent and a restart gap in child elapsed-time accounting. `fix/specialist-architecture-review` addresses both with focused tests. See [review journal](journey/10-foundation-review.md). Require Astra re-review of the fixed head and successful deployment before treating the fixes as live; incorporate them into dependent MR #30 before its final review/release.
+
+## Interactive Telegram output — issue #26
+
+`feature/telegram-views` implements phases 1/2: owner/message-bound read-only views, optional answer envelopes, grouped scheduled briefings and delivery/tap metadata. See [implementation and pickup](telegram-views.md) and [journey 11](journey/11-telegram-views.md). Mini App phase 3 remains pending a domain/ingress decision; no public endpoint or cloud service has been added. Next version is v0.3.1 under the owner’s new patch-only version policy. Require independent Astra approval, passing CI and exact deployment verification before marking this candidate live.
+
+The earlier foundation and job-alignment work above has since shipped: MR #31 / v0.2.1 and MR #30 / v0.3.0, respectively. The latter deployed `1c625cbe9dd56292347970f257513cfc7dcd9ada` in release run `34698539900`, verified healthy. Issue #27 still has a separate media-specialist milestone; existing image/PDF ingestion is not that specialist.

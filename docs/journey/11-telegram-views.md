@@ -1,0 +1,13 @@
+# From long Telegram replies to read-only interactive views
+
+Issue [#26](https://github.com/akhilvuputuri/companion-agent/issues/26) identifies a delivery problem: a useful multi-record analysis becomes several long messages on a phone. The existing renderer split text at 3,500 characters and `/status` sent a fixed ledger. Reformatting every conversational reply would impose a template without making saved data browsable.
+
+The implementation separates model prose from optional presentation data. `finish_turn` can attach sections, sources, numbers and saved record references. Plain long replies also become pages without rewriting or discarding the model’s text. Browsing loads Postgres state and edits the same message; it spends no model call and performs no domain action. A deterministic status view is appropriate when explicitly requested with `/status`; ordinary model replies remain natural.
+
+A versioned private UI-state event avoids a migration and public ingress for phases 1/2. Owner/chat/message binding, opaque callback tokens and server-stored keyboard actions prevent a copied or stale button from revealing a different record. The callback controller has an expiring database lease and preserves existing approval boundaries. Calendar draft viewing cannot create an event. Authoritative approval notices never disappear behind disclosure buttons.
+
+New tests reconstruct an entire long emoji/formatted reply through navigation, exercise restart/stale/expired/cross-owner callbacks, verify stored task support and known/unknown costs, and run actual grammy update handling with mocked Telegram. Runtime tests check envelope validation and persistence before delivery. These are functional checks, not evidence of improved real-world answer quality.
+
+Delivery and interaction events support a later before/after analysis: message counts per reply/run, baseline formatter chunk counts, taps, first-tap latency and errors. The existing restricted diagnostics script gains aggregate fields so cloud and local tasks can examine the same metadata once the reviewed handler is installed. Private answer snapshots remain in Postgres; no raw trace export is added.
+
+No domain, Mini App, tunnel or infrastructure is provisioned. Phase 3 remains an owner decision. The next candidate is v0.3.1; from this release onward the owner requested patch-only version increments. Release status must come from exact-head independent review, CI and verified deployment, not this journal entry. Real-phone review of ten conversations remains an acceptance follow-up, and no measured UX/cost gain is claimed yet.
