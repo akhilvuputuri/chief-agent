@@ -14,7 +14,11 @@ import { SerialQueue } from "./security.js";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
 import { ensureUser, event } from "./db.js";
-import { type AgentRequest, type AgentResponse } from "./protocol.js";
+import {
+  type AgentRequest,
+  type AgentResponse,
+  type ImageAttachment,
+} from "./protocol.js";
 import type { JobTools } from "./tools.js";
 export interface Agent {
   run(request: AgentRequest): Promise<AgentResponse>;
@@ -61,9 +65,10 @@ export class Assistant {
     user: string,
     message: string,
     progress?: (text: string) => Promise<void>,
+    images?: ImageAttachment[],
   ) {
     return this.queue.run(user, () =>
-      this.turn(user, message, false, progress),
+      this.turn(user, message, false, progress, images),
     );
   }
   async resume(
@@ -90,6 +95,7 @@ export class Assistant {
     message: string,
     background = false,
     progress?: (text: string) => Promise<void>,
+    images?: ImageAttachment[],
   ) {
     if (!message.trim() || message.length > 20000)
       throw new Error("Message must be between 1 and 20000 characters");
@@ -168,6 +174,7 @@ export class Assistant {
           runId: run,
           capability,
           message,
+          ...(images?.length ? { images } : {}),
           history,
           memories,
           runtime,
