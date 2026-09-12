@@ -33,6 +33,18 @@ Run `npm run doctor:cloud` early when a task needs GitHub or production access; 
 
 For runtime failures, use the manual `production-diagnostics` GitHub workflow if your GitHub access permits it. This returns bounded metadata rather than raw conversations. Never invent production findings when access is unavailable. Local browser sessions and SSH credentials are not inherited by cloud tasks.
 
+## Required independent review loop
+
+For each implemented feature or runtime behavior change:
+
+1. Complete the implementation and relevant tests, push a reviewable branch, and open a pull/merge request.
+2. Spawn an independent reviewer subagent using the most capable model family available in the current environment (currently GPT-6 Astra when available). Explicitly select that model when the tooling allows it. Give the reviewer the requirements, MR URL, base and exact head SHA, repository instructions and relevant checks. The reviewer must inspect the actual diff and may run tests; it must not implement the change it is reviewing.
+3. Require an explicit APPROVE or REQUEST CHANGES verdict with concrete findings and validation limits. Record the model, reviewed SHA and outcome on the MR. CI success alone is not reviewer approval.
+4. If changes are required, fix them, rerun affected checks, push, and ask the independent reviewer to review the updated head. Repeat until approval. Do not bypass unresolved findings or treat a review of an older revision as approval of changed code.
+5. Merge only when the current head has independent approval and required checks pass. Then follow the normal release workflow and verify the exact deployed SHA and health. Related foundation fixes must be incorporated and reviewed before releasing a dependent feature.
+
+The reviewer should remain independent of implementation. Findings can be discussed with evidence; approval must reflect the final code rather than a promise to fix it later. If subagent tools or a suitable reviewer model are unavailable, report the limitation and leave the MR ready for independent review; do not silently self-approve. This workflow does not authorize merging unrelated checkpoints, changing production permissions, or running paid model evaluations.
+
 ## Development journal
 
 For meaningful runtime changes, incidents or experiments, add or update docs/journey using its template. Link evidence and PRs, distinguish hypotheses from measurements, and record deployment status and unresolved limitations. Never copy private production traces or credentials into journal entries.

@@ -31,3 +31,7 @@ At each checkpoint record the branch and commit, objective, implemented behavior
 ## Research specialist — issue #27, phase 1
 
 Implemented on `feature/research-specialist`: isolated public research, exact targets, validated source quotations, parent/child execution and cost traces, shared cancellation and budgets. No database migration or new infrastructure. See [handover](research-specialist.md) and [journal](journey/08-research-specialist.md). Verify the PR/release result before treating it as live. Media specialist and Python weekly analysis (#28) remain separate work.
+
+## Foundation review fixes
+
+Independent Astra review of v0.2.0 found delegated search-cache isolation from its parent and a restart gap in child elapsed-time accounting. `fix/specialist-architecture-review` addresses both with focused tests. See [review journal](journey/10-foundation-review.md). Require Astra re-review of the fixed head and successful deployment before treating the fixes as live; incorporate them into dependent MR #30 before its final review/release.

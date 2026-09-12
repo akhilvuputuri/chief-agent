@@ -164,9 +164,15 @@ export class WebTools {
       const normalized = input.trim().replace(/\s+/g, " ").toLowerCase();
       const cached = (
         await scope.db.query(
-          `SELECT c.result FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id
-        WHERE r.user_id=$1 AND c.operation='web_search' AND c.state='success' AND c.started_at>now()-interval '1 hour' AND COALESCE((c.result->'result'->>'cacheHit')::boolean,false)=false
-        AND (r.id=$2 OR (r.task_id IS NOT NULL AND r.task_id=(SELECT task_id FROM runtime_runs WHERE id=$2 AND user_id=$1)))
+          `WITH identities AS (
+          SELECT r.id,COALESCE(parent.id,r.id) AS root_id,COALESCE(parent.task_id,r.task_id) AS task_id
+          FROM runtime_runs r LEFT JOIN LATERAL (
+            SELECT p.id,p.task_id FROM events e JOIN runtime_runs p ON p.id::text=e.data->>'parentRunId' AND p.user_id=r.user_id
+            WHERE e.run_id=r.id AND e.user_id=r.user_id AND e.type='research.child_started' ORDER BY e.id LIMIT 1
+          ) parent ON true WHERE r.user_id=$1
+        ) SELECT c.result FROM runtime_calls c JOIN identities r ON r.id=c.run_id JOIN identities current ON current.id=$2
+        WHERE c.operation='web_search' AND c.state='success' AND c.started_at>now()-interval '1 hour' AND COALESCE((c.result->'result'->>'cacheHit')::boolean,false)=false
+        AND (r.root_id=current.root_id OR (r.task_id IS NOT NULL AND r.task_id=current.task_id))
         AND lower(trim(regexp_replace((c.arguments->>'raw')::jsonb->>'query','\\s+',' ','g')))=$3
         ORDER BY c.started_at DESC LIMIT 1`,
           [scope.user, scope.run, normalized],
