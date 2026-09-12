@@ -8,7 +8,7 @@ import { projectObservation } from "./observations.js";
 import { action } from "./protocol.js";
 import type { AgentRequest, AgentResponse } from "./protocol.js";
 import type { Agent } from "./agent.js";
-import { context } from "./context.js";
+import { context, contextBudget, ContextLimitError } from "./context.js";
 import {
   ModelError,
   type ModelAdapter,
@@ -87,6 +87,12 @@ export class CustomAgent implements Agent {
               await execution.trace("context.omitted", {
                 messages: input.omitted,
               });
+            if (input.overBudget)
+              await execution.trace("context.over_budget", {
+                fixedSize: input.fixedSize,
+                reservedSize: input.reservedSize,
+                budget: contextBudget,
+              });
             if (req.specialist)
               await execution.trace("research.model_input", {
                 version: 1,
@@ -122,7 +128,15 @@ export class CustomAgent implements Agent {
               invocationId,
               ...(error instanceof ModelError
                 ? { diagnostics: error.diagnostics, transient: error.transient }
-                : {}),
+                : error instanceof ContextLimitError
+                  ? { contextSizes: error.sizes, budget: contextBudget }
+                  : {
+                      // Bounded error identity; no user content is parsed on this path.
+                      error:
+                        error instanceof Error
+                          ? `${error.name}: ${error.message.slice(0, 300)}`
+                          : "unknown",
+                    }),
               attempt,
               latencyMs: Date.now() - start,
             });

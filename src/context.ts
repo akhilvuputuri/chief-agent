@@ -57,6 +57,18 @@ export function boundHistory(
   const messages = selected.flat();
   return { messages, omitted: history.length - messages.length };
 }
+/** Total character allowance for one request, covering prior history and this turn's older tool groups. */
+export const contextBudget = 48000;
+/** Beyond this the request is refused rather than sent; a turn should never legitimately reach it. */
+export const contextHardLimit = 120000;
+/** Thrown with measured sizes so the failure is traceable instead of a bare execution error. */
+export class ContextLimitError extends Error {
+  constructor(readonly sizes: Record<string, number>) {
+    super(
+      "Current context exceeds the hard request limit; narrow the active batch",
+    );
+  }
+}
 export function context(request: AgentRequest, messages: Message[]) {
   const fixedSize =
     (request.systemInstructions ?? instructions).length +
@@ -65,18 +77,39 @@ export function context(request: AgentRequest, messages: Message[]) {
     JSON.stringify(request.runtime?.tools ?? []).length +
     reqSize(request.message) +
     2000;
-  if (fixedSize >= 48000)
-    throw new Error(
-      "Current context exceeds the request budget; narrow the active batch",
-    );
-  const bounded = boundHistory(messages, 20, 48000 - fixedSize);
-  if (
-    !bounded.messages.some(
-      (m) => m.role === "user" && m.content === request.message,
-    )
-  )
-    bounded.messages.push({ role: "user", content: request.message });
-  const current: ModelMessage[] = bounded.messages;
+  // Split at the current user message. It and the newest in-turn tool group form a floor that is
+  // always sent: dropping the results the model just requested would make it repeat the same calls.
+  const start = messages.findLastIndex(
+    (m) => m.role === "user" && m.content === request.message,
+  );
+  const prior = start >= 0 ? messages.slice(0, start) : messages;
+  const currentUser: Message =
+    start >= 0 ? messages[start]! : { role: "user", content: request.message };
+  const tail = start >= 0 ? messages.slice(start + 1) : [];
+  const lastCall = tail.findLastIndex(
+    (m) => m.role === "assistant" && m.tool_calls?.length,
+  );
+  const reserved = lastCall >= 0 ? tail.slice(lastCall) : [];
+  const olderTail = lastCall >= 0 ? tail.slice(0, lastCall) : tail;
+  const reservedSize = reserved.length ? JSON.stringify(reserved).length : 0;
+  if (fixedSize + reservedSize >= contextHardLimit)
+    throw new ContextLimitError({ fixedSize, reservedSize });
+  // The allowance is unchanged: prior history and older in-turn groups share it newest-first, as before.
+  // Only when the fixed part plus the floor already exceed it does the request exceed the allowance.
+  const overBudget = fixedSize + reservedSize >= contextBudget;
+  const bounded = boundHistory(
+    [...prior, ...olderTail],
+    20,
+    Math.max(0, contextBudget - fixedSize - reservedSize),
+  );
+  const inTurn = new Set<Message>(olderTail);
+  const current: ModelMessage[] = [
+    ...bounded.messages.filter((m) => !inTurn.has(m)),
+    currentUser,
+    ...bounded.messages.filter((m) => inTurn.has(m)),
+    ...reserved,
+  ];
+  const omitted = bounded.omitted;
   // Only the media specialist receives image bytes; the coordinator sees the note and delegates.
   const images = request.specialist === "media" ? (request.images ?? []) : [];
   if (images.length) {
@@ -97,7 +130,10 @@ export function context(request: AgentRequest, messages: Message[]) {
       };
   }
   return {
-    omitted: bounded.omitted,
+    omitted,
+    overBudget,
+    fixedSize,
+    reservedSize,
     messages: [
       {
         role: "system",
@@ -114,7 +150,7 @@ export function context(request: AgentRequest, messages: Message[]) {
           (request.runtime?.context ?? "") +
           "\nSingapore time: " +
           new Date().toLocaleString("en-SG", { timeZone: "Asia/Singapore" }) +
-          `\n${bounded.omitted} older/incomplete messages omitted. Retrieve exact evidence via observation_read; never infer missing results.`,
+          `\n${omitted} older messages or tool results omitted${overBudget ? "; the current request, state and schemas exceed the allowance, so only this message and its newest tool results are included" : ""}. Retrieve exact evidence via observation_read; never infer missing results.`,
       } as ModelMessage,
     ],
   };
