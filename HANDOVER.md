@@ -92,3 +92,7 @@ Cloud development uses the connected GitHub environment. Main changes now have a
 ## Job-alignment specialist
 
 See [job alignment](docs/job-alignment.md) for flexible saved-role scopes, versioned background/skill snapshots, assessment validation, report retrieval and recovery. The coordinator handles pending batches and authorized downstream updates; the specialist remains read-only. Preserve current scope IDs when continuing work. Check the merge request/release for deployment status.
+
+## Mini App hosting decision — 13 September 2026
+
+Use the existing DigitalOcean server and a free sslip.io hostname; AWS migration stays separate. The [HTTPS guide](docs/miniapp-deployment.md) covers the Caddy host-service configuration, reviewed operator install and verification. This milestone serves only a holding response; canvas authentication, storage, frontend and agent tools are separate follow-up work. Check the PR/operator evidence before claiming the endpoint is live.
