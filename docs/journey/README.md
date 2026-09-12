@@ -1,12 +1,12 @@
 # Companion Agent engineering journal
 
-A chronological account of building and operating a personal assistant, with evidence and unfinished work preserved. This is a learning and interview resource, not a claim that every experiment succeeded. Entries reconstructed on 9 September 2026 use repository history and existing incident reports; dates on entries identify the work, not necessarily when the narrative was written.
+A chronological account of building and operating a personal assistant, with evidence and unfinished work preserved. Entries distinguish verified results from unfinished work. Entries reconstructed on 9 September 2026 use repository history and existing incident reports; dates on entries identify the work, not necessarily when the narrative was written.
 
 ## Start here
 
 | Entry                                                          | Engineering question                                                                 | Status                                                  |
 | -------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------- |
-| [01 — Owning the runtime](01-owned-runtime.md)                 | What should our application own rather than delegate to a framework?                 | Released                                                |
+| [01 — Owning the runtime](01-owned-runtime.md)                 | Which components changed in the runtime cutover?                                     | Released                                                |
 | [02 — Losing the target collection](02-context-and-targets.md) | Why can a durable task still forget what it is doing?                                | Focused fixes released; broader eval candidate deferred |
 | [03 — Token cost investigation](03-token-cost.md)              | Why was useful output expensive, and which mechanisms could reduce waste?            | Released; comparative savings unmeasured                |
 | [04 — Empty response recovery](04-empty-responses.md)          | What should happen when a provider returns no usable answer?                         | Released                                                |
@@ -20,4 +20,4 @@ Add an entry for meaningful incidents, architectural decisions or experiments, u
 
 Label evidence precisely: production observation, synthetic test, hypothesis, implementation, verified release, or unmeasured outcome. A passing test is not proof of better conversational quality. A deployment health check is not a semantic evaluation. Report denominators, model/configuration and workload when comparing costs or success rates.
 
-For interviews, explain your decisions and tradeoffs, acknowledge AI coding assistance, and distinguish personal-project work from employer work. Do not claim benchmark wins, production scale or financial savings we have not measured.
+Do not claim benchmark wins, production scale or financial savings that have not been measured.

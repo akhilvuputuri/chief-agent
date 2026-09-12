@@ -29,9 +29,7 @@ flowchart LR
 - Durable task steps, source evidence, action receipts, execution budgets and cancellation.
 - Approval-gated role deletion and skill activation. No email sending, arbitrary shell execution or self-deployment.
 
-## Why build the runtime?
-
-The interesting engineering is the boundary between a model proposing actions and an application executing them reliably. A small loop makes context selection, tool calls, recovery, permissions and stop conditions inspectable. Integrations are reused rather than reimplemented; the reasoning loop is ours.
+## Runtime
 
 The runtime uses `openai/gpt-5.6-sol` through OpenRouter with explicit medium reasoning. Every request requires supported parameters and price-first provider selection, capped at $2 per million input tokens and $10 per million output tokens by default. A request fails if no eligible provider exists. Missing provider cost data is unknown, never recorded as zero.
 
