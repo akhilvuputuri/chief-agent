@@ -79,6 +79,10 @@ The cost-efficiency follow-up is documented in [cost controls](docs/cost-control
 
 Cost-efficiency release verified: PR #16, application `a31813bd167e3916c1914966a386a4a480f54320`. Health and migration 008 passed; 22 jobs preserved, paused work not resumed, and no dollar-cap schema present. 78 tests and CI passed. No paid eval was run.
 
+## Attachments — 12 September 2026
+
+Telegram photos, image files and PDF documents are accepted on `feature/attachments`. Images are sent to the main model as OpenAI-style `image_url` parts for the current turn only; persisted history, checkpoints and memory sources keep a text note without bytes. PDF text is extracted in-process with `unpdf`, stored in the existing `research_sources` table and read with the new read-only `source_read(id,offset?)` tool, which also works for earlier `web_read` sources. No migration or Compose change is required, so the ordinary automatic release applies once merged. Scanned PDFs are reported as unreadable rather than OCRed. See [journey 07](docs/journey/07-attachments.md).
+
 ## Current operating snapshot — 9 September 2026
 
 The last manually deployed application fix is `0ef13bc` (empty model response recovery). Nine exact LinkedIn saved postings were imported on 8 September, making 31 roles, all saved/unapplied; the preparation Sheet was synced. Existing assessments were retained. See [model response recovery](docs/model-response-recovery.md). Earlier 22-role counts above are historical.

@@ -15,7 +15,8 @@ One Node application owns the Telegram gateway, conversation runtime, tools and 
 | `tools.ts`                   | Owner-scoped dispatcher and action receipts                                                       |
 | `work.ts` / `work-worker.ts` | Task steps, evidence and automatic continuation within the task allocation                        |
 | `schedule.ts` / `daily.ts`   | TypeScript cron parsing and persisted reminder/briefing delivery                                  |
-| `telegram.ts`                | Allowlist, voice, commands, existing text renderer and approval previews                          |
+| `telegram.ts`                | Allowlist, voice, photo/PDF intake, commands, existing text renderer and approval previews        |
+| `attachments.ts`             | File classification and limits, PDF text extraction (unpdf), attachment notes for history         |
 
 The OpenRouter adapter uses Sol for the main loop. Gemini Flash remains a separate public search helper. ElevenLabs transcription and synthesis are independent providers. Google OAuth ownership is enforced in the integration modules. Gmail stays read-only. Calendar creation is separate from model tools: a saved draft requires the owner clicking its Telegram approval card before the Calendar service can write. See [Calendar approval](calendar-approval.md).
 

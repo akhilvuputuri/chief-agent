@@ -9,6 +9,18 @@ import type { Database } from "./db.js";
 import { ensureUser, event } from "./db.js";
 import { allowedChat, SerialQueue } from "./security.js";
 import { Voice, boundedBytes } from "./providers.js";
+import {
+  classifyInbound,
+  describeBytes,
+  documentMessage,
+  extractPdfText,
+  hasText,
+  imageMessage,
+  limits,
+  toImageAttachment,
+  validFilePath,
+} from "./attachments.js";
+import type { ImageAttachment } from "./protocol.js";
 export function telegram(c: Config, assistant: Assistant, db: Database) {
   const bot = new Bot(c.TELEGRAM_BOT_TOKEN);
   const voice = new Voice(c);
@@ -147,7 +159,7 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
             await ctx.reply(part.text, { entities: part.entities });
         } else if (message === "/start") {
           await ctx.reply(
-            `Tell me what you want to work on. I can research, manage tasks and notes, set reminders, compare roles, and remember preferences you ask me to keep. Use /continue for paused tracked work or /workcancel to cancel it. Web search is ${c.TAVILY_API_KEY || c.OPENROUTER_API_KEY ? "available" : "not configured yet"}. Voice notes are ${voice.transcriptionReady ? "available" : "not configured yet"}. /voice explains audio replies. Deleting a role requires your approval. I cannot send applications or emails.`,
+            `Tell me what you want to work on. I can research, manage tasks and notes, set reminders, compare roles, and remember preferences you ask me to keep. Use /continue for paused tracked work or /workcancel to cancel it. Web search is ${c.TAVILY_API_KEY || c.OPENROUTER_API_KEY ? "available" : "not configured yet"}. Voice notes are ${voice.transcriptionReady ? "available" : "not configured yet"}. /voice explains audio replies. You can also send photos and PDF documents for me to read. Deleting a role requires your approval. I cannot send applications or emails.`,
           );
         } else if (message === "/reset") {
           await db.query("DELETE FROM conversations WHERE user_id=$1", [user]);
@@ -159,6 +171,86 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
             `Voice transcription is ${voice.transcriptionReady ? `configured with ${c.STT_PROVIDER}` : "not configured yet"}. Audio is held in memory, not saved. Transcripts become conversation history. AI-generated voice replies are ${c.VOICE_REPLIES === "true" && voice.synthesisReady ? "enabled" : "disabled"} by the server setting.`,
           );
         } else {
+          let images: ImageAttachment[] | undefined;
+          const file = classifyInbound(ctx.message);
+          const download = async (fileId: string, max: number) => {
+            const meta = await ctx.api.getFile(fileId);
+            if (!validFilePath(meta.file_path))
+              throw new Error("Unexpected file path");
+            return boundedBytes(
+              await fetch(
+                `https://api.telegram.org/file/bot${c.TELEGRAM_BOT_TOKEN}/${meta.file_path}`,
+                { signal: AbortSignal.timeout(30000) },
+              ),
+              max,
+            );
+          };
+          if (file?.kind === "unsupported") {
+            await ctx.reply(
+              `I can read photos, image files (JPEG, PNG, WebP, GIF) and PDF documents, not ${file.mimeType || "this file type"}. Send the content as a PDF or a photo of it.`,
+            );
+            await db.query(
+              "UPDATE inbound_updates SET status='completed' WHERE update_id=$1",
+              [ctx.update.update_id],
+            );
+            return;
+          }
+          if (file?.kind === "image") {
+            if (file.bytes > limits.imageBytes)
+              throw new Error("Attachment too large");
+            const image = toImageAttachment(
+              file,
+              await download(file.fileId, limits.imageBytes),
+            );
+            images = [image];
+            message = imageMessage(ctx.message.caption ?? "", images);
+            await event(db, user, randomUUID(), "image.received", {
+              bytes: image.bytes,
+              mimeType: image.mimeType,
+            });
+          } else if (file?.kind === "pdf") {
+            if (file.bytes > limits.pdfBytes)
+              throw new Error("Attachment too large");
+            const bytes = await download(file.fileId, limits.pdfBytes);
+            const extracted = await extractPdfText(bytes);
+            if (!hasText(extracted)) {
+              await ctx.reply(
+                `${file.name} (${extracted.pages} pages) has no selectable text, so it is probably scanned. Send the pages as photos and I will read them as images.`,
+              );
+              await event(db, user, randomUUID(), "document.unreadable", {
+                bytes: bytes.length,
+                pages: extracted.pages,
+              });
+              await db.query(
+                "UPDATE inbound_updates SET status='completed' WHERE update_id=$1",
+                [ctx.update.update_id],
+              );
+              return;
+            }
+            const sourceId = randomUUID();
+            await db.query(
+              "INSERT INTO research_sources(id,user_id,url,content) VALUES($1,$2,$3,$4)",
+              [
+                sourceId,
+                user,
+                `telegram:document/${ctx.message.document?.file_unique_id ?? ctx.update.update_id}/${encodeURIComponent(file.name)}`,
+                extracted.text,
+              ],
+            );
+            message = documentMessage(
+              ctx.message.caption ?? "",
+              { name: file.name, bytes: bytes.length },
+              extracted,
+              sourceId,
+            );
+            await event(db, user, randomUUID(), "document.extracted", {
+              bytes: bytes.length,
+              pages: extracted.pages,
+              extractedPages: extracted.extractedPages,
+              characters: extracted.text.length,
+              truncated: extracted.truncated,
+            });
+          }
           if (ctx.message.voice) {
             if (!voice.transcriptionReady) {
               await ctx.reply(
@@ -175,17 +267,8 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
               (ctx.message.voice.file_size ?? 0) > 10 * 1024 * 1024
             )
               throw new Error("Voice note too long");
-            const file = await ctx.getFile();
-            if (
-              !file.file_path ||
-              !/^voice\/[a-zA-Z0-9_.-]+$/.test(file.file_path)
-            )
-              throw new Error("Unexpected file path");
-            const audio = await boundedBytes(
-              await fetch(
-                `https://api.telegram.org/file/bot${c.TELEGRAM_BOT_TOKEN}/${file.file_path}`,
-                { signal: AbortSignal.timeout(30000) },
-              ),
+            const audio = await download(
+              ctx.message.voice.file_id,
               10 * 1024 * 1024,
             );
             message = await voice.transcribe(audio);
@@ -194,7 +277,9 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
             });
           }
           if (!message) {
-            await ctx.reply("Please send text or a voice note.");
+            await ctx.reply(
+              "Please send text, a voice note, a photo or a PDF document.",
+            );
           } else {
             await ctx.replyWithChatAction("typing");
             const reply = await assistant.respond(
@@ -207,6 +292,7 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
                     link_preview_options: { is_disabled: true },
                   });
               },
+              images,
             );
             await sendCalendarApprovals(bot, db, user);
             const formatted = formatTelegram(reply);
@@ -242,7 +328,7 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
           [ctx.update.update_id],
         );
         await ctx.reply(
-          "I could not finish that request. A tool may already have saved changes; ask me to list your roles before retrying. Voice notes must be under 3 minutes and 10 MB.",
+          `I could not finish that request. A tool may already have saved changes; ask me to list your roles before retrying. Voice notes must be under 3 minutes and 10 MB; images under ${describeBytes(limits.imageBytes)} and PDFs under ${describeBytes(limits.pdfBytes)}.`,
         );
       }
     });

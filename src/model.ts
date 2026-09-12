@@ -6,6 +6,25 @@ export type Message = {
   tool_call_id?: string;
   reasoning_details?: unknown[];
 };
+/** OpenAI-style multimodal parts. Only the current turn's model input carries them; persisted history stays text. */
+export type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+export type ModelMessage = Omit<Message, "content"> & {
+  content: string | ContentPart[] | null;
+};
+/** Per-image input allowance used for cost estimates; providers bill roughly this order for a phone photo. */
+export const IMAGE_TOKEN_ALLOWANCE = 1600;
+/** Byte size for estimates: base64 image data is replaced by a fixed token allowance. */
+export function estimateInputBytes(messages: ModelMessage[]) {
+  let images = 0;
+  const text = JSON.stringify(messages, (key, value) =>
+    key === "image_url" && value && typeof value === "object"
+      ? (images++, {})
+      : value,
+  );
+  return Buffer.byteLength(text) + images * IMAGE_TOKEN_ALLOWANCE * 4;
+}
 export type ToolCall = {
   id: string;
   type: "function";
@@ -25,7 +44,7 @@ export type Generation = {
 export interface ModelAdapter {
   readonly model?: string;
   generate(input: {
-    messages: Message[];
+    messages: ModelMessage[];
     tools: ToolDefinition[];
     reasoning: "medium";
     signal: AbortSignal;
@@ -57,9 +76,8 @@ export class OpenRouter implements ModelAdapter {
   ): Promise<Generation> {
     const ledger = spending.getStore();
     const estimate =
-      ((Buffer.byteLength(
-        JSON.stringify(input.messages) + JSON.stringify(input.tools),
-      ) +
+      ((estimateInputBytes(input.messages) +
+        Buffer.byteLength(JSON.stringify(input.tools)) +
         4096) *
         this.inputPrice *
         1.25) /
