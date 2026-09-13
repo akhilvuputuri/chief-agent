@@ -2,6 +2,7 @@ import { randomUUID, createHash } from "node:crypto";
 import type { Database } from "./db.js";
 import type { Action } from "./protocol.js";
 import { resolvePreparationChain } from "./preparation-chain.js";
+import { ToolValidationError } from "./tool-errors.js";
 export class PreparationTools {
   constructor(private db: Database) {}
   async call(
@@ -51,7 +52,7 @@ export class PreparationTools {
       const content = JSON.stringify(task);
       const version = createHash("sha256").update(content).digest("hex");
       if ((a.offset > 0 && !a.version) || (a.version && a.version !== version))
-        throw new Error(
+        throw new ToolValidationError(
           "Preparation task changed or page version missing; restart at offset 0 and use the returned version for later pages",
         );
       let end = Math.min(content.length, a.offset + 6000);
@@ -103,7 +104,7 @@ export class PreparationTools {
         )
       ).rows[0];
       if (!saved)
-        throw new Error(
+        throw new ToolValidationError(
           "Preparation tasks require links to saved alignment actions. Read an alignment report and supply scopeId, jobId and preparationId; do not invent provenance for legacy tasks.",
         );
       return {

@@ -678,3 +678,168 @@ test("new or legacy unlinked preparation cannot fabricate provenance through a t
     await f.pg.close();
   }
 });
+
+test("runtime can correct rejected preparation inputs without an uncertain-write pause", async () => {
+  const { Assistant } = await import("../src/agent.js");
+  const { CustomAgent } = await import("../src/custom-agent.js");
+  const { JobTools } = await import("../src/tools.js");
+  const f = await fixture();
+  const args = {
+    topic: "runtime chain",
+    exercise: "Describe the existing work",
+    completionCriteria: "Provide an example or confirm the gap",
+    priority: "high",
+  };
+  let calls = 0;
+  const invoke = (data: unknown) => ({
+    message: {
+      role: "assistant" as const,
+      content: null,
+      tool_calls: [
+        {
+          id: randomUUID(),
+          type: "function" as const,
+          function: { name: "prep_task_save", arguments: JSON.stringify(data) },
+        },
+      ],
+    },
+  });
+  try {
+    const assistant = new Assistant(
+      f.db,
+      new CustomAgent({
+        generate: async (input) => {
+          const turn = calls++;
+          if (turn === 0) return invoke(args);
+          const observation = JSON.parse(
+            input.messages.findLast((m) => m.role === "tool")!.content!,
+          );
+          if (turn < 3) {
+            assert.equal(observation.error.code, "VALIDATION_FAILED");
+            assert.match(
+              observation.error.message,
+              turn === 1 ? /require links/ : /Preparation provenance:/,
+            );
+            return invoke({
+              ...args,
+              links: [
+                {
+                  ...f.link,
+                  preparationId:
+                    turn === 1 ? "nonexistent" : f.link.preparationId,
+                },
+              ],
+            });
+          }
+          assert.equal(observation.result.link_count, 1);
+          return {
+            message: {
+              role: "assistant" as const,
+              content: "Saved the preparation evidence.",
+            },
+          };
+        },
+      }),
+      new JobTools(f.db, {
+        call: async () => {
+          throw Error("No research expected");
+        },
+      }),
+    );
+    assert.match(
+      await assistant.respond(
+        "owner",
+        "Save the preparation with its evidence.",
+      ),
+      /Saved the preparation evidence/,
+    );
+    assert.equal(calls, 4);
+    const writes = (
+      await f.db.query(
+        "SELECT state FROM runtime_calls WHERE operation='prep_task_save' ORDER BY started_at,id",
+      )
+    ).rows;
+    assert.deepEqual(
+      writes.map((r) => r.state),
+      ["failed", "failed", "success"],
+    );
+    assert.equal(
+      (await f.db.query("SELECT count(*)::int n FROM preparation_tasks"))
+        .rows[0].n,
+      1,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("ambiguous preparation database acknowledgement still pauses as an uncertain write", async () => {
+  const { Assistant } = await import("../src/agent.js");
+  const { CustomAgent } = await import("../src/custom-agent.js");
+  const { JobTools } = await import("../src/tools.js");
+  const f = await fixture();
+  let calls = 0;
+  const db: Database = {
+    query: async (sql, values) => {
+      const result = await f.db.query(sql, values);
+      if (sql.startsWith("INSERT INTO preparation_tasks"))
+        throw new Error("Simulated lost database acknowledgement");
+      return result;
+    },
+  };
+  try {
+    const assistant = new Assistant(
+      db,
+      new CustomAgent({
+        generate: async () => {
+          calls++;
+          assert.equal(calls, 1, "must not blindly dispatch another write");
+          return {
+            message: {
+              role: "assistant" as const,
+              content: null,
+              tool_calls: [
+                {
+                  id: randomUUID(),
+                  type: "function" as const,
+                  function: {
+                    name: "prep_task_save",
+                    arguments: JSON.stringify({
+                      topic: "uncertain chain",
+                      exercise: "Explain the work",
+                      completionCriteria: "Show evidence",
+                      priority: "high",
+                      links: [f.link],
+                    }),
+                  },
+                },
+              ],
+            },
+          };
+        },
+      }),
+      new JobTools(db, {
+        call: async () => {
+          throw Error("No research expected");
+        },
+      }),
+    );
+    await assistant.respond("owner", "Save preparation.");
+    assert.equal(calls, 1);
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT state FROM runtime_calls WHERE operation='prep_task_save'",
+        )
+      ).rows[0].state,
+      "uncertain",
+    );
+    assert.equal(
+      (await f.db.query("SELECT count(*)::int n FROM preparation_tasks"))
+        .rows[0].n,
+      1,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});

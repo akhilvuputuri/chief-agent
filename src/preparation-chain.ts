@@ -2,9 +2,10 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { Database } from "./db.js";
 import { alignmentTarget } from "./alignment-schema.js";
+import { ToolValidationError } from "./tool-errors.js";
 
 function fail(message: string): never {
-  throw new Error("Preparation provenance: " + message);
+  throw new ToolValidationError("Preparation provenance: " + message);
 }
 const linkSchema = z
   .object({
