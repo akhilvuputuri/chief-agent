@@ -1,3 +1,4 @@
+import { HistoryStore } from "./history.js";
 import { scrubTrace } from "./trace-scrub.js";
 import { randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
@@ -19,6 +20,8 @@ export class Stop extends Error {
 }
 export const readOperations = new Set([
   "finish_turn",
+  "conversation_search",
+  "conversation_read",
   "canvas_list",
   "canvas_read",
   "research_delegate",
@@ -52,6 +55,7 @@ export const readOperations = new Set([
 ]);
 export class Execution {
   private task?: string;
+  private checkpointMessages: string[] = [];
   private delegatedMs = 0;
   private used = { ms: 0, models: 0, tools: 0 };
   constructor(
@@ -173,11 +177,22 @@ export class Execution {
     this.delegatedMs = 0;
   }
   async checkpoint(messages: Message[]) {
-    await this.db.query(
-      "UPDATE runtime_runs SET messages=$2::jsonb,updated_at=now() WHERE id=$1",
-      [this.run, JSON.stringify(messages)],
+    const serialized = messages.map((m) => JSON.stringify(m));
+    if (
+      serialized.length < this.checkpointMessages.length ||
+      this.checkpointMessages.some((m, i) => m !== serialized[i])
+    )
+      throw new Error("Checkpoint history is append-only");
+    const delta = messages.slice(this.checkpointMessages.length);
+    await new HistoryStore(this.db).append(
+      this.user,
+      this.run,
+      this.checkpointMessages.length,
+      delta,
     );
+    this.checkpointMessages = serialized;
   }
+
   async trace(type: string, data: Record<string, unknown>) {
     if (type === "model.completed" || type === "model.started")
       await this.db.query("UPDATE runtime_runs SET model=$2 WHERE id=$1", [

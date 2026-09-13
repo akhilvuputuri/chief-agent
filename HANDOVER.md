@@ -104,3 +104,7 @@ Use the existing DigitalOcean server and a free sslip.io hostname; AWS migration
 ## Portable plugin candidate — issue #37
 
 `feature/portable-plugins` (v0.3.6 candidate) packages general research and adds declarative import/export, a host registry, generic delegation, lazy skills and durable definition pins. See [plugin guide](docs/plugins.md). No migration/Compose change. Job alignment/media and external vendor-format adapters remain separate; the product issue stays open. Require independent exact-head approval, CI and verified release before treating this as live.
+
+## Authoritative message storage — v0.3.7 candidate
+
+`feature/authoritative-storage` normalizes repeated message payloads, appends checkpoint deltas and adds bounded history loading plus owner-scoped conversation search/read. See [storage architecture and rollout](docs/authoritative-storage.md). Migration 012/Compose require reviewed operator deployment and legacy rehydration for old-image rollback. No data reset or automatic trace purge; memory/wiki work remains subsequent. Verify exact review, CI and release before treating this candidate as live. The previous portable-plugin release v0.3.6 shipped PR #38 at `20564401c5130f79e2f90a8c802c32298c6c502e`.

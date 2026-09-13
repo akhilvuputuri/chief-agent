@@ -58,6 +58,19 @@ const workSteps = z
     "Unique step keys required",
   );
 export const action = z.discriminatedUnion("operation", [
+  z
+    .object({
+      operation: z.literal("conversation_search"),
+      query: z.string().min(1).max(300),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("conversation_read"),
+      id: z.string().uuid(),
+      offset: z.number().int().min(0).max(10000000).default(0),
+    })
+    .strict(),
   canvasCreate,
   canvasUpdate,
   canvasRead,
@@ -303,6 +316,7 @@ export interface AgentRequest {
   message: string;
   images?: ImageAttachment[];
   history: unknown[];
+  historyOmitted?: number;
   memories: { key: string; value: string }[];
   runtime?: { context: string; tools?: import("./model.js").ToolDefinition[] };
   specialist?: "research" | "job_alignment" | "media";

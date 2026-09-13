@@ -21,6 +21,19 @@ import { telegram, sendCalendarApprovals } from "./telegram.js";
 const c = readConfig();
 const db = connect(c.DATABASE_URL);
 await db.query("SELECT 1");
+// Refuse a stale/missing migration rather than silently losing legacy conversation context.
+if (
+  !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=12")).rows
+    .length ||
+  (
+    await db.query(
+      "SELECT 1 FROM conversations WHERE history<>'[]' UNION ALL SELECT 1 FROM runtime_runs WHERE messages<>'[]' LIMIT 1",
+    )
+  ).rows.length
+)
+  throw new Error(
+    "Message storage migration 012 must be applied with the gateway stopped",
+  );
 await recoverRuntime(db);
 const google = {
   owner: c.GMAIL_OWNER_USER_ID,

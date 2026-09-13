@@ -46,6 +46,12 @@ before(async () => {
   await pg.exec(
     await readFile(new URL("../db/006_runtime.sql", import.meta.url), "utf8"),
   );
+  await pg.exec(
+    await readFile(
+      new URL("../db/012_message_storage.sql", import.meta.url),
+      "utf8",
+    ),
+  );
   db = pg as unknown as Database;
   tools = new JobTools(db, {
     call: async () => ({ untrusted: true, content: "test" }),
@@ -287,7 +293,7 @@ test("approval preview comes from stored action even if model omits it", async (
           operation: "job_delete",
           id: role.id,
         });
-        return { reply: "Please review.", history: [] };
+        return { reply: "Please review.", history: req.history };
       },
     },
     tools,

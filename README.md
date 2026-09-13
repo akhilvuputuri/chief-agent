@@ -133,3 +133,7 @@ The optional Mini App offers persistent, revisioned canvases and a read-only sav
 ## Portable capability plugins
 
 General public research is packaged as a versioned declarative plugin. Enable reviewed agents through the host registry, export/import supported text-only bundles and inspect exact package/skill versions in execution traces. The host retains owner scope, evidence validation, approvals and budgets. See [plugin format and operation](docs/plugins.md). Job alignment and media still use their existing host profiles; external vendor adapters and MCP integration are future work.
+
+### Authoritative state and history
+
+Postgres stores current application records and ordered conversation/execution references. Message content is shared within each owner; active history reads are bounded, with original messages retrieved through conversation search/read tools. Model context is not the complete archive. See [storage, diagnostics and migration](docs/authoritative-storage.md). No automatic trace-retention purge is enabled.

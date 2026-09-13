@@ -77,6 +77,7 @@ async function database() {
     "005_work",
     "006_runtime",
     "008_costs",
+    "012_message_storage",
   ])
     await pg.exec(
       readFileSync(new URL(`../db/${name}.sql`, import.meta.url), "utf8"),

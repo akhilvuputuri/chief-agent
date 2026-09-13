@@ -63,6 +63,7 @@ async function fixture(model: ModelAdapter, models = 40) {
     "005_work",
     "006_runtime",
     "008_costs",
+    "012_message_storage",
   ])
     await pg.exec(
       await readFile(new URL(`../db/${file}.sql`, import.meta.url), "utf8"),
