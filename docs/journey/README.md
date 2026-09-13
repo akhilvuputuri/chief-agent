@@ -28,6 +28,7 @@ As checked on 14 September, the latest published release is [v0.3.9](https://git
 | 13 September                         | [16 — Authoritative storage](16-authoritative-storage.md): how can history remain retrievable without repeated payload copies?              | Released v0.3.7; measured storage reduction, no API-savings inference                                          |
 | 13 September                         | [17 — Rolling conversation and independent jobs](17-rolling-conversation.md): why did the immediately preceding exchange disappear?         | Released v0.3.8; context, retrieval and foreground/job isolation fixes                                         |
 | 13 September                         | [18 — Checkpoint steering](18-checkpoint-steering.md): how can corrections join active work without discarding its result?                  | Released v0.3.9 after repeated review fixes; live behavioral acceptance remains separate                       |
+| 14 September                         | [21 — Preparation evidence chain](21-preparation-chain.md): why does a saved exercise exist?                                                | Candidate; validation and release pending                                                                      |
 
 ## Connected case studies
 
@@ -49,6 +50,8 @@ As checked on 14 September, the latest published release is [v0.3.9](https://git
 | Integrations | [19 — Telegram, voice and Google](19-foundation-and-voice.md) → [20 — Skill versions](20-versioned-skills.md) → [07 — Attachments](07-attachments.md) → [08 — Research](08-research-specialist.md) → [09 — Alignment](09-job-alignment.md) → [12 — Media](12-media-specialist.md) → [15 — Plugins](15-portable-plugins.md)                                                    |
 | UI           | [19 — Voice/text delivery](19-foundation-and-voice.md) → [11 — Telegram views](11-telegram-views.md) → [13 — HTTPS](13-miniapp-https.md) → [14 — Canvases](14-persistent-canvases.md) → [18 — Reply delivery fences](18-checkpoint-steering.md)                                                                                                                               |
 | DevOps       | [01 — Runtime cutover](01-owned-runtime.md) → [04 — Provider failure diagnostics](04-empty-responses.md) → [05 — Cloud development](05-cloud-development.md) → [10 — Independent review](10-foundation-review.md) → [13 — Ingress](13-miniapp-https.md) → [16 — Storage migration](16-authoritative-storage.md) → [18 — Release guard and rollout](18-checkpoint-steering.md) |
+
+Preparation continuity: [09 — Job alignment](09-job-alignment.md) → [21 — Preserving preparation evidence](21-preparation-chain.md).
 
 ## Keep the record useful
 

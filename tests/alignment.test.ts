@@ -93,6 +93,7 @@ function report(target: any, sourceId: string) {
         fit: {
           status: "unknown",
           explanation: "No established systems example supplied.",
+          question: "What systems work have you done?",
           memoryEvidence: [],
         },
       },
@@ -219,7 +220,7 @@ test("all saved roles keep a frozen target set across batches and restarts; repo
     assert.equal(targets.length, 5);
     assert(
       assignments.every(
-        (r) => r.data.profile.skillVersion === "repo:job-alignment:1",
+        (r) => r.data.profile.skillVersion === "repo:job-alignment:2",
       ),
     );
     const run = randomUUID(),
@@ -353,6 +354,12 @@ test("fit and interview claims reject unsupported upgrades, foreign evidence and
       );
     await validate(base());
     let r: any = base();
+    delete r.requirements[0].fit.question;
+    await assert.rejects(() => validate(r), /requirement-specific question/);
+    r = base();
+    r.preparation[0].requirementIds = [];
+    await assert.rejects(() => validate(r), /sourced requirements/);
+    r = base();
     r.requirements[0].fit.status = "confirmed_gap";
     await assert.rejects(() => validate(r), /missing experience stays unknown/);
     r = base();
@@ -395,7 +402,7 @@ test("fit and interview claims reject unsupported upgrades, foreign evidence and
     await validate(r);
     r.preparation[0].requirementIds = [];
     r.preparation[0].interviewIds = ["us"];
-    await assert.rejects(() => validate(r), /cannot justify minimum/);
+    await assert.rejects(() => validate(r), /sourced requirements/);
     r = base();
     r.interviews.status = "not_found";
     await f.db.query("DELETE FROM runtime_calls WHERE operation='web_search'");

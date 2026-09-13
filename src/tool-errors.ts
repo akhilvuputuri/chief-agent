@@ -9,8 +9,12 @@ export class NotDispatchedError extends Error {
   }
 }
 import { ZodError } from "zod";
+/** The host has established that this invocation made no domain mutation. */
+export class ToolValidationError extends Error {}
 export function toolError(error: unknown) {
   const message = error instanceof Error ? error.message : "";
+  if (error instanceof ToolValidationError)
+    return { code: "VALIDATION_FAILED", retryable: false, message };
   if (error instanceof ZodError)
     return {
       code: "INVALID_INPUT",

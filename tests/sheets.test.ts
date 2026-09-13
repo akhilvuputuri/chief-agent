@@ -81,3 +81,95 @@ test("Sheets writes a single owner-scoped snapshot and propagates provider failu
   fail = true;
   await assert.rejects(() => sheets.sync("alice"));
 });
+
+test("preparation Sheet preserves role quotes, uncertainty and checks as literal cells", async () => {
+  const chain = {
+    scopeId: "scope",
+    jobId: "job",
+    preparationId: "action",
+    job: {
+      company: "Example",
+      title: "Engineer",
+      url: "https://example.com/job",
+    },
+    requirements: [
+      {
+        requirement: "Evaluate retrieval",
+        evidence: [
+          {
+            quote: "Build retrieval evaluations",
+            refId: "job",
+            kind: "job_snapshot",
+          },
+        ],
+        fit: {
+          status: "unknown",
+          explanation: "No relevant example supplied",
+          question: "Have you measured retrieval quality?",
+          memoryEvidence: [],
+        },
+      },
+    ],
+    why: "Clarify experience before assigning study",
+    action: "Describe an existing evaluation",
+    doneWhen: "An example or confirmed gap is recorded",
+    effortEstimate: null,
+  };
+  let rows: any[] = [];
+  const sheets = new SheetsTools(
+    {
+      query: async () => ({
+        rows: [
+          {
+            jobs: [],
+            requirements: [],
+            tasks: [
+              {
+                id: "task",
+                topic: "retrieval",
+                exercise: "=UNTRUSTED()",
+                completion_criteria: "Explain retrieval failures",
+                evidence_chain: [chain],
+              },
+              { id: "legacy", topic: "old", evidence_chain: [] },
+            ],
+          },
+        ],
+      }),
+    } as unknown as Database,
+    {
+      owner: "alice",
+      clientId: "id",
+      clientSecret: "secret",
+      refreshToken: "refresh",
+      spreadsheetId: "sheet",
+    },
+    async (url, init) => {
+      if (String(url).includes("oauth2"))
+        return Response.json({ access_token: "token" });
+      rows = JSON.parse(init!.body as string).requests.find(
+        (r: any) => r.updateCells?.range.sheetId === 2,
+      ).updateCells.rows;
+      return Response.json({});
+    },
+  );
+  await sheets.sync("alice");
+  const values = rows[1].values.map((v: any) => v.userEnteredValue.stringValue);
+  assert.ok(values.includes("=UNTRUSTED()"));
+  assert.match(values.join("\n"), /Build retrieval evaluations/);
+  assert.match(
+    values.join("\n"),
+    /unknown[\s\S]*Have you measured retrieval quality\?/,
+  );
+  assert.match(
+    values.join("\n"),
+    /Ready when: An example or confirmed gap is recorded/,
+  );
+  assert.ok(
+    rows[2].values.some(
+      (v: any) =>
+        v.userEnteredValue.stringValue ===
+        "Legacy task; provenance unavailable",
+    ),
+  );
+});

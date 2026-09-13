@@ -46,6 +46,7 @@ export class JobTools {
           synced: r?.synced,
           url: r?.url,
           counts: r?.counts,
+          preparationLinks: r?.link_count,
         };
         await this.db.query(
           `INSERT INTO tool_receipts(id,user_id,run_id,task_id,operation,status,details) VALUES($1,$2,$3,(SELECT task_id FROM work_turns WHERE run_id=$3),$4,'success',$5::jsonb)`,
@@ -183,6 +184,7 @@ export class JobTools {
       return new SkillTools(db).call(user, run, a);
     if (
       a.operation === "prep_list" ||
+      a.operation === "prep_task_read" ||
       a.operation === "prep_save" ||
       a.operation === "prep_task_save"
     )

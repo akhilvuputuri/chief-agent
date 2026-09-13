@@ -64,6 +64,12 @@ before(async () => {
       "utf8",
     ),
   );
+  await pg.exec(
+    await readFile(
+      new URL("../db/015_preparation_chain.sql", import.meta.url),
+      "utf8",
+    ),
+  );
   db = pg as unknown as Database;
   tools = new JobTools(db, {
     call: async () => ({ untrusted: true, content: "test" }),
@@ -386,7 +392,7 @@ test("preparation enforces role/source ownership, real quotes, and explicit unce
   assert.equal(listed.requirements.length, 1);
   assert.equal(listed.requirements[0].assessment, "strength");
 });
-test("shared preparation tasks upsert without resetting progress", async () => {
+test("unlinked preparation writes are rejected and legacy data remains readable", async () => {
   const task = {
     operation: "prep_task_save",
     topic: "RAG",
@@ -395,14 +401,21 @@ test("shared preparation tasks upsert without resetting progress", async () => {
     priority: "high",
     status: "doing",
   };
-  const first = (await tools.execute("alice", run(), task)) as any;
-  const second = (await tools.execute("alice", run(), {
-    ...task,
-    status: undefined,
-    exercise: "Add reranking",
+  await assert.rejects(
+    () => tools.execute("alice", run(), task),
+    /require links/,
+  );
+  await db.query(
+    "INSERT INTO preparation_tasks(id,user_id,topic,exercise,completion_criteria,priority,status) VALUES($1,'alice','legacy','Existing exercise','Existing check','high','doing')",
+    [randomUUID()],
+  );
+  const legacy = (await tools.execute("alice", run(), {
+    operation: "prep_list",
   })) as any;
-  assert.equal(first.id, second.id);
-  assert.equal(second.status, "doing");
+  assert.equal(
+    legacy.tasks.find((t: any) => t.topic === "legacy").link_count,
+    0,
+  );
   const bob = (await tools.execute("bob", run(), {
     operation: "prep_list",
   })) as any;
