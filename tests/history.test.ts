@@ -17,7 +17,7 @@ async function fixture(legacy = false) {
   for (const f of (await readdir(new URL("../db/", import.meta.url)))
     .filter((f) => f.endsWith(".sql"))
     .sort()) {
-    if (legacy && f.startsWith("012")) continue;
+    if (legacy && Number.parseInt(f, 10) >= 12) continue;
     await pg.exec(
       await readFile(new URL("../db/" + f, import.meta.url), "utf8"),
     );
@@ -361,6 +361,269 @@ test("very large originals survive migration and appends; SQL paging preserves U
       answer("🙂".repeat(8001) + "boundary"),
     );
     assert.ok(largestPayload <= 8000);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("conversation search retrieves original exchanges instead of repeated observation copies", async () => {
+  const f = await fixture();
+  try {
+    const earlier = [
+      user("Elena and Rowan's wedding is 3 October 2026, starting at 11am."),
+      answer("The earlier wedding starts at 11am."),
+    ];
+    const copies: Message[] = Array.from({ length: 24 }, (_, i) => [
+      {
+        role: "assistant" as const,
+        content: null,
+        tool_calls: [
+          {
+            id: `search-${i}`,
+            type: "function" as const,
+            function: {
+              name: "conversation_search",
+              arguments: '{"query":"11am"}',
+            },
+          },
+        ],
+      },
+      {
+        role: "tool" as const,
+        tool_call_id: `search-${i}`,
+        content: JSON.stringify({
+          excerpt: earlier[0]!.content,
+          nested: "11am ".repeat(30),
+        }),
+      },
+    ]).flat();
+    const latest = [
+      user("Please add the invitation I just sent to my calendar."),
+      answer(
+        "Nila and Arun's wedding is 18 March 2027. What time should I use?",
+      ),
+      user("Use 8am to 11am."),
+    ];
+    const orphan: Message = {
+      role: "tool",
+      tool_call_id: "missing-call",
+      content: '{"copied":"11am orphan observation"}',
+    };
+    await f.store.append("owner", null, 0, [
+      ...earlier,
+      ...copies,
+      ...latest,
+      orphan,
+    ]);
+    const count = await f.store.count("owner");
+    const results = await f.store.search("owner", "11am");
+    assert.equal(results.length, 3);
+    assert.ok(
+      results.every((r) => r.role === "user" || r.role === "assistant"),
+    );
+    const current = results.find((r) => r.excerpt === "Use 8am to 11am.")!;
+    assert.ok(current);
+    assert.ok(
+      current.neighborhood.some((n: any) => /Nila and Arun/.test(n.excerpt)),
+    );
+    assert.deepEqual(
+      current.neighborhood.map((n: any) => n.ordinal),
+      current.neighborhood
+        .map((n: any) => n.ordinal)
+        .sort((a: number, b: number) => a - b),
+    );
+    for (const result of results)
+      for (const entry of [result, ...result.neighborhood]) {
+        const original = await f.store.read("owner", entry.id, 0);
+        assert.equal(original.role, entry.role);
+        assert.match(original.content, new RegExp(entry.excerpt.slice(0, 12)));
+      }
+    assert.deepEqual(await f.store.search("other", "11am"), []);
+    await assert.rejects(
+      () => f.store.read("other", current.id, 0),
+      /not found/,
+    );
+    assert.equal(await f.store.count("owner"), count);
+    const orphanId = (
+      await f.db.query(
+        "SELECT id FROM conversation_messages WHERE user_id='owner' ORDER BY ordinal DESC LIMIT 1",
+      )
+    ).rows[0].id;
+    const originalOrphan = await f.store.read("owner", orphanId, 0);
+    assert.deepEqual(JSON.parse(originalOrphan.content), orphan);
+    // Feeding the result back into history as a tool observation cannot add another hit.
+    await f.store.append("owner", null, count, [
+      {
+        role: "tool",
+        tool_call_id: "replay",
+        content: JSON.stringify(results),
+      },
+    ]);
+    assert.deepEqual(
+      (await f.store.search("owner", "11am")).map((r) => r.id),
+      results.map((r) => r.id),
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("conversation commits retry concurrent appends, preserve exact retries and reject changed suffixes", async () => {
+  const f = await fixture();
+  const runs = [randomUUID(), randomUUID(), randomUUID()];
+  try {
+    for (const run of runs)
+      await f.db.query(
+        "INSERT INTO runtime_runs(id,user_id) VALUES($1,'owner')",
+        [run],
+      );
+    const first = [user("First inquiry"), answer("First answer")];
+    const second = [user("Second inquiry"), answer("Second answer")];
+    await Promise.all([
+      f.store.appendConversation("owner", runs[0]!, first),
+      f.store.appendConversation("owner", runs[1]!, second),
+      f.store.appendDelivery("owner", runs[2]!, "Background result delivered"),
+    ]);
+    assert.equal(await f.store.count("owner"), 5);
+    const refs = (
+      await f.db.query(
+        "SELECT id,ordinal FROM conversation_messages ORDER BY ordinal",
+      )
+    ).rows;
+    assert.deepEqual(
+      refs.map((r) => r.ordinal),
+      [0, 1, 2, 3, 4],
+    );
+    await Promise.all([
+      f.store.appendConversation(
+        "owner",
+        runs[0]!,
+        first.map((m) => ({ content: m.content, role: m.role })),
+      ),
+      f.store.appendDelivery("owner", runs[2]!, "Background result delivered"),
+    ]);
+    assert.deepEqual(
+      (
+        await f.db.query(
+          "SELECT id,ordinal FROM conversation_messages ORDER BY ordinal",
+        )
+      ).rows,
+      refs,
+    );
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT count(*)::int n FROM events WHERE type='conversation.delivery'",
+        )
+      ).rows[0].n,
+      1,
+    );
+    await assert.rejects(
+      () =>
+        f.store.appendConversation("owner", runs[0]!, [
+          ...first,
+          answer("Unmatched extra suffix"),
+        ]),
+      /different suffix/,
+    );
+    await assert.rejects(
+      () =>
+        f.store.appendDelivery("owner", runs[2]!, "Different delivered reply"),
+      /different suffix/,
+    );
+    await assert.rejects(
+      () => f.store.appendConversation("other", runs[0]!, first),
+      /not found/,
+    );
+    assert.equal(await f.store.count("owner"), 5);
+    assert.equal(await f.store.count("other"), 0);
+    assert.equal(
+      (await f.db.query("SELECT count(*)::int n FROM message_contents")).rows[0]
+        .n,
+      5,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("search excludes internal worker and specialist messages but retains delivered reply provenance", async () => {
+  const f = await fixture();
+  try {
+    const task = randomUUID(),
+      worker = randomUUID(),
+      child = randomUUID(),
+      delivery = randomUUID();
+    await f.db.query(
+      "INSERT INTO work_tasks(id,user_id,objective,request,status) VALUES($1,'owner','Research','Original request','paused')",
+      [task],
+    );
+    for (const run of [worker, child, delivery])
+      await f.db.query(
+        "INSERT INTO runtime_runs(id,user_id,task_id) VALUES($1,'owner',$2)",
+        [run, task],
+      );
+    for (const run of [worker, delivery])
+      await f.db.query(
+        "INSERT INTO work_turns(run_id,user_id,request,background,task_id) VALUES($1,'owner','Continue recorded task',true,$2)",
+        [run, task],
+      );
+    await f.db.query(
+      "INSERT INTO events(user_id,run_id,type,data) VALUES('owner',$1,'research.child_started','{}')",
+      [child],
+    );
+    await f.store.append(
+      "owner",
+      null,
+      0,
+      [user("Internal worker zebras"), answer("Worker-only zebras checkpoint")],
+      worker,
+    );
+    await f.store.append(
+      "owner",
+      null,
+      2,
+      [
+        user("Specialist zebras assignment"),
+        answer("Specialist-only zebras result"),
+      ],
+      child,
+    );
+    await f.store.appendDelivery("owner", delivery, "Delivered zebras finding");
+    const hits = await f.store.search("owner", "zebras");
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].excerpt, "Delivered zebras finding");
+    assert.equal(hits[0].task_id, task);
+    assert.equal(hits[0].run_id, delivery);
+    assert.deepEqual(hits[0].neighborhood, []);
+    const read = await f.store.read("owner", hits[0].id, 0);
+    assert.equal(read.source, "background_delivery");
+    assert.equal(read.taskId, task);
+    assert.equal(read.runId, delivery);
+    assert.equal(read.role, "assistant");
+    assert.equal(await f.store.count("owner"), 5);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("many long matching exchanges retain bounded structured search results", async () => {
+  const f = await fixture();
+  try {
+    const messages = Array.from({ length: 20 }, (_, i) => [
+      user(`Appointment ${i}: ${"a".repeat(600)}`),
+      answer(`Appointment details ${i}: ${"b".repeat(600)}`),
+    ]).flat();
+    await f.store.append("owner", null, 0, messages);
+    const hits = await f.store.search("owner", "appointment");
+    assert.equal(hits.length, 10);
+    assert.ok(JSON.stringify(hits).length <= 11000);
+    assert.ok(
+      hits.every(
+        (h) => h.neighborhood.length > 0 && h.neighborhood.length <= 4,
+      ),
+    );
+    assert.ok(hits.some((h) => h.neighborhoodTruncated));
   } finally {
     await f.pg.close();
   }
