@@ -14,6 +14,8 @@ export function jsonSchema(v: z.ZodTypeAny): any {
           ? v.removeDefault()
           : v.unwrap(),
     );
+  if (v instanceof z.ZodDiscriminatedUnion)
+    return { anyOf: v.options.map((o: z.ZodTypeAny) => jsonSchema(o)) };
   if (v instanceof z.ZodNullable)
     return { anyOf: [jsonSchema(v.unwrap()), { type: "null" }] };
   if (v instanceof z.ZodString) {
@@ -57,6 +59,7 @@ export function runtimeContext(
   skills: typeof baselineSkills = baselineSkills,
 ) {
   const disabled = (op: string) =>
+    (op.startsWith("canvas_") && !availability.canvases) ||
     op === "research_report" ||
     op === "media_report" ||
     op === "job_alignment_report" ||
@@ -81,6 +84,14 @@ export function runtimeContext(
           ? "Load the approved active skill or repository default using only its catalogue key."
           : ((
               {
+                canvas_create:
+                  "Save a new named canvas. Supply a unique UUID requestKey; reuse that key only for an exact retry. Content is a saved snapshot using supported blocks, not executable code. Only cite verified source IDs with matching URLs. Return the saved canvas in finish_turn.canvases for a Telegram open button.",
+                canvas_update:
+                  "Save a new immutable revision of an existing canvas. Read first and supply its exact baseRevision, preserving stable block IDs. Conflicts require reading and reconciling; never blindly overwrite. Use a new UUID requestKey for each intended revision.",
+                canvas_read:
+                  "Read one saved canvas revision in 8000-character chunks. Omit revision for latest; keep the returned revision for later chunks. Does not regenerate analysis.",
+                canvas_list:
+                  "List saved canvas titles, IDs and latest revisions, 20 per page. Reuse an existing canvas when refining the same topic.",
                 job_alignment_start:
                   "Assess fit, interview evidence and minimum useful preparation for any requested set of saved roles. allSaved=true selects all non-archived roles; otherwise pass exact IDs. Select relevant existing memoryKeys. Creates a frozen scope, processes an internal batch and returns coverage. Resume pending work automatically; user does not manage batches.",
                 job_alignment_resume:

@@ -53,3 +53,7 @@ Released in PR #33 as v0.3.2, deployed commit `10a2716b589783972a9f3f00e279a0e1d
 ## Mini App HTTPS foundation — issue #26
 
 The owner selected DigitalOcean and a free hostname on 13 September. `feature/miniapp-https` prepares `companion.188-166-246-143.sslip.io` with a Caddy host service serving only a holding response. See [deployment and canvas follow-up](miniapp-deployment.md) and [journey 13](journey/13-miniapp-https.md). Verify the PR/operator checks before treating HTTPS as live. Authentication, the actual frontend, multiple versioned canvases and agent tools are still unbuilt. No DB/Compose change; ordinary app releases do not install the host Caddyfile.
+
+## Persistent canvas candidate — issue #26
+
+`feature/miniapp-canvases` starts from main `1e44bdb` and implements the Mini App with Telegram authentication, a library of independent revisioned canvases, read-only roles, canvas tools and provenance/view traces. See [contract](canvases.md), [journal](journey/14-persistent-canvases.md) and [additive rollout](miniapp-deployment.md). Patch candidate v0.3.5. The earlier HTTPS foundation is live; this application's status requires the exact independent review, CI, migration, release and real Telegram acceptance evidence. Observable memory/Python checkpoints remain separate.

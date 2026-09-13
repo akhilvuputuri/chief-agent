@@ -1,3 +1,4 @@
+import { Canvases } from "./canvases.js";
 import { randomUUID } from "node:crypto";
 import type { Api } from "grammy";
 import type { Database } from "./db.js";
@@ -49,6 +50,7 @@ export class TelegramViews {
     private db: Database,
     private api: ViewApi,
     private now = () => Date.now(),
+    private miniOrigin = "",
   ) {}
   async open(
     user: string,
@@ -194,6 +196,7 @@ export class TelegramViews {
     const delivery = typeof input === "string" ? { reply: input } : input;
     const answer = answerSchema.parse({
       reply: delivery.reply,
+      canvases: delivery.canvases,
       records: delivery.records,
       numbers: delivery.numbers,
       sections: delivery.sections,
@@ -218,6 +221,38 @@ export class TelegramViews {
           entities: part.entities,
           link_preview_options: { is_disabled: true },
         });
+    let canvasMessages = 0;
+    if (this.miniOrigin && answer.canvases?.length) {
+      const buttons = [];
+      for (const ref of answer.canvases) {
+        // Model-provided IDs cannot become links without an owner-scoped existence check.
+        try {
+          const saved = await new Canvases(this.db).read(
+            user,
+            ref.id,
+            ref.revision,
+          );
+          const query = new URLSearchParams({ canvas: ref.id });
+          if (ref.revision) query.set("revision", String(ref.revision));
+          buttons.push([
+            {
+              text: saved.document.title.slice(0, 100),
+              web_app: {
+                url: this.miniOrigin + "/miniapp/?" + query.toString(),
+              },
+            },
+          ]);
+        } catch {
+          /* Do not expose or link unavailable/cross-owner records. */
+        }
+      }
+      if (buttons.length) {
+        await this.api.sendMessage(chat, "Open saved canvases", {
+          reply_markup: { inline_keyboard: buttons },
+        });
+        canvasMessages = 1;
+      }
+    }
     // Never hide authoritative approval notices behind a disclosure button.
     let noticeMessages = 0;
     for (const notice of delivery.notices ?? [])
@@ -231,7 +266,8 @@ export class TelegramViews {
       kind,
       characters: answer.reply.length,
       legacyChunks: parts.length,
-      messages: interactive ? 1 : parts.length,
+      messages: (interactive ? 1 : parts.length) + canvasMessages,
+      canvasMessages,
       noticeMessages,
       interactive,
     });

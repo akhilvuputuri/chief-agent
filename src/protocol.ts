@@ -1,3 +1,9 @@
+import {
+  canvasCreate,
+  canvasUpdate,
+  canvasRead,
+  canvasList,
+} from "./canvas-schema.js";
 import type { Answer } from "./answer.js";
 import {
   alignmentStart,
@@ -49,6 +55,10 @@ const workSteps = z
     "Unique step keys required",
   );
 export const action = z.discriminatedUnion("operation", [
+  canvasCreate,
+  canvasUpdate,
+  canvasRead,
+  canvasList,
   alignmentStart,
   alignmentResume,
   alignmentRead,

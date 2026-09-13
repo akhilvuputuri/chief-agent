@@ -1,6 +1,23 @@
 import "dotenv/config";
 import { z } from "zod";
 const schema = z.object({
+  MINIAPP_ORIGIN: z
+    .union([
+      z.literal(""),
+      z
+        .string()
+        .url()
+        .refine((v) => {
+          const u = new URL(v);
+          return (
+            u.protocol === "https:" &&
+            !u.username &&
+            !u.password &&
+            u.origin === v
+          );
+        }, "Use an HTTPS origin without path or credentials"),
+    ])
+    .default(""),
   CALENDAR_REFRESH_TOKEN: z.string().default(""),
   DAILY_SPREADSHEET_ID: z.string().default(""),
   OPENROUTER_API_KEY: z.string().default(""),

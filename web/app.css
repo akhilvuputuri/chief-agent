@@ -1,0 +1,236 @@
+:root {
+  color-scheme: light dark;
+  --bg: var(--tg-theme-bg-color, #f4f6f8);
+  --ink: var(--tg-theme-text-color, #172a35);
+  --muted: var(--tg-theme-hint-color, #61717e);
+  --surface: var(--tg-theme-secondary-bg-color, #fff);
+  --accent: var(--tg-theme-button-color, #146f76);
+  --border: color-mix(in srgb, var(--ink) 12%, transparent);
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font:
+    16px/1.55 system-ui,
+    sans-serif;
+  padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
+}
+header,
+main,
+footer {
+  max-width: 900px;
+  margin: auto;
+}
+header {
+  padding: 20px 0 8px;
+}
+.brand {
+  font-weight: 700;
+  font-size: 19px;
+  letter-spacing: -0.4px;
+}
+nav {
+  display: flex;
+  gap: 8px;
+  margin: 18px 0;
+}
+button,
+select,
+input {
+  font: inherit;
+  color: inherit;
+}
+button {
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 10px 16px;
+  min-height: 44px;
+}
+button:hover,
+button:focus-visible {
+  border-color: var(--accent);
+}
+button.selected {
+  background: var(--accent);
+  color: var(--tg-theme-button-text-color, #fff);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+h1 {
+  font-size: 28px;
+  line-height: 1.2;
+  letter-spacing: -0.8px;
+  margin: 18px 0 12px;
+}
+h2 {
+  font-size: 18px;
+  margin: 0 0 12px;
+}
+h3 {
+  font-size: 16px;
+  margin: 0 0 8px;
+}
+.muted,
+small {
+  color: var(--muted);
+}
+.toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 12px 0 22px;
+}
+.toolbar select {
+  max-width: 100%;
+  padding: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.card,
+.block {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+  margin: 14px 0;
+}
+.card.link {
+  display: block;
+  width: 100%;
+  text-align: left;
+}
+.card.link strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 18px;
+}
+.card.link small {
+  display: block;
+}
+.prose {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+.empty {
+  padding: 36px 12px;
+  text-align: center;
+  color: var(--muted);
+}
+.eyebrow {
+  text-transform: uppercase;
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: var(--accent);
+  font-weight: 650;
+}
+.table-scroll {
+  overflow-x: auto;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+th,
+td {
+  text-align: left;
+  vertical-align: top;
+  min-width: 110px;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+th {
+  font-weight: 650;
+  color: var(--muted);
+}
+tr:last-child td {
+  border-bottom: 0;
+}
+a {
+  color: var(--tg-theme-link-color, var(--accent));
+  overflow-wrap: anywhere;
+}
+.timeline {
+  border-left: 2px solid var(--border);
+  padding-left: 20px;
+  margin: 16px 0;
+}
+.timeline > div {
+  margin-bottom: 20px;
+}
+.chart-row {
+  margin: 16px 0;
+}
+.chart-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 14px;
+}
+.chart-row svg {
+  display: block;
+  width: 100%;
+  height: 10px;
+  margin-top: 8px;
+  fill: var(--accent);
+}
+summary {
+  cursor: pointer;
+  font-weight: 650;
+  min-height: 32px;
+}
+details .prose {
+  margin-top: 12px;
+}
+.error {
+  color: var(--ink);
+  border-left: 3px solid #b6583a;
+  padding: 16px;
+}
+footer {
+  padding: 32px 0 24px;
+  color: var(--muted);
+  font-size: 12px;
+}
+input[type="search"] {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.count {
+  font-size: 13px;
+  color: var(--muted);
+}
+.version-note {
+  font-size: 13px;
+  color: var(--muted);
+  padding: 8px 0;
+}
+.block .card {
+  margin: 10px 0;
+  padding: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: var(--tg-theme-bg-color, #101c24);
+    --surface: var(--tg-theme-secondary-bg-color, #192a36);
+    --ink: var(--tg-theme-text-color, #e8eef0);
+    --muted: var(--tg-theme-hint-color, #a0b2be);
+    --accent: var(--tg-theme-button-color, #368a91);
+  }
+}

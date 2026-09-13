@@ -298,7 +298,8 @@ export class CustomAgent implements Agent {
           messages.push({ role: "assistant", content: reply });
           if (
             finishObservation &&
-            (finish.sections?.length ||
+            (finish.canvases?.length ||
+              finish.sections?.length ||
               finish.records?.length ||
               finish.sources?.length ||
               finish.numbers?.length ||

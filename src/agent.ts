@@ -277,6 +277,7 @@ export class Assistant {
       }
       return {
         reply: output.reply,
+        canvases: output.canvases,
         records: output.records,
         numbers: output.numbers,
         sections: output.sections,

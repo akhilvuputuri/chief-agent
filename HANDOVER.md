@@ -96,3 +96,7 @@ See [job alignment](docs/job-alignment.md) for flexible saved-role scopes, versi
 ## Mini App hosting decision — 13 September 2026
 
 Use the existing DigitalOcean server and a free sslip.io hostname; AWS migration stays separate. The [HTTPS guide](docs/miniapp-deployment.md) covers the Caddy host-service configuration, reviewed operator install and verification. This milestone serves only a holding response; canvas authentication, storage, frontend and agent tools are separate follow-up work. Check the PR/operator evidence before claiming the endpoint is live.
+
+## Persistent canvas candidate — 13 September 2026
+
+`feature/miniapp-canvases` implements the authenticated read-only Mini App, versioned model-authored canvases, role browsing and trace links. See [canvases](docs/canvases.md) and the [reviewed rollout](docs/miniapp-deployment.md). Additive migration 011 and Compose/host ingress changes require the documented operator procedure before the normal release. No credentials move to the frontend. Check exact PR/release evidence before claiming this candidate is live.

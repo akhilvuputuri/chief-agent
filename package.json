@@ -1,6 +1,6 @@
 {
   "name": "companion-agent",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "private": true,
   "type": "module",
   "description": "A personal AI assistant with an owned TypeScript runtime, Telegram voice, memory, research and durable tasks",
@@ -12,7 +12,7 @@
     "start": "node dist/main.js",
     "build": "tsc",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.evals.json",
-    "test": "tsx --test tests/*.test.ts && node --test scripts/google-sheets-scopes.test.mjs",
+    "test": "npm run build && tsx --test tests/*.test.ts && node --test scripts/google-sheets-scopes.test.mjs",
     "migrate": "tsx src/migrate.ts",
     "check": "npm run typecheck && npm test",
     "format": "prettier --write .",

@@ -78,6 +78,7 @@ const assistant = new Assistant(
     new CalendarActions(db, calendar, c.GMAIL_OWNER_USER_ID),
   ),
   {
+    canvases: !!c.MINIAPP_ORIGIN,
     web: !!(c.TAVILY_API_KEY || c.OPENROUTER_API_KEY),
     gmail: !!c.GOOGLE_REFRESH_TOKEN,
     calendar: !!c.CALENDAR_REFRESH_TOKEN,
@@ -90,9 +91,18 @@ const assistant = new Assistant(
     tools: c.AGENT_BUDGET_TOOL_CALLS,
   },
 );
-const app = server();
+const app = server(
+  db,
+  c.MINIAPP_ORIGIN
+    ? {
+        origin: c.MINIAPP_ORIGIN,
+        token: c.TELEGRAM_BOT_TOKEN,
+        allowed: new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(",")),
+      }
+    : undefined,
+);
 const bot = telegram(c, assistant, db);
-const views = new TelegramViews(db, bot.api);
+const views = new TelegramViews(db, bot.api, undefined, c.MINIAPP_ORIGIN);
 const allowed = new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(","));
 const worker = new DailyWorker<Delivery>(
   db,

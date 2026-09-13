@@ -1,3 +1,4 @@
+import { Canvases } from "./canvases.js";
 import { WorkTools } from "./work.js";
 import { toolError } from "./tool-errors.js";
 import type { DailyTools, DailyAction } from "./daily.js";
@@ -80,6 +81,12 @@ export class JobTools {
     a: ReturnType<typeof action.parse>,
   ): Promise<unknown> {
     const db = this.db;
+    const canvases = new Canvases(db);
+    if (a.operation === "canvas_create" || a.operation === "canvas_update")
+      return canvases.write(user, run, a);
+    if (a.operation === "canvas_list") return canvases.list(user, a.offset);
+    if (a.operation === "canvas_read")
+      return canvases.toolRead(user, run, a.id, a.revision, a.offset);
     if (
       a.operation === "research_delegate" ||
       a.operation === "research_report" ||

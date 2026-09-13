@@ -46,12 +46,15 @@ services:
         "/migrations/008_costs.sql",
         "-f",
         "/migrations/009_calendar_approval.sql",
+        "-f",
+        "/migrations/011_canvases.sql",
       ]
     depends_on:
       postgres: { condition: service_healthy }
   gateway:
     build: .
     environment:
+      MINIAPP_ORIGIN: ${MINIAPP_ORIGIN:-}
       DATABASE_URL: postgres://companion:${POSTGRES_PASSWORD}@postgres:5432/companion
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?Set TELEGRAM_BOT_TOKEN}
       TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS:?Set TELEGRAM_ALLOWED_USER_IDS}
