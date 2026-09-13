@@ -19,6 +19,8 @@ export class Stop extends Error {
 }
 export const readOperations = new Set([
   "finish_turn",
+  "canvas_list",
+  "canvas_read",
   "research_delegate",
   "research_report",
   "media_delegate",

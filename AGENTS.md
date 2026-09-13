@@ -10,6 +10,8 @@ Node 22. `npm ci`, `npm run check`, `npm run build`, `npm run format:check`. Tes
 
 `src/telegram.ts` is the client; `agent.ts` manages conversations; `custom-agent.ts` runs the loop; `model.ts` calls OpenRouter. `context.ts`, `record-context.ts`, `execution.ts`, and `work.ts` handle context and durable work. Tools run through owner-scoped `tools.ts` and Zod `protocol.ts`. Read the domain module before changing a tool. `answer.ts` defines optional presentation data; `telegram-views.ts` owns read-only callback state/delivery and `telegram-view-render.ts` reads saved records. Views must never invoke the model or authorize an action. `alignment.ts` manages frozen job-alignment scopes and reports; `research.ts` runs isolated read-only specialists; `media.ts` delegates image and document reading to that runner; `attachments.ts` handles Telegram file intake. No production Hermes dependency.
 
+`canvases.ts`/`canvas-schema.ts` own versioned canvas storage and tools. `miniapp.ts`/`miniapp-auth.ts` expose authenticated read-only APIs; `miniapp-ui.ts` is browser code compiled by npm test/build, with static files in web/. Validate owner scope on every read and Telegram initData server-side. Preserve immutable revisions, request-key idempotency and base-revision conflicts. See docs/canvases.md and the reviewed additive deployment procedure in docs/miniapp-deployment.md. Do not add public writes or model-generated executable UI.
+
 ## Product and safety constraints
 
 - General personal assistant; job preparation is one domain.

@@ -1,3 +1,4 @@
+import { canvasRef } from "./canvas-schema.js";
 import { z } from "zod";
 
 // Optional presentation data, never an instruction to fetch, mutate or approve records.
@@ -8,6 +9,7 @@ export const recordRef = z
   })
   .strict();
 export const answerFields = {
+  canvases: z.array(canvasRef).max(10).optional(),
   records: z.array(recordRef).max(200).optional(),
   numbers: z
     .array(

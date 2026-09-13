@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover"
+    />
+    <title>Companion</title>
+    <link rel="stylesheet" href="/miniapp/app.css" />
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script type="module" src="/miniapp/app.js"></script>
+  </head>
+  <body>
+    <header>
+      <div class="brand">◈ Companion</div>
+      <nav aria-label="Views">
+        <button id="canvases" class="selected">Canvases</button
+        ><button id="roles">Roles</button>
+      </nav>
+    </header>
+    <main id="app" aria-live="polite">
+      <p class="empty">Opening your workspace…</p>
+    </main>
+    <footer>Private workspace · Changes and approvals stay in Telegram</footer>
+  </body>
+</html>

@@ -24,7 +24,7 @@ import {
 import type { ImageAttachment } from "./protocol.js";
 export function telegram(c: Config, assistant: Assistant, db: Database) {
   const bot = new Bot(c.TELEGRAM_BOT_TOKEN);
-  const views = new TelegramViews(db, bot.api);
+  const views = new TelegramViews(db, bot.api, undefined, c.MINIAPP_ORIGIN);
   const voice = new Voice(c);
   const queue = new SerialQueue();
   const ids = new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(","));
@@ -109,6 +109,45 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
       return;
     }
     const command = ctx.message.text;
+    if (command === "/canvases" || command === "/app") {
+      await ensureUser(db, user);
+      const claimed = await db.query(
+        "INSERT INTO inbound_updates(update_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING update_id",
+        [ctx.update.update_id, user],
+      );
+      if (!claimed.rows.length) return;
+      try {
+        await ctx.reply(
+          c.MINIAPP_ORIGIN
+            ? "Open your saved canvases and roles."
+            : "The Mini App is not configured yet.",
+          c.MINIAPP_ORIGIN
+            ? {
+                reply_markup: {
+                  inline_keyboard: [
+                    [
+                      {
+                        text: "Open Companion",
+                        web_app: { url: c.MINIAPP_ORIGIN + "/miniapp/" },
+                      },
+                    ],
+                  ],
+                },
+              }
+            : {},
+        );
+        await db.query(
+          "UPDATE inbound_updates SET status='completed' WHERE update_id=$1",
+          [ctx.update.update_id],
+        );
+      } catch {
+        await db.query(
+          "UPDATE inbound_updates SET status='failed' WHERE update_id=$1",
+          [ctx.update.update_id],
+        );
+      }
+      return;
+    }
     if (
       command &&
       [

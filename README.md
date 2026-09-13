@@ -125,3 +125,7 @@ The main agent can delegate bounded public research to an isolated, read-only sp
 ## Job alignment
 
 Ask about selected roles or all saved roles. The [job-alignment specialist](docs/job-alignment.md) assesses requirements, established experience, qualified interview evidence and minimum useful preparation. It retains the exact requested scope across internal batches, keeps unknowns explicit, and returns detailed persisted reports for the main agent to synthesize and save using existing tools. General research remains available for other tasks.
+
+## Telegram canvases
+
+The optional Mini App offers persistent, revisioned canvases and a read-only saved-role browser. Open `/canvases` in the bot, or ask it to save a plan or analysis as a canvas. Multiple topics stay separate; earlier revisions remain accessible. Telegram validates the owner before any private content loads. Read the [canvas contract](docs/canvases.md) and [DigitalOcean rollout](docs/miniapp-deployment.md) for configuration, migration 011 and live verification requirements. Calendar approvals remain in Telegram.
