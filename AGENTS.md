@@ -69,3 +69,7 @@ Keep repository documentation specific to application behavior, architecture, te
 ## Capability plugins
 
 Read docs/plugins.md before changing plugin behavior. plugins/registry.json is reviewed host configuration; packages cannot grant themselves tools. Keep content pins, strict text-only validation, owner-scoped task snapshots, approved private skill versions and host evidence/permission checks. New supported public-research agents should use plugin definitions rather than new loop branches. Export only package files, never owner data or host configuration. Plugin edits require updated hashes, tests and the same independent review/release loop as code; no automatic remote installation.
+
+## Authoritative history storage
+
+Read docs/authoritative-storage.md before changing history/checkpoints. Use HistoryStore, not the legacy conversations.history/runtime_runs.messages arrays (empty after migration 012). Preserve immutable owner-scoped payloads, ordered references, compare-and-append counters and stable conversation IDs. Do not copy full history into checkpoints or provenance records. Run/call journals still preserve incomplete/uncertain actions. Do not prune data without tracing active-task/evidence/memory dependencies. An old-image rollback requires the documented legacy rehydration; app-only deployment cannot apply migration 012.

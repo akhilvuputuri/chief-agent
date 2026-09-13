@@ -1,3 +1,5 @@
+import { HistoryStore } from "./history.js";
+import type { Message } from "./model.js";
 import type { Delivery } from "./answer.js";
 import { alignmentContext } from "./alignment.js";
 import { researchReads } from "./research-schema.js";
@@ -148,19 +150,27 @@ export class Assistant {
         ],
       );
       await event(this.db, user, run, "turn.started");
-      const history = background
-        ? ((
+      const histories = new HistoryStore(this.db);
+      const previousRun = background
+        ? (
             await this.db.query(
-              "SELECT messages FROM runtime_runs WHERE task_id=$1 AND user_id=$2 ORDER BY started_at DESC LIMIT 1",
+              "SELECT id FROM runtime_runs WHERE task_id=$1 AND user_id=$2 ORDER BY started_at DESC,id DESC LIMIT 1",
               [current?.id, user],
             )
-          ).rows[0]?.messages ?? [])
-        : ((
-            await this.db.query(
-              "SELECT history FROM conversations WHERE user_id=$1",
-              [user],
-            )
-          ).rows[0]?.history ?? []);
+          ).rows[0]?.id
+        : undefined;
+      const stored =
+        background && !previousRun
+          ? { messages: [], omitted: 0, total: 0 }
+          : await histories.recent(user, previousRun);
+      const history = stored.messages;
+      await event(this.db, user, run, "history.loaded", {
+        storageVersion: 2,
+        source: background ? "task_run" : "conversation",
+        loaded: history.length,
+        omitted: stored.omitted,
+        total: stored.total,
+      });
       const memories = (
         await this.db.query(
           "SELECT key,value FROM memories WHERE user_id=$1 ORDER BY key",
@@ -200,6 +210,7 @@ export class Assistant {
           message,
           ...(images?.length ? { images } : {}),
           history,
+          historyOmitted: stored.omitted,
           memories,
           runtime,
           progress: progress ? (text) => progress(text, run) : undefined,
@@ -229,11 +240,21 @@ export class Assistant {
           },
         }),
       );
-      if (!background)
-        await this.db.query(
-          "INSERT INTO conversations(user_id,history,runtime_version) VALUES($1,$2::jsonb,1) ON CONFLICT(user_id) DO UPDATE SET history=$2::jsonb,runtime_version=1,updated_at=now()",
-          [user, JSON.stringify(output.history)],
+      // Only new turn messages enter the conversation. Earlier context is already stored.
+      if (!background) {
+        const next = output.history as Message[];
+        if (
+          history.some((m, i) => JSON.stringify(m) !== JSON.stringify(next[i]))
+        )
+          throw new Error("Agent changed prior conversation history");
+        await histories.append(
+          user,
+          null,
+          stored.total,
+          next.slice(history.length),
+          run,
         );
+      }
       await execution.attach();
       await event(this.db, user, run, "turn.responded", {
         interrupted: output.interrupted ?? false,

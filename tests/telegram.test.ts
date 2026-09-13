@@ -27,6 +27,12 @@ test("Telegram handles natural text once and ignores unauthorized users and grou
   await pg.exec(
     await readFile(new URL("../db/006_runtime.sql", import.meta.url), "utf8"),
   );
+  await pg.exec(
+    await readFile(
+      new URL("../db/012_message_storage.sql", import.meta.url),
+      "utf8",
+    ),
+  );
   const db = pg as unknown as Database;
   let turns = 0;
   const replies: string[] = [];
@@ -37,7 +43,7 @@ test("Telegram handles natural text once and ignores unauthorized users and grou
         turns++;
         return {
           reply: `Understood: ${req.message}`,
-          history: [{ role: "user", content: req.message }],
+          history: [...req.history, { role: "user", content: req.message }],
         };
       },
     },
@@ -101,10 +107,17 @@ test("status responds while a conversation is still running", async () => {
     "005_work",
     "006_runtime",
     "008_costs",
+    "012_message_storage",
   ])
     await pg.exec(
       await readFile(new URL("../db/" + f + ".sql", import.meta.url), "utf8"),
     );
+  await pg.exec(
+    await readFile(
+      new URL("../db/012_message_storage.sql", import.meta.url),
+      "utf8",
+    ),
+  );
   const db = pg as unknown as Database;
   let entered!: () => void, release!: () => void;
   const started = new Promise<void>((r) => (entered = r)),
@@ -186,10 +199,17 @@ test("photos and PDF documents reach the agent as bounded, owner-scoped attachme
     "005_work",
     "006_runtime",
     "008_costs",
+    "012_message_storage",
   ])
     await pg.exec(
       await readFile(new URL("../db/" + f + ".sql", import.meta.url), "utf8"),
     );
+  await pg.exec(
+    await readFile(
+      new URL("../db/012_message_storage.sql", import.meta.url),
+      "utf8",
+    ),
+  );
   const db = pg as unknown as Database;
   const requests: any[] = [];
   const tools = new JobTools(db, { call: async () => ({}) });
@@ -200,7 +220,7 @@ test("photos and PDF documents reach the agent as bounded, owner-scoped attachme
         requests.push(req);
         return {
           reply: "Seen",
-          history: [{ role: "user", content: req.message }],
+          history: [...req.history, { role: "user", content: req.message }],
         };
       },
     },
@@ -307,7 +327,7 @@ test("photos and PDF documents reach the agent as bounded, owner-scoped attachme
     );
     // Persisted history and memory sources hold only the note, not image bytes.
     const stored = JSON.stringify(
-      (await pg.query("SELECT history FROM conversations")).rows,
+      (await pg.query("SELECT payload FROM message_contents")).rows,
     );
     assert.match(stored, /Attached image/);
     assert.doesNotMatch(stored, /fake-jpeg|base64,/);

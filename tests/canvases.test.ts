@@ -40,6 +40,7 @@ async function fixture() {
     "005_work",
     "006_runtime",
     "008_costs",
+    "012_message_storage",
     "009_calendar_approval",
     "011_canvases",
   ])

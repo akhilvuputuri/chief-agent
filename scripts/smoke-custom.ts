@@ -19,6 +19,7 @@ try {
     "005_work",
     "006_runtime",
     "008_costs",
+    "012_message_storage",
   ])
     await pg.exec(
       await readFile(new URL("../db/" + f + ".sql", import.meta.url), "utf8"),

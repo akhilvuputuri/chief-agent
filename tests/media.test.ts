@@ -150,7 +150,7 @@ test("images reach only the media specialist; the coordinator gets compact facts
     const dump = JSON.stringify(
       (
         await f.db.query(
-          "SELECT (SELECT json_agg(e) FROM events e) AS events,(SELECT json_agg(r.messages) FROM runtime_runs r) AS runs,(SELECT json_agg(s) FROM research_sources s) AS sources,(SELECT json_agg(c.history) FROM conversations c) AS conversations,(SELECT json_agg(x) FROM runtime_calls x) AS calls",
+          "SELECT (SELECT json_agg(e) FROM events e) AS events,(SELECT json_agg(r.messages) FROM runtime_runs r) AS runs,(SELECT json_agg(s) FROM research_sources s) AS sources,(SELECT json_agg(c.payload) FROM message_contents c) AS conversations,(SELECT json_agg(x) FROM runtime_calls x) AS calls",
         )
       ).rows[0],
     );

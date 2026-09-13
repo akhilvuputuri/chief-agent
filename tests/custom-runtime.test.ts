@@ -1,3 +1,4 @@
+import { HistoryStore } from "../src/history.js";
 import { boundedBytes } from "../src/providers.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -31,6 +32,7 @@ async function fixture(
     "005_work",
     "006_runtime",
     "008_costs",
+    "012_message_storage",
   ])
     await pg.exec(
       await readFile(new URL("../db/" + f + ".sql", import.meta.url), "utf8"),
@@ -140,7 +142,11 @@ test("custom conversation persists model and tool records, observes real results
     assert.equal(run.stop_reason, "answer");
     assert.equal(run.used_models, 2);
     assert.equal(run.used_tools, 1);
-    assert.equal(run.messages[1].tool_calls[0].function.name, "memory_set");
+    assert.equal(
+      (await new HistoryStore(f.db).recent("owner", run.id)).messages[1]!
+        .tool_calls![0]!.function.name,
+      "memory_set",
+    );
     assert.equal(
       (await f.db.query("SELECT value FROM memories")).rows[0].value,
       "Concise",
@@ -745,11 +751,7 @@ test("finish envelope is validated and persisted before delivery, while progress
       envelope.sections,
     );
     assert.equal(
-      (
-        await f.db.query(
-          "SELECT history FROM conversations WHERE user_id='owner'",
-        )
-      ).rows[0].history.at(-2).content,
+      (await new HistoryStore(f.db).recent("owner")).messages.at(-2)!.content,
       envelope.reply,
     );
   } finally {

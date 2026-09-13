@@ -1,3 +1,4 @@
+import { HistoryStore } from "./history.js";
 import { Canvases } from "./canvases.js";
 import { WorkTools } from "./work.js";
 import { toolError } from "./tool-errors.js";
@@ -81,6 +82,10 @@ export class JobTools {
     a: ReturnType<typeof action.parse>,
   ): Promise<unknown> {
     const db = this.db;
+    if (a.operation === "conversation_search")
+      return new HistoryStore(db).search(user, a.query);
+    if (a.operation === "conversation_read")
+      return new HistoryStore(db).read(user, a.id, a.offset);
     const canvases = new Canvases(db);
     if (a.operation === "canvas_create" || a.operation === "canvas_update")
       return canvases.write(user, run, a);
