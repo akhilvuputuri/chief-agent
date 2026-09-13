@@ -1,3 +1,4 @@
+import { WorkTools, renderWork, renderWorkList } from "./work.js";
 import { TelegramViews, viewCallback } from "./telegram-views.js";
 import type { Collection, View } from "./telegram-view-render.js";
 import { formatTelegram } from "./telegram-format.js";
@@ -92,20 +93,53 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
   bot.on("message", async (ctx) => {
     if (!allowedChat(ctx.from?.id, ctx.chat.type, ids)) return;
     const user = String(ctx.from.id);
-    // Cancellation must bypass both conversation queues to interrupt an in-flight model request.
-    if (ctx.message.text === "/workcancel") {
+    // Controls never wait behind reasoning, transcription, or speech delivery.
+    const control =
+      /^\/(status|continue|cancel|workcancel)(?: ([0-9a-f-]{36}))?$/i.exec(
+        ctx.message.text ?? "",
+      );
+    if (control) {
       await ensureUser(db, user);
       const claimed = await db.query(
         "INSERT INTO inbound_updates(update_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING update_id",
         [ctx.update.update_id, user],
       );
       if (!claimed.rows.length) return;
-      await assistant.cancel(user);
-      await ctx.reply("Cancelled. Completed external actions remain recorded.");
-      await db.query(
-        "UPDATE inbound_updates SET status='completed' WHERE update_id=$1",
-        [ctx.update.update_id],
-      );
+      try {
+        const id = control[2];
+        const name = control[1]!.toLowerCase();
+        let text: string;
+        if (name === "status") {
+          const work = new WorkTools(db);
+          text = id
+            ? renderWork(await work.snapshot(user, id))
+            : renderWorkList(await work.list(user));
+        } else if (name === "continue") {
+          const result = await assistant.grant(user, id);
+          text = result.rows.length
+            ? "Another execution allocation is queued for the selected task. Completed steps are preserved."
+            : "Choose a paused task with /status, then use /continue followed by its ID. Uncertain writes need inspection.";
+        } else {
+          const result = await assistant.cancel(user, id);
+          text = result.cancelled
+            ? "Cancelled the selected work. Completed external actions remain recorded."
+            : "No matching active work. Use /status to choose a background task, then /cancel followed by its ID.";
+        }
+        for (const part of formatTelegram(text))
+          await ctx.reply(part.text, { entities: part.entities });
+        await db.query(
+          "UPDATE inbound_updates SET status='completed' WHERE update_id=$1",
+          [ctx.update.update_id],
+        );
+      } catch {
+        await db.query(
+          "UPDATE inbound_updates SET status='failed' WHERE update_id=$1",
+          [ctx.update.update_id],
+        );
+        await ctx.reply(
+          "Could not apply that task control. Use /status to inspect the saved state.",
+        );
+      }
       return;
     }
     const command = ctx.message.text;
@@ -186,13 +220,31 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
       }
       return;
     }
+    await ensureUser(db, user);
+    const claimed = await db.query(
+      "INSERT INTO inbound_updates(update_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING update_id",
+      [ctx.update.update_id, user],
+    );
+    if (!claimed.rows.length) return;
+    const inputId = await assistant.recordInput(
+      user,
+      ctx.message.text ??
+        ctx.message.caption ??
+        "[attachment awaiting extraction]",
+      {
+        updateId: ctx.update.update_id,
+        messageId: ctx.message.message_id,
+        replyToMessageId: ctx.message.reply_to_message?.message_id,
+        receivedAt: new Date().toISOString(),
+      },
+    );
+    await event(db, user, inputId, "telegram.input_received", {
+      inputId,
+      updateId: ctx.update.update_id,
+      messageId: ctx.message.message_id,
+      replyToMessageId: ctx.message.reply_to_message?.message_id ?? null,
+    });
     await queue.run(user, async () => {
-      await ensureUser(db, user);
-      const claimed = await db.query(
-        "INSERT INTO inbound_updates(update_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING update_id",
-        [ctx.update.update_id, user],
-      );
-      if (!claimed.rows.length) return;
       try {
         let message = ctx.message.text ?? "";
         const decision = /^\/(approve|deny) ([0-9a-f-]{36})$/i.exec(message);
@@ -204,8 +256,8 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
           );
           if (result.status === "approved")
             await db.query(
-              "UPDATE work_tasks SET status='queued',pause_reason=NULL,next_run=now() WHERE user_id=$1 AND status='paused' AND pause_reason='awaiting_approval' AND used_ms<budget_ms AND used_models<budget_models AND used_tools<budget_tools",
-              [user],
+              "UPDATE work_tasks SET status='queued',pause_reason=NULL,next_run=now() WHERE user_id=$1 AND id IN (SELECT w.task_id FROM work_turns w JOIN approvals a ON a.run_id=w.run_id AND a.user_id=w.user_id WHERE a.id=$2 AND a.user_id=$1) AND status='paused' AND pause_reason='awaiting_approval' AND used_ms<budget_ms AND used_models<budget_models AND used_tools<budget_tools",
+              [user, decision[2]],
             );
           await event(db, user, randomUUID(), "approval.decided", {
             id: decision[2],
@@ -231,6 +283,9 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
           );
         } else if (message === "/reset") {
           await db.query("DELETE FROM conversations WHERE user_id=$1", [user]);
+          await db.query("DELETE FROM conversation_contexts WHERE user_id=$1", [
+            user,
+          ]);
           await ctx.reply(
             "Conversation reset. Saved roles and preferences are still available.",
           );
@@ -351,6 +406,14 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
               "Please send text, a voice note, a photo or a PDF document.",
             );
           } else {
+            await db.query(
+              "UPDATE conversation_inputs SET message=$3 WHERE id=$1 AND user_id=$2",
+              [inputId, user, message],
+            );
+            await event(db, user, inputId, "telegram.input_ready", {
+              inputId,
+              characters: message.length,
+            });
             await ctx.replyWithChatAction("typing");
             const reply = await assistant.respondDetailed(
               user,
@@ -363,11 +426,17 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
                   "progress",
                 ),
               images,
+              { id: inputId },
             );
             await sendCalendarApprovals(bot, db, user);
-            await views.deliver(user, String(ctx.chat.id), reply);
+            if (reply.reply)
+              await views.deliver(user, String(ctx.chat.id), reply);
             const formatted = formatTelegram(reply.reply);
-            if (ctx.message.voice && c.VOICE_REPLIES === "true") {
+            if (
+              reply.reply &&
+              ctx.message.voice &&
+              c.VOICE_REPLIES === "true"
+            ) {
               try {
                 const audio = await voice.speak(
                   formatted.map((part) => part.text).join(""),
@@ -385,10 +454,18 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
           }
         }
         await db.query(
+          "UPDATE conversation_inputs SET state='completed',finished_at=now() WHERE id=$1 AND user_id=$2 AND state='queued'",
+          [inputId, user],
+        );
+        await db.query(
           "UPDATE inbound_updates SET status='completed' WHERE update_id=$1",
           [ctx.update.update_id],
         );
       } catch {
+        await db.query(
+          "UPDATE conversation_inputs SET state='failed',finished_at=now() WHERE id=$1 AND user_id=$2 AND state IN ('queued','running')",
+          [inputId, user],
+        );
         await db.query(
           "UPDATE inbound_updates SET status='failed' WHERE update_id=$1",
           [ctx.update.update_id],

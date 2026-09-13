@@ -18,7 +18,7 @@ import {
   type ToolDefinition,
 } from "./model.js";
 import { Stop, readOperations, type StopReason } from "./execution.js";
-import { toolError } from "./tool-errors.js";
+import { toolError, NotDispatchedError } from "./tool-errors.js";
 const finishTool: ToolDefinition = {
   name: "finish_turn",
   description:
@@ -74,6 +74,7 @@ export class CustomAgent implements Agent {
     await execution.checkpoint(messages);
     try {
       while (true) {
+        if (req.shouldYield?.()) throw new Stop("interrupted");
         let generation;
         let invocationId = "";
         for (let attempt = 0; ; attempt++) {
@@ -87,7 +88,25 @@ export class CustomAgent implements Agent {
               attempt,
             });
             await req.refreshContext?.();
-            const input = context(req, messages);
+            const input = context(
+              {
+                ...req,
+                runtime: { context: req.runtime?.context ?? "", tools },
+              },
+              messages,
+            );
+            await execution.trace("context.selected", {
+              fixedSize: input.fixedSize,
+              reservedSize: input.reservedSize,
+              exchangeSize: input.exchangeSize,
+              workingSize: input.workingSize,
+              compacted: input.compacted,
+              omitted: input.omitted,
+              messageCount: input.messages.length,
+              inputCharacters:
+                JSON.stringify(omitImages(input.messages)).length +
+                JSON.stringify(tools).length,
+            });
             if (input.omitted)
               await execution.trace("context.omitted", {
                 messages: input.omitted,
@@ -114,6 +133,7 @@ export class CustomAgent implements Agent {
               sessionId: req.runId,
               signal: AbortSignal.any([
                 req.signal,
+                ...(req.modelSignal ? [req.modelSignal] : []),
                 AbortSignal.timeout(Math.max(1, remaining)),
               ]),
             });
@@ -146,6 +166,7 @@ export class CustomAgent implements Agent {
               latencyMs: Date.now() - start,
             });
             if (req.signal.aborted) throw new Stop("cancelled");
+            if (req.shouldYield?.()) throw new Stop("interrupted");
             if (Date.now() - start >= remaining)
               throw new Stop("budget_exhausted");
             if (
@@ -160,9 +181,13 @@ export class CustomAgent implements Agent {
             await execution.elapsed(Date.now() - start);
           }
         }
-        if (req.signal.aborted) throw new Stop("cancelled");
         const calls = generation.message.tool_calls ?? [];
-        if (calls.length && generation.message.content && req.progress) {
+        if (
+          calls.length &&
+          generation.message.content &&
+          req.progress &&
+          !req.shouldYield?.()
+        ) {
           try {
             await req.progress(generation.message.content);
           } catch {
@@ -170,12 +195,39 @@ export class CustomAgent implements Agent {
           }
         }
         if (!calls.length) {
+          if (req.signal.aborted) throw new Stop("cancelled");
+          if (req.shouldYield?.()) throw new Stop("interrupted");
           reply = generation.message.content ?? "";
           break;
         }
         let finish: (Answer & { reason: StopReason }) | undefined;
         let finishObservation: string | undefined;
-        for (const call of calls) {
+        const skipCalls = async (
+          from: number,
+          reason: "interrupted" | "cancelled",
+          journal?: string,
+        ): Promise<never> => {
+          const result = {
+            error:
+              "Not dispatched: newer input or cancellation interrupted this turn",
+            code: "NOT_DISPATCHED",
+          };
+          if (journal) await execution.endCall(journal, result, "interrupted");
+          for (const pending of calls.slice(from))
+            messages.push({
+              role: "tool",
+              tool_call_id: pending.id,
+              content: JSON.stringify(result),
+            });
+          await execution.checkpoint(messages);
+          throw new Stop(reason);
+        };
+        for (const [callIndex, call] of calls.entries()) {
+          if (req.shouldYield?.() || req.signal.aborted)
+            await skipCalls(
+              callIndex,
+              req.signal.aborted ? "cancelled" : "interrupted",
+            );
           const op = call.function.name;
           let result: unknown;
           let candidate: typeof finish;
@@ -195,6 +247,13 @@ export class CustomAgent implements Agent {
           });
           let dispatched = false;
           try {
+            // Budget/journal writes above are await points; check again before actual dispatch.
+            if (req.shouldYield?.() || req.signal.aborted)
+              await skipCalls(
+                callIndex,
+                req.signal.aborted ? "cancelled" : "interrupted",
+                journal,
+              );
             if (!enabled.has(op)) throw new Error("Operation unavailable");
             const args = JSON.parse(call.function.arguments);
             if (op === "finish_turn") {
@@ -207,6 +266,12 @@ export class CustomAgent implements Agent {
               const input = action.parse({ ...args, operation: op });
               for (let attempt = 0; ; attempt++) {
                 try {
+                  if (req.shouldYield?.() || req.signal.aborted)
+                    await skipCalls(
+                      callIndex,
+                      req.signal.aborted ? "cancelled" : "interrupted",
+                      journal,
+                    );
                   dispatched = true;
                   result =
                     op === "plugin_delegate"
@@ -286,6 +351,8 @@ export class CustomAgent implements Agent {
               finishObservation = op === "finish_turn" ? journal : undefined;
             }
           } catch (error) {
+            if (error instanceof NotDispatchedError)
+              await skipCalls(callIndex, error.reason, journal);
             if (error instanceof Stop) throw error;
             result = { error: toolError(error) };
             const uncertain =
@@ -315,6 +382,7 @@ export class CustomAgent implements Agent {
           });
           await execution.checkpoint(messages);
           await execution.attach();
+          req.afterTool?.(op);
         }
         if (finish) {
           answer = finish;
@@ -349,13 +417,17 @@ export class CustomAgent implements Agent {
             : "failed";
       // These are operational notices, not replacements for model-written task reports.
       reply =
-        reason === "budget_exhausted"
-          ? "The execution budget is used up. Completed results are saved. Use /status to inspect progress and /continue to grant another allocation."
-          : reason === "cancelled"
-            ? "Cancelled. Completed actions remain recorded."
-            : error instanceof ModelError
-              ? error.message
-              : "Execution stopped after an error. Saved results are retained; inspect /status before continuing.";
+        reason === "interrupted"
+          ? ""
+          : reason === "budget_exhausted"
+            ? "The execution budget is used up. Completed results are saved. Use /status to inspect progress and /continue to grant another allocation."
+            : reason === "cancelled"
+              ? "Cancelled. Completed actions remain recorded."
+              : error instanceof ContextLimitError
+                ? "This request exceeds the context limit while preserving our current exchange. Please narrow the active batch; your messages and saved results are retained."
+                : error instanceof ModelError
+                  ? error.message
+                  : "Execution stopped after an error. Saved results are retained; inspect /status before continuing.";
     }
     if (
       reason === "answer" &&

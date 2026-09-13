@@ -37,6 +37,12 @@ async function fixture() {
       "utf8",
     ),
   );
+  await pg.exec(
+    await readFile(
+      new URL("../db/013_conversation_control.sql", import.meta.url),
+      "utf8",
+    ),
+  );
   const db = pg as unknown as Database;
   await ensureUser(db, "owner");
   await ensureUser(db, "other");

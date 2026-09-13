@@ -6,6 +6,7 @@ import { event } from "./db.js";
 import type { Message } from "./model.js";
 export type StopReason =
   | "answer"
+  | "interrupted"
   | "awaiting_user"
   | "awaiting_approval"
   | "budget_exhausted"
@@ -55,6 +56,7 @@ export const readOperations = new Set([
 ]);
 export class Execution {
   private task?: string;
+  private attaching?: Promise<void>;
   private checkpointMessages: string[] = [];
   private delegatedMs = 0;
   private used = { ms: 0, models: 0, tools: 0 };
@@ -73,17 +75,39 @@ export class Execution {
     ]);
     await this.attach();
   }
-  async attach(force = false) {
+  async attach(_force = false) {
     if (this.parent) return;
-    const id = (
+    if (this.attaching) return this.attaching;
+    const pending = this.attachSelectedTask();
+    this.attaching = pending;
+    try {
+      await pending;
+    } finally {
+      if (this.attaching === pending) this.attaching = undefined;
+    }
+  }
+  private async attachSelectedTask() {
+    // Foreground turns begin unbound. Only an explicit task created/selected by
+    // work tools, or the exact background task, can own this run's allocation.
+    const turn = (
       await this.db.query(
-        "SELECT task_id FROM work_turns WHERE run_id=$1 AND user_id=$2 AND ($3 OR background OR EXISTS(SELECT 1 FROM events WHERE run_id=$1 AND type='tool.completed' AND data->>'operation' IN ('work_start','work_revise','work_step','work_evidence','work_yield')))",
-        [this.run, this.user, force],
+        `SELECT w.task_id,t.id AS owned_task FROM work_turns w LEFT JOIN work_tasks t ON t.id=w.task_id AND t.user_id=w.user_id WHERE w.run_id=$1 AND w.user_id=$2`,
+        [this.run, this.user],
       )
-    ).rows[0]?.task_id;
-    if (id && id !== this.task) {
-      await this.db.query(
-        `UPDATE work_tasks SET budget_ms=CASE WHEN budget_initialized THEN budget_ms ELSE $2 END,budget_models=CASE WHEN budget_initialized THEN budget_models ELSE $3 END,budget_tools=CASE WHEN budget_initialized THEN budget_tools ELSE $4 END,budget_initialized=true,used_ms=used_ms+$5,used_models=used_models+$6,used_tools=used_tools+$7 WHERE id=$1 AND user_id=$8`,
+    ).rows[0];
+    const id = turn?.task_id;
+    if (this.task && id !== this.task)
+      throw new Error(
+        "Execution task changed; refusing to switch its allocation",
+      );
+    if (id && !turn.owned_task)
+      throw new Error("Task unavailable for this owner");
+    if (id && !this.task) {
+      const attached = await this.db.query(
+        `WITH attached AS (
+          UPDATE runtime_runs SET task_id=$1 WHERE id=$9 AND user_id=$8 AND task_id IS NULL RETURNING id
+        ) UPDATE work_tasks SET budget_ms=CASE WHEN budget_initialized THEN budget_ms ELSE $2 END,budget_models=CASE WHEN budget_initialized THEN budget_models ELSE $3 END,budget_tools=CASE WHEN budget_initialized THEN budget_tools ELSE $4 END,budget_initialized=true,used_ms=used_ms+$5,used_models=used_models+$6,used_tools=used_tools+$7
+        WHERE id=$1 AND user_id=$8 AND EXISTS(SELECT 1 FROM attached) RETURNING id`,
         [
           id,
           this.limits.ms,
@@ -93,13 +117,12 @@ export class Execution {
           this.used.models,
           this.used.tools,
           this.user,
+          this.run,
         ],
       );
+      if (!attached.rows.length)
+        throw new Error("Execution task unavailable or already assigned");
       this.task = id;
-      await this.db.query("UPDATE runtime_runs SET task_id=$2 WHERE id=$1", [
-        this.run,
-        id,
-      ]);
     }
   }
   async remaining(): Promise<Budget> {
@@ -120,6 +143,7 @@ export class Execution {
           [this.task, this.user],
         )
       ).rows[0];
+      if (!t) throw new Error("Task unavailable for this owner");
       if (t.status === "cancelled") throw new Stop("cancelled");
       return {
         ms: Number(t.budget_ms) - Number(t.used_ms),
@@ -244,5 +268,8 @@ export async function recoverRuntime(db: Database) {
   );
   await db.query(
     "UPDATE runtime_runs SET state='stopped',stop_reason='failed' WHERE state='running'",
+  );
+  await db.query(
+    "UPDATE conversation_inputs SET state='failed',finished_at=now() WHERE state IN ('queued','running')",
   );
 }

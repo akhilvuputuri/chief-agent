@@ -256,7 +256,7 @@ test("only the media specialist's model input carries image parts, and costs are
   assert.equal(plain.messages.find((m) => m.role === "user")!.content, "hello");
 });
 
-test("an oversized fixed prompt drops prior history but keeps the current turn, up to a hard limit", () => {
+test("an oversized fixed prompt keeps the recent exchange and current turn, up to a hard limit", () => {
   const message = "when is this for?";
   const toolCall = {
     role: "assistant" as const,
@@ -301,16 +301,16 @@ test("an oversized fixed prompt drops prior history but keeps the current turn, 
   );
   assert.equal(heavy.overBudget, true);
   assert.ok(heavy.fixedSize > contextBudget);
-  assert.equal(heavy.omitted, 2);
+  assert.equal(heavy.omitted, 0);
   assert.deepEqual(
     heavy.messages.map((m) => m.role),
-    ["system", "user", "assistant", "tool", "system"],
+    ["system", "user", "assistant", "user", "assistant", "tool", "system"],
   );
-  assert.equal(heavy.messages[1]!.content, message);
-  assert.equal(heavy.messages[3]!.content, toolResult.content);
+  assert.equal(heavy.messages[3]!.content, message);
+  assert.equal(heavy.messages[5]!.content, toolResult.content);
   assert.match(
     String(heavy.messages.at(-1)!.content),
-    /2 older messages or tool results omitted; the current request/,
+    /0 older messages or tool results omitted; protected recent conversation/,
   );
   // Without the current message in history (specialist path), it is still supplied exactly once.
   const fresh = context({ ...base, message: "hello", history: [] }, []);

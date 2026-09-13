@@ -50,6 +50,8 @@ services:
         "/migrations/011_canvases.sql",
         "-f",
         "/migrations/012_message_storage.sql",
+        "-f",
+        "/migrations/013_conversation_control.sql",
       ]
     depends_on:
       postgres: { condition: service_healthy }

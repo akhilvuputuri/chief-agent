@@ -85,3 +85,7 @@ Priorities are a shared private trace inspection/export interface, reproducible 
 Use the same pipeline from a fresh local checkout or another cloud coding provider. See [portable setup](portable-development.md), [current work](current-work.md) and [release/version policy](releases.md). GitHub already stores COMPANION_DEPLOY_KEY and COMPANION_KNOWN_HOSTS; their values must not be exported to developer .env files. GitHub triggers deployment, while Docker build/start/health checks run on DigitalOcean. A local Mac does not participate in ordinary app releases.
 
 The latest verified release at the time of the 12 September handover was e6837c0; inspect fresh Actions results for current status. The private trace export candidate is checkpointed, not installed. Account-level branch protection and environment approvals are separate GitHub settings, not guaranteed by these workflow files.
+
+## Conversation control v0.3.8
+
+The reviewed migration013 release uses [the rolling-conversation procedure](rolling-conversation.md). Once installed, metadata diagnostics include input timing/states, foreground versus job routing, context sizes/omissions, and delivered-message provenance. Raw prompts, source content and pending-question text remain private in Postgres. The operator installs the reviewed entrypoint update; merely editing its repository source does not activate new diagnostic fields.

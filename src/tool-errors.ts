@@ -1,3 +1,13 @@
+/** Host validation stopped an invocation before entering the tool dispatcher. */
+export class NotDispatchedError extends Error {
+  constructor(readonly reason: "interrupted" | "cancelled") {
+    super(
+      reason === "cancelled"
+        ? "Task cancelled"
+        : "New input superseded this invocation",
+    );
+  }
+}
 import { ZodError } from "zod";
 export function toolError(error: unknown) {
   const message = error instanceof Error ? error.message : "";

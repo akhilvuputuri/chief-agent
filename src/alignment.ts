@@ -36,11 +36,15 @@ type Scope = {
   taskId: string | null;
   createdAt: string;
 };
-export async function alignmentContext(db: Database, user: string) {
+export async function alignmentContext(
+  db: Database,
+  user: string,
+  run?: string,
+) {
   return (
     await db.query(
-      "SELECT data->>'scopeId' AS scope_id,data->>'objective' AS objective,jsonb_array_length(data->'targets') AS total,created_at FROM events WHERE user_id=$1 AND type='job_alignment.scope' ORDER BY id DESC LIMIT 3",
-      [user],
+      "SELECT data->>'scopeId' AS scope_id,data->>'objective' AS objective,jsonb_array_length(data->'targets') AS total,created_at FROM events WHERE user_id=$1 AND type='job_alignment.scope' AND ($2::uuid IS NULL OR run_id=$2::uuid OR run_id IN (SELECT id FROM runtime_runs WHERE user_id=$1 AND task_id=(SELECT task_id FROM runtime_runs WHERE id=$2::uuid AND user_id=$1))) ORDER BY id DESC LIMIT 3",
+      [user, run ?? null],
     )
   ).rows;
 }

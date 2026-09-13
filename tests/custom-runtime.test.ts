@@ -33,6 +33,7 @@ async function fixture(
     "006_runtime",
     "008_costs",
     "012_message_storage",
+    "013_conversation_control",
   ])
     await pg.exec(
       await readFile(new URL("../db/" + f + ".sql", import.meta.url), "utf8"),
@@ -803,6 +804,11 @@ test("follow-up retrieves the exact saved answer after its large tool group leav
   ];
   const f = await fixture({
     generate: async (input) => {
+      if (
+        input.messages.findLast((message) => message.role === "user")
+          ?.content === "Thanks"
+      )
+        return text("You're welcome.");
       if (!turn++)
         return call("finish_turn", {
           reason: "answer",
@@ -843,6 +849,8 @@ test("follow-up retrieves the exact saved answer after its large tool group leav
       ["known ".repeat(500)],
     );
     await f.assistant.respond("owner", "Give the details");
+    // The immediately preceding exchange is protected. This question retrieves an older answer.
+    await f.assistant.respond("owner", "Thanks");
     assert.equal(
       await f.assistant.respond("owner", "What did the second section say?"),
       "Recovered both original details.",

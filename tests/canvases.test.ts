@@ -41,6 +41,7 @@ async function fixture() {
     "006_runtime",
     "008_costs",
     "012_message_storage",
+    "013_conversation_control",
     "009_calendar_approval",
     "011_canvases",
   ])

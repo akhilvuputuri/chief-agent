@@ -1,3 +1,11 @@
+# Current work: rolling conversation control
+
+Candidate v0.3.8 on `feature/rolling-conversation` replaces implicit owner-global task routing with a foreground conversation and independently selected background jobs. Context preserves the current exchange; history search uses original messages; pending questions retain source IDs; incoming messages are persisted before waiting and can interrupt model reasoning. See [implementation, tests and migration](rolling-conversation.md) and [development journal](journey/17-rolling-conversation.md).
+
+Next release steps: independent Astra review of the PR, fix/re-review any findings, passing checks, merge, then reviewed migration013 on the existing DigitalOcean server and exact-SHA health verification. No data reset or cancellation of active user work is authorized for rollout. Existing model/provider/voice/Google integration settings remain unchanged. Deferred observable-memory and evaluation branches remain deferred.
+
+The earlier entries below are historical checkpoints. Check GitHub main and server RELEASE for live state.
+
 # Current work and pickup map
 
 Updated 12 September 2026. Historical metrics and handover snapshots are not current production queries. Verify GitHub and production diagnostics when starting an incident investigation.

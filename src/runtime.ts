@@ -116,6 +116,12 @@ export function runtimeContext(
                   "Read role and profile inputs for analysis. Does not perform or save an assessment. Use the exact saved ID.",
                 observation_read:
                   "Read a full persisted observation by observationId and character offset; results are owner-scoped.",
+                work_status:
+                  "List independently tracked jobs when id is omitted; supply an exact id to inspect that job's checkpoint. Historical jobs are not the current chat request. Never resume a job based only on its presence.",
+                work_start:
+                  "Create a separately tracked durable job for substantial authorized work. Simple conversations and missing-time questions need no job. A turn can bind to only one job.",
+                work_revise:
+                  "Revise an explicitly selected paused/idle job for the current user's requested change. Cannot steal a running job. Read the exact job first; ordinary chat follow-ups do not revise unrelated jobs.",
                 work_step:
                   "Record a step outcome with actual proofs. Read receipts prove retrieval only; source applicability and analysis must be assessed separately.",
                 web_read:

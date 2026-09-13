@@ -22,7 +22,7 @@ const call = (name: string, args: unknown) => ({
     ],
   },
 });
-test("an over-budget turn keeps its own tool results, records the condition and still answers", async () => {
+test("an over-budget turn keeps the preceding exchange and its own tool results", async () => {
   const pg = new PGlite();
   for (const file of (await readdir(new URL("../db/", import.meta.url)))
     .filter((f) => f.endsWith(".sql"))
@@ -38,7 +38,12 @@ test("an over-budget turn keeps its own tool results, records the condition and 
   const model: ModelAdapter = {
     generate: async (input) => {
       inputs.push(input);
-      const tools = input.messages.filter((m: any) => m.role === "tool");
+      const current = input.messages.findLastIndex(
+        (m: any) => m.role === "user",
+      );
+      const tools = input.messages
+        .slice(current + 1)
+        .filter((m: any) => m.role === "tool");
       if (!tools.length) return call("job_list", {});
       const last = tools.at(-1)!;
       assert.match(String(last.content), /result/);
@@ -63,9 +68,20 @@ test("an over-budget turn keeps its own tool results, records the condition and 
     assert.equal(reply, "Answered after 1 tool result(s).");
     assert.equal(inputs.length, 2);
     const second = inputs[1]!.messages.map((m: any) => m.role);
-    // Prior history is gone, but the current user message and this turn's tool group are present, in order.
-    assert.deepEqual(second, ["system", "user", "assistant", "tool", "system"]);
-    assert.equal(inputs[1]!.messages[1].content, message);
+    // Fixed context cannot evict the most recent exchange or this turn's own observations.
+    assert.deepEqual(second, [
+      "system",
+      "user",
+      "assistant",
+      "tool",
+      "assistant",
+      "user",
+      "assistant",
+      "tool",
+      "system",
+    ]);
+    assert.equal(inputs[1]!.messages[1].content, "earlier turn");
+    assert.equal(inputs[1]!.messages[5].content, message);
     const events = (
       await db.query(
         "SELECT data FROM events WHERE type='context.over_budget' ORDER BY id",

@@ -1,5 +1,7 @@
 # Personal-agent handover
 
+Current candidate: v0.3.8, rolling-chat continuity and explicit background-job control. Read [the rework guide](docs/rolling-conversation.md) first for changed task commands, migration013, tracing and release verification. This candidate requires the reviewed operator migration procedure before ordinary GitHub deployments can resume. Do not infer deployment from this document.
+
 Start with [current work](docs/current-work.md) and [portable development](docs/portable-development.md). The unfinished observable-memory code is now on GitHub at `checkpoint/observable-memory` (`2a85839`), not just on the original Mac. It is not deployed. Read its checkpoint before resuming. GitHub main is integrated source; successful release SHA is deployed source. See [versions and release notes](docs/releases.md).
 
 Updated 9 September 2026. Read [cloud development and deployment](docs/cloud-development.md) and [agent instructions](AGENTS.md) for current operating procedures. The owned TypeScript runtime is deployed on the existing DigitalOcean server. PR #7 introduced the cutover (`f1664bb`); consult server `RELEASE` for subsequent revisions. The gateway and Postgres are healthy, and the Hermes container has been removed without deleting its volume.
@@ -31,7 +33,7 @@ Secrets live only in private environment/operations files and server configurati
 
 ## Durable execution
 
-Initial task allocation: 15 minutes active execution, 40 model calls, 100 tool calls. `/continue` adds capacity without resetting completed steps. `/workcancel` aborts an in-flight model request and prevents later dispatch. Already-started tools can finish and remain recorded.
+Initial task allocation: 15 minutes active execution, 40 model calls, 100 tool calls. `/continue` adds capacity without resetting completed steps. `/cancel` (or `/workcancel`) aborts the foreground model request; `/cancel <id>` selects a background job. It and prevents later dispatch. Already-started tools can finish and remain recorded.
 
 Migration `006_runtime.sql` archives old histories, seeds text-only context and pauses active tasks once. Do not automatically resume the 22-role request or erase its steps. Restart recovery conservatively pauses work and marks started writes uncertain. Uncertain writes require inspection before further writes. See [recovery](docs/reliable-execution.md).
 

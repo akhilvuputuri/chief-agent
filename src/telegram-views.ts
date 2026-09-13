@@ -216,11 +216,16 @@ export class TelegramViews {
     if (interactive)
       await this.open(user, chat, { kind: "answer", answer }, run);
     else
-      for (const part of parts)
-        await this.api.sendMessage(chat, part.text, {
+      for (const part of parts) {
+        const sent = await this.api.sendMessage(chat, part.text, {
           entities: part.entities,
           link_preview_options: { is_disabled: true },
         });
+        await event(this.db, user, run, "telegram.message_sent", {
+          messageId: sent.message_id,
+          kind,
+        });
+      }
     let canvasMessages = 0;
     if (this.miniOrigin && answer.canvases?.length) {
       const buttons = [];
