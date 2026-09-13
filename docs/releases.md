@@ -1,5 +1,7 @@
 # Versions and release notes
 
+Latest verified shipped release, checked 14 September 2026: [v0.3.9](https://github.com/akhilvuputuri/companion-agent/releases/tag/v0.3.9), deployed SHA `9c6335be09582432d9bf7c4a475c90f9b5e9272a`. The [release workflow](https://github.com/akhilvuputuri/companion-agent/actions/runs/34764417365) and [subsequent diagnostics](https://github.com/akhilvuputuri/companion-agent/actions/runs/34769892493) succeeded at that SHA. See the [engineering journal](journey/README.md) for the connected development history and dated release closures. Published milestones preserve their original verification limits; memory/evaluation checkpoints and live behavioral acceptance checks are not implicitly completed by a tag.
+
 Use immutable semantic-version tags for meaningful, verified shipped milestones. Keep continuous app deployment from main. Tags identify releases; they do not trigger deployment. There were no existing Git tags when this policy was prepared on 12 September 2026. Do not invent retrospective version history.
 
 ## First published baseline
@@ -32,7 +34,7 @@ Title: vX.Y.Z — concrete capability or fix
 - Migration requirements and rollback restrictions, if any.
 - Known gaps; distinguish unfinished memory/evals from shipped features.
 
-Use docs/journey for the deeper engineering story; release notes should summarize shipped behavior. Never claim cost savings or quality improvements without comparable measurements.
+Use [docs/journey](journey/README.md) for the deeper engineering story; release notes should summarize shipped behavior. Never claim cost savings or quality improvements without comparable measurements.
 
 ## Other practices to adopt gradually
 
@@ -44,6 +46,8 @@ A later improvement is pinning Actions to reviewed commit SHAs with automated de
 
 The branch-protection API returned HTTP 403 with a requirement to upgrade to GitHub Pro or make this repository public. The environments API returned an empty list. No plan, visibility or account setting was changed. Therefore required PR checks/force-push protection and protected deployment environments are not claimed as enforced. Keep this repository private; a plan upgrade is an owner decision. The existing release workflow independently requires passing checks and current main before deployment.
 
-## Candidate v0.3.9 — checkpoint steering
+## Released v0.3.9 — checkpoint steering
 
-The package version is prepared as v0.3.9 on `feature/checkpoint-steering`, based on released v0.3.8 at `d0e33365c7cec7b7cb1eb64c22de7c09d5d9a314`. This is not a tag or deployment claim. See [the candidate behavior, verification and migration014 procedure](checkpoint-steering.md). Require exact-head independent review, passing checks and verified deployment before creating an immutable release at its exact SHA. No paid evaluation or automatic replay is a release prerequisite.
+[PR #42](https://github.com/akhilvuputuri/companion-agent/pull/42) shipped at `9c6335be09582432d9bf7c4a475c90f9b5e9272a`, the exact target of the published v0.3.9 tag. Two independent GPT-6 Astra reviewers approved `79297e16dd218d8565c86545b7d2ef98da94d1e0`; the merged tree matches that head. The release records 230 application tests plus two scope tests, typecheck/build/format, three offline release-guard tests and eight mocked rollout scenarios.
+
+The reviewed migration014 rollout used the released v0.3.8 baseline, preserved data and paused work, and passed exact deployment/health verification. See the [behavior and rollback guide](checkpoint-steering.md) and [dated journal closure](journey/18-checkpoint-steering.md) for the linked release and diagnostics evidence. No paid model evaluation or production conversation replay was performed. A real Telegram behavioral acceptance check remains separate from startup health and mocked tests; deferred memory/evaluation work was not released.

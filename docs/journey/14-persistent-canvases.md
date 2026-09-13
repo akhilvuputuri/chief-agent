@@ -1,6 +1,7 @@
 # Persistent canvases inside Telegram
 
-Status: implementation candidate, 13 September 2026. Release evidence belongs in the PR and immutable release notes after verification.
+Work date: 2026-09-13. Revised: 2026-09-14.
+Status: released v0.3.5; real signed Telegram launch and a model-generated production canvas remain acceptance checks.
 
 ## Problem and design
 
@@ -20,4 +21,8 @@ Implementation began from current main after the HTTPS and media releases plus t
 
 Tests cover persistence, racing/repeated writes, ownership, authentication freshness/tampering, unsupported inputs, public-route boundaries, immutable history, source ID/URL ownership, restart reuse and message links. Browser inspection with synthetic local data verifies all component families, historical revisions and role navigation at phone width. This does not establish real Telegram client compatibility or model answer quality; real-owner launch and first generated canvas remain live acceptance checks. No production documents or credentials are used in fixtures.
 
-The required independent Astra review and exact deployment verification must precede a release claim. The [operator rollout](../miniapp-deployment.md) records migration and ingress installation and how to retain all revisions during an application rollback. Future iterations can use formation/retrieval/view traces to assess whether canvases improve daily use; no UX or cost savings are claimed yet.
+Independent Astra review and exact deployment verification were required before release; the dated closure records completion. The [operator rollout](../miniapp-deployment.md) records migration and ingress installation and how to retain all revisions during an application rollback. Future iterations can use formation/retrieval/view traces to assess whether canvases improve daily use; no UX or cost savings are claimed yet.
+
+## Release closure — 14 September 2026
+
+[v0.3.5](https://github.com/akhilvuputuri/companion-agent/releases/tag/v0.3.5) shipped [PR #36](https://github.com/akhilvuputuri/companion-agent/pull/36) at `677683a043e9f16d4a4bd4dc680a78b87ae9b639`. The [release workflow](https://github.com/akhilvuputuri/companion-agent/actions/runs/34738874165) completed successfully for that exact SHA; published release evidence records deployment and health verification. Astra approved `4cd5dac3ec471dc72f9ffde03efdaf7aea95c7ef`; 134 tests, typecheck/build/format and synthetic phone-width browser checks passed. Live checks verified HTTPS assets, rejected unauthorized/forged sessions, private-path 404s and the configured Telegram menu. The operator applied additive migration011 and installed the reviewed Compose, ingress and diagnostics changes while preserving data. Real signed Telegram launch and a model-generated production canvas were not part of those checks, and no UX/cost gain was measured.

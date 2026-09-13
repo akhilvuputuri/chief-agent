@@ -51,7 +51,11 @@ The reviewer should remain independent of implementation. Findings can be discus
 
 All future versioned releases increment only the patch component (including new features), unless the owner explicitly changes this policy. Preserve existing immutable tags. See docs/releases.md.
 
-For meaningful runtime changes, incidents or experiments, add or update docs/journey using its template. Link evidence and PRs, distinguish hypotheses from measurements, and record deployment status and unresolved limitations. Never copy private production traces or credentials into journal entries.
+For every meaningful application change, integration, incident, architectural decision or experiment, add or update `docs/journey` in the same work using [its template](docs/journey/TEMPLATE.md). Small related changes can be dated follow-ups. Explain the preceding iteration, the new observation/requirement, the change and remaining limitations; link related entries so the record shows how decisions evolved. Keep the chronological index and relevant topic paths in [the journal README](docs/journey/README.md) current; preserve existing filenames and order the index by work dates, not entry numbers.
+
+Label user/operator reports, synthetic tests, measured observations, hypotheses and deferred work explicitly. Measurements need dates/windows, units, sample sizes/denominators, workload/model/configuration and missing-accounting limits where relevant. Do not infer API savings from storage measurements, semantic quality from passing tests, or production acceptance from startup health. Link architecture/runbooks rather than duplicating procedures. Never copy private conversations, production traces, user records, credentials or personal motivations into the journal.
+
+Close the journal entry when review and deployment status changes: append dated evidence for the PR, approved head, exact deployed SHA, successful release and health/diagnostics, plus the published version/tag when present. Record separate operator migration/install verification when required. Update stale candidate status after verification while preserving dated failures and review/fix/re-review history. Merge, CI success or a prepared package version alone does not establish release. If work is deferred or release verification is unavailable, record the exact boundary and next step instead.
 
 ## Portable checkout and concurrent development
 

@@ -1,0 +1,49 @@
+{
+  "retrieved_date": "2026-09-14",
+  "source": "https://openrouter.ai/activity/explore",
+  "collection": "Signed-in Activity / Explore; metric by Model; Daily; Top 10; no user/model/API-key filter; chart display settings Download CSV. Four model groups visible, 13 date/model rows per export.",
+  "range_from_utc": "2026-08-14T17:03:00.000Z",
+  "range_to_utc": "2026-09-13T17:03:00.000Z",
+  "bucket_timezone": "UTC",
+  "timezone_verification": "Initial display GMT+8, tooltip warned this range retains UTC calendar days. Re-exporting spend after selecting UTC produced byte-identical CSV.",
+  "last_day_partial": true,
+  "exports": [
+    {
+      "file": "openrouter-total_usage.csv",
+      "sha256": "4c94b6993f74f0fcf1213388ec0f5ce3a6622385937d94aeeff2abec14b12207",
+      "rows": 13,
+      "original_filename": "explorer_total_usage_2026-08-14_2026-09-13.csv"
+    },
+    {
+      "file": "openrouter-request_count.csv",
+      "sha256": "47ca48229948e3faf827247b782bcc0cd6978f7d5c9dda096707417fafa76c04",
+      "rows": 13,
+      "original_filename": "explorer_request_count_2026-08-14_2026-09-13.csv"
+    },
+    {
+      "file": "openrouter-tokens_prompt.csv",
+      "sha256": "8e33cf3b1f24e1aa706f7c19db58a24e379a0bbff8d9f1fce67f9e1aff21c1c5",
+      "rows": 13,
+      "original_filename": "explorer_tokens_prompt_2026-08-14_2026-09-13.csv"
+    },
+    {
+      "file": "openrouter-tokens_completion.csv",
+      "sha256": "f83bd438fcd29796ad0908cf56063713c189b95a4dabb2f61d837ff8ce0ac112",
+      "rows": 13,
+      "original_filename": "explorer_tokens_completion_2026-08-14_2026-09-13.csv"
+    },
+    {
+      "file": "openrouter-reasoning_tokens.csv",
+      "sha256": "8fe21dfaec0108b5e64718bad448d43a203b0a549eb73407389c12e63e0ccfb1",
+      "rows": 13,
+      "original_filename": "explorer_reasoning_tokens_2026-08-14_2026-09-13.csv"
+    },
+    {
+      "file": "openrouter-cached_tokens.csv",
+      "sha256": "6a2ddc70f1de73579fb98f20d381efdf7debd72466c61f4c31aa459024ed8d03",
+      "rows": 13,
+      "original_filename": "explorer_cached_tokens_2026-08-14_2026-09-13.csv"
+    }
+  ],
+  "privacy": "Exports contain only date bucket, public model display name and numeric metric. No prompt/completion text, keys, account identifiers, generation IDs or personal records."
+}
