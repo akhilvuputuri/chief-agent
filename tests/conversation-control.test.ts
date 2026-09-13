@@ -9,6 +9,9 @@ import { JobTools } from "../src/tools.js";
 import { HistoryStore } from "../src/history.js";
 import { CalendarActions } from "../src/calendar-actions.js";
 import { recoverRuntime } from "../src/execution.js";
+import { telegram } from "../src/telegram.js";
+import { readConfig } from "../src/config.js";
+import { WorkWorker } from "../src/work-worker.js";
 import type { Database } from "../src/db.js";
 import type { Generation, ModelAdapter, ToolCall } from "../src/model.js";
 
@@ -701,6 +704,351 @@ test("a pending question retains exact sources across restart and text assent ca
   } finally {
     restarted?.shutdown();
     f.assistant.shutdown();
+    await f.pg.close();
+  }
+});
+
+test(
+  "new input between journal creation and dispatch prevents the old write and closes its tool group",
+  { timeout: 15000 },
+  async () => {
+    const journalStarted = deferred();
+    const releaseJournal = deferred();
+    let gated = false;
+    const inputs: Input[] = [];
+    const startTask = tool("work_start", {
+      objective: "Save the requested preferences",
+      steps: [
+        {
+          key: "save",
+          title: "Save preference",
+          verification: "action",
+          expectedOperation: "memory_set",
+        },
+      ],
+    });
+    const oldCalls = [
+      tool("memory_set", {
+        key: "rejected-before-dispatch",
+        value: "Old instruction",
+      }),
+      tool("memory_set", {
+        key: "also-not-dispatched",
+        value: "Old instruction",
+      }),
+    ];
+    const f = await fixture({ generate: async () => text("Unused model") });
+    const db: Database = {
+      query: async (sql, values) => {
+        const result = await f.db.query(sql, values);
+        if (
+          !gated &&
+          sql.startsWith("INSERT INTO runtime_calls") &&
+          values?.[3] === "memory_set"
+        ) {
+          gated = true;
+          journalStarted.resolve();
+          await releaseJournal.promise;
+        }
+        return result;
+      },
+    };
+    const assistant = new Assistant(
+      db,
+      new CustomAgent({
+        generate: async (input) => {
+          inputs.push(input);
+          return latestUser(input) === "Save both preferences"
+            ? calls(startTask, ...oldCalls)
+            : text("I did not save either preference.");
+        },
+      }),
+      new JobTools(db, { call: async () => ({}) }),
+    );
+    let first: ReturnType<Assistant["respondDetailed"]> | undefined;
+    let second: ReturnType<Assistant["respondDetailed"]> | undefined;
+    try {
+      first = assistant.respondDetailed("owner", "Save both preferences");
+      await bounded(journalStarted.promise, "journal before write dispatch");
+      assert.deepEqual(
+        (await f.db.query("SELECT operation,state FROM runtime_calls")).rows,
+        [
+          { operation: "work_start", state: "success" },
+          { operation: "memory_set", state: "started" },
+        ],
+      );
+      const id = await bounded(
+        assistant.recordInput("owner", "Stop, do not save those preferences"),
+        "new input while journal result is held",
+      );
+      second = assistant.respondDetailed(
+        "owner",
+        "Stop, do not save those preferences",
+        undefined,
+        undefined,
+        { id },
+      );
+      releaseJournal.resolve();
+      const [interrupted, answered] = await bounded(
+        Promise.all([first, second]),
+        "pre-dispatch interruption",
+      );
+      assert.equal(interrupted.reply, "");
+      assert.equal(answered.reply, "I did not save either preference.");
+      assert.equal(
+        (await f.db.query("SELECT key FROM memories")).rows.length,
+        0,
+      );
+      assert.equal(
+        (
+          await f.db.query(
+            "SELECT id FROM tool_receipts WHERE operation='memory_set'",
+          )
+        ).rows.length,
+        0,
+      );
+      const journal = (
+        await f.db.query(
+          "SELECT state,result FROM runtime_calls WHERE run_id=$1 AND operation='memory_set'",
+          [interrupted.runId],
+        )
+      ).rows;
+      assert.equal(journal.length, 1);
+      assert(["interrupted", "success"].includes(journal[0].state));
+      assert(JSON.stringify(journal[0].result).includes("NOT_DISPATCHED"));
+      const messages = (
+        await f.db.query(
+          "SELECT c.payload FROM run_messages e JOIN message_contents c USING(user_id,hash) WHERE e.user_id='owner' AND e.run_id=$1 ORDER BY e.ordinal",
+          [interrupted.runId],
+        )
+      ).rows.map((row) => row.payload);
+      assert.equal(
+        messages.filter((message) => message.tool_calls?.length).length,
+        1,
+      );
+      for (const call of oldCalls) {
+        const results = messages.filter(
+          (message) =>
+            message.role === "tool" && message.tool_call_id === call.id,
+        );
+        assert.equal(results.length, 1);
+        assert.equal(JSON.parse(results[0].content).code, "NOT_DISPATCHED");
+      }
+      const next = inputs.find(
+        (input) => latestUser(input) === "Stop, do not save those preferences",
+      )!;
+      for (const call of oldCalls)
+        assert(
+          next.messages.some(
+            (message) =>
+              message.tool_call_id === call.id &&
+              String(message.content).includes("NOT_DISPATCHED"),
+          ),
+        );
+      const task = (
+        await f.db.query("SELECT id,status,pause_reason FROM work_tasks")
+      ).rows[0];
+      assert.equal(task.status, "paused");
+      assert.equal(task.pause_reason, "interrupted");
+      assert.equal(runtime(next).work, null);
+      assert.equal(runtime(next).conversation.interruptedJob.id, task.id);
+      let resumes = 0;
+      const worker = new WorkWorker(
+        f.db,
+        async () => {
+          resumes++;
+          return "Must not resume";
+        },
+        async () => {},
+      );
+      await f.db.query("UPDATE work_tasks SET next_run=now()");
+      await worker.tick();
+      assert.equal(resumes, 0);
+      assert.equal(
+        (await f.db.query("SELECT key FROM memories")).rows.length,
+        0,
+      );
+    } finally {
+      releaseJournal.resolve();
+      assistant.shutdown();
+      await bounded(
+        Promise.allSettled([first, second].filter(Boolean)),
+        "interrupted test cleanup",
+      );
+      await f.pg.close();
+    }
+  },
+);
+
+test("mixed-case Telegram controls preserve their command and exact task target", async () => {
+  let modelCalls = 0;
+  const f = await fixture({
+    generate: async () => {
+      modelCalls++;
+      return text("Must not reach the model");
+    },
+  });
+  const replies: string[] = [];
+  try {
+    await f.db.query("INSERT INTO users(id) VALUES('123')");
+    const selected = await f.task("Selected paused job", "123");
+    const other = await f.task("Separate paused job", "123");
+    const bot = telegram(
+      readConfig({
+        DATABASE_URL: "postgres://x:x@localhost/x",
+        TELEGRAM_BOT_TOKEN: "123:long-test-token",
+        TELEGRAM_ALLOWED_USER_IDS: "123",
+      }),
+      f.assistant,
+      f.db,
+    );
+    bot.api.config.use(async (_previous, method, payload) => {
+      if (method === "getMe")
+        return {
+          ok: true,
+          result: {
+            id: 999,
+            is_bot: true,
+            first_name: "Test",
+            username: "test_bot",
+          },
+        };
+      if (method === "sendMessage") replies.push((payload as any).text);
+      return { ok: true, result: true } as any;
+    });
+    await bot.init();
+    let updateId = 20000;
+    const send = (message: string) =>
+      bot.handleUpdate({
+        update_id: ++updateId,
+        message: {
+          message_id: updateId,
+          date: 0,
+          chat: { id: 123, type: "private" },
+          from: { id: 123, is_bot: false, first_name: "Test" },
+          text: message,
+        },
+      } as any);
+    await send(`/Status ${selected}`);
+    assert(replies.at(-1)!.includes("Selected paused job"));
+    assert.equal(
+      (
+        await f.db.query("SELECT status FROM work_tasks WHERE id=$1", [
+          selected,
+        ])
+      ).rows[0].status,
+      "paused",
+    );
+    await send(`/Continue ${selected}`);
+    assert.deepEqual(
+      (
+        await f.db.query(
+          "SELECT status,budget_models FROM work_tasks WHERE id=$1",
+          [selected],
+        )
+      ).rows[0],
+      { status: "queued", budget_models: 49 },
+    );
+    assert.equal(
+      (await f.db.query("SELECT status FROM work_tasks WHERE id=$1", [other]))
+        .rows[0].status,
+      "paused",
+    );
+    await send(`/CaNcEl ${selected}`);
+    assert.equal(
+      (
+        await f.db.query("SELECT status FROM work_tasks WHERE id=$1", [
+          selected,
+        ])
+      ).rows[0].status,
+      "cancelled",
+    );
+    assert.equal(
+      (await f.db.query("SELECT status FROM work_tasks WHERE id=$1", [other]))
+        .rows[0].status,
+      "paused",
+    );
+    await send(`/WoRkCaNcEl ${other}`);
+    assert.equal(
+      (await f.db.query("SELECT status FROM work_tasks WHERE id=$1", [other]))
+        .rows[0].status,
+      "cancelled",
+    );
+    assert.equal(modelCalls, 0);
+    assert.equal(
+      (await f.db.query("SELECT id FROM conversation_inputs")).rows.length,
+      0,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("large stored reasoning cannot erase the latest target and clarification before a short reply", async () => {
+  const inputs: Input[] = [];
+  const f = await fixture({
+    generate: async (input) => {
+      inputs.push(input);
+      return text("I will use tomorrow at 9 for the original Board review.");
+    },
+  });
+  try {
+    const previous = randomUUID();
+    await f.db.query(
+      "INSERT INTO runtime_runs(id,user_id,state) VALUES($1,'owner','stopped')",
+      [previous],
+    );
+    const user = {
+      role: "user" as const,
+      content:
+        "Use the current Board review document, exact target BR-792, to draft the calendar event.",
+    };
+    const question = {
+      role: "assistant" as const,
+      content: "What date and time should I use for Board review BR-792?",
+      reasoning_details: [{ type: "reasoning.text", text: "r".repeat(100001) }],
+    };
+    const history = new HistoryStore(f.db);
+    await history.append("owner", previous, 0, [user, question]);
+    await history.appendConversation("owner", previous, [user, question]);
+    const reply = await f.assistant.respondDetailed("owner", "Tomorrow at 9");
+    assert.equal(
+      reply.reply,
+      "I will use tomorrow at 9 for the original Board review.",
+    );
+    assert.equal(inputs.length, 1);
+    const messages = inputs[0]!.messages;
+    assert(
+      messages.some(
+        (message) =>
+          message.role === "user" && message.content === user.content,
+      ),
+    );
+    assert(
+      messages.some(
+        (message) =>
+          message.role === "assistant" && message.content === question.content,
+      ),
+    );
+    assert(
+      messages.some(
+        (message) =>
+          message.role === "user" && message.content === "Tomorrow at 9",
+      ),
+    );
+    assert(
+      messages.every((message) => !Object.hasOwn(message, "reasoning_details")),
+    );
+    for (const table of ["run_messages", "conversation_messages"]) {
+      const original = (
+        await f.db.query(
+          `SELECT c.payload FROM ${table} e JOIN message_contents c USING(user_id,hash) WHERE e.user_id='owner' AND e.run_id=$1 AND c.payload->>'role'='assistant'`,
+          [previous],
+        )
+      ).rows[0].payload;
+      assert.deepEqual(original, question);
+    }
+  } finally {
     await f.pg.close();
   }
 });
