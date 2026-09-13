@@ -85,7 +85,7 @@ export function runtimeContext(
       name: o.shape.operation.value,
       description:
         o.shape.operation.value === "skill_read"
-          ? "Load the approved active skill or repository default using only its catalogue key."
+          ? "Load the approved active skill or default using its catalogue key. Optional offset reads a bounded page; follow nextOffset until null."
           : ((
               {
                 canvas_create:

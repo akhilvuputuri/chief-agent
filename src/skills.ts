@@ -1,3 +1,4 @@
+import { skillPage } from "./skill-content.js";
 import { baselineSkills } from "./baseline-skills.js";
 import { randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
@@ -39,6 +40,8 @@ export class SkillTools {
       ).rows[0];
       if (!version && a.operation === "skill_read") {
         const baseline = baselineSkills.find((b) => b.key === a.key);
+        if (baseline && a.offset !== undefined)
+          return skillPage(baseline, a.offset);
         if (baseline)
           return {
             version: baseline,
@@ -48,6 +51,11 @@ export class SkillTools {
           };
       }
       if (!version) throw new Error("Skill version not found");
+      if (a.operation === "skill_read" && a.offset !== undefined)
+        return skillPage(
+          { id: version.id, key: version.key, content: version.content },
+          a.offset,
+        );
       const evaluations = (
         await db.query(
           `SELECT report,created_at FROM skill_evaluations WHERE user_id=$1 AND version_id=$2 ORDER BY created_at DESC LIMIT 5`,

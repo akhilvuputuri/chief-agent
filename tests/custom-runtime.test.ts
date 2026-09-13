@@ -556,13 +556,15 @@ test("background resumes forward model-written progress unchanged", async () => 
   }
 });
 
-test("current skills use key-only loading and historical versions require UUIDs", async () => {
+test("current skills load by key with optional paging and historical versions require UUIDs", async () => {
   const schema = runtimeContext({}, null).tools.find(
     (t) => t.name === "skill_read",
   )!;
   assert.deepEqual(Object.keys(schema.parameters.properties as object), [
     "key",
+    "offset",
   ]);
+  assert.deepEqual(schema.parameters.required, ["key"]);
   const historical = runtimeContext({}, null).tools.find(
     (t) => t.name === "skill_version_read",
   )!;

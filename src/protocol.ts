@@ -185,6 +185,7 @@ export const action = z.discriminatedUnion("operation", [
     .object({
       operation: z.literal("skill_read"),
       key: skillKey,
+      offset: z.number().int().min(0).max(32000).optional(),
     })
     .strict(),
   z

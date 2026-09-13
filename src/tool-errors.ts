@@ -17,6 +17,7 @@ export function toolError(error: unknown) {
   const known = [
     /^Research validation:/,
     /^Plugin validation:/,
+    /^Skill validation:/,
     /^Canvas validation:/,
     /^Media validation:/,
     /Only a user follow-up can revise scope/,

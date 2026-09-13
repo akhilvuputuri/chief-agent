@@ -14,7 +14,9 @@ Definitions and approved namespaced skill versions are pinned to runs/tasks in e
 
 Started from main `129d03a` in an isolated worktree. Filed the product issue before implementation. Extracted the existing research instructions, added the registry/import/export boundary and task pinning, then added mocked compatibility and end-to-end delegation tests. Existing research authorization, evidence, cancellation and accounting tests are retained. No paid model evaluation or production conversation was initiated.
 
-Independent review and deployment evidence must be checked on the feature PR and release workflow before calling this candidate shipped. No database migration, Compose update or new paid infrastructure is required. Ordinary passing main changes use the existing GitHub deployment pipeline.
+Independent Astra review of initial head `63c3548` requested changes: accepted long skills exceeded the generic observation projection limit, and children could not read the remainder. Added scoped offset paging and a regression reading the final instruction through actual child observations, including JSON escaping overhead.
+
+Independent re-review and deployment evidence must be checked on the feature PR and release workflow before calling this candidate shipped. No database migration, Compose update or new paid infrastructure is required. Ordinary passing main changes use the existing GitHub deployment pipeline.
 
 ## Limits and next steps
 

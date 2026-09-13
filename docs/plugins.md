@@ -37,7 +37,7 @@ Operator configuration can specify an optional OpenRouter `model` ID on an enabl
 
 - Assignment: objective, relevant context, and up to six distinct saved job IDs/public HTTPS URLs, or a general topic with no explicit targets. Host ownership and public-URL checks remain in force.
 - Read capabilities: any declared subset of `web_search`, `web_read`, `source_read`, explicitly granted by the host and available in the parent session.
-- Agent context: assignment only, empty conversation history/memories, compact pinned skill catalogue. Relevant skill text is loaded only when requested. The coordinator's full conversation and memories are not injected.
+- Agent context: assignment only, empty conversation history/memories, compact pinned skill catalogue. Relevant skill text is loaded only when requested, in bounded pages using `skill_read(key, offset?)`; follow `nextOffset` until null. Pages account for JSON escaping so they survive the observation size limit. The coordinator's full conversation and memories are not injected.
 - Output: `research_report` with exactly one result per target, statuses complete/partial/blocked, summary and evidence. The Zod definition in `src/research-schema.ts` is authoritative.
 - Evidence: complete results require evidence; exact quotations must occur in an owner-scoped source actually read by that child. These checks establish recorded support, not semantic correctness.
 - Limits: at most 120 seconds, eight model calls and twenty tool calls per child, further constrained by the parent's remaining allocation. All child usage is charged to the parent once. No dollar caps are introduced.

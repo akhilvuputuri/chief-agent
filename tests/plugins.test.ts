@@ -413,3 +413,118 @@ test("generic plugin delegation discovers agents, loads only assigned skills laz
     await pg.close();
   }
 });
+
+test("long accepted plugin skills are fully readable through actual child observations", async () => {
+  const { delegateResearch } = await import("../src/research.js");
+  const root = temp(),
+    { pg, db } = await database();
+  const bundle = original();
+  bundle.files["skills/source-research/SKILL.md"] +=
+    "\n" +
+    '"quoted"\\instruction\n'.repeat(750) +
+    "\nFINAL RULE: never replace the assigned target.";
+  let collected = "",
+    calls = 0;
+  try {
+    const registry = install(root, validateBundle(bundle));
+    const definition = registry.get("public-research/researcher");
+    await ensureUser(db, "owner");
+    const signal = new AbortController().signal,
+      runId = randomUUID();
+    const execution = new Execution(db, "owner", runId, signal);
+    await execution.start();
+    const runtime = runtimeContext({ web: true }, null);
+    const result = await delegateResearch(
+      {
+        runId,
+        capability: "",
+        execution,
+        signal,
+        history: [],
+        memories: [],
+        message: "Research",
+        runtime,
+        executeResearch: async () => {
+          throw new Error("Unexpected research read");
+        },
+      },
+      {
+        operation: "research_delegate",
+        objective: "Read the complete procedure",
+        context: "",
+        jobIds: [],
+        urls: [],
+      },
+      async (req) =>
+        new CustomAgent({
+          generate: async (input) => {
+            let next: number | null = 0;
+            if (++calls > 1) {
+              const observation = JSON.parse(
+                String(
+                  input.messages.findLast((m) => m.role === "tool")?.content,
+                ),
+              ).result;
+              assert(
+                observation.version,
+                "Projection must retain the complete page object",
+              );
+              assert(!observation.truncated);
+              collected += observation.version.content;
+              next = observation.nextOffset;
+            }
+            const name = next === null ? "research_report" : "skill_read";
+            const args =
+              next === null
+                ? {
+                    targets: [
+                      {
+                        targetId: "topic",
+                        status: "blocked",
+                        summary: "No public evidence",
+                        evidence: [],
+                      },
+                    ],
+                  }
+                : { key: "public-research/source-research", offset: next };
+            return {
+              message: {
+                role: "assistant",
+                content: null,
+                tool_calls: [
+                  {
+                    id: randomUUID(),
+                    type: "function",
+                    function: { name, arguments: JSON.stringify(args) },
+                  },
+                ],
+              },
+            };
+          },
+        }).run(req),
+      definition,
+    );
+    assert.equal(result.status, "reported");
+    assert.equal(collected, bundle.files["skills/source-research/SKILL.md"]);
+    assert.match(collected, /FINAL RULE: never replace the assigned target/);
+    assert(calls > 2 && calls <= 8);
+    const tools = new SkillTools(db);
+    const page = (await tools.call("owner", runId, {
+      operation: "skill_read",
+      key: "public-research/source-research",
+      offset: 0,
+    })) as any;
+    assert.equal(page.offset, 0);
+    await assert.rejects(
+      tools.call("owner", runId, {
+        operation: "skill_read",
+        key: "public-research/source-research",
+        offset: 32000,
+      }),
+      /offset/,
+    );
+  } finally {
+    await pg.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
