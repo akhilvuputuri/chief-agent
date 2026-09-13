@@ -200,7 +200,7 @@ export class Execution {
     this.used.ms += ms;
     this.delegatedMs = 0;
   }
-  async checkpoint(messages: Message[]) {
+  async checkpoint(messages: Message[], pendingDeliveryIndices: number[] = []) {
     const serialized = messages.map((m) => JSON.stringify(m));
     if (
       serialized.length < this.checkpointMessages.length ||
@@ -213,6 +213,8 @@ export class Execution {
       this.run,
       this.checkpointMessages.length,
       delta,
+      undefined,
+      pendingDeliveryIndices,
     );
     this.checkpointMessages = serialized;
   }

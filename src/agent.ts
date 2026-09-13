@@ -141,13 +141,26 @@ export class Assistant {
     )
       return false;
     if (delivery.inputRevision === undefined) return true;
+    const version = this.inbox.version(user);
     const current = (
       await this.db.query(
         "SELECT coalesce(max(ordinal),0) AS revision FROM conversation_inputs WHERE user_id=$1",
         [user],
       )
     ).rows[0];
-    const valid = Number(current.revision) === delivery.inputRevision;
+    const active = this.foreground.get(user);
+    const valid =
+      Number(current.revision) === delivery.inputRevision &&
+      version === this.inbox.version(user) &&
+      !(
+        this.outgoing.get(user)?.run === delivery.runId &&
+        this.outgoing.get(user)?.cancelled
+      ) &&
+      !(
+        active &&
+        active.run === delivery.runId &&
+        (active.yield || this.controllers.get(active.run)?.signal.aborted)
+      );
     if (!valid && delivery.runId)
       await event(
         this.db,
@@ -227,6 +240,26 @@ export class Assistant {
         )
       ).rows[0]?.id;
     if (run) this.controllers.get(run)?.abort();
+    const outgoing = this.outgoing.get(user);
+    if (
+      outgoing &&
+      (
+        await this.db.query(
+          "SELECT 1 FROM runtime_runs WHERE user_id=$1 AND id=$2 AND task_id=$3",
+          [user, outgoing.run, id],
+        )
+      ).rows.length
+    ) {
+      outgoing.cancelled = true;
+      this.inbox.wake(user);
+      await event(
+        this.db,
+        user,
+        outgoing.run,
+        "conversation.delivery_cancelled",
+        { taskId: id },
+      );
+    }
     await this.db.query(
       "UPDATE work_tasks SET status='cancelled',lease=NULL,pause_reason='cancelled' WHERE user_id=$1 AND id=$2 AND status NOT IN ('done','cancelled')",
       [user, id],
@@ -385,28 +418,22 @@ export class Assistant {
             )
           ).rows[0]?.id
         : undefined;
+      const initialIndex =
+        background && previousRun
+          ? (
+              await this.db.query(
+                "SELECT message_index FROM conversation_inputs WHERE user_id=$1 AND run_id=$2 ORDER BY ordinal LIMIT 1",
+                [user, previousRun],
+              )
+            ).rows[0]?.message_index
+          : undefined;
       const stored =
         background && !previousRun
           ? { messages: [], omitted: 0, total: 0 }
-          : await histories.recent(user, previousRun);
-      let history = stored.messages;
-      if (background && previousRun) {
-        const previousTurn = (
-          await this.db.query(
-            "SELECT w.request,w.background,(SELECT message FROM conversation_inputs i WHERE i.user_id=w.user_id AND i.run_id=w.run_id ORDER BY ordinal LIMIT 1) AS initial_input FROM work_turns w WHERE run_id=$1 AND user_id=$2",
-            [previousRun, user],
-          )
-        ).rows[0];
-        if (previousTurn && !previousTurn.background) {
-          const anchor = history.findLastIndex(
-            (m) =>
-              m.role === "user" &&
-              m.content ===
-                (previousTurn.initial_input ?? previousTurn.request),
-          );
-          history = anchor >= 0 ? history.slice(anchor) : [];
-        }
-      }
+          : await histories.recent(user, previousRun, initialIndex ?? 0);
+      // Stable ordinal boundaries distinguish repeated identical user text. Legacy
+      // runs without an input anchor retain bounded history rather than guessing.
+      const history = stored.messages;
       await event(this.db, user, run, "history.loaded", {
         storageVersion: 2,
         source: background ? "task_run" : "conversation",
@@ -493,6 +520,7 @@ export class Assistant {
         history,
         historyOmitted: stored.omitted,
         turnStart: history.length,
+        managedDelivery,
         conversationSummary: conversation.summary,
         shouldYield: background ? undefined : () => active.yield,
         steer: background

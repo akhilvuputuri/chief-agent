@@ -65,6 +65,9 @@ def main():
             active = query("SELECT count(*)::int n FROM runtime_runs WHERE state='running'")[0]['n']
             if active:
                 raise RuntimeError('Active agent work detected; retry deployment when idle')
+            pending = query("SELECT count(*)::int n FROM conversation_inputs WHERE state IN ('queued','running')")[0]['n']
+            if pending:
+                raise RuntimeError('Pending conversation input detected; retry after preparation and execution finish')
             previous = compose('images','-q','gateway',text=True,capture_output=True).stdout.strip()
             if not previous:
                 raise RuntimeError('Cannot establish rollback image')

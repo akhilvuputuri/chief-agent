@@ -1,3 +1,4 @@
+import { HistoryStore } from "./history.js";
 import { finishSchema, type Answer } from "./answer.js";
 import { jsonSchema } from "./runtime.js";
 import { runAlignment } from "./alignment.js";
@@ -69,6 +70,15 @@ export class CustomAgent implements Agent {
     let tools = [...(req.runtime?.tools ?? []), finishTool];
     let enabled = new Set(tools.map((t) => t.name));
     const undeliveredMessageIndices: number[] = [];
+    const histories = new HistoryStore(execution.db);
+    const suppress = async (indices: number[]) => {
+      undeliveredMessageIndices.push(...indices);
+      await histories.excludeFromContext(
+        execution.user,
+        execution.run,
+        indices,
+      );
+    };
     const steer = async () => {
       if (req.signal!.aborted) throw new Stop("cancelled");
       if (!req.shouldYield?.()) return false;
@@ -107,7 +117,7 @@ export class CustomAgent implements Agent {
       // The final journal/approval lookups can receive input too. Keep the full
       // response in this run, but omit any undelivered assistant text from chat.
       if (req.shouldYield?.() || req.signal!.aborted) {
-        undeliveredMessageIndices.push(...indices);
+        await suppress(indices);
         answer = undefined;
         reply = "";
         reason = "answer";
@@ -194,7 +204,12 @@ export class CustomAgent implements Agent {
             });
             // Save the complete model response before dispatching any requested operation.
             messages.push(generation.message);
-            await execution.checkpoint(messages);
+            await execution.checkpoint(
+              messages,
+              req.managedDelivery && !generation.message.tool_calls?.length
+                ? [messages.length - 1]
+                : [],
+            );
             await execution.trace("model.completed", {
               invocationId,
               model: generation.model ?? model.model,
@@ -254,7 +269,7 @@ export class CustomAgent implements Agent {
         };
         if (req.shouldYield?.() || req.signal.aborted) {
           if (calls.length) await skipCalls(0);
-          else undeliveredMessageIndices.push(messages.length - 1);
+          else await suppress([messages.length - 1]);
           await steer();
           continue;
         }
@@ -455,7 +470,16 @@ export class CustomAgent implements Agent {
               content: `[Saved answer details: observationId=${finishObservation}. Use observation_read with offsets to retrieve the original answer envelope for follow-up questions.]`,
             });
           }
-          await execution.checkpoint(messages);
+          await execution.checkpoint(
+            messages,
+            req.managedDelivery
+              ? messages.flatMap((message, index) =>
+                  index >= replyIndex && message.role === "assistant"
+                    ? [index]
+                    : [],
+                )
+              : [],
+          );
           if (
             await prepareReply(
               messages.flatMap((message, index) =>

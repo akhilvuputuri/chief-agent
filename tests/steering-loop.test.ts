@@ -50,7 +50,13 @@ function fixture(model: ModelAdapter) {
   const execution = {
     user: "owner",
     run: randomUUID(),
-    db: { query: async () => ({ rows: [] }) },
+    db: {
+      query: async (sql?: string, values?: unknown[]) => ({
+        rows: sql?.includes("WITH selected_messages AS")
+          ? [{ saved: (values?.[2] as number[]).length }]
+          : [],
+      }),
+    },
     checkpoint: async (messages: Message[]) => {
       const prior = checkpoints.at(-1) ?? [];
       assert.deepEqual(messages.slice(0, prior.length), prior);
@@ -380,6 +386,7 @@ test("research yields after a completed read and returns the exact owner-scoped 
     "008_costs",
     "012_message_storage",
     "013_conversation_control",
+    "014_checkpoint_steering",
   ])
     await pg.exec(
       await readFile(new URL(`../db/${file}.sql`, import.meta.url), "utf8"),

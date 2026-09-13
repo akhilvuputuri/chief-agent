@@ -324,6 +324,7 @@ export interface AgentRequest {
   historyOmitted?: number;
   /** Stable start of this foreground exchange, including all absorbed follow-ups. */
   turnStart?: number;
+  managedDelivery?: boolean;
   conversationSummary?: string;
   shouldYield?: () => boolean;
   /** Host-claimed ordered inputs at a safe boundary. No model-supplied identity. */

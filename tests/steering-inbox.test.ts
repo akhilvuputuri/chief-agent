@@ -104,6 +104,199 @@ const image: ImageAttachment = {
   data: "EPHEMERAL_IMAGE_SECRET_BASE64",
 };
 
+for (const arrival of ["input", "cancel"] as const) {
+  test(`delivery rechecks ${arrival} after an in-flight revision query`, async () => {
+    const snapshot = deferred();
+    const release = deferred();
+    let hold = false;
+    const f = await fixture(
+      { generate: async () => text("Candidate reply") },
+      {
+        wrapDb: (db) => ({
+          query: async (sql, values) => {
+            const result = await db.query(sql, values);
+            if (
+              hold &&
+              sql.startsWith("SELECT coalesce(max(ordinal),0) AS revision")
+            ) {
+              hold = false;
+              snapshot.resolve();
+              await release.promise;
+            }
+            return result;
+          },
+        }),
+      },
+    );
+    let checked: Promise<boolean> | undefined;
+    try {
+      const output = await f.assistant.respondDetailed(
+        "owner",
+        "Original request",
+        undefined,
+        undefined,
+        { updateId: 401 },
+      );
+      assert.equal(await f.assistant.isCurrentDelivery("owner", output), true);
+      hold = true;
+      checked = f.assistant.isCurrentDelivery("owner", output);
+      await bounded(snapshot.promise, "delivery revision snapshot");
+      if (arrival === "input")
+        await f.assistant.recordInput("owner", "Correction before delivery");
+      else assert.equal((await f.assistant.cancel("owner")).cancelled, true);
+      release.resolve();
+      assert.equal(await bounded(checked, "delivery revalidation"), false);
+    } finally {
+      release.resolve();
+      await checked;
+      f.assistant.shutdown();
+      await f.pg.close();
+    }
+  });
+}
+
+test("task cancellation fences its completed foreground delivery without fencing unrelated task output", async () => {
+  let calls = 0;
+  const f = await fixture({
+    generate: async () =>
+      ++calls === 1
+        ? call("work_start", {
+            objective: "Review original sources",
+            steps: [
+              {
+                key: "source",
+                title: "Read original sources",
+                verification: "evidence",
+              },
+            ],
+          })
+        : call("finish_turn", {
+            reply: "Which source should I use?",
+            reason: "awaiting_user",
+          }),
+  });
+  try {
+    const output = await f.assistant.respondDetailed(
+      "owner",
+      "Review these sources",
+      undefined,
+      undefined,
+      { updateId: 402 },
+    );
+    const task = (
+      await f.db.query("SELECT id FROM work_tasks WHERE user_id='owner'")
+    ).rows[0].id;
+    assert.equal(await f.assistant.isCurrentDelivery("owner", output), true);
+    const unrelated = randomUUID();
+    await f.db.query(
+      "INSERT INTO work_tasks(id,user_id,objective,request,status) VALUES($1,'owner','Unrelated task','Unrelated request','paused')",
+      [unrelated],
+    );
+    assert.equal(
+      (await f.assistant.cancel("owner", unrelated)).cancelled,
+      true,
+    );
+    assert.equal(await f.assistant.isCurrentDelivery("owner", output), true);
+    assert.equal((await f.assistant.cancel("other", task)).cancelled, false);
+    assert.equal(await f.assistant.isCurrentDelivery("owner", output), true);
+    assert.equal((await f.assistant.cancel("owner", task)).cancelled, true);
+    assert.equal(await f.assistant.isCurrentDelivery("owner", output), false);
+  } finally {
+    f.assistant.shutdown();
+    await f.pg.close();
+  }
+});
+
+test("task resume anchors on the original input occurrence when follow-up text is identical", async () => {
+  const entered = deferred();
+  const release = deferred<Generation>();
+  const seen: Input[] = [];
+  const f = await fixture({
+    generate: async (input) => {
+      seen.push(input);
+      if (seen.length === 1) return call("memory_list", {});
+      if (seen.length === 2) {
+        entered.resolve();
+        return release.promise;
+      }
+      if (seen.length === 3)
+        return call("work_start", {
+          objective: "Inspect original sources",
+          steps: [
+            { key: "source", title: "Read sources", verification: "evidence" },
+          ],
+        });
+      return call("finish_turn", {
+        reply: "Please choose the next source",
+        reason: "awaiting_user",
+      });
+    },
+  });
+  const pending: Promise<unknown>[] = [];
+  try {
+    const first = f.assistant.respondDetailed(
+      "owner",
+      "Inspect the original sources",
+    );
+    pending.push(first);
+    await bounded(entered.promise, "model after completed memory read");
+    const id = await f.assistant.recordInput(
+      "owner",
+      "Inspect the original sources",
+    );
+    const second = f.assistant.respondDetailed(
+      "owner",
+      "Inspect the original sources",
+      undefined,
+      undefined,
+      { id },
+    );
+    pending.push(second);
+    release.resolve(text("SUPERSEDED_DUPLICATE_INPUT_ANSWER"));
+    await bounded(
+      Promise.all([first, second]),
+      "duplicate input task creation",
+    );
+    const task = (
+      await f.db.query("SELECT id FROM work_tasks WHERE user_id='owner'")
+    ).rows[0].id;
+    const originalTool = seen[1]!.messages.find((m) => m.role === "tool");
+    assert.ok(originalTool);
+    await f.assistant.grant("owner", task);
+    const resumed = f.assistant.resumeDetailed("owner", task);
+    pending.push(resumed);
+    await bounded(resumed, "duplicate input task resume");
+    const context = seen.at(-1)!.messages;
+    assert.equal(
+      context.filter(
+        (m) =>
+          m.role === "user" && m.content === "Inspect the original sources",
+      ).length,
+      2,
+    );
+    assert.ok(
+      context.some(
+        (m) =>
+          m.role === "tool" && m.tool_call_id === originalTool.tool_call_id,
+      ),
+    );
+    assert.ok(
+      context.some((m) =>
+        m.tool_calls?.some((c) => c.id === originalTool.tool_call_id),
+      ),
+    );
+    assert.doesNotMatch(
+      JSON.stringify(context),
+      /SUPERSEDED_DUPLICATE_INPUT_ANSWER/,
+    );
+  } finally {
+    release.resolve(text("Cleanup"));
+    f.assistant.shutdown();
+    await bounded(Promise.allSettled(pending), "duplicate input cleanup");
+    await f.pg.close();
+  }
+});
+
 test("a burst of ordered inputs produces one run, one final reply and one durable occurrence per input", async () => {
   const entered = deferred<Input>();
   const release = deferred<Generation>();
@@ -175,9 +368,18 @@ test("a burst of ordered inputs produces one run, one final reply and one durabl
         1,
       );
     assert(
-      journal.messages.some(
+      !journal.messages.some(
         (message) => message.content === "STALE_UNSENT_VENUE_ANSWER",
       ),
+    );
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT c.payload->>'content' AS content FROM run_messages m JOIN message_contents c USING(user_id,hash) WHERE m.user_id=$1 AND m.run_id=$2 AND c.payload->>'content'=$3",
+          ["owner", replies[0]!.runId, "STALE_UNSENT_VENUE_ANSWER"],
+        )
+      ).rows.length,
+      1,
     );
     assert(
       !(await f.history.recent("owner")).messages.some(
@@ -541,7 +743,7 @@ test("pending delivery is absent from recent history and search until transport 
       ),
     );
     assert(
-      (await f.history.recent("owner", reply.runId)).messages.some(
+      !(await f.history.recent("owner", reply.runId)).messages.some(
         (message) => message.content === reply.reply,
       ),
     );

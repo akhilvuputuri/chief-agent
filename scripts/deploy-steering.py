@@ -86,7 +86,7 @@ def main():
                     raise RuntimeError('Candidate failed startup health')
             except Exception:
                 compose('stop','gateway')
-                # Migration014 adds columns/indexes only. Preserve input and delivery
+                # Migration014 adds columns/indexes and projection metadata. Preserve input and delivery
                 # records on rollback; never reconstruct or replay conversation/actions.
                 (LIVE/'compose.yaml').write_bytes(old_compose)
                 run(['docker','tag',previous,IMAGE+':latest'])
