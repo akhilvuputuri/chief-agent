@@ -1,6 +1,6 @@
 # 21 — Preserving the reasoning behind preparation
 
-Work date: 14 September 2026. Status: locally tested candidate; independent review and deployment pending.
+Work date: 14 September 2026. Status: released as [v0.3.10](https://github.com/akhilvuputuri/companion-agent/releases/tag/v0.3.10); operator rollout, standard release and exact tag verified.
 
 ## User-visible problem and preceding iteration
 
@@ -22,13 +22,15 @@ The selected design extends existing Postgres tasks with a bounded evidence-chai
 
 ## Validation, review and limitations
 
-Focused synthetic tests cover source/owner isolation, frozen snapshots after live edits, unknown questions, invalid/missing references, multi-role persistence, progress preservation, bounded reads and Sheet cells. Local typecheck/build and all 242 application tests plus two Google-scope tests passed. Twelve offline operator-rollout checks passed. The first focused run caught an outdated skill-version assertion and an interview-only preparation fixture; these were updated to the tightened contract. Independent Astra requested changes on `9233af1aa6c77b5d53918258e9105eb9ee3ca021`: provenance/no-link validation refusals were classified as generic tool failures, causing a false uncertain-write pause. The fix introduces a typed host validation error and runtime-level tests proving the model can correct rejected inputs while a genuinely ambiguous database acknowledgement still pauses. Re-review and deployment remain pending. The additive rollout is documented in [the runbook](../preparation-rollout.md).
+Focused synthetic tests cover source/owner isolation, frozen snapshots after live edits, unknown questions, invalid/missing references, multi-role persistence, progress preservation, bounded reads and Sheet cells. Local typecheck/build, formatting and all 242 application tests plus two Google-scope tests passed. Twelve offline operator-rollout checks and three existing cloud release-guard regressions passed. The first focused run caught an outdated skill-version assertion and an interview-only preparation fixture; these were updated to the tightened contract.
+
+Independent GPT-6 Astra requested changes on `9233af1aa6c77b5d53918258e9105eb9ee3ca021`: provenance/no-link validation refusals were classified as generic tool failures, causing a false uncertain-write pause. The fix introduces a typed host validation error and runtime-level tests proving the model can correct rejected inputs while a genuinely ambiguous database acknowledgement still pauses. Astra then [approved exact head `b01a9226c37ea73fa0cb3140fdfb43e11fc08772`](https://github.com/akhilvuputuri/companion-agent/pull/44#issuecomment-5655091129), independently running 20 focused application tests and all 12 rollout tests. [PR #44](https://github.com/akhilvuputuri/companion-agent/pull/44) merged at `672021f2afcea620224fd9f7ce7ccfdc53b9ba89`; its tree matches that approved head. The additive rollout is documented in [the runbook](../preparation-rollout.md).
 
 These checks validate recorded support and persistence. They do not establish the semantic correctness of every fit judgment, teaching effectiveness, completeness of interview research or real-user readiness. No production role reanalysis or paid model evaluation is part of this implementation.
 
-### Release closure — pending
+### Release closure — 14 September 2026
 
-Await exact-head independent Astra review, passing checks, merge, reviewed migration 015 installation and exact deployment/health verification. Package version alone does not establish release.
+Independent review, required checks and merge are complete; [main CI](https://github.com/akhilvuputuri/companion-agent/actions/runs/34773706544) passed. On 14 September 2026 (Singapore time), the reviewed operator rollout succeeded from exact baseline `16cb37f28625823df1c35d41bc7f8844db4b09b2`, reporting deployed SHA `672021f2afcea620224fd9f7ce7ccfdc53b9ba89`, healthy startup and migration 15. A separate read-only server check confirmed the same release marker, `healthz` status `ok` for runtime `personal-agent`, all three existing preparation tasks retained with empty evidence arrays, and no active runs. The [standard release workflow](https://github.com/akhilvuputuri/companion-agent/actions/runs/34773911229) passed and the published [v0.3.10](https://github.com/akhilvuputuri/companion-agent/releases/tag/v0.3.10) tag resolves to that exact deployed SHA. These checks establish deployment and legacy-data preservation; they do not establish successful creation of a new linked task in a real user conversation.
 
 ## Follow-up
 
