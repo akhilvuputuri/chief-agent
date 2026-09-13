@@ -10,6 +10,7 @@ import type { Message } from "../src/model.js";
 import { Assistant } from "../src/agent.js";
 import { CustomAgent } from "../src/custom-agent.js";
 import { JobTools } from "../src/tools.js";
+import { ContextLimitError, contextHardLimit } from "../src/context.js";
 const migration = () =>
   readFile(new URL("../db/012_message_storage.sql", import.meta.url), "utf8");
 async function fixture(legacy = false) {
@@ -624,6 +625,293 @@ test("many long matching exchanges retain bounded structured search results", as
       ),
     );
     assert.ok(hits.some((h) => h.neighborhoodTruncated));
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("recent history projects old reasoning in SQL while keeping the exact exchange and immutable originals", async () => {
+  const f = await fixture();
+  try {
+    const run = randomUUID();
+    await f.db.query(
+      "INSERT INTO runtime_runs(id,user_id) VALUES($1,'owner')",
+      [run],
+    );
+    const original = [
+      user("Draft the event for the current Board review BR-792."),
+      {
+        ...answer("What date and time should I use for BR-792?"),
+        reasoning_details: [
+          { type: "reasoning.text", text: "r".repeat(100001) },
+        ],
+      },
+    ];
+    await f.store.append("owner", run, 0, original);
+    await f.store.appendConversation("owner", run, original);
+    let transferredPayloadCharacters = 0;
+    const reader = new HistoryStore({
+      query: async (sql, values) => {
+        const result = await f.db.query(sql, values);
+        for (const row of result.rows)
+          if (row.payload)
+            transferredPayloadCharacters += JSON.stringify(row.payload).length;
+        return result;
+      },
+    });
+    const expected = original.map(
+      ({ reasoning_details: _reasoning, ...message }: Message) => message,
+    );
+    for (const source of [undefined, run]) {
+      const recent = await reader.recent("owner", source);
+      assert.deepEqual(recent.messages, expected);
+      assert.equal(recent.total, 2);
+      assert.equal(recent.omitted, 0);
+    }
+    assert.ok(
+      transferredPayloadCharacters < 1000,
+      "opaque reasoning never reaches the caller",
+    );
+    for (const table of ["run_messages", "conversation_messages"]) {
+      const saved = (
+        await f.db.query(
+          `SELECT c.payload FROM ${table} e JOIN message_contents c USING(user_id,hash) WHERE e.user_id='owner' AND e.run_id=$1 ORDER BY ordinal`,
+          [run],
+        )
+      ).rows.map((row) => row.payload);
+      assert.deepEqual(saved, original);
+    }
+    assert.equal(
+      (await f.db.query("SELECT count(*)::int n FROM message_contents")).rows[0]
+        .n,
+      2,
+    );
+    assert.deepEqual((await reader.recent("other", run)).messages, []);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("the most recent complete tool exchange survives the optional 100k history allowance", async () => {
+  const f = await fixture();
+  try {
+    const call: Message = {
+      role: "assistant",
+      content: "Reading the current document.",
+      reasoning_details: [{ text: "old reasoning".repeat(9000) }],
+      tool_calls: [
+        {
+          id: "read-current",
+          type: "function",
+          function: {
+            name: "source_read",
+            arguments: JSON.stringify({ id: randomUUID() }),
+          },
+        },
+      ],
+    };
+    const result: Message = {
+      role: "tool",
+      tool_call_id: "read-current",
+      content: JSON.stringify({
+        observationId: randomUUID(),
+        text: "Extracted current document ".repeat(4100),
+      }),
+    };
+    const latest = [
+      user("Draft a calendar event from the current Board review document."),
+      call,
+      result,
+      answer("Which date should I use for the Board review?"),
+    ];
+    const old = [user("Unrelated earlier topic"), answer("Earlier answer")];
+    await f.store.append("owner", null, 0, [...old, ...latest]);
+    const recent = await f.store.recent("owner");
+    const expected = latest.map(
+      ({ reasoning_details: _reasoning, ...message }: Message) => message,
+    );
+    assert.deepEqual(recent.messages, expected);
+    assert.ok(JSON.stringify(recent.messages).length > 100000);
+    assert.ok(JSON.stringify(recent.messages).length < contextHardLimit);
+    assert.equal(recent.omitted, old.length);
+    assert.equal(recent.messages[2]!.content, result.content);
+    const stored = (
+      await f.db.query(
+        "SELECT c.payload FROM conversation_messages e JOIN message_contents c USING(user_id,hash) WHERE e.user_id='owner' ORDER BY ordinal",
+      )
+    ).rows.map((row) => row.payload);
+    assert.deepEqual(stored, [...old, ...latest]);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("an oversized protected answer fails before loading its body instead of returning a misleading partial exchange", async () => {
+  const f = await fixture();
+  try {
+    const original = [
+      user("Use the current event target."),
+      answer("Question context ".repeat(8000) + "Which date should I use?"),
+    ];
+    await f.store.append("owner", null, 0, original);
+    let loadedPayloads = 0;
+    const reader = new HistoryStore({
+      query: async (sql, values) => {
+        const result = await f.db.query(sql, values);
+        loadedPayloads += result.rows.filter((row) => row.payload).length;
+        return result;
+      },
+    });
+    await assert.rejects(
+      () => reader.recent("owner"),
+      (error: unknown) =>
+        error instanceof ContextLimitError &&
+        error.sizes.protectedHistoryCharacters! > contextHardLimit,
+    );
+    assert.equal(loadedPayloads, 0);
+    assert.equal(await f.store.count("owner"), original.length);
+    const id = (
+      await f.db.query(
+        "SELECT id FROM conversation_messages WHERE user_id='owner' AND ordinal=1",
+      )
+    ).rows[0].id;
+    const firstPage = await f.store.read("owner", id, 0);
+    assert.ok(firstPage.nextOffset);
+    assert.match(
+      (await f.store.read("owner", id, firstPage.totalCharacters - 100))
+        .content,
+      /Which date should I use/,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("a latest exchange whose user anchor lies beyond the reference cap fails explicitly", async () => {
+  const f = await fixture();
+  try {
+    const original = [
+      user("Original target at the start of this exchange"),
+      ...Array.from({ length: 1000 }, (_, i) => answer(`Continuation ${i}`)),
+    ];
+    await f.store.append("owner", null, 0, original);
+    let loadedPayloads = 0;
+    const reader = new HistoryStore({
+      query: async (sql, values) => {
+        const result = await f.db.query(sql, values);
+        loadedPayloads += result.rows.filter((row) => row.payload).length;
+        return result;
+      },
+    });
+    await assert.rejects(
+      () => reader.recent("owner"),
+      (error: unknown) =>
+        error instanceof ContextLimitError &&
+        error.sizes.protectedHistoryMessages === 1001,
+    );
+    assert.equal(loadedPayloads, 0);
+    assert.equal(await f.store.count("owner"), original.length);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("oversized stored tool results use bounded exact excerpts and owner-verified read references", async () => {
+  const f = await fixture();
+  try {
+    const run = randomUUID(),
+      observation = randomUUID(),
+      otherRun = randomUUID(),
+      otherObservation = randomUUID();
+    await f.db.query(
+      "INSERT INTO runtime_runs(id,user_id) VALUES($1,'owner'),($2,'other')",
+      [run, otherRun],
+    );
+    const body =
+      "HEAD: exact current target. " +
+      "large unparsed tool body ".repeat(20000) +
+      " TAIL: source ends here.";
+    for (const [runId, observationId] of [
+      [run, observation],
+      [otherRun, otherObservation],
+    ])
+      await f.db.query(
+        "INSERT INTO runtime_calls(id,run_id,call_id,operation,arguments,is_write,state,result) VALUES($1,$2,'large-read','source_read','{}',false,'success',$3::jsonb)",
+        [observationId, runId, JSON.stringify({ text: body })],
+      );
+    const original: Message[] = [
+      user("Read the current target and ask for the date."),
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: "large-read",
+            type: "function",
+            function: { name: "source_read", arguments: "{}" },
+          },
+        ],
+      },
+      { role: "tool", tool_call_id: "large-read", content: body },
+      answer("Which date should I use for this target?"),
+    ];
+    await f.store.append("owner", run, 0, original);
+    let transferred = 0;
+    const reader = new HistoryStore({
+      query: async (sql, values) => {
+        const result = await f.db.query(sql, values);
+        for (const row of result.rows)
+          if (row.payload) transferred += JSON.stringify(row.payload).length;
+        return result;
+      },
+    });
+    const recentRun = await reader.recent("owner", run);
+    assert.equal(recentRun.messages.length, 4);
+    assert.deepEqual(recentRun.messages[0], original[0]);
+    assert.deepEqual(recentRun.messages[1], original[1]);
+    assert.deepEqual(recentRun.messages[3], original[3]);
+    const projected = JSON.parse(recentRun.messages[2]!.content!);
+    assert.equal(projected.observationId, observation);
+    assert.notEqual(projected.observationId, otherObservation);
+    assert.equal(projected.totalCharacters, body.length);
+    for (const excerpt of projected.excerpts)
+      assert.equal(
+        excerpt.text,
+        body.slice(excerpt.offset, excerpt.offset + excerpt.text.length),
+      );
+    assert.ok(transferred < 5000);
+    await f.store.appendConversation("owner", run, original);
+    const recentChat = await reader.recent("owner");
+    const conversationProjection = JSON.parse(recentChat.messages[2]!.content!);
+    const source = await f.store.read(
+      "owner",
+      conversationProjection.originalMessageId,
+      0,
+    );
+    assert.equal(source.role, "tool");
+    assert.equal(source.runId, run);
+    await assert.rejects(
+      () => f.store.read("other", conversationProjection.originalMessageId, 0),
+      /not found/,
+    );
+    for (const table of ["run_messages", "conversation_messages"])
+      assert.deepEqual(
+        (
+          await f.db.query(
+            `SELECT c.payload FROM ${table} e JOIN message_contents c USING(user_id,hash) WHERE e.user_id='owner' AND e.run_id=$1 ORDER BY ordinal`,
+            [run],
+          )
+        ).rows.map((row) => row.payload),
+        original,
+      );
+    assert.deepEqual(
+      (
+        await f.db.query("SELECT result FROM runtime_calls WHERE id=$1", [
+          observation,
+        ])
+      ).rows[0].result,
+      { text: body },
+    );
   } finally {
     await f.pg.close();
   }

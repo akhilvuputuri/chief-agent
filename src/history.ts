@@ -1,6 +1,11 @@
 import type { Database } from "./db.js";
 import type { Message } from "./model.js";
-import { boundHistory } from "./context.js";
+import {
+  boundHistory,
+  ContextLimitError,
+  contextHardLimit,
+} from "./context.js";
+import { completeMessageGroups } from "./context-continuity.js";
 
 // Tool outputs include copies of earlier search results. They remain immutable history,
 // but are not original conversational evidence and must never become fresh search hits.
@@ -155,27 +160,92 @@ export class HistoryStore {
     return result.rows[0]?.message_count ?? 0;
   }
 
-  /** Read at most 1000 recent references and 100k characters; the model gets a further context bound. */
+  /**
+   * Read a bounded context projection, not an original-payload export. Provider reasoning
+   * remains in immutable messages/journals but never consumes this prior-history allowance.
+   * Keep the latest user/assistant exchange and complete tool groups. Large recoverable
+   * tools may use source-linked excerpts; otherwise fail rather than lose the exchange.
+   */
   async recent(user: string, run?: string) {
     const count = await this.count(user, run);
+    if (!count) return { messages: [], omitted: 0, total: 0 };
+    const entries = run ? "run_messages" : "conversation_messages";
+    const scope = run ? "AND e.run_id=$2::uuid" : "AND $2::uuid IS NULL";
     const rows = (
       await this.db.query(
-        `WITH recent AS (
-      SELECT e.ordinal,e.hash,c.characters,c.payload->>'role' AS role
-      FROM ${run ? "run_messages" : "conversation_messages"} e JOIN message_contents c USING(user_id,hash)
-      WHERE e.user_id=$1 ${run ? "AND e.run_id=$2" : ""} ORDER BY e.ordinal DESC LIMIT 1000
+        `WITH anchor AS (
+      SELECT coalesce((SELECT e.ordinal FROM ${entries} e JOIN message_contents c USING(user_id,hash)
+        WHERE e.user_id=$1 ${scope} AND e.ordinal<$3 AND c.payload->>'role'='user'
+        ORDER BY e.ordinal DESC LIMIT 1),0) AS exchange_start
+    ), recent AS (
+      SELECT e.ordinal,e.hash,e.run_id,${run ? "NULL::uuid" : "e.id"} AS message_id,
+        c.payload-'reasoning_details' AS original,
+        length((c.payload-'reasoning_details')::text) AS characters,c.payload->>'role' AS role
+      FROM ${entries} e JOIN message_contents c USING(user_id,hash)
+      WHERE e.user_id=$1 ${scope} AND e.ordinal<$3 ORDER BY e.ordinal DESC LIMIT 1000
+    ), raw_limits AS (
+      SELECT a.exchange_start,coalesce(sum(s.characters) FILTER(WHERE s.ordinal>=a.exchange_start),0) AS protected_chars
+      FROM anchor a LEFT JOIN recent s ON true GROUP BY a.exchange_start
+    ), recoverable AS (
+      SELECT s.*,l.exchange_start,refs.original_message_id,refs.observation_id
+      FROM recent s CROSS JOIN raw_limits l LEFT JOIN LATERAL (
+        SELECT coalesce(s.message_id,(SELECT m.id FROM conversation_messages m
+          WHERE m.user_id=$1 AND m.hash=s.hash ORDER BY m.ordinal LIMIT 1)) AS original_message_id,
+          (SELECT rc.id FROM runtime_calls rc JOIN runtime_runs rr ON rr.id=rc.run_id
+            WHERE rr.user_id=$1 AND rc.run_id=s.run_id AND rc.call_id=s.original->>'tool_call_id') AS observation_id
+      ) refs ON l.protected_chars>$4 AND s.ordinal>=l.exchange_start AND s.role='tool'
+        AND jsonb_typeof(s.original->'content')='string' AND length(s.original->>'content')>1800
+    ), projected AS (
+      SELECT ordinal,role,exchange_start,CASE WHEN original_message_id IS NULL AND observation_id IS NULL THEN original
+        ELSE original || jsonb_build_object('content',jsonb_strip_nulls(jsonb_build_object(
+          'contextProjection','stored tool result excerpts',
+          'notice','Partial exact excerpts. Read originalMessageId with conversation_read or observationId with observation_read for omitted details. Offsets below count Unicode code points within original content.',
+          'originalMessageId',original_message_id,'observationId',observation_id,
+          'totalCharacters',length(original->>'content'),
+          'excerpts',jsonb_build_array(jsonb_build_object('offset',0,'text',left(original->>'content',600)),
+            jsonb_build_object('offset',length(original->>'content')-300,'text',right(original->>'content',300)))
+        ))::text) END AS payload FROM recoverable
     ), selected AS (
-      SELECT *,sum(characters) OVER(ORDER BY ordinal DESC) AS chars,
-      count(*) FILTER(WHERE role='user') OVER(ORDER BY ordinal DESC) AS turns FROM recent
-    ) SELECT c.payload FROM selected s JOIN message_contents c ON c.user_id=$1 AND c.hash=s.hash
-    WHERE s.chars<=100000 AND s.turns<=20 ORDER BY s.ordinal`,
-        run ? [user, run] : [user],
+      SELECT *,length(payload::text) AS characters,sum(length(payload::text)) OVER(ORDER BY ordinal DESC) AS chars,
+        count(*) FILTER(WHERE role='user') OVER(ORDER BY ordinal DESC) AS turns FROM projected
+    ), limits AS (
+      SELECT exchange_start,coalesce(sum(characters) FILTER(WHERE ordinal>=exchange_start),0) AS protected_chars
+      FROM selected GROUP BY exchange_start
+    ) SELECT s.ordinal,l.exchange_start,l.protected_chars,
+      CASE WHEN $3-l.exchange_start<=1000 AND l.protected_chars<=$4
+        AND (s.ordinal>=l.exchange_start OR (s.chars<=100000 AND s.turns<=20))
+        THEN s.payload ELSE NULL END AS payload
+      FROM selected s CROSS JOIN limits l
+      ORDER BY s.ordinal`,
+        [user, run ?? null, count, contextHardLimit],
       )
     ).rows;
-    const bounded = boundHistory(rows.map((r) => r.payload));
+    const start = Number(rows[0]?.exchange_start ?? count);
+    const protectedCharacters = Number(rows[0]?.protected_chars ?? 0);
+    if (count - start > 1000 || protectedCharacters > contextHardLimit)
+      throw new ContextLimitError({
+        historyMessages: count,
+        protectedHistoryMessages: count - start,
+        protectedHistoryCharacters: protectedCharacters,
+        historyReferenceLimit: 1000,
+      });
+    const projected = rows.filter((row) => row.payload !== null);
+    const exchange = completeMessageGroups(
+      projected.filter((row) => row.ordinal >= start).map((row) => row.payload),
+    ).flat();
+    const exchangeSize = JSON.stringify(exchange).length;
+    // PostgreSQL lengths count Unicode code points; check the actual JS/wire size too.
+    if (exchangeSize >= contextHardLimit)
+      throw new ContextLimitError({ protectedHistoryCharacters: exchangeSize });
+    const earlier = boundHistory(
+      projected.filter((row) => row.ordinal < start).map((row) => row.payload),
+      19,
+      Math.max(0, 100000 - exchangeSize),
+    );
+    const messages = [...earlier.messages, ...exchange];
     return {
-      messages: bounded.messages,
-      omitted: count - bounded.messages.length,
+      messages,
+      omitted: count - messages.length,
       total: count,
     };
   }
