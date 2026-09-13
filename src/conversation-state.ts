@@ -71,7 +71,14 @@ export async function conversationState(
       }
     }
   }
+  const interrupted = (
+    await db.query(
+      `SELECT t.id,left(t.objective,240) AS objective,t.pause_reason FROM conversation_inputs i JOIN runtime_runs r ON r.id=i.run_id AND r.user_id=i.user_id JOIN work_tasks t ON t.id=r.task_id AND t.user_id=r.user_id WHERE i.user_id=$1 AND i.state='interrupted' AND t.status='paused' AND t.pause_reason='interrupted' AND NOT EXISTS(SELECT 1 FROM conversation_inputs later WHERE later.user_id=i.user_id AND later.ordinal>i.ordinal AND later.id<>$2::uuid AND later.state IN ('completed','interrupted')) ORDER BY i.ordinal DESC LIMIT 1`,
+      [user, inputId ?? null],
+    )
+  ).rows[0];
   return {
+    interruptedJob: interrupted ?? null,
     summary,
     previousId: previous?.id,
     pendingReply: previous?.pending_reply ?? null,

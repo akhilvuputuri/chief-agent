@@ -18,7 +18,7 @@ import {
   type ToolDefinition,
 } from "./model.js";
 import { Stop, readOperations, type StopReason } from "./execution.js";
-import { toolError } from "./tool-errors.js";
+import { toolError, NotDispatchedError } from "./tool-errors.js";
 const finishTool: ToolDefinition = {
   name: "finish_turn",
   description:
@@ -202,21 +202,32 @@ export class CustomAgent implements Agent {
         }
         let finish: (Answer & { reason: StopReason }) | undefined;
         let finishObservation: string | undefined;
+        const skipCalls = async (
+          from: number,
+          reason: "interrupted" | "cancelled",
+          journal?: string,
+        ): Promise<never> => {
+          const result = {
+            error:
+              "Not dispatched: newer input or cancellation interrupted this turn",
+            code: "NOT_DISPATCHED",
+          };
+          if (journal) await execution.endCall(journal, result, "interrupted");
+          for (const pending of calls.slice(from))
+            messages.push({
+              role: "tool",
+              tool_call_id: pending.id,
+              content: JSON.stringify(result),
+            });
+          await execution.checkpoint(messages);
+          throw new Stop(reason);
+        };
         for (const [callIndex, call] of calls.entries()) {
-          if (req.shouldYield?.() || req.signal.aborted) {
-            for (const pending of calls.slice(callIndex))
-              messages.push({
-                role: "tool",
-                tool_call_id: pending.id,
-                content: JSON.stringify({
-                  error:
-                    "Not dispatched: newer input or cancellation interrupted this turn",
-                  code: "NOT_DISPATCHED",
-                }),
-              });
-            await execution.checkpoint(messages);
-            throw new Stop(req.signal.aborted ? "cancelled" : "interrupted");
-          }
+          if (req.shouldYield?.() || req.signal.aborted)
+            await skipCalls(
+              callIndex,
+              req.signal.aborted ? "cancelled" : "interrupted",
+            );
           const op = call.function.name;
           let result: unknown;
           let candidate: typeof finish;
@@ -236,6 +247,13 @@ export class CustomAgent implements Agent {
           });
           let dispatched = false;
           try {
+            // Budget/journal writes above are await points; check again before actual dispatch.
+            if (req.shouldYield?.() || req.signal.aborted)
+              await skipCalls(
+                callIndex,
+                req.signal.aborted ? "cancelled" : "interrupted",
+                journal,
+              );
             if (!enabled.has(op)) throw new Error("Operation unavailable");
             const args = JSON.parse(call.function.arguments);
             if (op === "finish_turn") {
@@ -248,6 +266,12 @@ export class CustomAgent implements Agent {
               const input = action.parse({ ...args, operation: op });
               for (let attempt = 0; ; attempt++) {
                 try {
+                  if (req.shouldYield?.() || req.signal.aborted)
+                    await skipCalls(
+                      callIndex,
+                      req.signal.aborted ? "cancelled" : "interrupted",
+                      journal,
+                    );
                   dispatched = true;
                   result =
                     op === "plugin_delegate"
@@ -327,6 +351,8 @@ export class CustomAgent implements Agent {
               finishObservation = op === "finish_turn" ? journal : undefined;
             }
           } catch (error) {
+            if (error instanceof NotDispatchedError)
+              await skipCalls(callIndex, error.reason, journal);
             if (error instanceof Stop) throw error;
             result = { error: toolError(error) };
             const uncertain =

@@ -1052,3 +1052,97 @@ test("large stored reasoning cannot erase the latest target and clarification be
     await f.pg.close();
   }
 });
+
+test("input queued before a foreground controller starts still supersedes old reasoning", async () => {
+  const seen: Input[] = [];
+  const f = await fixture({
+    generate: async (input) => {
+      seen.push(input);
+      return text("I will use the correction.");
+    },
+  });
+  try {
+    const first = await f.assistant.recordInput("owner", "Use the early time");
+    const second = await f.assistant.recordInput("owner", "Actually use 9am");
+    const old = await f.assistant.respondDetailed(
+      "owner",
+      "Use the early time",
+      undefined,
+      undefined,
+      { id: first },
+    );
+    assert.equal(old.reply, "");
+    assert.equal(seen.length, 0);
+    await f.assistant.respondDetailed(
+      "owner",
+      "Actually use 9am",
+      undefined,
+      undefined,
+      { id: second },
+    );
+    assert.equal(seen.length, 1);
+    assert.equal(latestUser(seen[0]!), "Actually use 9am");
+    assert.ok(
+      seen[0]!.messages.some(
+        (m) => m.role === "user" && m.content === "Use the early time",
+      ),
+    );
+    assert.equal(
+      (
+        await f.db.query("SELECT state FROM conversation_inputs WHERE id=$1", [
+          first,
+        ])
+      ).rows[0].state,
+      "interrupted",
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("an oversized historical job exchange pauses instead of endlessly requeueing without budget use", async () => {
+  const f = await fixture({
+    generate: async () => {
+      throw new Error("Model must not be called");
+    },
+  });
+  try {
+    const taskId = await f.task("Oversized old job");
+    const run = randomUUID();
+    await f.db.query(
+      "INSERT INTO runtime_runs(id,user_id,task_id,state) VALUES($1,'owner',$2,'stopped')",
+      [run, taskId],
+    );
+    await new HistoryStore(f.db).append("owner", run, 0, [
+      { role: "user", content: "huge" },
+      { role: "assistant", content: "x".repeat(130000) },
+    ]);
+    await f.db.query(
+      "UPDATE work_tasks SET status='queued',next_run=now() WHERE id=$1",
+      [taskId],
+    );
+    let deliveries = 0;
+    const worker = new WorkWorker(
+      f.db,
+      (user, id) => f.assistant.resumeDetailed(user, id),
+      async () => {
+        deliveries++;
+      },
+    );
+    await worker.tick();
+    await f.db.query("UPDATE work_tasks SET next_run=now() WHERE id=$1", [
+      taskId,
+    ]);
+    await worker.tick();
+    assert.equal(deliveries, 1);
+    const task = (
+      await f.db.query(
+        "SELECT status,pause_reason FROM work_tasks WHERE id=$1",
+        [taskId],
+      )
+    ).rows[0];
+    assert.deepEqual(task, { status: "paused", pause_reason: "context_limit" });
+  } finally {
+    await f.pg.close();
+  }
+});

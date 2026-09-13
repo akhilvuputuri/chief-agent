@@ -1,3 +1,5 @@
+import { ContextLimitError } from "./context.js";
+import { NotDispatchedError } from "./tool-errors.js";
 import { alignmentContext } from "./alignment.js";
 import {
   conversationState,
@@ -299,12 +301,26 @@ export class Assistant {
           "UPDATE conversation_inputs SET state='running',run_id=$3,started_at=now() WHERE id=$1 AND user_id=$2",
           [inputId, user, run],
         );
+      if (
+        !background &&
+        inputId &&
+        (
+          await this.db.query(
+            "SELECT 1 FROM conversation_inputs WHERE user_id=$1 AND state='queued' AND ordinal>(SELECT ordinal FROM conversation_inputs WHERE id=$2 AND user_id=$1) LIMIT 1",
+            [user, inputId],
+          )
+        ).rows.length
+      ) {
+        active.yield = true;
+        if (!active.protectedMedia) active.model.abort();
+      }
       const conversation = background
         ? {
             summary: "",
             pendingReply: null,
             previousId: undefined,
             replyTarget: null,
+            interruptedJob: null,
           }
         : await conversationState(this.db, user, inputId);
       await event(this.db, user, run, "conversation.routed", {
@@ -328,6 +344,7 @@ export class Assistant {
           lane: background ? "job" : "foreground",
           pendingReply: conversation.pendingReply,
           replyTarget: conversation.replyTarget,
+          interruptedJob: conversation.interruptedJob,
           delivery: background
             ? "This is a separate background job. Your reply arrives amid the rolling chat; identify which job the update concerns in natural language."
             : "Answer the current user message; saved jobs are independent and must be explicitly selected.",
@@ -473,7 +490,7 @@ export class Assistant {
           ? "awaiting_approval"
           : (output.stopReason ?? "answer");
         await this.db.query(
-          `UPDATE work_tasks SET status=CASE WHEN ($3 IN ('answer','interrupted') OR ($3 IN ('awaiting_user','awaiting_approval') AND EXISTS(SELECT 1 FROM work_steps WHERE task_id=$1 AND status='blocked'))) AND used_ms<budget_ms AND used_models<budget_models AND used_tools<budget_tools AND EXISTS(SELECT 1 FROM work_steps WHERE task_id=$1 AND status='pending') THEN 'queued' ELSE 'paused' END,pause_reason=CASE WHEN $3 IN ('answer','interrupted') THEN NULL ELSE $3 END,next_run=now()+interval '15 seconds',updated_at=now() WHERE id=$1 AND revision=$2 AND status NOT IN ('done','cancelled')`,
+          `UPDATE work_tasks SET status=CASE WHEN ($3='answer' OR ($3 IN ('awaiting_user','awaiting_approval') AND EXISTS(SELECT 1 FROM work_steps WHERE task_id=$1 AND status='blocked'))) AND used_ms<budget_ms AND used_models<budget_models AND used_tools<budget_tools AND EXISTS(SELECT 1 FROM work_steps WHERE task_id=$1 AND status='pending') THEN 'queued' ELSE 'paused' END,pause_reason=CASE WHEN $3='answer' THEN NULL ELSE $3 END,next_run=now()+interval '15 seconds',updated_at=now() WHERE id=$1 AND revision=$2 AND status NOT IN ('done','cancelled')`,
           [linked, snapshot.task.revision, reason],
         );
       }
@@ -499,6 +516,26 @@ export class Assistant {
           [inputId, user],
         );
       await event(this.db, user, run, "turn.failed");
+      if (taskId)
+        await this.db.query(
+          "UPDATE work_tasks SET status='paused',lease=NULL,pause_reason=$3,updated_at=now() WHERE id=$1 AND user_id=$2 AND status NOT IN ('done','cancelled')",
+          [
+            taskId,
+            user,
+            error instanceof ContextLimitError ? "context_limit" : "failed",
+          ],
+        );
+      if (error instanceof ContextLimitError) {
+        await event(this.db, user, run, "context.failed", {
+          sizes: error.sizes,
+          beforeModel: true,
+        });
+        return {
+          reply:
+            "I could not load the preceding exchange within the context limit, so I stopped before asking the model. Your original messages and saved results are retained; this needs context inspection.",
+          runId: run,
+        };
+      }
       throw error;
     } finally {
       this.capabilities.delete(capability);
@@ -511,7 +548,7 @@ export class Assistant {
   async call(capability: string, input: unknown, childRun?: string) {
     const scope = this.capabilities.get(capability);
     if (scope && this.controllers.get(scope.run)?.signal.aborted)
-      throw new Error("Task cancelled");
+      throw new NotDispatchedError("cancelled");
     if (!scope || scope.expires < Date.now())
       throw new Error("Invalid run capability");
     const turn = (
@@ -545,6 +582,12 @@ export class Assistant {
           "An uncertain write requires inspection before further writes",
         );
     }
+    // Authorization awaits above may overlap new input. This is the actual dispatcher boundary.
+    if (this.controllers.get(scope.run)?.signal.aborted)
+      throw new NotDispatchedError("cancelled");
+    const active = this.foreground.get(scope.user);
+    if (active?.run === scope.run && active.yield && !active.protectedMedia)
+      throw new NotDispatchedError("interrupted");
     const result = await this.tools.execute(
       scope.user,
       childRun ?? scope.run,

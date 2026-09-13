@@ -16,7 +16,7 @@ Implementation was divided into independently owned context, history and task-se
 
 Regression tests reproduce the structural failure using synthetic events and mocked models. They verify that a paused research task cannot become an unrelated calendar request, that new messages are received during long work, and that writes, approvals and restart state retain their existing protections. Actual model interpretation may still be wrong; the new traces make those mistakes distinguishable from missing or misrouted context.
 
-Independent review, passing CI and an operator migration/health check are required before release. See [the implementation and rollout guide](../rolling-conversation.md) for current behavior and recovery. The work does not add a semantic summarizer, automatic inbox replay, embeddings or a hidden thread per subject.
+The first independent Astra review requested changes for three gaps: input arriving during journal awaits could still dispatch an old write; storage selection could remove the recent exchange before context selection saw it; mixed-case task commands could enter the cancellation branch. We added regression cases and fixed the actual dispatch boundary, storage projection/protection and command normalization. Interrupted foreground jobs now pause instead of silently continuing skipped work. Final independent approval, passing CI and an operator migration/health check remain required before release. See [the implementation and rollout guide](../rolling-conversation.md) for current behavior and recovery. The work does not add a semantic summarizer, automatic inbox replay, embeddings or a hidden thread per subject.
 
 ## References
 

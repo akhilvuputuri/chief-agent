@@ -107,13 +107,14 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
       if (!claimed.rows.length) return;
       try {
         const id = control[2];
+        const name = control[1]!.toLowerCase();
         let text: string;
-        if (control[1] === "status") {
+        if (name === "status") {
           const work = new WorkTools(db);
           text = id
             ? renderWork(await work.snapshot(user, id))
             : renderWorkList(await work.list(user));
-        } else if (control[1] === "continue") {
+        } else if (name === "continue") {
           const result = await assistant.grant(user, id);
           text = result.rows.length
             ? "Another execution allocation is queued for the selected task. Completed steps are preserved."
