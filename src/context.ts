@@ -71,9 +71,13 @@ export function context(request: AgentRequest, messages: Message[]) {
     2000;
   // The newest completed exchange anchors short replies (including missing date/time answers).
   // Fixed schemas and unrelated state must never silently evict this conversational relationship.
-  const start = messages.findLastIndex(
-    (m) => m.role === "user" && m.content === request.message,
-  );
+  const start =
+    request.turnStart !== undefined &&
+    messages[request.turnStart]?.role === "user"
+      ? request.turnStart
+      : messages.findLastIndex(
+          (m) => m.role === "user" && m.content === request.message,
+        );
   const prior = start >= 0 ? messages.slice(0, start) : messages;
   const previousUser = prior.findLastIndex((m) => m.role === "user");
   const exchangeStart = previousUser >= 0 ? previousUser : 0;

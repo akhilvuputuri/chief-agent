@@ -1,3 +1,4 @@
+import { InputInbox } from "./input-inbox.js";
 import { ContextLimitError } from "./context.js";
 import { NotDispatchedError } from "./tool-errors.js";
 import { alignmentContext } from "./alignment.js";
@@ -14,6 +15,7 @@ import { recordContext } from "./record-context.js";
 import { compactWork } from "./observations.js";
 import {
   Execution,
+  Stop,
   defaultBudget,
   readOperations,
   type Budget,
@@ -40,6 +42,8 @@ export type Incoming = {
   messageId?: number;
   replyToMessageId?: number;
   receivedAt?: string;
+  preparing?: boolean;
+  voiceReply?: boolean;
 };
 export class Assistant {
   private queue = new SerialQueue();
@@ -48,29 +52,114 @@ export class Assistant {
     string,
     {
       run: string;
-      model: AbortController;
       yield: boolean;
-      protectedMedia: boolean;
+      revision: number;
     }
   >();
   private commits = new SerialQueue();
   private taskRuns = new Map<string, string>();
+  private inbox: InputInbox;
+  private outgoing = new Map<string, { run: string; cancelled: boolean }>();
   interruptForInput(user: string) {
     const active = this.foreground.get(user);
     if (active) {
       active.yield = true;
-      if (!active.protectedMedia) active.model.abort();
     }
   }
   async recordInput(user: string, message: string, metadata: Incoming = {}) {
     await ensureUser(this.db, user);
     const id = metadata.id ?? randomUUID();
-    await this.db.query(
-      "INSERT INTO conversation_inputs(id,user_id,message,metadata) VALUES($1,$2,$3,$4::jsonb) ON CONFLICT DO NOTHING",
-      [id, user, message, JSON.stringify(metadata)],
+    const inserted = await this.db.query(
+      "INSERT INTO conversation_inputs(id,user_id,message,metadata,preparation) VALUES($1,$2,$3,$4::jsonb,$5) ON CONFLICT DO NOTHING RETURNING id",
+      [
+        id,
+        user,
+        message,
+        JSON.stringify(metadata),
+        metadata.preparing ? "pending" : "ready",
+      ],
     );
-    this.interruptForInput(user);
+    if (inserted.rows.length) {
+      this.inbox.wake(user);
+      this.interruptForInput(user);
+    }
     return id;
+  }
+  async prepareInput(
+    user: string,
+    id: string,
+    message: string,
+    images?: ImageAttachment[],
+  ) {
+    try {
+      await this.inbox.ready(user, id, message, images);
+    } catch (error) {
+      await this.inbox.fail(user, id);
+      throw error;
+    }
+  }
+  async failInput(user: string, id: string) {
+    await this.inbox.fail(user, id);
+  }
+  async isCurrentRun(user: string, run: string) {
+    const active = this.foreground.get(user);
+    if (active?.run === run)
+      return (
+        !active.yield &&
+        !this.controllers.get(run)?.signal.aborted &&
+        this.isCurrentDelivery(user, {
+          reply: "",
+          runId: run,
+          inputRevision: active.revision,
+        })
+      );
+    return (
+      (
+        await this.db.query(
+          "SELECT 1 FROM work_turns w JOIN runtime_runs r ON r.id=w.run_id AND r.user_id=w.user_id WHERE w.user_id=$1 AND w.run_id=$2 AND w.background AND r.state='running'",
+          [user, run],
+        )
+      ).rows.length > 0
+    );
+  }
+  resetConversation(user: string) {
+    // Serialize behind earlier foreground commits, as reset did before intake was decoupled.
+    return this.queue.run(user, () =>
+      this.db.query(
+        "WITH contexts AS (DELETE FROM conversation_contexts WHERE user_id=$1) DELETE FROM conversations WHERE user_id=$1",
+        [user],
+      ),
+    );
+  }
+  finishDelivery(user: string, run: string) {
+    if (this.outgoing.get(user)?.run === run) this.outgoing.delete(user);
+  }
+  async isCurrentDelivery(user: string, delivery: Delivery) {
+    if (
+      this.outgoing.get(user)?.run === delivery.runId &&
+      this.outgoing.get(user)?.cancelled
+    )
+      return false;
+    if (delivery.inputRevision === undefined) return true;
+    const current = (
+      await this.db.query(
+        "SELECT coalesce(max(ordinal),0) AS revision FROM conversation_inputs WHERE user_id=$1",
+        [user],
+      )
+    ).rows[0];
+    const valid = Number(current.revision) === delivery.inputRevision;
+    if (!valid && delivery.runId)
+      await event(
+        this.db,
+        user,
+        delivery.runId,
+        "conversation.delivery_withheld",
+        {
+          inputRevision: delivery.inputRevision,
+          currentRevision: Number(current.revision),
+        },
+      );
+    return valid;
   }
   async recordDelivery(user: string, run: string, reply: string) {
     if (!reply) return;
@@ -94,18 +183,33 @@ export class Assistant {
       dailySheet: false,
     },
     private budget: Budget = defaultBudget,
-  ) {}
+  ) {
+    this.inbox = new InputInbox(db);
+  }
   shutdown() {
     for (const controller of this.controllers.values()) controller.abort();
   }
   async cancel(user: string, id?: string) {
     if (!id) {
       const active = this.foreground.get(user);
-      if (active) {
-        this.controllers.get(active.run)?.abort();
-        return { cancelled: true };
-      }
-      return { cancelled: false };
+      if (active) this.controllers.get(active.run)?.abort();
+      const outgoing = this.outgoing.get(user);
+      if (outgoing) outgoing.cancelled = true;
+      const pending = await this.db.query(
+        "UPDATE conversation_inputs SET state='failed',finished_at=now(),metadata=metadata || jsonb_build_object('parkedReason','cancelled') WHERE user_id=$1 AND state='queued' RETURNING id",
+        [user],
+      );
+      this.inbox.release(pending.rows.map((x) => x.id));
+      this.inbox.wake(user);
+      if (outgoing)
+        await event(
+          this.db,
+          user,
+          outgoing.run,
+          "conversation.delivery_cancelled",
+          {},
+        );
+      return { cancelled: Boolean(active || outgoing || pending.rows.length) };
     }
     const selected = (
       await this.db.query(
@@ -159,13 +263,34 @@ export class Assistant {
     progress?: (text: string, runId?: string) => Promise<void>,
     images?: ImageAttachment[],
     incoming: Incoming = {},
-  ) {
+  ): Promise<Delivery> {
     const inputId =
       incoming.id ?? (await this.recordInput(user, message, incoming));
-    return this.queue.run(user, () =>
-      this.turn(user, message, false, progress, images, undefined, inputId),
-    );
+    await this.prepareInput(user, inputId, message, images);
+    return this.queue.run(user, async () => {
+      const requested = (
+        await this.db.query(
+          "SELECT state FROM conversation_inputs WHERE user_id=$1 AND id=$2",
+          [user, inputId],
+        )
+      ).rows[0];
+      // Another foreground run may already have absorbed this handler's input.
+      if (requested?.state !== "queued") return { reply: "" };
+      const ready = await this.inbox.waitReady(user);
+      if (!ready.length) return { reply: "" };
+      const first = ready[0]!;
+      return this.turn(
+        user,
+        first.message,
+        false,
+        progress,
+        first.images,
+        undefined,
+        first.id,
+      );
+    });
   }
+
   async resume(
     user: string,
     id: string,
@@ -206,7 +331,7 @@ export class Assistant {
     images?: ImageAttachment[],
     taskId?: string,
     inputId?: string,
-  ) {
+  ): Promise<Delivery> {
     if (!message.trim() || message.length > 20000)
       throw new Error("Message must be between 1 and 20000 characters");
     await ensureUser(this.db, user);
@@ -215,12 +340,16 @@ export class Assistant {
     this.controllers.set(run, controller);
     const active = {
       run,
-      model: new AbortController(),
       yield: false,
-      protectedMedia: !!images?.length,
+      revision: 0,
     };
     if (!background) this.foreground.set(user, active);
     if (taskId) this.taskRuns.set(taskId, run);
+    const consumedIds: string[] = inputId ? [inputId] : [];
+    let currentInputId = inputId;
+    let requestSnapshot = message;
+    let voiceReply = false;
+    let managedDelivery = false;
     const capability = randomBytes(32).toString("hex");
     this.capabilities.set(capability, {
       user,
@@ -264,13 +393,16 @@ export class Assistant {
       if (background && previousRun) {
         const previousTurn = (
           await this.db.query(
-            "SELECT request,background FROM work_turns WHERE run_id=$1 AND user_id=$2",
+            "SELECT w.request,w.background,(SELECT message FROM conversation_inputs i WHERE i.user_id=w.user_id AND i.run_id=w.run_id ORDER BY ordinal LIMIT 1) AS initial_input FROM work_turns w WHERE run_id=$1 AND user_id=$2",
             [previousRun, user],
           )
         ).rows[0];
         if (previousTurn && !previousTurn.background) {
           const anchor = history.findLastIndex(
-            (m) => m.role === "user" && m.content === previousTurn.request,
+            (m) =>
+              m.role === "user" &&
+              m.content ===
+                (previousTurn.initial_input ?? previousTurn.request),
           );
           history = anchor >= 0 ? history.slice(anchor) : [];
         }
@@ -296,24 +428,21 @@ export class Assistant {
         this.budget,
       );
       await execution.start();
-      if (inputId)
-        await this.db.query(
-          "UPDATE conversation_inputs SET state='running',run_id=$3,started_at=now() WHERE id=$1 AND user_id=$2",
-          [inputId, user, run],
+      if (inputId) {
+        const claimed = await this.db.query(
+          "UPDATE conversation_inputs SET state='running',run_id=$3,started_at=now(),consumed_at=now(),message_index=$4 WHERE id=$1 AND user_id=$2 AND state='queued' RETURNING ordinal,metadata",
+          [inputId, user, run, history.length],
         );
-      if (
-        !background &&
-        inputId &&
-        (
-          await this.db.query(
-            "SELECT 1 FROM conversation_inputs WHERE user_id=$1 AND state='queued' AND ordinal>(SELECT ordinal FROM conversation_inputs WHERE id=$2 AND user_id=$1) LIMIT 1",
-            [user, inputId],
-          )
-        ).rows.length
-      ) {
-        active.yield = true;
-        if (!active.protectedMedia) active.model.abort();
+        if (!claimed.rows.length) throw new Error("Input already consumed");
+        active.revision = Number(claimed.rows[0].ordinal);
+        voiceReply = claimed.rows[0].metadata.voiceReply === true;
+        managedDelivery = claimed.rows[0].metadata.updateId !== undefined;
       }
+      const initialVersion = this.inbox.version(user);
+      active.yield =
+        !background &&
+        ((await this.inbox.pending(user)).length > 0 ||
+          initialVersion !== this.inbox.version(user));
       const conversation = background
         ? {
             summary: "",
@@ -356,60 +485,119 @@ export class Assistant {
           )
         ).rows,
       });
+      const request: AgentRequest = {
+        runId: run,
+        capability,
+        message,
+        ...(images?.length ? { images } : {}),
+        history,
+        historyOmitted: stored.omitted,
+        turnStart: history.length,
+        conversationSummary: conversation.summary,
+        shouldYield: background ? undefined : () => active.yield,
+        steer: background
+          ? undefined
+          : async () => {
+              if (controller.signal.aborted) throw new Stop("cancelled");
+              const bound = (
+                await this.db.query(
+                  "SELECT task_id FROM work_turns WHERE user_id=$1 AND run_id=$2",
+                  [user, run],
+                )
+              ).rows[0]?.task_id;
+              if (bound && (await this.inbox.pending(user)).length) {
+                await execution.trace("conversation.task_handoff", {
+                  taskId: bound,
+                });
+                throw new Stop("interrupted");
+              }
+              const ready = await this.inbox.waitReady(user, controller.signal);
+              const adopted: Array<{ id: string; message: string }> = [];
+              for (const input of ready) {
+                const claim = await this.db.query(
+                  "UPDATE conversation_inputs SET state='running',run_id=$3,started_at=now(),consumed_at=now() WHERE user_id=$1 AND id=$2 AND state='queued' AND preparation='ready' RETURNING id",
+                  [user, input.id, run],
+                );
+                if (!claim.rows.length) continue;
+                consumedIds.push(input.id);
+                currentInputId = input.id;
+                active.revision = input.ordinal;
+                voiceReply = input.metadata.voiceReply === true;
+                adopted.push({ id: input.id, message: input.message });
+                request.message = input.message;
+                if (input.images?.length)
+                  request.images = [...(request.images ?? []), ...input.images];
+                requestSnapshot += `\n\nUser follow-up (${input.id}):\n${input.message}`;
+              }
+              // Do not overwrite a wakeup that arrives during an awaited state read.
+              const version = this.inbox.version(user);
+              const pending = await this.inbox.pending(user);
+              active.yield =
+                pending.length > 0 || version !== this.inbox.version(user);
+              if (adopted.length) {
+                await this.db.query(
+                  "UPDATE work_turns SET request=$3 WHERE user_id=$1 AND run_id=$2",
+                  [user, run, requestSnapshot],
+                );
+                const updated = await conversationState(
+                  this.db,
+                  user,
+                  currentInputId,
+                );
+                runtime.context = JSON.stringify({
+                  ...JSON.parse(runtime.context),
+                  conversation: {
+                    ...JSON.parse(runtime.context).conversation,
+                    replyTarget: updated.replyTarget,
+                    latestInputId: currentInputId,
+                    consumedInputIds: consumedIds,
+                  },
+                });
+                await execution.trace("conversation.inputs_consumed", {
+                  inputIds: adopted.map((x) => x.id),
+                  inputRevision: active.revision,
+                });
+              }
+              return adopted;
+            },
+        memories,
+        runtime,
+        progress: progress ? (text) => progress(text, run) : undefined,
+        execution,
+        signal: controller.signal,
+        execute: (input) => this.call(capability, input),
+        executeResearch: async (childRun, input) => {
+          const op = (input as any)?.operation;
+          if (!researchReads.has(op)) throw new Error("Operation unavailable");
+          const child = await this.db.query(
+            "SELECT 1 FROM runtime_runs r JOIN events e ON e.run_id=r.id AND e.user_id=r.user_id WHERE r.id=$1 AND r.user_id=$2 AND r.state='running' AND e.type='research.child_started' AND e.data->>'parentRunId'=$3",
+            [childRun, user, run],
+          );
+          if (!child.rows.length) throw new Error("Research scope unavailable");
+          return this.call(capability, input, childRun);
+        },
+        refreshContext: async () => {
+          runtime.context = JSON.stringify({
+            ...JSON.parse(runtime.context),
+            work: await (async () => {
+              const bound = (
+                await this.db.query(
+                  "SELECT task_id FROM work_turns WHERE run_id=$1 AND user_id=$2",
+                  [run, user],
+                )
+              ).rows[0]?.task_id;
+              return bound
+                ? compactWork(await work.snapshot(user, bound))
+                : null;
+            })(),
+            costUsage: await spending.getStore()!.summary(),
+            alignmentScopes: await alignmentContext(this.db, user, run),
+            retrievedCollections: await recordContext(this.db, user, run),
+          });
+        },
+      };
       const output = await spending.run(new Spending(this.db, user, run), () =>
-        this.agent.run({
-          runId: run,
-          capability,
-          message,
-          ...(images?.length ? { images } : {}),
-          history,
-          historyOmitted: stored.omitted,
-          conversationSummary: conversation.summary,
-          shouldYield: background
-            ? undefined
-            : () => active.yield && !active.protectedMedia,
-          afterTool: (operation) => {
-            if (operation === "media_delegate") active.protectedMedia = false;
-          },
-          modelSignal: background ? undefined : active.model.signal,
-          memories,
-          runtime,
-          progress: progress ? (text) => progress(text, run) : undefined,
-          execution,
-          signal: controller.signal,
-          execute: (input) => this.call(capability, input),
-          executeResearch: async (childRun, input) => {
-            const op = (input as any)?.operation;
-            if (!researchReads.has(op))
-              throw new Error("Operation unavailable");
-            const child = await this.db.query(
-              "SELECT 1 FROM runtime_runs r JOIN events e ON e.run_id=r.id AND e.user_id=r.user_id WHERE r.id=$1 AND r.user_id=$2 AND r.state='running' AND e.type='research.child_started' AND e.data->>'parentRunId'=$3",
-              [childRun, user, run],
-            );
-            if (!child.rows.length)
-              throw new Error("Research scope unavailable");
-            return this.call(capability, input, childRun);
-          },
-          refreshContext: async () => {
-            runtime.context = JSON.stringify({
-              ...JSON.parse(runtime.context),
-              work: await (async () => {
-                const bound = (
-                  await this.db.query(
-                    "SELECT task_id FROM work_turns WHERE run_id=$1 AND user_id=$2",
-                    [run, user],
-                  )
-                ).rows[0]?.task_id;
-                return bound
-                  ? compactWork(await work.snapshot(user, bound))
-                  : null;
-              })(),
-              costUsage: await spending.getStore()!.summary(),
-              alignmentScopes: await alignmentContext(this.db, user, run),
-              retrievedCollections: await recordContext(this.db, user, run),
-            });
-          },
-        }),
+        this.agent.run(request),
       );
       if (
         (
@@ -419,6 +607,40 @@ export class Assistant {
         ).rows[0]?.state === "running"
       )
         await execution.finish(output.stopReason ?? "answer");
+      if (
+        !background &&
+        ["budget_exhausted", "cancelled", "failed"].includes(
+          output.stopReason ?? "",
+        )
+      ) {
+        const bound = (
+          await this.db.query(
+            "SELECT task_id FROM work_turns WHERE user_id=$1 AND run_id=$2",
+            [user, run],
+          )
+        ).rows[0]?.task_id;
+        if (!bound) {
+          // Inputs already waiting at stop time must not turn into free fresh allocations.
+          const parked = await this.db.query(
+            "UPDATE conversation_inputs SET state='failed',finished_at=now(),metadata=metadata || jsonb_build_object('parkedReason',$2::text,'parkedByRun',$3::text) WHERE user_id=$1 AND state='queued' RETURNING id,ordinal",
+            [user, output.stopReason, run],
+          );
+          if (parked.rows.length) {
+            active.revision = Math.max(
+              active.revision,
+              ...parked.rows.map((x) => Number(x.ordinal)),
+            );
+            this.inbox.release(parked.rows.map((x) => x.id));
+            this.inbox.wake(user);
+            await execution.trace("conversation.inputs_parked", {
+              inputIds: parked.rows.map((x) => x.id),
+              reason: output.stopReason,
+            });
+            output.reply +=
+              " Additional queued messages were saved but not executed. Send them again when you want to start another request.";
+          }
+        }
+      }
       // Only new turn messages enter the conversation. Earlier context is already stored.
       if (!background) {
         const next = output.history as Message[];
@@ -427,7 +649,21 @@ export class Assistant {
         )
           throw new Error("Agent changed prior conversation history");
         await this.commits.run(user, () =>
-          histories.appendConversation(user, run, next.slice(history.length)),
+          histories.appendConversation(
+            user,
+            run,
+            next
+              .slice(history.length)
+              .filter(
+                (_, index) =>
+                  !output.undeliveredMessageIndices?.includes(
+                    index + history.length,
+                  ),
+              ),
+            managedDelivery
+              ? { pending: true, reply: output.reply }
+              : undefined,
+          ),
         );
         if (output.stopReason !== "interrupted")
           await saveConversationState(
@@ -435,15 +671,15 @@ export class Assistant {
             user,
             run,
             conversation.summary,
-            message,
+            requestSnapshot,
             output.reply,
             output.stopReason,
           );
         if (inputId)
           await this.db.query(
-            "UPDATE conversation_inputs SET state=$3,finished_at=now() WHERE id=$1 AND user_id=$2",
+            "UPDATE conversation_inputs SET state=$3,finished_at=now() WHERE id=ANY($1::uuid[]) AND user_id=$2",
             [
-              inputId,
+              consumedIds,
               user,
               output.stopReason === "interrupted"
                 ? "interrupted"
@@ -494,6 +730,8 @@ export class Assistant {
           [linked, snapshot.task.revision, reason],
         );
       }
+      if (!background && managedDelivery && output.reply)
+        this.outgoing.set(user, { run, cancelled: controller.signal.aborted });
       return {
         reply: output.reply,
         canvases: output.canvases,
@@ -502,6 +740,7 @@ export class Assistant {
         sections: output.sections,
         sources: output.sources,
         runId: run,
+        ...(!background ? { inputRevision: active.revision, voiceReply } : {}),
         // Approval notices also get their own always-visible delivery; views never authorize them.
         notices,
       };
@@ -512,8 +751,8 @@ export class Assistant {
       );
       if (inputId)
         await this.db.query(
-          "UPDATE conversation_inputs SET state='failed',finished_at=now() WHERE id=$1 AND user_id=$2",
-          [inputId, user],
+          "UPDATE conversation_inputs SET state='failed',finished_at=now() WHERE id=ANY($1::uuid[]) AND user_id=$2",
+          [consumedIds, user],
         );
       await event(this.db, user, run, "turn.failed");
       if (taskId)
@@ -538,6 +777,7 @@ export class Assistant {
       }
       throw error;
     } finally {
+      this.inbox.release(consumedIds);
       this.capabilities.delete(capability);
       this.controllers.delete(run);
       if (this.foreground.get(user)?.run === run) this.foreground.delete(user);
@@ -586,7 +826,7 @@ export class Assistant {
     if (this.controllers.get(scope.run)?.signal.aborted)
       throw new NotDispatchedError("cancelled");
     const active = this.foreground.get(scope.user);
-    if (active?.run === scope.run && active.yield && !active.protectedMedia)
+    if (active?.run === scope.run && active.yield)
       throw new NotDispatchedError("interrupted");
     const result = await this.tools.execute(
       scope.user,

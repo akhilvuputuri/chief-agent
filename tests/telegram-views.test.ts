@@ -24,6 +24,7 @@ async function fixture() {
     "008_costs",
     "012_message_storage",
     "013_conversation_control",
+    "014_checkpoint_steering",
     "009_calendar_approval",
   ])
     await pg.exec(

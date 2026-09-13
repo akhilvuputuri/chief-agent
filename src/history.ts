@@ -9,7 +9,7 @@ import { completeMessageGroups } from "./context-continuity.js";
 
 // Tool outputs include copies of earlier search results. They remain immutable history,
 // but are not original conversational evidence and must never become fresh search hits.
-const conversational = `c.payload->>'role' IN ('user','assistant')
+const conversational = `e.delivery_state IN ('recorded','sent') AND c.payload->>'role' IN ('user','assistant')
   AND jsonb_typeof(c.payload->'content')='string'
   AND length(btrim(c.payload->>'content'))>0
   AND NOT (c.payload ? 'tool_call_id')
@@ -77,8 +77,21 @@ export class HistoryStore {
   }
 
   /** Commit only this run's new conversation suffix, tolerating another completed run's append. */
-  async appendConversation(user: string, run: string, messages: Message[]) {
-    await this.appendRunConversation(user, run, messages, false);
+  async appendConversation(
+    user: string,
+    run: string,
+    messages: Message[],
+    delivery?: { pending: boolean; reply: string },
+  ) {
+    const pending = delivery?.pending
+      ? messages.findLastIndex(
+          (m) =>
+            m.role === "assistant" &&
+            !m.tool_calls?.length &&
+            m.content === delivery.reply,
+        )
+      : -1;
+    await this.appendRunConversation(user, run, messages, false, pending);
   }
 
   /** Call after a background reply was delivered; internal worker messages stay in the run journal. */
@@ -92,11 +105,19 @@ export class HistoryStore {
     );
   }
 
+  async markDelivered(user: string, run: string) {
+    await this.db.query(
+      "UPDATE conversation_messages SET delivery_state='sent' WHERE user_id=$1 AND run_id=$2 AND delivery_state='pending'",
+      [user, run],
+    );
+  }
+
   private async appendRunConversation(
     user: string,
     run: string,
     messages: Message[],
     delivery: boolean,
+    pendingIndex = -1,
   ) {
     if (!messages.length) return;
     await this.db.query(
@@ -126,8 +147,8 @@ export class HistoryStore {
         SELECT DISTINCT $1,i.hash,i.payload,length(i.payload::text) FROM input i WHERE EXISTS(SELECT 1 FROM guard)
         ON CONFLICT DO NOTHING RETURNING hash
       ), refs AS (
-        INSERT INTO conversation_messages(user_id,ordinal,hash,run_id)
-        SELECT $1,i.ordinal,i.hash,$2::uuid FROM input i WHERE EXISTS(SELECT 1 FROM guard)
+        INSERT INTO conversation_messages(user_id,ordinal,hash,run_id,delivery_state)
+        SELECT $1,i.ordinal,i.hash,$2::uuid,CASE WHEN i.ordinal-$3=$6 THEN 'pending' ELSE 'recorded' END FROM input i WHERE EXISTS(SELECT 1 FROM guard)
         RETURNING id
       ), delivered AS (
         INSERT INTO events(user_id,run_id,type,data)
@@ -135,7 +156,7 @@ export class HistoryStore {
         FROM refs CROSS JOIN owner_run WHERE $5::boolean RETURNING id
       ) SELECT (SELECT count(*)::int FROM refs) AS saved,prior.count AS existing,prior.identical,
         EXISTS(SELECT 1 FROM owner_run) AS owned FROM prior`,
-        [user, run, expected, JSON.stringify(messages), delivery],
+        [user, run, expected, JSON.stringify(messages), delivery, pendingIndex],
       );
       const row = result.rows[0];
       if (!row?.owned) throw new Error("Conversation run not found");
@@ -170,7 +191,9 @@ export class HistoryStore {
     const count = await this.count(user, run);
     if (!count) return { messages: [], omitted: 0, total: 0 };
     const entries = run ? "run_messages" : "conversation_messages";
-    const scope = run ? "AND e.run_id=$2::uuid" : "AND $2::uuid IS NULL";
+    const scope = run
+      ? "AND e.run_id=$2::uuid"
+      : "AND $2::uuid IS NULL AND e.delivery_state IN ('recorded','sent')";
     const rows = (
       await this.db.query(
         `WITH anchor AS (
@@ -305,7 +328,7 @@ export class HistoryStore {
         EXISTS(SELECT 1 FROM events d WHERE d.user_id=e.user_id AND d.run_id=e.run_id AND d.type='conversation.delivery' AND d.data->>'messageId'=e.id::text) AS delivered
       FROM conversation_messages e JOIN message_contents c USING(user_id,hash)
       LEFT JOIN runtime_runs r ON r.user_id=e.user_id AND r.id=e.run_id
-      WHERE e.user_id=$1 AND e.id=$2`,
+      WHERE e.user_id=$1 AND e.id=$2 AND e.delivery_state IN ('recorded','sent')`,
         [user, id, offset],
       )
     ).rows[0];

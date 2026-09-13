@@ -1,3 +1,4 @@
+import { HistoryStore } from "./history.js";
 import { Canvases } from "./canvases.js";
 import { randomUUID } from "node:crypto";
 import type { Api } from "grammy";
@@ -57,6 +58,8 @@ export class TelegramViews {
     chat: string,
     view: View,
     run: string = randomUUID(),
+    guard?: () => Promise<boolean>,
+    onSent?: () => Promise<void>,
   ) {
     const id = randomUUID();
     if (view.kind === "task" && !view.id) {
@@ -88,11 +91,13 @@ export class TelegramViews {
       "telegram.view_state",
       state as unknown as Record<string, unknown>,
     );
+    if (guard && !(await guard())) return;
     const sent = await this.api.sendMessage(chat, rendered.text, {
       entities: rendered.entities,
       reply_markup: keyboard(id, state),
       link_preview_options: { is_disabled: true },
     });
+    await onSent?.();
     state.message = sent.message_id;
     await this.db.query(
       "UPDATE events SET data=$3::jsonb WHERE run_id=$1 AND user_id=$2 AND type='telegram.view_state'",
@@ -192,6 +197,7 @@ export class TelegramViews {
     chat: string,
     input: string | Delivery,
     kind: "answer" | "progress" | "schedule" = "answer",
+    guard?: () => Promise<boolean>,
   ) {
     const delivery = typeof input === "string" ? { reply: input } : input;
     const answer = answerSchema.parse({
@@ -213,14 +219,27 @@ export class TelegramViews {
         answer.numbers?.length
       );
     const run = delivery.runId ?? randomUUID();
+    const onSent =
+      kind === "answer"
+        ? () => new HistoryStore(this.db).markDelivered(user, run)
+        : undefined;
     if (interactive)
-      await this.open(user, chat, { kind: "answer", answer }, run);
+      await this.open(
+        user,
+        chat,
+        { kind: "answer", answer },
+        run,
+        guard,
+        onSent,
+      );
     else
       for (const part of parts) {
+        if (guard && !(await guard())) return;
         const sent = await this.api.sendMessage(chat, part.text, {
           entities: part.entities,
           link_preview_options: { is_disabled: true },
         });
+        await onSent?.();
         await event(this.db, user, run, "telegram.message_sent", {
           messageId: sent.message_id,
           kind,
@@ -252,6 +271,7 @@ export class TelegramViews {
         }
       }
       if (buttons.length) {
+        if (guard && !(await guard())) return;
         await this.api.sendMessage(chat, "Open saved canvases", {
           reply_markup: { inline_keyboard: buttons },
         });
@@ -262,6 +282,7 @@ export class TelegramViews {
     let noticeMessages = 0;
     for (const notice of delivery.notices ?? [])
       for (const part of formatTelegram(notice)) {
+        if (guard && !(await guard())) return;
         await this.api.sendMessage(chat, part.text, {
           entities: part.entities,
         });

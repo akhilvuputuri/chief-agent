@@ -290,7 +290,10 @@ test("a background job uses its exact history and allocation while foreground an
   }
 });
 
-test("new foreground input aborts the active model and the next request retains the latest exchange", async () => {
+test("new foreground input waits for the model checkpoint and retains the latest exchange in one run", async () => {
+  const release = deferred<Generation>();
+  let first: ReturnType<Assistant["respondDetailed"]> | undefined;
+  let second: ReturnType<Assistant["respondDetailed"]> | undefined;
   const entered = deferred<Input>();
   const inputs: Input[] = [];
   const f = await fixture({
@@ -298,15 +301,7 @@ test("new foreground input aborts the active model and the next request retains 
       inputs.push(input);
       if (latestUser(input) === "Check the slower option") {
         entered.resolve(input);
-        return new Promise<Generation>((_, reject) => {
-          if (input.signal.aborted) reject(input.signal.reason);
-          else
-            input.signal.addEventListener(
-              "abort",
-              () => reject(input.signal.reason),
-              { once: true },
-            );
-        });
+        return release.promise;
       }
       return text(
         latestUser(input) === "What details do you need?"
@@ -317,22 +312,32 @@ test("new foreground input aborts the active model and the next request retains 
   });
   try {
     await f.assistant.respond("owner", "What details do you need?");
-    const first = f.assistant.respondDetailed(
-      "owner",
-      "Check the slower option",
-    );
+    first = f.assistant.respondDetailed("owner", "Check the slower option");
     const active = await bounded(entered.promise, "first foreground model");
-    const second = f.assistant.respondDetailed(
+    const id = await f.assistant.recordInput(
       "owner",
       "Use the newer option tomorrow instead",
     );
-    const [stopped, answered] = await bounded(
+    second = f.assistant.respondDetailed(
+      "owner",
+      "Use the newer option tomorrow instead",
+      undefined,
+      undefined,
+      { id },
+    );
+    assert.equal(active.signal.aborted, false);
+    release.resolve(text("Stale slower-option answer"));
+    const [answered, absorbed] = await bounded(
       Promise.all([first, second]),
       "corrected foreground turn",
     );
-    assert.equal(active.signal.aborted, true);
-    assert.equal(stopped.reply, "");
+    assert.equal(active.signal.aborted, false);
+    assert.equal(absorbed.reply, "");
     assert.equal(answered.reply, "I will use the newer option for tomorrow.");
+    assert.equal(
+      new Set(inputs.slice(1).map((input) => input.sessionId)).size,
+      1,
+    );
     const next = inputs.find(
       (input) => latestUser(input) === "Use the newer option tomorrow instead",
     )!;
@@ -346,10 +351,10 @@ test("new foreground input aborts the active model and the next request retains 
     assert.equal(
       (
         await f.db.query("SELECT stop_reason FROM runtime_runs WHERE id=$1", [
-          stopped.runId,
+          answered.runId,
         ])
       ).rows[0].stop_reason,
-      "interrupted",
+      "answer",
     );
     const records = (
       await f.db.query(
@@ -362,12 +367,17 @@ test("new foreground input aborts the active model and the next request retains 
         records.map((record) => [record.message, record.state]),
       ),
       {
-        "Check the slower option": "interrupted",
+        "Check the slower option": "completed",
         "Use the newer option tomorrow instead": "completed",
       },
     );
   } finally {
+    release.resolve(text("Cleanup"));
     f.assistant.shutdown();
+    await bounded(
+      Promise.allSettled([first, second].filter(Boolean)),
+      "foreground cleanup",
+    );
     await f.pg.close();
   }
 });
@@ -423,27 +433,31 @@ test("new input waits for a dispatched write, records its result and marks remai
       [{ operation: "sheet_sync", state: "started" }],
     );
     finishWrite.resolve();
-    const [stopped, answered] = await bounded(
+    const [answered, absorbed] = await bounded(
       Promise.all([first, second]),
       "write completion and correction",
     );
-    assert.equal(stopped.reply, "");
+    assert.equal(absorbed.reply, "");
     assert.equal(
       answered.reply,
       "I received the correction after the export completed.",
     );
+    assert.equal(new Set(inputs.map((input) => input.sessionId)).size, 1);
     assert.equal(writes, 1);
     assert.equal((await f.db.query("SELECT key FROM memories")).rows.length, 0);
     assert.deepEqual(
       (
         await f.db.query(
           "SELECT operation,state FROM runtime_calls WHERE run_id=$1",
-          [stopped.runId],
+          [answered.runId],
         )
       ).rows,
       [{ operation: "sheet_sync", state: "success" }],
     );
-    const history = await new HistoryStore(f.db).recent("owner", stopped.runId);
+    const history = await new HistoryStore(f.db).recent(
+      "owner",
+      answered.runId,
+    );
     const notDispatched = history.messages.find(
       (message) => message.tool_call_id === skipped.id,
     )!;
@@ -1053,7 +1067,7 @@ test("large stored reasoning cannot erase the latest target and clarification be
   }
 });
 
-test("input queued before a foreground controller starts still supersedes old reasoning", async () => {
+test("inputs queued before a foreground controller starts are consumed together once", async () => {
   const seen: Input[] = [];
   const f = await fixture({
     generate: async (input) => {
@@ -1071,15 +1085,16 @@ test("input queued before a foreground controller starts still supersedes old re
       undefined,
       { id: first },
     );
-    assert.equal(old.reply, "");
-    assert.equal(seen.length, 0);
-    await f.assistant.respondDetailed(
+    assert.equal(old.reply, "I will use the correction.");
+    assert.equal(seen.length, 1);
+    const absorbed = await f.assistant.respondDetailed(
       "owner",
       "Actually use 9am",
       undefined,
       undefined,
       { id: second },
     );
+    assert.equal(absorbed.reply, "");
     assert.equal(seen.length, 1);
     assert.equal(latestUser(seen[0]!), "Actually use 9am");
     assert.ok(
@@ -1093,7 +1108,7 @@ test("input queued before a foreground controller starts still supersedes old re
           first,
         ])
       ).rows[0].state,
-      "interrupted",
+      "completed",
     );
   } finally {
     await f.pg.close();

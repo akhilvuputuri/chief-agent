@@ -1,5 +1,7 @@
 # Companion Agent
 
+Released baseline: v0.3.8 (`d0e33365c7cec7b7cb1eb64c22de7c09d5d9a314`). Candidate v0.3.9 adds ordered input steering at model/tool checkpoints, concurrent file/voice preparation and delivery-aware history. It requires review, migration014 and verified deployment; see [checkpoint steering and rollout](docs/checkpoint-steering.md).
+
 **A personal assistant with a TypeScript agent runtime we own.** Talk to it through Telegram text or voice, ask it to research, maintain notes, plan preparation, and manage reminders. Postgres is the durable source of truth; Google Sheets gives you a familiar viewing surface.
 
 Repository: https://github.com/akhilvuputuri/companion-agent.

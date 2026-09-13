@@ -1,4 +1,12 @@
-# Current work: rolling conversation control
+# Current work: checkpoint steering
+
+Released baseline v0.3.8 is `d0e33365c7cec7b7cb1eb64c22de7c09d5d9a314`. Candidate v0.3.9 on `feature/checkpoint-steering` lets ordinary follow-ups join the same unbound run at model/tool checkpoints, preserves completed results, stops unstarted calls and separates input preparation from execution and delivery. Explicit cancellation still aborts; task-bound runs pause and hand off. See [behavior, tests and migration014 rollout](checkpoint-steering.md) and [journal 18](journey/18-checkpoint-steering.md).
+
+Next: finish integrated checks, exact-head independent Astra review, CI and merge, then the reviewed baseline-pinned operator deployment and exact-SHA health/data verification. The candidate is not deployed. No automatic input replay, extra allocation, active-work cancellation, data reset or paid evaluation is part of this rollout. Existing models/provider/voice/Google settings and deferred branches remain unchanged.
+
+The entries below preserve earlier checkpoint states. Their pending-release statements are historical; the baseline above supersedes the v0.3.8 candidate status.
+
+# Historical v0.3.8 candidate notes: rolling conversation control
 
 Candidate v0.3.8 on `feature/rolling-conversation` replaces implicit owner-global task routing with a foreground conversation and independently selected background jobs. Context preserves the current exchange; history search uses original messages; pending questions retain source IDs; incoming messages are persisted before waiting and can interrupt model reasoning. See [implementation, tests and migration](rolling-conversation.md) and [development journal](journey/17-rolling-conversation.md).
 

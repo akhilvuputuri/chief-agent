@@ -9,7 +9,7 @@ export async function conversationState(
 ) {
   const previous = (
     await db.query(
-      "SELECT id,summary,pending_reply,run_id FROM conversation_contexts WHERE user_id=$1 ORDER BY id DESC LIMIT 1",
+      "SELECT id,summary,pending_reply,run_id FROM conversation_contexts x WHERE user_id=$1 AND NOT EXISTS(SELECT 1 FROM conversation_messages m WHERE m.user_id=x.user_id AND m.run_id=x.run_id AND m.delivery_state='pending') ORDER BY id DESC LIMIT 1",
       [user],
     )
   ).rows[0];
@@ -18,7 +18,7 @@ export async function conversationState(
     await db.query(
       `SELECT e.id,e.ordinal,c.payload->>'role' AS role,left(c.payload->>'content',2000) AS content
      FROM conversation_messages e JOIN message_contents c USING(user_id,hash)
-     WHERE e.user_id=$1 AND c.payload->>'role' IN ('user','assistant')
+     WHERE e.user_id=$1 AND e.delivery_state IN ('recorded','sent') AND c.payload->>'role' IN ('user','assistant')
        AND NOT (c.payload ? 'tool_calls')
      ORDER BY e.ordinal DESC LIMIT 40`,
       [user],
@@ -50,13 +50,13 @@ export async function conversationState(
       if (target) {
         const question = (
           await db.query(
-            "SELECT pending_reply FROM conversation_contexts WHERE user_id=$1 AND run_id=$2",
+            "SELECT pending_reply FROM conversation_contexts x WHERE user_id=$1 AND run_id=$2 AND NOT EXISTS(SELECT 1 FROM conversation_messages m WHERE m.user_id=x.user_id AND m.run_id=x.run_id AND m.delivery_state='pending')",
             [user, target.run_id],
           )
         ).rows[0]?.pending_reply;
         const text = (
           await db.query(
-            `SELECT left(c.payload->>'content',3000) AS content FROM conversation_messages e JOIN message_contents c USING(user_id,hash) WHERE e.user_id=$1 AND e.run_id=$2 AND c.payload->>'role'='assistant' AND NOT(c.payload ? 'tool_calls') ORDER BY ordinal DESC LIMIT 1`,
+            `SELECT left(c.payload->>'content',3000) AS content FROM conversation_messages e JOIN message_contents c USING(user_id,hash) WHERE e.user_id=$1 AND e.run_id=$2 AND e.delivery_state IN ('recorded','sent') AND c.payload->>'role'='assistant' AND NOT(c.payload ? 'tool_calls') ORDER BY ordinal DESC LIMIT 1`,
             [user, target.run_id],
           )
         ).rows[0]?.content;

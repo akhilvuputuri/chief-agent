@@ -66,15 +66,61 @@ export class CustomAgent implements Agent {
       ...(req.history as Message[]),
       { role: "user", content: req.message } as Message,
     ];
-    const tools = [...(req.runtime?.tools ?? []), finishTool];
-    const enabled = new Set(tools.map((t) => t.name));
+    let tools = [...(req.runtime?.tools ?? []), finishTool];
+    let enabled = new Set(tools.map((t) => t.name));
+    const undeliveredMessageIndices: number[] = [];
+    const steer = async () => {
+      if (req.signal!.aborted) throw new Stop("cancelled");
+      if (!req.shouldYield?.()) return false;
+      if (!req.steer) throw new Stop("interrupted");
+      const inputs = await req.steer();
+      for (const input of inputs) {
+        messages.push({ role: "user", content: input.message });
+        await execution.db.query(
+          "UPDATE conversation_inputs SET message_index=$4 WHERE id=$1 AND user_id=$2 AND run_id=$3 AND state='running'",
+          [input.id, execution.user, execution.run, messages.length - 1],
+        );
+      }
+      if (inputs.length) req.message = inputs.at(-1)!.message;
+      await execution.checkpoint(messages);
+      if (inputs.length)
+        await execution.trace("input.checkpointed", {
+          inputs: inputs.map((input, index) => ({
+            inputId: input.id,
+            messageIndex: messages.length - inputs.length + index,
+          })),
+        });
+      return true;
+    };
     let answer: Answer | undefined;
     let reply = "",
       reason: StopReason = "answer";
+    const prepareReply = async (indices: number[]) => {
+      const approval =
+        reason === "answer" &&
+        (
+          await execution.db.query(
+            "SELECT 1 FROM approvals WHERE user_id=$1 AND run_id=$2 AND status='pending' AND expires_at>now() LIMIT 1",
+            [execution.user, execution.run],
+          )
+        ).rows.length;
+      // The final journal/approval lookups can receive input too. Keep the full
+      // response in this run, but omit any undelivered assistant text from chat.
+      if (req.shouldYield?.() || req.signal!.aborted) {
+        undeliveredMessageIndices.push(...indices);
+        answer = undefined;
+        reply = "";
+        reason = "answer";
+        await steer();
+        return true;
+      }
+      if (approval) reason = "awaiting_approval";
+      return false;
+    };
     await execution.checkpoint(messages);
     try {
-      while (true) {
-        if (req.shouldYield?.()) throw new Stop("interrupted");
+      turn: while (true) {
+        if (await steer()) continue;
         let generation;
         let invocationId = "";
         for (let attempt = 0; ; attempt++) {
@@ -88,12 +134,18 @@ export class CustomAgent implements Agent {
               attempt,
             });
             await req.refreshContext?.();
+            tools = [...(req.runtime?.tools ?? []), finishTool];
+            enabled = new Set(tools.map((t) => t.name));
             const input = context(
               {
                 ...req,
                 runtime: { context: req.runtime?.context ?? "", tools },
               },
-              messages,
+              // Undelivered finals remain in the immutable journal, but must not
+              // look like something the user already heard in subsequent context.
+              messages.filter(
+                (_, index) => !undeliveredMessageIndices.includes(index),
+              ),
             );
             await execution.trace("context.selected", {
               fixedSize: input.fixedSize,
@@ -126,6 +178,9 @@ export class CustomAgent implements Agent {
                 reasoning: "medium",
                 omitted: input.omitted,
               });
+            // Context/journal writes are await points, so recheck before starting a model.
+            if (req.signal.aborted) throw new Stop("cancelled");
+            if (req.shouldYield?.()) continue turn;
             generation = await model.generate({
               messages: input.messages,
               tools,
@@ -166,7 +221,7 @@ export class CustomAgent implements Agent {
               latencyMs: Date.now() - start,
             });
             if (req.signal.aborted) throw new Stop("cancelled");
-            if (req.shouldYield?.()) throw new Stop("interrupted");
+            if (req.shouldYield?.()) continue turn;
             if (Date.now() - start >= remaining)
               throw new Stop("budget_exhausted");
             if (
@@ -182,31 +237,7 @@ export class CustomAgent implements Agent {
           }
         }
         const calls = generation.message.tool_calls ?? [];
-        if (
-          calls.length &&
-          generation.message.content &&
-          req.progress &&
-          !req.shouldYield?.()
-        ) {
-          try {
-            await req.progress(generation.message.content);
-          } catch {
-            await execution.trace("delivery.progress_failed", {});
-          }
-        }
-        if (!calls.length) {
-          if (req.signal.aborted) throw new Stop("cancelled");
-          if (req.shouldYield?.()) throw new Stop("interrupted");
-          reply = generation.message.content ?? "";
-          break;
-        }
-        let finish: (Answer & { reason: StopReason }) | undefined;
-        let finishObservation: string | undefined;
-        const skipCalls = async (
-          from: number,
-          reason: "interrupted" | "cancelled",
-          journal?: string,
-        ): Promise<never> => {
+        const skipCalls = async (from: number, journal?: string) => {
           const result = {
             error:
               "Not dispatched: newer input or cancellation interrupted this turn",
@@ -220,14 +251,33 @@ export class CustomAgent implements Agent {
               content: JSON.stringify(result),
             });
           await execution.checkpoint(messages);
-          throw new Stop(reason);
         };
+        if (req.shouldYield?.() || req.signal.aborted) {
+          if (calls.length) await skipCalls(0);
+          else undeliveredMessageIndices.push(messages.length - 1);
+          await steer();
+          continue;
+        }
+        if (calls.length && generation.message.content && req.progress) {
+          try {
+            await req.progress(generation.message.content);
+          } catch {
+            await execution.trace("delivery.progress_failed", {});
+          }
+        }
+        if (!calls.length) {
+          reply = generation.message.content ?? "";
+          if (await prepareReply([messages.length - 1])) continue;
+          break;
+        }
+        let finish: (Answer & { reason: StopReason }) | undefined;
+        let finishObservation: string | undefined;
         for (const [callIndex, call] of calls.entries()) {
-          if (req.shouldYield?.() || req.signal.aborted)
-            await skipCalls(
-              callIndex,
-              req.signal.aborted ? "cancelled" : "interrupted",
-            );
+          if (req.shouldYield?.() || req.signal.aborted) {
+            await skipCalls(callIndex);
+            await steer();
+            continue turn;
+          }
           const op = call.function.name;
           let result: unknown;
           let candidate: typeof finish;
@@ -249,10 +299,8 @@ export class CustomAgent implements Agent {
           try {
             // Budget/journal writes above are await points; check again before actual dispatch.
             if (req.shouldYield?.() || req.signal.aborted)
-              await skipCalls(
-                callIndex,
+              throw new NotDispatchedError(
                 req.signal.aborted ? "cancelled" : "interrupted",
-                journal,
               );
             if (!enabled.has(op)) throw new Error("Operation unavailable");
             const args = JSON.parse(call.function.arguments);
@@ -267,10 +315,8 @@ export class CustomAgent implements Agent {
               for (let attempt = 0; ; attempt++) {
                 try {
                   if (req.shouldYield?.() || req.signal.aborted)
-                    await skipCalls(
-                      callIndex,
+                    throw new NotDispatchedError(
                       req.signal.aborted ? "cancelled" : "interrupted",
-                      journal,
                     );
                   dispatched = true;
                   result =
@@ -351,8 +397,11 @@ export class CustomAgent implements Agent {
               finishObservation = op === "finish_turn" ? journal : undefined;
             }
           } catch (error) {
-            if (error instanceof NotDispatchedError)
-              await skipCalls(callIndex, error.reason, journal);
+            if (error instanceof NotDispatchedError) {
+              await skipCalls(callIndex, journal);
+              if (error.reason === "cancelled") throw new Stop("cancelled");
+              continue turn;
+            }
             if (error instanceof Stop) throw error;
             result = { error: toolError(error) };
             const uncertain =
@@ -384,10 +433,12 @@ export class CustomAgent implements Agent {
           await execution.attach();
           req.afterTool?.(op);
         }
+        if (await steer()) continue;
         if (finish) {
           answer = finish;
           reply = finish.reply;
           reason = finish.reason;
+          const replyIndex = messages.length;
           messages.push({ role: "assistant", content: reply });
           if (
             finishObservation &&
@@ -405,6 +456,16 @@ export class CustomAgent implements Agent {
             });
           }
           await execution.checkpoint(messages);
+          if (
+            await prepareReply(
+              messages.flatMap((message, index) =>
+                index >= replyIndex && message.role === "assistant"
+                  ? [index]
+                  : [],
+              ),
+            )
+          )
+            continue;
           break;
         }
       }
@@ -429,17 +490,15 @@ export class CustomAgent implements Agent {
                   ? error.message
                   : "Execution stopped after an error. Saved results are retained; inspect /status before continuing.";
     }
-    if (
-      reason === "answer" &&
-      (
-        await execution.db.query(
-          "SELECT 1 FROM approvals WHERE user_id=$1 AND run_id=$2 AND status='pending' AND expires_at>now() LIMIT 1",
-          [execution.user, execution.run],
-        )
-      ).rows.length
-    )
-      reason = "awaiting_approval";
     await execution.finish(reason);
-    return { ...answer, reply, history: messages, stopReason: reason };
+    return {
+      ...answer,
+      reply,
+      history: messages,
+      stopReason: reason,
+      ...(undeliveredMessageIndices.length
+        ? { undeliveredMessageIndices }
+        : {}),
+    };
   }
 }

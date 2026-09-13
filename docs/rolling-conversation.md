@@ -1,5 +1,7 @@
 # Rolling conversation and independently addressed work
 
+Released v0.3.8 baseline: `d0e33365c7cec7b7cb1eb64c22de7c09d5d9a314`. The v0.3.9 [checkpoint-steering candidate](checkpoint-steering.md) supersedes the ordinary-input abort/replacement and image-wait behavior described below: it lets active model/tool work complete, consumes ordered input in the same unbound run, and pauses task-bound work for handoff. Explicit cancellation remains immediate. Preparation and pending/sent delivery now have separate boundaries. The sections below preserve the v0.3.8 design and migration013 procedure; use the new guide for migration014 and current candidate semantics.
+
 This change fixes a failure where a short calendar follow-up lost its preceding attachment exchange, retrieved a different event from history, and then inherited an unrelated paused research task. The original attachment extraction and database records were intact. The failure involved context selection, retrieval provenance, owner-global task selection, and message queues together.
 
 ## Execution model
@@ -35,7 +37,7 @@ Images are ephemeral. New input waits for an in-progress image extraction before
 
 Conversation search indexes original user/assistant conversation messages and delivered background replies. It excludes tool-result text, copied internal worker prompts and specialist transcripts. Hits have exact message IDs, roles, run/task provenance and bounded chronological neighboring excerpts. Search results cannot recursively become new search evidence. `conversation_read` still provides bounded pages of the original message. Historical assistant claims are not verified facts.
 
-## Input and interruption
+## Input and interruption — v0.3.8 behavior
 
 `conversation_inputs` records intake immediately, before the Telegram processing queue. It preserves message/reply/update IDs and intake/dispatch/completion times. Text or extracted transcripts become the input record; image/audio bytes are never stored there. New normal input asks the active foreground run to yield. An in-flight model request is aborted; an already-dispatched tool is allowed to finish and journal its actual outcome. Remaining requested tools receive `NOT_DISPATCHED` observations and are not executed. The queued next message then gets the updated conversation. If interrupted foreground work was bound to a durable job, that job pauses; interruption does not silently resume a skipped write in the background. The next foreground context has a compact reference to that interrupted job for explicit inspection/cancellation, without injecting its checkpoint as the new request. This is interruption followed by a new turn, not speculative concurrent writes within one foreground turn.
 
@@ -51,7 +53,7 @@ For a disputed fact, follow the input ID to its run, inspect the selected contex
 
 The focused tests cover large fixed schemas, two similarly described events, original versus recursive tool search, paused-job isolation, concurrent foreground/background execution, interruption during models and writes, owner-scoped controls, durable pending source links, restart handling and exact Calendar button approval. Existing provider, voice, Sheets and domain tests remain required.
 
-## Migration and release
+## Migration and release — historical migration013 procedure
 
 Migration `013_conversation_control.sql` adds input/context tables and relaxes the one-unfinished-job index. It preserves all existing tasks, evidence, budgets, approvals, memories and normalized history. Its legacy index name is retained as a non-unique index so rerunning earlier idempotent migrations does not reintroduce owner-global uniqueness. Migration013 is safe to reapply with the gateway stopped.
 

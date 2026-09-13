@@ -39,6 +39,12 @@ test("Telegram handles natural text once and ignores unauthorized users and grou
       "utf8",
     ),
   );
+  await pg.exec(
+    await readFile(
+      new URL("../db/014_checkpoint_steering.sql", import.meta.url),
+      "utf8",
+    ),
+  );
   const db = pg as unknown as Database;
   let turns = 0;
   const replies: string[] = [];
@@ -115,6 +121,7 @@ test("status responds while a conversation is still running", async () => {
     "008_costs",
     "012_message_storage",
     "013_conversation_control",
+    "014_checkpoint_steering",
   ])
     await pg.exec(
       await readFile(new URL("../db/" + f + ".sql", import.meta.url), "utf8"),
@@ -128,6 +135,12 @@ test("status responds while a conversation is still running", async () => {
   await pg.exec(
     await readFile(
       new URL("../db/013_conversation_control.sql", import.meta.url),
+      "utf8",
+    ),
+  );
+  await pg.exec(
+    await readFile(
+      new URL("../db/014_checkpoint_steering.sql", import.meta.url),
       "utf8",
     ),
   );
@@ -214,6 +227,7 @@ test("photos and PDF documents reach the agent as bounded, owner-scoped attachme
     "008_costs",
     "012_message_storage",
     "013_conversation_control",
+    "014_checkpoint_steering",
   ])
     await pg.exec(
       await readFile(new URL("../db/" + f + ".sql", import.meta.url), "utf8"),
@@ -227,6 +241,12 @@ test("photos and PDF documents reach the agent as bounded, owner-scoped attachme
   await pg.exec(
     await readFile(
       new URL("../db/013_conversation_control.sql", import.meta.url),
+      "utf8",
+    ),
+  );
+  await pg.exec(
+    await readFile(
+      new URL("../db/014_checkpoint_steering.sql", import.meta.url),
       "utf8",
     ),
   );
