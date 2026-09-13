@@ -2,7 +2,7 @@
 
 The journal connects the assistant's implementation, production incidents, experiments and releases. Read it as an evolving engineering record: a fix can pass its intended checks and expose a different failure in the next iteration. The timeline is ordered by work dates; entry numbers and filenames remain stable when earlier work is documented later. Dates follow the original work records, with later verification dated separately. Entries first reconstructed on 9 September 2026 use repository history and incident reports; this index was revised on 14 September 2026.
 
-As checked on 14 September, the latest published release is [v0.3.9](https://github.com/akhilvuputuri/companion-agent/releases/tag/v0.3.9) at `9c6335be09582432d9bf7c4a475c90f9b5e9272a`, with a [successful release](https://github.com/akhilvuputuri/companion-agent/actions/runs/34764417365) and [subsequent diagnostics](https://github.com/akhilvuputuri/companion-agent/actions/runs/34769892493). A released implementation does not by itself establish improved answer quality, lower cost or completion of its live acceptance checks.
+As checked on 14 September, the latest published release is [v0.3.10](https://github.com/akhilvuputuri/companion-agent/releases/tag/v0.3.10) at `672021f2afcea620224fd9f7ce7ccfdc53b9ba89`. The reviewed preparation evidence-chain operator rollout installed migration 15 and verified health and preserved legacy tasks; the [standard release workflow](https://github.com/akhilvuputuri/companion-agent/actions/runs/34773911229) subsequently passed and the immutable tag resolves to that SHA. See [the release closure](21-preparation-chain.md) for review and verification evidence. A released implementation does not by itself establish improved answer quality, lower cost or completion of its live acceptance checks.
 
 ## Timeline
 
@@ -28,7 +28,7 @@ As checked on 14 September, the latest published release is [v0.3.9](https://git
 | 13 September                         | [16 — Authoritative storage](16-authoritative-storage.md): how can history remain retrievable without repeated payload copies?              | Released v0.3.7; measured storage reduction, no API-savings inference                                          |
 | 13 September                         | [17 — Rolling conversation and independent jobs](17-rolling-conversation.md): why did the immediately preceding exchange disappear?         | Released v0.3.8; context, retrieval and foreground/job isolation fixes                                         |
 | 13 September                         | [18 — Checkpoint steering](18-checkpoint-steering.md): how can corrections join active work without discarding its result?                  | Released v0.3.9 after repeated review fixes; live behavioral acceptance remains separate                       |
-| 14 September                         | [21 — Preparation evidence chain](21-preparation-chain.md): why does a saved exercise exist?                                                | Candidate; validation and release pending                                                                      |
+| 14 September                         | [21 — Preparation evidence chain](21-preparation-chain.md): why does a saved exercise exist?                                                | Released v0.3.10; migration 015 and health verified; legacy tasks preserved                                    |
 
 ## Connected case studies
 
