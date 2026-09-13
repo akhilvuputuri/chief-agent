@@ -115,7 +115,12 @@ export const action = z.discriminatedUnion("operation", [
       steps: workSteps,
     })
     .strict(),
-  z.object({ operation: z.literal("work_status") }).strict(),
+  z
+    .object({
+      operation: z.literal("work_status"),
+      id: z.string().uuid().optional(),
+    })
+    .strict(),
   z
     .object({
       operation: z.literal("work_step"),
@@ -317,6 +322,10 @@ export interface AgentRequest {
   images?: ImageAttachment[];
   history: unknown[];
   historyOmitted?: number;
+  conversationSummary?: string;
+  shouldYield?: () => boolean;
+  afterTool?: (operation: string) => void;
+  modelSignal?: AbortSignal;
   memories: { key: string; value: string }[];
   runtime?: { context: string; tools?: import("./model.js").ToolDefinition[] };
   specialist?: "research" | "job_alignment" | "media";

@@ -14,7 +14,7 @@ export class WorkWorker<T = string> {
       const lease = randomUUID();
       const task = (
         await this.db.query(
-          `UPDATE work_tasks SET status='running',passes=passes+1,lease=$1,updated_at=now() WHERE id=(SELECT id FROM work_tasks WHERE status='queued' AND used_ms<budget_ms AND used_models<budget_models AND used_tools<budget_tools AND next_run<=now() ORDER BY next_run FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *`,
+          `UPDATE work_tasks SET status='running',passes=passes+1,lease=$1,updated_at=now() WHERE id=(SELECT id FROM work_tasks WHERE status='queued' AND used_ms<budget_ms AND used_models<budget_models AND used_tools<budget_tools AND next_run<=now() AND NOT EXISTS(SELECT 1 FROM runtime_runs r WHERE r.task_id=work_tasks.id AND r.state='running') ORDER BY next_run FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *`,
           [lease],
         )
       ).rows[0];

@@ -1,7 +1,11 @@
+import { alignmentContext } from "./alignment.js";
+import {
+  conversationState,
+  saveConversationState,
+} from "./conversation-state.js";
 import { HistoryStore } from "./history.js";
 import type { Message } from "./model.js";
 import type { Delivery } from "./answer.js";
-import { alignmentContext } from "./alignment.js";
 import { researchReads } from "./research-schema.js";
 import { spending, Spending } from "./spending.js";
 import { recordContext } from "./record-context.js";
@@ -28,9 +32,50 @@ import type { JobTools } from "./tools.js";
 export interface Agent {
   run(request: AgentRequest): Promise<AgentResponse>;
 }
+export type Incoming = {
+  id?: string;
+  updateId?: number;
+  messageId?: number;
+  replyToMessageId?: number;
+  receivedAt?: string;
+};
 export class Assistant {
   private queue = new SerialQueue();
   private controllers = new Map<string, AbortController>();
+  private foreground = new Map<
+    string,
+    {
+      run: string;
+      model: AbortController;
+      yield: boolean;
+      protectedMedia: boolean;
+    }
+  >();
+  private commits = new SerialQueue();
+  private taskRuns = new Map<string, string>();
+  interruptForInput(user: string) {
+    const active = this.foreground.get(user);
+    if (active) {
+      active.yield = true;
+      if (!active.protectedMedia) active.model.abort();
+    }
+  }
+  async recordInput(user: string, message: string, metadata: Incoming = {}) {
+    await ensureUser(this.db, user);
+    const id = metadata.id ?? randomUUID();
+    await this.db.query(
+      "INSERT INTO conversation_inputs(id,user_id,message,metadata) VALUES($1,$2,$3,$4::jsonb) ON CONFLICT DO NOTHING",
+      [id, user, message, JSON.stringify(metadata)],
+    );
+    this.interruptForInput(user);
+    return id;
+  }
+  async recordDelivery(user: string, run: string, reply: string) {
+    if (!reply) return;
+    await this.commits.run(user, () =>
+      new HistoryStore(this.db).appendDelivery(user, run, reply),
+    );
+  }
   readonly capabilities = new Map<
     string,
     { user: string; run: string; expires: number }
@@ -51,19 +96,50 @@ export class Assistant {
   shutdown() {
     for (const controller of this.controllers.values()) controller.abort();
   }
-  async cancel(user: string) {
-    this.controllers.get(user)?.abort();
+  async cancel(user: string, id?: string) {
+    if (!id) {
+      const active = this.foreground.get(user);
+      if (active) {
+        this.controllers.get(active.run)?.abort();
+        return { cancelled: true };
+      }
+      return { cancelled: false };
+    }
+    const selected = (
+      await this.db.query(
+        "SELECT id FROM work_tasks WHERE user_id=$1 AND id=$2 AND status NOT IN ('done','cancelled')",
+        [user, id],
+      )
+    ).rows[0];
+    if (!selected) return { cancelled: false };
+    const run =
+      this.taskRuns.get(id) ??
+      (
+        await this.db.query(
+          "SELECT id FROM runtime_runs WHERE task_id=$1 AND user_id=$2 AND state='running' ORDER BY started_at DESC LIMIT 1",
+          [id, user],
+        )
+      ).rows[0]?.id;
+    if (run) this.controllers.get(run)?.abort();
     await this.db.query(
-      "UPDATE work_tasks SET status='cancelled',lease=NULL,pause_reason='cancelled' WHERE user_id=$1 AND status NOT IN ('done','cancelled')",
-      [user],
+      "UPDATE work_tasks SET status='cancelled',lease=NULL,pause_reason='cancelled' WHERE user_id=$1 AND id=$2 AND status NOT IN ('done','cancelled')",
+      [user, id],
     );
+    return { cancelled: true };
   }
-  async grant(user: string) {
-    return this.queue.run(user, async () =>
-      this.db.query(
-        `UPDATE work_tasks SET status='queued',budget_initialized=true,budget_ms=budget_ms+$2,budget_models=budget_models+$3,budget_tools=budget_tools+$4,pause_reason=NULL,next_run=now(),updated_at=now() WHERE user_id=$1 AND status IN ('paused','active') AND NOT EXISTS(SELECT 1 FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id WHERE r.task_id=work_tasks.id AND c.state='uncertain') RETURNING id`,
-        [user, this.budget.ms, this.budget.models, this.budget.tools],
-      ),
+  async grant(user: string, id?: string) {
+    // A bare /continue is only unambiguous when exactly one job can be resumed.
+    const candidates = (
+      await this.db.query(
+        "SELECT id FROM work_tasks WHERE user_id=$1 AND status IN ('paused','active') AND ($2::uuid IS NULL OR id=$2::uuid) ORDER BY created_at DESC LIMIT 2",
+        [user, id ?? null],
+      )
+    ).rows;
+    const chosen = candidates.length === 1 ? candidates[0] : undefined;
+    if (!chosen) return { rows: [], ambiguous: !id && candidates.length > 1 };
+    return this.db.query(
+      `UPDATE work_tasks SET status='queued',budget_initialized=true,budget_ms=budget_ms+$2,budget_models=budget_models+$3,budget_tools=budget_tools+$4,pause_reason=NULL,next_run=now(),updated_at=now() WHERE user_id=$1 AND id=$5 AND status IN ('paused','active') AND lease IS NULL AND NOT EXISTS(SELECT 1 FROM runtime_runs r WHERE r.task_id=work_tasks.id AND r.state='running') AND NOT EXISTS(SELECT 1 FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id WHERE r.task_id=work_tasks.id AND c.state='uncertain') RETURNING id`,
+      [user, this.budget.ms, this.budget.models, this.budget.tools, chosen.id],
     );
   }
   async respond(
@@ -80,9 +156,12 @@ export class Assistant {
     message: string,
     progress?: (text: string, runId?: string) => Promise<void>,
     images?: ImageAttachment[],
+    incoming: Incoming = {},
   ) {
+    const inputId =
+      incoming.id ?? (await this.recordInput(user, message, incoming));
     return this.queue.run(user, () =>
-      this.turn(user, message, false, progress, images),
+      this.turn(user, message, false, progress, images, undefined, inputId),
     );
   }
   async resume(
@@ -98,7 +177,7 @@ export class Assistant {
     id: string,
     progress?: (text: string, runId?: string) => Promise<void>,
   ): Promise<Delivery> {
-    return this.queue.run(user, async () => {
+    return this.queue.run(`task:${id}`, async () => {
       const task = await new WorkTools(this.db).snapshot(user, id);
       if (!task || ["done", "cancelled"].includes(task.task.status))
         return { reply: "No runnable task." };
@@ -112,6 +191,8 @@ export class Assistant {
         "Continue the existing task from its recorded steps and original request in runtime context. Do not expand its scope.",
         true,
         progress,
+        undefined,
+        id,
       );
     });
   }
@@ -121,13 +202,23 @@ export class Assistant {
     background = false,
     progress?: (text: string, runId?: string) => Promise<void>,
     images?: ImageAttachment[],
+    taskId?: string,
+    inputId?: string,
   ) {
     if (!message.trim() || message.length > 20000)
       throw new Error("Message must be between 1 and 20000 characters");
     await ensureUser(this.db, user);
     const run = randomUUID();
     const controller = new AbortController();
-    this.controllers.set(user, controller);
+    this.controllers.set(run, controller);
+    const active = {
+      run,
+      model: new AbortController(),
+      yield: false,
+      protectedMedia: !!images?.length,
+    };
+    if (!background) this.foreground.set(user, active);
+    if (taskId) this.taskRuns.set(taskId, run);
     const capability = randomBytes(32).toString("hex");
     this.capabilities.set(capability, {
       user,
@@ -137,7 +228,11 @@ export class Assistant {
     });
     try {
       const work = new WorkTools(this.db);
-      const current = await work.current(user);
+      const current = taskId
+        ? (await work.snapshot(user, taskId))?.task
+        : undefined;
+      if (background && !current)
+        throw new Error("An exact background task is required");
       await this.db.query(
         "INSERT INTO work_turns(run_id,user_id,request,task_id,revision,background) VALUES($1,$2,$3,$4,$5,$6)",
         [
@@ -163,7 +258,21 @@ export class Assistant {
         background && !previousRun
           ? { messages: [], omitted: 0, total: 0 }
           : await histories.recent(user, previousRun);
-      const history = stored.messages;
+      let history = stored.messages;
+      if (background && previousRun) {
+        const previousTurn = (
+          await this.db.query(
+            "SELECT request,background FROM work_turns WHERE run_id=$1 AND user_id=$2",
+            [previousRun, user],
+          )
+        ).rows[0];
+        if (previousTurn && !previousTurn.background) {
+          const anchor = history.findLastIndex(
+            (m) => m.role === "user" && m.content === previousTurn.request,
+          );
+          history = anchor >= 0 ? history.slice(anchor) : [];
+        }
+      }
       await event(this.db, user, run, "history.loaded", {
         storageVersion: 2,
         source: background ? "task_run" : "conversation",
@@ -185,9 +294,28 @@ export class Assistant {
         this.budget,
       );
       await execution.start();
+      if (inputId)
+        await this.db.query(
+          "UPDATE conversation_inputs SET state='running',run_id=$3,started_at=now() WHERE id=$1 AND user_id=$2",
+          [inputId, user, run],
+        );
+      const conversation = background
+        ? {
+            summary: "",
+            pendingReply: null,
+            previousId: undefined,
+            replyTarget: null,
+          }
+        : await conversationState(this.db, user, inputId);
+      await event(this.db, user, run, "conversation.routed", {
+        lane: background ? "job" : "foreground",
+        taskId: current?.id ?? null,
+        inputId: inputId ?? null,
+        previousContextId: conversation.previousId ?? null,
+      });
       const runtime = runtimeContext(
         this.availability,
-        await work.snapshot(user),
+        current ? await work.snapshot(user, current.id) : null,
       );
       const catalogue = await new SkillTools(this.db).call(user, run, {
         operation: "skill_list",
@@ -195,10 +323,18 @@ export class Assistant {
       runtime.context = JSON.stringify({
         ...JSON.parse(runtime.context),
         skillCatalogue: catalogue,
-        alignmentScopes: await alignmentContext(this.db, user),
+        alignmentScopes: await alignmentContext(this.db, user, run),
+        conversation: {
+          lane: background ? "job" : "foreground",
+          pendingReply: conversation.pendingReply,
+          replyTarget: conversation.replyTarget,
+          delivery: background
+            ? "This is a separate background job. Your reply arrives amid the rolling chat; identify which job the update concerns in natural language."
+            : "Answer the current user message; saved jobs are independent and must be explicitly selected.",
+        },
         calendarApprovals: (
           await this.db.query(
-            "SELECT id,status,expires_at,payload->'draft' AS draft,payload->>'execution' AS execution,payload->'result' AS result FROM approvals WHERE user_id=$1 AND operation='calendar_create' ORDER BY created_at DESC LIMIT 10",
+            "SELECT id,status,expires_at,payload->'draft' AS draft,payload->>'execution' AS execution,payload->'result' AS result FROM approvals WHERE user_id=$1 AND operation='calendar_create' AND status='pending' AND expires_at>now() ORDER BY created_at DESC LIMIT 3",
             [user],
           )
         ).rows,
@@ -211,6 +347,14 @@ export class Assistant {
           ...(images?.length ? { images } : {}),
           history,
           historyOmitted: stored.omitted,
+          conversationSummary: conversation.summary,
+          shouldYield: background
+            ? undefined
+            : () => active.yield && !active.protectedMedia,
+          afterTool: (operation) => {
+            if (operation === "media_delegate") active.protectedMedia = false;
+          },
+          modelSignal: background ? undefined : active.model.signal,
           memories,
           runtime,
           progress: progress ? (text) => progress(text, run) : undefined,
@@ -232,14 +376,32 @@ export class Assistant {
           refreshContext: async () => {
             runtime.context = JSON.stringify({
               ...JSON.parse(runtime.context),
-              work: compactWork(await work.snapshot(user)),
+              work: await (async () => {
+                const bound = (
+                  await this.db.query(
+                    "SELECT task_id FROM work_turns WHERE run_id=$1 AND user_id=$2",
+                    [run, user],
+                  )
+                ).rows[0]?.task_id;
+                return bound
+                  ? compactWork(await work.snapshot(user, bound))
+                  : null;
+              })(),
               costUsage: await spending.getStore()!.summary(),
-              alignmentScopes: await alignmentContext(this.db, user),
+              alignmentScopes: await alignmentContext(this.db, user, run),
               retrievedCollections: await recordContext(this.db, user, run),
             });
           },
         }),
       );
+      if (
+        (
+          await this.db.query("SELECT state FROM runtime_runs WHERE id=$1", [
+            run,
+          ])
+        ).rows[0]?.state === "running"
+      )
+        await execution.finish(output.stopReason ?? "answer");
       // Only new turn messages enter the conversation. Earlier context is already stored.
       if (!background) {
         const next = output.history as Message[];
@@ -247,13 +409,32 @@ export class Assistant {
           history.some((m, i) => JSON.stringify(m) !== JSON.stringify(next[i]))
         )
           throw new Error("Agent changed prior conversation history");
-        await histories.append(
-          user,
-          null,
-          stored.total,
-          next.slice(history.length),
-          run,
+        await this.commits.run(user, () =>
+          histories.appendConversation(user, run, next.slice(history.length)),
         );
+        if (output.stopReason !== "interrupted")
+          await saveConversationState(
+            this.db,
+            user,
+            run,
+            conversation.summary,
+            message,
+            output.reply,
+            output.stopReason,
+          );
+        if (inputId)
+          await this.db.query(
+            "UPDATE conversation_inputs SET state=$3,finished_at=now() WHERE id=$1 AND user_id=$2",
+            [
+              inputId,
+              user,
+              output.stopReason === "interrupted"
+                ? "interrupted"
+                : output.stopReason === "failed"
+                  ? "failed"
+                  : "completed",
+            ],
+          );
       }
       await execution.attach();
       await event(this.db, user, run, "turn.responded", {
@@ -292,7 +473,7 @@ export class Assistant {
           ? "awaiting_approval"
           : (output.stopReason ?? "answer");
         await this.db.query(
-          `UPDATE work_tasks SET status=CASE WHEN ($3='answer' OR ($3 IN ('awaiting_user','awaiting_approval') AND EXISTS(SELECT 1 FROM work_steps WHERE task_id=$1 AND status='blocked'))) AND used_ms<budget_ms AND used_models<budget_models AND used_tools<budget_tools AND EXISTS(SELECT 1 FROM work_steps WHERE task_id=$1 AND status='pending') THEN 'queued' ELSE 'paused' END,pause_reason=CASE WHEN $3='answer' THEN NULL ELSE $3 END,next_run=now()+interval '15 seconds',updated_at=now() WHERE id=$1 AND revision=$2 AND status NOT IN ('done','cancelled')`,
+          `UPDATE work_tasks SET status=CASE WHEN ($3 IN ('answer','interrupted') OR ($3 IN ('awaiting_user','awaiting_approval') AND EXISTS(SELECT 1 FROM work_steps WHERE task_id=$1 AND status='blocked'))) AND used_ms<budget_ms AND used_models<budget_models AND used_tools<budget_tools AND EXISTS(SELECT 1 FROM work_steps WHERE task_id=$1 AND status='pending') THEN 'queued' ELSE 'paused' END,pause_reason=CASE WHEN $3 IN ('answer','interrupted') THEN NULL ELSE $3 END,next_run=now()+interval '15 seconds',updated_at=now() WHERE id=$1 AND revision=$2 AND status NOT IN ('done','cancelled')`,
           [linked, snapshot.task.revision, reason],
         );
       }
@@ -312,16 +493,24 @@ export class Assistant {
         "UPDATE runtime_runs SET state='stopped',stop_reason='failed' WHERE id=$1",
         [run],
       );
+      if (inputId)
+        await this.db.query(
+          "UPDATE conversation_inputs SET state='failed',finished_at=now() WHERE id=$1 AND user_id=$2",
+          [inputId, user],
+        );
       await event(this.db, user, run, "turn.failed");
       throw error;
     } finally {
       this.capabilities.delete(capability);
-      this.controllers.delete(user);
+      this.controllers.delete(run);
+      if (this.foreground.get(user)?.run === run) this.foreground.delete(user);
+      if (taskId && this.taskRuns.get(taskId) === run)
+        this.taskRuns.delete(taskId);
     }
   }
   async call(capability: string, input: unknown, childRun?: string) {
     const scope = this.capabilities.get(capability);
-    if (scope && this.controllers.get(scope.user)?.signal.aborted)
+    if (scope && this.controllers.get(scope.run)?.signal.aborted)
       throw new Error("Task cancelled");
     if (!scope || scope.expires < Date.now())
       throw new Error("Invalid run capability");
@@ -356,6 +545,16 @@ export class Assistant {
           "An uncertain write requires inspection before further writes",
         );
     }
-    return this.tools.execute(scope.user, childRun ?? scope.run, input, true);
+    const result = await this.tools.execute(
+      scope.user,
+      childRun ?? scope.run,
+      input,
+      true,
+    );
+    if (op === "work_cancel") {
+      const run = this.taskRuns.get((input as any).id);
+      if (run) this.controllers.get(run)?.abort();
+    }
+    return result;
   }
 }

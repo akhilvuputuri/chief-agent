@@ -23,7 +23,7 @@ const db = connect(c.DATABASE_URL);
 await db.query("SELECT 1");
 // Refuse a stale/missing migration rather than silently losing legacy conversation context.
 if (
-  !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=12")).rows
+  !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=13")).rows
     .length ||
   (
     await db.query(
@@ -32,7 +32,7 @@ if (
   ).rows.length
 )
   throw new Error(
-    "Message storage migration 012 must be applied with the gateway stopped",
+    "Conversation control migration 013 must be applied with the gateway stopped",
   );
 await recoverRuntime(db);
 const google = {
@@ -225,6 +225,8 @@ async function sendWorkMessage(user: string, text: string | Delivery) {
     text,
     typeof text === "string" ? "progress" : "answer",
   );
+  if (typeof text !== "string" && text.runId)
+    await assistant.recordDelivery(user, text.runId, text.reply);
   await sendCalendarApprovals(bot, db, user);
 }
 const workWorker = new WorkWorker(
