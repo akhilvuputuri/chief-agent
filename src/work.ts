@@ -12,6 +12,22 @@ export class WorkTools {
       )
     ).rows[0];
   }
+  async list(user: string) {
+    return (
+      await this.db.query(
+        `SELECT t.id,left(t.objective,240) AS objective,t.status,t.revision,t.pause_reason,
+          t.used_ms,t.budget_ms,t.used_models,t.budget_models,t.used_tools,t.budget_tools,
+          count(s.key)::integer AS total,
+          count(s.key) FILTER (WHERE s.status='done')::integer AS done,
+          count(s.key) FILTER (WHERE s.status='blocked')::integer AS blocked,
+          count(s.key) FILTER (WHERE s.status='pending')::integer AS pending
+        FROM work_tasks t LEFT JOIN work_steps s ON s.task_id=t.id
+        WHERE t.user_id=$1 AND t.status NOT IN ('done','cancelled')
+        GROUP BY t.id ORDER BY t.updated_at DESC,t.id LIMIT 50`,
+        [user],
+      )
+    ).rows;
+  }
   async snapshot(user: string, id?: string) {
     const task = id
       ? (
@@ -54,7 +70,8 @@ export class WorkTools {
     };
   }
   async call(user: string, run: string, a: WorkAction): Promise<any> {
-    if (a.operation === "work_status") return this.snapshot(user);
+    if (a.operation === "work_status")
+      return a.id ? this.snapshot(user, a.id) : this.list(user);
     const turn = (
       await this.db.query(
         "SELECT * FROM work_turns WHERE run_id=$1 AND user_id=$2",
@@ -63,15 +80,30 @@ export class WorkTools {
     ).rows[0];
     if (!turn) throw new Error("Work needs an active authenticated turn");
     if (a.operation === "work_start") {
+      if (turn.task_id)
+        throw new Error(
+          "This turn is already bound to a task; inspect its scope",
+        );
+      if (turn.background)
+        throw new Error("Only a foreground request can start a task");
       const id = randomUUID();
-      await this.db.query(
-        `WITH made AS (INSERT INTO work_tasks(id,user_id,objective,request) VALUES($1,$2,$3,$4) RETURNING id), steps AS (INSERT INTO work_steps(task_id,key,title,verification,expected_operation) SELECT made.id,x.key,x.title,x.verification,x."expectedOperation" FROM made,jsonb_to_recordset($5::jsonb) x(key text,title text,verification text,"expectedOperation" text)) INSERT INTO work_revisions(task_id,revision,request,objective) SELECT id,1,$4,$3 FROM made`,
-        [id, user, a.objective, turn.request, JSON.stringify(a.steps)],
+      const bound = await this.db.query(
+        `WITH available AS (
+          SELECT * FROM work_turns WHERE run_id=$6 AND user_id=$2 AND task_id IS NULL AND NOT background FOR UPDATE
+        ), made AS (
+          INSERT INTO work_tasks(id,user_id,objective,request) SELECT $1,$2,$3,$4 FROM available RETURNING id
+        ), steps AS (
+          INSERT INTO work_steps(task_id,key,title,verification,expected_operation)
+          SELECT made.id,x.key,x.title,x.verification,x."expectedOperation" FROM made,jsonb_to_recordset($5::jsonb) x(key text,title text,verification text,"expectedOperation" text)
+        ), recorded AS (
+          INSERT INTO work_revisions(task_id,revision,request,objective) SELECT id,1,$4,$3 FROM made
+        ) UPDATE work_turns SET task_id=made.id,revision=1 FROM made WHERE run_id=$6 AND user_id=$2 RETURNING task_id`,
+        [id, user, a.objective, turn.request, JSON.stringify(a.steps), run],
       );
-      await this.db.query(
-        "UPDATE work_turns SET task_id=$2,revision=1 WHERE run_id=$1",
-        [run, id],
-      );
+      if (!bound.rows.length)
+        throw new Error(
+          "This turn is already bound to a task; inspect its scope",
+        );
       return this.snapshot(user, id);
     }
     const task = (
@@ -92,15 +124,44 @@ export class WorkTools {
     if (a.operation === "work_revise") {
       if (turn.background)
         throw new Error("Only a user follow-up can revise scope");
+      if (turn.task_id && turn.task_id !== task.id)
+        throw new Error("This turn is already bound to another task");
+      if (turn.task_id && turn.revision !== task.revision)
+        throw new Error("Task scope changed; inspect current work");
       // Preserve audit history, conservatively invalidate prior completion against revised scope.
-      await this.db.query(
-        `WITH revised AS (UPDATE work_tasks SET objective=$3,request=request || E'\nFollow-up: ' || $4,revision=revision+1,status='active',passes=0,lease=NULL,updated_at=now() WHERE id=$1 AND user_id=$2 RETURNING *), removed AS (DELETE FROM work_steps USING revised WHERE work_steps.task_id=revised.id AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements($5::jsonb) x WHERE x->>'key'=work_steps.key)), added AS (INSERT INTO work_steps(task_id,key,title,verification,expected_operation) SELECT revised.id,x.key,x.title,x.verification,x."expectedOperation" FROM revised,jsonb_to_recordset($5::jsonb) x(key text,title text,verification text,"expectedOperation" text) ON CONFLICT(task_id,key) DO UPDATE SET title=EXCLUDED.title,verification=EXCLUDED.verification,expected_operation=EXCLUDED.expected_operation,status='pending',result='',proofs='{}') INSERT INTO work_revisions(task_id,revision,request,objective) SELECT id,revision,request,objective FROM revised`,
-        [a.id, user, a.objective, turn.request, JSON.stringify(a.steps)],
+      const revised = await this.db.query(
+        `WITH selected_turn AS (
+          SELECT * FROM work_turns WHERE run_id=$6 AND user_id=$2 AND NOT background
+            AND (task_id IS NULL OR (task_id=$1 AND revision=$7)) FOR UPDATE
+        ), revised AS (
+          UPDATE work_tasks SET objective=$3,request=request || E'\nFollow-up: ' || $4,revision=revision+1,status='active',passes=0,updated_at=now()
+          WHERE id=$1 AND user_id=$2 AND revision=$7 AND status NOT IN ('running','done','cancelled') AND lease IS NULL
+            AND EXISTS(SELECT 1 FROM selected_turn)
+            AND NOT EXISTS(SELECT 1 FROM runtime_runs WHERE task_id=$1 AND user_id=$2 AND id!=$6 AND state='running')
+          RETURNING *
+        ), removed AS (
+          DELETE FROM work_steps USING revised WHERE work_steps.task_id=revised.id AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements($5::jsonb) x WHERE x->>'key'=work_steps.key)
+        ), added AS (
+          INSERT INTO work_steps(task_id,key,title,verification,expected_operation)
+          SELECT revised.id,x.key,x.title,x.verification,x."expectedOperation" FROM revised,jsonb_to_recordset($5::jsonb) x(key text,title text,verification text,"expectedOperation" text)
+          ON CONFLICT(task_id,key) DO UPDATE SET title=EXCLUDED.title,verification=EXCLUDED.verification,expected_operation=EXCLUDED.expected_operation,status='pending',result='',proofs='{}'
+        ), recorded AS (
+          INSERT INTO work_revisions(task_id,revision,request,objective) SELECT id,revision,request,objective FROM revised
+        ) UPDATE work_turns SET task_id=revised.id,revision=revised.revision FROM revised WHERE work_turns.run_id=$6 AND work_turns.user_id=$2 RETURNING task_id`,
+        [
+          a.id,
+          user,
+          a.objective,
+          turn.request,
+          JSON.stringify(a.steps),
+          run,
+          task.revision,
+        ],
       );
-      await this.db.query(
-        "UPDATE work_turns SET task_id=$2,revision=(SELECT revision FROM work_tasks WHERE id=$2) WHERE run_id=$1",
-        [run, a.id],
-      );
+      if (!revised.rows.length)
+        throw new Error(
+          "Task is running, leased, or its scope changed; inspect it before revising",
+        );
       return this.snapshot(user, a.id);
     }
     if (turn.task_id !== task.id || turn.revision !== task.revision)
@@ -139,7 +200,7 @@ export class WorkTools {
         `UPDATE work_tasks SET status='queued',next_run=now()+interval '15 seconds',updated_at=now() WHERE id=$1 AND status!='done'`,
         [a.id],
       );
-      return { checkpointed: true, automaticPassLimit: 3 };
+      return { checkpointed: true };
     }
     const step = (
       await this.db.query(
@@ -209,6 +270,7 @@ export function renderWork(s: any) {
   return [
     `${state}.`,
     s.task.objective,
+    `Task: ${s.task.id}`,
     ...rows,
     "Counts refer to recorded steps; source assessments remain agent judgments.",
     `Execution used: ${s.task.used_models ?? 0}/${s.task.budget_models ?? 40} model calls, ${s.task.used_tools ?? 0}/${s.task.budget_tools ?? 100} tool calls, ${Math.ceil(Number(s.task.used_ms ?? 0) / 1000)}/${Math.ceil(Number(s.task.budget_ms ?? 900000) / 1000)} active seconds.`,
@@ -216,9 +278,29 @@ export function renderWork(s: any) {
       ? "Continuing automatically."
       : `State: ${s.task.status}${s.task.pause_reason ? " (" + s.task.pause_reason + ")" : ""}.`,
     s.task.status === "paused"
-      ? "Use /continue to grant another allocation after resolving any blocker. Uncertain writes require operator inspection."
+      ? `Use /continue ${s.task.id} to grant another allocation after resolving any blocker. Uncertain writes require operator inspection.`
+      : "",
+    !["done", "cancelled"].includes(s.task.status)
+      ? `Cancel this task: /cancel ${s.task.id}`
       : "",
   ]
     .filter(Boolean)
+    .join("\n\n");
+}
+export function renderWorkList(tasks: any[]) {
+  if (!tasks.length) return "No unfinished tracked tasks.";
+  return tasks
+    .map((task) =>
+      [
+        `${task.objective} — ${task.status}; ${task.done}/${task.total} steps recorded complete.`,
+        `Task: ${task.id}`,
+        ["paused", "active"].includes(task.status)
+          ? `/continue ${task.id}`
+          : "",
+        `/cancel ${task.id}`,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    )
     .join("\n\n");
 }
