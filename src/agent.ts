@@ -235,8 +235,8 @@ export class Assistant {
       this.taskRuns.get(id) ??
       (
         await this.db.query(
-          "SELECT id FROM runtime_runs WHERE task_id=$1 AND user_id=$2 AND state='running' ORDER BY started_at DESC LIMIT 1",
-          [id, user],
+          "SELECT id FROM runtime_runs WHERE task_id=$1 AND user_id=$2 AND (state='running' OR id=$3::uuid) ORDER BY started_at DESC LIMIT 1",
+          [id, user, this.foreground.get(user)?.run ?? null],
         )
       ).rows[0]?.id;
     if (run) this.controllers.get(run)?.abort();

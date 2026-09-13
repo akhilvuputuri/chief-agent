@@ -207,6 +207,91 @@ test("task cancellation fences its completed foreground delivery without fencing
   }
 });
 
+test("task cancellation during finalization fences delivery after the runtime row has stopped", async () => {
+  const stopped = deferred();
+  const release = deferred();
+  let calls = 0;
+  let held = false;
+  const f = await fixture(
+    {
+      generate: async () =>
+        ++calls === 1
+          ? call("work_start", {
+              objective: "Review selected sources",
+              steps: [
+                {
+                  key: "source",
+                  title: "Read sources",
+                  verification: "evidence",
+                },
+              ],
+            })
+          : call("finish_turn", {
+              reply: "Which source next?",
+              reason: "awaiting_user",
+            }),
+    },
+    {
+      wrapDb: (db) => ({
+        query: async (sql, values) => {
+          const result = await db.query(sql, values);
+          if (
+            !held &&
+            sql.startsWith("INSERT INTO events") &&
+            values?.includes("runtime.stopped")
+          ) {
+            held = true;
+            stopped.resolve();
+            await release.promise;
+          }
+          return result;
+        },
+      }),
+    },
+  );
+  let pending: ReturnType<Assistant["respondDetailed"]> | undefined;
+  try {
+    pending = f.assistant.respondDetailed(
+      "owner",
+      "Review selected sources",
+      undefined,
+      undefined,
+      { updateId: 403 },
+    );
+    await bounded(
+      stopped.promise,
+      "stopped runtime before foreground finalization",
+    );
+    const runtime = (
+      await f.db.query(
+        "SELECT state,task_id FROM runtime_runs WHERE user_id='owner'",
+      )
+    ).rows[0];
+    assert.equal(runtime.state, "stopped");
+    assert.ok(runtime.task_id);
+    assert.equal(
+      (await f.assistant.cancel("owner", runtime.task_id)).cancelled,
+      true,
+    );
+    release.resolve();
+    const output = await bounded(pending, "cancelled foreground finalization");
+    assert.equal(await f.assistant.isCurrentDelivery("owner", output), false);
+    assert.equal(
+      (
+        await f.db.query("SELECT status FROM work_tasks WHERE id=$1", [
+          runtime.task_id,
+        ])
+      ).rows[0].status,
+      "cancelled",
+    );
+  } finally {
+    release.resolve();
+    f.assistant.shutdown();
+    await pending;
+    await f.pg.close();
+  }
+});
+
 test("task resume anchors on the original input occurrence when follow-up text is identical", async () => {
   const entered = deferred();
   const release = deferred<Generation>();
