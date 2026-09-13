@@ -1,5 +1,8 @@
 # From generic research to job alignment
 
+Work date: 2026-09-12. Revised: 2026-09-14.
+Status: released v0.3.0; semantic quality and comparative cost unmeasured.
+
 ## Problem and intended behavior
 
 Generic delegation's short summaries and two source quotations were insufficient for deep role interpretation, qualified interview research and personalized preparation. The requirement concerns purpose, not cardinality: selected roles and all saved roles need the same standards. Internal batching must not become user-managed work.
@@ -14,4 +17,8 @@ Focused mocked regression tests cover selected/all scope, added records between 
 
 ## Release process
 
-Prepare a merge request, obtain an independent Astra review, fix findings and repeat review until approval, then merge passing changes and verify the exact deployed commit/health. See PR/release history for the result; a draft or checkpoint is not a production release. No schema migration or new service. Private trace exports and Python analysis remain separate work.
+The release required a merge request, independent Astra review, fixes and re-review, passing checks and exact deployment/health verification. The closure below records that outcome; the linked PR retains the intermediate revisions. No schema migration or new service. Private trace exports and Python analysis remain separate work.
+
+## Release closure — 14 September 2026
+
+[v0.3.0](https://github.com/akhilvuputuri/companion-agent/releases/tag/v0.3.0) shipped [PR #30](https://github.com/akhilvuputuri/companion-agent/pull/30) at `1c625cbe9dd56292347970f257513cfc7dcd9ada`. The [release workflow](https://github.com/akhilvuputuri/companion-agent/actions/runs/34698539900) completed successfully for that exact SHA; published release evidence records deployment and health verification. Independent Astra review approved final head `7ebdd38e820e01b4563154186366aa70db018fb6` after a pagination fix and incorporation/re-review of the [foundation correction](10-foundation-review.md). The release records 107 tests, typecheck, build and formatting. These establish tested scope, evidence and recovery behavior; source applicability and synthesis remain model judgments.

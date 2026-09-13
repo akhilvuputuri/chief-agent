@@ -1,0 +1,84 @@
+{
+  "captured_at_utc": "2026-09-13T17:11:19.090201+00:00",
+  "window_start_utc": "2026-09-04T16:00:00Z",
+  "window_end_exclusive_utc": "2026-09-15T00:00:00Z",
+  "method": "Numeric projections in a read-only transaction; both UTC and Asia/Singapore buckets. Charge times are request-begin times; model-event times are completion-record times. Run and row ordinals replace identifiers. Main ledger and overlapping model events must not be added.",
+  "source_coverage": [
+    {
+      "source_scope": "public",
+      "event_type": "model.completed",
+      "event_count": 205,
+      "earliest_utc": "2026-09-06T16:48:07.519649+00:00",
+      "latest_utc": "2026-09-13T13:58:02.40649+00:00"
+    },
+    {
+      "source_scope": "public",
+      "event_type": "model.failed",
+      "event_count": 2,
+      "earliest_utc": "2026-09-07T17:04:02.095311+00:00",
+      "latest_utc": "2026-09-12T18:46:59.933604+00:00"
+    },
+    {
+      "source_scope": "public",
+      "event_type": "model.started",
+      "event_count": 207,
+      "earliest_utc": "2026-09-06T16:48:00.665529+00:00",
+      "latest_utc": "2026-09-13T13:57:57.723844+00:00"
+    },
+    {
+      "source_scope": "reset_archive_20260907",
+      "event_type": "model.completed",
+      "event_count": 24,
+      "earliest_utc": "2026-09-06T15:51:57.381277+00:00",
+      "latest_utc": "2026-09-06T16:11:31.035393+00:00"
+    },
+    {
+      "source_scope": "reset_archive_20260907",
+      "event_type": "model.started",
+      "event_count": 24,
+      "earliest_utc": "2026-09-06T15:51:53.888764+00:00",
+      "latest_utc": "2026-09-06T16:11:11.465261+00:00"
+    }
+  ],
+  "archive_overlap": {
+    "same_model_event_id_in_public_and_archive": 0,
+    "same_run_id_in_public_and_archive": 0
+  },
+  "search_call_coverage": [
+    {
+      "source_scope": "public",
+      "calls": 121,
+      "succeeded": 118,
+      "cache_hits": 4,
+      "earliest_utc": "2026-09-06T16:48:25.846946+00:00",
+      "latest_utc": "2026-09-13T13:57:01.92438+00:00",
+      "result_usage_objects": 0
+    },
+    {
+      "source_scope": "reset_archive_20260907",
+      "calls": 25,
+      "succeeded": 25,
+      "cache_hits": 0,
+      "earliest_utc": "2026-09-06T15:52:24.917136+00:00",
+      "latest_utc": "2026-09-06T16:09:58.599607+00:00",
+      "result_usage_objects": 0
+    }
+  ],
+  "files": [
+    {
+      "file": "application-charges.jsonl",
+      "rows": 164,
+      "sha256": "8528a10d5e7552d5b3dc953549b7b768a4c7a4951dd7295fb4b64d526e3abf8f"
+    },
+    {
+      "file": "application-model-events.jsonl",
+      "rows": 229,
+      "sha256": "e3b0db0885dd3d698c5c50325490f0e5f4121e5a1f5e5ba2af0c3b16b78cef1a"
+    },
+    {
+      "file": "application-runs.jsonl",
+      "rows": 60,
+      "sha256": "ed4f850c7bfeac541b726e5d382dbf22958d7c3ad1a58a3c2087dc1b207b4bfc"
+    }
+  ]
+}

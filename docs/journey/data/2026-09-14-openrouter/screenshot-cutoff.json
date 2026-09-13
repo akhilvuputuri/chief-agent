@@ -1,0 +1,38 @@
+{
+  "captured_at_utc": "2026-09-13T17:15:13.982425+00:00",
+  "screenshot_filename_inferred_cutoff_utc": "2026-09-12T17:32:30Z",
+  "cutoff_provenance": "Cutoff inferred from the owner-supplied screenshot filename; query verifies numeric production usage around this cutoff, not screenshot creation metadata.",
+  "charge_day_utc": "2026-09-12",
+  "ledger": [
+    {
+      "period": "after_screenshot",
+      "channel": "main",
+      "reservations": 3,
+      "known_cost_records": 3,
+      "reported_usd": 0.054992,
+      "prompt_tokens": 22674,
+      "completion_tokens": 1397
+    },
+    {
+      "period": "at_or_before_screenshot",
+      "channel": "main",
+      "reservations": 4,
+      "known_cost_records": 4,
+      "reported_usd": 0.101845,
+      "prompt_tokens": 39734,
+      "completion_tokens": 2788
+    }
+  ],
+  "model_completed_events_overlap_ledger": [
+    {
+      "period": "after_screenshot",
+      "completed_calls": 3,
+      "reported_usd": 0.054992
+    },
+    {
+      "period": "at_or_before_screenshot",
+      "completed_calls": 4,
+      "reported_usd": 0.101845
+    }
+  ]
+}
