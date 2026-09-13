@@ -43,3 +43,7 @@ A later improvement is pinning Actions to reviewed commit SHAs with automated de
 ## GitHub settings verification — 12 September 2026
 
 The branch-protection API returned HTTP 403 with a requirement to upgrade to GitHub Pro or make this repository public. The environments API returned an empty list. No plan, visibility or account setting was changed. Therefore required PR checks/force-push protection and protected deployment environments are not claimed as enforced. Keep this repository private; a plan upgrade is an owner decision. The existing release workflow independently requires passing checks and current main before deployment.
+
+## Candidate v0.3.9 — checkpoint steering
+
+The package version is prepared as v0.3.9 on `feature/checkpoint-steering`, based on released v0.3.8 at `d0e33365c7cec7b7cb1eb64c22de7c09d5d9a314`. This is not a tag or deployment claim. See [the candidate behavior, verification and migration014 procedure](checkpoint-steering.md). Require exact-head independent review, passing checks and verified deployment before creating an immutable release at its exact SHA. No paid evaluation or automatic replay is a release prerequisite.

@@ -309,6 +309,7 @@ export async function runAlignment(
       scopeId: scope.scopeId,
       childRunId: result.childRunId,
       stopReason: result.stopReason,
+      observedSources: result.observedSources,
       pendingJobIds: batch.map((t) => t.id),
     });
   return {
@@ -317,6 +318,7 @@ export async function runAlignment(
       runId: result.childRunId,
       status: result.status,
       stopReason: result.stopReason,
+      observedSources: result.observedSources,
     },
   };
 }

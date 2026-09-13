@@ -11,7 +11,7 @@ A cloud task does not inherit this local conversation, browser login sessions or
 1. Work on a feature branch, add focused regression coverage and update relevant docs.
 2. Open a PR, wait for `checks`, and merge the passing change when authorized. The owner has authorized routine merges and releases.
 3. A successful main-branch push check triggers `release`. It revalidates the current main SHA and checks before sending its exact Git archive to DigitalOcean. Manual release dispatch is also supported, but only on main and still runs checks.
-4. The server builds a candidate image before touching the running gateway. If runtime work is active, deployment fails with a clear message; retry when idle. Do not cancel user work just to release code.
+4. The server builds a candidate image before touching the running gateway. If runtime work or queued/running conversation input (including attachment preparation) is active, deployment fails with a clear message; retry when idle. Do not cancel user work just to release code.
 5. The gateway is recreated, health is checked, and the previous image is restored if startup health fails. The Postgres container and data volume are not replaced. Only a successful health check updates server RELEASE.
 6. Watch the release workflow. Report the deployed SHA and status. A branch push, PR creation or passing test workflow alone does not mean the Telegram bot is updated.
 
@@ -89,3 +89,7 @@ The latest verified release at the time of the 12 September handover was e6837c0
 ## Conversation control v0.3.8
 
 The reviewed migration013 release uses [the rolling-conversation procedure](rolling-conversation.md). Once installed, metadata diagnostics include input timing/states, foreground versus job routing, context sizes/omissions, and delivered-message provenance. Raw prompts, source content and pending-question text remain private in Postgres. The operator installs the reviewed entrypoint update; merely editing its repository source does not activate new diagnostic fields.
+
+## Checkpoint steering v0.3.9
+
+The migration014 release uses the [checkpoint-steering procedure](checkpoint-steering.md). Its reviewed operator install also updates the trusted release command to refuse pending input preparation and adds bounded steering/delivery diagnostics. Ordinary code releases use that installed guard afterward. `python3 scripts/test-cloud-release.py` runs three offline deployment-guard regressions; it requires no credentials or Docker. The one-time database rollout remains an operator procedure.

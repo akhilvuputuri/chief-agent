@@ -108,6 +108,12 @@ test("migration exactly preserves legacy ordering, duplicate occurrences, reason
         .rows[0],
       { messages: [], message_count: 3 },
     );
+    // Legacy rollback assertions above exercise only migration 012. Current queries
+    // additionally require the conversation-control and delivery visibility schema.
+    for (const name of ["013_conversation_control", "014_checkpoint_steering"])
+      await f.pg.exec(
+        await readFile(new URL(`../db/${name}.sql`, import.meta.url), "utf8"),
+      );
     assert.deepEqual((await f.store.recent("owner", run)).messages, [
       user("same"),
       user("same"),
@@ -314,6 +320,10 @@ test("very large originals survive migration and appends; SQL paging preserves U
       ["owner", JSON.stringify([answer(huge)])],
     );
     await f.pg.exec(await migration());
+    for (const name of ["013_conversation_control", "014_checkpoint_steering"])
+      await f.pg.exec(
+        await readFile(new URL(`../db/${name}.sql`, import.meta.url), "utf8"),
+      );
     const hit = (await f.store.search("owner", "indexedanchor"))[0];
     assert.ok(hit.id);
     assert.deepEqual(await f.store.search("owner", "unindexedtailmarker"), []);

@@ -23,7 +23,7 @@ const db = connect(c.DATABASE_URL);
 await db.query("SELECT 1");
 // Refuse a stale/missing migration rather than silently losing legacy conversation context.
 if (
-  !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=13")).rows
+  !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=14")).rows
     .length ||
   (
     await db.query(
@@ -32,7 +32,7 @@ if (
   ).rows.length
 )
   throw new Error(
-    "Conversation control migration 013 must be applied with the gateway stopped",
+    "Checkpoint steering migration 014 must be applied with the gateway stopped",
   );
 await recoverRuntime(db);
 const google = {

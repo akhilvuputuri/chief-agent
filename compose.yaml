@@ -52,6 +52,8 @@ services:
         "/migrations/012_message_storage.sql",
         "-f",
         "/migrations/013_conversation_control.sql",
+        "-f",
+        "/migrations/014_checkpoint_steering.sql",
       ]
     depends_on:
       postgres: { condition: service_healthy }

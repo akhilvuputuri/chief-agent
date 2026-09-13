@@ -1,6 +1,8 @@
 # Personal-agent handover
 
-Current candidate: v0.3.8, rolling-chat continuity and explicit background-job control. Read [the rework guide](docs/rolling-conversation.md) first for changed task commands, migration013, tracing and release verification. This candidate requires the reviewed operator migration procedure before ordinary GitHub deployments can resume. Do not infer deployment from this document.
+Current implementation: v0.3.9, checkpoint steering ([PR #42](https://github.com/akhilvuputuri/companion-agent/pull/42)). Ordinary input waits for an in-flight model/tool result, then joins the same unbound run; task-bound work pauses for handoff. Read [the steering guide](docs/checkpoint-steering.md) for ordered photo/PDF/voice preparation, pending/sent delivery projection, cancellation/reset boundaries and migration014. The one-time rollout requires baseline v0.3.8 (`d0e33365c7cec7b7cb1eb64c22de7c09d5d9a314`); ordinary later code releases use the installed schema. Verify current server RELEASE and [published deployment evidence](https://github.com/akhilvuputuri/companion-agent/releases) before treating an implementation checkpoint as live.
+
+The [rolling-conversation guide](docs/rolling-conversation.md) remains the v0.3.8 foundation and records its earlier interrupt-and-replace behavior. Earlier handover snapshots below are historical. Do not reset data, cancel active user work or run paid evaluations for this rollout.
 
 Start with [current work](docs/current-work.md) and [portable development](docs/portable-development.md). The unfinished observable-memory code is now on GitHub at `checkpoint/observable-memory` (`2a85839`), not just on the original Mac. It is not deployed. Read its checkpoint before resuming. GitHub main is integrated source; successful release SHA is deployed source. See [versions and release notes](docs/releases.md).
 

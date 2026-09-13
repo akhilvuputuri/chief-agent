@@ -322,8 +322,13 @@ export interface AgentRequest {
   images?: ImageAttachment[];
   history: unknown[];
   historyOmitted?: number;
+  /** Stable start of this foreground exchange, including all absorbed follow-ups. */
+  turnStart?: number;
+  managedDelivery?: boolean;
   conversationSummary?: string;
   shouldYield?: () => boolean;
+  /** Host-claimed ordered inputs at a safe boundary. No model-supplied identity. */
+  steer?: () => Promise<Array<{ id: string; message: string }>>;
   afterTool?: (operation: string) => void;
   modelSignal?: AbortSignal;
   memories: { key: string; value: string }[];
@@ -343,6 +348,7 @@ export interface AgentResponse extends Answer {
   reply: string;
   history: unknown[];
   interrupted?: boolean;
+  undeliveredMessageIndices?: number[];
   stopReason?: import("./execution.js").StopReason;
 }
 export const agentResponse = z.object({

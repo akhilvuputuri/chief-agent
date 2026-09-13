@@ -12,10 +12,11 @@ import {
   researchReport,
   researchReads,
 } from "./research-schema.js";
-import { Execution, Stop } from "./execution.js";
+import { Execution } from "./execution.js";
 import { jsonSchema } from "./runtime.js";
 import { spending, Spending } from "./spending.js";
 import { publicHttps } from "./security.js";
+import { NotDispatchedError } from "./tool-errors.js";
 
 import { plugins } from "./plugin-registry.js";
 import type { PluginAgent } from "./plugins.js";
@@ -132,6 +133,10 @@ export async function runResearchSpecialist(
   const reportName = profile?.reportName ?? "research_report";
   const schema: z.AnyZodObject = profile?.reportSchema ?? researchReport;
   await parent.remaining();
+  if (req.signal.aborted || req.shouldYield?.())
+    throw new NotDispatchedError(
+      req.signal.aborted ? "cancelled" : "interrupted",
+    );
   const childRun = randomUUID();
   const child = new Execution(db, user, childRun, req.signal, limits, parent);
   await child.start();
@@ -227,8 +232,18 @@ export async function runResearchSpecialist(
           tools: toolset,
         },
         signal: req.signal,
+        // Ordinary input lets an in-flight child model/read complete, then closes
+        // its unstarted calls so the parent can consume the updated assignment.
+        shouldYield: req.shouldYield,
         execution: child,
         execute: async (input: any) => {
+          const checkDispatch = () => {
+            if (req.signal!.aborted || req.shouldYield?.())
+              throw new NotDispatchedError(
+                req.signal!.aborted ? "cancelled" : "interrupted",
+              );
+          };
+          checkDispatch();
           if (plugin && input.operation === "skill_read") {
             const skill = plugin.skillDefinitions.find(
               (s) => s.key === input.key,
@@ -261,6 +276,7 @@ export async function runResearchSpecialist(
                 for (const e of item.evidence)
                   await checkResearchQuote(req, childRun, e.sourceId, e.quote);
               }
+            checkDispatch();
             report = candidate;
             return { recorded: true, targets: candidate.targets };
           }
@@ -268,15 +284,30 @@ export async function runResearchSpecialist(
             invalid("operation outside specialist permissions");
           if (profile?.allowRead && !profile.allowRead(input))
             invalid("read outside this specialist's assignment");
-          if (req.signal!.aborted) throw new Stop("cancelled");
+          checkDispatch();
           return req.executeResearch!(childRun, input);
         },
       }),
     );
     const status =
       output.stopReason === "answer" && report ? "reported" : "incomplete";
+    const observedSources =
+      status === "incomplete"
+        ? (
+            await db.query(
+              `SELECT DISTINCT ON (s.id) s.id AS "sourceId",s.url,c.id AS "observationId"
+               FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id AND r.user_id=$2
+               JOIN research_sources s
+                 ON s.id::text=COALESCE(c.result->'result'->>'sourceId',c.result->>'sourceId') AND s.user_id=$2
+               WHERE c.run_id=$1 AND c.state='success' AND c.operation IN ('web_read','source_read')
+               ORDER BY s.id,c.started_at DESC LIMIT 30`,
+              [childRun, user],
+            )
+          ).rows
+        : [];
     const result = {
       childRunId: childRun,
+      ...(observedSources.length ? { observedSources } : {}),
       status,
       stopReason: output.stopReason,
       targets:
@@ -284,7 +315,10 @@ export async function runResearchSpecialist(
         targets.map((t) => ({
           targetId: t.targetId,
           status: "blocked",
-          summary: "Specialist stopped without a validated report",
+          summary:
+            output?.stopReason === "interrupted"
+              ? "Specialist paused for newer input; completed source reads remain available"
+              : "Specialist stopped without a validated report",
           evidence: [],
         })),
       notice:

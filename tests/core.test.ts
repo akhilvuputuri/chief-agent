@@ -58,6 +58,12 @@ before(async () => {
       "utf8",
     ),
   );
+  await pg.exec(
+    await readFile(
+      new URL("../db/014_checkpoint_steering.sql", import.meta.url),
+      "utf8",
+    ),
+  );
   db = pg as unknown as Database;
   tools = new JobTools(db, {
     call: async () => ({ untrusted: true, content: "test" }),

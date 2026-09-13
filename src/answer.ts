@@ -57,4 +57,10 @@ export const finishSchema = answerSchema.extend({
 });
 export type Answer = z.infer<typeof answerSchema>;
 export type RecordRef = z.infer<typeof recordRef>;
-export type Delivery = Answer & { runId?: string; notices?: string[] };
+export type Delivery = Answer & {
+  runId?: string;
+  notices?: string[];
+  /** Host-only delivery fence; never accepted from a model answer. */
+  inputRevision?: number;
+  voiceReply?: boolean;
+};
