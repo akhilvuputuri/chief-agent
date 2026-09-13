@@ -1,6 +1,6 @@
 {
   "name": "companion-agent",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "private": true,
   "type": "module",
   "description": "A personal AI assistant with an owned TypeScript runtime, Telegram voice, memory, research and durable tasks",
@@ -24,7 +24,8 @@
     "smoke:runtime": "tsx scripts/smoke-custom.ts",
     "eval": "tsx evals/run.ts",
     "eval:compare": "tsx evals/compare.ts",
-    "doctor:cloud": "node scripts/cloud-doctor.mjs"
+    "doctor:cloud": "node scripts/cloud-doctor.mjs",
+    "plugins": "node --import tsx src/plugin-cli.ts"
   },
   "dependencies": {
     "@grammyjs/runner": "^2.0.3",

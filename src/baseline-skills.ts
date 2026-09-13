@@ -1,3 +1,4 @@
+import { plugins } from "./plugin-registry.js";
 import { readFileSync } from "node:fs";
 const keys = [
   "job-alignment",
@@ -6,12 +7,15 @@ const keys = [
   "task-execution",
   "personal-assistance",
 ];
-export const baselineSkills = keys.map((key) => ({
-  key,
-  version: `repo:${key}:${["task-execution", "personal-assistance"].includes(key) ? 2 : 1}`,
-  reason: "Versioned repository default",
-  content: readFileSync(
-    new URL(`../skills/${key}/SKILL.md`, import.meta.url),
-    "utf8",
-  ),
-}));
+export const baselineSkills = [
+  ...keys.map((key) => ({
+    key,
+    version: `repo:${key}:${["task-execution", "personal-assistance"].includes(key) ? 2 : 1}`,
+    reason: "Versioned repository default",
+    content: readFileSync(
+      new URL(`../skills/${key}/SKILL.md`, import.meta.url),
+      "utf8",
+    ),
+  })),
+  ...plugins.skills(),
+];

@@ -1,0 +1,27 @@
+{
+  "format": "companion.plugin/v1",
+  "id": "public-research",
+  "version": "1.0.0",
+  "description": "Bounded evidence-backed research over exact public targets.",
+  "agents": [
+    {
+      "id": "researcher",
+      "description": "Research exact public URLs, saved roles or a bounded topic, returning source-linked findings.",
+      "instructions": "agents/researcher.md",
+      "contract": "public-research/v1",
+      "tools": ["web_search", "web_read", "source_read"],
+      "skills": ["source-research"],
+      "limits": {
+        "ms": 120000,
+        "models": 8,
+        "tools": 20
+      }
+    }
+  ],
+  "skills": [
+    {
+      "id": "source-research",
+      "path": "skills/source-research/SKILL.md"
+    }
+  ]
+}

@@ -100,3 +100,7 @@ Use the existing DigitalOcean server and a free sslip.io hostname; AWS migration
 ## Persistent canvas candidate — 13 September 2026
 
 `feature/miniapp-canvases` implements the authenticated read-only Mini App, versioned model-authored canvases, role browsing and trace links. See [canvases](docs/canvases.md) and the [reviewed rollout](docs/miniapp-deployment.md). Additive migration 011 and Compose/host ingress changes require the documented operator procedure before the normal release. No credentials move to the frontend. Check exact PR/release evidence before claiming this candidate is live.
+
+## Portable plugin candidate — issue #37
+
+`feature/portable-plugins` (v0.3.6 candidate) packages general research and adds declarative import/export, a host registry, generic delegation, lazy skills and durable definition pins. See [plugin guide](docs/plugins.md). No migration/Compose change. Job alignment/media and external vendor-format adapters remain separate; the product issue stays open. Require independent exact-head approval, CI and verified release before treating this as live.

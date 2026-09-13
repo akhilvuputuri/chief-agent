@@ -96,6 +96,7 @@ test("research isolates context, returns sourced targets and correlates traces/c
         assert.deepEqual(input.tools.map((t) => t.name).sort(), [
           "finish_turn",
           "research_report",
+          "skill_read",
           "source_read",
           "web_read",
           "web_search",

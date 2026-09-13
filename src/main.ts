@@ -62,6 +62,13 @@ const assistant = new Assistant(
           ),
         }
       : {},
+    (model) =>
+      new OpenRouter(
+        c.OPENROUTER_API_KEY,
+        model,
+        c.OPENROUTER_MAX_INPUT_PRICE,
+        c.OPENROUTER_MAX_OUTPUT_PRICE,
+      ),
   ),
   new JobTools(
     db,
