@@ -3,7 +3,7 @@ BEGIN;
 CREATE TABLE IF NOT EXISTS message_contents (
  user_id text NOT NULL REFERENCES users(id), hash text NOT NULL,
  payload jsonb NOT NULL, characters integer NOT NULL,
- search tsvector GENERATED ALWAYS AS (to_tsvector('english', coalesce(payload->>'content',''))) STORED,
+ search tsvector GENERATED ALWAYS AS (to_tsvector('english', left(coalesce(payload->>'content',''),32000))) STORED,
  PRIMARY KEY(user_id,hash)
 );
 CREATE INDEX IF NOT EXISTS message_contents_search ON message_contents USING gin(search);

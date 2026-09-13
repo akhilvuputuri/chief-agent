@@ -298,3 +298,70 @@ test("many turns read bounded state, append only new conversation events, retrie
     await f.pg.close();
   }
 });
+
+test("very large originals survive migration and appends; SQL paging preserves Unicode without transferring full payloads", async () => {
+  const f = await fixture(true);
+  try {
+    const huge =
+      "indexedanchor " +
+      Array.from({ length: 110000 }, (_, i) => `word${i.toString(36)}`).join(
+        " ",
+      ) +
+      " unindexedtailmarker";
+    await f.db.query(
+      "INSERT INTO conversations(user_id,history) VALUES($1,$2::jsonb)",
+      ["owner", JSON.stringify([answer(huge)])],
+    );
+    await f.pg.exec(await migration());
+    const hit = (await f.store.search("owner", "indexedanchor"))[0];
+    assert.ok(hit.id);
+    assert.deepEqual(await f.store.search("owner", "unindexedtailmarker"), []);
+    const page = await f.store.read("owner", hit.id, 0);
+    assert.equal([...page.content].length, 8000);
+    assert.ok(page.totalCharacters > 850000);
+    const end = await f.store.read("owner", hit.id, page.totalCharacters - 100);
+    assert.match(end.content, /unindexedtailmarker/);
+    assert.equal(end.nextOffset, null);
+    await f.store.append("owner", null, 1, [
+      answer(huge),
+      answer("🙂".repeat(8001) + "boundary"),
+    ]);
+    assert.equal(
+      (await f.db.query("SELECT count(*)::int n FROM message_contents")).rows[0]
+        .n,
+      2,
+    );
+    const id = (
+      await f.db.query(
+        "SELECT id FROM conversation_messages WHERE user_id=$1 AND ordinal=2",
+        ["owner"],
+      )
+    ).rows[0].id;
+    let largestPayload = 0;
+    const boundedDb: Database = {
+      query: async (q, v) => {
+        const result = await f.db.query(q, v);
+        for (const r of result.rows)
+          if (typeof r.content === "string")
+            largestPayload = Math.max(largestPayload, [...r.content].length);
+        return result;
+      },
+    };
+    const reader = new HistoryStore(boundedDb);
+    let content = "",
+      offset = 0;
+    while (true) {
+      const part = await reader.read("owner", id, offset);
+      content += part.content;
+      if (part.nextOffset === null) break;
+      offset = part.nextOffset;
+    }
+    assert.deepEqual(
+      JSON.parse(content),
+      answer("🙂".repeat(8001) + "boundary"),
+    );
+    assert.ok(largestPayload <= 8000);
+  } finally {
+    await f.pg.close();
+  }
+});

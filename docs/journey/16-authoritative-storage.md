@@ -15,3 +15,7 @@ Migration 012 verifies exact reconstruction before clearing old arrays. Rollback
 Focused tests cover migration/reapplication/rollback reconciliation, duplicate occurrences, incomplete calls, owner isolation, concurrent stale appends, bounded atomic tool groups, original-message retrieval, reset behavior, restart/uncertain writes and multi-turn integration. Full checks, exact-head independent review and verified deployment are required before release. No paid model evaluation is part of this work.
 
 Storage diagnostics report sizes/counts without private content. Detailed model-input traces and journal result copies remain; no automatic retention purge is enabled. The observable-memory checkpoint and personal-wiki design remain subsequent work. See [architecture and rollout](../authoritative-storage.md) for current details and limitations. Candidate v0.3.7; final review/release evidence belongs on the PR and immutable release notes.
+
+## Independent review correction
+
+Astra requested changes on initial head `c4d52e3`: unbounded full-text indexing rejected an 852,011-character legacy message at PostgreSQL’s tsvector limit, and fallback paging transferred the whole message before slicing it. The follow-up bounds indexing to 32,000 content characters and extracts pages/length inside SQL. Regression coverage preserves a very large original and checks non-BMP Unicode across page boundaries. Complete content remains stored; lexical search covers only the indexed prefix. Require re-review of the corrected head before release.

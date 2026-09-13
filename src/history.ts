@@ -98,10 +98,10 @@ export class HistoryStore {
   async read(user: string, id: string, offset: number) {
     const row = (
       await this.db.query(
-        `SELECT e.run_id,e.created_at,c.payload::text AS content
+        `SELECT e.run_id,e.created_at,substring(c.payload::text FROM $3::int+1 FOR 8000) AS content, length(c.payload::text) AS total
       FROM conversation_messages e JOIN message_contents c USING(user_id,hash)
       WHERE e.user_id=$1 AND e.id=$2`,
-        [user, id],
+        [user, id, offset],
       )
     ).rows[0];
     if (!row) throw new Error("Conversation message not found");
@@ -109,10 +109,10 @@ export class HistoryStore {
       id,
       runId: row.run_id,
       createdAt: row.created_at,
-      content: row.content.slice(offset, offset + 8000),
+      content: row.content,
       offset,
-      nextOffset: offset + 8000 < row.content.length ? offset + 8000 : null,
-      totalCharacters: row.content.length,
+      nextOffset: offset + 8000 < row.total ? offset + 8000 : null,
+      totalCharacters: row.total,
     };
   }
 }
