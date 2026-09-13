@@ -2,6 +2,13 @@ import type { Database } from "./db.js";
 import { boundedBytes } from "./providers.js";
 import { SerialQueue } from "./security.js";
 import { z } from "zod";
+function chainText(task: any, render: (chain: any) => string): string {
+  const text = (task.evidence_chain ?? []).map(render).join("\n\n");
+  return text.length <= 30000
+    ? text
+    : text.slice(0, 29500) +
+        "\n[Shortened for Sheets; use prep_task_read for the full saved chain.]";
+}
 export const sheetTabs = [
   "Target roles",
   "Preparation gaps",
@@ -175,6 +182,13 @@ export class SheetsTools {
           "Exercise",
           "Completion criteria",
           "Updated",
+          "Provenance",
+          "Linked roles",
+          "Quoted requirements",
+          "Experience or unresolved question",
+          "Why this preparation",
+          "Source references",
+          "Original readiness checks",
         ],
         ...snapshot.tasks.map((t: any) => [
           t.id,
@@ -184,6 +198,37 @@ export class SheetsTools {
           t.exercise,
           t.completion_criteria,
           t.updated_at,
+          t.evidence_chain?.length
+            ? "Linked; status is reported progress"
+            : "Legacy task; provenance unavailable",
+          chainText(t, (c) => `${c.job.company} — ${c.job.title} (${c.jobId})`),
+          chainText(t, (c) =>
+            c.requirements
+              .map(
+                (r: any) =>
+                  `${r.requirement}\n${r.evidence.map((e: any) => e.quote).join("\n")}`,
+              )
+              .join("\n\n"),
+          ),
+          chainText(t, (c) =>
+            c.requirements
+              .map(
+                (r: any) =>
+                  `${r.requirement}: ${r.fit.status}\n${r.fit.explanation}\n${r.fit.question ?? ""}\n${r.fit.memoryEvidence.map((m: any) => `${m.key}: ${m.quote}`).join("\n")}`,
+              )
+              .join("\n\n"),
+          ),
+          chainText(t, (c) => c.why),
+          chainText(
+            t,
+            (c) =>
+              `${c.scopeId} / ${c.preparationId}\n${c.job.url ?? ""}\n${c.requirements.flatMap((r: any) => r.evidence.map((e: any) => e.url ?? `Saved description ${e.refId}`)).join("\n")}`,
+          ),
+          chainText(
+            t,
+            (c) =>
+              `${c.action}\nReady when: ${c.doneWhen}\n${c.effortEstimate ?? ""}`,
+          ),
         ]),
       ],
     ];

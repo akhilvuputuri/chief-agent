@@ -75,6 +75,7 @@ export const alignmentTarget = z
                   "unknown",
                 ]),
                 explanation: short,
+                question: z.string().trim().min(1).max(1200).optional(),
                 memoryEvidence,
               })
               .strict(),

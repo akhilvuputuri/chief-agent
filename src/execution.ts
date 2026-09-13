@@ -46,6 +46,7 @@ export const readOperations = new Set([
   "skill_version_read",
   "skill_history",
   "prep_list",
+  "prep_task_read",
   "gmail_search",
   "gmail_read",
   "job_list",

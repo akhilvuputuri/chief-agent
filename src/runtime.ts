@@ -106,6 +106,10 @@ export function runtimeContext(
                   "Continue pending roles in an existing frozen scope; retains earlier complete, partial and blocked reports. Does not reset or expand targets. Resume automatically within the current task allocation.",
                 job_alignment_read:
                   "Read scope coverage (jobId=null, offset=role index) or full stored per-role report/input/source references (jobId, offset=character index). Read all chunks before detailed synthesis or domain saves.",
+                prep_task_save:
+                  "Save shared preparation with its source chain. New tasks require links [{scopeId,jobId,preparationId}] to saved alignment actions. Host resolves exact requirements, quotations, background or unknown questions; do not fabricate links. Additional links merge without losing earlier roles. Omitting links only updates an already linked task. A done status is reported progress, not proof of mastery.",
+                prep_task_read:
+                  "Read a saved preparation task and full evidence chain in bounded pages. Start offset=0; follow nextOffset with the returned version until null. A version conflict requires restarting the read. Preserves source/background snapshots and qualified unknowns; does not perform research or certify readiness.",
                 media_delegate:
                   "Have an isolated read-only media specialist process files: current-turn image attachmentIds from the user's message note, and/or stored document sourceIds (PDF text or earlier extractions). State the objective or question precisely. Returns compact facts with page/region references, quotes for documents, omissions and uncertainty, plus an extractionSourceId for images. Images are unavailable after this turn. Use directly readable excerpts and source_read for short documents instead.",
                 plugin_delegate:

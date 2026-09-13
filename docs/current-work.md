@@ -1,5 +1,7 @@
 # Current work and shipped baseline
 
+Candidate v0.3.10: persistent preparation evidence chains on `feature/preparation-provenance`; [contract](preparation.md). Adds migration 015 and its reviewed operator rollout. Existing data and paused tasks are preserved. Independent review, checks and deployment are pending; this is not a shipped-state claim.
+
 Latest verified shipped release, checked 14 September 2026: [v0.3.9](https://github.com/akhilvuputuri/companion-agent/releases/tag/v0.3.9), deployed SHA `9c6335be09582432d9bf7c4a475c90f9b5e9272a`. The [release workflow](https://github.com/akhilvuputuri/companion-agent/actions/runs/34764417365) and [subsequent diagnostics](https://github.com/akhilvuputuri/companion-agent/actions/runs/34769892493) succeeded at that SHA. See the [engineering journal](journey/README.md) for the chronological record, connected incidents and release closures. Deferred memory/evaluation work remains separate; real Telegram checkpoint-steering acceptance is still an open check.
 
 Version 0.3.9 ([PR #42](https://github.com/akhilvuputuri/companion-agent/pull/42)) lets ordinary follow-ups join the same unbound run at model/tool checkpoints, preserves completed results, stops unstarted calls and separates input preparation from execution and delivery. Explicit cancellation still aborts; task-bound runs pause and hand off. See [behavior, tests and migration014 rollout](checkpoint-steering.md) and [journal 18](journey/18-checkpoint-steering.md).

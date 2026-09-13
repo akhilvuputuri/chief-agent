@@ -378,6 +378,10 @@ export async function validateAlignment(
       fail("report IDs must be unique within each collection");
     for (const r of item.requirements) {
       await cited(r.evidence);
+      if (r.fit.status === "unknown" && !r.fit.question?.trim())
+        fail(
+          "unknown experience requires an explicit requirement-specific question",
+        );
       if (r.fit.status !== "unknown" && !r.fit.memoryEvidence.length)
         fail(
           "non-unknown fit requires established background evidence; missing experience stays unknown",
@@ -439,29 +443,15 @@ export async function validateAlignment(
         fail("high confidence requires dated applicable official evidence");
     }
     for (const p of item.preparation) {
-      if (!p.requirementIds.length && !p.interviewIds.length)
+      if (!p.requirementIds.length)
         fail(
-          "preparation must link to role requirements or applicable interview evidence",
+          "preparation must link to this role's sourced requirements; interview findings may supplement them",
         );
       if (
         p.requirementIds.some((id) => !reqIds.has(id)) ||
         p.interviewIds.some((id) => !interviewIds.has(id))
       )
         fail("preparation links must belong to this role");
-      if (
-        p.priority === "minimum" &&
-        !p.requirementIds.length &&
-        !p.interviewIds.some((id) =>
-          item.interviews.findings.some(
-            (f) =>
-              f.id === id &&
-              (f.scope === "exact_role" || f.scope === "employer_general"),
-          ),
-        )
-      )
-        fail(
-          "unrelated or unknown interview evidence cannot justify minimum preparation",
-        );
     }
   }
 }

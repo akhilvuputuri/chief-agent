@@ -41,3 +41,7 @@ Inspect an owner-scoped scope event, join child-start profile scope IDs, then in
 ## Checks and rollout
 
 Focused mocked tests cover all-saved and selected scopes, additions between batches, cross-owner denial, full snapshot retrieval, source/background validation, country/role applicability declarations, unsupported confidence/fit upgrades, and recovery when parent aggregation was lost. Generic research tests continue to cover inherited cancellation, budgets, restricted tools and charge attribution. Full checks, build, format and an independent Astra review are required before merge, followed by the normal main deployment/health verification. There is no database migration or reset. Real-user source applicability and preparation quality must still be observed during normal use; no paid benchmark is part of routine CI.
+
+## Persistent preparation chain — v0.3.10
+
+Every new unknown requirement includes `fit.question`, and every preparation action requires a same-role requirement link. `prep_task_save` accepts references to stored alignment actions and resolves their source/background chain server-side, preserving original checks across shared tasks. Reads are bounded and owner-scoped; Sheets mirrors the chain. Existing scopes/reports remain immutable and are not automatically reprocessed. See [preparation tools](preparation.md), [rollout](preparation-rollout.md) and [iteration record](journey/21-preparation-chain.md).
