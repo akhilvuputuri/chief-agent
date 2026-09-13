@@ -16,6 +16,8 @@ export function toolError(error: unknown) {
     return { code: "RESULT_UNRECORDED", retryable: false, message };
   const known = [
     /^Research validation:/,
+    /^Plugin validation:/,
+    /^Skill validation:/,
     /^Canvas validation:/,
     /^Media validation:/,
     /Only a user follow-up can revise scope/,

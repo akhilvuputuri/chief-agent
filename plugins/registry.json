@@ -1,0 +1,12 @@
+{
+  "format": "companion.plugin-registry/v1",
+  "researchAgent": "public-research/researcher",
+  "enabled": [
+    {
+      "path": "public-research",
+      "sha256": "d11e1cc6df488bb6014dcd95cbfd44f1773a91c74e6507ee16af6f8d8267c872",
+      "agents": ["researcher"],
+      "allowTools": ["web_search", "web_read", "source_read"]
+    }
+  ]
+}

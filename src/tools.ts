@@ -89,6 +89,7 @@ export class JobTools {
       return canvases.toolRead(user, run, a.id, a.revision, a.offset);
     if (
       a.operation === "research_delegate" ||
+      a.operation === "plugin_delegate" ||
       a.operation === "research_report" ||
       a.operation === "media_delegate" ||
       a.operation === "media_report" ||

@@ -22,6 +22,7 @@ export const readOperations = new Set([
   "canvas_list",
   "canvas_read",
   "research_delegate",
+  "plugin_delegate",
   "research_report",
   "media_delegate",
   "media_report",

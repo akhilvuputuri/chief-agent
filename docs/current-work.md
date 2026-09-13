@@ -57,3 +57,7 @@ The owner selected DigitalOcean and a free hostname on 13 September. `feature/mi
 ## Persistent canvas candidate — issue #26
 
 `feature/miniapp-canvases` starts from main `1e44bdb` and implements the Mini App with Telegram authentication, a library of independent revisioned canvases, read-only roles, canvas tools and provenance/view traces. See [contract](canvases.md), [journal](journey/14-persistent-canvases.md) and [additive rollout](miniapp-deployment.md). Patch candidate v0.3.5. The earlier HTTPS foundation is live; this application's status requires the exact independent review, CI, migration, release and real Telegram acceptance evidence. Observable memory/Python checkpoints remain separate.
+
+## Portable plugin candidate — issue #37
+
+`feature/portable-plugins` (v0.3.6 candidate) packages general research and adds declarative import/export, a host registry, generic delegation, lazy skills and durable definition pins. See [plugin guide](plugins.md). No migration/Compose change. Job alignment/media and external vendor-format adapters remain separate; the product issue stays open. Require independent exact-head approval, CI and verified release before treating this as live.

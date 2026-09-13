@@ -65,3 +65,7 @@ For meaningful runtime changes, incidents or experiments, add or update docs/jou
 ## Documentation scope
 
 Keep repository documentation specific to application behavior, architecture, technical decisions, incidents, tests and operations. Exclude the owner’s career goals, interview preparation narratives, portfolio positioning and personal motivations for technology choices. Conversation alignment is not repository content. Apply this rule to README, handovers, journal entries, templates and pending task documents.
+
+## Capability plugins
+
+Read docs/plugins.md before changing plugin behavior. plugins/registry.json is reviewed host configuration; packages cannot grant themselves tools. Keep content pins, strict text-only validation, owner-scoped task snapshots, approved private skill versions and host evidence/permission checks. New supported public-research agents should use plugin definitions rather than new loop branches. Export only package files, never owner data or host configuration. Plugin edits require updated hashes, tests and the same independent review/release loop as code; no automatic remote installation.

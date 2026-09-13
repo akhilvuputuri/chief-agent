@@ -2,6 +2,7 @@ import { finishSchema, type Answer } from "./answer.js";
 import { jsonSchema } from "./runtime.js";
 import { runAlignment } from "./alignment.js";
 import { randomUUID } from "node:crypto";
+import { pinPlugin } from "./plugin-execution.js";
 import { delegateResearch } from "./research.js";
 import { delegateMedia } from "./media.js";
 import { projectObservation } from "./observations.js";
@@ -48,10 +49,14 @@ export class CustomAgent implements Agent {
   constructor(
     private model: ModelAdapter,
     private specialists: { media?: ModelAdapter } = {},
+    private pluginModel?: (id: string) => ModelAdapter,
   ) {}
   async run(req: AgentRequest): Promise<AgentResponse> {
-    const model =
-      req.specialist === "media" && this.specialists.media
+    if (req.pluginModel && (!req.specialist || !this.pluginModel))
+      throw new Error("Plugin model override is unavailable");
+    const model = req.pluginModel
+      ? this.pluginModel!(req.pluginModel)
+      : req.specialist === "media" && this.specialists.media
         ? this.specialists.media
         : this.model;
     const execution = req.execution;
@@ -204,27 +209,46 @@ export class CustomAgent implements Agent {
                 try {
                   dispatched = true;
                   result =
-                    op === "research_delegate"
-                      ? await delegateResearch(req, input, (child) =>
-                          this.run(child),
-                        )
-                      : [
-                            "job_alignment_start",
-                            "job_alignment_resume",
-                            "job_alignment_read",
-                          ].includes(op)
-                        ? await runAlignment(req, input, (child) =>
+                    op === "plugin_delegate"
+                      ? await (async () => {
+                          if (req.specialist)
+                            throw new Error(
+                              "Plugin validation: recursive delegation is unavailable",
+                            );
+                          const { agentId, operation, ...assignment } =
+                            input as any;
+                          const definition = await pinPlugin(
+                            execution,
+                            agentId,
+                          );
+                          return delegateResearch(
+                            req,
+                            { ...assignment, operation: "research_delegate" },
+                            (child) => this.run(child),
+                            definition,
+                          );
+                        })()
+                      : op === "research_delegate"
+                        ? await delegateResearch(req, input, (child) =>
                             this.run(child),
                           )
-                        : op === "media_delegate"
-                          ? await delegateMedia(
-                              req,
-                              input,
-                              (child) => this.run(child),
-                              (this.specialists.media ?? this.model).model ??
-                                "",
+                        : [
+                              "job_alignment_start",
+                              "job_alignment_resume",
+                              "job_alignment_read",
+                            ].includes(op)
+                          ? await runAlignment(req, input, (child) =>
+                              this.run(child),
                             )
-                          : await req.execute(input);
+                          : op === "media_delegate"
+                            ? await delegateMedia(
+                                req,
+                                input,
+                                (child) => this.run(child),
+                                (this.specialists.media ?? this.model).model ??
+                                  "",
+                              )
+                            : await req.execute(input);
                   if (
                     op === "research_report" ||
                     op === "media_report" ||
@@ -240,6 +264,7 @@ export class CustomAgent implements Agent {
                   if (
                     !readOperations.has(op) ||
                     op === "research_delegate" ||
+                    op === "plugin_delegate" ||
                     op === "media_delegate" ||
                     op.startsWith("job_alignment_") ||
                     attempt >= 2 ||

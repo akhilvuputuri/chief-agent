@@ -129,3 +129,7 @@ Ask about selected roles or all saved roles. The [job-alignment specialist](docs
 ## Telegram canvases
 
 The optional Mini App offers persistent, revisioned canvases and a read-only saved-role browser. Open `/canvases` in the bot, or ask it to save a plan or analysis as a canvas. Multiple topics stay separate; earlier revisions remain accessible. Telegram validates the owner before any private content loads. Read the [canvas contract](docs/canvases.md) and [DigitalOcean rollout](docs/miniapp-deployment.md) for configuration, migration 011 and live verification requirements. Calendar approvals remain in Telegram.
+
+## Portable capability plugins
+
+General public research is packaged as a versioned declarative plugin. Enable reviewed agents through the host registry, export/import supported text-only bundles and inspect exact package/skill versions in execution traces. The host retains owner scope, evidence validation, approvals and budgets. See [plugin format and operation](docs/plugins.md). Job alignment and media still use their existing host profiles; external vendor adapters and MCP integration are future work.

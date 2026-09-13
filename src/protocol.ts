@@ -12,6 +12,7 @@ import {
   alignmentInput,
   alignmentReport,
 } from "./alignment-schema.js";
+import { pluginDelegate } from "./plugin-schema.js";
 import { researchAssignment, researchReport } from "./research-schema.js";
 import { mediaAssignment, mediaReport } from "./media-schema.js";
 import { calendarDraft } from "./calendar-draft.js";
@@ -27,7 +28,9 @@ export const status = z.enum([
   "rejected",
   "archived",
 ]);
-const skillKey = z.string().regex(/^[a-z][a-z0-9_-]{0,49}$/);
+const skillKey = z
+  .string()
+  .regex(/^[a-z][a-z0-9_-]{0,49}(?:\/[a-z][a-z0-9-]{0,47})?$/);
 const workKey = z.string().regex(/^[a-z0-9_-]{1,60}$/);
 const workSteps = z
   .array(
@@ -64,6 +67,7 @@ export const action = z.discriminatedUnion("operation", [
   alignmentRead,
   alignmentInput,
   alignmentReport,
+  pluginDelegate,
   researchAssignment,
   researchReport,
   mediaAssignment,
@@ -181,6 +185,7 @@ export const action = z.discriminatedUnion("operation", [
     .object({
       operation: z.literal("skill_read"),
       key: skillKey,
+      offset: z.number().int().min(0).max(32000).optional(),
     })
     .strict(),
   z
@@ -302,6 +307,8 @@ export interface AgentRequest {
   runtime?: { context: string; tools?: import("./model.js").ToolDefinition[] };
   specialist?: "research" | "job_alignment" | "media";
   systemInstructions?: string;
+  /** Host-resolved model override from a pinned plugin, never a model tool argument. */
+  pluginModel?: string;
   executeResearch?: (run: string, input: unknown) => Promise<unknown>;
   refreshContext?: () => Promise<void>;
   execution?: import("./execution.js").Execution;
