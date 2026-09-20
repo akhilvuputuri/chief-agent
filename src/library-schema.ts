@@ -13,5 +13,10 @@ export const libraryAvailability = z
     titleIds: z.array(titleId).min(1).max(5),
   })
   .strict();
+export const libraryShelf = z
+  .object({ operation: z.literal("library_shelf") })
+  .strict();
 export type LibraryAction =
-  z.infer<typeof libraryCheck> | z.infer<typeof libraryAvailability>;
+  | z.infer<typeof libraryCheck>
+  | z.infer<typeof libraryAvailability>
+  | z.infer<typeof libraryShelf>;

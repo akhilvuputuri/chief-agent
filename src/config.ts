@@ -19,6 +19,11 @@ const schema = z.object({
     ])
     .default(""),
   CALENDAR_REFRESH_TOKEN: z.string().default(""),
+  // Encrypts the runtime-obtained Libby identity at rest; account features are off when empty.
+  LIBRARY_IDENTITY_KEY: z
+    .union([z.literal(""), z.string().regex(/^[0-9a-f]{64}$/i)])
+    .default(""),
+  LIBRARY_HOLD_EMAIL: z.union([z.literal(""), z.string().email()]).default(""),
   DAILY_SPREADSHEET_ID: z.string().default(""),
   OPENROUTER_API_KEY: z.string().default(""),
   AGENT_MODEL: z.string().default("openai/gpt-5.6-sol"),

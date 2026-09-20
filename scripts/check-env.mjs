@@ -24,6 +24,8 @@ for (const key of [
   "ELEVENLABS_VOICE_ID",
   "GROQ_API_KEY",
   "TAVILY_API_KEY",
+  "LIBRARY_IDENTITY_KEY",
+  "LIBRARY_HOLD_EMAIL",
 ]) {
   console.log(`${key}: ${env[key]?.trim() ? "configured" : "not configured"}`);
 }

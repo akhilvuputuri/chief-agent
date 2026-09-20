@@ -1,0 +1,382 @@
+import { randomUUID } from "node:crypto";
+import { z } from "zod";
+import { setTimeout as delay } from "node:timers/promises";
+import type { Database } from "./db.js";
+import { event } from "./db.js";
+import { Bearer, LibraryClient, LibraryError } from "./library-client.js";
+import { LibraryIdentity } from "./library-identity.js";
+import {
+  linkConfirming,
+  linkDone,
+  linkFailed,
+  linkProgress,
+} from "./library-cards.js";
+export const linkLimits = {
+  pollMs: 5000,
+  deadlineMs: 5 * 60000,
+  maxPolls: 60,
+  maxEdits: 6,
+  attemptsPerDay: 2,
+  fallbackWindowMs: 15 * 60000,
+};
+const codeResponse = z.object({
+  result: z.string(),
+  code: z.string().optional(),
+  expiry: z.number().optional(),
+});
+export interface LinkApi {
+  editMessageText(
+    chat: string,
+    messageId: number,
+    text: string,
+    extra?: {
+      reply_markup?: {
+        inline_keyboard: { text: string; callback_data: string }[][];
+      };
+    },
+  ): Promise<unknown>;
+}
+export type LinkOutcome =
+  | { status: "done"; loans: number; holds: number }
+  | { status: "expired" | "aborted" | "failed" | "uncertain" };
+/**
+ * The phone-only linking ceremony. Runs detached from the Telegram callback so the owner's
+ * control queue is never held; every poll result is journaled as an enum, never the code.
+ */
+export class LinkCeremony {
+  constructor(
+    private db: Database,
+    private client: LibraryClient,
+    private identity: LibraryIdentity,
+    private api: LinkApi,
+    private onFinished: (
+      user: string,
+      approvalId: string,
+      outcome: LinkOutcome,
+    ) => Promise<void>,
+    private now: () => number = Date.now,
+    private sleep: (ms: number) => Promise<void> = (ms) => delay(ms),
+    private limits = linkLimits,
+  ) {}
+  async attemptsToday(user: string) {
+    return Number(
+      (
+        await this.db.query(
+          "SELECT count(*)::int AS n FROM library_link_attempts WHERE user_id=$1 AND started_at>now()-interval '1 day'",
+          [user],
+        )
+      ).rows[0]?.n ?? 0,
+    );
+  }
+  async liveAttempt(user: string) {
+    return (
+      await this.db.query(
+        "SELECT id,approval_id,state,direction,deadline_at,telegram_message_id FROM library_link_attempts WHERE user_id=$1 AND state IN ('displaying','fulfilled','completing') ORDER BY started_at DESC LIMIT 1",
+        [user],
+      )
+    ).rows[0];
+  }
+  /** Creates the attempt row and starts the detached loop; returns at once. */
+  async start(
+    user: string,
+    approvalId: string,
+    chat: string,
+    messageId: number | null,
+  ) {
+    const id = randomUUID();
+    const deadline = new Date(
+      this.now() + this.limits.deadlineMs,
+    ).toISOString();
+    await this.db.query(
+      "INSERT INTO library_link_attempts(id,user_id,approval_id,direction,state,deadline_at,telegram_message_id) VALUES($1,$2,$3,'display','displaying',$4,$5)",
+      [id, user, approvalId, deadline, messageId],
+    );
+    void this.run(user, id, approvalId, chat, messageId, deadline).catch(
+      async () => {
+        await this.finish(user, id, approvalId, chat, messageId, {
+          status: "failed",
+        }).catch(() => {});
+      },
+    );
+    return id;
+  }
+  private keyboard(attemptId: string) {
+    return {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "Stop linking", callback_data: `lib:abort:${attemptId}` }],
+        ],
+      },
+    };
+  }
+  private async edit(
+    chat: string,
+    messageId: number | null,
+    text: string,
+    extra?: ReturnType<LinkCeremony["keyboard"]>,
+  ) {
+    if (messageId === null) return;
+    await this.api
+      .editMessageText(chat, messageId, text, extra)
+      .catch(() => {});
+  }
+  private async progress(
+    attemptId: string,
+    fields: {
+      polls?: number;
+      rotations?: number;
+      last_result?: string;
+      state?: string;
+    },
+  ) {
+    await this.db.query(
+      "UPDATE library_link_attempts SET polls=COALESCE($2,polls),rotations=COALESCE($3,rotations),last_result=COALESCE($4,last_result),state=COALESCE($5,state) WHERE id=$1",
+      [
+        attemptId,
+        fields.polls ?? null,
+        fields.rotations ?? null,
+        fields.last_result ?? null,
+        fields.state ?? null,
+      ],
+    );
+  }
+  private async aborted(attemptId: string) {
+    return !!(
+      await this.db.query(
+        "SELECT 1 FROM library_link_attempts WHERE id=$1 AND abort_requested",
+        [attemptId],
+      )
+    ).rows.length;
+  }
+  private async run(
+    user: string,
+    attemptId: string,
+    approvalId: string,
+    chat: string,
+    messageId: number | null,
+    deadline: string,
+  ) {
+    const bearer = await this.identity.mint(user);
+    let polls = 0;
+    let rotations = 0;
+    let edits = 0;
+    let code: string | null = null;
+    const deadlineAt = Date.parse(deadline);
+    const poll = () =>
+      this.client.call("chipCloneCode", {
+        query: { role: "pointer" },
+        bearer,
+        schema: codeResponse,
+        context: "background",
+      });
+    for (;;) {
+      if (await this.aborted(attemptId))
+        return this.finish(user, attemptId, approvalId, chat, messageId, {
+          status: "aborted",
+        });
+      if (this.now() >= deadlineAt || polls >= this.limits.maxPolls)
+        return this.finish(user, attemptId, approvalId, chat, messageId, {
+          status: "expired",
+        });
+      let answer: z.infer<typeof codeResponse>;
+      try {
+        answer = await poll();
+      } catch (error) {
+        if (error instanceof LibraryError && error.kind === "transient") {
+          await this.sleep(this.limits.pollMs);
+          continue;
+        }
+        throw error;
+      }
+      polls++;
+      const result = answer.result.toLowerCase();
+      await event(this.db, user, approvalId, "library.link_progress", {
+        attemptId,
+        result,
+        polls,
+      });
+      if (result === "fulfilled") {
+        await this.progress(attemptId, {
+          polls,
+          rotations,
+          last_result: result,
+          state: "fulfilled",
+        });
+        await this.edit(chat, messageId, linkConfirming);
+        return this.complete(
+          user,
+          attemptId,
+          approvalId,
+          chat,
+          messageId,
+          bearer,
+        );
+      }
+      if (answer.code && answer.code !== code) {
+        if (code !== null) rotations++;
+        code = answer.code;
+        if (edits < this.limits.maxEdits) {
+          edits++;
+          await this.edit(
+            chat,
+            messageId,
+            linkProgress(code, deadline),
+            this.keyboard(attemptId),
+          );
+        }
+      }
+      await this.progress(attemptId, { polls, rotations, last_result: result });
+      await this.sleep(this.limits.pollMs);
+    }
+  }
+  /** Fallback direction: the owner read a code in Libby and typed it here. */
+  async enterCode(
+    user: string,
+    approvalId: string,
+    chat: string,
+    code: string,
+  ) {
+    const id = randomUUID();
+    const deadline = new Date(
+      this.now() + this.limits.deadlineMs,
+    ).toISOString();
+    await this.db.query(
+      "INSERT INTO library_link_attempts(id,user_id,approval_id,direction,state,deadline_at) VALUES($1,$2,$3,'enter','fulfilled',$4)",
+      [id, user, approvalId, deadline],
+    );
+    try {
+      const existing = await this.identity.row(user);
+      const bearer =
+        existing && ["linking", "anonymous"].includes(existing.state)
+          ? await this.identity.remint(user, "linking")
+          : await this.identity.mint(user);
+      await this.client.call("chipCloneEnter", {
+        bearer,
+        body: { code, role: "pointer" },
+        schema: z.unknown(),
+        context: "background",
+      });
+      await event(this.db, user, approvalId, "library.link_progress", {
+        attemptId: id,
+        result: "entered",
+        polls: 0,
+      });
+      return await this.complete(user, id, approvalId, chat, null, bearer);
+    } catch (error) {
+      await this.progress(id, {
+        last_result:
+          error instanceof LibraryError
+            ? "error:" + error.kind
+            : "error:" + String((error as Error)?.message ?? "").slice(0, 60),
+      });
+      const outcome: LinkOutcome = {
+        status:
+          error instanceof LibraryError && error.kind === "rejected"
+            ? "failed"
+            : "uncertain",
+      };
+      await this.finish(user, id, approvalId, chat, null, outcome);
+      return outcome;
+    }
+  }
+  private async complete(
+    user: string,
+    attemptId: string,
+    approvalId: string,
+    chat: string,
+    messageId: number | null,
+    bearer: Bearer,
+  ): Promise<LinkOutcome> {
+    await this.progress(attemptId, { state: "completing" });
+    try {
+      await this.client.call("chipClone", {
+        bearer,
+        body: {},
+        schema: z.unknown(),
+        context: "background",
+      });
+      const renewed = await this.identity.remint(user, "linking");
+      const { shelf, card, cards } = await this.identity.syncRaw(user, renewed);
+      if (!card) {
+        const outcome: LinkOutcome = { status: "failed" };
+        await this.finish(
+          user,
+          attemptId,
+          approvalId,
+          chat,
+          messageId,
+          outcome,
+        );
+        return outcome;
+      }
+      await this.identity.markLinked(user, card.cardId, cards);
+      await this.db.query(
+        "INSERT INTO library_watch(user_id) VALUES($1) ON CONFLICT(user_id) DO UPDATE SET status='scheduled',next_run=now()",
+        [user],
+      );
+      const outcome: LinkOutcome = {
+        status: "done",
+        loans: shelf.loans.length,
+        holds: shelf.holds.length,
+      };
+      await this.progress(attemptId, { state: "done" });
+      await this.db.query(
+        "UPDATE library_link_attempts SET finished_at=now() WHERE id=$1",
+        [attemptId],
+      );
+      await this.edit(chat, messageId, linkDone(shelf));
+      await this.onFinished(user, approvalId, outcome);
+      return outcome;
+    } catch (error) {
+      await this.progress(attemptId, {
+        last_result:
+          error instanceof LibraryError
+            ? "error:" + error.kind
+            : "error:" + String((error as Error)?.message ?? "").slice(0, 60),
+      });
+      const outcome: LinkOutcome = {
+        status:
+          error instanceof LibraryError && error.kind === "rejected"
+            ? "failed"
+            : "uncertain",
+      };
+      await this.finish(user, attemptId, approvalId, chat, messageId, outcome);
+      return outcome;
+    }
+  }
+  private async finish(
+    user: string,
+    attemptId: string,
+    approvalId: string,
+    chat: string,
+    messageId: number | null,
+    outcome: LinkOutcome,
+  ) {
+    const rotations = Number(
+      (
+        await this.db.query(
+          "UPDATE library_link_attempts SET state=$2,finished_at=now() WHERE id=$1 RETURNING rotations",
+          [
+            attemptId,
+            outcome.status === "done"
+              ? "done"
+              : outcome.status === "uncertain"
+                ? "completing"
+                : outcome.status,
+          ],
+        )
+      ).rows[0]?.rotations ?? 0,
+    );
+    if (outcome.status !== "uncertain" && outcome.status !== "done")
+      await this.identity.discard(user);
+    if (outcome.status !== "done")
+      await this.edit(
+        chat,
+        messageId,
+        outcome.status === "uncertain"
+          ? "Libby accepted the code but I could not confirm the card yet. Send /library to check; nothing will be retried on its own."
+          : linkFailed(outcome.status, rotations),
+      );
+    await this.onFinished(user, approvalId, outcome);
+  }
+}

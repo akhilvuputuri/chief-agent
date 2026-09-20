@@ -48,3 +48,7 @@ Ship as patch v0.3.1 only after the required independent Astra review and passin
 Phase 3's hosting decision is now the existing DigitalOcean server with a free sslip.io hostname. See [HTTPS deployment and agreed canvas architecture](miniapp-deployment.md). The HTTPS foundation is separate from the unbuilt frontend, Telegram authentication, canvas storage and tools. A public holding endpoint does not expose private views or complete phase 3. Media processing (issue #27) and Python trace analysis (#28) remain independent.
 
 References: [Telegram editMessageText](https://core.telegram.org/bots/api#editmessagetext), [inline keyboard buttons](https://core.telegram.org/bots/api#inlinekeyboardbutton), [Mini Apps](https://core.telegram.org/bots/webapps).
+
+## Library commands
+
+`/library`, `/library link`, `/library revoke`, `/library pending` and `/library code 12345678` are host commands handled before any model call and claim the inbound update like the other commands. `/library` renders the last shelf snapshot as plain text. Link and revoke produce approval cards with `lib:` callbacks in the Calendar pattern; `lib:abort:` stops a running link attempt and is deliberately not serialised behind the owner's control queue. See [library](library.md).

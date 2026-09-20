@@ -8,8 +8,13 @@ import { WorkWorker } from "./work-worker.js";
 import { DailyTools, DailyWorker, ScheduleParser } from "./daily.js";
 import { CalendarActions } from "./calendar-actions.js";
 import { LibraryClient } from "./library-client.js";
-import { MemoryPacing } from "./library-pacing.js";
+import { MemoryPacing, PostgresPacing } from "./library-pacing.js";
 import { LibraryTools } from "./library.js";
+import { LibraryIdentity } from "./library-identity.js";
+import { LinkCeremony } from "./library-link.js";
+import { LibraryActions } from "./library-actions.js";
+import { libraryMigrated, recoverLibrary } from "./library-recovery.js";
+import { secretKey } from "./secret-box.js";
 import { CalendarTools } from "./calendar.js";
 import { DailySheet } from "./daily-sheet.js";
 import { SheetsTools } from "./sheets.js";
@@ -20,7 +25,11 @@ import { JobTools } from "./tools.js";
 import { WebTools } from "./providers.js";
 import { Assistant } from "./agent.js";
 import { server } from "./server.js";
-import { telegram, sendCalendarApprovals } from "./telegram.js";
+import {
+  telegram,
+  sendCalendarApprovals,
+  sendLibraryApprovals,
+} from "./telegram.js";
 const c = readConfig();
 const db = connect(c.DATABASE_URL);
 await db.query("SELECT 1");
@@ -38,6 +47,23 @@ if (
     "Checkpoint steering migration 014 must be applied with the gateway stopped",
   );
 await recoverRuntime(db);
+// Library account features need migration 016; without the key they stay off even if tables exist.
+const libraryReady = await libraryMigrated(db);
+if (c.LIBRARY_IDENTITY_KEY && !libraryReady)
+  throw new Error(
+    "Library migration 016 must be applied with the gateway stopped before LIBRARY_IDENTITY_KEY is set",
+  );
+if (libraryReady) {
+  const recovered = await recoverLibrary(db);
+  console.error(JSON.stringify({ event: "library.recovered", ...recovered }));
+  if (
+    !c.LIBRARY_IDENTITY_KEY &&
+    (await db.query("SELECT 1 FROM library_identities LIMIT 1")).rows.length
+  )
+    console.error(
+      JSON.stringify({ event: "library.disabled_with_identity_present" }),
+    );
+}
 const google = {
   owner: c.GMAIL_OWNER_USER_ID,
   email: c.GMAIL_EMAIL,
@@ -58,22 +84,47 @@ const mirror = new DailySheet(db, {
 });
 const shutdown = new AbortController();
 let notifyOwner: (text: string) => Promise<void> = async () => {};
-const library = new LibraryTools(
-  new LibraryClient({
-    pacing: new MemoryPacing(),
-    signal: shutdown.signal,
-    onBreakerOpen: async (until, reason) => {
-      const when = new Date(until).toLocaleString("en-SG", {
-        timeZone: "Asia/Singapore",
-      });
-      await notifyOwner(
-        reason === "failures"
-          ? `The library did not answer repeatedly. Library calls are paused until ${when}; nothing will be retried on its own.`
-          : `The library asked us to slow down. Library calls are paused until ${when}; nothing will be retried on its own.`,
-      );
+const libraryClient = new LibraryClient({
+  pacing:
+    c.LIBRARY_IDENTITY_KEY && libraryReady
+      ? new PostgresPacing(db)
+      : new MemoryPacing(),
+  signal: shutdown.signal,
+  onBreakerOpen: async (until, reason) => {
+    const when = new Date(until).toLocaleString("en-SG", {
+      timeZone: "Asia/Singapore",
+    });
+    await notifyOwner(
+      reason === "failures"
+        ? `The library did not answer repeatedly. Library calls are paused until ${when}; nothing will be retried on its own.`
+        : `The library asked us to slow down. Library calls are paused until ${when}; nothing will be retried on its own.`,
+    );
+  },
+});
+const libraryOwner = c.TELEGRAM_ALLOWED_USER_IDS.split(",")[0]!;
+const libraryIdentity = c.LIBRARY_IDENTITY_KEY
+  ? new LibraryIdentity(db, libraryClient, secretKey(c.LIBRARY_IDENTITY_KEY))
+  : undefined;
+let libraryActions: LibraryActions | undefined;
+if (libraryIdentity) {
+  const link = new LinkCeremony(
+    db,
+    libraryClient,
+    libraryIdentity,
+    {
+      editMessageText: (chat, messageId, text, extra) =>
+        bot.api.editMessageText(chat, messageId, text, extra),
     },
-  }),
-);
+    (user, approvalId, outcome) =>
+      libraryActions!.linkFinished(user, approvalId, outcome),
+  );
+  libraryActions = new LibraryActions(
+    db,
+    { identity: libraryIdentity, link, client: libraryClient },
+    libraryOwner,
+  );
+}
+const library = new LibraryTools(libraryClient, undefined, libraryIdentity);
 const parser = new ScheduleParser();
 const daily = new DailyTools(db, parser, calendar, mirror);
 const assistant = new Assistant(
@@ -118,6 +169,7 @@ const assistant = new Assistant(
     daily,
     new CalendarActions(db, calendar, c.GMAIL_OWNER_USER_ID),
     library,
+    libraryActions,
   ),
   {
     canvases: !!c.MINIAPP_ORIGIN,
@@ -125,6 +177,7 @@ const assistant = new Assistant(
     gmail: !!c.GOOGLE_REFRESH_TOKEN,
     calendar: !!c.CALENDAR_REFRESH_TOKEN,
     library: true,
+    libraryAccount: !!libraryIdentity,
     preparationSheet: !!(c.SHEETS_REFRESH_TOKEN && c.SHEETS_SPREADSHEET_ID),
     dailySheet: !!(c.SHEETS_REFRESH_TOKEN && c.DAILY_SPREADSHEET_ID),
   },
@@ -255,6 +308,7 @@ async function sendWorkMessage(user: string, text: string | Delivery) {
   if (typeof text !== "string" && text.runId)
     await assistant.recordDelivery(user, text.runId, text.reply);
   await sendCalendarApprovals(bot, db, user);
+  await sendLibraryApprovals(bot, db, user);
 }
 const workWorker = new WorkWorker(
   db,

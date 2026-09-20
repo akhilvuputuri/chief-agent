@@ -34,10 +34,34 @@ Every library failure the model sees is a `ToolValidationError` with neutral wor
 
 `src/library-routes.ts` is the only module naming the two OverDrive hosts. Its (method, path) inventory is the complete outbound surface; `tests/library-boundary.test.ts` fails if a route is added, if a host appears elsewhere, or if any source constructs a return, renew, download, fulfilment or card-login path. Identity routes are declared now and unused until Phase 2.
 
+## Phase 2 — linked card, shelf and days left (v0.3.12, operator-released)
+
+Requires migration 016 and a server `LIBRARY_IDENTITY_KEY`; see [rollout](library-rollout.md). Without the key the account features are absent from the tool list and `/library` says so.
+
+### Linking from the phone
+
+`/library link` sends an approval card. Tapping **Start linking** claims the row and starts a detached ceremony: the assistant mints an anonymous Libby identity, asks Libby for an 8-digit setup code and edits the card to show it (spaced as `4821 9037`), with a **Stop linking** button. The owner types the code into Libby on the same phone under Menu → Copy To Another Device. The assistant polls every 5 seconds for up to 5 minutes and at most 60 polls, edits the message when the code rotates (at most 6 edits), and on `fulfilled` completes the clone, re-mints so the card is baked into its token, syncs, and requires a card for NLB (website id 106 or advantage key `nlb`) before marking the identity linked. Two attempts per Singapore day; an attempt needs 80 calls of allowance left. Every poll is journaled as an enum (`retained`, `regenerated`, `fulfilled`), never the code. Abort flips a flag the loop reads and is never queued behind other controls. The fallback direction, if Libby shows a code on the phone instead, is `/library code 12345678` within 15 minutes of the approved attempt; the message is deleted best-effort and the code is never stored. Do not use Recover Your Data on the phone: that path would replace the phone's own Libby data.
+
+Direction and the second half of the handshake are documented, not yet exercised; the first real link settles them and the losing instruction text is removed afterwards.
+
+### Identity storage and kill switches
+
+The bearer, card id and expiry are sealed with AES-256-GCM (`src/secret-box.ts`, key from `LIBRARY_IDENTITY_KEY`, AAD bound to the owner) in `library_identities.token_box`. Only `withBearer()` decrypts; the `Bearer` value stringifies as `[REDACTED]`; no tool argument, tool result, event, approval payload or Telegram text carries the token, the card id or a code, and a test scans every store after a full link to prove it. The only unattended request is the re-mint (`POST /chip` with the current bearer) when the token is within 72 hours of expiry. An unauthenticated answer marks the identity `expired` with one notice. Kill switches in increasing reach: `/library revoke` (card; local wipe first, then one remote revoke attempt, never retried), `scripts/library-kill.sql` (operator), removing the key from the server environment and restarting.
+
+### Shelf
+
+`library_shelf` (model tool, read, only when the account is configured) and `/library` (host command, no model, reads the last snapshot) report loans with days left computed from `expireDate`, due dates, Lucky Day flags, holds with readiness or estimated wait, slot capacity when the card exposes limits, and today's call usage. Sync is cached 15 minutes. Snapshots never contain ids.
+
+### Recovery
+
+`recoverLibrary()` runs at startup after `recoverRuntime()`: an executing approval without a recorded send becomes `failed` (nothing was sent), one with a send becomes `uncertain`, a displaying link attempt is aborted and its anonymous chip forgotten, a fulfilled or completing attempt stays uncertain for the Check shelf path. `/library pending` re-sends pending cards that scrolled away. Borrow, hold and cancel cards exist in the schema but their execution arrives in Phase 3.
+
 ### Acceptance (owner, from the phone)
 
 1. Ask for a well-known title and confirm the verdict, Lucky Day or hold numbers and the Kobo label arrive in one reply.
 2. Ask a vague title and confirm the assistant lists candidates and asks which.
 3. Repeat the first question within 15 minutes and confirm the reply quotes the same check time.
+
+4. Phase 2: `/library` says not linked; `/library link`, approve, complete the handshake in Libby; ask "how many days left on my loans"; note which direction Libby used.
 
 Record outcomes in [journey 22](journey/22-library-assistant.md) as reported observations.

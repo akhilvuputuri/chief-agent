@@ -193,6 +193,7 @@ export class Assistant {
       gmail: false,
       calendar: false,
       library: false,
+      libraryAccount: false,
       preparationSheet: false,
       dailySheet: false,
     },
@@ -512,6 +513,25 @@ export class Assistant {
             [user],
           )
         ).rows,
+        libraryApprovals: (
+          await this.db.query(
+            "SELECT id,operation,expires_at,payload->'draft' AS draft,payload->>'execution' AS execution,payload->>'source' AS source FROM approvals WHERE user_id=$1 AND operation LIKE 'library\\_%' AND status='pending' AND expires_at>now() ORDER BY created_at DESC LIMIT 5",
+            [user],
+          )
+        ).rows,
+        ...(this.availability.libraryAccount
+          ? {
+              library: (
+                await this.db.query(
+                  'SELECT i.state,i.token_expires_at AS "tokenRenewsBy",s.synced_at AS "lastSyncAt" FROM library_identities i LEFT JOIN library_shelf s ON s.user_id=i.user_id WHERE i.user_id=$1',
+                  [user],
+                )
+              ).rows[0] ?? {
+                state: "none",
+                note: "Not linked; the user can send /library link.",
+              },
+            }
+          : {}),
       });
       const request: AgentRequest = {
         runId: run,
@@ -730,7 +750,11 @@ export class Assistant {
       ).rows;
       // Render the authoritative preview ourselves; never rely on model wording.
       const notices = approvals
-        .filter((a) => a.operation !== "calendar_create")
+        .filter(
+          (a) =>
+            a.operation !== "calendar_create" &&
+            !a.operation.startsWith("library_"),
+        )
         .map(
           (a) =>
             `Approval required — saved action\n${a.operation === "skill_activate" ? a.payload.preview + "\nAgent evaluation: " + a.payload.evaluation : `Delete role ${a.payload.id}: ${JSON.stringify(a.payload.title)} at ${JSON.stringify(a.payload.company)}`}\nWithin 15 minutes, send /approve ${a.id} or /deny ${a.id}`,
