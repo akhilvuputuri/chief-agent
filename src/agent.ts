@@ -192,6 +192,7 @@ export class Assistant {
       web: true,
       gmail: false,
       calendar: false,
+      library: false,
       preparationSheet: false,
       dailySheet: false,
     },

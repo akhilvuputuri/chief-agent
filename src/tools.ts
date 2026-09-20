@@ -13,6 +13,7 @@ import { event } from "./db.js";
 import { action } from "./protocol.js";
 import type { WebTools } from "./providers.js";
 import type { CalendarActions } from "./calendar-actions.js";
+import type { LibraryTools } from "./library.js";
 export class JobTools {
   constructor(
     private db: Database,
@@ -21,6 +22,7 @@ export class JobTools {
     private sheets?: Pick<SheetsTools, "sync">,
     private daily?: DailyTools,
     private calendarActions?: CalendarActions,
+    private library?: LibraryTools,
   ) {}
   async execute(
     user: string,
@@ -108,6 +110,13 @@ export class JobTools {
       throw new Error(
         "Research validation: operation requires the scoped agent runtime",
       );
+    if (
+      a.operation === "library_check" ||
+      a.operation === "library_availability"
+    ) {
+      if (!this.library) throw new Error("Library catalogue is not configured");
+      return this.library.call(user, run, a);
+    }
     if (a.operation === "calendar_draft") {
       if (!this.calendarActions)
         throw new Error("Calendar creation is not configured");
