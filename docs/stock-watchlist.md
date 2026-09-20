@@ -100,8 +100,10 @@ button — also terminal-mutes any still-`pending` alert so a queued
 notification cannot deliver after the pause. Two further races are closed:
 the monitor rechecks item status and the master pause right before inserting
 an alert (a pause landing while the quote request was in flight becomes
-`suppressed_today`), and delivery first mutes pending rows of newly-paused
-items then claims only alerts whose item is active and unpaused. The
+`suppressed_today`, leaving no alert row — resuming can still alert that
+day), and delivery first mutes pending rows of newly-paused items then
+claims only alerts whose item is active and unpaused (a `muted` row keeps
+the day silent even after resume, matching the once-per-day dedupe). The
 monitor's outer tick is guarded so a stuck tick never overlaps.
 
 Alerts follow the same outbox contract as routine delivery:

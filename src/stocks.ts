@@ -480,10 +480,17 @@ export class StockMonitor {
       for (const [mic, group] of groups) {
         const tz = marketCalendar(mic)?.timezone;
         if (!tz) {
-          for (const item of group)
+          for (const item of group) {
+            // Advance the poll cursor too, or an uncovered exchange would
+            // churn an error observation every tick.
+            await this.db.query(
+              "UPDATE watchlist_items SET last_polled_at=$2,updated_at=now() WHERE id=$1",
+              [item.id, now],
+            );
             await this.observe(item, "error", {
               detail: { reason: `no built-in calendar for exchange ${mic}` },
             });
+          }
           continue;
         }
         const date = zoned(now, tz).date;
@@ -647,7 +654,10 @@ export class StockMonitor {
                     [item.id],
                   )
                 ).rows[0];
-                if (!still || still.status !== "active" || still.paused) {
+                // watchlist_remove may have deleted the item mid-poll; its
+                // observation row would violate the FK, so skip silently.
+                if (!still) continue;
+                if (still.status !== "active" || still.paused) {
                   await this.observe(item, "suppressed_today", {
                     quote: { ...q, price },
                     marketState: q.marketOpen ? "regular" : "extended",

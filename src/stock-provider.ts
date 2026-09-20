@@ -73,6 +73,15 @@ export function rowToQuote(row: any): Quote {
     row.timestamp ??
     (row.datetime ? Date.parse(`${row.datetime}`) / 1000 : undefined);
   const extendedSeconds = row.extended_timestamp ?? null;
+  const extendedTime = extendedSeconds
+    ? new Date(Number(extendedSeconds) * 1000)
+    : null;
+  const quoteTime = quoteSeconds
+    ? new Date(Number(quoteSeconds) * 1000)
+    : new Date(0);
+  // Non-numeric provider times must fail closed: an Invalid Date makes every
+  // age comparison false, bypassing staleness — collapse to the epoch instead.
+  if (Number.isNaN(quoteTime.getTime())) quoteTime.setTime(0);
   const extended =
     row.extended_price != null
       ? {
@@ -81,9 +90,10 @@ export function rowToQuote(row: any): Quote {
             row.extended_percent_change != null
               ? Number(row.extended_percent_change)
               : null,
-          time: extendedSeconds
-            ? new Date(Number(extendedSeconds) * 1000)
-            : null,
+          time:
+            extendedTime && !Number.isNaN(extendedTime.getTime())
+              ? extendedTime
+              : null,
         }
       : null;
   return {
@@ -92,9 +102,7 @@ export function rowToQuote(row: any): Quote {
     providerChangePct:
       row.percent_change != null ? Number(row.percent_change) : null,
     currency: String(row.currency ?? ""),
-    quoteTime: quoteSeconds
-      ? new Date(Number(quoteSeconds) * 1000)
-      : new Date(0),
+    quoteTime,
     tradingDate: String(row.datetime ?? "").slice(0, 10),
     marketOpen: row.is_market_open === true,
     extended,

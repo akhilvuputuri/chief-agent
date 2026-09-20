@@ -990,3 +990,39 @@ test("extended opt-in is refused when the plan lacks prepost data", async () => 
     await f.pg.close();
   }
 });
+
+test("malformed provider timestamps fail closed as stale", () => {
+  const q = rowToQuote({
+    symbol: "ACME",
+    close: "90",
+    previous_close: "100",
+    currency: "USD",
+    last_quote_at: "not-a-number",
+    is_market_open: true,
+  });
+  assert.equal(q.quoteTime.getTime(), 0);
+});
+
+test("watchlist_remove during an in-flight poll aborts the chunk safely", async () => {
+  const f = await fixture(new Date("2026-01-15T15:30:00Z"));
+  try {
+    const itemId = await f.add(5);
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({ price: 90, prevClose: 100, providerChangePct: -10 }),
+    );
+    // Owner deletes the watch while the quote request is in flight — the
+    // enqueue recheck finds no row and skips without FK violations.
+    f.provider.onQuotes = () =>
+      f.tools.call("a", f.run, {
+        operation: "watchlist_remove",
+        id: itemId,
+      });
+    await f.monitor.tick();
+    assert.equal((await f.alerts(itemId)).length, 0);
+    await f.delivery.tick();
+    assert.equal(f.sent.length, 0);
+  } finally {
+    await f.pg.close();
+  }
+});
