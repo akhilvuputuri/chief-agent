@@ -38,3 +38,7 @@ Retain any committed additive parcel tables, evidence, request keys and events. 
 After success, verify the deployed SHA and health through existing bounded diagnostics and confirm a subsequent ordinary release can use the now-matching schema/Compose baseline. Record exact-head independent review and operator evidence in the PR and [journal](journey/25-delivery-tracker.md); publish only a new patch version/tag after verified shipment.
 
 Phone acceptance is separate: manually save a parcel, find selected delivery mail, distinguish reported/confirmed receipt, correct a field, query saved state after restart, and verify a failed refresh preserves it. No paid evaluation or real mailbox scan is part of the migration procedure.
+
+## Interrupted proposal reports
+
+`parcel_report` persists evidence and proposal events before acknowledging completion. A restart in that window leaves the call `uncertain`; the existing owner-wide uncertain-write gate blocks further writes pending inspection, even though proposals do not change saved parcels. Inspect the owner/run-scoped call and proposal records through the authorized operations path before resolving uncertainty. Do not automatically replay reports or clear the guard to continue. Source fingerprints prevent duplicate parcel application but do not prove report completion.

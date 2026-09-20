@@ -1,6 +1,6 @@
 # 25 — Which delivery facts should survive a conversation?
 
-Work date: 20 September 2026. Status: implementation candidate; independent review and deployment pending.
+Work date: 20 September 2026. Status: independently approved implementation candidate; operator deployment and live acceptance pending.
 
 ## User-visible problem and preceding iteration
 
@@ -20,7 +20,7 @@ Synthetic testing first exposed two integration errors: an optional result envel
 
 The additional schemas also exposed a continuity regression: when fixed context exceeded the optional-history allowance, saved-answer retrieval pointers disappeared. Four recent host-shaped answer references now survive optional-history eviction, still subject to the final serialized hard limit. The existing saved-answer regression test exercises this foundation fix. Parcel guidance stays in the loadable personal-assistance skill to limit fixed instructions.
 
-Independent review has not yet approved a final SHA. The final review verdict and exact revision belong on the PR; no self-approval or CI-only approval is implied here.
+The review history below records the independent verdicts. The PR records final exact-head approval, including subsequent documentation revisions; CI alone is not reviewer approval.
 
 ### 20 September: confirmation-field review correction
 
@@ -34,6 +34,12 @@ Three additional automated review findings reproduced under PGlite: a duplicate 
 
 The fourth comment, that carrier exceptions permanently prevent recovery, did not reproduce: the existing rank comparison defaults the previous status to zero, not infinity. A regression test verifies newer transit and delivery reports can leave an exception while delivered status remains protected. No status-transition implementation change was necessary. All 19 parcel/extraction tests passed after these corrections.
 
+### 20 September: independent approval
+
+The same independent reviewer returned **APPROVE** for `71e866a0cfa821e6761546b2567ef835c8e4dcc1` against base `25aa0e33af9f620b27b29f98f07d0978d4d165cb`, resolving the prior blocking finding and independently verifying the PR-comment fixes. Reviewer provenance remains the explicitly selected Devin Ultra mode, with no exposed underlying model identifier. Its separate worktree passed TypeScript and 33 parcel/extraction/plugin/context/research tests; synthetic probes confirmed receipt protection, merged-ETA rejection and exception recovery.
+
+**Accepted limitations:** an inverted merged ETA rejects the whole proposal, requiring fresh extraction even when other claims are valid. An interrupted proposal report conservatively blocks further writes pending inspection under the existing uncertain-write policy; see the runbook. The review covers mocked/PGlite behavior, not real email interpretation, Telegram acceptance or production installation.
+
 ## Verification and outcome
 
 **Synthetic tests:** owner isolation, restart-style service reconstruction, idempotency, multiple shipments per order, ambiguity without mutation, stale/unknown facts, confirmation/correction, archive history, failed transactional writes and migration reruns. Private extraction tests cover actual runtime tool access, selected sources, page-level evidence, partial coverage and unavailable Gmail. Existing research/plugin/Gmail suites remain regression coverage for public permissions, pins, revocation and budgets.
@@ -46,8 +52,8 @@ The fourth comment, that carrier exceptions permanently prevent recovery, did no
 
 **UI acceptance attempt:** the independent testing agent reached the Telegram login screen, but no authenticated test conversation, test runtime/bot/model configuration or test Gmail authorization was available. All parcel UI flows remain untested. No production polling or paid model call was attempted.
 
-**Pending:** independent final-head review of [PR #66](https://github.com/akhilvuputuri/companion-agent/pull/66). **Not measured:** real email interpretation quality, live mailbox coverage, Telegram phone acceptance or cost improvements. **Not deployed:** migration 019 and gateway release require the reviewed operator procedure; production state has not been inspected or changed for this task.
+**Review:** implementation approved; final documentation-head verdict is recorded on [PR #66](https://github.com/akhilvuputuri/companion-agent/pull/66). **Not measured:** real email interpretation quality, live mailbox coverage, Telegram phone acceptance or cost improvements. **Not deployed:** migration 019 and gateway release require the reviewed operator procedure; production state has not been inspected or changed for this task.
 
 ## Follow-up
 
-After review, record exact-SHA approval, operator migration verification and deployment health before publishing a release closure. Carrier integrations, automatic refresh, notification scheduling and a dedicated parcel browser are deliberately outside this on-demand feature.
+Record operator migration verification and exact deployed SHA/health before publishing a release closure. Carrier integrations, automatic refresh, notification scheduling and a dedicated parcel browser are deliberately outside this on-demand feature.
