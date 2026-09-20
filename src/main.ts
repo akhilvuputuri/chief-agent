@@ -7,6 +7,9 @@ import type { Delivery } from "./answer.js";
 import { WorkWorker } from "./work-worker.js";
 import { DailyTools, DailyWorker, ScheduleParser } from "./daily.js";
 import { CalendarActions } from "./calendar-actions.js";
+import { LibraryClient } from "./library-client.js";
+import { MemoryPacing } from "./library-pacing.js";
+import { LibraryTools } from "./library.js";
 import { CalendarTools } from "./calendar.js";
 import { DailySheet } from "./daily-sheet.js";
 import { SheetsTools } from "./sheets.js";
@@ -53,6 +56,24 @@ const mirror = new DailySheet(db, {
   refreshToken: c.SHEETS_REFRESH_TOKEN,
   spreadsheetId: c.DAILY_SPREADSHEET_ID,
 });
+const shutdown = new AbortController();
+let notifyOwner: (text: string) => Promise<void> = async () => {};
+const library = new LibraryTools(
+  new LibraryClient({
+    pacing: new MemoryPacing(),
+    signal: shutdown.signal,
+    onBreakerOpen: async (until, reason) => {
+      const when = new Date(until).toLocaleString("en-SG", {
+        timeZone: "Asia/Singapore",
+      });
+      await notifyOwner(
+        reason === "failures"
+          ? `The library did not answer repeatedly. Library calls are paused until ${when}; nothing will be retried on its own.`
+          : `The library asked us to slow down. Library calls are paused until ${when}; nothing will be retried on its own.`,
+      );
+    },
+  }),
+);
 const parser = new ScheduleParser();
 const daily = new DailyTools(db, parser, calendar, mirror);
 const assistant = new Assistant(
@@ -96,12 +117,14 @@ const assistant = new Assistant(
     }),
     daily,
     new CalendarActions(db, calendar, c.GMAIL_OWNER_USER_ID),
+    library,
   ),
   {
     canvases: !!c.MINIAPP_ORIGIN,
     web: !!(c.TAVILY_API_KEY || c.OPENROUTER_API_KEY),
     gmail: !!c.GOOGLE_REFRESH_TOKEN,
     calendar: !!c.CALENDAR_REFRESH_TOKEN,
+    library: true,
     preparationSheet: !!(c.SHEETS_REFRESH_TOKEN && c.SHEETS_SPREADSHEET_ID),
     dailySheet: !!(c.SHEETS_REFRESH_TOKEN && c.DAILY_SPREADSHEET_ID),
   },
@@ -122,6 +145,10 @@ const app = server(
     : undefined,
 );
 const bot = telegram(c, assistant, db);
+notifyOwner = async (text) => {
+  for (const user of c.TELEGRAM_ALLOWED_USER_IDS.split(","))
+    await bot.api.sendMessage(user, text).catch(() => {});
+};
 const views = new TelegramViews(db, bot.api, undefined, c.MINIAPP_ORIGIN);
 const allowed = new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(","));
 const worker = new DailyWorker<Delivery>(
@@ -269,6 +296,7 @@ for (const signal of ["SIGINT", "SIGTERM"])
     void (async () => {
       clearInterval(scheduleTimer);
       clearInterval(workTimer);
+      shutdown.abort();
       assistant.shutdown();
       await runner.stop();
       await app.close();

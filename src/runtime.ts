@@ -71,6 +71,8 @@ export function runtimeContext(
       (!availability.web || !plugins.researchAgent)) ||
     (op === "plugin_delegate" &&
       (!availability.web || !plugins.catalogue().length)) ||
+    (["library_check", "library_availability"].includes(op) &&
+      !availability.library) ||
     (op.startsWith("gmail_") && !availability.gmail) ||
     (["calendar_list", "calendar_draft"].includes(op) &&
       !availability.calendar) ||
@@ -128,6 +130,10 @@ export function runtimeContext(
                   "Revise an explicitly selected paused/idle job for the current user's requested change. Cannot steal a running job. Read the exact job first; ordinary chat follow-ups do not revise unrelated jobs.",
                 work_step:
                   "Record a step outcome with actual proofs. Read receipts prove retrieval only; source applicability and analysis must be assessed separately.",
+                library_check:
+                  "Find the NLB ebook edition of a title and its borrowability in one call. Returns up to five ranked candidates with verdict borrow_now (normal loan), lucky_day (7 days, cannot be held), hold (queue length and estimated wait) or unobtainable, Kobo reachability, an answerHint sentence per candidate, an ambiguous flag and the count of non-ebook results omitted. Cached 15 minutes; never repeat the same query.",
+                library_availability:
+                  "Recheck up to five known titleIds from an earlier library_check. Same verdict rule; cached 15 minutes.",
                 web_read:
                   "Retrieve a public source. Returned sourceId is for source evidence; recommended records are not the requested posting.",
               } as Record<string, string>

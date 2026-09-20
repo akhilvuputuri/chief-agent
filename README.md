@@ -28,6 +28,7 @@ flowchart LR
 - Public web research and evidence-backed role preparation, including questions about unknown experience.
 - Telegram voice notes through ElevenLabs Scribe v2, with optional Flash v2.5 spoken replies.
 - Photos and PDF documents sent on Telegram: an isolated media specialist reads current-turn images and answers targeted questions over stored documents, returning referenced facts and uncertainty; PDF text is extracted in-process, stored as an owner-scoped source and readable page by page with `source_read`. Image bytes are never retained. Scanned PDFs without selectable text are reported, not guessed. See [media processing](docs/media-specialist.md).
+- NLB library catalogue: "is this available as an ebook?" answered with the Lucky Day and hold rule, Kobo reachability and paced, read-only calls. See [library assistant](docs/library.md).
 - Read-only Gmail; Calendar queries and [button-approved event creation](docs/calendar-approval.md); separate preparation and daily-assistant Sheet mirrors.
 - Durable task steps, source evidence, action receipts, execution budgets and cancellation.
 - Approval-gated role deletion and skill activation. No email sending, arbitrary shell execution or self-deployment.

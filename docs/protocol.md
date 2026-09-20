@@ -6,4 +6,6 @@
 
 Each enabled Zod operation becomes its own model tool. `finish_turn` supplies a model-written reply and answer/awaiting_user/awaiting_approval reason. This is flow control, not a text template. Tool calls execute sequentially, after strict parsing and enabled-operation checks. Actual result messages are fed back into the loop.
 
+Library catalogue operations (`library_check`, `library_availability`) are read tools gated by the `library` availability flag; their client enforces host pinning, pacing and neutral error wording (see [library](library.md)).
+
 The production Fastify server exposes only `/healthz`; `/internal/tools` and the Python callback protocol have been removed. Telegram is the authenticated client. A future web or realtime-voice client should reuse the normalized runtime boundary and provide its own authenticated owner scope.

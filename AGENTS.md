@@ -18,6 +18,7 @@ Node 22. `npm ci`, `npm run check`, `npm run build`, `npm run format:check`. Tes
 - Preserve exact user-selected target records throughout research. Do not invent postings, user experience, evidence or completion claims.
 - Telegram phone delivery context guides model-written prose. Do not impose fixed templates or replace answers with ledger summaries.
 - Gmail remains read-only. Calendar queries and button-approved creation of primary-calendar timed events are supported; preserve the explicit Telegram confirmation boundary. Do not add email sending, invitations or applications.
+- Library (NLB/OverDrive): the agent never downloads, returns, renews or fulfils a book, never solves CAPTCHAs or enters a card PIN, and every account write must go behind a Telegram approval card; the only permitted unattended request is the identity re-mint. `src/library-routes.ts` is the complete route inventory and the boundary test must keep passing.
 - Preserve owner scoping, tool validation, approvals, private skill versioning, cancellation and uncertain-write handling.
 - Do not add dollar caps. Keep existing model/provider price filters and time/model/tool allocations unless asked to change them.
 - No data reset, automatic resumption of paused tasks, paid infrastructure, runtime shell access, self-deployment, subagents or deferred eval migration without a specific request.
