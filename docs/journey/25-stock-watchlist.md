@@ -48,7 +48,7 @@ External review (second reviewer, owner-reported) then found five substantive de
 
 ### Release closure — pending
 
-[PR #63](https://github.com/akhilvuputuri/companion-agent/pull/63), CI green. Independent reviewer (Devin session) verdicts: APPROVE on `26e29df` (3 low findings), APPROVE on `bc0a7fb` (findings fixed), APPROVE on final rebased head `3b7155659be13bf2f8de0628d809903a19b29b27`; recorded on the PR. Merge and the reviewed operator rollout (migration 018, `TWELVE_DATA_API_KEY` on the host) are still outstanding — the ordinary release will refuse the DB/Compose change by design.
+[PR #63](https://github.com/akhilvuputuri/companion-agent/pull/63), CI green. Independent reviewer (Devin session) verdicts, recorded on the PR: APPROVE on `26e29df`, `bc0a7fb`, `3b71556`, `4a8fec6`, then `6ea1ac5` (external-review fixes verified) and final head `1d10d7cc6ca68481af2180591ed538940891bb96` (post-review hardening). Merge and the reviewed operator rollout (migration 018, `TWELVE_DATA_API_KEY` on the host) are still outstanding — the ordinary release will refuse the DB/Compose change by design.
 
 ## Follow-up and next iteration
 
