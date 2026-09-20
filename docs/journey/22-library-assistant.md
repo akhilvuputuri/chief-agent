@@ -1,7 +1,7 @@
 # 22 — NLB library assistant
 
 Work date: 2026-09-13 to 2026-09-20. Written: 2026-09-20.
-Status: Phase 1 in progress (candidate v0.3.11); account phases planned. Release SHA and PR added at verification.
+Status: Phase 1 released as [v0.3.11](https://github.com/akhilvuputuri/companion-agent/releases/tag/v0.3.11) at `9c71f61` ([PR #51](https://github.com/akhilvuputuri/companion-agent/pull/51), [release run 35489220156](https://github.com/akhilvuputuri/companion-agent/actions/runs/35489220156)); owner acceptance pending; Phase 2 in progress.
 
 ## User-visible problem
 
@@ -23,7 +23,9 @@ Phase 1 adds `src/library-routes.ts` (the only module naming the hosts; a closed
 
 ## Verification and outcome
 
-Tested: 15 new automated tests (route inventory and forbidden-segment scan, pacing, ceiling, breaker, retry classes, leak-free errors, verdict table, ebook filtering and ranking, caching, dispatcher gating). Full suite, typecheck, build and formatting pass locally. Deployment and owner acceptance are pending and will be appended with the exact SHA.
+Released 20 September 2026 (v0.3.11, exact SHA above, health verified by the release workflow). Independent review of the first head found a NUL byte that made `library.ts` binary in diffs, a lending-period walk that could cache the Lucky Day map as the normal loan length, and an unwired throttle notice; all fixed before approval. Retry jitter in code is 3–4.8 s and 8–12.8 s (the plan said 3–8 s); the catalogue test fixture has 7 items, not the 25 of the live sample.
+
+Tested: 15 new automated tests (route inventory and forbidden-segment scan, pacing, ceiling, breaker, retry classes, leak-free errors, verdict table, ebook filtering and ranking, caching, dispatcher gating). Full suite, typecheck, build and formatting pass locally. Owner acceptance from the phone (real title, vague title, repeat within 15 minutes) is pending and will be appended as reported.
 
 ## Follow-up
 
