@@ -56,6 +56,8 @@ services:
         "/migrations/014_checkpoint_steering.sql",
         "-f",
         "/migrations/015_preparation_chain.sql",
+        "-f",
+        "/migrations/016_library.sql",
       ]
     depends_on:
       postgres: { condition: service_healthy }
@@ -63,6 +65,8 @@ services:
     build: .
     environment:
       MINIAPP_ORIGIN: ${MINIAPP_ORIGIN:-}
+      LIBRARY_IDENTITY_KEY: ${LIBRARY_IDENTITY_KEY:-}
+      LIBRARY_HOLD_EMAIL: ${LIBRARY_HOLD_EMAIL:-}
       DATABASE_URL: postgres://companion:${POSTGRES_PASSWORD}@postgres:5432/companion
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?Set TELEGRAM_BOT_TOKEN}
       TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS:?Set TELEGRAM_ALLOWED_USER_IDS}

@@ -11,6 +11,7 @@ import {
   type Verdict,
 } from "./library-rules.js";
 import type { LibraryAction } from "./library-schema.js";
+import type { LibraryIdentity } from "./library-identity.js";
 export const libraryCache = {
   searchMs: 15 * 60000,
   availabilityMs: 15 * 60000,
@@ -87,14 +88,23 @@ export class LibraryTools {
   constructor(
     private client: LibraryClient,
     private now: () => number = Date.now,
+    private identity?: LibraryIdentity,
   ) {}
-  async call(_user: string, _run: string, a: LibraryAction) {
+  async call(user: string, _run: string, a: LibraryAction) {
     if (a.operation === "library_check") return this.check(a.query, a.author);
+    if (a.operation === "library_shelf") return this.shelf(user);
     return this.recheck(a.titleIds);
   }
-  /** Linked state and allowance for the per-turn context block; no network. */
-  async state() {
-    return this.client.usage();
+  async shelf(user: string) {
+    if (!this.identity) throw new Error("Library account is not configured");
+    const status = await this.identity.status(user);
+    if (!status.linked)
+      return {
+        linked: false as const,
+        state: status.state,
+        note: "No Libby card is linked. The user can send /library link to connect it from the phone; drafting a link is not available to you.",
+      };
+    return this.identity.shelf(user);
   }
   private async lendingDays() {
     if (this.library && this.now() - this.library.at < libraryCache.libraryMs)

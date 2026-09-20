@@ -73,6 +73,7 @@ export function runtimeContext(
       (!availability.web || !plugins.catalogue().length)) ||
     (["library_check", "library_availability"].includes(op) &&
       !availability.library) ||
+    (op === "library_shelf" && !availability.libraryAccount) ||
     (op.startsWith("gmail_") && !availability.gmail) ||
     (["calendar_list", "calendar_draft"].includes(op) &&
       !availability.calendar) ||
@@ -132,6 +133,8 @@ export function runtimeContext(
                   "Record a step outcome with actual proofs. Read receipts prove retrieval only; source applicability and analysis must be assessed separately.",
                 library_check:
                   "Find the NLB ebook edition of a title and its borrowability in one call. Returns up to five ranked candidates with verdict borrow_now (normal loan), lucky_day (7 days, cannot be held), hold (queue length and estimated wait) or unobtainable, Kobo reachability, an answerHint sentence per candidate, an ambiguous flag and the count of non-ebook results omitted. Cached 15 minutes; never repeat the same query.",
+                library_shelf:
+                  "Read the linked NLB card's current loans (days left, due dates, Lucky Day flag) and holds (ready or estimated wait) plus slot capacity. Cached 15 minutes; never contains card numbers or ids. Not linked → ask the user to send /library link.",
                 library_availability:
                   "Recheck up to five known titleIds from an earlier library_check. Same verdict rule; cached 15 minutes.",
                 web_read:

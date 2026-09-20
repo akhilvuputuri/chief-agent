@@ -3,6 +3,11 @@ import { TelegramViews, viewCallback } from "./telegram-views.js";
 import type { Collection, View } from "./telegram-view-render.js";
 import { formatTelegram } from "./telegram-format.js";
 import { calendarPreview, validateDraft } from "./calendar-draft.js";
+import {
+  LibraryActions,
+  libraryButtons,
+  libraryPreview,
+} from "./library-actions.js";
 import { Bot, InputFile } from "grammy";
 import { randomUUID } from "node:crypto";
 import type { Config } from "./config.js";
@@ -91,6 +96,62 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
       }
     });
   });
+  // Abort must never queue behind the owner's controls: it only flips a flag the ceremony reads.
+  bot.callbackQuery(/^lib:abort:([0-9a-f-]{36})$/, async (ctx) => {
+    if (!allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids)) return;
+    await db
+      .query(
+        "UPDATE library_link_attempts SET abort_requested=true WHERE id=$1 AND user_id=$2 AND state IN ('displaying','fulfilled')",
+        [ctx.match[1], String(ctx.from.id)],
+      )
+      .catch(() => {});
+    await ctx.answerCallbackQuery({ text: "Stopping." });
+  });
+  bot.callbackQuery(/^lib:(yes|no|shelf):([0-9a-f-]{36})$/, async (ctx) => {
+    if (!allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids)) return;
+    const user = String(ctx.from.id);
+    await ctx.answerCallbackQuery();
+    await controls.run(user, async () => {
+      try {
+        const result = await assistant.tools.decideLibrary(
+          user,
+          ctx.match[2]!,
+          ctx.match[1] !== "no",
+          String(ctx.chat?.id ?? user),
+        );
+        if (result.status !== "linking") {
+          await ctx.reply(LibraryActions.replyFor(result), {
+            reply_markup: {
+              inline_keyboard:
+                result.status === "uncertain"
+                  ? [
+                      [
+                        {
+                          text: "Check shelf",
+                          callback_data: `lib:shelf:${ctx.match[2]}`,
+                        },
+                      ],
+                    ]
+                  : [],
+            },
+          });
+          if (result.status !== "busy")
+            await ctx
+              .editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } })
+              .catch(() => {});
+        }
+        if (["created", "denied", "failed"].includes(result.status))
+          await db.query(
+            "UPDATE work_tasks SET status='queued',pause_reason=NULL,next_run=now() WHERE user_id=$1 AND id IN (SELECT w.task_id FROM work_turns w JOIN approvals a ON a.run_id=w.run_id AND a.user_id=w.user_id WHERE a.id=$2 AND a.user_id=$1) AND status='paused' AND pause_reason='awaiting_approval' AND used_ms<budget_ms AND used_models<budget_models AND used_tools<budget_tools",
+            [user, ctx.match[2]],
+          );
+      } catch {
+        await ctx.reply(
+          "This library card is unavailable, expired or already used. Ask me again for a fresh one.",
+        );
+      }
+    });
+  });
   bot.on("message", async (ctx) => {
     if (!allowedChat(ctx.from?.id, ctx.chat.type, ids)) return;
     const user = String(ctx.from.id);
@@ -144,6 +205,53 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
       return;
     }
     const command = ctx.message.text;
+    const library =
+      /^\/library(?: (link|revoke|pending|code)(?: (\d{8}))?)?$/i.exec(
+        command ?? "",
+      );
+    if (library) {
+      await ensureUser(db, user);
+      const claimed = await db.query(
+        "INSERT INTO inbound_updates(update_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING update_id",
+        [ctx.update.update_id, user],
+      );
+      if (!claimed.rows.length) return;
+      // The one-time code passes through Telegram once; do not leave it in the chat.
+      if (library[1]?.toLowerCase() === "code")
+        await ctx.deleteMessage().catch(() => {});
+      try {
+        const actions = assistant.tools.libraryAccount;
+        if (!actions) {
+          await ctx.reply(
+            "Library account features are not configured yet. You can still ask me whether a title is available.",
+          );
+        } else {
+          const kind = (library[1]?.toLowerCase() ?? "shelf") as
+            "shelf" | "link" | "revoke" | "pending" | "code";
+          const result = await actions.command(
+            user,
+            kind,
+            library[2],
+            String(ctx.chat.id),
+          );
+          await ctx.reply(result.text);
+          if (result.cards) await sendLibraryApprovals(bot, db, user);
+        }
+        await db.query(
+          "UPDATE inbound_updates SET status='completed' WHERE update_id=$1",
+          [ctx.update.update_id],
+        );
+      } catch {
+        await db.query(
+          "UPDATE inbound_updates SET status='failed' WHERE update_id=$1",
+          [ctx.update.update_id],
+        );
+        await ctx.reply(
+          "Could not apply that library command. Send /library to inspect the saved state.",
+        );
+      }
+      return;
+    }
     if (command === "/canvases" || command === "/app") {
       await ensureUser(db, user);
       const claimed = await db.query(
@@ -462,6 +570,7 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
         if (reply.reply || reply.notices?.length) deliveryRun = reply.runId;
         if ((reply.reply || reply.notices?.length) && (await deliveryGuard())) {
           await sendCalendarApprovals(bot, db, user, deliveryGuard);
+          await sendLibraryApprovals(bot, db, user, deliveryGuard);
           if (reply.reply)
             await views.deliver(
               user,
@@ -547,6 +656,41 @@ export async function sendCalendarApprovals(
               { text: "Decline", callback_data: `cal:no:${row.id}` },
             ],
           ],
+        },
+      },
+    );
+    await db.query(
+      "UPDATE approvals SET payload=jsonb_set(payload,'{telegramMessageId}',$3::jsonb) WHERE id=$1 AND user_id=$2",
+      [row.id, user, JSON.stringify(message.message_id)],
+    );
+  }
+}
+
+export async function sendLibraryApprovals(
+  bot: Bot,
+  db: Database,
+  user: string,
+  guard?: () => Promise<boolean>,
+) {
+  if (guard && !(await guard())) return;
+  const rows = (
+    await db.query(
+      "SELECT id,operation,payload,expires_at FROM approvals WHERE user_id=$1 AND operation LIKE 'library\\_%' AND status='pending' AND expires_at>now() AND NOT (payload ? 'telegramMessageId') ORDER BY created_at",
+      [user],
+    )
+  ).rows;
+  for (const row of rows) {
+    if (guard && !(await guard())) return;
+    const message = await bot.api.sendMessage(
+      user,
+      libraryPreview(
+        row.operation,
+        row.payload,
+        new Date(row.expires_at).toISOString(),
+      ),
+      {
+        reply_markup: {
+          inline_keyboard: libraryButtons(row.operation, row.id),
         },
       },
     );

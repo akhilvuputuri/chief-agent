@@ -14,6 +14,7 @@ import { action } from "./protocol.js";
 import type { WebTools } from "./providers.js";
 import type { CalendarActions } from "./calendar-actions.js";
 import type { LibraryTools } from "./library.js";
+import type { LibraryActions } from "./library-actions.js";
 export class JobTools {
   constructor(
     private db: Database,
@@ -23,6 +24,7 @@ export class JobTools {
     private daily?: DailyTools,
     private calendarActions?: CalendarActions,
     private library?: LibraryTools,
+    private libraryActions?: LibraryActions,
   ) {}
   async execute(
     user: string,
@@ -112,7 +114,8 @@ export class JobTools {
       );
     if (
       a.operation === "library_check" ||
-      a.operation === "library_availability"
+      a.operation === "library_availability" ||
+      a.operation === "library_shelf"
     ) {
       if (!this.library) throw new Error("Library catalogue is not configured");
       return this.library.call(user, run, a);
@@ -302,6 +305,19 @@ export class JobTools {
       analysisInstruction:
         "Analyze fit using only this evidence. Separate strengths, gaps, unknowns, and next steps. Cite the role text and profile facts. If the profile is missing, ask the user for their background. Do not invent experience or give a numeric hiring probability.",
     };
+  }
+  get libraryAccount() {
+    return this.libraryActions;
+  }
+  async decideLibrary(
+    user: string,
+    id: string,
+    approve: boolean,
+    chat: string,
+  ) {
+    if (!this.libraryActions)
+      throw new Error("Library account is not configured");
+    return this.libraryActions.decide(user, id, approve, { chat });
   }
   async decideCalendar(user: string, id: string, approve: boolean) {
     if (!this.calendarActions)

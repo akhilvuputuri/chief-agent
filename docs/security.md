@@ -12,7 +12,7 @@ Public page extraction uses hosted providers. URL checks reject local names, lit
 
 ## Persistence and privacy
 
-Postgres stores conversations, voice transcripts, memories, domain records, model-response checkpoints and tool arguments/results. Execution records can contain personal data: treat the database, reset archives and backups as sensitive. Credentials are kept in private environment files and must never be injected into prompts or diagnostic logs.
+Postgres stores conversations, voice transcripts, memories, domain records, model-response checkpoints and tool arguments/results. Execution records can contain personal data: treat the database, reset archives and backups as sensitive. Credentials are kept in private environment files and must never be injected into prompts or diagnostic logs. One credential is obtained at runtime and cannot live there: the Libby identity token for the NLB library assistant, which is sealed with AES-256-GCM under `LIBRARY_IDENTITY_KEY` before it is stored in Postgres, decrypted only inside the identity module, and never returned to the model or written to events, receipts, approval payloads or Telegram. This protects database dumps, backups, diagnostics and fixtures, not a compromised host that holds the key. `/reset` clears conversation history but not the library identity; `/library revoke` removes it and asks Libby to invalidate the copy.
 
 Audio passes through Telegram and speech providers. Provider retention policies apply; do not promise end-to-end encryption or zero retention. `/reset` clears current conversation history, not every task, memory, trace or archive. Complete erasure requires an operator-reviewed data and provider retention procedure; a user export/erase flow remains future work.
 

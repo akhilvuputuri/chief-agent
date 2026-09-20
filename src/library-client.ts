@@ -13,7 +13,7 @@ export const libraryLimits = {
   minWriteGapMs: 60000,
   dailyCeiling: 200,
   readCeiling: 180,
-  linkPollCeiling: 60,
+  linkPollCeiling: 120, // per Singapore day; the ceremony caps each attempt at 60 polls
   turnWaitMs: 8000,
   backgroundWaitMs: 60000,
   timeoutMs: 15000,
