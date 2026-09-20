@@ -1066,3 +1066,77 @@ test("post-market: a fresh extended quote is validated on its own timestamp", as
     await f.pg.close();
   }
 });
+
+test("a failed quote request still consumes its credits", async () => {
+  const f = await fixture(new Date("2026-01-15T15:30:00Z"));
+  try {
+    const ids: string[] = [];
+    for (let i = 0; i < 10; i++) {
+      f.provider.hits = [{ ...ACME, symbol: `S${i}` }];
+      const r = await f.tools.call("a", f.run, {
+        operation: "watchlist_add",
+        query: `S${i}`,
+        dropPct: 5,
+      });
+      ids.push(r.added.id);
+    }
+    // The 8-symbol request times out — the provider may have billed it anyway,
+    // so the remaining 2 items must wait for the next minute window.
+    f.provider.fail.quotes = new ProviderError("request timed out", true);
+    await f.monitor.tick();
+    f.provider.fail.quotes = undefined;
+    f.setNow(new Date("2026-01-15T15:30:40Z")); // still the same minute window
+    await f.monitor.tick();
+    assert.equal(f.provider.calls.quotes, 1);
+    // Past the boundary, the allowance is back and the leftovers poll.
+    f.setNow(new Date("2026-01-15T15:31:05Z"));
+    await f.monitor.tick();
+    assert.equal(f.provider.calls.quotes, 2);
+    assert.deepEqual(f.provider.batchSizes, [8, 2]);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("an extended-hours alert is stored under the extended session's trading date", async () => {
+  const f = await fixture(new Date("2026-01-15T15:30:00Z"));
+  try {
+    const itemId = await f.add(5);
+    await f.tools.call("a", f.run, {
+      operation: "watchlist_settings",
+      includeExtended: true,
+    });
+    // Friday 2026-01-16, 08:00 ET pre-market. The provider's regular fields
+    // still describe Thursday's close; the extended quote is fresh.
+    f.setNow(new Date("2026-01-16T13:00:00Z"));
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({
+        price: 100,
+        prevClose: 100,
+        providerChangePct: 0,
+        marketOpen: false,
+        quoteTime: new Date("2026-01-15T21:00:00Z"),
+        tradingDate: "2026-01-15",
+        extended: {
+          price: 90,
+          changePct: -10,
+          time: new Date("2026-01-16T13:00:00Z"),
+        },
+      }),
+    );
+    await f.monitor.tick();
+    const alerts = await f.alerts(itemId);
+    assert.equal(alerts.length, 1);
+    assert.equal(
+      alerts[0].trading_date.toISOString().slice(0, 10),
+      "2026-01-16",
+    );
+    assert.match(alerts[0].payload.reply, /2026-01-16/);
+    // A second breach in the same extended session suppresses as today.
+    await f.monitor.tick();
+    assert.equal((await f.alerts(itemId)).length, 1);
+  } finally {
+    await f.pg.close();
+  }
+});

@@ -535,6 +535,9 @@ export class StockMonitor {
           const wantExtended = chunk.some(
             (i) => i.eff_extended && this.provider.supportsExtended,
           );
+          // Reserve the credits before dispatch: a timed-out request may
+          // still have been processed — and billed — provider-side.
+          this.bucket.left -= chunk.length;
           try {
             quotes = await this.provider.quotes(
               chunk.map((i) => ({ symbol: i.symbol, mic: i.mic_code })),
@@ -553,7 +556,6 @@ export class StockMonitor {
               );
             continue;
           }
-          this.bucket.left -= chunk.length;
           for (const item of chunk) {
             const q = quotes.get(
               quoteKey({ symbol: item.symbol, mic: item.mic_code }),
@@ -617,6 +619,11 @@ export class StockMonitor {
               const providerPct = useExtended
                 ? q.extended!.changePct
                 : q.providerChangePct;
+              // Everything downstream — dedupe, observations and the alert
+              // text — sees the selected session's timestamp, not the
+              // regular quote's, so a pre/post-market alert lands on the
+              // trading date its price actually belongs to.
+              const basis = { ...q, price, quoteTime: basisTime };
               const verdict = this.evaluate(item, {
                 ...q,
                 price,
@@ -624,16 +631,17 @@ export class StockMonitor {
               });
               if (verdict.decision) {
                 await this.observe(item, verdict.decision, {
-                  quote: { ...q, price },
-                  marketState: q.marketOpen ? "regular" : "closed",
+                  quote: basis,
+                  marketState: basisLabel,
                   detail: verdict,
                 });
                 continue;
               }
               const changePct = verdict.changePct!;
-              const tradingDate =
-                q.tradingDate ||
-                zoned(q.quoteTime, item.exchange_timezone).date;
+              const tradingDate = useExtended
+                ? zoned(basisTime!, item.exchange_timezone).date
+                : q.tradingDate ||
+                  zoned(q.quoteTime, item.exchange_timezone).date;
               const existing = (
                 await this.db.query(
                   "SELECT state FROM stock_alerts WHERE item_id=$1 AND trading_date=$2",
@@ -661,14 +669,14 @@ export class StockMonitor {
                 if (!still) continue;
                 if (still.status !== "active" || still.paused) {
                   await this.observe(item, "suppressed_today", {
-                    quote: { ...q, price },
-                    marketState: q.marketOpen ? "regular" : "extended",
+                    quote: basis,
+                    marketState: basisLabel,
                     detail: { changePct, reason: "paused during poll" },
                   });
                 } else if (existing) {
                   await this.observe(item, "suppressed_today", {
-                    quote: { ...q, price },
-                    marketState: q.marketOpen ? "regular" : "extended",
+                    quote: basis,
+                    marketState: basisLabel,
                     detail: { changePct, alertState: existing.state },
                   });
                 } else {
@@ -677,12 +685,7 @@ export class StockMonitor {
                     alertId,
                     itemId: item.id,
                     symbol: item.symbol,
-                    reply: this.alertText(
-                      item,
-                      { ...q, price },
-                      price,
-                      changePct,
-                    ),
+                    reply: this.alertText(item, basis, price, changePct),
                   };
                   await this.db.query(
                     `INSERT INTO stock_alerts(id,user_id,item_id,trading_date,payload)
@@ -696,8 +699,8 @@ export class StockMonitor {
                     ],
                   );
                   await this.observe(item, "alerted", {
-                    quote: { ...q, price },
-                    marketState: q.marketOpen ? "regular" : "extended",
+                    quote: basis,
+                    marketState: basisLabel,
                     detail: {
                       changePct,
                       alertId,
@@ -708,8 +711,8 @@ export class StockMonitor {
                 }
               } else {
                 await this.observe(item, "below_threshold", {
-                  quote: { ...q, price },
-                  marketState: q.marketOpen ? "regular" : "extended",
+                  quote: basis,
+                  marketState: basisLabel,
                   detail: { changePct },
                 });
               }
