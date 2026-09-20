@@ -251,8 +251,6 @@ test("the linking ceremony displays a rotating code, completes on fulfilled, lin
       "GET /chip/clone/code",
       "GET /chip/clone/code",
       "GET /chip/clone/code",
-      "POST /chip/clone",
-      "POST /chip",
       "GET /chip/sync",
     ]);
     // Code edits: two distinct codes → two progress edits, then confirming, then done.
@@ -291,6 +289,7 @@ test("abort, deadline and a missing card each end the attempt without linking; r
   try {
     const h = harness(db, {
       codes: [{ result: "regenerated", code: "12345678" }],
+      sync: () => ({ cards: [], loans: [], holds: [] }),
     });
     const a = await h.actions.draft(
       "123",
@@ -403,7 +402,24 @@ test("abort, deadline and a missing card each end the attempt without linking; r
 test("the fallback code entry, re-mint, expiry marking and revoke behave without ever returning the token", async () => {
   const { pg, db } = await database();
   try {
-    const h = harness(db, { codes: [] });
+    let cardPresent = false;
+    const h = harness(db, {
+      codes: [],
+      sync: () =>
+        cardPresent
+          ? {
+              cards: [{ cardId: "card-1", library: { websiteId: 106 } }],
+              loans: [
+                {
+                  id: "5665700",
+                  title: "Project Hail Mary",
+                  expireDate: "2026-10-09T00:00:00Z",
+                },
+              ],
+              holds: [],
+            }
+          : { cards: [], loans: [], holds: [] },
+    });
     const a = await h.actions.draft(
       "123",
       randomUUID(),
@@ -413,6 +429,7 @@ test("the fallback code entry, re-mint, expiry marking and revoke behave without
     );
     await h.actions.decide("123", a.approvalId!, true);
     assert.equal(await settled(db, a.approvalId!), "failed");
+    cardPresent = true;
     const entered = await h.actions.command("123", "code", "87654321", "123");
     const detail = (
       await db.query(
@@ -581,6 +598,76 @@ test("an uncertain link is settled by Check shelf: discarded when no card appear
     assert.equal(linked.status, "created");
     assert.equal((await h.identity.row("123"))?.state, "linked");
     assert.equal(await h.link.liveAttempt("123"), undefined);
+  } finally {
+    await pg.close();
+  }
+});
+
+test("the card arriving by sync completes the link even when the code poll never says fulfilled, and /library link reuses a synced identity", async () => {
+  const { pg, db } = await database();
+  try {
+    let cardPresent = false;
+    let polls = 0;
+    const h = harness(db, {
+      codes: [],
+      sync: () =>
+        cardPresent
+          ? {
+              cards: [{ cardId: "card-1", advantageKey: "nlb" }],
+              loans: [
+                { id: "1", title: "Dune", expireDate: "2026-10-01T00:00:00Z" },
+              ],
+              holds: [],
+            }
+          : { cards: [], loans: [], holds: [] },
+    });
+    const originalCall = h.client.call.bind(h.client);
+    (h.client as any).call = (key: string, opts: any) => {
+      if (key === "chipCloneCode" && ++polls >= 2) cardPresent = true;
+      return originalCall(key as any, opts);
+    };
+    const a = await h.actions.draft(
+      "123",
+      randomUUID(),
+      "library_link",
+      {},
+      { source: "command" },
+    );
+    await db.query(
+      "UPDATE approvals SET payload=jsonb_set(payload,'{telegramMessageId}','11') WHERE id=$1",
+      [a.approvalId],
+    );
+    await h.actions.decide("123", a.approvalId!, true);
+    assert.equal(await settled(db, a.approvalId!), "created");
+    assert.equal((await h.identity.row("123"))?.state, "linked");
+    const paths = h.calls.map((c) => `${c.init.method} ${c.url.pathname}`);
+    assert.ok(
+      !paths.includes("POST /chip/clone"),
+      "no clone call when the card arrived by sync",
+    );
+    assert.equal(
+      paths.filter((p) => p === "POST /chip").length,
+      1,
+      "no re-mint once the card arrived on the attempt's bearer",
+    );
+    const syncs = h.calls.filter((c) => c.url.pathname === "/chip/sync");
+    assert.ok(
+      syncs.every(
+        (c) =>
+          (c.init.headers as Record<string, string>).authorization ===
+          "Bearer " + TOKEN,
+      ),
+      "mid-attempt syncs use the attempt's own bearer",
+    );
+    assert.equal(paths.filter((p) => p === "GET /chip/sync").length, 1);
+    assert.match(h.edits.at(-1)!.text, /Linked to NLB/);
+    // Reuse: an expired identity whose token already carries the card links without a new code.
+    await db.query(
+      "UPDATE library_identities SET state='expired' WHERE user_id='123'",
+    );
+    const reused = await h.actions.command("123", "link", undefined, "123");
+    assert.match(reused.text, /Linked to NLB using the earlier setup: 1 loans/);
+    assert.equal((await h.identity.row("123"))?.state, "linked");
   } finally {
     await pg.close();
   }

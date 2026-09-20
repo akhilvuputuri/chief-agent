@@ -16,6 +16,8 @@ export const linkLimits = {
   deadlineMs: 5 * 60000,
   maxPolls: 60,
   maxEdits: 6,
+  /** Libby syncs the card straight to the displaying identity; a sync check every N polls is the real completion signal. */
+  syncEveryPolls: 4,
   attemptsPerDay: 2,
   fallbackWindowMs: 15 * 60000,
 };
@@ -198,22 +200,28 @@ export class LinkCeremony {
         result,
         polls,
       });
-      if (result === "fulfilled") {
-        await this.progress(attemptId, {
-          polls,
-          rotations,
-          last_result: result,
-          state: "fulfilled",
-        });
-        await this.edit(chat, messageId, linkConfirming);
-        return this.complete(
-          user,
-          attemptId,
-          approvalId,
-          chat,
-          messageId,
-          bearer,
-        );
+      // Observed on the first real link: the phone reported success while the code poll kept
+      // answering "retained". The card arrives on the identity itself, so check the sync.
+      if (result === "fulfilled" || polls % this.limits.syncEveryPolls === 0) {
+        const arrived = await this.cardArrived(user, bearer);
+        if (arrived || result === "fulfilled") {
+          await this.progress(attemptId, {
+            polls,
+            rotations,
+            last_result: result,
+            state: "fulfilled",
+          });
+          await this.edit(chat, messageId, linkConfirming);
+          return this.complete(
+            user,
+            attemptId,
+            approvalId,
+            chat,
+            messageId,
+            bearer,
+            arrived,
+          );
+        }
       }
       if (answer.code && answer.code !== code) {
         if (code !== null) rotations++;
@@ -230,6 +238,16 @@ export class LinkCeremony {
       }
       await this.progress(attemptId, { polls, rotations, last_result: result });
       await this.sleep(this.limits.pollMs);
+    }
+  }
+  /** One paced sync with the attempt's bearer; the sync result when a card is already present. */
+  private async cardArrived(user: string, bearer: Bearer) {
+    try {
+      const synced = await this.identity.syncRaw(user, bearer);
+      return synced.card ? synced : null;
+    } catch (error) {
+      if (error instanceof LibraryError) return null;
+      throw error;
     }
   }
   /** Settles a completing attempt from the Check shelf path: linked, or discarded so a fresh attempt is allowed. */
@@ -297,19 +315,27 @@ export class LinkCeremony {
     chat: string,
     messageId: number | null,
     bearer: Bearer,
+    arrived: Awaited<ReturnType<LinkCeremony["cardArrived"]>> = null,
   ): Promise<LinkOutcome> {
     await this.progress(attemptId, { state: "completing" });
-    let cloned = false;
+    let cloned = !!arrived;
     try {
-      await this.client.call("chipClone", {
-        bearer,
-        body: {},
-        schema: z.unknown(),
-        context: "background",
-      });
-      cloned = true;
-      const renewed = await this.identity.remint(user, "linking");
-      const { shelf, card, cards } = await this.identity.syncRaw(user, renewed);
+      // The card already arrived on this bearer: link it as is. Re-minting here is an
+      // unexercised hypothesis that could discard the only token carrying the card; the
+      // standing needsRemint path renews it later.
+      let synced = arrived;
+      if (!synced) {
+        await this.client.call("chipClone", {
+          bearer,
+          body: {},
+          schema: z.unknown(),
+          context: "background",
+        });
+        cloned = true;
+        const renewed = await this.identity.remint(user, "linking");
+        synced = await this.identity.syncRaw(user, renewed);
+      }
+      const { shelf, card, cards } = synced;
       if (!card) {
         const outcome: LinkOutcome = { status: "failed" };
         await this.finish(

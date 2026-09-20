@@ -239,6 +239,29 @@ export class LibraryActions {
         return {
           text: "Two linking attempts were already made today. Try again tomorrow so the library is not called too often.",
         };
+      // A previous attempt's identity may already hold the card (Libby syncs to the displaying
+      // identity without reporting it on the code poll). One sync settles it without a new code.
+      if (row && row.state !== "revoked") {
+        try {
+          const { shelf, card, cards } = await identity.syncRaw(user);
+          if (card) {
+            await identity.markLinked(user, card.cardId, cards);
+            await this.db.query(
+              "INSERT INTO library_watch(user_id) VALUES($1) ON CONFLICT(user_id) DO UPDATE SET status='scheduled',next_run=now()",
+              [user],
+            );
+            await event(this.db, user, randomUUID(), "library.link_progress", {
+              result: "reused",
+              polls: 0,
+            });
+            return {
+              text: `Linked to NLB using the earlier setup: ${shelf.loans.length} loans, ${shelf.holds.length} holds on your shelf. Send /library any time.`,
+            };
+          }
+        } catch (error) {
+          if (!(error instanceof LibraryError)) throw error;
+        }
+      }
       const usage = await this.deps.client.usage();
       if (usage.breakerOpenUntil)
         return {
