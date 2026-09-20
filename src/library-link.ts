@@ -4,7 +4,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { Database } from "./db.js";
 import { event } from "./db.js";
 import { Bearer, LibraryClient, LibraryError } from "./library-client.js";
-import { LibraryIdentity, shapeOf } from "./library-identity.js";
+import { LibraryIdentity } from "./library-identity.js";
 import {
   linkConfirming,
   linkDone,
@@ -18,8 +18,6 @@ export const linkLimits = {
   maxEdits: 6,
   /** Libby syncs the card straight to the displaying identity; a sync check every N polls is the real completion signal. */
   syncEveryPolls: 4,
-  /** After this many polls with no card, try the documented completion call once. */
-  cloneAfterPolls: 8,
   attemptsPerDay: 2,
   fallbackWindowMs: 15 * 60000,
 };
@@ -28,7 +26,12 @@ const codeResponse = z
     result: z.string(),
     code: z.string().optional(),
     expiry: z.number().optional(),
+    blessing: z.string().optional(),
   })
+  .passthrough();
+/** POST chip/clone may answer with a renewed identity; anything else is ignored. */
+const cloneResponse = z
+  .object({ identity: z.string().optional(), expiry: z.number().optional() })
   .passthrough();
 export interface LinkApi {
   editMessageText(
@@ -50,8 +53,6 @@ export type LinkOutcome =
  * control queue is never held; every poll result is journaled as an enum, never the code.
  */
 export class LinkCeremony {
-  /** Attempts whose probe clone succeeded; consulted by the outer failure handler. */
-  private clonedAttempts = new Set<string>();
   constructor(
     private db: Database,
     private client: LibraryClient,
@@ -101,15 +102,9 @@ export class LinkCeremony {
     );
     void this.run(user, id, approvalId, chat, messageId, deadline).catch(
       async () => {
-        await this.finish(
-          user,
-          id,
-          approvalId,
-          chat,
-          messageId,
-          { status: "failed" },
-          this.clonedAttempts.has(id),
-        ).catch(() => {});
+        await this.finish(user, id, approvalId, chat, messageId, {
+          status: "failed",
+        }).catch(() => {});
       },
     );
     return id;
@@ -175,37 +170,25 @@ export class LinkCeremony {
     let rotations = 0;
     let edits = 0;
     let code: string | null = null;
-    let cloneTried = false;
-    let cloneOk = false;
     const deadlineAt = Date.parse(deadline);
+    // Libby's own client polls with the code it is displaying; without it the server only
+    // issues or retains codes and never reports fulfilment.
     const poll = () =>
       this.client.call("chipCloneCode", {
-        query: { role: "pointer" },
+        query: { role: "pointer", ...(code ? { code } : {}) },
         bearer,
         schema: codeResponse,
         context: "background",
       });
     for (;;) {
       if (await this.aborted(attemptId))
-        return this.finish(
-          user,
-          attemptId,
-          approvalId,
-          chat,
-          messageId,
-          { status: "aborted" },
-          cloneOk,
-        );
+        return this.finish(user, attemptId, approvalId, chat, messageId, {
+          status: "aborted",
+        });
       if (this.now() >= deadlineAt || polls >= this.limits.maxPolls)
-        return this.finish(
-          user,
-          attemptId,
-          approvalId,
-          chat,
-          messageId,
-          { status: "expired" },
-          cloneOk,
-        );
+        return this.finish(user, attemptId, approvalId, chat, messageId, {
+          status: "expired",
+        });
       let answer: z.infer<typeof codeResponse>;
       try {
         answer = await poll();
@@ -233,40 +216,6 @@ export class LinkCeremony {
       // answering "retained". The card arrives on the identity itself, so check the sync.
       if (result === "fulfilled" || polls % this.limits.syncEveryPolls === 0) {
         const arrived = await this.cardArrived(user, bearer);
-        // Second observation: the card did not appear on the chip by itself either. Try the
-        // documented completion call once, logging only its status and body shape.
-        if (
-          !arrived &&
-          result !== "fulfilled" &&
-          polls >= this.limits.cloneAfterPolls &&
-          !cloneTried
-        ) {
-          cloneTried = true;
-          try {
-            const body = await this.client.call("chipClone", {
-              bearer,
-              body: {},
-              schema: z.unknown(),
-              context: "background",
-            });
-            cloneOk = true;
-            this.clonedAttempts.add(attemptId);
-            await event(this.db, user, approvalId, "library.link_probe", {
-              attemptId,
-              step: "clone",
-              outcome: "ok",
-              shape: shapeOf(body),
-            });
-          } catch (error) {
-            await event(this.db, user, approvalId, "library.link_probe", {
-              attemptId,
-              step: "clone",
-              outcome: error instanceof LibraryError ? error.kind : "error",
-              status: error instanceof LibraryError ? error.status : undefined,
-              code: error instanceof LibraryError ? error.code : undefined,
-            });
-          }
-        }
         if (arrived || result === "fulfilled") {
           await this.progress(attemptId, {
             polls,
@@ -283,7 +232,7 @@ export class LinkCeremony {
             messageId,
             bearer,
             arrived,
-            cloneOk,
+            answer.blessing,
           );
         }
       }
@@ -343,18 +292,31 @@ export class LinkCeremony {
         existing && ["linking", "anonymous"].includes(existing.state)
           ? await this.identity.remint(user, "linking")
           : await this.identity.mint(user);
-      await this.client.call("chipCloneEnter", {
+      const entered = await this.client.call("chipCloneEnter", {
         bearer,
         body: { code, role: "pointer" },
-        schema: z.unknown(),
+        schema: codeResponse.partial({ result: true }),
         context: "background",
       });
+      // Libby's entering side treats an answer without a blessing as "transfer done".
+      const already = entered.blessing
+        ? null
+        : await this.cardArrived(user, bearer);
       await event(this.db, user, approvalId, "library.link_progress", {
         attemptId: id,
         result: "entered",
         polls: 0,
       });
-      return await this.complete(user, id, approvalId, chat, null, bearer);
+      return await this.complete(
+        user,
+        id,
+        approvalId,
+        chat,
+        null,
+        bearer,
+        already,
+        entered.blessing,
+      );
     } catch (error) {
       await this.progress(id, {
         last_result:
@@ -380,26 +342,41 @@ export class LinkCeremony {
     messageId: number | null,
     bearer: Bearer,
     arrived: Awaited<ReturnType<LinkCeremony["cardArrived"]>> = null,
-    alreadyCloned = false,
+    blessing?: string,
   ): Promise<LinkOutcome> {
     await this.progress(attemptId, { state: "completing" });
-    let cloned = !!arrived || alreadyCloned;
+    let cloned = !!arrived;
     try {
       // The card already arrived on this bearer: link it as is. Re-minting here is an
       // unexercised hypothesis that could discard the only token carrying the card; the
       // standing needsRemint path renews it later.
       let synced = arrived;
       if (!synced) {
-        if (!alreadyCloned)
-          await this.client.call("chipClone", {
-            bearer,
-            body: {},
-            schema: z.unknown(),
-            context: "background",
-          });
+        if (!blessing) throw new LibraryError("rejected", "no blessing", 0);
+        // The documented completion: POST chip/clone {blessing}; the answer may carry a renewed identity.
+        const answer = await this.client.call("chipClone", {
+          bearer,
+          body: { blessing },
+          schema: cloneResponse,
+          context: "background",
+        });
         cloned = true;
-        const renewed = await this.identity.remint(user, "linking");
-        synced = await this.identity.syncRaw(user, renewed);
+        let current = bearer;
+        // Hypothesis kept defensively: a clone answer carrying an identity is adopted. Not
+        // observed in Libby's client, which instead re-mints with its existing bearer.
+        if (answer.identity && answer.identity.length >= 20)
+          current = await this.identity.adopt(
+            user,
+            answer.identity,
+            answer.expiry,
+          );
+        synced = await this.identity.syncRaw(user, current);
+        if (!synced.card) {
+          // Libby's own client forgets its in-memory identity after the clone and re-mints
+          // with the old bearer before syncing; do the same once.
+          const renewed = await this.identity.remint(user, "linking");
+          synced = await this.identity.syncRaw(user, renewed);
+        }
       }
       const { shelf, card, cards } = synced;
       if (!card) {

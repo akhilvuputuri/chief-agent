@@ -33,16 +33,19 @@ async function database() {
   await ensureUser(db, "456");
   return { pg, db };
 }
-type Script = { result: string; code?: string }[];
+type Script = { result: string; code?: string; blessing?: string }[];
 function harness(
   db: Database,
   options: {
     codes?: Script;
     sync?: () => unknown;
-    clone?: () => Response;
-    enter?: () => Response;
+    clone?: (body: any) => Response;
+    enter?: (body: any) => Response;
+    /** The card appears on sync only after a clone with a valid blessing (Libby's real order). */
+    cardAfterClone?: boolean;
   } = {},
 ) {
+  let cloned = false;
   let now = Date.UTC(2026, 8, 20, 4, 0, 0);
   const calls: { url: URL; init: RequestInit }[] = [];
   const edits: { messageId: number; text: string; buttons: string[] }[] = [];
@@ -69,40 +72,52 @@ function harness(
         return Response.json(
           codes.shift() ?? { result: "retained", code: "11112222" },
         );
+      const body = init.body ? JSON.parse(String(init.body)) : {};
       if (p === "/chip/clone/code")
-        return (options.enter ?? (() => Response.json({})))();
-      if (p === "/chip/clone")
-        return (options.clone ?? (() => Response.json({})))();
+        return (
+          options.enter ??
+          (() =>
+            Response.json({ result: "fulfilled", blessing: "bless-enter" }))
+        )(body);
+      if (p === "/chip/clone") {
+        if (options.clone) return options.clone(body);
+        if (!body.blessing) return new Response("", { status: 403 });
+        cloned = true;
+        return Response.json({ identity: TOKEN2 });
+      }
       if (p === "/chip/sync")
         return Response.json(
-          options.sync?.() ?? {
-            cards: [
-              {
-                cardId: "card-1",
-                library: { websiteId: 106 },
-                limits: { loan: 5, hold: 8 },
-              },
-            ],
-            loans: [
-              {
-                id: "5665700",
-                title: "Project Hail Mary",
-                firstCreatorName: "Andy Weir",
-                type: { id: "ebook" },
-                checkoutDate: "2026-09-18T00:00:00Z",
-                expireDate: "2026-10-09T00:00:00Z",
-              },
-            ],
-            holds: [
-              {
-                id: "77",
-                title: "Dune",
-                isAvailable: false,
-                estimatedWaitDays: 40,
-                placedDate: "2026-09-01T00:00:00Z",
-              },
-            ],
-          },
+          options.sync?.() ??
+            (options.cardAfterClone && !cloned
+              ? { cards: [], loans: [], holds: [] }
+              : {
+                  cards: [
+                    {
+                      cardId: "card-1",
+                      library: { websiteId: 106 },
+                      limits: { loan: 5, hold: 8 },
+                    },
+                  ],
+                  loans: [
+                    {
+                      id: "5665700",
+                      title: "Project Hail Mary",
+                      firstCreatorName: "Andy Weir",
+                      type: { id: "ebook" },
+                      checkoutDate: "2026-09-18T00:00:00Z",
+                      expireDate: "2026-10-09T00:00:00Z",
+                    },
+                  ],
+                  holds: [
+                    {
+                      id: "77",
+                      title: "Dune",
+                      isAvailable: false,
+                      estimatedWaitDays: 40,
+                      placedDate: "2026-09-01T00:00:00Z",
+                    },
+                  ],
+                }),
         );
       if (p === "/chip/revoke") return Response.json({});
       return new Response("", { status: 404 });
@@ -221,8 +236,9 @@ test("the linking ceremony displays a rotating code, completes on fulfilled, lin
         { result: "regenerated", code: "48219037" },
         { result: "retained", code: "48219037" },
         { result: "regenerated", code: "10203040" },
-        { result: "fulfilled" },
+        { result: "fulfilled", blessing: "bless-1" },
       ],
+      cardAfterClone: true,
     });
     const draft = await h.actions.draft(
       "123",
@@ -252,7 +268,23 @@ test("the linking ceremony displays a rotating code, completes on fulfilled, lin
       "GET /chip/clone/code",
       "GET /chip/clone/code",
       "GET /chip/sync",
+      "POST /chip/clone",
+      "GET /chip/sync",
     ]);
+    // Polls echo the displayed code once one is known, as Libby's own client does.
+    const polls = h.calls.filter((c) => c.url.pathname === "/chip/clone/code");
+    assert.equal(polls[0]!.url.searchParams.get("code"), null);
+    assert.equal(polls[1]!.url.searchParams.get("code"), "48219037");
+    assert.equal(polls[3]!.url.searchParams.get("code"), "10203040");
+    const clone = h.calls.find((c) => c.url.pathname === "/chip/clone")!;
+    assert.deepEqual(JSON.parse(String(clone.init.body)), {
+      blessing: "bless-1",
+    });
+    assert.equal(
+      (h.calls.at(-1)!.init.headers as Record<string, string>).authorization,
+      "Bearer " + TOKEN2,
+      "the identity returned by the clone is adopted for the confirming sync",
+    );
     // Code edits: two distinct codes → two progress edits, then confirming, then done.
     const texts = h.edits.map((e) => e.text);
     assert.equal(texts.filter((t) => t.includes("4821 9037")).length, 1);
@@ -272,7 +304,7 @@ test("the linking ceremony displays a rotating code, completes on fulfilled, lin
     assert.equal(events.length, 4);
     await leakScan(
       db,
-      [TOKEN, TOKEN2, "48219037", "10203040"],
+      [TOKEN, TOKEN2, "48219037", "10203040", "bless-1"],
       texts.filter((t) => !t.startsWith("Linking — step 1")),
     );
     const watch = (
@@ -673,7 +705,7 @@ test("the card arriving by sync completes the link even when the code poll never
   }
 });
 
-test("shapeOf records structure only and a probe clone after eight empty polls is revoked when the attempt still fails", async () => {
+test("shapeOf records structure only, and an attempt with no blessing never calls clone", async () => {
   const shape = shapeOf({
     cards: [{ cardId: "12345678", email: "a@b.c", "1234567890": 1 }],
     identity: "eyJhbGciOiJIUzI1NiJ9.eyJjaGlwIjoieCJ9.c2ln",
@@ -696,14 +728,9 @@ test("shapeOf records structure only and a probe clone after eight empty polls i
   assert.equal(shape.nested.deep.deeper, "object");
   const { pg, db } = await database();
   try {
-    let clones = 0;
     const h = harness(db, {
       codes: [],
       sync: () => ({ cards: [], loans: [], holds: [] }),
-      clone: () => {
-        clones++;
-        return Response.json({ result: "ok", blessing: "x" });
-      },
     });
     const a = await h.actions.draft(
       "123",
@@ -714,13 +741,15 @@ test("shapeOf records structure only and a probe clone after eight empty polls i
     );
     await h.actions.decide("123", a.approvalId!, true);
     assert.equal(await settled(db, a.approvalId!), "failed");
-    assert.equal(clones, 1, "exactly one probe clone per attempt");
-    const probe = (
-      await db.query("SELECT data FROM events WHERE type='library.link_probe'")
-    ).rows;
-    assert.equal(probe.length, 1);
-    assert.equal(probe[0].data.outcome, "ok");
-    assert.equal(probe[0].data.shape.blessing, "string");
+    const paths = h.calls.map((c) => `${c.init.method} ${c.url.pathname}`);
+    assert.ok(
+      !paths.includes("POST /chip/clone"),
+      "no clone without a blessing",
+    );
+    assert.ok(
+      !paths.includes("POST /chip/revoke"),
+      "nothing to revoke: no clone happened",
+    );
     const shapes = (
       await db.query(
         "SELECT count(*)::int n FROM events WHERE type='library.sync_shape'",
@@ -733,10 +762,167 @@ test("shapeOf records structure only and a probe clone after eight empty polls i
       )
     ).rows[0].data;
     assert.deepEqual(progress.keys, ["result", "code"]);
-    // The probe clone may have moved the card onto this token: it is revoked, not silently dropped.
-    assert.equal(h.calls.at(-1)!.url.pathname, "/chip/revoke");
     assert.equal(await h.identity.row("123"), undefined);
   } finally {
     await pg.close();
+  }
+});
+
+test("the production-likely path: a clone answer without an identity, re-mint with the old bearer, then the card; plus failure semantics after and without a blessing", async () => {
+  {
+    const { pg, db } = await database();
+    try {
+      let cloned = false;
+      let minted = 0;
+      const h = harness(db, {
+        codes: [{ result: "fulfilled", blessing: "bless-x" }],
+        clone: (body: any) => {
+          assert.deepEqual(body, { blessing: "bless-x" });
+          cloned = true;
+          return Response.json({ result: "cloned" });
+        },
+        sync: () =>
+          cloned && minted >= 2
+            ? {
+                cards: [{ cardId: "c-old", advantageKey: "nlb" }],
+                loans: [],
+                holds: [],
+              }
+            : { cards: [], loans: [], holds: [] },
+      });
+      const originalCall = h.client.call.bind(h.client);
+      (h.client as any).call = (key: string, opts: any) => {
+        if (key === "chipMint") minted++;
+        return originalCall(key as any, opts);
+      };
+      const a = await h.actions.draft(
+        "123",
+        randomUUID(),
+        "library_link",
+        {},
+        { source: "command" },
+      );
+      await h.actions.decide("123", a.approvalId!, true);
+      assert.equal(await settled(db, a.approvalId!), "created");
+      const paths = h.calls.map((c) => `${c.init.method} ${c.url.pathname}`);
+      assert.deepEqual(paths, [
+        "POST /chip",
+        "GET /chip/clone/code",
+        "GET /chip/sync",
+        "POST /chip/clone",
+        "GET /chip/sync",
+        "POST /chip",
+        "GET /chip/sync",
+      ]);
+      assert.equal(
+        (h.calls.at(-1)!.init.headers as any).authorization,
+        "Bearer " + TOKEN2,
+      );
+      assert.equal((await h.identity.row("123"))?.state, "linked");
+    } finally {
+      await pg.close();
+    }
+  }
+  {
+    const { pg, db } = await database();
+    try {
+      let cloned = false;
+      const h = harness(db, {
+        codes: [{ result: "fulfilled", blessing: "bless-y" }],
+        clone: () => {
+          cloned = true;
+          return Response.json({});
+        },
+        sync: () =>
+          cloned
+            ? {
+                cards: [{ cardId: "c1", advantageKey: "nlb" }],
+                loans: [],
+                holds: [],
+              }
+            : { cards: [], loans: [], holds: [] },
+      });
+      const a = await h.actions.draft(
+        "123",
+        randomUUID(),
+        "library_link",
+        {},
+        { source: "command" },
+      );
+      await h.actions.decide("123", a.approvalId!, true);
+      assert.equal(await settled(db, a.approvalId!), "created");
+      assert.equal(
+        h.calls.filter(
+          (c) => c.url.pathname === "/chip" && c.init.method === "POST",
+        ).length,
+        1,
+        "card already on the old bearer: no re-mint",
+      );
+    } finally {
+      await pg.close();
+    }
+  }
+  {
+    const { pg, db } = await database();
+    try {
+      const h = harness(db, {
+        codes: [{ result: "fulfilled" }],
+        sync: () => ({ cards: [], loans: [], holds: [] }),
+      });
+      const a = await h.actions.draft(
+        "123",
+        randomUUID(),
+        "library_link",
+        {},
+        { source: "command" },
+      );
+      await h.actions.decide("123", a.approvalId!, true);
+      assert.equal(await settled(db, a.approvalId!), "failed");
+      const paths = h.calls.map((c) => `${c.init.method} ${c.url.pathname}`);
+      assert.ok(
+        !paths.includes("POST /chip/clone"),
+        "fulfilled without a blessing: no clone",
+      );
+      assert.ok(!paths.includes("POST /chip/revoke"), "nothing to revoke");
+    } finally {
+      await pg.close();
+    }
+  }
+  {
+    const { pg, db } = await database();
+    try {
+      let cloned = false;
+      const h = harness(db, {
+        codes: [{ result: "fulfilled", blessing: "bless-z" }],
+        clone: () => {
+          cloned = true;
+          return Response.json({});
+        },
+        sync: () => {
+          if (cloned) throw new Error("boom");
+          return { cards: [], loans: [], holds: [] };
+        },
+      });
+      const a = await h.actions.draft(
+        "123",
+        randomUUID(),
+        "library_link",
+        {},
+        { source: "command" },
+      );
+      await h.actions.decide("123", a.approvalId!, true);
+      assert.equal(await settled(db, a.approvalId!), "uncertain");
+      assert.ok(
+        !h.calls.some((c) => c.url.pathname === "/chip/revoke"),
+        "uncertain keeps the token for Check shelf",
+      );
+      assert.equal(
+        (await db.query("SELECT state FROM library_link_attempts")).rows[0]
+          .state,
+        "completing",
+      );
+    } finally {
+      await pg.close();
+    }
   }
 });
