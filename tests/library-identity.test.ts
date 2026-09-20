@@ -941,6 +941,64 @@ test("the production-likely path: a clone answer without an identity, re-mint wi
   }
 });
 
+test("a first clone that answers 403 missing_chip is retried once after re-minting, and then lands the card", async () => {
+  const { pg, db } = await database();
+  try {
+    let clones = 0;
+    let cloned = false;
+    const h = harness(db, {
+      codes: [{ result: "fulfilled", blessing: "bless-mc" }],
+      clone: (body: any) => {
+        assert.deepEqual(body, { blessing: "bless-mc" });
+        clones++;
+        // The freshly minted chip is not registered yet: first clone is refused.
+        if (clones === 1)
+          return Response.json({ result: "missing_chip" }, { status: 403 });
+        cloned = true;
+        return Response.json({ result: "cloned" });
+      },
+      sync: () =>
+        cloned
+          ? { cards: [{ cardId: "c-mc", advantageKey: "nlb" }], loans: [], holds: [] }
+          : { cards: [], loans: [], holds: [] },
+    });
+    const a = await h.actions.draft(
+      "123",
+      randomUUID(),
+      "library_link",
+      {},
+      { source: "command" },
+    );
+    await h.actions.decide("123", a.approvalId!, true);
+    assert.equal(await settled(db, a.approvalId!), "created");
+    assert.equal(clones, 2, "the clone is attempted exactly twice");
+    const paths = h.calls.map((c) => `${c.init.method} ${c.url.pathname}`);
+    // Mint, poll, first clone (403), re-mint, second clone (ok), sync with the card.
+    assert.deepEqual(paths, [
+      "POST /chip",
+      "GET /chip/clone/code",
+      "GET /chip/sync",
+      "POST /chip/clone",
+      "POST /chip",
+      "POST /chip/clone",
+      "GET /chip/sync",
+    ]);
+    const remint = h.calls.filter(
+      (c) => c.url.pathname === "/chip" && c.init.method === "POST",
+    ).at(-1)!;
+    assert.equal(remint.url.searchParams.get("v"), "chip1234");
+    const retry = h.calls.filter((c) => c.url.pathname === "/chip/clone").at(-1)!;
+    assert.equal(
+      (retry.init.headers as any).authorization,
+      "Bearer " + TOKEN2,
+      "the retry carries the re-minted identity",
+    );
+    assert.equal((await h.identity.row("123"))?.state, "linked");
+  } finally {
+    await pg.close();
+  }
+});
+
 test("/library link settles an attempt left completing before starting a new one", async () => {
   const { pg, db } = await database();
   try {
