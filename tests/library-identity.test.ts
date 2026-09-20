@@ -7,7 +7,7 @@ import { ensureUser, type Database } from "../src/db.js";
 import { open, seal, secretKey } from "../src/secret-box.js";
 import { LibraryClient } from "../src/library-client.js";
 import { PostgresPacing } from "../src/library-pacing.js";
-import { LibraryIdentity, daysLeft } from "../src/library-identity.js";
+import { LibraryIdentity, daysLeft, shapeOf } from "../src/library-identity.js";
 import { LinkCeremony, type LinkOutcome } from "../src/library-link.js";
 import { LibraryActions } from "../src/library-actions.js";
 import { recoverLibrary } from "../src/library-recovery.js";
@@ -668,6 +668,74 @@ test("the card arriving by sync completes the link even when the code poll never
     const reused = await h.actions.command("123", "link", undefined, "123");
     assert.match(reused.text, /Linked to NLB using the earlier setup: 1 loans/);
     assert.equal((await h.identity.row("123"))?.state, "linked");
+  } finally {
+    await pg.close();
+  }
+});
+
+test("shapeOf records structure only and a probe clone after eight empty polls is revoked when the attempt still fails", async () => {
+  const shape = shapeOf({
+    cards: [{ cardId: "12345678", email: "a@b.c", "1234567890": 1 }],
+    identity: "eyJhbGciOiJIUzI1NiJ9.eyJjaGlwIjoieCJ9.c2ln",
+    "user@example.com": true,
+    nested: { deep: { deeper: { value: "secret" } } },
+  }) as any;
+  const text = JSON.stringify(shape);
+  for (const leak of [
+    "12345678",
+    "a@b.c",
+    "eyJ",
+    "secret",
+    "1234567890",
+    "user@example.com",
+  ])
+    assert.ok(!text.includes(leak), `leaked ${leak}`);
+  assert.equal(shape.cards.length, 1);
+  assert.equal(shape.cards.item.cardId, "string");
+  assert.equal(shape["?"], "boolean");
+  assert.equal(shape.nested.deep.deeper, "object");
+  const { pg, db } = await database();
+  try {
+    let clones = 0;
+    const h = harness(db, {
+      codes: [],
+      sync: () => ({ cards: [], loans: [], holds: [] }),
+      clone: () => {
+        clones++;
+        return Response.json({ result: "ok", blessing: "x" });
+      },
+    });
+    const a = await h.actions.draft(
+      "123",
+      randomUUID(),
+      "library_link",
+      {},
+      { source: "command" },
+    );
+    await h.actions.decide("123", a.approvalId!, true);
+    assert.equal(await settled(db, a.approvalId!), "failed");
+    assert.equal(clones, 1, "exactly one probe clone per attempt");
+    const probe = (
+      await db.query("SELECT data FROM events WHERE type='library.link_probe'")
+    ).rows;
+    assert.equal(probe.length, 1);
+    assert.equal(probe[0].data.outcome, "ok");
+    assert.equal(probe[0].data.shape.blessing, "string");
+    const shapes = (
+      await db.query(
+        "SELECT count(*)::int n FROM events WHERE type='library.sync_shape'",
+      )
+    ).rows[0].n;
+    assert.ok(shapes >= 10);
+    const progress = (
+      await db.query(
+        "SELECT data FROM events WHERE type='library.link_progress' LIMIT 1",
+      )
+    ).rows[0].data;
+    assert.deepEqual(progress.keys, ["result", "code"]);
+    // The probe clone may have moved the card onto this token: it is revoked, not silently dropped.
+    assert.equal(h.calls.at(-1)!.url.pathname, "/chip/revoke");
+    assert.equal(await h.identity.row("123"), undefined);
   } finally {
     await pg.close();
   }

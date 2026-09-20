@@ -182,7 +182,13 @@ test("/library commands are host-only, claim the update, send one card, and only
     await f.bot.handleUpdate(message(123, "/library"));
     assert.match(f.sent.at(-1).text, /Card: linked/);
     assert.ok(!JSON.stringify(f.sent).includes(TOKEN));
-    assert.ok(!JSON.stringify(f.sent).includes("c9"));
+    // Card ids never reach texts; callback data holds random UUIDs, so scan only the texts.
+    assert.ok(
+      !f.sent
+        .map((m) => m.text)
+        .join("\n")
+        .includes("c9"),
+    );
   } finally {
     await f.pg.close();
   }

@@ -1,5 +1,6 @@
 import { z } from "zod";
-import type { Database } from "./db.js";
+import { type Database, event } from "./db.js";
+import { randomUUID } from "node:crypto";
 import { Bearer, LibraryClient, LibraryError } from "./library-client.js";
 import { libraryKey, websiteId } from "./library-routes.js";
 import { open, seal } from "./secret-box.js";
@@ -50,11 +51,40 @@ const card = z.object({
     .object({ loan: z.number().optional(), hold: z.number().optional() })
     .optional(),
 });
-const syncResponse = z.object({
-  cards: z.array(card).default([]),
-  loans: z.array(loan).default([]),
-  holds: z.array(hold).default([]),
-});
+const syncResponse = z
+  .object({
+    cards: z.array(card).default([]),
+    loans: z.array(loan).default([]),
+    holds: z.array(hold).default([]),
+  })
+  .passthrough();
+/** Structural fingerprint of an upstream body: key names and sizes only, never values. */
+export function shapeOf(value: unknown, depth = 0): unknown {
+  // Leading letter required: numeric keys could be ids; anything else is masked.
+  const name = (k: string) =>
+    /^[A-Za-z_][A-Za-z0-9_]{0,39}$/.test(k) ? k : "?";
+  if (Array.isArray(value))
+    return {
+      length: value.length,
+      item:
+        value.length && depth < 2 ? shapeOf(value[0], depth + 1) : undefined,
+    };
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).slice(
+      0,
+      40,
+    );
+    return Object.fromEntries(
+      entries.map(([k, v]) => [
+        name(k),
+        depth < 2 && v && typeof v === "object"
+          ? shapeOf(v, depth + 1)
+          : typeof v,
+      ]),
+    );
+  }
+  return value === null ? "null" : typeof value;
+}
 export type SyncResponse = z.infer<typeof syncResponse>;
 export interface ShelfLoan {
   titleId: string;
@@ -311,6 +341,11 @@ export class LibraryIdentity {
     const response = bearer
       ? await call(bearer)
       : await this.withBearer(user, (b) => call(b));
+    // Ceremony syncs record the body's shape so an unexpected layout is diagnosable without values.
+    if (bearer)
+      await event(this.db, user, randomUUID(), "library.sync_shape", {
+        shape: shapeOf(response),
+      });
     const shelf = this.project(response);
     await this.persist(user, shelf);
     return {
