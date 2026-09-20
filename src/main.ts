@@ -47,6 +47,13 @@ if (
   throw new Error(
     "Checkpoint steering migration 014 must be applied with the gateway stopped",
   );
+if (
+  !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=17")).rows
+    .length
+)
+  throw new Error(
+    "Scheduled routines migration 017 must be applied with the gateway stopped",
+  );
 await recoverRuntime(db);
 // Library account features need migration 016; without the key they stay off even if tables exist.
 const libraryReady = await libraryMigrated(db);

@@ -62,3 +62,7 @@ Use [the template](TEMPLATE.md) for every meaningful change, incident, architect
 Use **reported** for user/operator accounts not independently reproduced; **tested** for a named synthetic or automated check; **measured** for recorded observations with units, dates, sample sizes and collection method; **hypothesis** for a possible explanation; and **deferred** for deliberately unfinished work. **Released** requires the exact deployed SHA, successful release/health evidence and the corresponding PR/review record, with version/tag when published. Append a dated release closure after verification; retain earlier failures with the revision or stage at which they occurred. A merge, passing test or package version alone is not deployment evidence.
 
 Equivalent workload, model/configuration, pricing, denominators and missing accounting matter for comparisons. A health check is not a semantic evaluation, and a supplied memory is not proof that the model used it. Do not claim benchmark wins, production scale or savings without measurements. Keep private conversations, credentials, raw traces, user records and personal motivations out of this journal.
+
+## Scheduled work
+
+- 20 September 2026: [24 — Scheduled independent agent work](24-scheduled-routines.md), implementation candidate; builds on [17 — Independent jobs](17-rolling-conversation.md).
