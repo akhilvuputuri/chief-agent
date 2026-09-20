@@ -174,7 +174,7 @@ test("/library commands are host-only, claim the update, send one card, and only
     await f.bot.handleUpdate(callback(123, `lib:yes:${id}`));
     assert.equal(await settled(f.db, id), "created");
     assert.equal((await f.identity.row("123"))?.state, "linked");
-    assert.ok(f.calls.includes("POST /chip/clone"));
+    assert.ok(f.calls.includes("GET /chip/sync"));
     // A second tap on the used card is refused without any request.
     const n = f.calls.length;
     await f.bot.handleUpdate(callback(123, `lib:yes:${id}`));

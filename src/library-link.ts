@@ -16,6 +16,8 @@ export const linkLimits = {
   deadlineMs: 5 * 60000,
   maxPolls: 60,
   maxEdits: 6,
+  /** Libby syncs the card straight to the displaying identity; a sync check every N polls is the real completion signal. */
+  syncEveryPolls: 4,
   attemptsPerDay: 2,
   fallbackWindowMs: 15 * 60000,
 };
@@ -198,22 +200,28 @@ export class LinkCeremony {
         result,
         polls,
       });
-      if (result === "fulfilled") {
-        await this.progress(attemptId, {
-          polls,
-          rotations,
-          last_result: result,
-          state: "fulfilled",
-        });
-        await this.edit(chat, messageId, linkConfirming);
-        return this.complete(
-          user,
-          attemptId,
-          approvalId,
-          chat,
-          messageId,
-          bearer,
-        );
+      // Observed on the first real link: the phone reported success while the code poll kept
+      // answering "retained". The card arrives on the identity itself, so check the sync.
+      if (result === "fulfilled" || polls % this.limits.syncEveryPolls === 0) {
+        const arrived = await this.cardArrived(user, bearer);
+        if (arrived || result === "fulfilled") {
+          await this.progress(attemptId, {
+            polls,
+            rotations,
+            last_result: result,
+            state: "fulfilled",
+          });
+          await this.edit(chat, messageId, linkConfirming);
+          return this.complete(
+            user,
+            attemptId,
+            approvalId,
+            chat,
+            messageId,
+            bearer,
+            arrived,
+          );
+        }
       }
       if (answer.code && answer.code !== code) {
         if (code !== null) rotations++;
@@ -230,6 +238,15 @@ export class LinkCeremony {
       }
       await this.progress(attemptId, { polls, rotations, last_result: result });
       await this.sleep(this.limits.pollMs);
+    }
+  }
+  /** One paced sync with the attempt's bearer; true when a card is already present. */
+  private async cardArrived(user: string, bearer: Bearer) {
+    try {
+      return !!(await this.identity.syncRaw(user, bearer)).card;
+    } catch (error) {
+      if (error instanceof LibraryError) return false;
+      throw error;
     }
   }
   /** Settles a completing attempt from the Check shelf path: linked, or discarded so a fresh attempt is allowed. */
@@ -297,17 +314,21 @@ export class LinkCeremony {
     chat: string,
     messageId: number | null,
     bearer: Bearer,
+    alreadySynced = false,
   ): Promise<LinkOutcome> {
     await this.progress(attemptId, { state: "completing" });
-    let cloned = false;
+    let cloned = alreadySynced;
     try {
-      await this.client.call("chipClone", {
-        bearer,
-        body: {},
-        schema: z.unknown(),
-        context: "background",
-      });
-      cloned = true;
+      // When the card already arrived by sync, the clone call is unnecessary; a rejection is not a failure.
+      if (!alreadySynced) {
+        await this.client.call("chipClone", {
+          bearer,
+          body: {},
+          schema: z.unknown(),
+          context: "background",
+        });
+        cloned = true;
+      }
       const renewed = await this.identity.remint(user, "linking");
       const { shelf, card, cards } = await this.identity.syncRaw(user, renewed);
       if (!card) {
