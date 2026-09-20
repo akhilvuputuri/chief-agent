@@ -1,6 +1,6 @@
 # Scheduled agent routines
 
-Implementation for [issue 56](https://github.com/akhilvuputuri/companion-agent/issues/56). Candidate until the reviewed migration and release are verified.
+Implementation for [issue 56](https://github.com/akhilvuputuri/companion-agent/issues/56). Released in v0.3.15: migration 017 and exact deployed SHA `c1f8e7088676d4ee3d041993d5e08412e4c73a70` verified healthy on 20 September 2026. See [release evidence](journey/24-scheduled-routines.md).
 
 ## User behavior
 
