@@ -65,4 +65,4 @@ Equivalent workload, model/configuration, pricing, denominators and missing acco
 
 ## Scheduled work
 
-- 20 September 2026: [24 — Scheduled independent agent work](24-scheduled-routines.md), implementation candidate; builds on [17 — Independent jobs](17-rolling-conversation.md).
+- 20 September 2026: [24 — Scheduled independent agent work](24-scheduled-routines.md), released v0.3.15; builds on [17 — Independent jobs](17-rolling-conversation.md).
