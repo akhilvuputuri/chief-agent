@@ -959,7 +959,11 @@ test("a first clone that answers 403 missing_chip is retried once after re-minti
       },
       sync: () =>
         cloned
-          ? { cards: [{ cardId: "c-mc", advantageKey: "nlb" }], loans: [], holds: [] }
+          ? {
+              cards: [{ cardId: "c-mc", advantageKey: "nlb" }],
+              loans: [],
+              holds: [],
+            }
           : { cards: [], loans: [], holds: [] },
     });
     const a = await h.actions.draft(
@@ -983,11 +987,13 @@ test("a first clone that answers 403 missing_chip is retried once after re-minti
       "POST /chip/clone",
       "GET /chip/sync",
     ]);
-    const remint = h.calls.filter(
-      (c) => c.url.pathname === "/chip" && c.init.method === "POST",
-    ).at(-1)!;
+    const remint = h.calls
+      .filter((c) => c.url.pathname === "/chip" && c.init.method === "POST")
+      .at(-1)!;
     assert.equal(remint.url.searchParams.get("v"), "chip1234");
-    const retry = h.calls.filter((c) => c.url.pathname === "/chip/clone").at(-1)!;
+    const retry = h.calls
+      .filter((c) => c.url.pathname === "/chip/clone")
+      .at(-1)!;
     assert.equal(
       (retry.init.headers as any).authorization,
       "Bearer " + TOKEN2,
