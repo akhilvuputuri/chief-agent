@@ -378,7 +378,19 @@ test("abort, deadline and a missing card each end the attempt without linking; r
     assert.ok(!h.edits.at(-1)!.text.includes("Recover Your Data →"));
     assert.equal(await h.link.attemptsToday("123"), 2);
     const third = await h.actions.command("123", "link", undefined, "123");
-    assert.match(third.text, /Two linking attempts/);
+    assert.match(third.text, /Sent you a card/);
+    await db.query(
+      "UPDATE approvals SET status='denied' WHERE operation='library_link' AND status='pending'",
+    );
+    for (let i = 0; i < 2; i++)
+      await db.query(
+        "INSERT INTO library_link_attempts(id,user_id,approval_id,direction,state,deadline_at) VALUES($1,'123',$2,'display','expired',now())",
+        [randomUUID(), randomUUID()],
+      );
+    assert.match(
+      (await h.actions.command("123", "link", undefined, "123")).text,
+      /Four linking attempts/,
+    );
     // Recovery: a displaying attempt left by a crash is aborted and its anonymous chip forgotten.
     const c = randomUUID();
     await db.query(
@@ -594,10 +606,6 @@ test("an uncertain link is settled by Check shelf: discarded when no card appear
       [randomUUID(), approvalId],
     );
     await h.identity.mint("123");
-    assert.match(
-      (await h.actions.command("123", "link", undefined, "123")).text,
-      /already in progress/,
-    );
     const first = await h.actions.decide("123", approvalId, true);
     assert.equal(first.status, "failed");
     assert.equal(await h.link.liveAttempt("123"), undefined);
@@ -606,6 +614,9 @@ test("an uncertain link is settled by Check shelf: discarded when no card appear
     assert.match(
       (await h.actions.command("123", "link", undefined, "123")).text,
       /Sent you a card/,
+    );
+    await db.query(
+      "UPDATE approvals SET status='denied' WHERE operation='library_link' AND status='pending'",
     );
     // The same path links when the card has appeared.
     cards = [{ cardId: "card-2", advantageKey: "nlb" }];
@@ -927,5 +938,54 @@ test("the production-likely path: a clone answer without an identity, re-mint wi
     } finally {
       await pg.close();
     }
+  }
+});
+
+test("/library link settles an attempt left completing before starting a new one", async () => {
+  const { pg, db } = await database();
+  try {
+    const h = harness(db, {
+      sync: () => ({ cards: [], loans: [], holds: [] }),
+    });
+    const approvalId = randomUUID();
+    await db.query(
+      "INSERT INTO approvals(id,user_id,run_id,operation,payload,status) VALUES($1,'123',$2,'library_link',$3::jsonb,'approved')",
+      [
+        approvalId,
+        randomUUID(),
+        JSON.stringify({
+          draft: {},
+          execution: "uncertain",
+          startedAt: new Date().toISOString(),
+        }),
+      ],
+    );
+    await db.query(
+      "INSERT INTO library_link_attempts(id,user_id,approval_id,direction,state,deadline_at) VALUES($1,'123',$2,'display','completing',now())",
+      [randomUUID(), approvalId],
+    );
+    await h.identity.mint("123");
+    const result = await h.actions.command("123", "link", undefined, "123");
+    assert.match(result.text, /Sent you a card/);
+    assert.equal(
+      (
+        await db.query(
+          "SELECT state FROM library_link_attempts WHERE approval_id=$1",
+          [approvalId],
+        )
+      ).rows[0].state,
+      "failed",
+    );
+    assert.equal(
+      (
+        await db.query(
+          "SELECT payload->>'execution' e FROM approvals WHERE id=$1",
+          [approvalId],
+        )
+      ).rows[0].e,
+      "failed",
+    );
+  } finally {
+    await pg.close();
   }
 });
