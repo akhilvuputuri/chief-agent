@@ -98,10 +98,10 @@ rows in `stock_alerts` and reset them to `pending` deliberately.
    changed-file formatting. Review `scripts/deploy-watchlist.py` too.
 2. Merge only after approval and CI. The ordinary release refuses the
    DB/Compose change.
-3. Verify live `RELEASE` is one of the script's reviewed baselines
-   (`c1f8e7088676d4ee3d041993d5e08412e4c73a70` or
-   `6ffd2339dd20954e0457cc6bbaf61fea37425d6b`). If newer, reconcile and
-   re-review the operator script; do not bypass the guard.
+3. Verify live `RELEASE` is one of the script's reviewed baselines (the
+   `BASES` set in `scripts/deploy-watchlist.py`: the verified v0.3.15 release,
+   its record commit, or the v0.3.16/v0.3.17 library releases). If newer,
+   reconcile and re-review the operator script; do not bypass the guard.
 4. Transfer a Git archive of the exact reviewed main SHA and the reviewed
    operator script using the existing local operations connection. Run
    `python3 deploy-watchlist.py ARCHIVE SHA` on the host. It validates

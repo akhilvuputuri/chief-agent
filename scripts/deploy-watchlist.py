@@ -16,7 +16,13 @@ LOCK = pathlib.Path('/var/lock/companion-release.lock')
 # Deployable on top of the verified v0.3.15 release or the identical-tree record
 # that followed it. If another release lands first, add its SHA here after review.
 BASE = 'c1f8e7088676d4ee3d041993d5e08412e4c73a70'
-BASES = {BASE, '6ffd2339dd20954e0457cc6bbaf61fea37425d6b'}
+BASES = {
+    BASE,
+    '6ffd2339dd20954e0457cc6bbaf61fea37425d6b',
+    # v0.3.16/v0.3.17 app-only library releases (PRs #61/#62).
+    '818671bc004bc75e543a8b62d94ec59f3ae17825',
+    '5b263dd9fbda1e348cf038d409904e4e67b8e889',
+}
 IMAGE = 'hermes-companion-gateway'
 MIGRATION = '018_watchlist.sql'
 COMPOSE_MIGRATION_ANCHOR = b'        "/migrations/017_routines.sql",\n'
