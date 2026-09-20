@@ -223,10 +223,23 @@ export class LibraryActions {
         return {
           text: "Already linked. Send /library revoke first if you want to link a different card.",
         };
-      if (await this.deps.link.liveAttempt(user))
+      const live = await this.deps.link.liveAttempt(user);
+      if (live && live.state !== "completing")
         return {
           text: "A linking attempt is already in progress. Tap Stop linking on that message to abandon it.",
         };
+      if (live) {
+        // An attempt stuck after the clone: settle it read-only (linked, or discarded) before starting anew.
+        const settledResult = await this.decide(user, live.approval_id, true, {
+          chat,
+        });
+        if (settledResult.status === "created")
+          return { text: LibraryActions.replyFor(settledResult) };
+        if (settledResult.status !== "failed")
+          return {
+            text: "The last attempt could not be confirmed yet; try /library link again in a minute.",
+          };
+      }
       if (
         (await this.pending(user)).some((p) => p.operation === "library_link")
       )
@@ -237,7 +250,7 @@ export class LibraryActions {
         (await this.deps.link.attemptsToday(user)) >= linkLimits.attemptsPerDay
       )
         return {
-          text: "Two linking attempts were already made today. Try again tomorrow so the library is not called too often.",
+          text: "Four linking attempts were already made today. Try again tomorrow so the library is not called too often.",
         };
       // A previous attempt's identity may already hold the card (Libby syncs to the displaying
       // identity without reporting it on the code poll). One sync settles it without a new code.

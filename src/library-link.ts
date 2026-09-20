@@ -18,7 +18,7 @@ export const linkLimits = {
   maxEdits: 6,
   /** Libby syncs the card straight to the displaying identity; a sync check every N polls is the real completion signal. */
   syncEveryPolls: 4,
-  attemptsPerDay: 2,
+  attemptsPerDay: 4,
   fallbackWindowMs: 15 * 60000,
 };
 const codeResponse = z
@@ -413,7 +413,7 @@ export class LinkCeremony {
       await this.progress(attemptId, {
         last_result:
           error instanceof LibraryError
-            ? "error:" + error.kind
+            ? "error:" + error.kind + (error.code ? ":" + error.code : "")
             : "error:" + String((error as Error)?.message ?? "").slice(0, 60),
       });
       const outcome: LinkOutcome = {

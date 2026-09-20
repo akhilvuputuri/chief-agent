@@ -13,7 +13,7 @@ export const libraryLimits = {
   minWriteGapMs: 60000,
   dailyCeiling: 200,
   readCeiling: 180,
-  linkPollCeiling: 130, // per Singapore day; two attempts of 60 polls plus their clone calls
+  linkPollCeiling: 130, // per Singapore day; the hard bound on linking (two full 60-poll attempts), independent of attemptsPerDay
   turnWaitMs: 8000,
   backgroundWaitMs: 60000,
   timeoutMs: 15000,
@@ -275,10 +275,17 @@ export class LibraryClient {
     }
     if (status === 401 || (status === 403 && route.host === "sentry")) {
       await finish("unauthenticated");
+      let code: string | undefined;
+      try {
+        code = upstreamCode(JSON.parse(text));
+      } catch {
+        code = undefined;
+      }
       throw new LibraryError(
         "unauthenticated",
         "the Libby link needs to be renewed; send /library link",
         status,
+        code,
       );
     }
     if (status >= 500) throw await this.transient(route, started, "transient");
