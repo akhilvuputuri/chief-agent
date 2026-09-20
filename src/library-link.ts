@@ -368,10 +368,12 @@ export class LinkCeremony {
             context: "background",
           });
         } catch (error) {
+          // Only the specific sentry rejection is recoverable. A whoa/throttle 403 also
+          // reaches here as a LibraryError with status 403 (kind "throttled", no code), so
+          // keying on status would spuriously re-mint into an open breaker; key on the code.
           if (
             !(
-              error instanceof LibraryError &&
-              (error.code === "missing_chip" || error.status === 403)
+              error instanceof LibraryError && error.code === "missing_chip"
             )
           )
             throw error;

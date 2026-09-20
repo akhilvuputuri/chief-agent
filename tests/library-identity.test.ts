@@ -999,6 +999,41 @@ test("a first clone that answers 403 missing_chip is retried once after re-minti
   }
 });
 
+test("a clone 403 that is not missing_chip is not retried and does not re-mint", async () => {
+  const { pg, db } = await database();
+  try {
+    let clones = 0;
+    const h = harness(db, {
+      codes: [{ result: "fulfilled", blessing: "bless-t" }],
+      clone: () => {
+        clones++;
+        // A different terminal rejection (not missing_chip): must not trigger a re-mint retry.
+        return Response.json({ result: "denied" }, { status: 403 });
+      },
+      sync: () => ({ cards: [], loans: [], holds: [] }),
+    });
+    const a = await h.actions.draft(
+      "123",
+      randomUUID(),
+      "library_link",
+      {},
+      { source: "command" },
+    );
+    await h.actions.decide("123", a.approvalId!, true);
+    assert.equal(await settled(db, a.approvalId!), "uncertain");
+    assert.equal(clones, 1, "the clone is attempted exactly once");
+    // Exactly one mint (the initial one): no recovery re-mint on a non-missing_chip 403.
+    assert.equal(
+      h.calls.filter(
+        (c) => c.url.pathname === "/chip" && c.init.method === "POST",
+      ).length,
+      1,
+    );
+  } finally {
+    await pg.close();
+  }
+});
+
 test("/library link settles an attempt left completing before starting a new one", async () => {
   const { pg, db } = await database();
   try {
