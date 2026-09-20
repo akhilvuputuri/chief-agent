@@ -37,7 +37,7 @@ The owner ran `/library link` on v0.3.12. Measured: the ceremony polled 52 times
 
 ## Second real link — 20 September 2026 (measured)
 
-On v0.3.13 the reuse path found no card on the preserved identity and issued a new code. After the owner entered it, two ceremony syncs 25 s apart still returned zero cards and zero loans on the anonymous chip, while the code poll kept answering `retained`. Hypotheses now open: the documented `POST /chip/clone` completion call is required before the copied data appears on the chip, or the sync body has a layout the tolerant parser does not recognise. v0.3.14 records the sync body's shape (key names and sizes only), the code response's key names, and tries the clone call once after eight polls without a card, logging only its status and shape.
+On v0.3.13 the reuse path found no card on the preserved identity and issued a new code. After the owner entered it, two ceremony syncs 25 s apart still returned zero cards and zero loans on the anonymous chip, while the code poll kept answering `retained`. Hypotheses now open: the documented `POST /chip/clone` completion call is required before the copied data appears on the chip, or the sync body has a layout the tolerant parser does not recognise. v0.3.14 records the sync body's shape (key names and sizes only), the code response's key names, and tries the clone call once per attempt after eight polls without a card (before any later completion clone), logging only its status and shape. Events are structural and are not passed through the trace scrubber.
 
 ## Follow-up
 

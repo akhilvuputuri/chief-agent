@@ -60,7 +60,9 @@ const syncResponse = z
   .passthrough();
 /** Structural fingerprint of an upstream body: key names and sizes only, never values. */
 export function shapeOf(value: unknown, depth = 0): unknown {
-  const name = (k: string) => (/^[A-Za-z0-9_]{1,40}$/.test(k) ? k : "?");
+  // Leading letter required: numeric keys could be ids; anything else is masked.
+  const name = (k: string) =>
+    /^[A-Za-z_][A-Za-z0-9_]{0,39}$/.test(k) ? k : "?";
   if (Array.isArray(value))
     return {
       length: value.length,
@@ -81,7 +83,7 @@ export function shapeOf(value: unknown, depth = 0): unknown {
       ]),
     );
   }
-  return typeof value;
+  return value === null ? "null" : typeof value;
 }
 export type SyncResponse = z.infer<typeof syncResponse>;
 export interface ShelfLoan {
