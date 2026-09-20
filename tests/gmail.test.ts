@@ -3,6 +3,19 @@ import assert from "node:assert/strict";
 import { GmailTools, plainBody, unreadDigest } from "../src/gmail.js";
 import { action } from "../src/protocol.js";
 import { toolError } from "../src/tool-errors.js";
+import { projectObservation } from "../src/observations.js";
+/**
+ * Results must survive the model-facing projection intact: above 12,000 serialized
+ * characters it is replaced by a bare excerpt, which would drop the untrusted-content
+ * warning that the repository requires on every email result.
+ */
+function assertProjects(result: unknown, operation: string) {
+  const size = JSON.stringify(result).length;
+  assert.ok(size < 12000, `${operation} serialises to ${size} characters`);
+  const projected = projectObservation(operation, result).result;
+  assert.equal(projected.truncated === true && !!projected.excerpt, false);
+  assert.match(projected.warning, /Untrusted email content/);
+}
 const config = {
   owner: "123",
   email: "owner@example.com",
@@ -99,7 +112,7 @@ test("search returns bounded triage metadata instead of bare ids", async () => {
   const long = "x".repeat(500);
   const r = routed((url) =>
     url.pathname.endsWith("/messages")
-      ? { messages: [{ id: "a1", threadId: "ta1" }], resultSizeEstimate: 1 }
+      ? { messages: [{ id: "a1", threadId: "fa1" }], resultSizeEstimate: 1 }
       : metadata("a1", long, { snippet: long, labelIds: ["INBOX"] }),
   );
   const out: any = await new GmailTools(config, r.request).call(
@@ -109,10 +122,11 @@ test("search returns bounded triage metadata instead of bare ids", async () => {
   );
   const hit = out.results[0];
   assert.equal(hit.id, "a1");
-  assert.equal(hit.threadId, "ta1");
+  assert.equal(hit.threadId, "fa1");
   assert.equal(hit.from, "Sender <sender@example.com>");
-  assert.equal(hit.subject.length, 200);
-  assert.equal(hit.snippet.length, 200);
+  assert.equal(hit.subject.length, 160);
+  assert.equal(hit.snippet.length, 120);
+  assert.ok(hit.from.length <= 120);
   assert.equal(hit.unread, false);
   assert.equal(hit.date, "Sat, 19 Sep 2026 10:00:00 +0800");
   assert.equal(out.hint, undefined);
@@ -125,28 +139,78 @@ test("search returns bounded triage metadata instead of bare ids", async () => {
 });
 
 test("a hit whose metadata fails degrades only its own row", async () => {
+  const ids = ["a1", "a2", "a3", "a4", "a5"];
+  const r = routed((url) => {
+    if (url.pathname.endsWith("/messages"))
+      return {
+        messages: ids.map((id) => ({ id, threadId: `f${id}` })),
+        resultSizeEstimate: 5,
+      };
+    const id = url.pathname.split("/").pop()!;
+    // The failure sits in the middle, so the worker pool must hand off past it.
+    return id === "a3" ? new Error("boom") : metadata(id, `Subject ${id}`);
+  });
+  const out: any = await new GmailTools(config, r.request).call(
+    "123",
+    "gmail_search",
+    "deposit",
+  );
+  assert.equal(out.results.length, 5);
+  // Rows stay dense, in request order, and each carries its own requested id.
+  assert.deepEqual(
+    out.results.map((x: any) => x.id),
+    ids,
+  );
+  assert.deepEqual(
+    out.results.map((x: any) => x.threadId),
+    ids.map((id) => `f${id}`),
+  );
+  assert.match(out.results[2].detail, /unavailable/);
+  assert.equal(out.results[2].subject, undefined);
+  for (const i of [0, 1, 3, 4]) {
+    assert.equal(out.results[i].subject, `Subject ${ids[i]}`);
+    assert.equal(out.results[i].detail, undefined);
+  }
+});
+
+test("row identifiers come from the request, not the response echo", async () => {
   const r = routed((url) =>
     url.pathname.endsWith("/messages")
-      ? {
-          messages: [
-            { id: "a1", threadId: "t1" },
-            { id: "a2", threadId: "t2" },
-          ],
-          resultSizeEstimate: 2,
-        }
-      : url.pathname.endsWith("/a1")
-        ? new Error("boom")
-        : metadata("a2", "Second"),
+      ? { messages: [{ id: "a1", threadId: "fa1" }], resultSizeEstimate: 1 }
+      : // Gmail echoes a different id; the row must not adopt it.
+        metadata("deadbeef", "Echoed", { threadId: "wrongthread" }),
   );
   const out: any = await new GmailTools(config, r.request).call(
     "123",
     "gmail_search",
     "deposit",
   );
-  assert.equal(out.results.length, 2);
-  assert.match(out.results[0].detail, /unavailable/);
   assert.equal(out.results[0].id, "a1");
-  assert.equal(out.results[1].subject, "Second");
+  assert.equal(out.results[0].threadId, "fa1");
+});
+
+test("identifiers that are not hexadecimal never reach a request URL", async () => {
+  const r = routed((url) =>
+    url.pathname.endsWith("/messages")
+      ? {
+          messages: [
+            { id: "../../../v1/users/me/settings/forwarding", threadId: "fa1" },
+            { id: "a1", threadId: "../../settings" },
+            { id: "a2", threadId: "fa2" },
+          ],
+          resultSizeEstimate: 3,
+        }
+      : metadata("a2", "Only safe hit"),
+  );
+  const out: any = await new GmailTools(config, r.request).call(
+    "123",
+    "gmail_search",
+    "deposit",
+  );
+  assert.equal(out.results.length, 1);
+  assert.equal(out.results[0].id, "a2");
+  assert.ok(!r.calls.some((c) => c.includes("settings")));
+  assert.ok(!r.calls.some((c) => c.includes("..")));
 });
 
 test("hints describe an empty and an oversized result set", async () => {
@@ -161,7 +225,7 @@ test("hints describe an empty and an oversized result set", async () => {
   const many = routed((url) =>
     url.pathname.endsWith("/messages")
       ? {
-          messages: [{ id: "a1", threadId: "t1" }],
+          messages: [{ id: "a1", threadId: "fa1" }],
           resultSizeEstimate: 900,
         }
       : metadata("a1", "One of many"),
@@ -174,11 +238,32 @@ test("hints describe an empty and an oversized result set", async () => {
   assert.match(lots.hint, /Narrow with from:/);
 });
 
+test("a full page of maximal metadata still fits the model projection", async () => {
+  const wide = "\u00e9".repeat(500);
+  const ids = Array.from({ length: 10 }, (_, i) => `abcdef${i}`);
+  const r = routed((url) =>
+    url.pathname.endsWith("/messages")
+      ? {
+          messages: ids.map((id) => ({ id, threadId: `fabcdef${id}` })),
+          nextPageToken: "n".repeat(200),
+          resultSizeEstimate: 900,
+        }
+      : metadata(url.pathname.split("/").pop()!, wide, { snippet: wide }),
+  );
+  const out: any = await new GmailTools(config, r.request).call(
+    "123",
+    "gmail_search",
+    "deposit",
+  );
+  assert.equal(out.results.length, 10);
+  assertProjects(out, "gmail_search");
+});
+
 test("an identical search inside the cache window makes no request", async () => {
   let now = 1_000_000;
   const r = routed((url) =>
     url.pathname.endsWith("/messages")
-      ? { messages: [{ id: "a1", threadId: "t1" }], resultSizeEstimate: 1 }
+      ? { messages: [{ id: "a1", threadId: "fa1" }], resultSizeEstimate: 1 }
       : metadata("a1", "Cached"),
   );
   const g = new GmailTools(config, r.request, () => now);
@@ -195,11 +280,15 @@ test("an identical search inside the cache window makes no request", async () =>
   assert.ok(r.calls.length > paged);
 });
 
-test("thread reads are ordered oldest first and bounded per message and in total", async () => {
-  const body = (text: string) => ({
-    mimeType: "text/plain",
-    body: { data: Buffer.from(text).toString("base64url") },
-  });
+const plain = (text: string) => ({
+  mimeType: "text/plain",
+  body: { data: Buffer.from(text).toString("base64url") },
+});
+const html = (text: string) => ({
+  mimeType: "text/html",
+  body: { data: Buffer.from(text).toString("base64url") },
+});
+test("thread reads are ordered oldest first and bounded per message", async () => {
   const r = routed(() => ({
     id: "ffa1",
     messages: [
@@ -209,7 +298,7 @@ test("thread reads are ordered oldest first and bounded per message and in total
         internalDate: "200",
         payload: {
           headers: [{ name: "Subject", value: "Re: Deposit" }],
-          ...body("b".repeat(5000)),
+          ...plain("b".repeat(5000)),
         },
       },
       {
@@ -219,9 +308,10 @@ test("thread reads are ordered oldest first and bounded per message and in total
         payload: {
           headers: [
             { name: "Subject", value: "Deposit" },
+            { name: "From", value: "Sender <sender@example.com>" },
             { name: "Received", value: "should not be returned" },
           ],
-          ...body("short"),
+          ...plain("short"),
         },
       },
     ],
@@ -236,39 +326,108 @@ test("thread reads are ordered oldest first and bounded per message and in total
     ["m1", "m2"],
   );
   assert.equal(out.messages[0].truncated, false);
-  assert.equal(out.messages[1].text.length, 4000);
+  assert.equal(out.messages[0].from, "Sender <sender@example.com>");
+  assert.equal(out.messages[1].text.length, 2500);
   assert.equal(out.messages[1].truncated, true);
   assert.ok(!JSON.stringify(out).includes("should not be returned"));
   assert.match(out.note, /gmail_read/);
+  assert.match(out.warning, /Untrusted email content/);
   assert.match(String(r.calls.at(-1)), /\/threads\/ffa1\?format=full/);
 });
 
-test("a thread past the total budget omits trailing messages", async () => {
-  const filler = (id: string, at: string) => ({
-    id,
-    threadId: "ffa1",
-    internalDate: at,
-    payload: {
-      headers: [],
-      mimeType: "text/plain",
-      body: { data: Buffer.from("c".repeat(4000)).toString("base64url") },
-    },
-  });
+test("a thread of messages without plain text is still bounded", async () => {
+  // The regression this guards: HTML-only messages have an empty plain body, so
+  // an accounting that charges only body length never terminates the loop.
   const r = routed(() => ({
     id: "ffa1",
-    messages: ["1", "2", "3", "4", "5"].map((n) => filler(`m${n}`, n + "00")),
+    messages: Array.from({ length: 60 }, (_, i) => ({
+      id: `m${i}`,
+      threadId: "ffa1",
+      internalDate: String(i),
+      snippet: "s".repeat(400),
+      payload: {
+        headers: [
+          { name: "Subject", value: "N".repeat(900) },
+          { name: "From", value: "F".repeat(900) },
+          { name: "To", value: "T".repeat(4000) },
+        ],
+        ...html("<p>" + "h".repeat(20000) + "</p>"),
+      },
+    })),
   }));
   const out: any = await new GmailTools(config, r.request).call(
     "123",
     "gmail_thread",
     "ffa1",
   );
-  assert.equal(out.messages.length, 4);
-  assert.equal(out.omitted, 1);
+  assert.equal(out.messages.length, 12);
+  assert.equal(out.omitted, 48);
+  assert.ok(out.messages.every((m: any) => m.subject.length <= 160));
+  assert.ok(out.messages.every((m: any) => m.from.length <= 120));
+  assert.ok(!JSON.stringify(out).includes("TTTT"));
+  assertProjects(out, "gmail_thread");
+});
+
+test("a thread of plain-text messages respects the total character budget", async () => {
+  const r = routed(() => ({
+    id: "ffa1",
+    messages: Array.from({ length: 12 }, (_, i) => ({
+      id: `m${i}`,
+      threadId: "ffa1",
+      internalDate: String(i),
+      payload: { headers: [], ...plain("c".repeat(4000)) },
+    })),
+  }));
+  const out: any = await new GmailTools(config, r.request).call(
+    "123",
+    "gmail_thread",
+    "ffa1",
+  );
   assert.equal(
     out.messages.reduce((n: number, m: any) => n + m.text.length, 0),
-    16000,
+    6000,
   );
+  assert.ok(out.omitted > 0);
+  assertProjects(out, "gmail_thread");
+});
+
+test("a conversation past the response guard falls back to its message list", async () => {
+  let full = true;
+  const calls: string[] = [];
+  const request = (async (u: unknown) => {
+    const url = new URL(String(u));
+    calls.push(url.pathname + url.search);
+    if (url.hostname === "oauth2.googleapis.com")
+      return Response.json({ access_token: "a", expires_in: 3600 });
+    if (url.pathname.endsWith("/profile"))
+      return Response.json({ emailAddress: config.email });
+    if (url.search.includes("format=full") && full) {
+      full = false;
+      // Larger than the two-megabyte response guard.
+      return new Response("x".repeat(2_000_100));
+    }
+    return Response.json({
+      id: "ffa1",
+      messages: Array.from({ length: 30 }, (_, i) => ({
+        id: `m${i}`,
+        threadId: "ffa1",
+        internalDate: String(i),
+        payload: { headers: [{ name: "Subject", value: `Part ${i}` }] },
+      })),
+    });
+  }) as typeof fetch;
+  const out: any = await new GmailTools(config, request).call(
+    "123",
+    "gmail_thread",
+    "ffa1",
+  );
+  // The call answers instead of failing, and points at a usable next step.
+  assert.equal(out.truncated, true);
+  assert.equal(out.messages.length, 20);
+  assert.equal(out.omitted, 10);
+  assert.match(out.note, /gmail_read/);
+  assert.ok(calls.some((c) => c.includes("format=metadata")));
+  assertProjects(out, "gmail_thread");
 });
 
 test("thread and message ids are validated before any request", async () => {
@@ -282,7 +441,7 @@ test("thread and message ids are validated before any request", async () => {
 test("the per-turn request budget is enforced and does not cross runs", async () => {
   const r = routed((url) =>
     url.pathname.endsWith("/messages")
-      ? { messages: [{ id: "a1", threadId: "t1" }], resultSizeEstimate: 1 }
+      ? { messages: [{ id: "a1", threadId: "fa1" }], resultSizeEstimate: 1 }
       : metadata("a1", "Budgeted"),
   );
   const g = new GmailTools(config, r.request);
@@ -304,17 +463,16 @@ test("the per-turn request budget is enforced and does not cross runs", async ()
 });
 
 test("a search that runs out of budget mid-page still answers with the ids", async () => {
-  const r = routed((url) =>
-    url.pathname.endsWith("/messages")
-      ? {
-          messages: Array.from({ length: 10 }, (_, i) => ({
-            id: `a${i}`,
-            threadId: `t${i}`,
-          })),
-          resultSizeEstimate: 10,
-        }
-      : metadata("a1", "Partial"),
-  );
+  const ids = Array.from({ length: 10 }, (_, i) => `b${i}`);
+  const r = routed((url) => {
+    if (url.pathname.endsWith("/messages"))
+      return {
+        messages: ids.map((id) => ({ id, threadId: `f${id}` })),
+        resultSizeEstimate: 10,
+      };
+    const id = url.pathname.split("/").pop()!;
+    return metadata(id, `Subject ${id}`);
+  });
   const g = new GmailTools(config, r.request);
   for (let i = 0; i < 3; i++)
     await g.call("123", "gmail_search", `query ${i}`, undefined, "run-1");
@@ -326,10 +484,66 @@ test("a search that runs out of budget mid-page still answers with the ids", asy
     "run-1",
   );
   assert.equal(out.results.length, 10);
+  // Every row keeps its own requested identifiers, retrieved or not.
+  assert.deepEqual(
+    out.results.map((x: any) => x.id),
+    ids,
+  );
   const short = out.results.filter((x: any) => x.detail);
   assert.ok(short.length > 0);
   assert.match(short[0].detail, /budget/);
-  assert.ok(out.results.every((x: any) => x.id && x.threadId));
+  assert.ok(
+    out.results
+      .filter((x: any) => !x.detail)
+      .every((x: any) => x.subject === `Subject ${x.id}`),
+  );
+});
+
+test("a page degraded by the budget is not cached for a later turn", async () => {
+  const ids = Array.from({ length: 10 }, (_, i) => `c${i}`);
+  const r = routed((url) => {
+    if (url.pathname.endsWith("/messages"))
+      return {
+        messages: ids.map((id) => ({ id, threadId: `f${id}` })),
+        resultSizeEstimate: 10,
+      };
+    return metadata(url.pathname.split("/").pop()!, "Complete");
+  });
+  const g = new GmailTools(config, r.request);
+  for (let i = 0; i < 3; i++)
+    await g.call("123", "gmail_search", `query ${i}`, undefined, "run-1");
+  const partial: any = await g.call(
+    "123",
+    "gmail_search",
+    "deposit",
+    undefined,
+    "run-1",
+  );
+  assert.ok(partial.results.some((x: any) => x.detail));
+  // A fresh turn with full budget must retry rather than inherit the partial page.
+  const complete: any = await g.call(
+    "123",
+    "gmail_search",
+    "deposit",
+    undefined,
+    "run-2",
+  );
+  assert.ok(complete.results.every((x: any) => !x.detail));
+  assert.ok(complete.results.every((x: any) => x.subject === "Complete"));
+});
+
+test("a cached page is handed out as a copy, not the stored object", async () => {
+  const r = routed((url) =>
+    url.pathname.endsWith("/messages")
+      ? { messages: [{ id: "a1", threadId: "fa1" }], resultSizeEstimate: 1 }
+      : metadata("a1", "Original"),
+  );
+  const g = new GmailTools(config, r.request);
+  const first: any = await g.call("123", "gmail_search", "deposit");
+  first.results[0].subject = "Mutated";
+  const second: any = await g.call("123", "gmail_search", "deposit");
+  assert.equal(second.results[0].subject, "Original");
+  assert.notEqual(first, second);
 });
 
 test("the unread briefing digest is built from search metadata alone", async () => {
@@ -337,8 +551,8 @@ test("the unread briefing digest is built from search metadata alone", async () 
     url.pathname.endsWith("/messages")
       ? {
           messages: [
-            { id: "a1", threadId: "ta1" },
-            { id: "a2", threadId: "ta2" },
+            { id: "a1", threadId: "fa1" },
+            { id: "a2", threadId: "fa2" },
           ],
           resultSizeEstimate: 2,
         }

@@ -266,6 +266,8 @@ const worker = new DailyWorker<Delivery>(
           j.user_id,
           "gmail_search",
           "in:inbox is:unread newer_than:1d",
+          undefined,
+          `briefing:${j.id}`,
         );
         const lines = unreadDigest(r);
         sections.push({

@@ -18,11 +18,19 @@ A per-turn ceiling of 40 Gmail API requests is charged in the adapter against th
 
 Guidance was added in two places: a runtime context paragraph on triaging from the result list and stopping after about three searches, and a Gmail operator sheet in `personal-assistance` (bumped to version 3) covering `from:`, `subject:`, quoted phrases, `OR`, negation, relative and absolute dates, `has:attachment`, `filename:`, `label:` and `in:anywhere`, with a widen-then-narrow strategy.
 
-The daily briefing lost its five per-message reads, since the digest is now built from search metadata alone.
+The daily briefing builds its digest from search metadata alone. That removes five message reads but is not a saving in requests: it went from six (one list and five reads) to eleven, because search fetches metadata for all ten hits while the digest shows five. What it saves is context, since no message body enters the briefing at all. The briefing is now charged under its own synthetic run identifier, so it is subject to the same ceiling.
 
 ## A limitation worth recording
 
 Gmail's metadata format returns headers, labels and a snippet, but no parts listing, so the result cannot carry an attachment flag. `has:attachment` still works as a search operator, which covers the common request; a caller wanting the flag itself would need a `format=full` read per hit, which is exactly the cost this change removed.
+
+## What independent review caught
+
+The first head passed 275 tests and was still wrong in a way the tests could not see. Every thread test used plain-text messages, and the total-character budget was charged only against the extracted plain body. A message with no `text/plain` part therefore cost nothing, the loop never terminated early, and a forty-message HTML newsletter thread returned every message and about 70,000 characters against a documented 16,000 cap. Because the model-facing projection replaces anything above 12,000 characters with a bare excerpt, the practical effect was that the untrusted-content warning silently disappeared from the very tool this work added, on its most common input.
+
+The fix is three independent bounds rather than one: a hard cap of 12 messages, a minimum of one character charged per message, and per-message header fields capped like the search fields. The sizes were then chosen against the 12,000-character projection rather than picked for roundness, and tests now assert that a full page and a full thread both survive the projection with the warning intact.
+
+Review also found that a search page degraded by the request ceiling was cached for five minutes and served to a later turn that could have afforded the rest, that a conversation past the two-megabyte response guard failed the whole call instead of degrading, that the briefing bypassed the ceiling entirely, and that a sentence added to the security document claimed email bodies are never stored outside their turn when every tool result is persisted in `runtime_calls`. All are corrected here. The lesson worth keeping is that the bound and the test fixture were written from the same assumption, so the fixture could never contradict the bound.
 
 ## A note on sequencing
 
