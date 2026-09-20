@@ -1,6 +1,6 @@
 # 23 — Making mailbox search usable through the agent
 
-Status: candidate v0.3.13 on `feature/gmail-search`, branched from `b850a83`; app-only, no schema or Compose change. No phone acceptance has been recorded yet, so everything about real-world quality below is a hypothesis, not a measurement.
+Status: released as [v0.3.14](https://github.com/akhilvuputuri/companion-agent/releases/tag/v0.3.14) at `dd2be31` ([PR #54](https://github.com/akhilvuputuri/companion-agent/pull/54), [release run 35502859189](https://github.com/akhilvuputuri/companion-agent/actions/runs/35502859189), deployed and health-verified on 20 September 2026); app-only, no schema or Compose change. The version skipped 0.3.13, published the same day for an unrelated library linking fix while this was in review. No phone acceptance has been recorded yet, so everything about real-world quality below is a hypothesis, not a measurement.
 
 ## The observed problem
 
