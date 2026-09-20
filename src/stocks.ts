@@ -393,21 +393,16 @@ export class StockMonitor {
     );
     await this.observe(item, "error", { detail: { reason } });
   }
-  /** Token bucket over provider credits — one credit per symbol per quote
-   * call, so batches never exceed the plan's per-minute allowance. */
-  private bucket = { tokens: 0, at: 0 };
+  /** Per-minute allowance matching the provider's reset: Twelve Data
+   * replenishes the full allowance at each minute boundary rather than
+   * dripping credits, so a batch can never borrow from the next window
+   * inside the same minute. */
+  private bucket = { left: 0, minute: -1 };
   private creditsNow(now: Date) {
     const cap = this.provider.creditsPerMinute;
-    if (!this.bucket.at) this.bucket = { tokens: cap, at: now.getTime() };
-    else if (now.getTime() > this.bucket.at)
-      this.bucket = {
-        tokens: Math.min(
-          cap,
-          this.bucket.tokens + ((now.getTime() - this.bucket.at) / 60000) * cap,
-        ),
-        at: now.getTime(),
-      };
-    return this.bucket.tokens;
+    const minute = Math.floor(now.getTime() / 60000);
+    if (minute !== this.bucket.minute) this.bucket = { left: cap, minute };
+    return this.bucket.left;
   }
   private evaluate(item: any, q: Quote) {
     if (!Number.isFinite(q.price) || q.price <= 0)
@@ -558,7 +553,7 @@ export class StockMonitor {
               );
             continue;
           }
-          this.bucket.tokens -= chunk.length;
+          this.bucket.left -= chunk.length;
           for (const item of chunk) {
             const q = quotes.get(
               quoteKey({ symbol: item.symbol, mic: item.mic_code }),
@@ -578,39 +573,46 @@ export class StockMonitor {
                 });
                 continue;
               }
-              const age = now.getTime() - q.quoteTime.getTime();
-              if (age > freshnessMs || age < -5 * 60000) {
+              // Pick the session's own price and timestamp BEFORE checking
+              // freshness: outside regular hours the regular `quoteTime` goes
+              // quiet at the close, so it would discard fresh extended
+              // prices. Substituting the regular price is never allowed — a
+              // missing or stale extended quote skips the item instead.
+              const wantExtendedQuote =
+                !q.marketOpen &&
+                item.eff_extended &&
+                this.provider.supportsExtended;
+              const basisTime = wantExtendedQuote
+                ? (q.extended?.time ?? null)
+                : q.quoteTime;
+              const basisLabel = wantExtendedQuote
+                ? "extended"
+                : q.marketOpen
+                  ? "regular"
+                  : "closed";
+              if (basisTime == null) {
                 await this.observe(item, "stale", {
                   quote: q,
-                  marketState: q.marketOpen ? "regular" : "closed",
-                  detail: { ageMinutes: Math.round(age / 60000) },
+                  marketState: basisLabel,
+                  detail: { reason: "extended quote missing" },
                 });
                 continue;
               }
-              // In a pre/post session an opted-in item must use the extended
-              // quote; substituting the regular-session price would compare
-              // against the wrong market.
-              if (!q.marketOpen && item.eff_extended) {
-                const extAge =
-                  q.extended?.time != null
-                    ? now.getTime() - q.extended.time.getTime()
-                    : null;
-                if (
-                  !q.extended ||
-                  extAge == null ||
-                  extAge > freshnessMs ||
-                  extAge < -5 * 60000
-                ) {
-                  await this.observe(item, "stale", {
-                    quote: q,
-                    marketState: "extended",
-                    detail: { reason: "extended quote missing or stale" },
-                  });
-                  continue;
-                }
+              const age = now.getTime() - basisTime.getTime();
+              if (age > freshnessMs || age < -5 * 60000) {
+                await this.observe(item, "stale", {
+                  quote: q,
+                  marketState: basisLabel,
+                  detail: {
+                    ageMinutes: Math.round(age / 60000),
+                    ...(wantExtendedQuote
+                      ? { reason: "extended quote stale" }
+                      : {}),
+                  },
+                });
+                continue;
               }
-              const useExtended =
-                !q.marketOpen && item.eff_extended && q.extended != null;
+              const useExtended = wantExtendedQuote;
               const price = useExtended ? q.extended!.price : q.price;
               const providerPct = useExtended
                 ? q.extended!.changePct

@@ -945,8 +945,13 @@ test("batches never exceed the provider's per-minute credit budget", async () =>
     await f.monitor.tick();
     // First tick can spend at most 8 credits → first batch of 8 only.
     assert.deepEqual(f.provider.batchSizes, [8]);
-    // 20s later: ~2.6 credits back — a second chunk of at most 2.
+    // The provider refills at the minute boundary, not continuously — 20s
+    // later is still the same minute, so no credits are available yet.
     f.setNow(new Date("2026-01-15T15:30:20Z"));
+    await f.monitor.tick();
+    assert.deepEqual(f.provider.batchSizes, [8]);
+    // Past the boundary the remaining 2 items are fetched.
+    f.setNow(new Date("2026-01-15T15:31:05Z"));
     await f.monitor.tick();
     assert.deepEqual(f.provider.batchSizes, [8, 2]);
     for (const id of ids) assert.equal((await f.alerts(id)).length, 1);
@@ -1022,6 +1027,41 @@ test("watchlist_remove during an in-flight poll aborts the chunk safely", async 
     assert.equal((await f.alerts(itemId)).length, 0);
     await f.delivery.tick();
     assert.equal(f.sent.length, 0);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("post-market: a fresh extended quote is validated on its own timestamp", async () => {
+  const f = await fixture(new Date("2026-01-15T15:30:00Z"));
+  try {
+    const itemId = await f.add(5);
+    await f.tools.call("a", f.run, {
+      operation: "watchlist_settings",
+      includeExtended: true,
+    });
+    // 18:00 ET post-market: the regular quote stopped updating at the 16:00
+    // close, but the extended quote is fresh — it must still alert.
+    f.setNow(new Date("2026-01-15T23:00:00Z"));
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({
+        price: 100,
+        prevClose: 100,
+        providerChangePct: 0,
+        marketOpen: false,
+        quoteTime: new Date("2026-01-15T21:00:00Z"), // regular 16:00 ET close
+        extended: {
+          price: 90,
+          changePct: -10,
+          time: new Date("2026-01-15T23:00:00Z"),
+        },
+      }),
+    );
+    await f.monitor.tick();
+    const alerts = await f.alerts(itemId);
+    assert.equal(alerts.length, 1);
+    assert.match(alerts[0].payload.reply, /extended session/);
   } finally {
     await f.pg.close();
   }

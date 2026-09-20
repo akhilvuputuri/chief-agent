@@ -71,10 +71,11 @@ change the watchlist, matching the routine-management boundary.
 ## Provider limits
 
 Free-plan calls: symbol search at add time, then batched `/quote` requests —
-no calendar calls at all. Batches are paced by a shared token bucket at the
-provider's credits/minute (8 on free): at most 8 symbols per request, and
-items left unfetched when the bucket empties are polled on the next tick in
-last-polled order. At the default 15-minute cadence a US watchlist uses about
+no calendar calls at all. Batches are paced against the provider's
+credits/minute allowance (8 on free), which Twelve Data resets at each minute
+boundary rather than refilling continuously: at most 8 symbols per request,
+and items left unfetched when the window empties wait for the next boundary
+(polled in last-polled order). At the default 15-minute cadence a US watchlist uses about
 26 quote calls per symbol per day, so ~10–15 symbols fit inside 800/day.
 Non-US listings typically require a paid plan and have no built-in calendar;
 `watchlist_add` rejects them and surfaces the provider's `access` field when a
