@@ -14,6 +14,8 @@ import time
 LIVE = pathlib.Path('/opt/hermes-companion')
 LOCK = pathlib.Path('/var/lock/companion-release.lock')
 BASE = 'dd2be311e4cbfaecd75eca64bb0bcb730abfab76'
+# The parallel Gmail release changes only docs and package version after this baseline.
+BASES = {BASE, '62e531c70b2397b22293988b9c078eef9bca25f4'}
 IMAGE = 'hermes-companion-gateway'
 MIGRATION = '017_routines.sql'
 COMPOSE_ANCHOR = b'        "/migrations/016_library.sql",\n'
@@ -161,7 +163,7 @@ def main():
     with open(LOCK, 'w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         old_release = (LIVE / 'RELEASE').read_bytes()
-        if old_release.decode().strip() != BASE:
+        if old_release.decode().strip() not in BASES:
             raise RuntimeError('Routines rollout requires the exact documented baseline; reconcile newer releases first')
         with tempfile.TemporaryDirectory(prefix='companion-routines-') as temporary:
             stage, backup = pathlib.Path(temporary) / 'stage', pathlib.Path(temporary) / 'backup'
