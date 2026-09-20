@@ -4,7 +4,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { Database } from "./db.js";
 import { event } from "./db.js";
 import { Bearer, LibraryClient, LibraryError } from "./library-client.js";
-import { LibraryIdentity, shapeOf } from "./library-identity.js";
+import { LibraryIdentity } from "./library-identity.js";
 import {
   linkConfirming,
   linkDone,
@@ -31,10 +31,7 @@ const codeResponse = z
   .passthrough();
 /** POST chip/clone may answer with a renewed identity; anything else is ignored. */
 const cloneResponse = z
-  .object({
-    identity: z.string().min(20).optional(),
-    expiry: z.number().optional(),
-  })
+  .object({ identity: z.string().optional(), expiry: z.number().optional() })
   .passthrough();
 export interface LinkApi {
   editMessageText(
@@ -301,6 +298,10 @@ export class LinkCeremony {
         schema: codeResponse.partial({ result: true }),
         context: "background",
       });
+      // Libby's entering side treats an answer without a blessing as "transfer done".
+      const already = entered.blessing
+        ? null
+        : await this.cardArrived(user, bearer);
       await event(this.db, user, approvalId, "library.link_progress", {
         attemptId: id,
         result: "entered",
@@ -313,7 +314,7 @@ export class LinkCeremony {
         chat,
         null,
         bearer,
-        null,
+        already,
         entered.blessing,
       );
     } catch (error) {
@@ -361,7 +362,9 @@ export class LinkCeremony {
         });
         cloned = true;
         let current = bearer;
-        if (answer.identity)
+        // Hypothesis kept defensively: a clone answer carrying an identity is adopted. Not
+        // observed in Libby's client, which instead re-mints with its existing bearer.
+        if (answer.identity && answer.identity.length >= 20)
           current = await this.identity.adopt(
             user,
             answer.identity,
@@ -369,7 +372,8 @@ export class LinkCeremony {
           );
         synced = await this.identity.syncRaw(user, current);
         if (!synced.card) {
-          // Some clients re-mint after the clone; try once more before giving up.
+          // Libby's own client forgets its in-memory identity after the clone and re-mints
+          // with the old bearer before syncing; do the same once.
           const renewed = await this.identity.remint(user, "linking");
           synced = await this.identity.syncRaw(user, renewed);
         }

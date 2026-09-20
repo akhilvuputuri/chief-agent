@@ -767,3 +767,162 @@ test("shapeOf records structure only, and an attempt with no blessing never call
     await pg.close();
   }
 });
+
+test("the production-likely path: a clone answer without an identity, re-mint with the old bearer, then the card; plus failure semantics after and without a blessing", async () => {
+  {
+    const { pg, db } = await database();
+    try {
+      let cloned = false;
+      let minted = 0;
+      const h = harness(db, {
+        codes: [{ result: "fulfilled", blessing: "bless-x" }],
+        clone: (body: any) => {
+          assert.deepEqual(body, { blessing: "bless-x" });
+          cloned = true;
+          return Response.json({ result: "cloned" });
+        },
+        sync: () =>
+          cloned && minted >= 2
+            ? {
+                cards: [{ cardId: "c-old", advantageKey: "nlb" }],
+                loans: [],
+                holds: [],
+              }
+            : { cards: [], loans: [], holds: [] },
+      });
+      const originalCall = h.client.call.bind(h.client);
+      (h.client as any).call = (key: string, opts: any) => {
+        if (key === "chipMint") minted++;
+        return originalCall(key as any, opts);
+      };
+      const a = await h.actions.draft(
+        "123",
+        randomUUID(),
+        "library_link",
+        {},
+        { source: "command" },
+      );
+      await h.actions.decide("123", a.approvalId!, true);
+      assert.equal(await settled(db, a.approvalId!), "created");
+      const paths = h.calls.map((c) => `${c.init.method} ${c.url.pathname}`);
+      assert.deepEqual(paths, [
+        "POST /chip",
+        "GET /chip/clone/code",
+        "GET /chip/sync",
+        "POST /chip/clone",
+        "GET /chip/sync",
+        "POST /chip",
+        "GET /chip/sync",
+      ]);
+      assert.equal(
+        (h.calls.at(-1)!.init.headers as any).authorization,
+        "Bearer " + TOKEN2,
+      );
+      assert.equal((await h.identity.row("123"))?.state, "linked");
+    } finally {
+      await pg.close();
+    }
+  }
+  {
+    const { pg, db } = await database();
+    try {
+      let cloned = false;
+      const h = harness(db, {
+        codes: [{ result: "fulfilled", blessing: "bless-y" }],
+        clone: () => {
+          cloned = true;
+          return Response.json({});
+        },
+        sync: () =>
+          cloned
+            ? {
+                cards: [{ cardId: "c1", advantageKey: "nlb" }],
+                loans: [],
+                holds: [],
+              }
+            : { cards: [], loans: [], holds: [] },
+      });
+      const a = await h.actions.draft(
+        "123",
+        randomUUID(),
+        "library_link",
+        {},
+        { source: "command" },
+      );
+      await h.actions.decide("123", a.approvalId!, true);
+      assert.equal(await settled(db, a.approvalId!), "created");
+      assert.equal(
+        h.calls.filter(
+          (c) => c.url.pathname === "/chip" && c.init.method === "POST",
+        ).length,
+        1,
+        "card already on the old bearer: no re-mint",
+      );
+    } finally {
+      await pg.close();
+    }
+  }
+  {
+    const { pg, db } = await database();
+    try {
+      const h = harness(db, {
+        codes: [{ result: "fulfilled" }],
+        sync: () => ({ cards: [], loans: [], holds: [] }),
+      });
+      const a = await h.actions.draft(
+        "123",
+        randomUUID(),
+        "library_link",
+        {},
+        { source: "command" },
+      );
+      await h.actions.decide("123", a.approvalId!, true);
+      assert.equal(await settled(db, a.approvalId!), "failed");
+      const paths = h.calls.map((c) => `${c.init.method} ${c.url.pathname}`);
+      assert.ok(
+        !paths.includes("POST /chip/clone"),
+        "fulfilled without a blessing: no clone",
+      );
+      assert.ok(!paths.includes("POST /chip/revoke"), "nothing to revoke");
+    } finally {
+      await pg.close();
+    }
+  }
+  {
+    const { pg, db } = await database();
+    try {
+      let cloned = false;
+      const h = harness(db, {
+        codes: [{ result: "fulfilled", blessing: "bless-z" }],
+        clone: () => {
+          cloned = true;
+          return Response.json({});
+        },
+        sync: () => {
+          if (cloned) throw new Error("boom");
+          return { cards: [], loans: [], holds: [] };
+        },
+      });
+      const a = await h.actions.draft(
+        "123",
+        randomUUID(),
+        "library_link",
+        {},
+        { source: "command" },
+      );
+      await h.actions.decide("123", a.approvalId!, true);
+      assert.equal(await settled(db, a.approvalId!), "uncertain");
+      assert.ok(
+        !h.calls.some((c) => c.url.pathname === "/chip/revoke"),
+        "uncertain keeps the token for Check shelf",
+      );
+      assert.equal(
+        (await db.query("SELECT state FROM library_link_attempts")).rows[0]
+          .state,
+        "completing",
+      );
+    } finally {
+      await pg.close();
+    }
+  }
+});
