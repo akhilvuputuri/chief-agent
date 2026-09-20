@@ -250,6 +250,10 @@ export class LibraryActions {
               "INSERT INTO library_watch(user_id) VALUES($1) ON CONFLICT(user_id) DO UPDATE SET status='scheduled',next_run=now()",
               [user],
             );
+            await event(this.db, user, randomUUID(), "library.link_progress", {
+              result: "reused",
+              polls: 0,
+            });
             return {
               text: `Linked to NLB using the earlier setup: ${shelf.loans.length} loans, ${shelf.holds.length} holds on your shelf. Send /library any time.`,
             };

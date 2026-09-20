@@ -252,8 +252,6 @@ test("the linking ceremony displays a rotating code, completes on fulfilled, lin
       "GET /chip/clone/code",
       "GET /chip/clone/code",
       "GET /chip/sync",
-      "POST /chip",
-      "GET /chip/sync",
     ]);
     // Code edits: two distinct codes → two progress edits, then confirming, then done.
     const texts = h.edits.map((e) => e.text);
@@ -646,6 +644,20 @@ test("the card arriving by sync completes the link even when the code poll never
     assert.ok(
       !paths.includes("POST /chip/clone"),
       "no clone call when the card arrived by sync",
+    );
+    assert.equal(
+      paths.filter((p) => p === "POST /chip").length,
+      1,
+      "no re-mint once the card arrived on the attempt's bearer",
+    );
+    const syncs = h.calls.filter((c) => c.url.pathname === "/chip/sync");
+    assert.ok(
+      syncs.every(
+        (c) =>
+          (c.init.headers as Record<string, string>).authorization ===
+          "Bearer " + TOKEN,
+      ),
+      "mid-attempt syncs use the attempt's own bearer",
     );
     assert.ok(paths.filter((p) => p === "GET /chip/sync").length >= 2);
     assert.match(h.edits.at(-1)!.text, /Linked to NLB/);

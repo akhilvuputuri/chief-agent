@@ -240,12 +240,13 @@ export class LinkCeremony {
       await this.sleep(this.limits.pollMs);
     }
   }
-  /** One paced sync with the attempt's bearer; true when a card is already present. */
+  /** One paced sync with the attempt's bearer; the sync result when a card is already present. */
   private async cardArrived(user: string, bearer: Bearer) {
     try {
-      return !!(await this.identity.syncRaw(user, bearer)).card;
+      const synced = await this.identity.syncRaw(user, bearer);
+      return synced.card ? synced : null;
     } catch (error) {
-      if (error instanceof LibraryError) return false;
+      if (error instanceof LibraryError) return null;
       throw error;
     }
   }
@@ -314,13 +315,16 @@ export class LinkCeremony {
     chat: string,
     messageId: number | null,
     bearer: Bearer,
-    alreadySynced = false,
+    arrived: Awaited<ReturnType<LinkCeremony["cardArrived"]>> = null,
   ): Promise<LinkOutcome> {
     await this.progress(attemptId, { state: "completing" });
-    let cloned = alreadySynced;
+    let cloned = !!arrived;
     try {
-      // When the card already arrived by sync, the clone call is unnecessary; a rejection is not a failure.
-      if (!alreadySynced) {
+      // The card already arrived on this bearer: link it as is. Re-minting here is an
+      // unexercised hypothesis that could discard the only token carrying the card; the
+      // standing needsRemint path renews it later.
+      let synced = arrived;
+      if (!synced) {
         await this.client.call("chipClone", {
           bearer,
           body: {},
@@ -328,9 +332,10 @@ export class LinkCeremony {
           context: "background",
         });
         cloned = true;
+        const renewed = await this.identity.remint(user, "linking");
+        synced = await this.identity.syncRaw(user, renewed);
       }
-      const renewed = await this.identity.remint(user, "linking");
-      const { shelf, card, cards } = await this.identity.syncRaw(user, renewed);
+      const { shelf, card, cards } = synced;
       if (!card) {
         const outcome: LinkOutcome = { status: "failed" };
         await this.finish(
