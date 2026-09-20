@@ -189,7 +189,10 @@ export class LinkCeremony {
         throw error;
       }
       polls++;
-      const result = answer.result.toLowerCase();
+      const raw = answer.result.toLowerCase();
+      const result = ["regenerated", "retained", "fulfilled"].includes(raw)
+        ? raw
+        : "other";
       await event(this.db, user, approvalId, "library.link_progress", {
         attemptId,
         result,
@@ -228,6 +231,14 @@ export class LinkCeremony {
       await this.progress(attemptId, { polls, rotations, last_result: result });
       await this.sleep(this.limits.pollMs);
     }
+  }
+  /** Settles a completing attempt from the Check shelf path: linked, or discarded so a fresh attempt is allowed. */
+  async settle(user: string, approvalId: string, linked: boolean) {
+    await this.db.query(
+      "UPDATE library_link_attempts SET state=$3,finished_at=now() WHERE user_id=$1 AND approval_id=$2 AND state IN ('fulfilled','completing')",
+      [user, approvalId, linked ? "done" : "failed"],
+    );
+    if (!linked) await this.identity.discard(user, true);
   }
   /** Fallback direction: the owner read a code in Libby and typed it here. */
   async enterCode(
@@ -288,6 +299,7 @@ export class LinkCeremony {
     bearer: Bearer,
   ): Promise<LinkOutcome> {
     await this.progress(attemptId, { state: "completing" });
+    let cloned = false;
     try {
       await this.client.call("chipClone", {
         bearer,
@@ -295,6 +307,7 @@ export class LinkCeremony {
         schema: z.unknown(),
         context: "background",
       });
+      cloned = true;
       const renewed = await this.identity.remint(user, "linking");
       const { shelf, card, cards } = await this.identity.syncRaw(user, renewed);
       if (!card) {
@@ -340,7 +353,15 @@ export class LinkCeremony {
             ? "failed"
             : "uncertain",
       };
-      await this.finish(user, attemptId, approvalId, chat, messageId, outcome);
+      await this.finish(
+        user,
+        attemptId,
+        approvalId,
+        chat,
+        messageId,
+        outcome,
+        cloned,
+      );
       return outcome;
     }
   }
@@ -351,6 +372,7 @@ export class LinkCeremony {
     chat: string,
     messageId: number | null,
     outcome: LinkOutcome,
+    cloned = false,
   ) {
     const rotations = Number(
       (
@@ -367,8 +389,9 @@ export class LinkCeremony {
         )
       ).rows[0]?.rotations ?? 0,
     );
+    // A token discarded after a successful clone may carry the card: revoke it upstream, best effort.
     if (outcome.status !== "uncertain" && outcome.status !== "done")
-      await this.identity.discard(user);
+      await this.identity.discard(user, cloned);
     if (outcome.status !== "done")
       await this.edit(
         chat,

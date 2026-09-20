@@ -95,19 +95,6 @@ export class LibraryTools {
     if (a.operation === "library_shelf") return this.shelf(user);
     return this.recheck(a.titleIds);
   }
-  /** Linked state and allowance for the per-turn context block; no network. */
-  async state(user: string) {
-    const usage = await this.client.usage();
-    const identity = this.identity
-      ? await this.identity.status(user)
-      : {
-          linked: false,
-          state: "unconfigured",
-          tokenRenewsBy: null,
-          lastSyncAt: null,
-        };
-    return { ...usage, ...identity };
-  }
   async shelf(user: string) {
     if (!this.identity) throw new Error("Library account is not configured");
     const status = await this.identity.status(user);

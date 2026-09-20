@@ -190,12 +190,22 @@ export class LibraryActions {
     if (kind === "shelf") {
       const status = await identity.status(user);
       const usage = await this.deps.client.usage();
+      const interrupted = (
+        await this.db.query(
+          "DELETE FROM library_notices WHERE user_id=$1 AND kind='link_interrupted' RETURNING kind",
+          [user],
+        )
+      ).rows.length;
       return {
-        text: shelfText(
-          status.linked ? await identity.snapshot(user) : null,
-          status.linked,
-          usage,
-        ),
+        text:
+          (interrupted
+            ? "A linking attempt was interrupted by a restart; nothing was linked. Send /library link to try again.\n\n"
+            : "") +
+          shelfText(
+            status.linked ? await identity.snapshot(user) : null,
+            status.linked,
+            usage,
+          ),
       };
     }
     if (kind === "pending") {
@@ -282,7 +292,7 @@ export class LibraryActions {
     if (row?.state === "linked") return { text: "Already linked." };
     const approved = (
       await this.db.query(
-        "SELECT id FROM approvals WHERE user_id=$1 AND operation='library_link' AND status='approved' AND created_at>now()-($2::int * interval '1 millisecond') AND payload->>'execution'<>'created' ORDER BY created_at DESC LIMIT 1",
+        "SELECT id FROM approvals WHERE user_id=$1 AND operation='library_link' AND status='approved' AND (payload->>'startedAt')::timestamptz>now()-($2::int * interval '1 millisecond') AND payload->>'execution'<>'created' ORDER BY created_at DESC LIMIT 1",
         [user, linkLimits.fallbackWindowMs],
       )
     ).rows[0];
@@ -434,27 +444,36 @@ export class LibraryActions {
         reason: previous.payload.failure?.code ?? "failed",
       };
     if (previous.operation === "library_link") {
+      const live = await this.deps.link.liveAttempt(user);
+      if (live && live.state !== "completing")
+        return { status: "linking", operation: "library_link" };
       // Read-only check: a card present under the stored token means the clone completed.
+      let outcome: "linked" | "absent" | "unknown" = "unknown";
+      let counts = { loans: 0, holds: 0 };
       try {
         const { shelf, card, cards } = await this.deps.identity.syncRaw(user);
         if (card) {
           await this.deps.identity.markLinked(user, card.cardId, cards);
-          await this.linkFinished(user, id, {
-            status: "done",
-            loans: shelf.loans.length,
-            holds: shelf.holds.length,
-          });
-          return {
-            status: "created",
-            operation: "library_link",
-            loans: shelf.loans.length,
-            holds: shelf.holds.length,
-          };
-        }
+          counts = { loans: shelf.loans.length, holds: shelf.holds.length };
+          outcome = "linked";
+        } else outcome = "absent";
       } catch (error) {
         if (!(error instanceof LibraryError)) throw error;
+        if (error.kind === "unauthenticated") outcome = "absent";
       }
-      return { status: "uncertain", operation: previous.operation };
+      if (outcome === "unknown")
+        return { status: "uncertain", operation: previous.operation };
+      await this.deps.link.settle(user, id, outcome === "linked");
+      if (outcome === "linked") {
+        await this.linkFinished(user, id, { status: "done", ...counts });
+        return { status: "created", operation: "library_link", ...counts };
+      }
+      await this.linkFinished(user, id, { status: "failed" });
+      return {
+        status: "failed",
+        operation: "library_link",
+        reason: "no card was linked; send /library link to try again",
+      };
     }
     return { status: "uncertain", operation: previous.operation };
   }

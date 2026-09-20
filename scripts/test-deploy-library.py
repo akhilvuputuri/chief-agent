@@ -108,6 +108,7 @@ class LibraryRolloutTests(unittest.TestCase):
                     return "CHECK ((operation = ANY (ARRAY['job_delete'::text, 'library_borrow'::text])))" if database['migration16'] else 'CHECK (old)'
                 if statement.startswith('DELETE FROM library_link_attempts; DELETE FROM approvals'):
                     database['deleted'] = True
+                    commands.append(('sql', 'delete-library-rows'))
                     return ''
                 self.assertEqual(statement, candidate['db/' + release.MIGRATION])
                 self.assertNotRegex(statement.upper(), r'\b(DELETE FROM|TRUNCATE)\b')
@@ -118,6 +119,11 @@ class LibraryRolloutTests(unittest.TestCase):
                 return ''
 
             real_publish = release.publish_source
+            real_restore = release.restore_source
+
+            def restore(backup, original):
+                commands.append(('restore_source',))
+                return real_restore(backup, original)
 
             def publish(stage):
                 if publish_failure:
@@ -136,6 +142,7 @@ class LibraryRolloutTests(unittest.TestCase):
                     patch.object(release, 'sql', side_effect=sql), \
                     patch.object(release, 'healthy', side_effect=health or [True, True]), \
                     patch.object(release, 'publish_source', side_effect=publish), \
+                    patch.object(release, 'restore_source', side_effect=restore), \
                     contextlib.redirect_stdout(output):
                 if expected_error:
                     with self.assertRaisesRegex(RuntimeError, expected_error) as caught:
@@ -169,6 +176,9 @@ class LibraryRolloutTests(unittest.TestCase):
                     self.assertIn(('docker', 'tag', 'previous-image', release.IMAGE + ':latest'), commands)
                     self.assertTrue(database['deleted'])
                     self.assertEqual((live / 'db/003_skills.sql').read_text(), OLD_003)
+                    if ('restore_source',) in commands:
+                        # Library rows must be gone before the narrow 003/009 are restored.
+                        self.assertLess(commands.index(('sql', 'delete-library-rows')), commands.index(('restore_source',)))
                 else:
                     self.assertFalse(database['migration16'])
                     self.assertFalse(database['deleted'])

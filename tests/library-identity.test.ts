@@ -520,3 +520,68 @@ test("the fallback code entry, re-mint, expiry marking and revoke behave without
     await pg.close();
   }
 });
+
+test("an uncertain link is settled by Check shelf: discarded when no card appears, so a fresh attempt is allowed", async () => {
+  const { pg, db } = await database();
+  try {
+    let cards: unknown[] = [];
+    const h = harness(db, { sync: () => ({ cards, loans: [], holds: [] }) });
+    const approvalId = randomUUID();
+    await db.query(
+      "INSERT INTO approvals(id,user_id,run_id,operation,payload,status) VALUES($1,'123',$2,'library_link',$3::jsonb,'approved')",
+      [
+        approvalId,
+        randomUUID(),
+        JSON.stringify({
+          draft: {},
+          execution: "uncertain",
+          startedAt: new Date().toISOString(),
+        }),
+      ],
+    );
+    await db.query(
+      "INSERT INTO library_link_attempts(id,user_id,approval_id,direction,state,deadline_at) VALUES($1,'123',$2,'display','completing',now())",
+      [randomUUID(), approvalId],
+    );
+    await h.identity.mint("123");
+    assert.match(
+      (await h.actions.command("123", "link", undefined, "123")).text,
+      /already in progress/,
+    );
+    const first = await h.actions.decide("123", approvalId, true);
+    assert.equal(first.status, "failed");
+    assert.equal(await h.link.liveAttempt("123"), undefined);
+    assert.equal(await h.identity.row("123"), undefined);
+    assert.equal(h.calls.at(-1)!.url.pathname, "/chip/revoke");
+    assert.match(
+      (await h.actions.command("123", "link", undefined, "123")).text,
+      /Sent you a card/,
+    );
+    // The same path links when the card has appeared.
+    cards = [{ cardId: "card-2", advantageKey: "nlb" }];
+    const second = randomUUID();
+    await db.query(
+      "INSERT INTO approvals(id,user_id,run_id,operation,payload,status) VALUES($1,'123',$2,'library_link',$3::jsonb,'approved')",
+      [
+        second,
+        randomUUID(),
+        JSON.stringify({
+          draft: {},
+          execution: "uncertain",
+          startedAt: new Date().toISOString(),
+        }),
+      ],
+    );
+    await db.query(
+      "INSERT INTO library_link_attempts(id,user_id,approval_id,direction,state,deadline_at) VALUES($1,'123',$2,'display','completing',now())",
+      [randomUUID(), second],
+    );
+    await h.identity.mint("123");
+    const linked = await h.actions.decide("123", second, true);
+    assert.equal(linked.status, "created");
+    assert.equal((await h.identity.row("123"))?.state, "linked");
+    assert.equal(await h.link.liveAttempt("123"), undefined);
+  } finally {
+    await pg.close();
+  }
+});

@@ -19,6 +19,8 @@ export async function recoverLibrary(db: Database) {
         DELETE FROM library_identities i USING stopped s WHERE i.user_id=s.user_id AND i.state IN ('anonymous','linking') RETURNING i.user_id
       ), marked AS (
         UPDATE approvals a SET payload=a.payload || '{"execution":"failed","failure":{"code":"interrupted"}}'::jsonb FROM stopped s WHERE a.id=s.approval_id AND a.payload->>'execution'<>'created' RETURNING a.id
+      ), noticed AS (
+        INSERT INTO library_notices(user_id,kind,key) SELECT DISTINCT user_id,'link_interrupted','' FROM stopped ON CONFLICT DO NOTHING RETURNING user_id
       ) SELECT count(*)::int AS n FROM stopped`,
     )
   ).rows[0]?.n;
@@ -26,6 +28,11 @@ export async function recoverLibrary(db: Database) {
   await db.query(
     `UPDATE approvals a SET payload=jsonb_set(a.payload,'{execution}','"uncertain"'::jsonb) FROM library_link_attempts t
      WHERE a.id=t.approval_id AND t.state IN ('fulfilled','completing') AND a.payload->>'execution' NOT IN ('created','failed')`,
+  );
+  // A revoke whose local wipe committed is done even if its record never ran.
+  await db.query(
+    `UPDATE approvals a SET payload=a.payload || '{"execution":"created","result":{"recovered":true}}'::jsonb FROM library_identities i
+     WHERE a.user_id=i.user_id AND a.operation='library_revoke' AND a.status='approved' AND a.payload->>'execution'='executing' AND i.state='revoked'`,
   );
   const uncertain = (
     await db.query(

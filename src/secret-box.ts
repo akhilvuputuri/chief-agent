@@ -22,7 +22,7 @@ export function seal(key: Buffer, plaintext: string, aad: string) {
 }
 export function open(key: Buffer, box: Uint8Array, aad: string) {
   const buffer = Buffer.from(box);
-  if (buffer.length < 29 || buffer[0] !== VERSION)
+  if (key.length !== 32 || buffer.length < 29 || buffer[0] !== VERSION)
     throw new Error("Identity unreadable");
   const decipher = createDecipheriv("aes-256-gcm", key, buffer.subarray(1, 13));
   decipher.setAAD(Buffer.from(aad, "utf8"));

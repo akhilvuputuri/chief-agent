@@ -104,9 +104,7 @@ export function pickCard(cards: SyncResponse["cards"]) {
       (c) =>
         String(c.library?.websiteId ?? "") === String(websiteId) ||
         c.advantageKey === libraryKey,
-    ) ??
-    cards[0] ??
-    null
+    ) ?? null
   );
 }
 /** Owns the encrypted Libby identity. The bearer is decrypted only inside withBearer and never returned. */
@@ -388,7 +386,12 @@ export class LibraryIdentity {
    * makes one remote revoke attempt. Never retried: once token_box is null nothing can retry.
    */
   async revoke(user: string) {
-    const sealed = await this.load(user);
+    let sealed: Sealed | null = null;
+    try {
+      sealed = await this.load(user);
+    } catch {
+      sealed = null; // unreadable box: wipe locally anyway; the remote token lapses by itself
+    }
     // One statement: the pool does not pin a connection across BEGIN/COMMIT.
     await this.db.query(
       `WITH identity AS (

@@ -34,7 +34,7 @@ export function linkFailed(
   const observed = `The code rotated ${rotations} time${rotations === 1 ? "" : "s"} and Libby never confirmed it; nothing was linked.`;
   if (reason === "aborted") return "Stopped. Nothing was changed.";
   if (reason === "expired")
-    return `Linking did not complete in 5 minutes. ${observed}\n\nAlternative: in Libby open Menu → Settings → Copy To Another Device. If Libby shows an 8-digit code there, send me /library code 12345678 within a minute. If it asks you to enter a code instead, tell me. Do not use Recover Your Data on this phone: that path replaces the phone's own Libby data.`;
+    return `Linking did not complete in 5 minutes. ${observed}\n\nAlternative: in Libby open Menu → Settings → Copy To Another Device. If Libby shows an 8-digit code there, send me /library code 12345678 (within 15 minutes of approving this attempt; the code itself changes every minute). If it asks you to enter a code instead, tell me. Do not use Recover Your Data on this phone: that path replaces the phone's own Libby data.`;
   return `Linking failed before completion. ${observed} Send /library link to try again.`;
 }
 export function revokeCard(expiresAt: string) {
