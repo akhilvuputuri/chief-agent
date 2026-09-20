@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { createHash } from "node:crypto";
 import { ToolValidationError } from "./tool-errors.js";
 const tokenSchema = z.object({
   access_token: z.string().min(1),
@@ -24,6 +25,7 @@ const headers = z
 const messageSchema = z.object({
   id: z.string(),
   threadId: z.string(),
+  internalDate: z.string().optional(),
   snippet: z.string().optional(),
   payload: z.object({ headers }).and(part).optional(),
 });
@@ -461,14 +463,25 @@ export class GmailTools {
     const body = plainBody(m.payload);
     return {
       warning: UNTRUSTED,
-      id: m.id,
+      id,
       threadId: m.threadId,
+      mailboxId: createHash("sha256")
+        .update(this.config.email.trim().toLowerCase())
+        .digest("hex"),
+      assertedAt:
+        m.internalDate &&
+        Number.isFinite(Number(m.internalDate)) &&
+        Math.abs(Number(m.internalDate)) < 8.64e15
+          ? new Date(Number(m.internalDate)).toISOString()
+          : null,
+      observedAt: new Date(this.now()).toISOString(),
       headers: kept(m.payload?.headers),
       text:
         body.slice(0, MESSAGE_CHARS) ||
-        m.snippet ||
+        m.snippet?.slice(0, MESSAGE_CHARS) ||
         "No inline plain-text body available",
       truncated: body.length > MESSAGE_CHARS,
+      bodyless: !body,
     };
   }
   async call(

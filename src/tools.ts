@@ -1,4 +1,5 @@
 import { RoutineTools } from "./routines.js";
+import { Parcels } from "./parcels.js";
 import { HistoryStore } from "./history.js";
 import { Canvases } from "./canvases.js";
 import { WorkTools } from "./work.js";
@@ -88,6 +89,13 @@ export class JobTools {
     a: ReturnType<typeof action.parse>,
   ): Promise<unknown> {
     const db = this.db;
+    if (
+      a.operation === "parcel_list" ||
+      a.operation === "parcel_read" ||
+      a.operation === "parcel_save" ||
+      a.operation === "parcel_apply"
+    )
+      return new Parcels(db).call(user, run, a);
     if (a.operation === "conversation_search")
       return new HistoryStore(db).search(user, a.query);
     if (a.operation === "conversation_read")
@@ -100,6 +108,8 @@ export class JobTools {
       return canvases.toolRead(user, run, a.id, a.revision, a.offset);
     if (
       a.operation === "research_delegate" ||
+      a.operation === "parcel_report" ||
+      a.operation === "parcel_email_read" ||
       a.operation === "plugin_delegate" ||
       a.operation === "research_report" ||
       a.operation === "media_delegate" ||

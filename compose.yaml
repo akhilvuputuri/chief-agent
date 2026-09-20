@@ -60,6 +60,8 @@ services:
         "/migrations/016_library.sql",
         "-f",
         "/migrations/017_routines.sql",
+        "-f",
+        "/migrations/019_parcels.sql",
       ]
     depends_on:
       postgres: { condition: service_healthy }

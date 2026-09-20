@@ -11,13 +11,18 @@ const file = z
   .string()
   .regex(/^[a-zA-Z0-9_/-]+\.(md|json)$/)
   .max(160);
-const reads = z.enum(["web_search", "web_read", "source_read"]);
+const reads = z.enum([
+  "web_search",
+  "web_read",
+  "source_read",
+  "parcel_email_read",
+]);
 const agent = z
   .object({
     id,
     description: z.string().min(1).max(600),
     instructions: file,
-    contract: z.literal("public-research/v1"),
+    contract: z.enum(["public-research/v1", "parcel-extraction/v1"]),
     tools: z.array(reads).min(1).max(3),
     skills: z.array(id).max(8),
     // These are host ceilings, not permissions a package can raise.
@@ -29,7 +34,18 @@ const agent = z
       })
       .strict(),
   })
-  .strict();
+  .strict()
+  .superRefine((a, ctx) => {
+    const valid =
+      a.contract === "public-research/v1"
+        ? a.tools.every((t) => t !== "parcel_email_read")
+        : a.tools.length === 1 && a.tools[0] === "parcel_email_read";
+    if (!valid)
+      ctx.addIssue({
+        code: "custom",
+        message: "Tools must match the host contract",
+      });
+  });
 export const pluginManifest = z
   .object({
     format: z.literal("companion.plugin/v1"),
@@ -305,7 +321,10 @@ export class PluginRegistry {
       throw new Error(
         "Plugin compatibility: enabled catalogue is too large; enable fewer packages",
       );
-    if (this.researchAgent && !this.agents.has(this.researchAgent))
+    if (
+      this.researchAgent &&
+      this.agents.get(this.researchAgent)?.contract !== "public-research/v1"
+    )
       throw new Error(
         "Plugin compatibility: research alias references a disabled or missing agent",
       );
@@ -319,6 +338,7 @@ export class PluginRegistry {
     return structuredClone(
       [...this.agents.values()].map((a) => ({
         agentId: a.agentId,
+        contract: a.contract,
         description: a.description,
         pluginVersion: a.pluginVersion,
         pluginHash: a.pluginHash,

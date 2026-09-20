@@ -73,6 +73,8 @@ export async function delegateResearch(
     invalid("duplicate normalized targets");
   const definition =
     selected ?? (await pinPlugin(parent, plugins.researchAgent ?? "disabled"));
+  if (definition.contract !== "public-research/v1")
+    invalid("public research requires the public research contract");
   return runResearchSpecialist(req, runAgent, {
     a,
     targets,
@@ -81,13 +83,16 @@ export async function delegateResearch(
 }
 
 export type ResearchProfile = {
-  role: "job_alignment" | "media";
+  role: "job_alignment" | "media" | "parcel";
   instructions: string;
   reportSchema: z.AnyZodObject;
   reportName: string;
   limits: Budget;
   metadata: Record<string, unknown>;
-  validate: (candidate: any, childRun: string) => Promise<void>;
+  validate: (
+    candidate: unknown,
+    childRun: string,
+  ) => Promise<void | { targets: unknown[] }>;
   /** Read operations this specialist may dispatch; defaults to public research reads. */
   reads?: Set<string>;
   /** Optional per-call check restricting reads to the assignment (for example assigned source IDs). */
@@ -124,7 +129,9 @@ export async function runResearchSpecialist(
   if (
     plugin &&
     plugin.tools.some(
-      (name) => !(req.runtime?.tools ?? []).some((t) => t.name === name),
+      (name) =>
+        name !== profile?.inputTool?.name &&
+        !(req.runtime?.tools ?? []).some((t) => t.name === name),
     )
   )
     throw new Error(
@@ -268,7 +275,9 @@ export async function runResearchSpecialist(
               ids.some((id: string) => !targets.some((t) => t.targetId === id))
             )
               invalid("report exactly the assigned target set");
-            if (profile) await profile.validate(candidate, childRun);
+            if (profile)
+              report =
+                (await profile.validate(candidate, childRun)) ?? candidate;
             else
               for (const item of candidate.targets) {
                 if (item.status === "complete" && !item.evidence.length)
@@ -277,8 +286,8 @@ export async function runResearchSpecialist(
                   await checkResearchQuote(req, childRun, e.sourceId, e.quote);
               }
             checkDispatch();
-            report = candidate;
-            return { recorded: true, targets: candidate.targets };
+            if (!profile) report = candidate;
+            return { recorded: true, targets: report.targets };
           }
           if (!reads.has(input.operation))
             invalid("operation outside specialist permissions");

@@ -1,5 +1,7 @@
 # Companion Agent
 
+On-demand parcel tracking saves delivery facts from selected email and user updates, with evidence history, ambiguity checks and explicit receipt confirmation. See [delivery tracking](docs/parcels.md) and [migration 019 rollout](docs/parcel-rollout.md).
+
 Scheduled agent routines support owner-selected one-time/recurring independent tasks with saved results and delivery state. See [architecture and domain-agent extension contract](docs/scheduled-routines.md) (migration 017).
 
 Version 0.3.9 adds ordered input steering at model/tool checkpoints, concurrent file/voice preparation and delivery-aware history. Existing installations require additive migration014; see [checkpoint steering and rollout](docs/checkpoint-steering.md). [Published releases](https://github.com/akhilvuputuri/companion-agent/releases) record verified deployment milestones; a branch push alone is not a deployment.

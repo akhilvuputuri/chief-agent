@@ -7,6 +7,12 @@
       "sha256": "d11e1cc6df488bb6014dcd95cbfd44f1773a91c74e6507ee16af6f8d8267c872",
       "agents": ["researcher"],
       "allowTools": ["web_search", "web_read", "source_read"]
+    },
+    {
+      "path": "parcel-extraction",
+      "sha256": "9431d47f9ffd402d2cbf057dbc73a03979bf64e71aa016d2487d4783dbb3c1e2",
+      "agents": ["extractor"],
+      "allowTools": ["parcel_email_read"]
     }
   ]
 }

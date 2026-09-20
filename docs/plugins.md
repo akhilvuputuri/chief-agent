@@ -33,6 +33,8 @@ Operator configuration can specify an optional OpenRouter `model` ID on an enabl
 
 ## Supported execution contract
 
+`parcel-extraction/v1` adds a separate private-email profile; see [parcel tracking](parcels.md). Its sole source tool is `parcel_email_read`, restricted to exact message IDs from current-turn owner-scoped Gmail search observations. `parcel_report` returns quote-validated proposals, never current-state writes. It has no public web or broad Gmail access. Public research cannot request this tool or receive private email targets. Both contracts use the same registry grants, immutable pins and revocation checks; private agents are exposed only when Gmail is configured. The parcel domain additionally requires migration 019.
+
 `public-research/v1` is the only agent contract in this release:
 
 - Assignment: objective, relevant context, and up to six distinct saved job IDs/public HTTPS URLs, or a general topic with no explicit targets. Host ownership and public-URL checks remain in force.

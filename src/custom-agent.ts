@@ -5,6 +5,7 @@ import { runAlignment } from "./alignment.js";
 import { randomUUID } from "node:crypto";
 import { pinPlugin } from "./plugin-execution.js";
 import { delegateResearch } from "./research.js";
+import { delegateParcels } from "./parcel-extraction.js";
 import { delegateMedia } from "./media.js";
 import { projectObservation } from "./observations.js";
 import { action } from "./protocol.js";
@@ -341,12 +342,31 @@ export class CustomAgent implements Agent {
                             throw new Error(
                               "Plugin validation: recursive delegation is unavailable",
                             );
-                          const { agentId, operation, ...assignment } =
-                            input as any;
+                          if (input.operation !== "plugin_delegate")
+                            throw new Error(
+                              "Plugin validation: invalid assignment",
+                            );
+                          const {
+                            agentId,
+                            operation,
+                            emailTargets,
+                            ...assignment
+                          } = input;
                           const definition = await pinPlugin(
                             execution,
                             agentId,
                           );
+                          if (definition.contract === "parcel-extraction/v1")
+                            return delegateParcels(
+                              req,
+                              input,
+                              (child) => this.run(child),
+                              definition,
+                            );
+                          if (emailTargets)
+                            throw new Error(
+                              "Plugin validation: public research cannot receive private email targets",
+                            );
                           return delegateResearch(
                             req,
                             { ...assignment, operation: "research_delegate" },
@@ -377,6 +397,7 @@ export class CustomAgent implements Agent {
                             : await req.execute(input);
                   if (
                     op === "research_report" ||
+                    op === "parcel_report" ||
                     op === "media_report" ||
                     op === "job_alignment_report"
                   )

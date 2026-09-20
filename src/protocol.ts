@@ -1,4 +1,12 @@
 import {
+  parcelApply,
+  parcelSave,
+  parcelRead,
+  parcelList,
+  parcelReport,
+  parcelEmailRead,
+} from "./parcel-schema.js";
+import {
   canvasCreate,
   canvasUpdate,
   canvasRead,
@@ -63,6 +71,12 @@ const workSteps = z
     "Unique step keys required",
   );
 export const action = z.discriminatedUnion("operation", [
+  parcelApply,
+  parcelSave,
+  parcelRead,
+  parcelList,
+  parcelReport,
+  parcelEmailRead,
   z
     .object({
       operation: z.literal("conversation_search"),
@@ -393,7 +407,7 @@ export interface AgentRequest {
   modelSignal?: AbortSignal;
   memories: { key: string; value: string }[];
   runtime?: { context: string; tools?: import("./model.js").ToolDefinition[] };
-  specialist?: "research" | "job_alignment" | "media";
+  specialist?: "research" | "job_alignment" | "media" | "parcel";
   systemInstructions?: string;
   /** Host-resolved model override from a pinned plugin, never a model tool argument. */
   pluginModel?: string;

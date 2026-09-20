@@ -1,0 +1,18 @@
+{
+  "format": "companion.plugin/v1",
+  "id": "parcel-extraction",
+  "version": "1.0.0",
+  "description": "Extract quoted parcel facts from explicitly selected private email.",
+  "agents": [
+    {
+      "id": "extractor",
+      "description": "Extract quoted parcel proposals from assigned email; no search or state writes.",
+      "instructions": "agents/extractor.md",
+      "contract": "parcel-extraction/v1",
+      "tools": ["parcel_email_read"],
+      "skills": ["email-parcels"],
+      "limits": { "ms": 120000, "models": 8, "tools": 20 }
+    }
+  ],
+  "skills": [{ "id": "email-parcels", "path": "skills/email-parcels/SKILL.md" }]
+}
