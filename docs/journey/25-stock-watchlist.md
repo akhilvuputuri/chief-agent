@@ -45,7 +45,7 @@ Review outcome: independent review of head `26e29df36d188aeaba653a7ada9a5e3dd1e4
 
 ### Release closure — pending
 
-PR, approved head, deployed SHA, release run and health evidence to be appended after the review loop and the reviewed operator rollout.
+[PR #63](https://github.com/akhilvuputuri/companion-agent/pull/63), CI green. Independent reviewer (Devin session) verdicts: APPROVE on `26e29df` (3 low findings), APPROVE on `bc0a7fb` (findings fixed), APPROVE on final rebased head `3b7155659be13bf2f8de0628d809903a19b29b27`; recorded on the PR. Merge and the reviewed operator rollout (migration 018, `TWELVE_DATA_API_KEY` on the host) are still outstanding — the ordinary release will refuse the DB/Compose change by design.
 
 ## Follow-up and next iteration
 
