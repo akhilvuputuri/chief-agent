@@ -659,7 +659,7 @@ test("the card arriving by sync completes the link even when the code poll never
       ),
       "mid-attempt syncs use the attempt's own bearer",
     );
-    assert.ok(paths.filter((p) => p === "GET /chip/sync").length >= 2);
+    assert.equal(paths.filter((p) => p === "GET /chip/sync").length, 1);
     assert.match(h.edits.at(-1)!.text, /Linked to NLB/);
     // Reuse: an expired identity whose token already carries the card links without a new code.
     await db.query(
