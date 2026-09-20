@@ -40,7 +40,6 @@ const credentials = [
 /** Authorised mock that answers each Gmail endpoint from a route table. */
 function routed(routes: (url: URL) => unknown) {
   const calls: string[] = [];
-  let first = true;
   const request = (async (u: unknown) => {
     const url = new URL(String(u));
     calls.push(url.pathname + url.search);
@@ -52,7 +51,6 @@ function routed(routes: (url: URL) => unknown) {
     if (body instanceof Error) throw body;
     return Response.json(body);
   }) as typeof fetch;
-  void first;
   return { request, calls };
 }
 function metadata(id: string, subject: string, extra: object = {}) {
@@ -568,7 +566,127 @@ test("the unread briefing digest is built from search metadata alone", async () 
   assert.match(lines[0]!, /Deposit notice — Sender <sender@example.com>/);
   // No message body was fetched for the digest.
   assert.ok(!r.calls.some((c) => c.includes("format=full")));
-  assert.deepEqual(unreadDigest({ results: [{}] }), ["• (No subject)"]);
+  // A row that could not be retrieved must not become a blank bullet.
+  assert.deepEqual(
+    unreadDigest({
+      results: [{ detail: "not retrieved: unavailable" }, { from: "A" }],
+    }),
+    ["• (No subject) — A"],
+  );
+});
+
+test("a full page with no size estimate still asks the model to narrow", async () => {
+  // Gmail omits resultSizeEstimate on some queries; a full page is itself the signal.
+  const ids = Array.from({ length: 10 }, (_, i) => `e${i}`);
+  const r = routed((url) =>
+    url.pathname.endsWith("/messages")
+      ? { messages: ids.map((id) => ({ id, threadId: `f${id}` })) }
+      : metadata(url.pathname.split("/").pop()!, "Hit"),
+  );
+  const out: any = await new GmailTools(config, r.request).call(
+    "123",
+    "gmail_search",
+    "the",
+  );
+  assert.equal(out.resultSizeEstimate, undefined);
+  assert.match(out.hint, /Narrow with from:/);
+});
+
+test("an oversized result keeps its warning at the front of the excerpt", async () => {
+  // Escaping can double the serialised size, so trimming keeps the result whole;
+  // if a projection ever excerpts one anyway, the warning must still lead it.
+  const quotes = '"'.repeat(500);
+  const ids = Array.from({ length: 10 }, (_, i) => `d${i}`);
+  const r = routed((url) =>
+    url.pathname.endsWith("/messages")
+      ? {
+          messages: ids.map((id) => ({ id, threadId: `f${id}` })),
+          nextPageToken: "n".repeat(6000),
+          resultSizeEstimate: 900,
+        }
+      : {
+          id: url.pathname.split("/").pop()!,
+          threadId: "fa1",
+          snippet: quotes,
+          labelIds: [],
+          payload: {
+            headers: [
+              { name: "From", value: quotes },
+              { name: "To", value: quotes },
+              { name: "Subject", value: quotes },
+              { name: "Date", value: quotes },
+            ],
+          },
+        },
+  );
+  const out: any = await new GmailTools(config, r.request).call(
+    "123",
+    "gmail_search",
+    "deposit",
+  );
+  assert.ok(out.nextPageToken.length <= 1000);
+  assertProjects(out, "gmail_search");
+  assert.ok(out.omitted > 0, "trimmed rows are counted");
+  const excerpt = JSON.stringify(out).slice(0, 200);
+  assert.match(excerpt, /Untrusted email content/);
+});
+
+test("a thread of snippet-only messages is charged for the snippets it returns", async () => {
+  // The original defect: the snippet stand-in was returned without being charged.
+  const r = routed(() => ({
+    id: "ffa1",
+    messages: Array.from({ length: 12 }, (_, i) => ({
+      id: `m${i}`,
+      threadId: "ffa1",
+      internalDate: String(i),
+      snippet: "s".repeat(900),
+      payload: { headers: [], mimeType: "text/html", body: { data: "" } },
+    })),
+  }));
+  const out: any = await new GmailTools(config, r.request).call(
+    "123",
+    "gmail_thread",
+    "ffa1",
+  );
+  assert.equal(
+    out.messages.reduce((n: number, m: any) => n + m.text.length, 0),
+    6000,
+  );
+  assert.ok(out.omitted > 0);
+  // A snippet stand-in is not something gmail_read can improve on.
+  assert.ok(out.messages.every((m: any) => m.bodyless === true));
+  assert.ok(out.messages.every((m: any) => m.truncated === false));
+});
+
+test("a caller without a run identifier shares one bounded bucket", async () => {
+  const r = routed((url) =>
+    url.pathname.endsWith("/messages")
+      ? { messages: [{ id: "a1", threadId: "fa1" }], resultSizeEstimate: 1 }
+      : metadata("a1", "Unattributed"),
+  );
+  const g = new GmailTools(config, r.request);
+  for (let i = 0; i < 20; i++)
+    await g.call("123", "gmail_search", `unattributed ${i}`);
+  // Twenty searches at two requests each exhaust the shared bucket, not 220 requests.
+  assert.ok(r.calls.filter((c) => c.includes("/messages")).length <= 40);
+  await assert.rejects(
+    g.call("123", "gmail_read", "abc"),
+    /budget for this turn is used/,
+  );
+});
+
+test("a cached page cannot be mutated through a second read", async () => {
+  const r = routed((url) =>
+    url.pathname.endsWith("/messages")
+      ? { messages: [{ id: "a1", threadId: "fa1" }], resultSizeEstimate: 1 }
+      : metadata("a1", "Original"),
+  );
+  const g = new GmailTools(config, r.request);
+  await g.call("123", "gmail_search", "deposit");
+  const second: any = await g.call("123", "gmail_search", "deposit");
+  second.results[0].subject = "Mutated";
+  const third: any = await g.call("123", "gmail_search", "deposit");
+  assert.equal(third.results[0].subject, "Original");
 });
 
 test("Gmail reads plain text without processing HTML or attachments", () => {

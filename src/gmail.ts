@@ -116,6 +116,19 @@ function kept(list: { name: string; value: string }[] | undefined) {
     }))
     .filter((h): h is { name: string; value: string } => h.value !== undefined);
 }
+/**
+ * Character caps bound source text, not JSON. Quote- or backslash-dense content can
+ * still double under escaping, so trim trailing entries until the serialised result
+ * fits below the observation projection limit in src/observations.ts.
+ */
+const SERIALISED_LIMIT = 11_000;
+function fit<T extends { omitted: number }>(result: T, rows: unknown[]) {
+  while (rows.length && JSON.stringify(result).length > SERIALISED_LIMIT) {
+    rows.pop();
+    result.omitted += 1;
+  }
+  return result;
+}
 /** Computed from the result set only; never written by the model. */
 function hintFor(count: number, estimate: number | undefined) {
   if (!count)
@@ -131,6 +144,7 @@ function hintFor(count: number, estimate: number | undefined) {
 export function unreadDigest(result: unknown, limit = 5) {
   const rows = (result as { results?: Record<string, string>[] }).results ?? [];
   return rows
+    .filter((m) => m.subject || m.from)
     .slice(0, limit)
     .map(
       (m) =>
@@ -156,11 +170,12 @@ export class GmailTools {
     private now: () => number = Date.now,
   ) {}
   /**
-   * Charges one Gmail API request to the turn. Runs are bounded so a search loop
-   * cannot walk a mailbox; the briefing path passes no run and is a fixed cost.
+   * Charges one Gmail API request to the turn, so a search loop cannot walk a
+   * mailbox. A caller without a run identifier shares one bucket rather than
+   * being exempt; the hourly sweep releases it.
    */
   private charge(run: string | undefined, required = true) {
-    if (!run) return true;
+    run = run || "unattributed";
     const at = this.now();
     for (const [key, value] of this.spent)
       if (at - value.at > 3_600_000) this.spent.delete(key);
@@ -328,14 +343,18 @@ export class GmailTools {
       ),
     );
     // Warning and hint lead so they survive if a projection ever excerpts this.
-    const result = {
-      warning: UNTRUSTED,
-      hint: hintFor(hits.length, listed.resultSizeEstimate),
-      query,
+    const result = fit(
+      {
+        warning: UNTRUSTED,
+        hint: hintFor(hits.length, listed.resultSizeEstimate),
+        query,
+        results,
+        omitted: 0,
+        nextPageToken: listed.nextPageToken?.slice(0, 1000),
+        resultSizeEstimate: listed.resultSizeEstimate,
+      },
       results,
-      nextPageToken: listed.nextPageToken,
-      resultSizeEstimate: listed.resultSizeEstimate,
-    };
+    );
     // A partial page must not be served to a later turn that can afford the rest.
     if (!degraded) this.remember(key, structuredClone(result));
     return result;
@@ -381,16 +400,21 @@ export class GmailTools {
         subject: header(m.payload?.headers, "subject", SUBJECT),
         date: header(m.payload?.headers, "date", DATE),
         text: text || "No inline plain-text body",
-        truncated: source.length > text.length,
+        // Only a cut plain-text body is worth re-reading; a snippet stand-in is not.
+        truncated: body.length > text.length,
+        ...(body ? {} : { bodyless: true }),
       });
     }
-    return {
-      warning: UNTRUSTED,
-      note: `Ordered oldest first, at most ${THREAD_MAX_MESSAGES} messages. Use gmail_read for the full text of a truncated or omitted message.`,
-      threadId: parsed.id,
+    return fit(
+      {
+        warning: UNTRUSTED,
+        note: `Ordered oldest first, at most ${THREAD_MAX_MESSAGES} messages. Use gmail_read for the full text of a message marked truncated, or an omitted one. A message marked bodyless has no plain-text part and gmail_read will not return more.`,
+        threadId: parsed.id,
+        messages,
+        omitted,
+      },
       messages,
-      omitted,
-    };
+    );
   }
   /** Fallback when a conversation exceeds the response guard: identifiers only. */
   private async threadIndex(
@@ -409,19 +433,23 @@ export class GmailTools {
     const ordered = [...parsed.messages].sort(
       (a, b) => Number(a.internalDate ?? 0) - Number(b.internalDate ?? 0),
     );
-    return {
-      warning: UNTRUSTED,
-      note: "This conversation is too large to return in full. These are its messages, newest last; read individual ones with gmail_read.",
-      threadId: parsed.id,
-      messages: ordered.slice(0, SEARCH_RESULTS * 2).map((m) => ({
-        id: m.id,
-        from: header(m.payload?.headers, "from", FROM),
-        subject: header(m.payload?.headers, "subject", SUBJECT),
-        date: header(m.payload?.headers, "date", DATE),
-      })),
-      omitted: Math.max(0, ordered.length - SEARCH_RESULTS * 2),
-      truncated: true,
-    };
+    const listing = ordered.slice(0, SEARCH_RESULTS * 2).map((m) => ({
+      id: m.id,
+      from: header(m.payload?.headers, "from", FROM),
+      subject: header(m.payload?.headers, "subject", SUBJECT),
+      date: header(m.payload?.headers, "date", DATE),
+    }));
+    return fit(
+      {
+        warning: UNTRUSTED,
+        note: "This conversation is too large to return in full. These are its messages, newest last; read individual ones with gmail_read.",
+        threadId: parsed.id,
+        messages: listing,
+        omitted: Math.max(0, ordered.length - listing.length),
+        truncated: true,
+      },
+      listing,
+    );
   }
   private async read(token: string, id: string, run: string | undefined) {
     this.charge(run);
