@@ -278,13 +278,27 @@ export class Parcels {
     });
     const duplicate = (
       await this.db.query(
-        `SELECT data->'result' AS result FROM parcel_events WHERE user_id=$1 AND fingerprint=$2
+        `SELECT parcel_id FROM parcel_events WHERE user_id=$1 AND fingerprint=$2
        AND kind='applied' ORDER BY created_at LIMIT 1`,
         [user, fingerprint],
       )
     ).rows[0];
     if (duplicate) {
-      const result = { ...duplicate.result, replayed: true };
+      const current = await this.read(
+        user,
+        z.string().uuid().parse(duplicate.parcel_id),
+      );
+      const result = {
+        outcome: "duplicate",
+        id: current.id,
+        revision: current.revision,
+        data: current.data,
+        deliveryBasis: current.delivery_basis,
+        disputed: current.disputed,
+        archivedAt: current.archived_at?.toISOString() ?? null,
+        decisions: {},
+        replayed: true,
+      };
       await this.db.query(
         `WITH saved AS (
           INSERT INTO parcel_requests(user_id,request_key,request_hash,result) VALUES($1,$2,$3,$4::jsonb)
@@ -471,6 +485,12 @@ export class Parcels {
       if (mode !== "confirm" && decisions.status === "applied")
         basis = data.status === "delivered" ? "reported" : "unknown";
       parcelData.parse(data);
+      if (
+        data.etaStart &&
+        data.etaEnd &&
+        Date.parse(data.etaStart) > Date.parse(data.etaEnd)
+      )
+        invalid("ETA range must be ordered");
       if (
         target &&
         mode === "update" &&

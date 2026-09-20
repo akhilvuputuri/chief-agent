@@ -28,6 +28,12 @@ The [independent reviewer](https://app.devin.ai/sessions/48e6bad842ad401aa70a424
 
 **Synthetic finding:** confirmation protected status but left accompanying receipt facts, such as `deliveredAt`, open to newer email claims. That could change the receipt date while retaining the user-confirmed delivery basis. Confirmation now protects every supplied field, while explicit user corrections can still replace it. The regression test first reproduced an incorrect `applied` decision, then passed with `conflict`, preserving the confirmed date and provenance and recording the rejected decision. All 15 parcel/extraction tests passed after the fix. Updated-head review is required; no live acceptance or rollout follows from this correction.
 
+### 20 September: PR comment regressions
+
+Three additional automated review findings reproduced under PGlite: a duplicate source with a new request key returned obsolete parcel state; a partial ETA change could invert the saved range; and an unacknowledged `parcel_report` was classified as an interrupted read after restart despite durable proposals. New source-duplicate responses now read current state while exact request-key replays retain their original results. ETA validation covers the merged parcel. Reports are journaled as writes, preserving uncertainty and preventing transient-read retries.
+
+The fourth comment, that carrier exceptions permanently prevent recovery, did not reproduce: the existing rank comparison defaults the previous status to zero, not infinity. A regression test verifies newer transit and delivery reports can leave an exception while delivered status remains protected. No status-transition implementation change was necessary. All 19 parcel/extraction tests passed after these corrections.
+
 ## Verification and outcome
 
 **Synthetic tests:** owner isolation, restart-style service reconstruction, idempotency, multiple shipments per order, ambiguity without mutation, stale/unknown facts, confirmation/correction, archive history, failed transactional writes and migration reruns. Private extraction tests cover actual runtime tool access, selected sources, page-level evidence, partial coverage and unavailable Gmail. Existing research/plugin/Gmail suites remain regression coverage for public permissions, pins, revocation and budgets.
@@ -35,6 +41,8 @@ The [independent reviewer](https://app.devin.ai/sessions/48e6bad842ad401aa70a424
 **Verified locally on 20 September 2026:** `npm run check` passed 315 application tests and two scope-script tests on `30c387d55a4159157d54ee955e77f52503c44595`; `npm run build` and `npm run format:check` passed. These are synthetic PGlite/mocked-provider checks, not semantic acceptance.
 
 **After the review correction, 20 September 2026:** `npm run check` passed 316 application tests and two scope-script tests; `npm run build` and `npm run format:check` passed. No paid evaluation or live provider access was used.
+
+**After PR comment corrections, 20 September 2026:** `npm run check` passed 320 application tests and two scope-script tests; `npm run build` and `npm run format:check` passed.
 
 **UI acceptance attempt:** the independent testing agent reached the Telegram login screen, but no authenticated test conversation, test runtime/bot/model configuration or test Gmail authorization was available. All parcel UI flows remain untested. No production polling or paid model call was attempted.
 

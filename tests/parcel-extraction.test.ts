@@ -10,7 +10,7 @@ import { JobTools } from "../src/tools.js";
 import { GmailTools } from "../src/gmail.js";
 import { type Database, ensureUser } from "../src/db.js";
 import { type ModelAdapter, type Generation } from "../src/model.js";
-import { Execution, readOperations } from "../src/execution.js";
+import { Execution, readOperations, recoverRuntime } from "../src/execution.js";
 import { delegateParcels } from "../src/parcel-extraction.js";
 import { plugins } from "../src/plugin-registry.js";
 import { runtimeContext } from "../src/runtime.js";
@@ -424,6 +424,55 @@ test("quotes beyond read pages and false complete coverage are rejected; paging 
     );
     assert.equal(result.status, "reported");
     assert.equal(f.reads(), 1);
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT count(*)::int n FROM parcel_events WHERE kind='proposal'",
+        )
+      ).rows[0].n,
+      1,
+    );
+    assert.equal(
+      (await f.db.query("SELECT count(*)::int n FROM parcels")).rows[0].n,
+      0,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("restart marks an unacknowledged proposal report uncertain without replaying it", async () => {
+  const f = await scopedFixture();
+  let reportCall = "";
+  try {
+    await delegateParcels(
+      f.req,
+      f.assignment,
+      async (child) => {
+        await f.execute(child, {
+          operation: "parcel_email_read",
+          messageId: "aa",
+          offset: 0,
+        });
+        const parsed = action.parse(report());
+        reportCall = await child.execution!.beginCall(
+          randomUUID(),
+          "parcel_report",
+          parsed,
+        );
+        await child.execute!(parsed);
+        return { reply: "", history: [], stopReason: "answer" };
+      },
+      plugin(),
+    );
+    await recoverRuntime(f.db);
+    const call = (
+      await f.db.query("SELECT state,is_write FROM runtime_calls WHERE id=$1", [
+        reportCall,
+      ])
+    ).rows[0];
+    assert.equal(call.state, "uncertain");
+    assert.equal(call.is_write, true);
     assert.equal(
       (
         await f.db.query(

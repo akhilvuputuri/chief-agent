@@ -189,6 +189,156 @@ test("repeated email claims do not duplicate parcels, including new request keys
   }
 });
 
+test("duplicate sources return current state but exact request retries preserve their original result", async () => {
+  const f = await fixture();
+  try {
+    const source = f.email(textFor(facts()));
+    const requestKey = randomUUID();
+    const initial = await f.apply(source, facts(), { requestKey });
+    const confirmed = await f.save([], {
+      id: initial.id!,
+      baseRevision: initial.revision,
+      mode: "confirm",
+    });
+    const archived = await f.save([], {
+      id: initial.id!,
+      baseRevision: confirmed.revision,
+      mode: "archive",
+    });
+    const duplicate = await f.apply(source, facts());
+    assert.equal(duplicate.outcome, "duplicate");
+    assert.equal(duplicate.revision, archived.revision);
+    assert.equal(duplicate.data?.status, "delivered");
+    const current = z
+      .object({
+        deliveryBasis: z.literal("user_confirmed"),
+        disputed: z.boolean(),
+        archivedAt: z.string(),
+      })
+      .parse(
+        (
+          await f.db.query(
+            "SELECT result FROM parcel_requests WHERE user_id='a' AND result->>'outcome'='duplicate'",
+          )
+        ).rows[0].result,
+      );
+    assert.equal(current.disputed, false);
+    const replay = await f.apply(source, facts(), { requestKey });
+    assert.equal(replay.revision, initial.revision);
+    assert.equal(replay.data?.status, "in_transit");
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT count(*)::int n FROM parcel_events WHERE kind='applied'",
+        )
+      ).rows[0].n,
+      3,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("newer email can recover from a carrier exception but cannot undo delivery", async () => {
+  const f = await fixture();
+  try {
+    const withStatus = (status: string): ParcelCandidate["claims"] =>
+      facts().map((c) =>
+        c.field === "status" ? { ...c, value: status, quote: status } : c,
+      );
+    const initial = await f.apply(f.email(textFor(facts())), facts());
+    const exception = withStatus("exception");
+    await f.apply(
+      f.email(textFor(exception), "2026-09-18T01:00:00.000Z"),
+      exception,
+    );
+    const transit = withStatus("in_transit");
+    const recovered = await f.apply(
+      f.email(textFor(transit), "2026-09-18T02:00:00.000Z"),
+      transit,
+    );
+    assert.equal(recovered.id, initial.id);
+    assert.equal(recovered.decisions.status, "applied");
+    assert.equal(recovered.data?.status, "in_transit");
+    const delivered = withStatus("delivered");
+    await f.apply(
+      f.email(textFor(exception), "2026-09-18T03:00:00.000Z"),
+      exception,
+    );
+    const received = await f.apply(
+      f.email(textFor(delivered), "2026-09-18T04:00:00.000Z"),
+      delivered,
+    );
+    assert.equal(received.data?.status, "delivered");
+    const regressed = await f.apply(
+      f.email(textFor(transit), "2026-09-18T05:00:00.000Z"),
+      transit,
+    );
+    assert.equal(regressed.decisions.status, "conflict");
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("partial ETA changes cannot invert a saved range; explicit clearing remains possible", async () => {
+  const f = await fixture();
+  try {
+    const initialClaims: ParcelCandidate["claims"] = [
+      ...facts(),
+      { field: "etaEnd", value: "2026-09-20", quote: "by 2026-09-20" },
+    ];
+    const initial = await f.apply(
+      f.email(textFor(initialClaims)),
+      initialClaims,
+    );
+    const laterClaims: ParcelCandidate["claims"] = [
+      ...facts(),
+      { field: "etaStart", value: "2026-09-21", quote: "from 2026-09-21" },
+    ];
+    await assert.rejects(
+      () =>
+        f.apply(
+          f.email(textFor(laterClaims), "2026-09-19T00:00:00.000Z"),
+          laterClaims,
+        ),
+      /ETA range must be ordered/,
+    );
+    await assert.rejects(
+      () =>
+        f.save([laterClaims.at(-1)!], {
+          id: initial.id!,
+          baseRevision: initial.revision,
+          mode: "correct",
+        }),
+      /ETA range must be ordered/,
+    );
+    const saved = z
+      .object({
+        revision: z.number(),
+        data: z.object({ etaStart: z.null(), etaEnd: z.literal("2026-09-20") }),
+      })
+      .parse(
+        await f.parcels.call("a", f.run, {
+          operation: "parcel_read",
+          id: initial.id!,
+          offset: 0,
+        }),
+      );
+    assert.equal(saved.revision, initial.revision);
+    const corrected = await f.save(
+      [
+        laterClaims.at(-1)!,
+        { field: "etaEnd", value: null, quote: "no upper estimate" },
+      ],
+      { id: initial.id!, baseRevision: initial.revision, mode: "correct" },
+    );
+    assert.equal(corrected.decisions.etaStart, "applied");
+    assert.equal(corrected.decisions.etaEnd, "applied");
+  } finally {
+    await f.pg.close();
+  }
+});
+
 test("two shipments in one email/order remain distinct; order-only updates ask", async () => {
   const f = await fixture();
   try {

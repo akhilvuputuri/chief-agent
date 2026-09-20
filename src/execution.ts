@@ -23,7 +23,6 @@ export const readOperations = new Set([
   "parcel_list",
   "parcel_read",
   "parcel_email_read",
-  "parcel_report",
   "finish_turn",
   "conversation_search",
   "conversation_read",
