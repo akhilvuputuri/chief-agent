@@ -13,7 +13,7 @@ export const libraryLimits = {
   minWriteGapMs: 60000,
   dailyCeiling: 200,
   readCeiling: 180,
-  linkPollCeiling: 130, // per Singapore day; two attempts of 60 polls plus their clone calls
+  linkPollCeiling: 130, // per Singapore day; the hard bound on linking (two full 60-poll attempts), independent of attemptsPerDay
   turnWaitMs: 8000,
   backgroundWaitMs: 60000,
   timeoutMs: 15000,

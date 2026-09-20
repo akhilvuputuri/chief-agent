@@ -45,7 +45,7 @@ On v0.3.14 the sync body shape was exactly `{result, cards, loans, holds, stashe
 
 ## Fourth real link — 20 September 2026 (measured)
 
-On v0.3.16 the third poll answered `fulfilled` with a `blessing` (keys `result`, `blessing`), confirming the echoed-code fix. `POST chip/clone {blessing}` still answered 403. The remaining difference from Libby's client is the chip itself: Libby mints with `chip?c=d:22.1.1&s=0` (plus `v=<chip id prefix>` on renewals) and keeps the returned `chip` id, whereas the assistant minted with the third-party `client=dewey` form. v0.3.17 mints and renews exactly as the client does and records the upstream error code on refusals. Hypothesis: a chip minted the third-party way is not permitted to receive a clone.
+On v0.3.16 the third poll answered `fulfilled` with a `blessing` (keys `result`, `blessing`), confirming the echoed-code fix. `POST chip/clone {blessing}` still answered 403. The remaining difference from Libby's client is the chip itself: Libby mints with `chip?c=d:22.1.1&s=0` (plus `v=<chip id prefix>` on renewals) and keeps the returned `chip` id, whereas the assistant minted with the third-party `client=dewey` form. v0.3.17 mints and renews exactly as the client does and records the upstream error code on refusals. Hypothesis: a chip minted the third-party way is not permitted to receive a clone. Also in v0.3.17: `/library link` settles an attempt left `completing` before starting a new one, and the per-day attempt count is raised from two to four while the 130 link-call ceiling remains the hard daily bound.
 
 ## Follow-up
 
