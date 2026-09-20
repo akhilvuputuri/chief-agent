@@ -152,6 +152,37 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
       }
     });
   });
+  // Stock alert pause buttons: direct owner-scoped writes, never queued behind the model.
+  bot.callbackQuery(/^stk:(item|all):([0-9a-f-]{36})$/, async (ctx) => {
+    if (!allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids)) return;
+    const user = String(ctx.from.id);
+    const paused =
+      ctx.match[1] === "item"
+        ? (
+            await db.query(
+              "UPDATE watchlist_items SET status='paused' WHERE id=$1 AND user_id=$2 RETURNING id",
+              [ctx.match[2], user],
+            )
+          ).rows.length > 0
+        : (
+            await db.query(
+              `INSERT INTO stock_settings(user_id,paused) VALUES($1,true)
+               ON CONFLICT(user_id) DO UPDATE SET paused=true RETURNING user_id`,
+              [user],
+            )
+          ).rows.length > 0;
+    await ctx.answerCallbackQuery({
+      text: paused
+        ? ctx.match[1] === "item"
+          ? "Alerts paused for that stock. Ask me to resume it anytime."
+          : "All stock alerts paused. Ask me to resume anytime."
+        : "That watchlist item is no longer active.",
+    });
+    if (paused)
+      await ctx
+        .editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } })
+        .catch(() => {});
+  });
   bot.on("message", async (ctx) => {
     if (!allowedChat(ctx.from?.id, ctx.chat.type, ids)) return;
     const user = String(ctx.from.id);

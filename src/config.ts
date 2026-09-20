@@ -65,6 +65,9 @@ const schema = z.object({
   GROQ_STT_MODEL: z.string().default("whisper-large-v3-turbo"),
   OPENAI_API_KEY: z.string().default(""),
   TAVILY_API_KEY: z.string().default(""),
+  // Optional stock watchlist monitor; empty disables it entirely.
+  MARKET_DATA_PROVIDER: z.enum(["", "twelvedata"]).default(""),
+  TWELVE_DATA_API_KEY: z.string().default(""),
   STT_MODEL: z.string().default("whisper-1"),
   TTS_MODEL: z.string().default("tts-1"),
   TTS_VOICE: z.string().default("alloy"),
