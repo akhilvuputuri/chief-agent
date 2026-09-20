@@ -100,7 +100,7 @@ export class RoutineTools {
     const row = (
       await this.db.query(
         `UPDATE agent_routines SET name=$3,instruction=$4,schedule=$5,parsed=$6::jsonb,next_run=$7,status=$8,
-       missed_policy=$9,revision=revision+1,updated_at=now() WHERE id=$1 AND user_id=$2 AND revision=$10 RETURNING *`,
+       missed_policy=$9,revision=revision+1,updated_at=now() WHERE id=$1 AND user_id=$2 AND revision=$10 AND next_run IS NOT DISTINCT FROM $11::timestamptz AND status=$12 RETURNING *`,
         [
           a.id,
           user,
@@ -112,6 +112,8 @@ export class RoutineTools {
           a.status ?? old.status,
           a.missedPolicy ?? old.missed_policy,
           old.revision,
+          old.next_run,
+          old.status,
         ],
       )
     ).rows[0];
@@ -168,7 +170,14 @@ export class RoutineScheduler {
       )
     ).rows;
     for (const r of rows) {
-      if (!this.allowed(r.user_id)) continue;
+      if (!this.allowed(r.user_id)) {
+        // Revoked owners must not monopolize the bounded due scan forever.
+        await this.db.query(
+          "UPDATE agent_routines SET status='paused',revision=revision+1,updated_at=now() WHERE id=$1 AND revision=$2 AND status='scheduled'",
+          [r.id, r.revision],
+        );
+        continue;
+      }
       const { due, next } = dueWindow(r.parsed, new Date(r.next_run), now);
       const missed =
         r.missed_policy === "skip" && now.getTime() - due.getTime() > 300000;
@@ -225,7 +234,7 @@ export class RoutineDelivery {
       INSERT INTO routine_deliveries(id,occurrence_id,user_id,run_id,payload) VALUES($1,$2,$3,$4,$5::jsonb)
       ON CONFLICT(run_id) DO NOTHING RETURNING id
     ) UPDATE work_tasks SET status='done',pause_reason=NULL WHERE id=$6 AND user_id=$3
-      AND status NOT IN ('cancelled','done') AND NOT EXISTS(SELECT 1 FROM work_steps WHERE task_id=$6)
+      AND status NOT IN ('cancelled','done') AND pause_reason IS NULL AND NOT EXISTS(SELECT 1 FROM work_steps WHERE task_id=$6)
       AND EXISTS(SELECT 1 FROM runtime_runs WHERE id=$4 AND user_id=$3 AND task_id=$6 AND stop_reason='answer')`,
       [
         randomUUID(),

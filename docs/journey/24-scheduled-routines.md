@@ -23,3 +23,9 @@ Synthetic PGlite regressions cover concurrent scheduler ticks, owner isolation, 
 Single background worker; execution may start after due time. Paused tasks block subsequent occurrences until resolved. Progress delivery is best-effort. A crash before outbox capture requires inspection of saved runtime history. No realtime stock monitoring or news feedback, and no conditional silence policy yet. Domain agents should reuse the contract in [scheduled routines](../scheduled-routines.md).
 
 Review/deployment closure will be appended after verification; no production acceptance claimed here.
+
+### Review corrections (20 September)
+
+The first full regression run exposed a context-budget regression: repeating scheduling guidance in four tool descriptions displaced an older answer's retrieval reference. The fix uses brief operation-specific descriptions; the existing exact-answer retrieval regression now passes.
+
+Independent Astra review of `a9c5fbd` requested changes for a stale scheduling-state update race and unauthorized owners monopolizing a bounded due scan. Updates now compare scheduling state as well as revision, and revoked owners' routines are paused. Added adversarial regressions for both and an actual Assistant-lane/approval-pause integration test. This preserves the failure and correction, rather than presenting the initial implementation as immediately correct.

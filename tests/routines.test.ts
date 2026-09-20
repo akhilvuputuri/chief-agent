@@ -278,3 +278,166 @@ test("time calculation preserves phase and Singapore cron with latest-only catch
   const b = dueWindow({ kind: "interval", minutes: 60 }, f, now);
   assert.equal(b.next!.toISOString(), "2026-09-20T16:00:00.000Z");
 });
+
+test("real Assistant keeps scheduled instruction isolated and preserves an approval pause", async () => {
+  const { Assistant } = await import("../src/agent.js");
+  const { JobTools } = await import("../src/tools.js");
+  const f = await fixture();
+  try {
+    const r = await f.create();
+    await f.db.query(
+      "UPDATE agent_routines SET next_run=now()-interval '1 minute' WHERE id=$1",
+      [r.id],
+    );
+    await new RoutineScheduler(f.db, () => true).tick();
+    const task = (await f.db.query("SELECT * FROM work_tasks")).rows[0];
+    const assistant = new Assistant(
+      f.db,
+      {
+        run: async (req) => {
+          assert.equal(req.history.length, 0);
+          const ctx = JSON.parse(req.runtime!.context);
+          assert.equal(ctx.work.task.id, task.id);
+          assert.match(ctx.work.task.request, /Research updates/);
+          assert.equal(ctx.conversation.lane, "job");
+          await assert.rejects(
+            () =>
+              req.execute!({
+                operation: "routine_create",
+                name: "Recursive",
+                instruction: "again",
+                schedule: "every 1h",
+                missedPolicy: "latest",
+              }),
+            /foreground/,
+          );
+          await f.db.query(
+            "INSERT INTO approvals(id,user_id,run_id,operation,payload,expires_at) VALUES($1,'a',$2,'calendar_create','{}',now()+interval '15 minutes')",
+            [randomUUID(), req.runId],
+          );
+          return {
+            reply: "Please approve the draft.",
+            history: [],
+            stopReason: "answer",
+          };
+        },
+      },
+      new JobTools(f.db, { call: async () => ({}) }),
+      { web: false },
+    );
+    const delivery = new RoutineDelivery(f.db, async () => {});
+    const worker = new WorkWorker(
+      f.db,
+      (u, id) => assistant.resumeDetailed(u, id),
+      async () => {},
+      (u, id, p) => delivery.capture(u, id, p),
+    );
+    await worker.tick();
+    const saved = (await f.db.query("SELECT * FROM work_tasks")).rows[0];
+    assert.equal(saved.status, "paused");
+    assert.equal(saved.pause_reason, "awaiting_approval");
+    assert.equal(
+      (await f.db.query("SELECT * FROM agent_routines")).rows.length,
+      1,
+    );
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT count(*)::int AS count FROM routine_deliveries",
+        )
+      ).rows[0].count,
+      1,
+    );
+    assert.equal(
+      (await f.db.query("SELECT data FROM events WHERE type='history.loaded'"))
+        .rows[0].data.source,
+      "task_run",
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("editing a routine cannot rewind a concurrently advanced occurrence", async () => {
+  const f = await fixture();
+  try {
+    const r = await f.create("in 1h");
+    await f.db.query(
+      "UPDATE agent_routines SET next_run=now()-interval '1 minute' WHERE id=$1",
+      [r.id],
+    );
+    let interleaved = false;
+    const wrapped = {
+      query: async (sql: string, values?: unknown[]) => {
+        const result = await f.db.query(sql, values);
+        if (
+          !interleaved &&
+          sql.startsWith("SELECT * FROM agent_routines WHERE id=")
+        ) {
+          interleaved = true;
+          await new RoutineScheduler(f.db, () => true).tick();
+          await f.db.query("UPDATE work_tasks SET status='done'");
+        }
+        return result;
+      },
+    } as Database;
+    await assert.rejects(
+      () =>
+        new RoutineTools(wrapped).call("a", f.run, {
+          operation: "routine_update",
+          id: r.id,
+          name: "Renamed",
+        }),
+      /changed concurrently/,
+    );
+    await new RoutineScheduler(f.db, () => true).tick();
+    assert.equal(
+      (await f.db.query("SELECT * FROM routine_occurrences")).rows.length,
+      1,
+    );
+    assert.equal(
+      (await f.db.query("SELECT status FROM agent_routines")).rows[0].status,
+      "completed",
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+test("revoked owners cannot starve the bounded scheduler scan", async () => {
+  const f = await fixture();
+  try {
+    const r = await f.create("in 1h");
+    await f.db.query(
+      "UPDATE agent_routines SET next_run=now()-interval '1 minute' WHERE id=$1",
+      [r.id],
+    );
+    for (let i = 0; i < 20; i++)
+      await f.db.query(
+        "INSERT INTO agent_routines(id,user_id,name,instruction,schedule,parsed,next_run) VALUES($1,'b','Revoked','No access','in 1h','{\"kind\":\"once\"}',now()-interval '1 day')",
+        [randomUUID()],
+      );
+    const scheduler = new RoutineScheduler(f.db, (u) => u === "a");
+    await scheduler.tick();
+    await scheduler.tick();
+    assert.equal(
+      (await f.db.query("SELECT * FROM work_tasks WHERE user_id='a'")).rows
+        .length,
+      1,
+    );
+    assert.equal(
+      (await f.db.query("SELECT * FROM work_tasks WHERE user_id='b'")).rows
+        .length,
+      0,
+    );
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT * FROM agent_routines WHERE user_id='b' AND status='paused'",
+        )
+      ).rows.length,
+      20,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
