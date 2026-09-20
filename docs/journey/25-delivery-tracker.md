@@ -26,7 +26,11 @@ Independent review has not yet approved a final SHA. The final review verdict an
 
 **Synthetic tests:** owner isolation, restart-style service reconstruction, idempotency, multiple shipments per order, ambiguity without mutation, stale/unknown facts, confirmation/correction, archive history, failed transactional writes and migration reruns. Private extraction tests cover actual runtime tool access, selected sources, page-level evidence, partial coverage and unavailable Gmail. Existing research/plugin/Gmail suites remain regression coverage for public permissions, pins, revocation and budgets.
 
-**Pending:** complete repository checks and independent final-head review. **Not measured:** real email interpretation quality, live mailbox coverage, Telegram phone acceptance or cost improvements. **Not deployed:** migration 019 and gateway release require the reviewed operator procedure; production state has not been inspected or changed for this task.
+**Verified locally on 20 September 2026:** `npm run check` passed 315 application tests and two scope-script tests on `30c387d55a4159157d54ee955e77f52503c44595`; `npm run build` and `npm run format:check` passed. These are synthetic PGlite/mocked-provider checks, not semantic acceptance.
+
+**UI acceptance attempt:** the independent testing agent reached the Telegram login screen, but no authenticated test conversation, test runtime/bot/model configuration or test Gmail authorization was available. All parcel UI flows remain untested. No production polling or paid model call was attempted.
+
+**Pending:** independent final-head review of [PR #66](https://github.com/akhilvuputuri/companion-agent/pull/66). **Not measured:** real email interpretation quality, live mailbox coverage, Telegram phone acceptance or cost improvements. **Not deployed:** migration 019 and gateway release require the reviewed operator procedure; production state has not been inspected or changed for this task.
 
 ## Follow-up
 

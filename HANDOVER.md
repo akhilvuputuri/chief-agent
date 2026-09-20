@@ -1,6 +1,6 @@
 # Personal-agent handover
 
-Delivery tracker candidate for [issue #64](https://github.com/akhilvuputuri/companion-agent/issues/64): owner-scoped parcel state and a selected-email extraction plugin. Read [the contract](docs/parcels.md), [migration 019 procedure](docs/parcel-rollout.md) and [journal](docs/journey/25-delivery-tracker.md). Independent review and operator deployment are pending; this paragraph does not establish a shipped release.
+Delivery tracker candidate [PR #66](https://github.com/akhilvuputuri/companion-agent/pull/66) for [issue #64](https://github.com/akhilvuputuri/companion-agent/issues/64): owner-scoped parcel state and a selected-email extraction plugin. Read [the contract](docs/parcels.md), [migration 019 procedure](docs/parcel-rollout.md) and [journal](docs/journey/25-delivery-tracker.md). Local check/build/format passed on 20 September. Independent review and operator deployment are pending; UI acceptance needs a separate test Telegram/runtime/Gmail setup. This paragraph does not establish a shipped release.
 
 Scheduled independent agent routines shipped in v0.3.15 for issue #56 (PRs #58/#59, migration 017, deployed `c1f8e7088676d4ee3d041993d5e08412e4c73a70`). Read [the extension contract and migration runbook](docs/scheduled-routines.md) before adding domain schedules; existing reminders remain separate.
 
