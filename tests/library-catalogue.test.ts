@@ -132,6 +132,19 @@ test("the verdict follows the availability rule and never isAvailable", () => {
     28,
   );
   assert.equal(lendingDaysFrom({ unrelated: true }), 21);
+  assert.equal(
+    lendingDaysFrom({
+      luckyDayLendingPeriodsByFormat: { ebook: 7 },
+      lendingPeriods: { ebook: 21 },
+    }),
+    21,
+  );
+  assert.equal(
+    lendingDaysFrom({
+      holdRedeliveryPeriods: [{ formatType: "ebook", days: 3 }],
+    }),
+    21,
+  );
   assert.match(
     answerHint({
       title: "Project Hail Mary",

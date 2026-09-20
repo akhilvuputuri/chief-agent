@@ -2,7 +2,6 @@ import { z } from "zod";
 import { setTimeout as delay } from "node:timers/promises";
 import { ToolValidationError } from "./tool-errors.js";
 import {
-  hosts,
   permitted,
   routes,
   type PermittedUrl,
@@ -167,7 +166,7 @@ export class LibraryClient {
     if (open)
       throw new LibraryError(
         "paced",
-        `library access is paused until ${singaporeClock(open.until)} Singapore time after a throttle signal`,
+        `library access is paused until ${singaporeClock(open.until)} Singapore time after ${open.reason === "failures" ? "repeated failed answers" : "a throttle signal"}`,
       );
     const now = this.now();
     const ceiling =
@@ -233,7 +232,14 @@ export class LibraryClient {
       key === "mediaSearch"
         ? this.limits.searchBodyBytes
         : this.limits.bodyBytes;
-    const text = await readBounded(response, limit).catch(() => null);
+    let text: string | null;
+    try {
+      text = await readBounded(response, limit);
+    } catch (error) {
+      if (!(error instanceof BodyTooLarge))
+        throw await this.transient(route, started, "timeout");
+      text = null;
+    }
     const finish = (outcome: CallOutcome) =>
       pacing.record({
         host: route.host,
@@ -321,11 +327,11 @@ export class LibraryClient {
       ms: this.now() - started,
     });
     const failures = await this.deps.pacing.failures("increment");
-    if (failures >= this.limits.failureTrip)
-      await this.deps.pacing.openBreaker(
-        this.now() + this.limits.transientPauseMs,
-        "failures",
-      );
+    if (failures >= this.limits.failureTrip) {
+      const until = this.now() + this.limits.transientPauseMs;
+      if (await this.deps.pacing.openBreaker(until, "failures"))
+        await this.deps.onBreakerOpen?.(until, "failures").catch(() => {});
+    }
     return new LibraryError(
       "transient",
       "the library did not answer after bounded retries; try again in a few minutes",
@@ -342,6 +348,7 @@ function upstreamCode(body: unknown) {
   }
   return undefined;
 }
+class BodyTooLarge extends Error {}
 async function readBounded(response: Response, limit: number) {
   if (!response.body) return "";
   const reader = response.body.getReader();
@@ -353,10 +360,9 @@ async function readBounded(response: Response, limit: number) {
     size += value.byteLength;
     if (size > limit) {
       await reader.cancel().catch(() => {});
-      throw new Error("body too large");
+      throw new BodyTooLarge();
     }
     chunks.push(value);
   }
   return Buffer.concat(chunks).toString("utf8");
 }
-export { hosts as libraryHosts };

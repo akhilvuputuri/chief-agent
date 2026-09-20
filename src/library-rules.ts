@@ -34,7 +34,7 @@ export function normalise(text: string) {
   return text
     .toLowerCase()
     .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\b(the|a|an)\b/g, " ")
     .replace(/\s+/g, " ")
@@ -131,26 +131,34 @@ export function lendingDaysFrom(info: unknown, fallback = defaultLendingDays) {
       return null;
     }
     const o = node as Record<string, unknown>;
-    const format = String(o.formatType ?? o.format ?? o.mediaType ?? "");
-    if (/^ebook$/i.test(format)) {
-      for (const key of ["lendingPeriodDays", "days", "defaultDays", "value"])
-        if (typeof o[key] === "number" && o[key] > 0 && o[key] <= 90)
-          return o[key] as number;
-    }
     for (const [key, value] of Object.entries(o)) {
-      if (/lending/i.test(key)) {
-        const found = walk(value, depth + 1);
-        if (found) return found;
+      // Only the normal lending-period settings count; Lucky Day and redelivery periods are separate keys.
+      if (/^lendingPeriods?$/i.test(key)) {
         if (value && typeof value === "object" && !Array.isArray(value)) {
           const ebook = (value as Record<string, unknown>).ebook;
           if (typeof ebook === "number" && ebook > 0 && ebook <= 90)
             return ebook;
         }
+        if (Array.isArray(value))
+          for (const item of value) {
+            if (!item || typeof item !== "object") continue;
+            const e = item as Record<string, unknown>;
+            const format = String(
+              e.formatType ?? e.format ?? e.mediaType ?? "",
+            );
+            const days = e.lendingPeriodDays ?? e.defaultDays;
+            if (
+              /^ebook$/i.test(format) &&
+              typeof days === "number" &&
+              days > 0 &&
+              days <= 90
+            )
+              return days;
+          }
+      } else if (!/lucky|redeliver/i.test(key)) {
+        const found = walk(value, depth + 1);
+        if (found) return found;
       }
-    }
-    for (const value of Object.values(o)) {
-      const found = walk(value, depth + 1);
-      if (found) return found;
     }
     return null;
   };

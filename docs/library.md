@@ -28,7 +28,7 @@ Both are read operations (`readOperations`), advertised only when the `library` 
 
 ### Pacing and safety
 
-All requests go through one `LibraryClient` that serialises calls globally, waits at least 2 seconds between calls (60 seconds between writes, none exist yet), counts attempts per Singapore day (reads stop at 180 of a 200 ceiling), retries only reads and only on transient failures (twice, jittered), and opens a circuit breaker on a `whoa` 403 (24 hours, one owner notice) or HTTP 429 (1 hour), or after five consecutive transient failures (30 minutes). In Phase 1 the counter, cache and breaker live in memory and reset on restart; the schema release moves them to Postgres.
+All requests go through one `LibraryClient` that serialises calls globally, waits at least 2 seconds between calls (60 seconds between writes, none exist yet), counts attempts per Singapore day (reads stop at 180 of a 200 ceiling), retries only reads and only on transient failures (twice, jittered), and opens a circuit breaker on a `whoa` 403 (24 hours, one owner notice) or HTTP 429 (1 hour), or after five consecutive transient failures (30 minutes); each opening sends the owner one Telegram notice. In Phase 1 the counter, cache and breaker live in memory and reset on restart; the schema release moves them to Postgres.
 
 Every library failure the model sees is a `ToolValidationError` with neutral wording (no status codes, no titleIds, no URLs), so the agent loop never retries it and an interrupted read can never be journaled as an uncertain write.
 

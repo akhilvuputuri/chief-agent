@@ -57,8 +57,22 @@ const mirror = new DailySheet(db, {
   spreadsheetId: c.DAILY_SPREADSHEET_ID,
 });
 const shutdown = new AbortController();
+let notifyOwner: (text: string) => Promise<void> = async () => {};
 const library = new LibraryTools(
-  new LibraryClient({ pacing: new MemoryPacing(), signal: shutdown.signal }),
+  new LibraryClient({
+    pacing: new MemoryPacing(),
+    signal: shutdown.signal,
+    onBreakerOpen: async (until, reason) => {
+      const when = new Date(until).toLocaleString("en-SG", {
+        timeZone: "Asia/Singapore",
+      });
+      await notifyOwner(
+        reason === "failures"
+          ? `The library did not answer repeatedly. Library calls are paused until ${when}; nothing will be retried on its own.`
+          : `The library asked us to slow down. Library calls are paused until ${when}; nothing will be retried on its own.`,
+      );
+    },
+  }),
 );
 const parser = new ScheduleParser();
 const daily = new DailyTools(db, parser, calendar, mirror);
@@ -131,6 +145,10 @@ const app = server(
     : undefined,
 );
 const bot = telegram(c, assistant, db);
+notifyOwner = async (text) => {
+  for (const user of c.TELEGRAM_ALLOWED_USER_IDS.split(","))
+    await bot.api.sendMessage(user, text).catch(() => {});
+};
 const views = new TelegramViews(db, bot.api, undefined, c.MINIAPP_ORIGIN);
 const allowed = new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(","));
 const worker = new DailyWorker<Delivery>(

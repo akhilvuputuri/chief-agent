@@ -62,7 +62,7 @@ test("hostnames live only in library-routes.ts and no source constructs a forbid
     /\/return\b|\/renew\b|\/fulfill|\/download\b|\/auth\/link|openbook|\.acsm/i;
   for (const [file, text] of await sourceFiles()) {
     if (file !== "library-routes.ts")
-      for (const host of Object.values(hosts))
+      for (const host of Object.values(hosts).map((h) => new URL(h).hostname))
         assert.ok(!text.includes(host), `${file} names ${host}`);
     assert.ok(
       !forbidden.test(text),
