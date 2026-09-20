@@ -188,6 +188,28 @@ export const action = z.discriminatedUnion("operation", [
       includeCalendar: z.boolean().default(false),
     })
     .strict(),
+  z
+    .object({
+      operation: z.literal("routine_create"),
+      name: z.string().trim().min(1).max(150),
+      instruction: z.string().trim().min(1).max(12000),
+      schedule: z.string().trim().min(1).max(150),
+      missedPolicy: z.enum(["latest", "skip"]).default("latest"),
+    })
+    .strict(),
+  z.object({ operation: z.literal("routine_list") }).strict(),
+  z.object({ operation: z.literal("routine_history"), id }).strict(),
+  z
+    .object({
+      operation: z.literal("routine_update"),
+      id,
+      name: z.string().trim().min(1).max(150).optional(),
+      instruction: z.string().trim().min(1).max(12000).optional(),
+      schedule: z.string().trim().min(1).max(150).optional(),
+      status: z.enum(["scheduled", "paused", "cancelled"]).optional(),
+      missedPolicy: z.enum(["latest", "skip"]).optional(),
+    })
+    .strict(),
   z.object({ operation: z.literal("schedule_list") }).strict(),
   z
     .object({
