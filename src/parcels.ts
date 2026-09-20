@@ -432,7 +432,7 @@ export class Parcels {
           prov[claim.field] = {
             evidenceId,
             assertedAt,
-            protected: mode === "correct",
+            protected: mode === "correct" || mode === "confirm",
             quote: claim.quote,
           };
         }

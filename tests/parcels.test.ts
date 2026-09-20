@@ -244,6 +244,84 @@ test("older email cannot overwrite confirmed receipt; explicit corrections reope
   }
 });
 
+test("confirmation protects receipt facts against newer email while allowing explicit correction", async () => {
+  const f = await fixture();
+  try {
+    const initial = await f.apply(f.email(textFor(facts())), facts());
+    const receipt: ParcelCandidate["claims"] = [
+      {
+        field: "deliveredAt",
+        value: "2026-09-19",
+        quote: "received on 2026-09-19",
+      },
+    ];
+    const confirmed = await f.save(receipt, {
+      id: initial.id!,
+      baseRevision: initial.revision,
+      mode: "confirm",
+    });
+    const laterClaims: ParcelCandidate["claims"] = [
+      ...facts().filter((c) => c.field !== "status"),
+      {
+        field: "deliveredAt",
+        value: "2026-09-25",
+        quote: "delivered 2026-09-25",
+      },
+    ];
+    const later = await f.apply(
+      f.email(
+        textFor(laterClaims),
+        new Date(Date.now() + 86400000).toISOString(),
+      ),
+      laterClaims,
+    );
+    assert.equal(later.decisions.deliveredAt, "conflict");
+    assert.equal(later.revision, confirmed.revision);
+    const saved = z
+      .object({
+        data: z.object({ deliveredAt: z.string(), status: z.string() }),
+        provenance: z.object({
+          deliveredAt: z.object({ protected: z.boolean(), quote: z.string() }),
+        }),
+        delivery_basis: z.string(),
+      })
+      .parse(
+        await f.parcels.call("a", f.run, {
+          operation: "parcel_read",
+          id: initial.id!,
+          offset: 0,
+        }),
+      );
+    assert.equal(saved.data.deliveredAt, "2026-09-19");
+    assert.equal(saved.data.status, "delivered");
+    assert.equal(saved.delivery_basis, "user_confirmed");
+    assert.equal(saved.provenance.deliveredAt.protected, true);
+    assert.equal(saved.provenance.deliveredAt.quote, receipt[0]!.quote);
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT count(*)::int n FROM parcel_events WHERE user_id='a' AND parcel_id=$1 AND data->'decisions'->>'deliveredAt'='conflict'",
+          [initial.id],
+        )
+      ).rows[0].n,
+      1,
+    );
+    const corrected = await f.save(
+      [
+        {
+          field: "deliveredAt",
+          value: "2026-09-18",
+          quote: "actually received 2026-09-18",
+        },
+      ],
+      { id: initial.id!, baseRevision: confirmed.revision, mode: "correct" },
+    );
+    assert.equal(corrected.decisions.deliveredAt, "applied");
+  } finally {
+    await f.pg.close();
+  }
+});
+
 test("same source can add omitted facts; unknowns do not erase known data", async () => {
   const f = await fixture();
   try {

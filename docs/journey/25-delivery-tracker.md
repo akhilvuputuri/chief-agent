@@ -22,11 +22,19 @@ The additional schemas also exposed a continuity regression: when fixed context 
 
 Independent review has not yet approved a final SHA. The final review verdict and exact revision belong on the PR; no self-approval or CI-only approval is implied here.
 
+### 20 September: confirmation-field review correction
+
+The [independent reviewer](https://app.devin.ai/sessions/48e6bad842ad401aa70a4243cea2a7bf) returned **REQUEST CHANGES** for `eac8d3384e88d0aa395c6caf8829d9cc1eb12b1e`, compared with base `25aa0e33af9f620b27b29f98f07d0978d4d165cb`. The reviewer ran in explicitly selected Devin Ultra mode; the underlying model identifier is not exposed, so no GPT-6 Astra claim is made.
+
+**Synthetic finding:** confirmation protected status but left accompanying receipt facts, such as `deliveredAt`, open to newer email claims. That could change the receipt date while retaining the user-confirmed delivery basis. Confirmation now protects every supplied field, while explicit user corrections can still replace it. The regression test first reproduced an incorrect `applied` decision, then passed with `conflict`, preserving the confirmed date and provenance and recording the rejected decision. All 15 parcel/extraction tests passed after the fix. Updated-head review is required; no live acceptance or rollout follows from this correction.
+
 ## Verification and outcome
 
 **Synthetic tests:** owner isolation, restart-style service reconstruction, idempotency, multiple shipments per order, ambiguity without mutation, stale/unknown facts, confirmation/correction, archive history, failed transactional writes and migration reruns. Private extraction tests cover actual runtime tool access, selected sources, page-level evidence, partial coverage and unavailable Gmail. Existing research/plugin/Gmail suites remain regression coverage for public permissions, pins, revocation and budgets.
 
 **Verified locally on 20 September 2026:** `npm run check` passed 315 application tests and two scope-script tests on `30c387d55a4159157d54ee955e77f52503c44595`; `npm run build` and `npm run format:check` passed. These are synthetic PGlite/mocked-provider checks, not semantic acceptance.
+
+**After the review correction, 20 September 2026:** `npm run check` passed 316 application tests and two scope-script tests; `npm run build` and `npm run format:check` passed. No paid evaluation or live provider access was used.
 
 **UI acceptance attempt:** the independent testing agent reached the Telegram login screen, but no authenticated test conversation, test runtime/bot/model configuration or test Gmail authorization was available. All parcel UI flows remain untested. No production polling or paid model call was attempted.
 
