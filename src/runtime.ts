@@ -91,6 +91,13 @@ export function runtimeContext(
           ? "Load the approved active skill or default using its catalogue key. Optional offset reads a bounded page; follow nextOffset until null."
           : ((
               {
+                routine_create:
+                  "On explicit user request, schedule an independent agent job with a self-contained instruction. Singapore time: ISO, in 30m, every 2h, daily at 11pm, or five-field cron (hourly minimum). latest catches up one slot; skip ignores slots over 5 minutes late. Use schedule_create for fixed reminders.",
+                routine_update:
+                  "Change future routine instructions/times or pause/resume/cancel on user request. Existing tasks are unchanged; use work_cancel on their task ID. Same time syntax as routine_create.",
+                routine_list: "List the owner's routines and next due times.",
+                routine_history:
+                  "Read the ten latest occurrences, task IDs, counters, saved responses and Telegram delivery states. Does not rerun work.",
                 conversation_search:
                   "Search earlier saved conversation messages using concrete words. Returns up to ten owner-scoped message IDs and excerpts; historical assistant claims are not verified facts.",
                 conversation_read:

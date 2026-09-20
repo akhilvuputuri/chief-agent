@@ -38,6 +38,8 @@ export const readOperations = new Set([
   "work_status",
   "item_list",
   "schedule_list",
+  "routine_list",
+  "routine_history",
   "calendar_list",
   "library_check",
   "library_availability",

@@ -1,3 +1,4 @@
+import { RoutineScheduler, RoutineDelivery } from "./routines.js";
 import { run as runTelegram } from "@grammyjs/runner";
 import { CustomAgent } from "./custom-agent.js";
 import { OpenRouter } from "./model.js";
@@ -45,6 +46,13 @@ if (
 )
   throw new Error(
     "Checkpoint steering migration 014 must be applied with the gateway stopped",
+  );
+if (
+  !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=17")).rows
+    .length
+)
+  throw new Error(
+    "Scheduled routines migration 017 must be applied with the gateway stopped",
   );
 await recoverRuntime(db);
 // Library account features need migration 016; without the key they stay off even if tables exist.
@@ -301,6 +309,22 @@ async function sendWorkMessage(user: string, text: string | Delivery) {
   await sendCalendarApprovals(bot, db, user);
   await sendLibraryApprovals(bot, db, user);
 }
+const routineScheduler = new RoutineScheduler(db, (user) => allowed.has(user));
+const routineDelivery = new RoutineDelivery(db, sendWorkMessage);
+await routineDelivery.recover();
+const routineTimer = setInterval(() => {
+  void routineScheduler
+    .tick()
+    .catch(() =>
+      console.error(JSON.stringify({ event: "routine.tick_failed" })),
+    );
+  void routineDelivery
+    .tick()
+    .catch(() =>
+      console.error(JSON.stringify({ event: "routine.delivery_failed" })),
+    );
+}, 15000);
+routineTimer.unref();
 const workWorker = new WorkWorker(
   db,
   async (user, id) => {
@@ -320,6 +344,7 @@ const workWorker = new WorkWorker(
     }
   },
   sendWorkMessage,
+  (user, task, delivery) => routineDelivery.capture(user, task, delivery),
 );
 const workTimer = setInterval(() => {
   void workWorker
@@ -341,6 +366,7 @@ for (const signal of ["SIGINT", "SIGTERM"])
     void (async () => {
       clearInterval(scheduleTimer);
       clearInterval(workTimer);
+      clearInterval(routineTimer);
       shutdown.abort();
       assistant.shutdown();
       await runner.stop();

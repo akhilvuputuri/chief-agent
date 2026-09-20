@@ -1,3 +1,4 @@
+import { RoutineTools } from "./routines.js";
 import { HistoryStore } from "./history.js";
 import { Canvases } from "./canvases.js";
 import { WorkTools } from "./work.js";
@@ -171,6 +172,13 @@ export class JobTools {
       a.operation === "work_cancel"
     )
       return new WorkTools(db).call(user, run, a);
+    if (
+      a.operation === "routine_create" ||
+      a.operation === "routine_update" ||
+      a.operation === "routine_list" ||
+      a.operation === "routine_history"
+    )
+      return new RoutineTools(db).call(user, run, a);
     if (
       a.operation === "item_save" ||
       a.operation === "item_list" ||

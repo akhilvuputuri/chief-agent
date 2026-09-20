@@ -58,6 +58,8 @@ services:
         "/migrations/015_preparation_chain.sql",
         "-f",
         "/migrations/016_library.sql",
+        "-f",
+        "/migrations/017_routines.sql",
       ]
     depends_on:
       postgres: { condition: service_healthy }

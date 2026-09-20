@@ -6,6 +6,7 @@ export class WorkWorker<T = string> {
     private db: Database,
     private resume: (user: string, id: string) => Promise<T>,
     private notify: (user: string, text: T) => Promise<unknown>,
+    private capture?: (user: string, task: string, text: T) => Promise<boolean>,
   ) {}
   async tick() {
     if (this.busy) return;
@@ -25,7 +26,8 @@ export class WorkWorker<T = string> {
           `UPDATE work_tasks SET status=CASE WHEN status IN ('done','cancelled','paused') THEN status WHEN used_ms>=budget_ms OR used_models>=budget_models OR used_tools>=budget_tools OR NOT EXISTS(SELECT 1 FROM work_steps WHERE task_id=$1 AND status='pending') THEN 'paused' ELSE 'queued' END,lease=NULL,next_run=now()+interval '15 seconds',updated_at=now() WHERE id=$1 AND lease=$2`,
           [task.id, lease],
         );
-        await this.notify(task.user_id, text);
+        if (!(await this.capture?.(task.user_id, task.id, text)))
+          await this.notify(task.user_id, text);
       } catch {
         await this.db.query(
           `UPDATE work_tasks SET status='paused',lease=NULL,updated_at=now() WHERE id=$1 AND lease=$2`,
