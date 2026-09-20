@@ -354,14 +354,39 @@ export class LinkCeremony {
       if (!synced) {
         if (!blessing) throw new LibraryError("rejected", "no blessing", 0);
         // The documented completion: POST chip/clone {blessing}; the answer may carry a renewed identity.
-        const answer = await this.client.call("chipClone", {
-          bearer,
-          body: { blessing },
-          schema: cloneResponse,
-          context: "background",
-        });
-        cloned = true;
+        // A freshly minted anonymous chip is not registered server-side yet, so the first clone
+        // answers 403 missing_chip (observed and reproduced against two fresh chips). Libby's own
+        // client treats that as recoverable: its chip-authed request wrapper re-mints the chip once
+        // (same identity, v=<chip prefix>) and retries. Without this retry the card never lands.
         let current = bearer;
+        let answer: z.infer<typeof cloneResponse>;
+        try {
+          answer = await this.client.call("chipClone", {
+            bearer,
+            body: { blessing },
+            schema: cloneResponse,
+            context: "background",
+          });
+        } catch (error) {
+          // Only the specific sentry rejection is recoverable. A whoa/throttle 403 also
+          // reaches here as a LibraryError with status 403 (kind "throttled", no code), so
+          // keying on status would spuriously re-mint into an open breaker; key on the code.
+          if (!(error instanceof LibraryError && error.code === "missing_chip"))
+            throw error;
+          await event(this.db, user, approvalId, "library.link_progress", {
+            attemptId,
+            result: "clone_missing_chip_retry",
+            polls: 0,
+          });
+          current = await this.identity.remint(user, "linking");
+          answer = await this.client.call("chipClone", {
+            bearer: current,
+            body: { blessing },
+            schema: cloneResponse,
+            context: "background",
+          });
+        }
+        cloned = true;
         // Hypothesis kept defensively: a clone answer carrying an identity is adopted. Not
         // observed in Libby's client, which instead re-mints with its existing bearer.
         if (answer.identity && answer.identity.length >= 20)
