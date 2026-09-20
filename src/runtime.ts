@@ -137,6 +137,12 @@ export function runtimeContext(
                   "Read the linked NLB card's current loans (days left, due dates, Lucky Day flag) and holds (ready or estimated wait) plus slot capacity. Cached 15 minutes; never contains card numbers or ids. Not linked → ask the user to send /library link.",
                 library_availability:
                   "Recheck up to five known titleIds from an earlier library_check. Same verdict rule; cached 15 minutes.",
+                gmail_search:
+                  "Search the owner's mailbox with Gmail operators (from:, subject:, newer_than:, quoted phrases, OR, -term, has:attachment, in:anywhere). Returns up to ten hits with sender, subject, date, snippet and unread flag, plus a hint when the result set is empty or very large. Triage from this list; do not read every hit. Identical searches are cached five minutes.",
+                gmail_thread:
+                  "Read one whole conversation oldest first using a threadId from gmail_search. Bounded per message and in total; truncated messages can be read in full with gmail_read. Prefer this over reading messages one by one.",
+                gmail_read:
+                  "Read one message in full plain text by its messageId. Use only when a thread read is truncated or a single message is enough. HTML and attachments are never fetched.",
                 web_read:
                   "Retrieve a public source. Returned sourceId is for source evidence; recommended records are not the requested posting.",
               } as Record<string, string>

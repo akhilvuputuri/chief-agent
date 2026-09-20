@@ -205,13 +205,22 @@ export class JobTools {
       if (!this.sheets) throw new Error("Google Sheets is not configured");
       return this.sheets.sync(user);
     }
-    if (a.operation === "gmail_search" || a.operation === "gmail_read") {
+    if (
+      a.operation === "gmail_search" ||
+      a.operation === "gmail_read" ||
+      a.operation === "gmail_thread"
+    ) {
       if (!this.gmail) throw new Error("Gmail is not configured");
       return this.gmail.call(
         user,
         a.operation,
-        a.operation === "gmail_search" ? a.query : a.messageId,
+        a.operation === "gmail_search"
+          ? a.query
+          : a.operation === "gmail_thread"
+            ? a.threadId
+            : a.messageId,
         a.operation === "gmail_search" ? a.pageToken : undefined,
+        run,
       );
     }
     if (a.operation === "job_save")

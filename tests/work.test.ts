@@ -421,7 +421,17 @@ test("tracked responses retain model-written prose while status uses recorded ev
 test("capability schema exposes configured operations and structured work arguments", () => {
   const off = runtimeContext({}, null);
   assert.ok(
-    !off.tools.some((t) => t.name === "gmail_read" || t.name === "sheet_sync"),
+    !off.tools.some(
+      (t) =>
+        t.name === "gmail_read" ||
+        t.name === "gmail_thread" ||
+        t.name === "sheet_sync",
+    ),
+  );
+  assert.ok(
+    runtimeContext({ gmail: true }, null).tools.some(
+      (t) => t.name === "gmail_thread",
+    ),
   );
   const start = off.tools.find((t) => t.name === "work_start")!;
   assert.equal((start.parameters.properties as any).steps.type, "array");

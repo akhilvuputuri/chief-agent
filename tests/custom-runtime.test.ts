@@ -179,7 +179,14 @@ test("invalid identities and unauthorized operations cannot reach dispatcher", a
   }
   const tools = runtimeContext({}, null).tools;
   assert.ok(tools.some((t) => t.name === "job_list"));
-  assert.ok(!tools.some((t) => t.name === "gmail_read" || t.name === "shell"));
+  assert.ok(
+    !tools.some(
+      (t) =>
+        t.name === "gmail_read" ||
+        t.name === "gmail_thread" ||
+        t.name === "shell",
+    ),
+  );
   assert.ok(
     !(
       "operation" in

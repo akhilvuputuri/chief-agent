@@ -18,7 +18,7 @@ import { secretKey } from "./secret-box.js";
 import { CalendarTools } from "./calendar.js";
 import { DailySheet } from "./daily-sheet.js";
 import { SheetsTools } from "./sheets.js";
-import { GmailTools } from "./gmail.js";
+import { GmailTools, unreadDigest } from "./gmail.js";
 import { readConfig } from "./config.js";
 import { connect } from "./db.js";
 import { JobTools } from "./tools.js";
@@ -266,19 +266,10 @@ const worker = new DailyWorker<Delivery>(
           j.user_id,
           "gmail_search",
           "in:inbox is:unread newer_than:1d",
+          undefined,
+          `briefing:${j.id}:${Date.now()}`,
         );
-        const lines: string[] = [];
-        for (const m of r.messages.slice(0, 5)) {
-          const mail: any = await gmail.call(j.user_id, "gmail_read", m.id);
-          lines.push(
-            "• " +
-              (
-                mail.headers?.find(
-                  (h: any) => h.name.toLowerCase() === "subject",
-                )?.value ?? "(No subject)"
-              ).slice(0, 160),
-          );
-        }
+        const lines = unreadDigest(r);
         sections.push({
           title: "Unread inbox — past 24 hours (up to 5)",
           body: lines.join("\n") || "No matching messages.",
