@@ -3,11 +3,23 @@ import type { Database } from "./db.js";
 import type { Action } from "./protocol.js";
 import { ToolValidationError } from "./tool-errors.js";
 import {
+  ProviderError,
   quoteKey,
   type MarketDataProvider,
   type Quote,
   type SymbolHit,
 } from "./stock-provider.js";
+
+/** Terminal-suppress a user's queued alerts ('muted'); delivered or uncertain
+ * rows are untouched. Used when an item or the whole feature is paused. */
+async function mutePending(db: Database, userId: string, itemId?: string) {
+  await db.query(
+    `UPDATE stock_alerts SET state='muted' WHERE user_id=$1 AND state='pending'${
+      itemId ? " AND item_id=$2" : ""
+    }`,
+    itemId ? [userId, itemId] : [userId],
+  );
+}
 
 type WatchlistAction = Extract<Action, { operation: `watchlist_${string}` }>;
 
@@ -206,6 +218,7 @@ export class WatchlistTools {
         ],
       )
     ).rows[0];
+    if (row.status === "paused") await mutePending(this.db, user, a.id);
     return { updated: row };
   }
   private async settings(
@@ -232,6 +245,7 @@ export class WatchlistTools {
         ],
       )
     ).rows[0];
+    if (row.paused) await mutePending(this.db, user);
     return { settings: row };
   }
 }
@@ -345,7 +359,20 @@ export class StockMonitor {
     pollMinutes: number,
     reason: string,
     now: Date,
+    retryable = true,
   ) {
+    // A permanent failure (bad plan, unknown symbol) pauses the item instead
+    // of retrying on a schedule that would silently consume daily credits.
+    if (!retryable) {
+      await this.db.query(
+        "UPDATE watchlist_items SET status='paused',error_count=0,next_retry_at=NULL,updated_at=now() WHERE id=$1 AND user_id=$2",
+        [item.id, item.user_id],
+      );
+      await this.observe(item, "error", {
+        detail: { reason, paused: "non-retryable provider error" },
+      });
+      return;
+    }
     const errors = item.error_count + 1;
     const delay = Math.min(
       pollMinutes * Math.min(Math.pow(2, item.error_count), 16),
@@ -447,12 +474,15 @@ export class StockMonitor {
         try {
           sessions = (await this.sessionsFor(mic, tz, date)).sessions;
         } catch (error) {
+          const retryable =
+            !(error instanceof ProviderError) || error.retryable;
           for (const item of group)
             await this.backoff(
               item,
               item.eff_poll,
               `exchange schedule: ${error instanceof Error ? error.message : "provider error"}`,
               now,
+              retryable,
             );
           continue;
         }
@@ -496,12 +526,15 @@ export class StockMonitor {
             openItems.map((i) => ({ symbol: i.symbol, mic: i.mic_code })),
           );
         } catch (error) {
+          const retryable =
+            !(error instanceof ProviderError) || error.retryable;
           for (const item of openItems)
             await this.backoff(
               item,
               item.eff_poll,
               `quotes: ${error instanceof Error ? error.message : "provider error"}`,
               now,
+              retryable,
             );
           continue;
         }
@@ -621,6 +654,7 @@ export class StockMonitor {
               item.eff_poll,
               error instanceof Error ? error.message : "poll failed",
               now,
+              !(error instanceof ProviderError) || error.retryable,
             );
           }
         }

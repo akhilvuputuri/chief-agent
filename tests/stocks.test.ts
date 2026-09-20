@@ -5,6 +5,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
 import { WatchlistTools, StockMonitor, StockDelivery } from "../src/stocks.js";
 import {
+  ProviderError,
   quoteKey,
   type MarketDataProvider,
   type Quote,
@@ -794,6 +795,56 @@ test("end to end: add, poll, queue, deliver", async () => {
     assert.equal(Number(obs.prev_close), 100);
     assert.equal(obs.decision, "alerted");
     assert.equal(obs.market_state, "regular");
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("pausing an item mutes its queued alert", async () => {
+  const f = await fixture(new Date("2026-01-15T15:30:00Z"));
+  try {
+    const itemId = await f.add(5);
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({ price: 90, prevClose: 100, providerChangePct: -10 }),
+    );
+    await f.monitor.tick();
+    assert.equal((await f.alerts(itemId))[0].state, "pending");
+    await f.tools.call("a", f.run, {
+      operation: "watchlist_update",
+      id: itemId,
+      status: "paused",
+    });
+    assert.equal((await f.alerts(itemId))[0].state, "muted");
+    await f.delivery.tick();
+    assert.equal(f.sent.length, 0);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("a non-retryable provider error pauses the item instead of backing off", async () => {
+  const f = await fixture(new Date("2026-01-15T15:30:00Z"));
+  try {
+    const itemId = await f.add(5);
+    f.provider.fail.quotes = new ProviderError(
+      "plan does not include this symbol",
+      false,
+    );
+    await f.monitor.tick();
+    const item = (
+      await f.db.query("SELECT * FROM watchlist_items WHERE id=$1", [itemId])
+    ).rows[0];
+    assert.equal(item.status, "paused");
+    assert.equal(item.next_retry_at, null);
+    assert.equal(
+      (await f.observations(itemId)).at(-1)!.detail.paused,
+      "non-retryable provider error",
+    );
+    // A paused item is never polled again.
+    f.setNow(new Date("2026-01-15T16:00:00Z"));
+    await f.monitor.tick();
+    assert.equal(f.provider.calls.quotes, 1);
   } finally {
     await f.pg.close();
   }

@@ -35,7 +35,7 @@ The preceding iteration was [24 — Scheduled independent agent work](24-schedul
 - `compose.yaml`: migration entry plus `MARKET_DATA_PROVIDER`/`TWELVE_DATA_API_KEY` passthrough; the feature is inert without them.
 - `scripts/deploy-watchlist.py` + offline tests: operator-only rollout reusing the migration-017 procedure shape.
 
-Review outcome: pending — the independent reviewer requirement applies before merge.
+Review outcome: independent review of head `26e29df36d188aeaba653a7ada9a5e3dd1e45e0e` returned APPROVE (Devin reviewer session, `npm ci` + `npm run check` + rollout tests all green at that SHA) with three low findings; two were fixed in the follow-up head (pausing now terminal-mutes a queued alert, and non-retryable provider errors pause the item instead of looping on a schedule) with a re-review required on the updated head before merge.
 
 ## Verification and outcome
 

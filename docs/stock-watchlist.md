@@ -78,7 +78,13 @@ observation per item.
 
 Provider failures back off per item: `error_count` doubles the delay from the
 poll interval up to a 4-hour cap via `next_retry_at`, and a successful poll
-resets it. The monitor's outer tick is guarded so a stuck tick never overlaps.
+resets it. A failure the provider marks non-retryable (e.g. a symbol the free
+plan cannot serve) pauses the item instead of retrying, so a permanent error
+does not quietly consume daily credits; resuming re-enables it. Pausing an
+item — via `watchlist_update`, `watchlist_settings`, or the alert's pause
+button — also terminal-mutes any still-`pending` alert so a queued
+notification cannot deliver after the pause. The monitor's outer tick is
+guarded so a stuck tick never overlaps.
 
 Alerts follow the same outbox contract as routine delivery:
 `pending → sending → sent`; an exception or restart during send becomes

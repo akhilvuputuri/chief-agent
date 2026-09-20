@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS watchlist_items (
  UNIQUE(user_id, symbol, mic_code)
 );
 -- One row per item per exchange trading day doubles as the notification state and
--- the delivery outbox; 'muted' markers suppress further alerts for that day.
+-- the delivery outbox; 'muted' marks a pending alert suppressed by a pause.
 CREATE TABLE IF NOT EXISTS stock_alerts (
  id uuid PRIMARY KEY,
  user_id text NOT NULL REFERENCES users(id),

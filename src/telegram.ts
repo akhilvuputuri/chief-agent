@@ -171,6 +171,14 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
               [user],
             )
           ).rows.length > 0;
+    if (paused)
+      // A queued alert for a just-paused stock (or all stocks) must not still deliver.
+      await db.query(
+        `UPDATE stock_alerts SET state='muted' WHERE user_id=$1 AND state='pending'${
+          ctx.match[1] === "item" ? " AND item_id=$2" : ""
+        }`,
+        ctx.match[1] === "item" ? [user, ctx.match[2]] : [user],
+      );
     await ctx.answerCallbackQuery({
       text: paused
         ? ctx.match[1] === "item"
