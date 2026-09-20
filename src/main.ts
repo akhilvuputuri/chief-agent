@@ -144,7 +144,9 @@ if (libraryIdentity) {
 const library = new LibraryTools(libraryClient, undefined, libraryIdentity);
 const stockProvider =
   c.MARKET_DATA_PROVIDER === "twelvedata"
-    ? new TwelveDataProvider(c.TWELVE_DATA_API_KEY)
+    ? new TwelveDataProvider(c.TWELVE_DATA_API_KEY, {
+        supportsExtended: c.MARKET_DATA_EXTENDED === "true",
+      })
     : undefined;
 if (c.MARKET_DATA_PROVIDER === "twelvedata" && !c.TWELVE_DATA_API_KEY)
   throw new Error(

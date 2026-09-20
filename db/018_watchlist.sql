@@ -55,14 +55,7 @@ CREATE TABLE IF NOT EXISTS stock_observations (
  detail jsonb NOT NULL DEFAULT '{}'::jsonb
 );
 CREATE INDEX IF NOT EXISTS stock_observations_item ON stock_observations(item_id, observed_at DESC);
--- Provider exchange calendar cache: sessions and holidays per market day.
-CREATE TABLE IF NOT EXISTS stock_exchange_hours (
- mic_code text NOT NULL,
- for_date date NOT NULL,
- timezone text NOT NULL,
- sessions jsonb NOT NULL,
- fetched_at timestamptz NOT NULL DEFAULT now(),
- PRIMARY KEY(mic_code, for_date)
-);
+-- Exchange sessions come from the built-in US market calendar (src/market-calendar.ts):
+-- the provider's exchange_schedule endpoint is paid-tier only, so no calendar is cached here.
 INSERT INTO runtime_migrations(version) VALUES(18) ON CONFLICT DO NOTHING;
 COMMIT;

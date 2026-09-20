@@ -9,6 +9,7 @@ import {
   type Quote,
   type SymbolHit,
 } from "./stock-provider.js";
+import { marketCalendar, sessionsFor } from "./market-calendar.js";
 
 /** Terminal-suppress a user's queued alerts ('muted'); delivered or uncertain
  * rows are untouched. Used when an item or the whole feature is paused. */
@@ -139,6 +140,10 @@ export class WatchlistTools {
     }
     const hit = this.pick(hits, a.query, a.exchange);
     if ("needsChoice" in hit) return hit;
+    if (!marketCalendar(hit.mic))
+      throw new ToolValidationError(
+        `${hit.exchange} isn't covered by the built-in US market calendar; only US exchanges (NYSE/Nasdaq hours) are supported`,
+      );
     const row = (
       await this.db.query(
         `INSERT INTO watchlist_items(id,user_id,symbol,name,exchange,mic_code,exchange_timezone,currency,drop_pct)
@@ -225,6 +230,10 @@ export class WatchlistTools {
     user: string,
     a: Extract<WatchlistAction, { operation: "watchlist_settings" }>,
   ) {
+    if (a.includeExtended && !this.provider?.supportsExtended)
+      throw new ToolValidationError(
+        "Extended-hours quotes need a paid provider plan (prepost data); enable MARKET_DATA_EXTENDED after upgrading, or keep regular hours",
+      );
     const row = (
       await this.db.query(
         `INSERT INTO stock_settings(user_id,default_drop_pct,paused,poll_minutes,include_extended)
@@ -384,21 +393,21 @@ export class StockMonitor {
     );
     await this.observe(item, "error", { detail: { reason } });
   }
-  private async sessionsFor(mic: string, timezone: string, date: string) {
-    const cached = (
-      await this.db.query(
-        "SELECT timezone,sessions FROM stock_exchange_hours WHERE mic_code=$1 AND for_date=$2",
-        [mic, date],
-      )
-    ).rows[0];
-    if (cached) return cached as { timezone: string; sessions: any[] };
-    const sched = await this.provider.schedule(mic, date);
-    await this.db.query(
-      `INSERT INTO stock_exchange_hours(mic_code,for_date,timezone,sessions)
-       VALUES($1,$2,$3,$4::jsonb) ON CONFLICT(mic_code,for_date) DO NOTHING`,
-      [mic, date, sched.timezone || timezone, JSON.stringify(sched.sessions)],
-    );
-    return { timezone: sched.timezone || timezone, sessions: sched.sessions };
+  /** Token bucket over provider credits — one credit per symbol per quote
+   * call, so batches never exceed the plan's per-minute allowance. */
+  private bucket = { tokens: 0, at: 0 };
+  private creditsNow(now: Date) {
+    const cap = this.provider.creditsPerMinute;
+    if (!this.bucket.at) this.bucket = { tokens: cap, at: now.getTime() };
+    else if (now.getTime() > this.bucket.at)
+      this.bucket = {
+        tokens: Math.min(
+          cap,
+          this.bucket.tokens + ((now.getTime() - this.bucket.at) / 60000) * cap,
+        ),
+        at: now.getTime(),
+      };
+    return this.bucket.tokens;
   }
   private evaluate(item: any, q: Quote) {
     if (!Number.isFinite(q.price) || q.price <= 0)
@@ -451,7 +460,8 @@ export class StockMonitor {
              COALESCE(s.poll_minutes,15) AS eff_poll,
              COALESCE(s.include_extended,false) AS eff_extended
            FROM watchlist_items i LEFT JOIN stock_settings s ON s.user_id=i.user_id
-           WHERE i.status='active' AND (i.next_retry_at IS NULL OR i.next_retry_at<=$1)`,
+           WHERE i.status='active' AND (i.next_retry_at IS NULL OR i.next_retry_at<=$1)
+           ORDER BY i.last_polled_at ASC NULLS FIRST`,
           [now],
         )
       ).rows.filter(
@@ -464,39 +474,31 @@ export class StockMonitor {
       );
       const groups = new Map<string, any[]>();
       for (const item of items) {
-        const key = `${item.mic_code}|${item.exchange_timezone}`;
+        const key = item.mic_code;
         groups.set(key, [...(groups.get(key) ?? []), item]);
       }
-      for (const [key, group] of groups) {
-        const [mic, tz] = key.split("|") as [string, string];
-        const date = zoned(now, tz).date;
-        let sessions: { open: string; close: string; type: string }[];
-        try {
-          sessions = (await this.sessionsFor(mic, tz, date)).sessions;
-        } catch (error) {
-          const retryable =
-            !(error instanceof ProviderError) || error.retryable;
+      for (const [mic, group] of groups) {
+        const tz = marketCalendar(mic)?.timezone;
+        if (!tz) {
           for (const item of group)
-            await this.backoff(
-              item,
-              item.eff_poll,
-              `exchange schedule: ${error instanceof Error ? error.message : "provider error"}`,
-              now,
-              retryable,
-            );
+            await this.observe(item, "error", {
+              detail: { reason: `no built-in calendar for exchange ${mic}` },
+            });
           continue;
         }
+        const date = zoned(now, tz).date;
+        const sessions = sessionsFor(mic, date).sessions;
         // Session gating is per item: owners may differ in extended-hours opt-in.
         const local = zoned(now, tz).minutes;
         const openItems = [] as any[];
         for (const item of group) {
+          const extendedOk =
+            item.eff_extended && this.provider.supportsExtended;
           if (
             inSessions(
               local,
               sessions,
-              item.eff_extended
-                ? ["regular", "pre", "post", "extended"]
-                : ["regular"],
+              extendedOk ? ["regular", "pre", "post"] : ["regular"],
             )
           ) {
             openItems.push(item);
@@ -519,143 +521,195 @@ export class StockMonitor {
             [item.id, now],
           );
         }
-        if (!openItems.length) continue;
-        let quotes: Map<string, Quote>;
-        try {
-          quotes = await this.provider.quotes(
-            openItems.map((i) => ({ symbol: i.symbol, mic: i.mic_code })),
-          );
-        } catch (error) {
-          const retryable =
-            !(error instanceof ProviderError) || error.retryable;
-          for (const item of openItems)
-            await this.backoff(
-              item,
-              item.eff_poll,
-              `quotes: ${error instanceof Error ? error.message : "provider error"}`,
-              now,
-              retryable,
-            );
-          continue;
-        }
-        for (const item of openItems) {
-          const q = quotes.get(
-            quoteKey({ symbol: item.symbol, mic: item.mic_code }),
+        // Fetch in credit-sized chunks (one credit per symbol) so a due batch
+        // can never exceed the plan's per-minute allowance; leftovers stay due
+        // for the next tick.
+        const pending = [...openItems];
+        while (pending.length) {
+          const budget = Math.floor(this.creditsNow(now));
+          if (budget <= 0) break;
+          const chunk = pending.splice(0, Math.min(8, budget));
+          let quotes: Map<string, Quote>;
+          const wantExtended = chunk.some(
+            (i) => i.eff_extended && this.provider.supportsExtended,
           );
           try {
-            // Every quote we fetched counts as the item's poll, whatever the
-            // verdict; otherwise rejected quotes would re-hit the provider
-            // every tick.
-            await this.db.query(
-              "UPDATE watchlist_items SET last_polled_at=$2,error_count=0,next_retry_at=NULL,updated_at=now() WHERE id=$1 AND user_id=$3",
-              [item.id, now, item.user_id],
+            quotes = await this.provider.quotes(
+              chunk.map((i) => ({ symbol: i.symbol, mic: i.mic_code })),
+              { extended: wantExtended },
             );
-            const freshnessMs = Math.max(2 * item.eff_poll, 20) * 60000;
-            if (!q) {
-              await this.observe(item, "invalid", {
-                detail: { reason: "provider returned no quote" },
-              });
-              continue;
-            }
-            const age = now.getTime() - q.quoteTime.getTime();
-            if (age > freshnessMs || age < -5 * 60000) {
-              await this.observe(item, "stale", {
-                quote: q,
-                marketState: q.marketOpen ? "regular" : "closed",
-                detail: { ageMinutes: Math.round(age / 60000) },
-              });
-              continue;
-            }
-            const useExtended =
-              !q.marketOpen && item.eff_extended && q.extended != null;
-            const price = useExtended ? q.extended!.price : q.price;
-            const providerPct = useExtended
-              ? q.extended!.changePct
-              : q.providerChangePct;
-            const verdict = this.evaluate(item, {
-              ...q,
-              price,
-              providerChangePct: providerPct,
-            });
-            if (verdict.decision) {
-              await this.observe(item, verdict.decision, {
-                quote: { ...q, price },
-                marketState: q.marketOpen ? "regular" : "closed",
-                detail: verdict,
-              });
-              continue;
-            }
-            const changePct = verdict.changePct!;
-            const tradingDate =
-              q.tradingDate || zoned(q.quoteTime, item.exchange_timezone).date;
-            const existing = (
+          } catch (error) {
+            const retryable =
+              !(error instanceof ProviderError) || error.retryable;
+            for (const item of chunk)
+              await this.backoff(
+                item,
+                item.eff_poll,
+                `quotes: ${error instanceof Error ? error.message : "provider error"}`,
+                now,
+                retryable,
+              );
+            continue;
+          }
+          this.bucket.tokens -= chunk.length;
+          for (const item of chunk) {
+            const q = quotes.get(
+              quoteKey({ symbol: item.symbol, mic: item.mic_code }),
+            );
+            try {
+              // Every quote we fetched counts as the item's poll, whatever the
+              // verdict; otherwise rejected quotes would re-hit the provider
+              // every tick.
               await this.db.query(
-                "SELECT state FROM stock_alerts WHERE item_id=$1 AND trading_date=$2",
-                [item.id, tradingDate],
-              )
-            ).rows[0];
-            // "Drops more than the threshold": compare price against the trigger
-            // level directly so boundary math is exact.
-            if (
-              price <
-              q.prevClose * (1 - (item.drop_pct ?? item.eff_drop) / 100)
-            ) {
-              if (existing) {
-                await this.observe(item, "suppressed_today", {
-                  quote: { ...q, price },
-                  marketState: q.marketOpen ? "regular" : "extended",
-                  detail: { changePct, alertState: existing.state },
+                "UPDATE watchlist_items SET last_polled_at=$2,error_count=0,next_retry_at=NULL,updated_at=now() WHERE id=$1 AND user_id=$3",
+                [item.id, now, item.user_id],
+              );
+              const freshnessMs = Math.max(2 * item.eff_poll, 20) * 60000;
+              if (!q) {
+                await this.observe(item, "invalid", {
+                  detail: { reason: "provider returned no quote" },
                 });
-              } else {
-                const alertId = randomUUID();
-                const payload = {
-                  alertId,
-                  itemId: item.id,
-                  symbol: item.symbol,
-                  reply: this.alertText(
-                    item,
-                    { ...q, price },
-                    price,
-                    changePct,
-                  ),
-                };
+                continue;
+              }
+              const age = now.getTime() - q.quoteTime.getTime();
+              if (age > freshnessMs || age < -5 * 60000) {
+                await this.observe(item, "stale", {
+                  quote: q,
+                  marketState: q.marketOpen ? "regular" : "closed",
+                  detail: { ageMinutes: Math.round(age / 60000) },
+                });
+                continue;
+              }
+              // In a pre/post session an opted-in item must use the extended
+              // quote; substituting the regular-session price would compare
+              // against the wrong market.
+              if (!q.marketOpen && item.eff_extended) {
+                const extAge =
+                  q.extended?.time != null
+                    ? now.getTime() - q.extended.time.getTime()
+                    : null;
+                if (
+                  !q.extended ||
+                  extAge == null ||
+                  extAge > freshnessMs ||
+                  extAge < -5 * 60000
+                ) {
+                  await this.observe(item, "stale", {
+                    quote: q,
+                    marketState: "extended",
+                    detail: { reason: "extended quote missing or stale" },
+                  });
+                  continue;
+                }
+              }
+              const useExtended =
+                !q.marketOpen && item.eff_extended && q.extended != null;
+              const price = useExtended ? q.extended!.price : q.price;
+              const providerPct = useExtended
+                ? q.extended!.changePct
+                : q.providerChangePct;
+              const verdict = this.evaluate(item, {
+                ...q,
+                price,
+                providerChangePct: providerPct,
+              });
+              if (verdict.decision) {
+                await this.observe(item, verdict.decision, {
+                  quote: { ...q, price },
+                  marketState: q.marketOpen ? "regular" : "closed",
+                  detail: verdict,
+                });
+                continue;
+              }
+              const changePct = verdict.changePct!;
+              const tradingDate =
+                q.tradingDate ||
+                zoned(q.quoteTime, item.exchange_timezone).date;
+              const existing = (
                 await this.db.query(
-                  `INSERT INTO stock_alerts(id,user_id,item_id,trading_date,payload)
-                   VALUES($1,$2,$3,$4,$5::jsonb) ON CONFLICT(item_id,trading_date) DO NOTHING`,
-                  [
+                  "SELECT state FROM stock_alerts WHERE item_id=$1 AND trading_date=$2",
+                  [item.id, tradingDate],
+                )
+              ).rows[0];
+              // "Drops more than the threshold": compare price against the trigger
+              // level directly so boundary math is exact.
+              if (
+                price <
+                q.prevClose * (1 - (item.drop_pct ?? item.eff_drop) / 100)
+              ) {
+                // The owner may have paused the item or the whole feature while
+                // the quote request was in flight — recheck before enqueueing.
+                const still = (
+                  await this.db.query(
+                    `SELECT i.status,COALESCE(s.paused,false) AS paused
+                   FROM watchlist_items i LEFT JOIN stock_settings s ON s.user_id=i.user_id
+                   WHERE i.id=$1`,
+                    [item.id],
+                  )
+                ).rows[0];
+                if (!still || still.status !== "active" || still.paused) {
+                  await this.observe(item, "suppressed_today", {
+                    quote: { ...q, price },
+                    marketState: q.marketOpen ? "regular" : "extended",
+                    detail: { changePct, reason: "paused during poll" },
+                  });
+                } else if (existing) {
+                  await this.observe(item, "suppressed_today", {
+                    quote: { ...q, price },
+                    marketState: q.marketOpen ? "regular" : "extended",
+                    detail: { changePct, alertState: existing.state },
+                  });
+                } else {
+                  const alertId = randomUUID();
+                  const payload = {
                     alertId,
-                    item.user_id,
-                    item.id,
-                    tradingDate,
-                    JSON.stringify(payload),
-                  ],
-                );
-                await this.observe(item, "alerted", {
+                    itemId: item.id,
+                    symbol: item.symbol,
+                    reply: this.alertText(
+                      item,
+                      { ...q, price },
+                      price,
+                      changePct,
+                    ),
+                  };
+                  await this.db.query(
+                    `INSERT INTO stock_alerts(id,user_id,item_id,trading_date,payload)
+                   VALUES($1,$2,$3,$4,$5::jsonb) ON CONFLICT(item_id,trading_date) DO NOTHING`,
+                    [
+                      alertId,
+                      item.user_id,
+                      item.id,
+                      tradingDate,
+                      JSON.stringify(payload),
+                    ],
+                  );
+                  await this.observe(item, "alerted", {
+                    quote: { ...q, price },
+                    marketState: q.marketOpen ? "regular" : "extended",
+                    detail: {
+                      changePct,
+                      alertId,
+                      tradingDate,
+                      threshold: item.drop_pct ?? item.eff_drop,
+                    },
+                  });
+                }
+              } else {
+                await this.observe(item, "below_threshold", {
                   quote: { ...q, price },
                   marketState: q.marketOpen ? "regular" : "extended",
-                  detail: {
-                    changePct,
-                    alertId,
-                    tradingDate,
-                    threshold: item.drop_pct ?? item.eff_drop,
-                  },
+                  detail: { changePct },
                 });
               }
-            } else {
-              await this.observe(item, "below_threshold", {
-                quote: { ...q, price },
-                marketState: q.marketOpen ? "regular" : "extended",
-                detail: { changePct },
-              });
+            } catch (error) {
+              await this.backoff(
+                item,
+                item.eff_poll,
+                error instanceof Error ? error.message : "poll failed",
+                now,
+                !(error instanceof ProviderError) || error.retryable,
+              );
             }
-          } catch (error) {
-            await this.backoff(
-              item,
-              item.eff_poll,
-              error instanceof Error ? error.message : "poll failed",
-              now,
-              !(error instanceof ProviderError) || error.retryable,
-            );
           }
         }
       }
@@ -682,9 +736,22 @@ export class StockDelivery {
     if (this.busy) return;
     this.busy = true;
     try {
+      // Pauses can land after an alert was queued: mute those rows, then only
+      // claim an alert whose monitoring is still enabled.
+      await this.db.query(
+        `UPDATE stock_alerts SET state='muted' FROM watchlist_items i
+         WHERE stock_alerts.item_id=i.id AND stock_alerts.state='pending'
+           AND (i.status<>'active' OR EXISTS(
+             SELECT 1 FROM stock_settings s
+             WHERE s.user_id=stock_alerts.user_id AND s.paused))`,
+      );
       const d = (
         await this.db.query(`UPDATE stock_alerts SET state='sending' WHERE id=(
-          SELECT id FROM stock_alerts WHERE state='pending' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *`)
+          SELECT a.id FROM stock_alerts a
+            JOIN watchlist_items i ON i.id=a.item_id AND i.status='active'
+            LEFT JOIN stock_settings s ON s.user_id=a.user_id
+          WHERE a.state='pending' AND COALESCE(s.paused,false)=false
+          ORDER BY a.created_at FOR UPDATE OF a SKIP LOCKED LIMIT 1) RETURNING *`)
       ).rows[0];
       if (!d) return;
       try {

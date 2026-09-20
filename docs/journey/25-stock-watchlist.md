@@ -21,25 +21,28 @@ The preceding iteration was [24 — Scheduled independent agent work](24-schedul
 
 - **Polling vs event feeds**: no free official push/stream exists for this use case; polling at a configurable cadence with a per-day dedupe is the bounded option. Rejected alternatives: a routine-driven LLM check (violates the no-token and conditional-silence requirements), and unofficial Yahoo scraping (fragile, undocumented).
 - **Ambiguity**: ticker search hits can span exchanges; the tool returns candidates and the agent must ask rather than guess — instruments differ across exchanges even with the same ticker string.
-- **Session/calendar correctness**: exchange schedules (with timezone, holidays, DST) come from the provider and are cached per trading day in `stock_exchange_hours`, so a holiday produces `market_closed` observations instead of quote calls.
+- **Session/calendar correctness**: an external review round found Twelve Data's `/exchange_schedule` is Ultra-tier at 100 credits/call — unusable on the free plan the owner approved. Replaced with a built-in US market calendar (`src/market-calendar.ts`: regular 09:30–16:00, 13:00 early closes, NYSE holidays; non-US MICs rejected at add). A consequence: only US exchanges are coverable until a second calendar is added.
 - **Threshold semantics**: the issue's "drops more than" is implemented strictly — a decline exactly equal to the threshold does not alert.
 - **Split artifacts**: computed moves of ≥40% that the provider's own percent_change does not corroborate are suppressed as `suspect`; a corroborated crash still alerts.
 - **Failure handling**: per-item exponential backoff bounded at 4 hours, so one failing symbol does not block others and a rate-limit burst does not hammer the provider.
 
 ## Implementation and review
 
-- `db/018_watchlist.sql`: `stock_settings`, `watchlist_items` (user+symbol+mic unique, cascading cleanup), `stock_alerts` (unique per item+trading_date, outbox states incl. `muted`), `stock_observations` (bounded decision log), `stock_exchange_hours` (per-day schedule cache).
-- `src/stock-provider.ts`: provider interface plus a Twelve Data implementation (symbol search, batched quotes, exchange schedule; 15s timeout; retryable 429/5xx).
-- `src/stocks.ts`: `WatchlistTools` (foreground-only mutations, owner-scoped, ambiguity-aware add), `StockMonitor` (session gate, quote validation, strict threshold compare, once-per-day dedupe, per-item backoff, bounded observations), `StockDelivery` (pending→sending→sent/uncertain outbox, recovered on boot).
+- `db/018_watchlist.sql`: `stock_settings`, `watchlist_items` (user+symbol+mic unique, cascading cleanup), `stock_alerts` (unique per item+trading_date, outbox states incl. `muted`), `stock_observations` (bounded decision log).
+- `src/market-calendar.ts`: built-in US sessions/holidays (the provider calendar endpoint is Ultra-tier).
+- `src/stock-provider.ts`: provider interface plus a Twelve Data implementation (symbol search, credit-batched quotes with optional `prepost`; 15s timeout; retryable 429/5xx).
+- `src/stocks.ts`: `WatchlistTools` (foreground-only mutations, owner-scoped, ambiguity-aware add, non-US rejection), `StockMonitor` (static-calendar session gate, quote validation, strict threshold compare, once-per-day dedupe, credit pacing, enqueue pause recheck, per-item backoff, bounded observations), `StockDelivery` (pending→sending→sent/uncertain outbox with pause-aware claim, recovered on boot).
 - `src/telegram.ts`: `stk:` callback buttons on alerts pause the single stock or all alerts — direct owner-scoped writes, never queued behind the model.
-- `compose.yaml`: migration entry plus `MARKET_DATA_PROVIDER`/`TWELVE_DATA_API_KEY` passthrough; the feature is inert without them.
+- `compose.yaml`: migration entry plus `MARKET_DATA_PROVIDER`/`MARKET_DATA_EXTENDED`/`TWELVE_DATA_API_KEY` passthrough; the feature is inert without them.
 - `scripts/deploy-watchlist.py` + offline tests: operator-only rollout reusing the migration-017 procedure shape.
 
-Review outcome: independent review of head `26e29df36d188aeaba653a7ada9a5e3dd1e45e0e` returned APPROVE (Devin reviewer session, `npm ci` + `npm run check` + rollout tests all green at that SHA) with three low findings; two were fixed in the follow-up head (pausing now terminal-mutes a queued alert, and non-retryable provider errors pause the item instead of looping on a schedule) with a re-review required on the updated head before merge.
+Review outcome: independent review of head `26e29df36d188aeaba653a7ada9a5e3dd1e45e0e` returned APPROVE (Devin reviewer session, `npm ci` + `npm run check` + rollout tests all green at that SHA) with three low findings; two were fixed in the follow-up head (pausing now terminal-mutes a queued alert, and non-retryable provider errors pause the item instead of looping on a schedule). Re-review approved `bc0a7fb`, then `3b71556` and `4a8fec6` after rebase.
+
+External review (second reviewer, owner-reported) then found five substantive defects at `4a8fec6`, reproduced where indicated: (P1) `/exchange_schedule` is Ultra/Enterprise at 100 credits/call — the free plan cannot run it; (P1) freshness used `timestamp`, the interval open, so fresh declines were discarded as stale — now `last_quote_at`; (P2) a pause landing while the quote request is in flight could still deliver — enqueue now rechecks status/pause and the delivery claim re-joins active+unpaused with a pending-mute sweep; (P2) `prepost=true` was never sent and is Pro+-only — extended opt-in is gated on `MARKET_DATA_EXTENDED`, extended quotes validated by their own timestamp, and missing extended data skips instead of substituting the regular price; (P2) batches could exceed 8 credits/minute — a shared token bucket now chunks requests at the provider's rate. The `stock_exchange_hours` cache table was dropped from migration 018. Fixes supersede the previous approval; re-review required on the new head.
 
 ## Verification and outcome
 
-- `npm run check`: 328 tests pass (all existing suites plus the new watchlist and offline rollout tests); typecheck clean; changed files formatted.
+- `npm run check`: all tests pass (existing suites plus the watchlist and offline rollout tests); typecheck clean; changed files formatted. New regression tests cover: `last_quote_at` freshness, pause-during-poll suppression, claim-time pause recheck, ≤8-credit batch pacing, non-US MIC rejection and the extended-opt-in plan gate.
 - During development, adding five tool operations grew the fixed prompt enough to evict a saved-answer retrieval marker in `custom-runtime.test.ts`; resolved by gating `watchlist_*` operations behind `availability.stocks` so they are only offered when a provider is configured — the right behavior regardless of test pressure.
 - Not verified: live Twelve Data responses, real Telegram alert delivery, production poll cadence. First live acceptance is an owner watch on a US stock during a session.
 

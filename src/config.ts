@@ -67,6 +67,8 @@ const schema = z.object({
   TAVILY_API_KEY: z.string().default(""),
   // Optional stock watchlist monitor; empty disables it entirely.
   MARKET_DATA_PROVIDER: z.enum(["", "twelvedata"]).default(""),
+  // prepost quotes are a Pro+ feature; only set with a plan that includes them.
+  MARKET_DATA_EXTENDED: z.enum(["", "true"]).default(""),
   TWELVE_DATA_API_KEY: z.string().default(""),
   STT_MODEL: z.string().default("whisper-1"),
   TTS_MODEL: z.string().default("tts-1"),

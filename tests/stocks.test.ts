@@ -7,11 +7,11 @@ import { WatchlistTools, StockMonitor, StockDelivery } from "../src/stocks.js";
 import {
   ProviderError,
   quoteKey,
+  rowToQuote,
   type MarketDataProvider,
   type Quote,
   type SymbolHit,
   type SymbolRef,
-  type ExchangeSessions,
 } from "../src/stock-provider.js";
 import { ensureUser, type Database } from "../src/db.js";
 import { runtimeContext } from "../src/runtime.js";
@@ -21,12 +21,14 @@ const MIC = "XNAS";
 
 class FakeProvider implements MarketDataProvider {
   name = "fake-market-data";
+  creditsPerMinute = 8;
+  supportsExtended = true;
   hits: SymbolHit[] = [];
   quotes_ = new Map<string, Quote>();
-  calls = { search: 0, quotes: 0, schedule: 0 };
-  fail: { search?: Error; quotes?: Error; schedule?: Error } = {};
-  extraSessions: { open: string; close: string; type: string }[] = [];
-  closedDates = new Set<string>();
+  calls = { search: 0, quotes: 0 };
+  batchSizes: number[] = [];
+  onQuotes: (() => Promise<void> | void) | null = null;
+  fail: { search?: Error; quotes?: Error } = {};
   async search(q: string): Promise<SymbolHit[]> {
     this.calls.search++;
     if (this.fail.search) throw this.fail.search;
@@ -37,8 +39,13 @@ class FakeProvider implements MarketDataProvider {
         h.name.toLowerCase().includes(needle),
     );
   }
-  async quotes(refs: SymbolRef[]): Promise<Map<string, Quote>> {
+  async quotes(
+    refs: SymbolRef[],
+    opts: { extended?: boolean } = {},
+  ): Promise<Map<string, Quote>> {
     this.calls.quotes++;
+    this.batchSizes.push(refs.length);
+    if (this.onQuotes) await this.onQuotes();
     if (this.fail.quotes) throw this.fail.quotes;
     const map = new Map<string, Quote>();
     for (const r of refs) {
@@ -46,18 +53,6 @@ class FakeProvider implements MarketDataProvider {
       if (q) map.set(quoteKey(r), q);
     }
     return map;
-  }
-  async schedule(mic: string, date: string): Promise<ExchangeSessions> {
-    this.calls.schedule++;
-    if (this.fail.schedule) throw this.fail.schedule;
-    if (this.closedDates.has(date)) return { timezone: NY, sessions: [] };
-    return {
-      timezone: NY,
-      sessions: [
-        { open: "09:30", close: "16:00", type: "regular" },
-        ...this.extraSessions,
-      ],
-    };
   }
 }
 
@@ -449,15 +444,16 @@ test("a new trading day can alert again; paused items and settings skip polls", 
       id: itemId,
       status: "active",
     });
-    f.setNow(new Date("2026-01-19T15:30:00Z"));
+    // 2026-01-19 is MLK Day (closed); resume takes effect on Tuesday 01-20.
+    f.setNow(new Date("2026-01-20T15:30:00Z"));
     f.provider.quotes_.set(
       `${MIC}:ACME`,
       quote({
         price: 93,
         prevClose: 100,
         providerChangePct: -7,
-        quoteTime: new Date("2026-01-19T15:30:00Z"),
-        tradingDate: "2026-01-19",
+        quoteTime: new Date("2026-01-20T15:30:00Z"),
+        tradingDate: "2026-01-20",
       }),
     );
     await f.monitor.tick();
@@ -484,13 +480,20 @@ test("closed markets and exchange holidays produce market_closed observations wi
       obs.filter((o: any) => o.decision === "market_closed").length,
       1,
     );
-    // Holiday: schedule returns no sessions at all.
-    f.provider.closedDates.add("2026-01-19");
+    // Holiday from the built-in calendar: 2026-01-19 is MLK Day.
     f.setNow(new Date("2026-01-19T15:30:00Z"));
     await f.monitor.tick();
     assert.equal(f.provider.calls.quotes, 0);
     obs = await f.observations(itemId);
     assert.equal(obs.at(-1)!.decision, "market_closed");
+    // Early close (day after Thanksgiving is 13:00 ET): 17:30 UTC = 12:30 ET
+    // is still open on 2026-11-26 Thanksgiving Friday? No — 2026-11-27.
+    f.setNow(new Date("2026-11-27T18:30:00Z")); // 13:30 ET, post-early-close
+    await f.monitor.tick();
+    assert.equal(
+      (await f.observations(itemId)).at(-1)!.decision,
+      "market_closed",
+    );
   } finally {
     await f.pg.close();
   }
@@ -650,11 +653,6 @@ test("provider errors back off per item and recover", async () => {
 test("extended hours need opt-in and use the extended quote", async () => {
   const f = await fixture(new Date("2026-01-15T13:00:00Z")); // 08:00 ET pre-market
   try {
-    f.provider.extraSessions.push({
-      open: "04:00",
-      close: "09:30",
-      type: "pre",
-    });
     const itemId = await f.add(5);
     f.provider.quotes_.set(
       `${MIC}:ACME`,
@@ -663,7 +661,11 @@ test("extended hours need opt-in and use the extended quote", async () => {
         prevClose: 100,
         providerChangePct: 0,
         marketOpen: false,
-        extended: { price: 90, changePct: -10 },
+        extended: {
+          price: 90,
+          changePct: -10,
+          time: new Date("2026-01-15T13:00:00Z"),
+        },
         quoteTime: new Date("2026-01-15T13:00:00Z"),
       }),
     );
@@ -686,7 +688,11 @@ test("extended hours need opt-in and use the extended quote", async () => {
         prevClose: 100,
         providerChangePct: 0,
         marketOpen: false,
-        extended: { price: 90, changePct: -10 },
+        extended: {
+          price: 90,
+          changePct: -10,
+          time: new Date("2026-01-15T13:20:00Z"),
+        },
         quoteTime: new Date("2026-01-15T13:20:00Z"),
       }),
     );
@@ -845,6 +851,141 @@ test("a non-retryable provider error pauses the item instead of backing off", as
     f.setNow(new Date("2026-01-15T16:00:00Z"));
     await f.monitor.tick();
     assert.equal(f.provider.calls.quotes, 1);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("quote freshness uses the last-update time, not the interval open", () => {
+  // Twelve Data's `timestamp`/`datetime` describe the interval open (day open
+  // under the default 1day interval); freshness must use last_quote_at.
+  const q = rowToQuote({
+    symbol: "ACME",
+    close: "90",
+    previous_close: "100",
+    percent_change: "-10",
+    currency: "USD",
+    datetime: "2026-01-15",
+    timestamp: new Date("2026-01-15T14:30:00Z").getTime() / 1000, // day open
+    last_quote_at: new Date("2026-01-15T17:30:00Z").getTime() / 1000, // last update
+    is_market_open: true,
+  });
+  assert.equal(q.quoteTime.toISOString(), "2026-01-15T17:30:00.000Z");
+});
+
+test("a pause landing mid-poll suppresses the alert instead of queueing it", async () => {
+  const f = await fixture(new Date("2026-01-15T15:30:00Z"));
+  try {
+    const itemId = await f.add(5);
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({ price: 90, prevClose: 100, providerChangePct: -10 }),
+    );
+    // Owner hits pause while the quote request is in flight.
+    f.provider.onQuotes = () =>
+      f.tools.call("a", f.run, {
+        operation: "watchlist_update",
+        id: itemId,
+        status: "paused",
+      });
+    await f.monitor.tick();
+    assert.equal((await f.alerts(itemId)).length, 0);
+    assert.equal(
+      (await f.observations(itemId)).at(-1)!.detail.reason,
+      "paused during poll",
+    );
+    await f.delivery.tick();
+    assert.equal(f.sent.length, 0);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("delivery claim rechecks pause state instead of trusting the queue", async () => {
+  const f = await fixture(new Date("2026-01-15T15:30:00Z"));
+  try {
+    const itemId = await f.add(5);
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({ price: 90, prevClose: 100, providerChangePct: -10 }),
+    );
+    await f.monitor.tick();
+    assert.equal((await f.alerts(itemId))[0].state, "pending");
+    // A pause path that bypassed the queue (direct status flip) still cannot
+    // deliver: the claim rechecks monitoring state and mutes the row.
+    await f.db.query("UPDATE watchlist_items SET status='paused' WHERE id=$1", [
+      itemId,
+    ]);
+    await f.delivery.tick();
+    assert.equal(f.sent.length, 0);
+    assert.equal((await f.alerts(itemId))[0].state, "muted");
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("batches never exceed the provider's per-minute credit budget", async () => {
+  const f = await fixture(new Date("2026-01-15T15:30:00Z"));
+  try {
+    f.provider.creditsPerMinute = 8;
+    const ids: string[] = [];
+    for (let i = 0; i < 10; i++) {
+      f.provider.hits = [{ ...ACME, symbol: `S${i}` }];
+      const r = await f.tools.call("a", f.run, {
+        operation: "watchlist_add",
+        query: `S${i}`,
+        dropPct: 5,
+      });
+      ids.push(r.added.id);
+      f.provider.quotes_.set(
+        `${MIC}:S${i}`,
+        quote({ price: 90, prevClose: 100, providerChangePct: -10 }),
+      );
+    }
+    await f.monitor.tick();
+    // First tick can spend at most 8 credits → first batch of 8 only.
+    assert.deepEqual(f.provider.batchSizes, [8]);
+    // 20s later: ~2.6 credits back — a second chunk of at most 2.
+    f.setNow(new Date("2026-01-15T15:30:20Z"));
+    await f.monitor.tick();
+    assert.deepEqual(f.provider.batchSizes, [8, 2]);
+    for (const id of ids) assert.equal((await f.alerts(id)).length, 1);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("adding a symbol on an exchange without a calendar is rejected", async () => {
+  const f = await fixture(new Date("2026-01-15T15:30:00Z"));
+  try {
+    f.provider.hits = [
+      { ...ACME, symbol: "SGL", exchange: "SGX", mic: "XSES", currency: "SGD" },
+    ];
+    await assert.rejects(
+      () =>
+        f.tools.call("a", f.run, {
+          operation: "watchlist_add",
+          query: "SGL",
+        }),
+      /US market calendar/,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("extended opt-in is refused when the plan lacks prepost data", async () => {
+  const f = await fixture(new Date("2026-01-15T15:30:00Z"));
+  try {
+    f.provider.supportsExtended = false;
+    await assert.rejects(
+      () =>
+        f.tools.call("a", f.run, {
+          operation: "watchlist_settings",
+          includeExtended: true,
+        }),
+      /prepost/,
+    );
   } finally {
     await f.pg.close();
   }

@@ -12,7 +12,9 @@ manages configuration.
    8 credits/minute, 800 credits/day, US-listed symbols, delayed quotes).
 2. Set `MARKET_DATA_PROVIDER=twelvedata` and `TWELVE_DATA_API_KEY` in `.env`.
    An empty `MARKET_DATA_PROVIDER` disables the feature entirely: no scheduler
-   work, no `watchlist_*` tools offered, no provider calls.
+   work, no `watchlist_*` tools offered, no provider calls. On a paid Pro+ plan
+   only, `MARKET_DATA_EXTENDED=true` additionally enables extended-hours
+   monitoring (`prepost` quotes); the free plan leaves it unset.
 3. Apply migration `018_watchlist.sql` through the reviewed operator procedure
    (`scripts/deploy-watchlist.py`, see below). The gateway refuses to start if
    runtime_migrations lacks version 18.
@@ -27,7 +29,9 @@ alert and the last observation verdict. `watchlist_update` changes a per-stock
 threshold (`null` restores the account default) or pauses/resumes one item.
 `watchlist_remove` deletes the item with its alert/observation history.
 `watchlist_settings` sets the account default drop percentage, a master pause,
-the poll cadence (5–240 minutes, default 15) and extended-hours opt-in.
+the poll cadence (5–240 minutes, default 15) and extended-hours opt-in. The
+opt-in is refused unless the provider can actually serve `prepost` quotes
+(`MARKET_DATA_EXTENDED`, Pro+ plan); free-plan watchlists stay regular-hours.
 
 Mutations are foreground-only: a background routine or scheduled job cannot
 change the watchlist, matching the routine-management boundary.
@@ -38,18 +42,25 @@ change the watchlist, matching the routine-management boundary.
   drops strictly below the item's threshold (default 5%). The comparison uses
   the price and the trigger level `prevClose × (1 − threshold/100)` directly, so
   a drop exactly at the threshold does not alert.
-- **Session gate**: each exchange's trading calendar comes from the provider's
-  exchange schedule (timezone, session windows, holidays) and is cached per
-  (mic, date) in `stock_exchange_hours`. Regular hours only unless the owner
-  opts into extended sessions; opted-in items use the extended quote's price and
-  percent change for the comparison.
+- **Session gate**: trading sessions come from a built-in US market calendar
+  (`src/market-calendar.ts`, America/New_York) — the provider's
+  `/exchange_schedule` endpoint is Ultra-tier at 100 credits/call, which the
+  free plan cannot serve. The calendar encodes regular hours (09:30–16:00, or
+  13:00 on early closes), weekends and the NYSE holiday list, so symbols on
+  exchanges without a calendar (non-US MICs) are rejected at add time. Regular
+  hours only unless the owner opts into extended sessions; opted-in items then
+  use the extended quote's price and percent change for the comparison, and an
+  item whose extended quote is missing or stale is skipped rather than
+  silently compared against the regular-session price.
 - **Once per stock per trading day**: at most one alert row per
   `(item, trading_date)`; repeated breaches the same day are logged as
   `suppressed_today`. A new trading day may alert again. Enabling a watch that
   is already breached alerts once on the next valid observation.
 - **Data hygiene**: missing quotes, non-positive price/previous close, currency
   mismatches and stale timestamps (older than `max(2×poll, 20 minutes)`, or
-  more than 5 minutes in the future) are logged and skipped. Moves of ≥40%
+  more than 5 minutes in the future) are logged and skipped; freshness uses the
+  provider's `last_quote_at` (the last update time), not `timestamp`, which is
+  the interval's opening time. Moves of ≥40%
   without provider corroboration (`percent_change` within 3 points) are logged
   `suspect` and suppressed — likely a split/adjustment artifact.
 - **Alert content**: company, ticker, exchange, observed price and currency,
@@ -59,13 +70,16 @@ change the watchlist, matching the routine-management boundary.
 
 ## Provider limits
 
-Free-plan calls: symbol search at add time; one batch `/quote` per exchange per
-poll interval; one `/exchange_schedule` per exchange per trading day (cached).
-At the default 15-minute cadence a US watchlist uses about 26 quote calls per
-symbol per day plus schedule lookups, so ~10–15 symbols fit inside 800/day.
-Non-US listings typically require a paid plan; `watchlist_add` surfaces the
-provider's `access` field when a symbol is marked as paid-tier only. The
-monitor never buys data and there is no paid fallback.
+Free-plan calls: symbol search at add time, then batched `/quote` requests —
+no calendar calls at all. Batches are paced by a shared token bucket at the
+provider's credits/minute (8 on free): at most 8 symbols per request, and
+items left unfetched when the bucket empties are polled on the next tick in
+last-polled order. At the default 15-minute cadence a US watchlist uses about
+26 quote calls per symbol per day, so ~10–15 symbols fit inside 800/day.
+Non-US listings typically require a paid plan and have no built-in calendar;
+`watchlist_add` rejects them and surfaces the provider's `access` field when a
+symbol is marked paid-tier only. The monitor never buys data and there is no
+paid fallback.
 
 ## Failure and observability
 
@@ -83,8 +97,12 @@ plan cannot serve) pauses the item instead of retrying, so a permanent error
 does not quietly consume daily credits; resuming re-enables it. Pausing an
 item — via `watchlist_update`, `watchlist_settings`, or the alert's pause
 button — also terminal-mutes any still-`pending` alert so a queued
-notification cannot deliver after the pause. The monitor's outer tick is
-guarded so a stuck tick never overlaps.
+notification cannot deliver after the pause. Two further races are closed:
+the monitor rechecks item status and the master pause right before inserting
+an alert (a pause landing while the quote request was in flight becomes
+`suppressed_today`), and delivery first mutes pending rows of newly-paused
+items then claims only alerts whose item is active and unpaused. The
+monitor's outer tick is guarded so a stuck tick never overlaps.
 
 Alerts follow the same outbox contract as routine delivery:
 `pending → sending → sent`; an exception or restart during send becomes

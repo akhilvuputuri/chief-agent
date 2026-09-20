@@ -33,41 +33,90 @@ export interface Quote {
   /** Provider-computed daily change percent when supplied; used to cross-check. */
   providerChangePct: number | null;
   currency: string;
-  /** Provider's quote timestamp. */
+  /** When the quote was last updated — the freshness signal, NOT the interval-open `timestamp`. */
   quoteTime: Date;
   /** Trading day in the exchange timezone (YYYY-MM-DD). */
   tradingDate: string;
   marketOpen: boolean;
   /** Pre/post-market quote when the provider supplies one and the owner opted in. */
-  extended: { price: number; changePct: number | null } | null;
+  extended: {
+    price: number;
+    changePct: number | null;
+    time: Date | null;
+  } | null;
   /** True when the plan's quotes are known delayed (e.g. ~15m). */
   delayed: boolean;
 }
 
-export interface ExchangeSessions {
-  timezone: string;
-  /** Local-time windows; type is 'pre'|'regular'|'post' when the provider supplies it. */
-  sessions: { open: string; close: string; type: string }[];
-}
-
 export interface MarketDataProvider {
   readonly name: string;
+  /** API credits consumed per symbol per quote request; paces batches. */
+  readonly creditsPerMinute: number;
+  /** Whether the plan can serve pre/post-market quotes (prepost flag). */
+  readonly supportsExtended: boolean;
   search(query: string): Promise<SymbolHit[]>;
-  quotes(refs: SymbolRef[]): Promise<Map<string, Quote>>;
-  /** Sessions for a market date (YYYY-MM-DD in the exchange zone); empty list = holiday/closed. */
-  schedule(mic: string, date: string): Promise<ExchangeSessions>;
+  quotes(
+    refs: SymbolRef[],
+    opts?: { extended?: boolean },
+  ): Promise<Map<string, Quote>>;
 }
 
 export const quoteKey = (ref: SymbolRef) => `${ref.mic}:${ref.symbol}`;
 
-/** Twelve Data REST adapter (free Basic plan: 8 credits/min, 800 credits/day).
- * Covers US markets on the free tier; other exchanges may report plan errors. */
+/** Map one Twelve Data quote row onto Quote. Freshness uses `last_quote_at`
+ * (the last 1-minute candle's time): `timestamp`/`datetime` describe the open of
+ * the requested interval — under the default 1day interval that is the day-open
+ * time, which would mark every fresh intraday quote as stale. */
+export function rowToQuote(row: any): Quote {
+  const quoteSeconds =
+    row.last_quote_at ??
+    row.timestamp ??
+    (row.datetime ? Date.parse(`${row.datetime}`) / 1000 : undefined);
+  const extendedSeconds = row.extended_timestamp ?? null;
+  const extended =
+    row.extended_price != null
+      ? {
+          price: Number(row.extended_price),
+          changePct:
+            row.extended_percent_change != null
+              ? Number(row.extended_percent_change)
+              : null,
+          time: extendedSeconds
+            ? new Date(Number(extendedSeconds) * 1000)
+            : null,
+        }
+      : null;
+  return {
+    price: Number(row.close ?? row.price),
+    prevClose: Number(row.previous_close),
+    providerChangePct:
+      row.percent_change != null ? Number(row.percent_change) : null,
+    currency: String(row.currency ?? ""),
+    quoteTime: quoteSeconds
+      ? new Date(Number(quoteSeconds) * 1000)
+      : new Date(0),
+    tradingDate: String(row.datetime ?? "").slice(0, 10),
+    marketOpen: row.is_market_open === true,
+    extended,
+    delayed: true,
+  };
+}
+
+/** Twelve Data REST adapter. Free plan: 8 credits/min, 800/day, US listings,
+ * ~15m delayed quotes. Extended-hours quotes need `prepost=true`, which is a
+ * Pro+ feature — enable via supportsExtended only when the plan has it. */
 export class TwelveDataProvider implements MarketDataProvider {
   readonly name = "twelvedata";
+  readonly creditsPerMinute: number;
+  readonly supportsExtended: boolean;
   constructor(
     private key: string,
+    opts: { supportsExtended?: boolean; creditsPerMinute?: number } = {},
     private base = "https://api.twelvedata.com",
-  ) {}
+  ) {
+    this.supportsExtended = opts.supportsExtended ?? false;
+    this.creditsPerMinute = opts.creditsPerMinute ?? 8;
+  }
   private async get(path: string, params: Record<string, string>) {
     const url = new URL(this.base + path);
     url.search = new URLSearchParams({
@@ -115,7 +164,10 @@ export class TwelveDataProvider implements MarketDataProvider {
         access: r.access?.global != null ? String(r.access.global) : undefined,
       }));
   }
-  async quotes(refs: SymbolRef[]): Promise<Map<string, Quote>> {
+  async quotes(
+    refs: SymbolRef[],
+    opts: { extended?: boolean } = {},
+  ): Promise<Map<string, Quote>> {
     const out = new Map<string, Quote>();
     if (!refs.length) return out;
     const mic = refs[0]!.mic;
@@ -124,6 +176,8 @@ export class TwelveDataProvider implements MarketDataProvider {
     const body = await this.get("/quote", {
       symbol: refs.map((r) => r.symbol).join(","),
       mic_code: mic,
+      interval: "1min",
+      ...(opts.extended ? { prepost: "true" } : {}),
     });
     const rows: any[] = body?.symbol
       ? [body]
@@ -131,53 +185,8 @@ export class TwelveDataProvider implements MarketDataProvider {
     for (const row of rows) {
       const ref = refs.find((r) => r.symbol === row.symbol);
       if (!ref) continue;
-      const extended =
-        row.extended_price != null
-          ? {
-              price: Number(row.extended_price),
-              changePct:
-                row.extended_percent_change != null
-                  ? Number(row.extended_percent_change)
-                  : null,
-            }
-          : null;
-      out.set(quoteKey(ref), {
-        price: Number(row.close ?? row.price),
-        prevClose: Number(row.previous_close),
-        providerChangePct:
-          row.percent_change != null ? Number(row.percent_change) : null,
-        currency: String(row.currency ?? ""),
-        quoteTime: row.timestamp
-          ? new Date(Number(row.timestamp) * 1000)
-          : new Date(`${row.datetime}T00:00:00Z`),
-        tradingDate: String(row.datetime ?? "").slice(0, 10),
-        marketOpen: row.is_market_open === true,
-        extended,
-        delayed: true,
-      });
+      out.set(quoteKey(ref), rowToQuote(row));
     }
     return out;
-  }
-  async schedule(mic: string, date: string): Promise<ExchangeSessions> {
-    const body = await this.get("/exchange_schedule", {
-      mic_code: mic,
-      date,
-    });
-    const rows = Array.isArray(body?.data) ? body.data : [];
-    const sessions = rows.flatMap((r: any) =>
-      (Array.isArray(r.sessions) ? r.sessions : []).map((s: any) => ({
-        open: String(s.open_time ?? "").slice(0, 5),
-        close: String(s.close_time ?? "").slice(0, 5),
-        type: String(s.session_type ?? s.session_name ?? "regular")
-          .toLowerCase()
-          .replace(/[^a-z].*$/, ""),
-      })),
-    );
-    return {
-      timezone: String(rows[0]?.time_zone ?? ""),
-      sessions: sessions.filter((s: { open: string }) =>
-        /^\d\d:\d\d$/.test(s.open),
-      ),
-    };
   }
 }

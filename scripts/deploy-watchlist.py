@@ -29,6 +29,7 @@ COMPOSE_MIGRATION_ANCHOR = b'        "/migrations/017_routines.sql",\n'
 COMPOSE_MIGRATION_ADDITION = b'        "-f",\n        "/migrations/018_watchlist.sql",\n'
 COMPOSE_ENV_ANCHOR = b'      TAVILY_API_KEY: ${TAVILY_API_KEY:-}\n'
 COMPOSE_ENV_ADDITION = (b'      MARKET_DATA_PROVIDER: ${MARKET_DATA_PROVIDER:-}\n'
+                        b'      MARKET_DATA_EXTENDED: ${MARKET_DATA_EXTENDED:-}\n'
                         b'      TWELVE_DATA_API_KEY: ${TWELVE_DATA_API_KEY:-}\n')
 MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
 
