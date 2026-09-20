@@ -279,6 +279,20 @@ export class LibraryIdentity {
       return new Bearer(response.identity);
     });
   }
+  /** Stores an identity handed back by the clone completion; keeps the card id until sync confirms it. */
+  async adopt(user: string, identity: string, expiry?: number) {
+    const existing = await this.load(user);
+    await this.store(
+      user,
+      {
+        bearer: identity,
+        cardId: existing?.cardId ?? null,
+        expiresAt: this.expiry({ identity, expiry }),
+      },
+      "linking",
+    );
+    return new Bearer(identity);
+  }
   async needsRemint(user: string) {
     const row = await this.row(user);
     if (!row || row.state !== "linked" || !row.token_expires_at) return false;
