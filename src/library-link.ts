@@ -413,7 +413,7 @@ export class LinkCeremony {
       await this.progress(attemptId, {
         last_result:
           error instanceof LibraryError
-            ? "error:" + error.kind
+            ? "error:" + error.kind + (error.code ? ":" + error.code : "")
             : "error:" + String((error as Error)?.message ?? "").slice(0, 60),
       });
       const outcome: LinkOutcome = {

@@ -275,10 +275,17 @@ export class LibraryClient {
     }
     if (status === 401 || (status === 403 && route.host === "sentry")) {
       await finish("unauthenticated");
+      let code: string | undefined;
+      try {
+        code = upstreamCode(JSON.parse(text));
+      } catch {
+        code = undefined;
+      }
       throw new LibraryError(
         "unauthenticated",
         "the Libby link needs to be renewed; send /library link",
         status,
+        code,
       );
     }
     if (status >= 500) throw await this.transient(route, started, "transient");

@@ -66,6 +66,7 @@ function harness(
       if (p === "/chip" && init.method === "POST")
         return Response.json({
           identity: mints++ === 0 ? TOKEN : TOKEN2,
+          chip: "chip1234-5678",
           expiry: Math.floor(now / 1000) + 7 * 86400,
         });
       if (p === "/chip/clone/code" && init.method === "GET")
@@ -819,6 +820,8 @@ test("the production-likely path: a clone answer without an identity, re-mint wi
         "Bearer " + TOKEN2,
       );
       assert.equal((await h.identity.row("123"))?.state, "linked");
+      const remint = h.calls.filter((c) => c.url.pathname === "/chip").at(-1)!;
+      assert.equal(remint.url.searchParams.get("v"), "chip1234");
     } finally {
       await pg.close();
     }

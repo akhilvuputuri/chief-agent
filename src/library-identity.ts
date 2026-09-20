@@ -121,7 +121,15 @@ interface Sealed {
   bearer: string;
   cardId: string | null;
   expiresAt: string;
+  /** Libby's chip id; its prefix is sent as `v` on renewals, as the official client does. */
+  chip?: string;
 }
+/** Libby's own chip request parameters (client version and shell), not the third-party `client=dewey`. */
+export const chipQuery = (chip?: string) => ({
+  c: "d:22.1.1",
+  s: "0",
+  ...(chip ? { v: chip.split("-")[0]! } : {}),
+});
 export function daysLeft(expiresAt: string | null | undefined, now: number) {
   if (!expiresAt) return null;
   const at = Date.parse(expiresAt);
@@ -247,7 +255,7 @@ export class LibraryIdentity {
   /** Mints an anonymous chip for a linking attempt; it holds no card until the clone completes. */
   async mint(user: string) {
     const response = await this.client.call("chipMint", {
-      query: { client: "dewey" },
+      query: chipQuery(),
       schema: mintResponse,
       context: "background",
     });
@@ -257,6 +265,7 @@ export class LibraryIdentity {
         bearer: response.identity,
         cardId: null,
         expiresAt: this.expiry(response),
+        ...(response.chip ? { chip: response.chip } : {}),
       },
       "linking",
     );
@@ -264,16 +273,23 @@ export class LibraryIdentity {
   }
   /** Re-mints with the current bearer so the token (and any baked-in card) is renewed. */
   async remint(user: string, state: IdentityState = "linked") {
+    const previous = await this.load(user);
     return this.withBearer(user, async (bearer, cardId) => {
       const response = await this.client.call("chipMint", {
-        query: { client: "dewey" },
+        query: chipQuery(previous?.chip),
         bearer,
         schema: mintResponse,
         context: "background",
       });
+      const chip = response.chip ?? previous?.chip;
       await this.store(
         user,
-        { bearer: response.identity, cardId, expiresAt: this.expiry(response) },
+        {
+          bearer: response.identity,
+          cardId,
+          expiresAt: this.expiry(response),
+          ...(chip ? { chip } : {}),
+        },
         state,
       );
       return new Bearer(response.identity);
@@ -288,6 +304,7 @@ export class LibraryIdentity {
         bearer: identity,
         cardId: existing?.cardId ?? null,
         expiresAt: this.expiry({ identity, expiry }),
+        ...(existing?.chip ? { chip: existing.chip } : {}),
       },
       "linking",
     );
