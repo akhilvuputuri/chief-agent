@@ -1,7 +1,7 @@
 # 22 — NLB library assistant
 
 Work date: 2026-09-13 to 2026-09-20. Written: 2026-09-20.
-Status: Phase 1 released as [v0.3.11](https://github.com/akhilvuputuri/companion-agent/releases/tag/v0.3.11) at `9c71f61` ([PR #51](https://github.com/akhilvuputuri/companion-agent/pull/51), [release run 35489220156](https://github.com/akhilvuputuri/companion-agent/actions/runs/35489220156)); owner acceptance pending. Phase 2 candidate v0.3.12 (migration 016, encrypted identity, phone linking, shelf) awaits review and the operator rollout.
+Status: Phase 1 released as [v0.3.11](https://github.com/akhilvuputuri/companion-agent/releases/tag/v0.3.11) at `9c71f61` ([PR #51](https://github.com/akhilvuputuri/companion-agent/pull/51), [release run 35489220156](https://github.com/akhilvuputuri/companion-agent/actions/runs/35489220156)); owner acceptance pending. Phase 2 released as [v0.3.12](https://github.com/akhilvuputuri/companion-agent/releases/tag/v0.3.12) at `71de810` ([PR #52](https://github.com/akhilvuputuri/companion-agent/pull/52), operator rollout 20 September 2026, migration 16, health verified); first real link pending.
 
 ## User-visible problem
 
@@ -27,7 +27,7 @@ Released 20 September 2026 (v0.3.11, exact SHA above, health verified by the rel
 
 Tested: 15 new automated tests (route inventory and forbidden-segment scan, pacing, ceiling, breaker, retry classes, leak-free errors, verdict table, ebook filtering and ranking, caching, dispatcher gating). Full suite, typecheck, build and formatting pass locally. Owner acceptance from the phone (real title, vague title, repeat within 15 minutes) is pending and will be appended as reported.
 
-## Phase 2 — 20 September 2026 (candidate)
+## Phase 2 — 20 September 2026 (released)
 
 Adds migration 016 with the approvals constraint widened in place in 003 and 009 (the Calendar precedent), AES-256-GCM identity storage, the detached linking ceremony with rotating-code edits and an unqueued abort, `/library` host commands, the `lib:` approval callbacks, `library_shelf`, startup recovery and the operator script `scripts/deploy-library.py` with 13 offline rollout tests. Tested: the ceremony against scripted `retained`/`regenerated`/`fulfilled` sequences, abort, deadline, the fallback code entry, re-mint, expiry marking, revoke ordering (decrypt, local wipe, one remote call), pending-card denial, redelivered updates, stranger and group taps, `/approve` rejection, expired-card retirement before the unique index, full-directory migration re-run with rows present, and a store-wide scan for the fake token and codes. Hypotheses still open until the first real link: the clone-code direction, the `POST /chip/clone` body, `chip/sync` field names and the card's `limits`.
 

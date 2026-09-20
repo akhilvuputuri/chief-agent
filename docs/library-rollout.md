@@ -13,7 +13,9 @@ The ordinary GitHub release refuses database and Compose changes. The reviewed [
 
 ## Run from the exact baseline
 
-Server `RELEASE` must equal `794da5fda26482877d12d21661cb9f38adda4378` (the v0.3.11 docs record deployed on 20 September 2026). If a newer release has deployed, reconcile and obtain a revised review; do not rewrite `RELEASE`.
+Completed on 20 September 2026: deployed `71de810f370d109f859a845de262ae694d3e552f`, healthy, migration 16. The baseline-specific procedure below is retained as the record; do not rerun it against a newer release.
+
+Server `RELEASE` had to equal `794da5fda26482877d12d21661cb9f38adda4378` (the v0.3.11 docs record deployed on 20 September 2026). If a newer release has deployed, reconcile and obtain a revised review; do not rewrite `RELEASE`.
 
 Invoke `python3 /path/to/deploy-library.py /path/to/reviewed-source.tar <full merged main SHA>`. It takes the nonblocking release lock and:
 

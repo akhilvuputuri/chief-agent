@@ -29,7 +29,7 @@ As checked on 14 September, the latest published release is [v0.3.10](https://gi
 | 13 September                         | [17 — Rolling conversation and independent jobs](17-rolling-conversation.md): why did the immediately preceding exchange disappear?         | Released v0.3.8; context, retrieval and foreground/job isolation fixes                                         |
 | 13 September                         | [18 — Checkpoint steering](18-checkpoint-steering.md): how can corrections join active work without discarding its result?                  | Released v0.3.9 after repeated review fixes; live behavioral acceptance remains separate                       |
 | 14 September                         | [21 — Preparation evidence chain](21-preparation-chain.md): why does a saved exercise exist?                                                | Released v0.3.10; migration 015 and health verified; legacy tasks preserved                                    |
-| 13–20 September                      | [22 — NLB library assistant](22-library-assistant.md): how can a phone-only owner check, borrow and hold library ebooks without downloads?  | Phase 1 released v0.3.11; Phase 2 (identity, linking, shelf) candidate; owner acceptance pending               |
+| 13–20 September                      | [22 — NLB library assistant](22-library-assistant.md): how can a phone-only owner check, borrow and hold library ebooks without downloads?  | Phases 1–2 released (v0.3.11, v0.3.12); first real link and owner acceptance pending                           |
 
 ## Connected case studies
 
