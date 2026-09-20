@@ -23,6 +23,9 @@ BASE_COMPOSE = ('services:\n  migrate:\n    command:\n      [\n'
 
 
 class RoutinesRolloutTests(unittest.TestCase):
+    def test_parallel_documentation_baseline(self):
+        self.scenario(baseline='62e531c70b2397b22293988b9c078eef9bca25f4', expected_migration=True)
+
     def scenario(self, *, running=0, pending=0, baseline=None, requested_sha=SHA,
                  archive_sha=SHA, changes=None, unsafe=None, health=None,
                  build_failure=False, migration_failure=False, publish_failure=False,

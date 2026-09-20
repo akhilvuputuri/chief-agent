@@ -1,6 +1,6 @@
 {
   "name": "companion-agent",
-  "version": "0.3.14",
+  "version": "0.3.15",
   "private": true,
   "type": "module",
   "description": "A personal AI assistant with an owned TypeScript runtime, Telegram voice, memory, research and durable tasks",

@@ -29,3 +29,7 @@ Review/deployment closure will be appended after verification; no production acc
 The first full regression run exposed a context-budget regression: repeating scheduling guidance in four tool descriptions displaced an older answer's retrieval reference. The fix uses brief operation-specific descriptions; the existing exact-answer retrieval regression now passes.
 
 Independent Astra review of `a9c5fbd` requested changes for a stale scheduling-state update race and unauthorized owners monopolizing a bounded due scan. Updates now compare scheduling state as well as revision, and revoked owners' routines are paused. Added adversarial regressions for both and an actual Assistant-lane/approval-pause integration test. This preserves the failure and correction, rather than presenting the initial implementation as immediately correct.
+
+### Release coordination
+
+PR #58 merged after approval of `a54fee1` and both CI checks. A parallel Gmail documentation/version closure reserved v0.3.14 before the merge, so routines use v0.3.15. The rollout accepts the exact reviewed Gmail implementation baseline or that documentation/version closure; historical migrations, Compose and the trusted release-handler source must still match. Deployment remains pending.
