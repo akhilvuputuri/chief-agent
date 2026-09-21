@@ -207,13 +207,14 @@ test("long in-turn observations compact with exact read references and keep the 
 test("an exchange that cannot fit the hard limit fails explicitly rather than dropping its question", () => {
   const history = [
     user("Which date do you mean?"),
-    answer("Preserved answer " + "x".repeat(70000)),
+    answer("Preserved answer " + "x".repeat(contextHardLimit)),
   ];
   const message = "The later one";
   assert.throws(
     () => context(request(message, history), [...history, user(message)]),
     (error: unknown) =>
-      error instanceof ContextLimitError && error.sizes.exchangeSize! > 70000,
+      error instanceof ContextLimitError &&
+      error.sizes.exchangeSize! > contextHardLimit,
   );
 });
 
@@ -247,7 +248,7 @@ test("an uncompactable current working set fails explicitly and leaves its origi
   const message = "Continue checking";
   const huge = toolGroup("canvas_create", { result: "saved" });
   huge[0]!.tool_calls![0]!.function.arguments = JSON.stringify({
-    content: "x".repeat(70000),
+    content: "x".repeat(contextHardLimit),
   });
   const messages = [
     user(message),
@@ -269,7 +270,7 @@ test("the serialized text guard accounts for escaping inside fixed system contex
     message: "hello",
     history: [],
     memories: [],
-    systemInstructions: "\n".repeat(60000),
+    systemInstructions: "\n".repeat(contextHardLimit / 2),
   };
   assert.throws(
     () => context(req, [user(req.message)]),
@@ -376,7 +377,55 @@ test("compaction cannot hide oversized unreferenced results", () => {
   };
   const messages = [
     user(message),
-    ...toolGroup("gmail_read", { text: "x".repeat(80000) }),
+    ...toolGroup("gmail_read", { text: "x".repeat(contextHardLimit) }),
   ];
   assert.throws(() => context(req, messages), ContextLimitError);
+});
+
+test("continuation above the former guard retains its preceding exchange and compacts before using extra headroom", () => {
+  const history = [
+    user("Find tracking details for the two selected shipments"),
+    ...toolGroup(
+      "gmail_read",
+      {
+        observationId: "previous-mail",
+        result: {
+          account: "secondary",
+          threadId: "selected-thread",
+          text: "mail body ".repeat(5000),
+        },
+      },
+      "previous-call",
+    ),
+    answer(
+      "Confirmed selected shipments. " + "Retained exact detail. ".repeat(1600),
+    ),
+  ];
+  const message = "Continue";
+  const latest = toolGroup(
+    "observation_read",
+    {
+      observationId: "latest-observation",
+      result: {
+        sourceId: "selected-source",
+        text: "More mail text ".repeat(2500),
+      },
+    },
+    "latest-call",
+  );
+  const messages = [...history, user(message), ...latest];
+  const original = JSON.stringify(messages);
+  const result = context(request(message, history, 67570), messages);
+  assert.ok(result.serializedSize > 120000);
+  assert.ok(result.serializedSize < contextHardLimit);
+  assert.equal(result.wireCompacted, true);
+  assert.equal(result.compacted, 2);
+  assert.match(JSON.stringify(result.messages), /selected-thread/);
+  assert.match(JSON.stringify(result.messages), /selected-source/);
+  assert.match(
+    JSON.stringify(result.messages),
+    /Find tracking details for the two selected shipments/,
+  );
+  assert.deepEqual(result.messages.at(-3), latest[0]);
+  assert.equal(JSON.stringify(messages), original);
 });
