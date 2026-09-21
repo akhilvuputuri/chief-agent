@@ -1,6 +1,6 @@
-# Chief rebrand — candidate v0.3.21
+# Chief — released v0.3.21
 
-Product and repository naming changes are awaiting independent review and verified release. Existing server/database/plugin identifiers are retained; see [compatibility](rebranding.md). Context management remains tracked separately in [issue #77](https://github.com/akhilvuputuri/chief-agent/issues/77); the temporary limit increase has not shipped.
+Product and repository naming changes shipped at `4c91eeb`; [release and live branding verification](journey/30-chief-rebrand.md#verified-application-release) passed. Existing server/database/plugin identifiers are retained; see [compatibility](rebranding.md). Context management remains tracked separately in [issue #77](https://github.com/akhilvuputuri/chief-agent/issues/77); the temporary limit increase has not shipped.
 
 Cloud harness PRs #74/#75 are merged: shared independent-review instructions, `/companion` Devin shortcut, exact-commit release receipts, and a pinned-owner/Devin-bot diagnostics comment command. Released at `f71468a` with startup health and authenticated release receipt verified; actual Devin-originated diagnostics and PR reply passed; see [workflow](cloud-agent-workflow.md) and [evidence](journey/29-cloud-agent-harness.md). Self-merge remains unverified under the reported platform restriction; schema/host rollouts remain operator-mediated.
 
