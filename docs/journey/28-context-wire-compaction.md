@@ -18,7 +18,7 @@ Regression tests reproduce serialized overflow with escaping, preserve latest re
 
 Candidate v0.3.20; independent review, CI and deployment pending. No automatic retry of the user's order lookup or external action is part of deployment.
 
-## Release verification — 22 September 2026 SGT
+## Release verification — 21 September 2026 SGT
 
 [PR #72](https://github.com/akhilvuputuri/companion-agent/pull/72) passed both CI runs after independent GPT-6 Astra approval at `ee0c0e73a035dffbede449d3a8cada987ab680f7`. Local checks passed 342 application tests and 2 script tests plus formatting; the reviewer independently passed 15 continuity/budget/projection tests.
 
