@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { PGlite } from "@electric-sql/pglite";
 import { ensureUser, type Database } from "../src/db.js";
 import { open, seal, secretKey } from "../src/secret-box.js";
-import { LibraryClient } from "../src/library-client.js";
+import { LibraryClient, scrubExcerpt } from "../src/library-client.js";
 import { PostgresPacing } from "../src/library-pacing.js";
 import { LibraryIdentity, daysLeft, shapeOf } from "../src/library-identity.js";
 import { LinkCeremony, type LinkOutcome } from "../src/library-link.js";
@@ -1074,6 +1074,62 @@ test("a session cookie set at mint travels with the rest of the handshake and ne
   } finally {
     await pg.close();
   }
+});
+
+test("a refused clone journals why without echoing the blessing, the cookie or a truncated token", async () => {
+  const { pg, db } = await database();
+  try {
+    const h = harness(db, {
+      mintCookie: "sentry_session=s3cr3tvalue; Path=/; HttpOnly",
+      codes: [{ result: "fulfilled", blessing: "bless-short" }],
+      clone: () =>
+        // A refusal that echoes the request: the blessing and cookie are short enough that
+        // shape heuristics alone would not catch them.
+        Response.json(
+          {
+            result: "denied",
+            echo: "bless-short",
+            session: "sentry_session=s3cr3tvalue",
+          },
+          { status: 403 },
+        ),
+    });
+    const a = await h.actions.draft(
+      "123",
+      randomUUID(),
+      "library_link",
+      {},
+      { source: "command" },
+    );
+    await h.actions.decide("123", a.approvalId!, true);
+    assert.equal(await settled(db, a.approvalId!), "uncertain");
+    const refused = (
+      await db.query(
+        "SELECT data FROM events WHERE type='library.clone_refused' ORDER BY id DESC LIMIT 1",
+      )
+    ).rows[0]?.data as any;
+    assert.ok(refused, "the refusal was journalled");
+    assert.equal(refused.attempts[0].status, 403);
+    // The reason survives; the credentials do not.
+    assert.match(refused.attempts[0].body, /denied/);
+    assert.ok(refused.cookies.includes("sentry_session"), "cookie name kept");
+    await leakScan(db, ["bless-short", "s3cr3tvalue"]);
+  } finally {
+    await pg.close();
+  }
+});
+
+test("scrubExcerpt redacts before bounding so a token straddling the cut cannot survive", () => {
+  const jwt =
+    "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJlc2lnbmF0dXJl";
+  const out = scrubExcerpt("x".repeat(370) + jwt, 400);
+  assert.ok(!out.includes("eyJhbGciOiJIUzI1NiJ9"), "no JWT fragment survives");
+  assert.ok(out.length <= 400);
+  // A short secret is only removable by literal match.
+  assert.equal(
+    scrubExcerpt('{"echo":"abc123"}', 400, ["abc123"]),
+    '{"echo":"[SECRET]"}',
+  );
 });
 
 test("/library link settles an attempt left completing before starting a new one", async () => {

@@ -384,6 +384,7 @@ export class LinkCeremony {
             schema: cloneResponse,
             context: "background",
             jar,
+            secrets: [blessing],
             onFailure: (d) => diagnostics.push(d),
           });
         } catch (error) {
@@ -404,9 +405,19 @@ export class LinkCeremony {
             schema: cloneResponse,
             context: "background",
             jar,
+            secrets: [blessing],
             onFailure: (d) => diagnostics.push(d),
           });
         }
+        // Journal a refusal the retry recovered from too: that is precisely the case the
+        // re-mint hypothesis needs evidence for, and waiting for a throw would discard it.
+        if (diagnostics.length)
+          await event(this.db, user, approvalId, "library.clone_refused", {
+            attemptId,
+            recovered: true,
+            cookies: jar?.names() ?? [],
+            attempts: diagnostics.splice(0, 4),
+          });
         cloned = true;
         // Hypothesis kept defensively: a clone answer carrying an identity is adopted. Not
         // observed in Libby's client, which instead re-mints with its existing bearer.
