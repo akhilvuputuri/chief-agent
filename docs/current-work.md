@@ -1,5 +1,7 @@
 # Current work and shipped baseline
 
+Released v0.3.20 at `c323b34`: recoverable context repacking after serialized tool results exceed the application guard. [Incident, regression and deployment evidence](journey/28-context-wire-compaction.md). Original messages/results remain stored; fixed schema footprint optimization remains separate.
+
 Released [v0.3.19](https://github.com/akhilvuputuri/companion-agent/releases/tag/v0.3.19): two read-only Gmail accounts with explicit account selection, separate credentials/caches and a shared request allocation. See [runbook](google-authorization.md) and [journal](journey/27-multiple-gmail-accounts.md). Independent review and CI passed; operator rollout verified `452b4fd` healthy with migration018 and both Gmail account searches successful.
 
 The stock watchlist from [PR #63](https://github.com/akhilvuputuri/companion-agent/pull/63) is now included in operator-deployed `452b4fd`; additive migration018 was verified during the v0.3.19 rollout. No market-data provider or live watch was configured by that rollout. See [stock-watchlist.md](stock-watchlist.md) and [the rollout evidence](journey/27-multiple-gmail-accounts.md#verified-release--21-september-2026).
