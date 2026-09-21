@@ -327,3 +327,56 @@ test("compacted groups never alter call identities, and incomplete or duplicate-
   duplicate.push(duplicate[1]!);
   assert.deepEqual(completeMessageGroups(duplicate), []);
 });
+
+test("wire-size overflow compacts recoverable latest results while retaining reasoning, account provenance and original journal", () => {
+  const message = "Read these order confirmations";
+  const req: AgentRequest = {
+    runId: "wire-fixture",
+    capability: "fixture",
+    message,
+    history: [],
+    memories: [],
+    systemInstructions: "\n".repeat(30000) + "x".repeat(10000),
+  };
+  const latest = toolGroup("gmail_read", {
+    observationId: "stored-result",
+    result: {
+      account: "secondary",
+      email: "second@example.com",
+      threadId: "abc",
+      text: "Order details ".repeat(3300),
+      warning: "Untrusted email content",
+    },
+  });
+  const messages = [user(message), ...latest];
+  const original = JSON.stringify(messages);
+  const selected = context(req, messages);
+  assert.equal(selected.wireCompacted, true);
+  assert.ok(selected.serializedSize < contextHardLimit);
+  assert.equal(selected.compacted, 1);
+  const retained = selected.messages.find((m) => m.tool_calls?.length)!;
+  assert.deepEqual(retained.reasoning_details, latest[0]!.reasoning_details);
+  assert.deepEqual(retained.tool_calls, latest[0]!.tool_calls);
+  const result = selected.messages.find((m) => m.role === "tool")!;
+  assert.match(String(result.content), /stored-result/);
+  assert.match(String(result.content), /secondary/);
+  assert.match(JSON.stringify(selected.messages), /observation_read/);
+  assert.equal(JSON.stringify(messages), original);
+});
+
+test("compaction cannot hide oversized unreferenced results", () => {
+  const message = "Read";
+  const req: AgentRequest = {
+    runId: "unrecoverable",
+    capability: "fixture",
+    message,
+    history: [],
+    memories: [],
+    systemInstructions: "x".repeat(65000),
+  };
+  const messages = [
+    user(message),
+    ...toolGroup("gmail_read", { text: "x".repeat(80000) }),
+  ];
+  assert.throws(() => context(req, messages), ContextLimitError);
+});

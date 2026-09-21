@@ -72,3 +72,5 @@ Equivalent workload, model/configuration, pricing, denominators and missing acco
 - [Google authorization expiry](26-google-authorization-expiry.md): 21 September 2026 investigation and long-lived OAuth recovery; operator completion pending.
 
 - 21 September: [27 — Separate Gmail accounts](27-multiple-gmail-accounts.md): explicit mailbox routing after authorization recovery; released v0.3.19 with both mailbox searches verified.
+
+- 21 September: [28 — Context wire compaction](28-context-wire-compaction.md): recoverable results crossed the serialized guard; candidate v0.3.20.
