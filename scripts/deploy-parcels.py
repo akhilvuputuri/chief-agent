@@ -13,9 +13,9 @@ import time
 
 LIVE = pathlib.Path('/opt/hermes-companion')
 LOCK = pathlib.Path('/var/lock/companion-release.lock')
-BASE = 'c9a86cf0a8db4a73288827ad7910281035697ac3'
-# Only the exact reviewed baseline. The watchlist rollout installs migration 018 and
-# publishes its source; this rollout must run after it, never before.
+BASE = 'c936d7d630831f6f0c4b27dd62c5a06141a50201'
+# The deployed v0.3.22 baseline, which already carries migration 018 from the watchlist
+# rollout. Reconcile any newer release before running this; do not rewrite RELEASE.
 BASES = {BASE}
 IMAGE = 'hermes-companion-gateway'
 MIGRATION = '019_parcels.sql'
@@ -71,7 +71,7 @@ def unpack(archive_path, sha, stage):
             relative = pathlib.PurePosixPath(member.name)
             if (not relative.parts or relative.is_absolute() or '..' in relative.parts
                     or not (member.isfile() or member.isdir())
-                    or relative.parts[0] in {'RELEASE', '.git', '.RELEASE-routines'}
+                    or relative.parts[0] in {'RELEASE', '.git', '.RELEASE-parcels'}
                     or any(p.startswith('.env') and p != '.env.example' for p in relative.parts)
                     or relative in seen):
                 raise RuntimeError('Unsafe archive entry')
@@ -149,7 +149,7 @@ def restore_source(backup, original):
 
 
 def write_release(content):
-    pending = LIVE / '.RELEASE-routines'
+    pending = LIVE / '.RELEASE-parcels'
     try:
         pending.write_bytes(content)
         pending.replace(LIVE / 'RELEASE')
