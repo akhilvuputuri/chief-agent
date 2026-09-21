@@ -80,7 +80,7 @@ jobs:
       contents: read
       statuses: write
       issues: write
-      pull-requests: read
+      pull-requests: write
     steps:
       - uses: actions/github-script@v7
         env:
