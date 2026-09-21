@@ -216,6 +216,7 @@ const assistant = new Assistant(
     web: !!(c.TAVILY_API_KEY || c.OPENROUTER_API_KEY),
     gmail: !!c.GOOGLE_REFRESH_TOKEN,
     calendar: !!c.CALENDAR_REFRESH_TOKEN,
+    parcels: true,
     library: true,
     libraryAccount: !!libraryIdentity,
     preparationSheet: !!(c.SHEETS_REFRESH_TOKEN && c.SHEETS_SPREADSHEET_ID),
