@@ -7,8 +7,8 @@ The repository, tests and GitHub release pipeline are shared across local agents
 Install Git, Node 22 and GitHub CLI. Authenticate GitHub using your own authorized identity (`gh auth login`); do not share a token in chat or source. Then:
 
 ```sh
-gh repo clone akhilvuputuri/companion-agent
-cd companion-agent
+gh repo clone akhilvuputuri/chief-agent
+cd chief-agent
 git fetch origin
 npm ci
 npm run doctor:cloud

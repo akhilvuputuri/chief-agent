@@ -14,9 +14,9 @@ Production cutover completed from PR #7 (`f1664bb`). Gateway and Postgres health
 
 Post-cutover checks passed: Telegram getMe; a bounded server-side Sol request (OpenAI provider, $0.000084 reported); Gmail search; read-only Calendar listing; both Sheet metadata reads (three tabs each); ElevenLabs Flash v2.5 synthesis followed by Scribe v2 transcription. These were provider checks, not a claim that a new human Telegram voice note has been sent since cutover. This does not claim semantic correctness, exhaustive requirement coverage or production-scale resilience. The historical Hermes test record is archived in `docs/history/hermes-verification.md`.
 
-## Companion Agent fresh start — 7 September 2026
+## Chief fresh start — 7 September 2026
 
-The GitHub repository is now `akhilvuputuri/companion-agent`. The selective reset supersedes the historical task state above: old conversations, runtime traces, task records, research and generated preparation data are recoverably archived in private Postgres schema `reset_archive_20260907`. All 22 job records and six explicit memories remain. Credentials, connections and Telegram update deduplication are unchanged. No private skills existed to migrate.
+The GitHub repository is now `akhilvuputuri/chief-agent`. The selective reset supersedes the historical task state above: old conversations, runtime traces, task records, research and generated preparation data are recoverably archived in private Postgres schema `reset_archive_20260907`. All 22 job records and six explicit memories remain. Credentials, connections and Telegram update deduplication are unchanged. No private skills existed to migrate.
 
 The current regression suite passes 65 Node tests plus two OAuth scope tests, along with strict typechecking, build and formatting checks. CI passed for the separate key-only current-skill and UUID-based historical-skill operations. A real Sol medium request successfully called `skill_read(key)` and loaded the repository research skill through the owner-scoped implementation.
 

@@ -1,12 +1,12 @@
-# Companion Agent
+# Chief
 
 Scheduled agent routines support owner-selected one-time/recurring independent tasks with saved results and delivery state. See [architecture and domain-agent extension contract](docs/scheduled-routines.md) (migration 017).
 
-Version 0.3.9 adds ordered input steering at model/tool checkpoints, concurrent file/voice preparation and delivery-aware history. Existing installations require additive migration014; see [checkpoint steering and rollout](docs/checkpoint-steering.md). [Published releases](https://github.com/akhilvuputuri/companion-agent/releases) record verified deployment milestones; a branch push alone is not a deployment.
+Version 0.3.9 adds ordered input steering at model/tool checkpoints, concurrent file/voice preparation and delivery-aware history. Existing installations require additive migration014; see [checkpoint steering and rollout](docs/checkpoint-steering.md). [Published releases](https://github.com/akhilvuputuri/chief-agent/releases) record verified deployment milestones; a branch push alone is not a deployment.
 
 **A personal assistant with a TypeScript agent runtime we own.** Talk to it through Telegram text or voice, ask it to research, maintain notes, plan preparation, and manage reminders. Postgres is the durable source of truth; Google Sheets gives you a familiar viewing surface.
 
-Repository: https://github.com/akhilvuputuri/companion-agent.
+Repository: https://github.com/akhilvuputuri/chief-agent. Formerly Companion Agent. See [rebrand compatibility](docs/rebranding.md) for stable operational identifiers.
 
 ```mermaid
 flowchart LR
@@ -117,7 +117,7 @@ See [evaluation guide](docs/evals/guide.md) and [development process](docs/devel
 
 ## Developing from Codex cloud
 
-Use the connected `akhilvuputuri/companion-agent` environment and read [AGENTS.md](AGENTS.md). The [cloud development guide](docs/cloud-development.md) covers testing, PRs, automatic production releases after passing main checks, bounded diagnostics and operational limits. Live credentials remain on DigitalOcean.
+Use the connected `akhilvuputuri/chief-agent` environment and read [AGENTS.md](AGENTS.md). The [cloud development guide](docs/cloud-development.md) covers testing, PRs, automatic production releases after passing main checks, bounded diagnostics and operational limits. Live credentials remain on DigitalOcean.
 
 ## Engineering journey
 

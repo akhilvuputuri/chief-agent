@@ -23,7 +23,7 @@ const result = {
   workflowDispatch: "not tested (would mutate)",
   productionSecrets: "not required; must stay outside cloud task",
 };
-const repo = run("gh", ["api", "repos/akhilvuputuri/companion-agent"]);
+const repo = run("gh", ["api", "repos/akhilvuputuri/chief-agent"]);
 if (repo) {
   try {
     const r = JSON.parse(repo);
@@ -35,7 +35,7 @@ if (repo) {
 result.actionsRead =
   run("gh", [
     "api",
-    "repos/akhilvuputuri/companion-agent/actions/runs?per_page=1",
+    "repos/akhilvuputuri/chief-agent/actions/runs?per_page=1",
   ]) !== null;
 console.log(JSON.stringify(result, null, 2));
 if (result.repositoryWrite !== true)

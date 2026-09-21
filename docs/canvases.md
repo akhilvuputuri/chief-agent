@@ -1,6 +1,6 @@
 # Telegram Mini App and persistent canvases
 
-The Mini App is a small browser client served by the existing TypeScript application. `/canvases` or `/app` in a private Telegram chat returns an Open Companion button. The library offers separate named canvases and a read-only Roles tab. The application remains on DigitalOcean; the free HTTPS origin and Caddy installation are described in [deployment](miniapp-deployment.md).
+The Mini App is a small browser client served by the existing TypeScript application. `/canvases` or `/app` in a private Telegram chat returns an Open Chief button. The library offers separate named canvases and a read-only Roles tab. The application remains on DigitalOcean; the free HTTPS origin and Caddy installation are described in [deployment](miniapp-deployment.md).
 
 ## Creating and revisiting content
 

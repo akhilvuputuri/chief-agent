@@ -272,6 +272,6 @@ await writeFile(new URL("report.json", out), JSON.stringify(report, null, 2), {
 });
 await writeFile(
   new URL("report.md", out),
-  `# Companion evaluation\n\nRevision: ${revision}; dirty: ${dirty}. Mode: ${report.mode}.\n\nContext probe: ${probe.pass ? "PASS" : "FAIL"} (${probe.omitted} messages omitted).\n\n${summaries.map((s) => `- ${s.name}: ${s.score?.pass ? "PASS" : "FAIL"}; coverage ${s.score?.coverage ?? "unknown"}; model calls ${s.modelCalls ?? "unknown"}; tools ${s.toolCalls ?? "unknown"}`).join("\n")}\n\nSemantic quality requires manual review. One trial is not a reliability estimate. Spending admission accounting is not a billing statement; missing usage remains unknown.\n`,
+  `# Chief evaluation\n\nRevision: ${revision}; dirty: ${dirty}. Mode: ${report.mode}.\n\nContext probe: ${probe.pass ? "PASS" : "FAIL"} (${probe.omitted} messages omitted).\n\n${summaries.map((s) => `- ${s.name}: ${s.score?.pass ? "PASS" : "FAIL"}; coverage ${s.score?.coverage ?? "unknown"}; model calls ${s.modelCalls ?? "unknown"}; tools ${s.toolCalls ?? "unknown"}`).join("\n")}\n\nSemantic quality requires manual review. One trial is not a reliability estimate. Spending admission accounting is not a billing statement; missing usage remains unknown.\n`,
 );
 console.log(JSON.stringify({ report: out.pathname, probe }));

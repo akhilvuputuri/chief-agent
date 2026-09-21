@@ -1,6 +1,6 @@
 # Live deployment
 
-The existing DigitalOcean Singapore server runs Companion Agent at `/opt/hermes-companion`. That deployment path, Docker project and volume names intentionally retain their original names to preserve storage identity. They do not imply an upstream runtime dependency.
+The existing DigitalOcean Singapore server runs Chief at `/opt/hermes-companion`. That deployment path, Docker project and volume names intentionally retain their original names to preserve storage identity. They do not imply an upstream runtime dependency.
 
 Only the Node gateway and Postgres are long-running services. A one-shot migration job applies schema changes. Credentials live in a private environment file; services publish only to loopback. The server's `RELEASE` records its deployed revision.
 

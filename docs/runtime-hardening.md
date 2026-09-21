@@ -1,4 +1,4 @@
-# Durable scope and evidence in Companion Agent
+# Durable scope and evidence in Chief
 
 **Checkpoint status: candidate implementation on `feature/runtime-evaluations`, not deployed. Further evaluation and rollout deferred at the user’s request on 7 September 2026.** See [resume checklist](checkpoints/runtime-evaluations.md).
 

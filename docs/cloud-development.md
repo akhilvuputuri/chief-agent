@@ -2,7 +2,7 @@
 
 ## Working from anywhere
 
-The Codex cloud environment `akhilvuputuri/companion-agent` checks out this repository. Read AGENTS.md and HANDOVER.md first. Use Node 22, npm ci, npm run check, npm run build and npm run format:check. No API keys are required for mocked unit/integration tests. Automatic environment setup is enabled; internet access was enabled by the owner. Do not run the production bot in cloud development.
+The Codex cloud environment `akhilvuputuri/chief-agent` checks out this repository. Read AGENTS.md and HANDOVER.md first. Use Node 22, npm ci, npm run check, npm run build and npm run format:check. No API keys are required for mocked unit/integration tests. Automatic environment setup is enabled; internet access was enabled by the owner. Do not run the production bot in cloud development.
 
 A cloud task does not inherit this local conversation, browser login sessions or SSH files. Describe the problem, approximate Singapore time and expected behavior; attach a screenshot when useful. The repository documents constraints and historical incidents. Fresh production evidence takes precedence over old documents.
 
