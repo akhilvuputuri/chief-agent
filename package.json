@@ -12,7 +12,7 @@
     "start": "node dist/main.js",
     "build": "tsc",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.evals.json",
-    "test": "npm run build && tsx --test tests/*.test.ts && node --test scripts/google-sheets-scopes.test.mjs",
+    "test": "npm run build && tsx --test tests/*.test.ts && node --test scripts/*.test.mjs",
     "migrate": "tsx src/migrate.ts",
     "check": "npm run typecheck && npm test",
     "format": "prettier --write .",
@@ -25,7 +25,8 @@
     "eval": "tsx evals/run.ts",
     "eval:compare": "tsx evals/compare.ts",
     "doctor:cloud": "node scripts/cloud-doctor.mjs",
-    "plugins": "node --import tsx src/plugin-cli.ts"
+    "plugins": "node --import tsx src/plugin-cli.ts",
+    "release:status": "node scripts/release-status.mjs"
   },
   "dependencies": {
     "@grammyjs/runner": "^2.0.3",

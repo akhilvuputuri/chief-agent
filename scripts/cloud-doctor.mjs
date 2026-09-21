@@ -17,7 +17,8 @@ const result = {
   git: run("git", ["--version"]) !== null,
   githubCli: run("gh", ["--version"]) !== null,
   repositoryRead: false,
-  repositoryWrite: false,
+  repositoryWrite: "unknown",
+  merge: "not tested; depends on PR policy and token permissions",
   actionsRead: false,
   workflowDispatch: "not tested (would mutate)",
   productionSecrets: "not required; must stay outside cloud task",
@@ -27,7 +28,8 @@ if (repo) {
   try {
     const r = JSON.parse(repo);
     result.repositoryRead = true;
-    result.repositoryWrite = !!r.permissions?.push;
+    result.repositoryWrite =
+      typeof r.permissions?.push === "boolean" ? r.permissions.push : "unknown";
   } catch {}
 }
 result.actionsRead =
@@ -36,7 +38,7 @@ result.actionsRead =
     "repos/akhilvuputuri/companion-agent/actions/runs?per_page=1",
   ]) !== null;
 console.log(JSON.stringify(result, null, 2));
-if (!result.repositoryWrite)
+if (result.repositoryWrite !== true)
   console.log(
     "Use the cloud PR UI if available. Repository connection alone does not establish merge/API permissions. Report missing merge access rather than claiming a release.",
   );

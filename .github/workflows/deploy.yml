@@ -11,12 +11,35 @@ concurrency:
   group: companion-production
   cancel-in-progress: false
 jobs:
-  deploy:
+  announce:
     if: >-
       github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' ||
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
+    outputs:
+      sha: ${{ steps.target.outputs.sha }}
+    steps:
+      - uses: actions/github-script@v7
+        id: target
+        env:
+          TARGET_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        with:
+          script: |
+            const sha = process.env.TARGET_SHA;
+            if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error('Invalid release SHA');
+            core.setOutput('sha', sha);
+            await github.rest.repos.createCommitStatus({
+              ...context.repo, sha, context: 'companion/production', state: 'pending',
+              description: 'Release queued; deployment not yet verified',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
+  deploy:
+    needs: announce
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -48,3 +71,39 @@ jobs:
           chmod 600 ~/.ssh/companion ~/.ssh/known_hosts
           trap 'rm -f ~/.ssh/companion' EXIT
           git archive HEAD | ssh -i ~/.ssh/companion -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes root@188.166.246.143 "deploy $(git rev-parse HEAD)"
+
+  report:
+    needs: [announce, deploy]
+    if: always() && needs.announce.outputs.sha != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
+      issues: write
+      pull-requests: read
+    steps:
+      - uses: actions/github-script@v7
+        env:
+          TARGET_SHA: ${{ needs.announce.outputs.sha }}
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
+        with:
+          script: |
+            const sha = process.env.TARGET_SHA;
+            if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error('Invalid release SHA');
+            const success = process.env.DEPLOY_RESULT === 'success';
+            const url = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.repos.createCommitStatus({
+              ...context.repo, sha, context: 'companion/production',
+              state: success ? 'success' : 'failure', target_url: url,
+              description: success ? 'Exact commit deployed; startup health passed' : 'Deployment not verified; inspect release logs'
+            });
+            const prs = await github.paginate(github.rest.repos.listPullRequestsAssociatedWithCommit, {
+              ...context.repo, commit_sha: sha, per_page: 100
+            });
+            const body = success
+              ? `Production release: **${sha}** deployed and startup health passed. [Release evidence](${url}). This does not establish feature acceptance or current health.`
+              : `Production release: **${sha}** is **not verified** by this attempt (${process.env.DEPLOY_RESULT}). [Inspect release logs](${url}). Check for active work, a superseded main commit, or database/Compose prerequisites. Do not bypass the guard. Use production-diagnostics to establish the running version.`;
+            for (const pr of prs.filter(pr => pr.merged_at && pr.merge_commit_sha === sha && pr.base.repo.full_name === `${context.repo.owner}/${context.repo.repo}`)) {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: pr.number, body });
+            }
+            await core.summary.addRaw(body).write();

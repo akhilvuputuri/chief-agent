@@ -1,6 +1,8 @@
 # Personal-agent handover
 
-Stock watchlist (issue #46) is implemented on a review branch: deterministic polling monitor, once-per-trading-day Telegram alerts, `watchlist_*` configuration tools gated on `MARKET_DATA_PROVIDER`, migration 018 and reviewed rollout `scripts/deploy-watchlist.py`. Read [docs/stock-watchlist.md](docs/stock-watchlist.md) and [journal 25](docs/journey/25-stock-watchlist.md) before merging or deploying; independent review is pending and the Twelve Data key is not yet provisioned on the host.
+Start cloud tasks with [the end-to-end agent workflow](docs/cloud-agent-workflow.md). Independent review and exact deployment receipts are separate from CI.
+
+Stock watchlist PR #63 is merged; migration 018 and code were installed during the v0.3.19 operator rollout. No live market-data provider was configured. See [current work](docs/current-work.md) for release evidence; the old review-branch status is superseded.
 
 Scheduled independent agent routines shipped in v0.3.15 for issue #56 (PRs #58/#59, migration 017, deployed `c1f8e7088676d4ee3d041993d5e08412e4c73a70`). Read [the extension contract and migration runbook](docs/scheduled-routines.md) before adding domain schedules; existing reminders remain separate.
 
