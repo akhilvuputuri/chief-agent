@@ -41,6 +41,10 @@ export type ConversationArchiveEntry = {
 const referenceKeys = new Set([
   "observationId",
   "receiptId",
+  "account",
+  "email",
+  "threadId",
+  "nextPageToken",
   "sourceId",
   "extractionSourceId",
   "scopeId",

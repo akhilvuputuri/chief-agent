@@ -61,7 +61,24 @@ export class ContextLimitError extends Error {
     );
   }
 }
-export function context(request: AgentRequest, messages: Message[]) {
+type ContextSelection = {
+  omitted: number;
+  overBudget: boolean;
+  fixedSize: number;
+  reservedSize: number;
+  exchangeSize: number;
+  workingSize: number;
+  compacted: number;
+  serializedSize: number;
+  protectedMessages: number;
+  wireCompacted: boolean;
+  messages: ModelMessage[];
+};
+export function context(
+  request: AgentRequest,
+  messages: Message[],
+  compactForWire = false,
+): ContextSelection {
   const summary = request.conversationSummary ?? "";
   const fixedSize =
     (request.systemInstructions ?? instructions).length +
@@ -85,14 +102,22 @@ export function context(request: AgentRequest, messages: Message[]) {
   const exchangeStart = previousUser >= 0 ? previousUser : 0;
   const earlier = prior.slice(0, exchangeStart);
   const exchangeGroups = completeMessageGroups(prior.slice(exchangeStart));
-  let exchange = exchangeGroups.flat().map(withoutReasoning);
+  let exchange = compactForWire
+    ? exchangeGroups.flatMap((group) => compactToolGroup(group))
+    : exchangeGroups.flat().map(withoutReasoning);
   const currentUser: Message =
     start >= 0 ? messages[start]! : { role: "user", content: request.message };
   const tail = start >= 0 ? messages.slice(start + 1) : [];
   const lastCall = tail.findLastIndex(
     (m) => m.role === "assistant" && m.tool_calls?.length,
   );
-  const reserved = lastCall >= 0 ? tail.slice(lastCall) : [];
+  const latest = lastCall >= 0 ? tail.slice(lastCall) : [];
+  // Keep the latest assistant reasoning/tool arguments intact for provider continuity.
+  // Only recoverable result bodies may shrink, never the authoritative journal.
+  const projectedLatest = compactForWire ? compactToolGroup(latest) : latest;
+  const reserved = projectedLatest.map((message, index) =>
+    message.role === "tool" ? message : latest[index]!,
+  );
   const olderTail = lastCall >= 0 ? tail.slice(0, lastCall) : tail;
   const reservedSize = reserved.length ? JSON.stringify(reserved).length : 0;
   let exchangeSize = exchange.length ? JSON.stringify(exchange).length : 0;
@@ -102,14 +127,18 @@ export function context(request: AgentRequest, messages: Message[]) {
     exchange = exchangeGroups.flatMap((group) => compactToolGroup(group));
     exchangeSize = exchange.length ? JSON.stringify(exchange).length : 0;
   }
-  if (fixedSize + reservedSize + exchangeSize >= contextHardLimit)
+  if (fixedSize + reservedSize + exchangeSize >= contextHardLimit) {
+    if (!compactForWire) return context(request, messages, true);
     throw new ContextLimitError({ fixedSize, reservedSize, exchangeSize });
+  }
 
   // Earlier results from this turn remain available across subsequent calls. When necessary,
   // replace long result bodies with exact excerpts and their observation/source read references.
   // Call/result groups stay complete; authoritative journal messages are never modified.
   const workingGroups = completeMessageGroups(olderTail);
-  let working = workingGroups.flat().map(withoutReasoning);
+  let working = compactForWire
+    ? workingGroups.flatMap((group) => compactToolGroup(group))
+    : workingGroups.flat().map(withoutReasoning);
   let available = contextHardLimit - fixedSize - reservedSize - exchangeSize;
   let workingSize = working.length ? JSON.stringify(working).length : 0;
   if (workingSize >= available) {
@@ -121,14 +150,16 @@ export function context(request: AgentRequest, messages: Message[]) {
     exchangeSize = exchange.length ? JSON.stringify(exchange).length : 0;
     available = contextHardLimit - fixedSize - reservedSize - exchangeSize;
   }
-  if (workingSize >= available)
+  if (workingSize >= available) {
+    if (!compactForWire) return context(request, messages, true);
     throw new ContextLimitError({
       fixedSize,
       reservedSize,
       exchangeSize,
       workingSize,
     });
-  const compacted = [...exchange, ...working].filter(
+  }
+  const compacted = [...exchange, ...working, ...reserved].filter(
     (m) => m.role === "tool" && m.content?.includes('"contextProjection"'),
   ).length;
   const protectedSize = reservedSize + exchangeSize + workingSize;
@@ -183,7 +214,10 @@ export function context(request: AgentRequest, messages: Message[]) {
       })),
     ).length +
     2000;
-  if (serializedSize >= contextHardLimit)
+  if (serializedSize >= contextHardLimit) {
+    // Estimates omit JSON escaping/envelopes. Retry once with source-linked tool
+    // projections before treating a recoverable observation batch as oversized.
+    if (!compactForWire) return context(request, messages, true);
     throw new ContextLimitError({
       fixedSize,
       reservedSize,
@@ -191,6 +225,7 @@ export function context(request: AgentRequest, messages: Message[]) {
       workingSize,
       serializedSize,
     });
+  }
   // Only the media specialist receives image bytes; the coordinator sees the note and delegates.
   const images = request.specialist === "media" ? (request.images ?? []) : [];
   if (images.length) {
@@ -219,6 +254,7 @@ export function context(request: AgentRequest, messages: Message[]) {
     workingSize,
     compacted,
     serializedSize,
+    wireCompacted: compactForWire,
     protectedMessages: exchange.length + 1 + working.length + reserved.length,
     messages: assembled,
   };

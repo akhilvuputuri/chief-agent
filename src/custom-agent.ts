@@ -163,6 +163,8 @@ export class CustomAgent implements Agent {
               exchangeSize: input.exchangeSize,
               workingSize: input.workingSize,
               compacted: input.compacted,
+              wireCompacted: input.wireCompacted,
+              serializedSize: input.serializedSize,
               omitted: input.omitted,
               messageCount: input.messages.length,
               inputCharacters:
@@ -509,7 +511,7 @@ export class CustomAgent implements Agent {
             : reason === "cancelled"
               ? "Cancelled. Completed actions remain recorded."
               : error instanceof ContextLimitError
-                ? "This request exceeds the context limit while preserving our current exchange. Please narrow the active batch; your messages and saved results are retained."
+                ? "I reached an internal context limit before I could finish. Your messages and retrieved results are saved; the request was not completed."
                 : error instanceof ModelError
                   ? error.message
                   : "Execution stopped after an error. Saved results are retained; inspect /status before continuing.";
