@@ -6,6 +6,8 @@ The Codex cloud environment `akhilvuputuri/companion-agent` checks out this repo
 
 A cloud task does not inherit this local conversation, browser login sessions or SSH files. Describe the problem, approximate Singapore time and expected behavior; attach a screenshot when useful. The repository documents constraints and historical incidents. Fresh production evidence takes precedence over old documents.
 
+Use [the shared cloud-agent workflow](cloud-agent-workflow.md) for the full preflight, independent review and verification contract. `npm run release:status -- FULL_MERGE_SHA` reads the exact commit's durable production receipt. Release attempts publish results to their merged PR even if the coding session is asleep. Missing receipts (including older releases) require direct log inspection.
+
 ## Shipping a change
 
 1. Work on a feature branch, add focused regression coverage and update relevant docs.
