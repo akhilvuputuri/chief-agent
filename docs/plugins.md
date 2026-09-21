@@ -1,6 +1,6 @@
 # Portable capability plugins
 
-Product requirement: [issue #37](https://github.com/akhilvuputuri/companion-agent/issues/37). The first implementation packages public research as a declarative plugin. It supports import/export between compatible Companion checkouts, namespaced agent discovery, host-granted tool access, lazy skills and durable definition pins. This is not universal Claude/Codex plugin compatibility or an MCP client implementation.
+Product requirement: [issue #37](https://github.com/akhilvuputuri/chief-agent/issues/37). The first implementation packages public research as a declarative plugin. It supports import/export between compatible Chief checkouts, namespaced agent discovery, host-granted tool access, lazy skills and durable definition pins. This is not universal Claude/Codex plugin compatibility or an MCP client implementation.
 
 ## Ownership of behavior
 

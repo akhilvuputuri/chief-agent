@@ -35,7 +35,7 @@ const t = await request("https://oauth2.googleapis.com/token", {
 const sheet = await request(
   "https://sheets.googleapis.com/v4/spreadsheets",
   {
-    properties: { title: "Companion Agent — Preparation" },
+    properties: { title: "Chief — Preparation" },
     sheets: ["Target roles", "Preparation gaps", "Preparation tasks"].map(
       (title, sheetId) => ({
         properties: {

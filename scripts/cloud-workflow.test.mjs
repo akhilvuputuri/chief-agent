@@ -18,12 +18,15 @@ const request = () => ({
   actor: user.login,
   event_name: "issue_comment",
   event: {
-    repository: { private: true },
+    repository: { id: 1358822022, private: true },
     comment: { body: "/companion diagnose", user: { ...user } },
   },
 });
 test("diagnostics permits only fixed owner/Devin requests and manual main dispatch", () => {
   assert.equal(allowed(request()), true);
+  const renamed = request();
+  renamed.repository = "akhilvuputuri/chief-agent";
+  assert.equal(allowed(renamed), true);
   const owner = request();
   owner.actor = "akhilvuputuri";
   owner.event.comment.user = { login: owner.actor, type: "User" };
@@ -35,6 +38,9 @@ test("diagnostics permits only fixed owner/Devin requests and manual main dispat
 });
 test("diagnostics rejects other actors, impersonation, arguments, public repos and other refs", () => {
   const mutations = [
+    (x) => {
+      x.event.repository.id = 1;
+    },
     (x) => {
       x.actor = "outsider";
       x.event.comment.user = { login: "outsider", type: "User" };

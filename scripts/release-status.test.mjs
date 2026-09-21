@@ -2,7 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { releaseStatus } from "./release-status.mjs";
 const sha = "a".repeat(40);
-const repository = { full_name: "akhilvuputuri/companion-agent" };
+const repository = {
+  id: 1358822022,
+  full_name: "akhilvuputuri/companion-agent",
+};
 const run = {
   id: 123,
   path: ".github/workflows/deploy.yml",
@@ -108,4 +111,33 @@ test("success receipt alone cannot establish deployment when run or deploy faile
     ).exitCode,
     2,
   );
+});
+
+test("renamed repository accepts historical receipts but rejects different repository IDs", () => {
+  const chief = { id: 1358822022, full_name: "akhilvuputuri/chief-agent" };
+  for (const url of [
+    receipt("success").target_url,
+    "https://github.com/akhilvuputuri/chief-agent/actions/runs/123",
+  ]) {
+    assert.equal(
+      releaseStatus(
+        sha,
+        [{ ...receipt("success"), target_url: url }],
+        { ...run, repository: chief, head_repository: chief },
+        jobs,
+      ).exitCode,
+      0,
+    );
+  }
+  for (const field of ["repository", "head_repository"]) {
+    assert.equal(
+      releaseStatus(
+        sha,
+        [receipt("success")],
+        { ...run, [field]: { ...repository, id: 1 } },
+        jobs,
+      ).exitCode,
+      2,
+    );
+  }
 });

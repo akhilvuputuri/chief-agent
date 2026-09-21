@@ -309,7 +309,7 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
                   inline_keyboard: [
                     [
                       {
-                        text: "Open Companion",
+                        text: "Open Chief",
                         web_app: { url: c.MINIAPP_ORIGIN + "/miniapp/" },
                       },
                     ],

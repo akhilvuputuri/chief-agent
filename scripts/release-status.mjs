@@ -1,6 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
-const repo = "akhilvuputuri/companion-agent";
+const repo = "akhilvuputuri/chief-agent";
+// Historical receipts retain the old URL after the repository is renamed.
+const repositoryNames = new Set([repo, "akhilvuputuri/companion-agent"]);
 export function releaseStatus(sha, statuses, run, jobs = []) {
   if (!/^[a-f0-9]{40}$/.test(sha))
     throw new Error("Use a full 40-character commit SHA");
@@ -19,7 +21,7 @@ export function releaseStatus(sha, statuses, run, jobs = []) {
       "No deployment receipt. Inspect exact release logs; merge/checks alone are insufficient.",
     );
   const match =
-    /^https:\/\/github\.com\/akhilvuputuri\/companion-agent\/actions\/runs\/(\d+)$/.exec(
+    /^https:\/\/github\.com\/akhilvuputuri\/(?:chief-agent|companion-agent)\/actions\/runs\/(\d+)$/.exec(
       receipt.target_url ?? "",
     );
   if (
@@ -32,8 +34,10 @@ export function releaseStatus(sha, statuses, run, jobs = []) {
     !run ||
     String(run.id) !== match[1] ||
     run.path !== ".github/workflows/deploy.yml" ||
-    run.repository?.full_name !== repo ||
-    run.head_repository?.full_name !== repo ||
+    !repositoryNames.has(run.repository?.full_name) ||
+    run.repository?.id !== 1358822022 ||
+    !repositoryNames.has(run.head_repository?.full_name) ||
+    run.head_repository?.id !== 1358822022 ||
     run.head_sha !== sha ||
     run.head_branch !== "main" ||
     !["workflow_run", "workflow_dispatch"].includes(run.event)
@@ -87,7 +91,7 @@ if (
     ).flat();
     const receipt = statuses.find((s) => s.context === "companion/production");
     const match =
-      /^https:\/\/github\.com\/akhilvuputuri\/companion-agent\/actions\/runs\/(\d+)$/.exec(
+      /^https:\/\/github\.com\/akhilvuputuri\/(?:chief-agent|companion-agent)\/actions\/runs\/(\d+)$/.exec(
         receipt?.target_url ?? "",
       );
     let run, jobs;

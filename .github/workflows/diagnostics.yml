@@ -8,7 +8,8 @@ permissions:
 jobs:
   inspect:
     if: >-
-      github.repository == 'akhilvuputuri/companion-agent' &&
+      (github.repository == 'akhilvuputuri/chief-agent' || github.repository == 'akhilvuputuri/companion-agent') &&
+      github.event.repository.id == 1358822022 &&
       github.event.repository.private == true &&
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'workflow_dispatch' ||

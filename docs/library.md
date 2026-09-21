@@ -1,6 +1,6 @@
 # NLB library assistant
 
-Product requirement and full implementation plan: [issue #41](https://github.com/akhilvuputuri/companion-agent/issues/41). This document describes shipped behaviour and grows with each phase.
+Product requirement and full implementation plan: [issue #41](https://github.com/akhilvuputuri/chief-agent/issues/41). This document describes shipped behaviour and grows with each phase.
 
 ## Phase 1 — catalogue availability (v0.3.11)
 

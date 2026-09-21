@@ -1,4 +1,4 @@
-# Companion Agent development
+# Chief development
 
 Read `docs/current-work.md`, `HANDOVER.md`, `docs/portable-development.md`, `docs/cloud-development.md`, and the relevant source before modifying behavior. Historical incident reports and deferred candidates describe earlier states; current code and verified production diagnostics take precedence.
 
