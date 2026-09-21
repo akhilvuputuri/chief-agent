@@ -761,7 +761,10 @@ test("an oversized protected answer fails before loading its body instead of ret
   try {
     const original = [
       user("Use the current event target."),
-      answer("Question context ".repeat(8000) + "Which date should I use?"),
+      answer(
+        "Question context ".repeat(Math.ceil(contextHardLimit / 17) + 1) +
+          "Which date should I use?",
+      ),
     ];
     await f.store.append("owner", null, 0, original);
     let loadedPayloads = 0;

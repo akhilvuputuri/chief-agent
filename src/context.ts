@@ -51,8 +51,10 @@ export function boundHistory(
 }
 /** Soft target for optional history; protected conversation continuity may exceed it. */
 export const contextBudget = 48000;
-/** Beyond this the request is refused rather than sent; a turn should never legitimately reach it. */
-export const contextHardLimit = 120000;
+/** Keep existing compaction pressure even while the temporary ceiling is higher. */
+const contextCompactionThreshold = 120000;
+/** Temporary text-character ceiling, not the provider token window; see issue #77. */
+export const contextHardLimit = 400000;
 /** Thrown with measured sizes so the failure is traceable instead of a bare execution error. */
 export class ContextLimitError extends Error {
   constructor(readonly sizes: Record<string, number>) {
@@ -121,7 +123,7 @@ export function context(
   const olderTail = lastCall >= 0 ? tail.slice(0, lastCall) : tail;
   const reservedSize = reserved.length ? JSON.stringify(reserved).length : 0;
   let exchangeSize = exchange.length ? JSON.stringify(exchange).length : 0;
-  if (fixedSize + reservedSize + exchangeSize >= contextHardLimit) {
+  if (fixedSize + reservedSize + exchangeSize >= contextCompactionThreshold) {
     // A long previous exchange may contain large observations. Preserve its user/assistant
     // text and every complete group, reducing only recoverable result bodies when necessary.
     exchange = exchangeGroups.flatMap((group) => compactToolGroup(group));
@@ -141,7 +143,10 @@ export function context(
     : workingGroups.flat().map(withoutReasoning);
   let available = contextHardLimit - fixedSize - reservedSize - exchangeSize;
   let workingSize = working.length ? JSON.stringify(working).length : 0;
-  if (workingSize >= available) {
+  if (
+    fixedSize + reservedSize + exchangeSize + workingSize >=
+    contextCompactionThreshold
+  ) {
     working = workingGroups.flatMap((group) => compactToolGroup(group));
     workingSize = working.length ? JSON.stringify(working).length : 0;
   }
@@ -214,6 +219,9 @@ export function context(
       })),
     ).length +
     2000;
+  if (!compactForWire && serializedSize >= contextCompactionThreshold) {
+    return context(request, messages, true);
+  }
   if (serializedSize >= contextHardLimit) {
     // Estimates omit JSON escaping/envelopes. Retry once with source-linked tool
     // projections before treating a recoverable observation batch as oversized.

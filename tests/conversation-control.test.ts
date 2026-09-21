@@ -1,3 +1,4 @@
+import { contextHardLimit } from "../src/context.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -1130,7 +1131,7 @@ test("an oversized historical job exchange pauses instead of endlessly requeuein
     );
     await new HistoryStore(f.db).append("owner", run, 0, [
       { role: "user", content: "huge" },
-      { role: "assistant", content: "x".repeat(130000) },
+      { role: "assistant", content: "x".repeat(contextHardLimit + 10000) },
     ]);
     await f.db.query(
       "UPDATE work_tasks SET status='queued',next_run=now() WHERE id=$1",
