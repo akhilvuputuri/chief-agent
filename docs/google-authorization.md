@@ -20,4 +20,4 @@ On 21 September 2026 the production Gmail refresh request returned HTTP 400 `inv
 
 ## Current status
 
-Static pages and operator configuration prepared; publication, token renewal and production verification pending. No claim of restored Gmail access until those checks pass.
+On 21 September 2026, independent GPT-6 Astra review approved `2bfdecf48ffb382dc617fb1c21c776fefa141699`. The host validated and installed the static routes: `/about`, `/privacy`, `/terms` and existing `/miniapp/` returned 200; an unrelated path returned 404. Following explicit owner confirmation, branding was saved and Google Audience showed **In production**. The owner must still complete Gmail consent; token renewal and production Gmail verification remain pending. No claim of restored Gmail access until those checks pass.
