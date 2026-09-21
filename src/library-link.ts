@@ -3,7 +3,13 @@ import { z } from "zod";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Database } from "./db.js";
 import { event } from "./db.js";
-import { Bearer, LibraryClient, LibraryError } from "./library-client.js";
+import {
+  Bearer,
+  type CallDiagnostic,
+  CookieJar,
+  LibraryClient,
+  LibraryError,
+} from "./library-client.js";
 import { LibraryIdentity } from "./library-identity.js";
 import {
   linkConfirming,
@@ -165,7 +171,10 @@ export class LinkCeremony {
     messageId: number | null,
     deadline: string,
   ) {
-    const bearer = await this.identity.mint(user);
+    // Libby issues every sentry call with credentials, so the session established at mint
+    // travels with the handshake. One jar covers this ceremony's mint, polls, clone and sync.
+    const jar = new CookieJar();
+    const bearer = await this.identity.mint(user, jar);
     let polls = 0;
     let rotations = 0;
     let edits = 0;
@@ -179,6 +188,7 @@ export class LinkCeremony {
         bearer,
         schema: codeResponse,
         context: "background",
+        jar,
       });
     for (;;) {
       if (await this.aborted(attemptId))
@@ -212,10 +222,14 @@ export class LinkCeremony {
           .filter((k) => /^[A-Za-z_][A-Za-z0-9_]{0,39}$/.test(k))
           .slice(0, 40),
       });
-      // Observed on the first real link: the phone reported success while the code poll kept
-      // answering "retained". The card arrives on the identity itself, so check the sync.
+      // A blessed fulfilment goes straight to the clone, exactly as Libby's client does; the
+      // periodic sync probe remains only as the fallback signal for unfulfilled polls, where
+      // an earlier attempt showed the card can arrive while the code poll still says retained.
       if (result === "fulfilled" || polls % this.limits.syncEveryPolls === 0) {
-        const arrived = await this.cardArrived(user, bearer);
+        const arrived =
+          result === "fulfilled" && answer.blessing
+            ? null
+            : await this.cardArrived(user, bearer, jar);
         if (arrived || result === "fulfilled") {
           await this.progress(attemptId, {
             polls,
@@ -233,6 +247,7 @@ export class LinkCeremony {
             bearer,
             arrived,
             answer.blessing,
+            jar,
           );
         }
       }
@@ -254,9 +269,9 @@ export class LinkCeremony {
     }
   }
   /** One paced sync with the attempt's bearer; the sync result when a card is already present. */
-  private async cardArrived(user: string, bearer: Bearer) {
+  private async cardArrived(user: string, bearer: Bearer, jar?: CookieJar) {
     try {
-      const synced = await this.identity.syncRaw(user, bearer);
+      const synced = await this.identity.syncRaw(user, bearer, jar);
       return synced.card ? synced : null;
     } catch (error) {
       if (error instanceof LibraryError) return null;
@@ -343,9 +358,11 @@ export class LinkCeremony {
     bearer: Bearer,
     arrived: Awaited<ReturnType<LinkCeremony["cardArrived"]>> = null,
     blessing?: string,
+    jar?: CookieJar,
   ): Promise<LinkOutcome> {
     await this.progress(attemptId, { state: "completing" });
     let cloned = !!arrived;
+    const diagnostics: CallDiagnostic[] = [];
     try {
       // The card already arrived on this bearer: link it as is. Re-minting here is an
       // unexercised hypothesis that could discard the only token carrying the card; the
@@ -366,6 +383,8 @@ export class LinkCeremony {
             body: { blessing },
             schema: cloneResponse,
             context: "background",
+            jar,
+            onFailure: (d) => diagnostics.push(d),
           });
         } catch (error) {
           // Only the specific sentry rejection is recoverable. A whoa/throttle 403 also
@@ -378,12 +397,14 @@ export class LinkCeremony {
             result: "clone_missing_chip_retry",
             polls: 0,
           });
-          current = await this.identity.remint(user, "linking");
+          current = await this.identity.remint(user, "linking", jar);
           answer = await this.client.call("chipClone", {
             bearer: current,
             body: { blessing },
             schema: cloneResponse,
             context: "background",
+            jar,
+            onFailure: (d) => diagnostics.push(d),
           });
         }
         cloned = true;
@@ -395,12 +416,12 @@ export class LinkCeremony {
             answer.identity,
             answer.expiry,
           );
-        synced = await this.identity.syncRaw(user, current);
+        synced = await this.identity.syncRaw(user, current, jar);
         if (!synced.card) {
           // Libby's own client forgets its in-memory identity after the clone and re-mints
           // with the old bearer before syncing; do the same once.
-          const renewed = await this.identity.remint(user, "linking");
-          synced = await this.identity.syncRaw(user, renewed);
+          const renewed = await this.identity.remint(user, "linking", jar);
+          synced = await this.identity.syncRaw(user, renewed, jar);
         }
       }
       const { shelf, card, cards } = synced;
@@ -441,6 +462,15 @@ export class LinkCeremony {
             ? "error:" + error.kind + (error.code ? ":" + error.code : "")
             : "error:" + String((error as Error)?.message ?? "").slice(0, 60),
       });
+      // Structural record of what the refusal actually said, so a repeat failure is
+      // diagnosable without another live attempt. Values never appear, only names and a
+      // scrubbed excerpt.
+      if (diagnostics.length)
+        await event(this.db, user, approvalId, "library.clone_refused", {
+          attemptId,
+          cookies: jar?.names() ?? [],
+          attempts: diagnostics.slice(0, 4),
+        });
       const outcome: LinkOutcome = {
         status:
           error instanceof LibraryError && error.kind === "rejected"

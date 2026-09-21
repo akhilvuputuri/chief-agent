@@ -43,6 +43,8 @@ function harness(
     enter?: (body: any) => Response;
     /** The card appears on sync only after a clone with a valid blessing (Libby's real order). */
     cardAfterClone?: boolean;
+    /** A Set-Cookie the sentry returns on mint, as Libby's credentialed client would receive. */
+    mintCookie?: string;
   } = {},
 ) {
   let cloned = false;
@@ -64,11 +66,16 @@ function harness(
       calls.push({ url, init });
       const p = url.pathname;
       if (p === "/chip" && init.method === "POST")
-        return Response.json({
-          identity: mints++ === 0 ? TOKEN : TOKEN2,
-          chip: "chip1234-5678",
-          expiry: Math.floor(now / 1000) + 7 * 86400,
-        });
+        return Response.json(
+          {
+            identity: mints++ === 0 ? TOKEN : TOKEN2,
+            chip: "chip1234-5678",
+            expiry: Math.floor(now / 1000) + 7 * 86400,
+          },
+          options.mintCookie
+            ? { headers: { "set-cookie": options.mintCookie } }
+            : undefined,
+        );
       if (p === "/chip/clone/code" && init.method === "GET")
         return Response.json(
           codes.shift() ?? { result: "retained", code: "11112222" },
@@ -268,7 +275,6 @@ test("the linking ceremony displays a rotating code, completes on fulfilled, lin
       "GET /chip/clone/code",
       "GET /chip/clone/code",
       "GET /chip/clone/code",
-      "GET /chip/sync",
       "POST /chip/clone",
       "GET /chip/sync",
     ]);
@@ -820,7 +826,6 @@ test("the production-likely path: a clone answer without an identity, re-mint wi
       assert.deepEqual(paths, [
         "POST /chip",
         "GET /chip/clone/code",
-        "GET /chip/sync",
         "POST /chip/clone",
         "GET /chip/sync",
         "POST /chip",
@@ -981,7 +986,6 @@ test("a first clone that answers 403 missing_chip is retried once after re-minti
     assert.deepEqual(paths, [
       "POST /chip",
       "GET /chip/clone/code",
-      "GET /chip/sync",
       "POST /chip/clone",
       "POST /chip",
       "POST /chip/clone",
@@ -1035,6 +1039,38 @@ test("a clone 403 that is not missing_chip is not retried and does not re-mint",
       ).length,
       1,
     );
+  } finally {
+    await pg.close();
+  }
+});
+
+test("a session cookie set at mint travels with the rest of the handshake and never leaks", async () => {
+  const { pg, db } = await database();
+  try {
+    const h = harness(db, {
+      mintCookie: "sentry_session=s3cr3tvalue; Path=/; HttpOnly",
+      codes: [{ result: "fulfilled", blessing: "bless-c" }],
+      cardAfterClone: true,
+    });
+    const a = await h.actions.draft(
+      "123",
+      randomUUID(),
+      "library_link",
+      {},
+      { source: "command" },
+    );
+    await h.actions.decide("123", a.approvalId!, true);
+    assert.equal(await settled(db, a.approvalId!), "created");
+    const after = h.calls.filter((c) => c.url.pathname !== "/chip");
+    assert.ok(after.length >= 2, "the handshake continued past the mint");
+    for (const call of after)
+      assert.equal(
+        (call.init.headers as any).cookie,
+        "sentry_session=s3cr3tvalue",
+        `${call.url.pathname} carries the session cookie`,
+      );
+    // The value is a secret: it must not reach events, approvals or the attempt row.
+    await leakScan(db, ["s3cr3tvalue"]);
   } finally {
     await pg.close();
   }
