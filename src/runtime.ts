@@ -79,6 +79,7 @@ export function runtimeContext(
       !availability.calendar) ||
     (op === "sheet_sync" && !availability.preparationSheet) ||
     (op === "daily_sync" && !availability.dailySheet) ||
+    (op.startsWith("watchlist_") && !availability.stocks) ||
     (op.startsWith("web_") && !availability.web);
   const options = action.options.filter(
     (o) => !disabled(o.shape.operation.value),
@@ -144,6 +145,16 @@ export function runtimeContext(
                   "Read the linked NLB card's current loans (days left, due dates, Lucky Day flag) and holds (ready or estimated wait) plus slot capacity. Cached 15 minutes; never contains card numbers or ids. Not linked → ask the user to send /library link.",
                 library_availability:
                   "Recheck up to five known titleIds from an earlier library_check. Same verdict rule; cached 15 minutes.",
+                watchlist_add:
+                  "Add a stock to the price-drop watchlist. query is a ticker or company name; when candidates span exchanges ask the owner to pick, then repeat with that exchange. Optional dropPct overrides the owner's default threshold. Alerting is deterministic, never trading advice.",
+                watchlist_update:
+                  "Change a watched stock's threshold (null restores the account default) or pause/resume it by exact id from watchlist_list.",
+                watchlist_remove:
+                  "Stop watching a stock by exact id from watchlist_list. Removes its alert and observation history.",
+                watchlist_list:
+                  "List watched stocks, effective thresholds, latest alerts and the most recent observation decision.",
+                watchlist_settings:
+                  "Set watchlist defaults: defaultDropPct, paused master switch, pollMinutes cadence, includeExtended opt-in for pre/post-market quotes.",
                 gmail_search:
                   "Search the owner's mailbox with Gmail operators (from:, subject:, newer_than:, quoted phrases, OR, -term, has:attachment, in:anywhere). Returns up to ten hits with sender, subject, date, snippet and unread flag, plus a hint when the result set is empty or very large. Triage from this list; do not read every hit. Identical searches are cached five minutes.",
                 gmail_thread:

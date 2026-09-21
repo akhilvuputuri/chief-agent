@@ -16,6 +16,7 @@ import type { WebTools } from "./providers.js";
 import type { CalendarActions } from "./calendar-actions.js";
 import type { LibraryTools } from "./library.js";
 import type { LibraryActions } from "./library-actions.js";
+import type { WatchlistTools } from "./stocks.js";
 export class JobTools {
   constructor(
     private db: Database,
@@ -26,6 +27,7 @@ export class JobTools {
     private calendarActions?: CalendarActions,
     private library?: LibraryTools,
     private libraryActions?: LibraryActions,
+    private stocks?: WatchlistTools,
   ) {}
   async execute(
     user: string,
@@ -179,6 +181,16 @@ export class JobTools {
       a.operation === "routine_history"
     )
       return new RoutineTools(db).call(user, run, a);
+    if (
+      a.operation === "watchlist_add" ||
+      a.operation === "watchlist_update" ||
+      a.operation === "watchlist_remove" ||
+      a.operation === "watchlist_list" ||
+      a.operation === "watchlist_settings"
+    ) {
+      if (!this.stocks) throw new Error("Stock watchlist is not configured");
+      return this.stocks.call(user, run, a);
+    }
     if (
       a.operation === "item_save" ||
       a.operation === "item_list" ||

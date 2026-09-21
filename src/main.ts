@@ -1,4 +1,6 @@
 import { RoutineScheduler, RoutineDelivery } from "./routines.js";
+import { StockMonitor, StockDelivery, WatchlistTools } from "./stocks.js";
+import { TwelveDataProvider } from "./stock-provider.js";
 import { run as runTelegram } from "@grammyjs/runner";
 import { CustomAgent } from "./custom-agent.js";
 import { OpenRouter } from "./model.js";
@@ -53,6 +55,13 @@ if (
 )
   throw new Error(
     "Scheduled routines migration 017 must be applied with the gateway stopped",
+  );
+if (
+  !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=18")).rows
+    .length
+)
+  throw new Error(
+    "Stock watchlist migration 018 must be applied with the gateway stopped",
   );
 await recoverRuntime(db);
 // Library account features need migration 016; without the key they stay off even if tables exist.
@@ -133,6 +142,16 @@ if (libraryIdentity) {
   );
 }
 const library = new LibraryTools(libraryClient, undefined, libraryIdentity);
+const stockProvider =
+  c.MARKET_DATA_PROVIDER === "twelvedata"
+    ? new TwelveDataProvider(c.TWELVE_DATA_API_KEY, {
+        supportsExtended: c.MARKET_DATA_EXTENDED === "true",
+      })
+    : undefined;
+if (c.MARKET_DATA_PROVIDER === "twelvedata" && !c.TWELVE_DATA_API_KEY)
+  throw new Error(
+    "MARKET_DATA_PROVIDER=twelvedata requires TWELVE_DATA_API_KEY",
+  );
 const parser = new ScheduleParser();
 const daily = new DailyTools(db, parser, calendar, mirror);
 const assistant = new Assistant(
@@ -178,6 +197,7 @@ const assistant = new Assistant(
     new CalendarActions(db, calendar, c.GMAIL_OWNER_USER_ID),
     library,
     libraryActions,
+    new WatchlistTools(db, stockProvider),
   ),
   {
     canvases: !!c.MINIAPP_ORIGIN,
@@ -188,6 +208,7 @@ const assistant = new Assistant(
     libraryAccount: !!libraryIdentity,
     preparationSheet: !!(c.SHEETS_REFRESH_TOKEN && c.SHEETS_SPREADSHEET_ID),
     dailySheet: !!(c.SHEETS_REFRESH_TOKEN && c.DAILY_SPREADSHEET_ID),
+    stocks: !!stockProvider,
   },
   {
     ms: c.AGENT_BUDGET_MS,
@@ -312,6 +333,32 @@ async function sendWorkMessage(user: string, text: string | Delivery) {
 const routineScheduler = new RoutineScheduler(db, (user) => allowed.has(user));
 const routineDelivery = new RoutineDelivery(db, sendWorkMessage);
 await routineDelivery.recover();
+const stockMonitor = stockProvider
+  ? new StockMonitor(db, stockProvider, (user) => allowed.has(user))
+  : undefined;
+const stockDelivery = new StockDelivery(db, async (user, payload) => {
+  if (!allowed.has(user)) throw new Error("Unauthorized delivery");
+  await bot.api.sendMessage(user, payload.reply, {
+    link_preview_options: { is_disabled: true },
+    reply_markup: {
+      inline_keyboard: [
+        [
+          {
+            text: `Pause ${payload.symbol} alerts`,
+            callback_data: `stk:item:${payload.itemId}`,
+          },
+        ],
+        [
+          {
+            text: "Pause all stock alerts",
+            callback_data: `stk:all:${payload.alertId}`,
+          },
+        ],
+      ],
+    },
+  });
+});
+await stockDelivery.recover();
 const routineTimer = setInterval(() => {
   void routineScheduler
     .tick()
@@ -322,6 +369,14 @@ const routineTimer = setInterval(() => {
     .tick()
     .catch(() =>
       console.error(JSON.stringify({ event: "routine.delivery_failed" })),
+    );
+  void stockMonitor
+    ?.tick()
+    .catch(() => console.error(JSON.stringify({ event: "stock.tick_failed" })));
+  void stockDelivery
+    .tick()
+    .catch(() =>
+      console.error(JSON.stringify({ event: "stock.delivery_failed" })),
     );
 }, 15000);
 routineTimer.unref();

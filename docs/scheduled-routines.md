@@ -49,6 +49,8 @@ Stock/news agents should add their specialist definitions/tools through the exis
 
 Use existing source/evidence records and structured results. Include exact watched instruments/topics and relevant threshold definitions in saved instructions. This foundation does not implement market-price feeds, stock thresholds, ranking/feedback for news, realtime listeners or conditional notification delivery. Those belong to the domain issues. A routine currently reports each executed pass; do not promise “notify only if changed” until an explicit validated silent-result mechanism is added.
 
+The stock watchlist ([issue #46](https://github.com/akhilvuputuri/companion-agent/issues/46)) landed separately as a deterministic poller, not a routine: an LLM routine could not meet its no-model-per-poll and conditional-silence requirements. See [stock-watchlist.md](stock-watchlist.md); news feeds remain future domain work on this contract.
+
 ## Deployment (operator-reviewed migration 017)
 
 1. Independently review exact PR head and run `npm run check` plus changed-file formatting. Review `scripts/deploy-routines.py` too.

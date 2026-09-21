@@ -26,6 +26,9 @@ for (const key of [
   "TAVILY_API_KEY",
   "LIBRARY_IDENTITY_KEY",
   "LIBRARY_HOLD_EMAIL",
+  "MARKET_DATA_PROVIDER",
+  "MARKET_DATA_EXTENDED",
+  "TWELVE_DATA_API_KEY",
 ]) {
   console.log(`${key}: ${env[key]?.trim() ? "configured" : "not configured"}`);
 }
