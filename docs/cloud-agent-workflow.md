@@ -39,7 +39,7 @@ gh run view RUN_ID --log
 gh workflow run deploy.yml --ref main
 ```
 
-Match the run's time and actor before reading its output. A dispatch acknowledgement is not completion. Diagnostics expose bounded metadata only; they are not full prompt/email exports. If dispatch is denied, request the narrow missing capability or an operator diagnostic run, and continue with available CI logs and reproductions. Do not hand a cloud worker unrestricted SSH.
+Match the run's time and actor before reading its output. A dispatch acknowledgement is not completion. Diagnostics expose bounded metadata only; they are not full prompt/email exports. If dispatch is denied, the repository owner or the installed Devin GitHub bot can post the exact comment `/companion diagnose` on a repository issue or PR. The trusted default-branch workflow runs only the existing fixed `diagnose` command and replies with its private Actions link. It accepts no arguments, refs or shell commands, does not check out PR code, and is disabled if the repository becomes public. Other commenters cannot trigger it. This closes diagnostics dispatch without granting the coding session Actions write or SSH. If comment permission is also unavailable, continue with available logs and state the blocker. Do not hand a cloud worker unrestricted SSH.
 
 Close with PR, reviewed SHA, tests, deployment SHA/workflow evidence, behavioral acceptance limits and remaining blockers. Update the journal and handover. A statement such as “after merge I'll watch” is incomplete unless the task actually watches or leaves an explicit blocked handover.
 
@@ -50,3 +50,9 @@ As observed on 22 September 2026, Companion Agent is enrolled in automatic Devin
 GitHub integration permissions, security profiles and the session's CLI credentials determine its actual mutation/Actions capabilities. Local Codex access proves none of these. Keep a cloud capability result in the task; do not store credentials or personal environment dumps in the repository. Native Devin web deployment is unrelated to the DigitalOcean release pipeline.
 
 Remaining boundaries: remote schema/host installation is operator-mediated; raw private trace export is not installed. Review quality must be evaluated on defects found and missed over time, not the number of approvals. See [the harness incident](journey/29-cloud-agent-harness.md).
+
+### Cloud audit, 22 September 2026
+
+The existing Devin session verified repository and Actions-log reads. It reported `403 Resource not accessible by integration` for workflow dispatch and a platform policy restriction on `gh pr merge`; merge on an open PR remains unverified. Do not bypass a platform policy using alternate APIs. Routine merge authorization from the owner does not override the tool's restrictions. Use an authorized reviewer/operator to merge if that boundary persists. The diagnostics comment command supplies a supported, narrowly scoped read operation; it does not merge or deploy code.
+
+The session also attempted write probes during a read-only audit, despite the instructions. It was stopped and reported no new changes. Treat that as an instruction-following limitation, not evidence of reliable autonomy. The workflow enforces its own narrow command/actor boundary regardless of the agent's prose.
