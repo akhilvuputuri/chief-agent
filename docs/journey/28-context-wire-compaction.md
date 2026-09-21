@@ -17,3 +17,9 @@ Keep the hard limit and existing continuity guarantees. If either preliminary or
 Regression tests reproduce serialized overflow with escaping, preserve latest reasoning and account provenance, assert original messages remain unchanged and keep the hard failure for unreferenced oversized results. Existing continuity checks retain user/assistant context and incomplete-group handling. This is a general packing correction, not an order-specific prompt. It does not reduce fixed tool-schema bloat or guarantee semantic extraction quality. Lazy tool selection and richer context budgeting remain separate improvements.
 
 Candidate v0.3.20; independent review, CI and deployment pending. No automatic retry of the user's order lookup or external action is part of deployment.
+
+## Release verification — 21 September 2026 SGT
+
+[PR #72](https://github.com/akhilvuputuri/companion-agent/pull/72) passed both CI runs after independent GPT-6 Astra approval at `ee0c0e73a035dffbede449d3a8cada987ab680f7`. Local checks passed 342 application tests and 2 script tests plus formatting; the reviewer independently passed 15 continuity/budget/projection tests.
+
+The installed guarded release command deployed `c323b34da7fb663ebdf8d2805c88f1e7fc1dac1f` and reported healthy. A synthetic no-network regression in the deployed container repacked to 94,033 characters below the 120,000-character limit, preserving original messages. This verifies deployed packing mechanics, not semantic completion of the original email request. No original user task was automatically resumed. Published [v0.3.20](https://github.com/akhilvuputuri/companion-agent/releases/tag/v0.3.20) records this evidence. No schema or Compose migration was needed.
