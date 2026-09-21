@@ -29,6 +29,9 @@ class WatchlistRolloutTests(unittest.TestCase):
     def test_parallel_documentation_baseline(self):
         self.scenario(baseline='6ffd2339dd20954e0457cc6bbaf61fea37425d6b', expected_migration=True)
 
+    def test_live_library_repair_baseline(self):
+        self.scenario(baseline='25aa0e33af9f620b27b29f98f07d0978d4d165cb', expected_migration=True)
+
     def scenario(self, *, running=0, pending=0, baseline=None, requested_sha=SHA,
                  archive_sha=SHA, changes=None, unsafe=None, health=None,
                  build_failure=False, migration_failure=False, publish_failure=False,
