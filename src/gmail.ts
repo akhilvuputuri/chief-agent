@@ -158,6 +158,7 @@ export class GmailTools {
   private expires = 0;
   private searches = new Map<string, { at: number; result: unknown }>();
   private spent = new Map<string, { at: number; used: number }>();
+  private secondary?: GmailTools;
   constructor(
     private config: {
       owner: string;
@@ -165,10 +166,26 @@ export class GmailTools {
       clientId: string;
       clientSecret: string;
       refreshToken: string;
+      secondary?: { email: string; refreshToken: string };
     },
     private request: typeof fetch = fetch,
     private now: () => number = Date.now,
-  ) {}
+  ) {
+    if (config.secondary) {
+      if (
+        !config.secondary.email ||
+        !config.secondary.refreshToken ||
+        config.secondary.email.toLowerCase() === config.email.toLowerCase()
+      )
+        throw new Error("Invalid secondary Gmail configuration");
+      this.secondary = new GmailTools(
+        { ...config, ...config.secondary, secondary: undefined },
+        request,
+        now,
+      );
+      this.secondary.spent = this.spent;
+    }
+  }
   /**
    * Charges one Gmail API request to the turn, so a search loop cannot walk a
    * mailbox. A caller without a run identifier shares one bucket rather than
@@ -473,17 +490,66 @@ export class GmailTools {
   }
   async call(
     user: string,
-    operation: "gmail_search" | "gmail_read" | "gmail_thread",
+    operation:
+      "gmail_search" | "gmail_read" | "gmail_thread" | "gmail_accounts",
     value: string,
     pageToken?: string,
     run?: string,
-  ) {
+    account?: string,
+  ): Promise<unknown> {
+    if (!this.config.owner || user !== this.config.owner)
+      throw new Error("Gmail is not connected for this user");
+    const accounts = [
+      { account: "primary", email: this.config.email, default: true },
+      ...(this.secondary
+        ? [
+            {
+              account: "secondary",
+              email: this.secondary.config.email,
+              default: false,
+            },
+          ]
+        : []),
+    ];
+    if (operation === "gmail_accounts") return { accounts };
+    const selected = account?.toLowerCase() ?? "primary";
+    if (
+      this.secondary &&
+      (selected === "secondary" ||
+        selected === this.secondary.config.email.toLowerCase())
+    ) {
+      const result = await this.secondary.call(
+        user,
+        operation,
+        value,
+        pageToken,
+        run,
+      );
+      return {
+        ...(result as Record<string, unknown>),
+        account: "secondary",
+        email: this.secondary.config.email,
+      };
+    }
+    if (selected !== "primary" && selected !== this.config.email.toLowerCase())
+      throw new ToolValidationError(
+        "Unknown Gmail account. Use gmail_accounts to list connected mailboxes; do not fall back to another mailbox.",
+      );
     const token = await this.access(user);
+    const identity = { account: "primary", email: this.config.email };
     if (operation === "gmail_search")
-      return this.search(token, user, value, pageToken, run);
+      return {
+        ...((await this.search(token, user, value, pageToken, run)) as Record<
+          string,
+          unknown
+        >),
+        ...identity,
+      };
     if (!ID.test(value)) throw new Error("Invalid Gmail message id");
-    return operation === "gmail_thread"
-      ? this.thread(token, value, run)
-      : this.read(token, value, run);
+    const result =
+      operation === "gmail_thread"
+        ? await this.thread(token, value, run)
+        : await this.read(token, value, run);
+    return { ...result, ...identity };
   }
 }

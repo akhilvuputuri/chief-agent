@@ -54,6 +54,7 @@ export class JobTools {
           url: r?.url,
           counts: r?.counts,
           preparationLinks: r?.link_count,
+          account: a.operation.startsWith("gmail_") ? r?.account : undefined,
         };
         await this.db.query(
           `INSERT INTO tool_receipts(id,user_id,run_id,task_id,operation,status,details) VALUES($1,$2,$3,(SELECT task_id FROM work_turns WHERE run_id=$3),$4,'success',$5::jsonb)`,
@@ -226,6 +227,7 @@ export class JobTools {
       return this.sheets.sync(user);
     }
     if (
+      a.operation === "gmail_accounts" ||
       a.operation === "gmail_search" ||
       a.operation === "gmail_read" ||
       a.operation === "gmail_thread"
@@ -234,13 +236,16 @@ export class JobTools {
       return this.gmail.call(
         user,
         a.operation,
-        a.operation === "gmail_search"
-          ? a.query
-          : a.operation === "gmail_thread"
-            ? a.threadId
-            : a.messageId,
+        a.operation === "gmail_accounts"
+          ? ""
+          : a.operation === "gmail_search"
+            ? a.query
+            : a.operation === "gmail_thread"
+              ? a.threadId
+              : a.messageId,
         a.operation === "gmail_search" ? a.pageToken : undefined,
         run,
+        a.operation === "gmail_accounts" ? undefined : a.account,
       );
     }
     if (a.operation === "job_save")

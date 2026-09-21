@@ -1,5 +1,7 @@
 # Current work and shipped baseline
 
+Candidate v0.3.19: two read-only Gmail accounts with explicit account selection, separate credentials/caches and a shared request allocation. See [runbook](google-authorization.md) and [journal](journey/27-multiple-gmail-accounts.md). Review and deployment pending.
+
 In progress on a review branch: the stock watchlist for [issue #46](https://github.com/akhilvuputuri/companion-agent/issues/46) — a deterministic `StockMonitor` plus persisted alert outbox (not an LLM routine), conversational `watchlist_*` tools gated behind a configured market-data provider (Twelve Data free plan, US listings), migration 018 and the reviewed operator rollout `scripts/deploy-watchlist.py`. Behavior and operator runbook: [stock-watchlist.md](stock-watchlist.md); journal: [25](journey/25-stock-watchlist.md). Independent review and deployment are pending; production is unchanged until both complete.
 
 Released scheduled routine foundation: [v0.3.15](https://github.com/akhilvuputuri/companion-agent/releases/tag/v0.3.15), issue #56, PRs #58/#59, migration 017. Operator rollout verified `c1f8e7088676d4ee3d041993d5e08412e4c73a70` healthy on 20 September 2026. Future domain agents should reuse the [contract/runbook](scheduled-routines.md). No live routine was created during deployment.

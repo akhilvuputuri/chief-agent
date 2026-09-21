@@ -43,6 +43,10 @@ const schema = z.object({
   SHEETS_REFRESH_TOKEN: z.string().default(""),
   SHEETS_SPREADSHEET_ID: z.string().default(""),
   GMAIL_OWNER_USER_ID: z.string().regex(/^\d*$/).default(""),
+  GMAIL_SECONDARY_EMAIL: z
+    .union([z.literal(""), z.string().email().max(254)])
+    .default(""),
+  GMAIL_SECONDARY_REFRESH_TOKEN: z.string().default(""),
   GMAIL_EMAIL: z.string().default(""),
   GOOGLE_CLIENT_ID: z.string().default(""),
   GOOGLE_CLIENT_SECRET: z.string().default(""),
