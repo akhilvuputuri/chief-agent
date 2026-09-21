@@ -155,6 +155,8 @@ export function runtimeContext(
                   "List watched stocks, effective thresholds, latest alerts and the most recent observation decision.",
                 watchlist_settings:
                   "Set watchlist defaults: defaultDropPct, paused master switch, pollMinutes cadence, includeExtended opt-in for pre/post-market quotes.",
+                gmail_accounts:
+                  "List connected Gmail account selectors and email addresses. Owner-only; no credentials returned.",
                 gmail_search:
                   "Search the owner's mailbox with Gmail operators (from:, subject:, newer_than:, quoted phrases, OR, -term, has:attachment, in:anywhere). Returns up to ten hits with sender, subject, date, snippet and unread flag, plus a hint when the result set is empty or very large. Triage from this list; do not read every hit. Identical searches are cached five minutes.",
                 gmail_thread:

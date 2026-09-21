@@ -52,6 +52,7 @@ export const readOperations = new Set([
   "skill_history",
   "prep_list",
   "prep_task_read",
+  "gmail_accounts",
   "gmail_search",
   "gmail_read",
   "gmail_thread",

@@ -88,7 +88,17 @@ const google = {
   clientSecret: c.GOOGLE_CLIENT_SECRET,
   refreshToken: c.GOOGLE_REFRESH_TOKEN,
 };
-const gmail = new GmailTools(google);
+const gmail = new GmailTools({
+  ...google,
+  ...(c.GMAIL_SECONDARY_EMAIL || c.GMAIL_SECONDARY_REFRESH_TOKEN
+    ? {
+        secondary: {
+          email: c.GMAIL_SECONDARY_EMAIL,
+          refreshToken: c.GMAIL_SECONDARY_REFRESH_TOKEN,
+        },
+      }
+    : {}),
+});
 const calendar = new CalendarTools({
   ...google,
   refreshToken: c.CALENDAR_REFRESH_TOKEN,

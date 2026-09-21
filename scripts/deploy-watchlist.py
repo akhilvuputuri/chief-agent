@@ -18,6 +18,8 @@ LOCK = pathlib.Path('/var/lock/companion-release.lock')
 BASE = 'c1f8e7088676d4ee3d041993d5e08412e4c73a70'
 BASES = {
     BASE,
+    # Verified live app-only library repair; DB/Compose unchanged (PR65).
+    '25aa0e33af9f620b27b29f98f07d0978d4d165cb',
     '6ffd2339dd20954e0457cc6bbaf61fea37425d6b',
     # v0.3.16/v0.3.17 app-only library releases (PRs #61/#62).
     '818671bc004bc75e543a8b62d94ec59f3ae17825',
@@ -28,7 +30,9 @@ MIGRATION = '018_watchlist.sql'
 COMPOSE_MIGRATION_ANCHOR = b'        "/migrations/017_routines.sql",\n'
 COMPOSE_MIGRATION_ADDITION = b'        "-f",\n        "/migrations/018_watchlist.sql",\n'
 COMPOSE_ENV_ANCHOR = b'      TAVILY_API_KEY: ${TAVILY_API_KEY:-}\n'
-COMPOSE_ENV_ADDITION = (b'      MARKET_DATA_PROVIDER: ${MARKET_DATA_PROVIDER:-}\n'
+COMPOSE_ENV_ADDITION = (b'      GMAIL_SECONDARY_EMAIL: ${GMAIL_SECONDARY_EMAIL:-}\n'
+                        b'      GMAIL_SECONDARY_REFRESH_TOKEN: ${GMAIL_SECONDARY_REFRESH_TOKEN:-}\n'
+                        b'      MARKET_DATA_PROVIDER: ${MARKET_DATA_PROVIDER:-}\n'
                         b'      MARKET_DATA_EXTENDED: ${MARKET_DATA_EXTENDED:-}\n'
                         b'      TWELVE_DATA_API_KEY: ${TWELVE_DATA_API_KEY:-}\n')
 MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
@@ -122,7 +126,7 @@ def validate_changes(stage):
         COMPOSE_MIGRATION_ANCHOR + COMPOSE_MIGRATION_ADDITION).replace(
         COMPOSE_ENV_ANCHOR, COMPOSE_ENV_ANCHOR + COMPOSE_ENV_ADDITION)
     if (stage / 'compose.yaml').read_bytes() != expected:
-        raise RuntimeError('Unexpected Compose change; only the migration 018 entry and watchlist environment passthrough are permitted')
+        raise RuntimeError('Unexpected Compose change; only migration 018, secondary Gmail and watchlist environment passthrough are permitted')
     if (stage / 'scripts/cloud-release.py').read_bytes() != (LIVE / 'scripts/cloud-release.py').read_bytes():
         raise RuntimeError('Trusted release-handler source changed; requires separate review')
 
