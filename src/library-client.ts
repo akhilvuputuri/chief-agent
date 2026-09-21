@@ -88,6 +88,60 @@ export interface CallOptions<T> {
   schema: z.ZodType<T, any, any>;
   /** Turn calls refuse long pacing waits; background calls (callbacks, watcher) honour them. */
   context: "turn" | "background";
+  /**
+   * Libby's client issues every sentry request with credentials, so the chip session it
+   * establishes at mint time travels on later calls. A ceremony passes one jar through its
+   * whole handshake to do the same; without it the server may not recognise the chip.
+   */
+  jar?: CookieJar;
+  /** Receives structural failure diagnostics (never values) for a refused call. */
+  onFailure?: (diagnostic: CallDiagnostic) => void;
+  /** In-flight values to redact from any diagnostic excerpt by literal match. */
+  secrets?: string[];
+}
+export interface CallDiagnostic {
+  route: string;
+  status: number;
+  /** Header names only; values may carry session secrets. */
+  headers: string[];
+  /** Bounded, scrubbed excerpt of the error body. */
+  body: string;
+}
+/**
+ * A minimal same-host cookie store. Values are held in memory for the life of one ceremony and
+ * are never logged or persisted; only their names ever reach diagnostics.
+ */
+export class CookieJar {
+  private jar = new Map<string, string>();
+  absorb(response: Response) {
+    const raw = (response.headers as any).getSetCookie?.() ?? [];
+    const lines: string[] = raw.length
+      ? raw
+      : ((h) => (h ? [h] : []))(response.headers.get("set-cookie"));
+    for (const line of lines) {
+      const pair = line.split(";", 1)[0] ?? "";
+      const eq = pair.indexOf("=");
+      if (eq <= 0) continue;
+      const name = pair.slice(0, eq).trim();
+      const value = pair.slice(eq + 1).trim();
+      if (!/^[A-Za-z0-9_.-]{1,64}$/.test(name)) continue;
+      // An empty value is the standard clear; honour it rather than echoing a dead cookie.
+      if (value) this.jar.set(name, value);
+      else this.jar.delete(name);
+    }
+  }
+  header() {
+    if (!this.jar.size) return undefined;
+    return [...this.jar].map(([n, v]) => `${n}=${v}`).join("; ");
+  }
+  /** Cookie names present, for diagnostics. Never the values. */
+  names() {
+    return [...this.jar.keys()];
+  }
+  /** Values, used only to redact them from diagnostics before they are journalled. */
+  values() {
+    return [...this.jar.values()];
+  }
 }
 export interface LibraryClientDeps {
   pacing: PacingStore;
@@ -220,13 +274,17 @@ export class LibraryClient {
             ? { "content-type": "application/json" }
             : {}),
           ...(options.bearer ? { authorization: options.bearer.header() } : {}),
-        },
+          ...(route.host === "sentry" && options.jar?.header()
+            ? { cookie: options.jar.header() as string }
+            : {}),
+        } as Record<string, string>,
         body:
           options.body !== undefined ? JSON.stringify(options.body) : undefined,
       });
     } catch {
       throw await this.transient(route, started, "timeout");
     }
+    if (route.host === "sentry") options.jar?.absorb(response);
     const status = response.status;
     const limit =
       key === "mediaSearch"
@@ -281,6 +339,15 @@ export class LibraryClient {
       } catch {
         code = undefined;
       }
+      options.onFailure?.({
+        route: route.template,
+        status,
+        headers: [...response.headers.keys()].slice(0, 40),
+        body: scrubExcerpt(text, 400, [
+          ...(options.secrets ?? []),
+          ...(options.jar?.values() ?? []),
+        ]),
+      });
       throw new LibraryError(
         "unauthenticated",
         "the Libby link needs to be renewed; send /library link",
@@ -354,6 +421,29 @@ function upstreamCode(body: unknown) {
       return code;
   }
   return undefined;
+}
+/**
+ * A short, safe excerpt of an error body for diagnostics. Anything token-shaped is replaced
+ * before it can reach the journal; the result is bounded so a hostile body cannot flood it.
+ */
+export function scrubExcerpt(
+  text: string,
+  limit = 400,
+  secrets: string[] = [],
+) {
+  // Known in-flight values go first and by literal match: shape heuristics cannot catch a
+  // short blessing or cookie, and a refused body most often echoes what we just sent.
+  let out = text;
+  for (const secret of secrets)
+    if (secret && secret.length >= 4) out = out.split(secret).join("[SECRET]");
+  // Scrub before bounding, so a token straddling the cut cannot survive as a fragment.
+  return out
+    .replace(
+      /[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
+      "[JWT]",
+    )
+    .replace(/[A-Za-z0-9+/_-]{40,}={0,2}/g, "[LONG]")
+    .slice(0, limit);
 }
 class BodyTooLarge extends Error {}
 async function readBounded(response: Response, limit: number) {

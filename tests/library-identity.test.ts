@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { PGlite } from "@electric-sql/pglite";
 import { ensureUser, type Database } from "../src/db.js";
 import { open, seal, secretKey } from "../src/secret-box.js";
-import { LibraryClient } from "../src/library-client.js";
+import { LibraryClient, scrubExcerpt } from "../src/library-client.js";
 import { PostgresPacing } from "../src/library-pacing.js";
 import { LibraryIdentity, daysLeft, shapeOf } from "../src/library-identity.js";
 import { LinkCeremony, type LinkOutcome } from "../src/library-link.js";
@@ -43,6 +43,8 @@ function harness(
     enter?: (body: any) => Response;
     /** The card appears on sync only after a clone with a valid blessing (Libby's real order). */
     cardAfterClone?: boolean;
+    /** A Set-Cookie the sentry returns on mint, as Libby's credentialed client would receive. */
+    mintCookie?: string;
   } = {},
 ) {
   let cloned = false;
@@ -64,11 +66,16 @@ function harness(
       calls.push({ url, init });
       const p = url.pathname;
       if (p === "/chip" && init.method === "POST")
-        return Response.json({
-          identity: mints++ === 0 ? TOKEN : TOKEN2,
-          chip: "chip1234-5678",
-          expiry: Math.floor(now / 1000) + 7 * 86400,
-        });
+        return Response.json(
+          {
+            identity: mints++ === 0 ? TOKEN : TOKEN2,
+            chip: "chip1234-5678",
+            expiry: Math.floor(now / 1000) + 7 * 86400,
+          },
+          options.mintCookie
+            ? { headers: { "set-cookie": options.mintCookie } }
+            : undefined,
+        );
       if (p === "/chip/clone/code" && init.method === "GET")
         return Response.json(
           codes.shift() ?? { result: "retained", code: "11112222" },
@@ -268,7 +275,6 @@ test("the linking ceremony displays a rotating code, completes on fulfilled, lin
       "GET /chip/clone/code",
       "GET /chip/clone/code",
       "GET /chip/clone/code",
-      "GET /chip/sync",
       "POST /chip/clone",
       "GET /chip/sync",
     ]);
@@ -820,7 +826,6 @@ test("the production-likely path: a clone answer without an identity, re-mint wi
       assert.deepEqual(paths, [
         "POST /chip",
         "GET /chip/clone/code",
-        "GET /chip/sync",
         "POST /chip/clone",
         "GET /chip/sync",
         "POST /chip",
@@ -981,7 +986,6 @@ test("a first clone that answers 403 missing_chip is retried once after re-minti
     assert.deepEqual(paths, [
       "POST /chip",
       "GET /chip/clone/code",
-      "GET /chip/sync",
       "POST /chip/clone",
       "POST /chip",
       "POST /chip/clone",
@@ -1038,6 +1042,94 @@ test("a clone 403 that is not missing_chip is not retried and does not re-mint",
   } finally {
     await pg.close();
   }
+});
+
+test("a session cookie set at mint travels with the rest of the handshake and never leaks", async () => {
+  const { pg, db } = await database();
+  try {
+    const h = harness(db, {
+      mintCookie: "sentry_session=s3cr3tvalue; Path=/; HttpOnly",
+      codes: [{ result: "fulfilled", blessing: "bless-c" }],
+      cardAfterClone: true,
+    });
+    const a = await h.actions.draft(
+      "123",
+      randomUUID(),
+      "library_link",
+      {},
+      { source: "command" },
+    );
+    await h.actions.decide("123", a.approvalId!, true);
+    assert.equal(await settled(db, a.approvalId!), "created");
+    const after = h.calls.filter((c) => c.url.pathname !== "/chip");
+    assert.ok(after.length >= 2, "the handshake continued past the mint");
+    for (const call of after)
+      assert.equal(
+        (call.init.headers as any).cookie,
+        "sentry_session=s3cr3tvalue",
+        `${call.url.pathname} carries the session cookie`,
+      );
+    // The value is a secret: it must not reach events, approvals or the attempt row.
+    await leakScan(db, ["s3cr3tvalue"]);
+  } finally {
+    await pg.close();
+  }
+});
+
+test("a refused clone journals why without echoing the blessing, the cookie or a truncated token", async () => {
+  const { pg, db } = await database();
+  try {
+    const h = harness(db, {
+      mintCookie: "sentry_session=s3cr3tvalue; Path=/; HttpOnly",
+      codes: [{ result: "fulfilled", blessing: "bless-short" }],
+      clone: () =>
+        // A refusal that echoes the request: the blessing and cookie are short enough that
+        // shape heuristics alone would not catch them.
+        Response.json(
+          {
+            result: "denied",
+            echo: "bless-short",
+            session: "sentry_session=s3cr3tvalue",
+          },
+          { status: 403 },
+        ),
+    });
+    const a = await h.actions.draft(
+      "123",
+      randomUUID(),
+      "library_link",
+      {},
+      { source: "command" },
+    );
+    await h.actions.decide("123", a.approvalId!, true);
+    assert.equal(await settled(db, a.approvalId!), "uncertain");
+    const refused = (
+      await db.query(
+        "SELECT data FROM events WHERE type='library.clone_refused' ORDER BY id DESC LIMIT 1",
+      )
+    ).rows[0]?.data as any;
+    assert.ok(refused, "the refusal was journalled");
+    assert.equal(refused.attempts[0].status, 403);
+    // The reason survives; the credentials do not.
+    assert.match(refused.attempts[0].body, /denied/);
+    assert.ok(refused.cookies.includes("sentry_session"), "cookie name kept");
+    await leakScan(db, ["bless-short", "s3cr3tvalue"]);
+  } finally {
+    await pg.close();
+  }
+});
+
+test("scrubExcerpt redacts before bounding so a token straddling the cut cannot survive", () => {
+  const jwt =
+    "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJlc2lnbmF0dXJl";
+  const out = scrubExcerpt("x".repeat(370) + jwt, 400);
+  assert.ok(!out.includes("eyJhbGciOiJIUzI1NiJ9"), "no JWT fragment survives");
+  assert.ok(out.length <= 400);
+  // A short secret is only removable by literal match.
+  assert.equal(
+    scrubExcerpt('{"echo":"abc123"}', 400, ["abc123"]),
+    '{"echo":"[SECRET]"}',
+  );
 });
 
 test("/library link settles an attempt left completing before starting a new one", async () => {

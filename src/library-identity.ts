@@ -1,7 +1,12 @@
 import { z } from "zod";
 import { type Database, event } from "./db.js";
 import { randomUUID } from "node:crypto";
-import { Bearer, LibraryClient, LibraryError } from "./library-client.js";
+import {
+  Bearer,
+  type CookieJar,
+  LibraryClient,
+  LibraryError,
+} from "./library-client.js";
 import { libraryKey, websiteId } from "./library-routes.js";
 import { open, seal } from "./secret-box.js";
 export const identityLimits = {
@@ -253,11 +258,12 @@ export class LibraryIdentity {
     return new Date(at).toISOString();
   }
   /** Mints an anonymous chip for a linking attempt; it holds no card until the clone completes. */
-  async mint(user: string) {
+  async mint(user: string, jar?: CookieJar) {
     const response = await this.client.call("chipMint", {
       query: chipQuery(),
       schema: mintResponse,
       context: "background",
+      jar,
     });
     await this.store(
       user,
@@ -272,7 +278,7 @@ export class LibraryIdentity {
     return new Bearer(response.identity);
   }
   /** Re-mints with the current bearer so the token (and any baked-in card) is renewed. */
-  async remint(user: string, state: IdentityState = "linked") {
+  async remint(user: string, state: IdentityState = "linked", jar?: CookieJar) {
     const previous = await this.load(user);
     return this.withBearer(user, async (bearer, cardId) => {
       const response = await this.client.call("chipMint", {
@@ -280,6 +286,7 @@ export class LibraryIdentity {
         bearer,
         schema: mintResponse,
         context: "background",
+        jar,
       });
       const chip = response.chip ?? previous?.chip;
       await this.store(
@@ -362,12 +369,13 @@ export class LibraryIdentity {
     };
   }
   /** Raw sync for the link ceremony and write reconciliation: returns the projection plus the chosen card. */
-  async syncRaw(user: string, bearer?: Bearer) {
+  async syncRaw(user: string, bearer?: Bearer, jar?: CookieJar) {
     const call = (b: Bearer) =>
       this.client.call("chipSync", {
         bearer: b,
         schema: syncResponse,
         context: "background",
+        jar,
       });
     const response = bearer
       ? await call(bearer)
