@@ -12,7 +12,8 @@ jobs:
       github.event.repository.private == true &&
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'workflow_dispatch' ||
-       (github.event.comment.body == '/companion diagnose' &&
+       (github.event_name == 'issue_comment' &&
+        github.event.comment.body == '/companion diagnose' &&
         github.actor == github.event.comment.user.login &&
         ((github.event.comment.user.login == github.repository_owner && github.event.comment.user.type == 'User') ||
          (github.event.comment.user.id == 158243242 && github.event.comment.user.login == 'devin-ai-integration[bot]' && github.event.comment.user.type == 'Bot'))))
