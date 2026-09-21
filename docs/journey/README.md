@@ -77,4 +77,4 @@ Equivalent workload, model/configuration, pricing, denominators and missing acco
 
 ## Cloud task delivery follow-up
 
-- 22 September 2026: [29 — Cloud-agent review and release harness](29-cloud-agent-harness.md), extending the deployment and incident-investigation reading path. Implementation and verification in progress.
+- 22 September 2026: [29 — Cloud-agent review and release harness](29-cloud-agent-harness.md), extending the deployment and incident-investigation reading path. Merged; actual cloud diagnostics acceptance passed. Release evidence and remaining boundaries are recorded in the entry.

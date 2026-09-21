@@ -1,3 +1,7 @@
+Cloud harness PRs #74/#75 are merged: shared independent-review instructions, `/companion` Devin shortcut, exact-commit release receipts, and a pinned-owner/Devin-bot diagnostics comment command. Released at `f71468a` with startup health and authenticated release receipt verified; actual Devin-originated diagnostics and PR reply passed; see [workflow](cloud-agent-workflow.md) and [evidence](journey/29-cloud-agent-harness.md). Self-merge remains unverified under the reported platform restriction; schema/host rollouts remain operator-mediated.
+
+New context incident diagnosed on 22 September: the wire-compaction patch works but accumulated current-turn groups still outgrow the internal character guard. See [measured follow-up](journey/28-context-wire-compaction.md#follow-up--22-september-2026-accumulation-remains-unbounded). Model capacity and application policy are distinct; general rolling-context remediation is not yet implemented.
+
 # Current work and shipped baseline
 
 Released v0.3.20 at `c323b34`: recoverable context repacking after serialized tool results exceed the application guard. [Incident, regression and deployment evidence](journey/28-context-wire-compaction.md). Original messages/results remain stored; fixed schema footprint optimization remains separate.
