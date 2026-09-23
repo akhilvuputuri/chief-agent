@@ -86,7 +86,7 @@ Equivalent workload, model/configuration, pricing, denominators and missing acco
 
 ## Calendar
 
-- 23–24 September 2026: [31 — Calendar authorization failure](31-calendar-authorization-failure.md): an expired Calendar token made an approval uncertain and blocked later drafts; the server token was renewed on 24 September, the stale approval was reconciled, and a clearer blocked-draft response was prepared for release.
+- 23–24 September 2026: [31 — Calendar authorization and status confusion](31-calendar-authorization-failure.md): an expired Calendar token made an approval uncertain and blocked later drafts; the server token was renewed, the stale approval was reconciled, and separate status guidance was corrected after a global task list looked like an unrelated reply.
 
 ## Model configuration
 

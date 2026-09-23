@@ -289,18 +289,21 @@ export function renderWork(s: any) {
 }
 export function renderWorkList(tasks: any[]) {
   if (!tasks.length) return "No unfinished tracked tasks.";
-  return tasks
-    .map((task) =>
-      [
-        `${task.objective} — ${task.status}; ${task.done}/${task.total} steps recorded complete.`,
-        `Task: ${task.id}`,
-        ["paused", "active"].includes(task.status)
-          ? `/continue ${task.id}`
-          : "",
-        `/cancel ${task.id}`,
-      ]
-        .filter(Boolean)
-        .join("\n"),
-    )
-    .join("\n\n");
+  return (
+    "Unfinished tracked tasks across conversations (not necessarily the latest request):\n\n" +
+    tasks
+      .map((task) =>
+        [
+          `${task.objective} — ${task.status}; ${task.done}/${task.total} steps recorded complete.`,
+          `Task: ${task.id}`,
+          ["paused", "active"].includes(task.status)
+            ? `/continue ${task.id}`
+            : "",
+          `/cancel ${task.id}`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      )
+      .join("\n\n")
+  );
 }

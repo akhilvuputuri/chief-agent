@@ -448,13 +448,41 @@ test("ambiguous write is never retried and later writes require inspection", asy
       dispatches++;
       throw new Error("network timeout after possible write");
     };
-    await f.assistant.respond("owner", "Save x");
+    const reply = await f.assistant.respond("owner", "Save x");
+    assert.match(reply, /This request stopped after an error/);
+    assert.doesNotMatch(reply, /\/status/);
     assert.equal(dispatches, 1);
     assert.equal(requests, 1);
     assert.equal(
       (await f.db.query("SELECT state FROM runtime_calls")).rows[0].state,
       "uncertain",
     );
+  } finally {
+    await f.pg.close();
+  }
+});
+test("a failed tracked run points to its own task, not an unrelated status list", async () => {
+  let requests = 0;
+  const f = await fixture({
+    generate: async () =>
+      ++requests === 1
+        ? call("work_start", {
+            objective: "Research",
+            steps: [{ key: "a", title: "Research", verification: "evidence" }],
+          })
+        : call("memory_set", { key: "x", value: "x" }),
+  });
+  try {
+    const execute = f.assistant.tools.execute.bind(f.assistant.tools);
+    f.assistant.tools.execute = async (user, run, input) => {
+      if ((input as { operation?: string }).operation === "memory_set")
+        throw new Error("network timeout after possible write");
+      return execute(user, run, input);
+    };
+    const reply = await f.assistant.respond("owner", "Research");
+    const task = (await f.db.query("SELECT id FROM work_tasks")).rows[0].id;
+    assert.match(reply, new RegExp(`/status ${task}`));
+    assert.equal(requests, 2);
   } finally {
     await f.pg.close();
   }
