@@ -98,7 +98,10 @@ plan cannot serve) pauses the item instead of retrying, so a permanent error
 does not quietly consume daily credits; resuming re-enables it. Twelve Data can
 report errors with HTTP 200 and the real status in the body `code`: body
 `429` (credits exhausted) and `5xx` back off like transport failures, while
-other body codes (400/401/403/404) pause the item. Pausing an
+other body codes (400/401/403/404) pause the item. This applies to errors
+covering the whole request. A per-symbol error row inside a successful batched
+response is currently dropped and logged `invalid` ("provider returned no
+quote") without pausing, so that item keeps being polled. Pausing an
 item — via `watchlist_update`, `watchlist_settings`, or the alert's pause
 button — also terminal-mutes any still-`pending` alert so a queued
 notification cannot deliver after the pause. Two further races are closed:
