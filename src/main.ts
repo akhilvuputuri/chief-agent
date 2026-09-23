@@ -1,6 +1,13 @@
 import { RoutineScheduler, RoutineDelivery } from "./routines.js";
 import { StockMonitor, StockDelivery, WatchlistTools } from "./stocks.js";
 import { TwelveDataProvider } from "./stock-provider.js";
+import {
+  ReadingDelivery,
+  ReadingEditions,
+  ReadingScheduler,
+  ReadingTools,
+} from "./reading.js";
+import { PublicFeedFetcher } from "./reading-feed.js";
 import { run as runTelegram } from "@grammyjs/runner";
 import { CustomAgent } from "./custom-agent.js";
 import { OpenRouter } from "./model.js";
@@ -65,6 +72,11 @@ if (
   throw new Error(
     "Stock watchlist migration 018 must be applied with the gateway stopped",
   );
+// The reading bulletin stays off until reviewed migration 019 is applied.
+const readingReady = !!(
+  await db.query("SELECT 1 FROM runtime_migrations WHERE version=19")
+).rows.length;
+const feedFetcher = new PublicFeedFetcher();
 await recoverRuntime(db);
 // Library account features need migration 016; without the key they stay off even if tables exist.
 const libraryReady = await libraryMigrated(db);
@@ -210,6 +222,7 @@ const assistant = new Assistant(
     library,
     libraryActions,
     new WatchlistTools(db, stockProvider),
+    readingReady ? new ReadingTools(db, feedFetcher) : undefined,
   ),
   {
     canvases: !!c.MINIAPP_ORIGIN,
@@ -221,6 +234,7 @@ const assistant = new Assistant(
     preparationSheet: !!(c.SHEETS_REFRESH_TOKEN && c.SHEETS_SPREADSHEET_ID),
     dailySheet: !!(c.SHEETS_REFRESH_TOKEN && c.DAILY_SPREADSHEET_ID),
     stocks: !!stockProvider,
+    reading: readingReady,
   },
   {
     ms: c.AGENT_BUDGET_MS,
@@ -371,6 +385,25 @@ const stockDelivery = new StockDelivery(db, async (user, payload) => {
   });
 });
 await stockDelivery.recover();
+const readingScheduler = readingReady
+  ? new ReadingScheduler(db, new ReadingEditions(db, feedFetcher), (user) =>
+      allowed.has(user),
+    )
+  : undefined;
+const readingDelivery = readingReady
+  ? new ReadingDelivery(
+      db,
+      async (user, text, keyboard) => {
+        if (!allowed.has(user)) throw new Error("Unauthorized delivery");
+        await bot.api.sendMessage(user, text, {
+          link_preview_options: { is_disabled: true },
+          ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
+        });
+      },
+      (user) => allowed.has(user),
+    )
+  : undefined;
+await readingDelivery?.recover();
 const routineTimer = setInterval(() => {
   void routineScheduler
     .tick()
@@ -389,6 +422,16 @@ const routineTimer = setInterval(() => {
     .tick()
     .catch(() =>
       console.error(JSON.stringify({ event: "stock.delivery_failed" })),
+    );
+  void readingScheduler
+    ?.tick()
+    .catch(() =>
+      console.error(JSON.stringify({ event: "reading.tick_failed" })),
+    );
+  void readingDelivery
+    ?.tick()
+    .catch(() =>
+      console.error(JSON.stringify({ event: "reading.delivery_failed" })),
     );
 }, 15000);
 routineTimer.unref();

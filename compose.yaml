@@ -62,6 +62,8 @@ services:
         "/migrations/017_routines.sql",
         "-f",
         "/migrations/018_watchlist.sql",
+        "-f",
+        "/migrations/019_reading.sql",
       ]
     depends_on:
       postgres: { condition: service_healthy }
