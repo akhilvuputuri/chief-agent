@@ -1,7 +1,7 @@
 # 25 — Stock watchlist drop alerts
 
-Work date(s): 2026-09-20. Written/revised: 2026-09-20.
-Status: implemented and tested; PR review and deployment pending. State the current outcome and limitations; add the dated release closure below when verified.
+Work date(s): 2026-09-20, 2026-09-23. Written/revised: 2026-09-23.
+Status: merged and installed with migration 018 during the v0.3.19 rollout (see [27](27-multiple-gmail-accounts.md#verified-release--21-september-2026)); provider not yet configured on the host, so monitoring is inert. A 2026-09-23 follow-up below fixes error classification before activation.
 
 ## User-visible problem and preceding iteration
 
@@ -51,6 +51,14 @@ A second external round then found: (P2) the token bucket refilled continuously 
 ### Release closure — pending
 
 [PR #63](https://github.com/akhilvuputuri/companion-agent/pull/63), CI green. Independent reviewer (Devin session) verdicts, recorded on the PR: APPROVE on `26e29df`, `bc0a7fb`, `3b71556`, `4a8fec6`, `6ea1ac5` (first external round), `1d10d7c` (post-review hardening), `87f6e90` (docs-only), `9e4ae43` (second external round: boundary-reset pacing + session-aware freshness), `3283a08` (docs-only), and final head `d0cf9ce70bc0345459bcbc4331a782ba411b7db2` (third external round: credit pre-reservation + session timestamp carried through dedupe/alert). Merge and the reviewed operator rollout (migration 018, `TWELVE_DATA_API_KEY` on the host) are still outstanding — the ordinary release will refuse the DB/Compose change by design.
+
+### Follow-up — 2026-09-23: body error codes before activation
+
+- **Observation (code reading, not a live response)**: the owner supplied a Twelve Data key for activation. Before it goes live, reading `TwelveDataProvider.get` showed that a JSON body with `status: "error"` was classified retryable only when the HTTP status was ≥500, which had already been handled one line earlier, so every body-reported error was non-retryable. Twelve Data reports the real status in the body `code`, including credit exhaustion (`429`). If that arrives with HTTP 200, the first exhausted minute or day would pause every item in the batch as a "non-retryable provider error", and the items would stay paused until resumed by hand.
+- **Change**: body `code` 429 or ≥500 is now retryable (bounded per-item backoff). 400/401/403/404 stay non-retryable and still pause the item, so a symbol the plan cannot serve does not keep using credits.
+- **Synthetic check (tested)**: a new test drives the real adapter with mocked `fetch` responses and fails on the previous code (`expected true, actual false`). `npm run check`: 344 + 10 tests pass.
+- **Not verified**: the live HTTP status Twelve Data pairs with each body code. The cloud session's network policy denied `api.twelvedata.com`, so no live request was made. The fix is correct whichever HTTP status accompanies the body.
+- **Activation boundary**: the key lives only in the host `.env` (`MARKET_DATA_PROVIDER=twelvedata`, `TWELVE_DATA_API_KEY`). The restricted release command refuses `.env` paths and accepts only `deploy <SHA>`/`diagnose`, so a cloud task cannot set it. The operator adds both lines on the host. The gateway reads them when it is next recreated (any release, or a manual gateway recreate).
 
 ## Follow-up and next iteration
 

@@ -143,11 +143,16 @@ export class TwelveDataProvider implements MarketDataProvider {
     const body: any = await res.json().catch(() => ({}));
     if (res.status === 429 || res.status >= 500)
       throw new ProviderError(`Twelve Data HTTP ${res.status}`, true);
-    if (body?.status === "error")
+    // Twelve Data reports errors in the body's `code`, which can arrive with
+    // HTTP 200: credit exhaustion (429) and provider faults (5xx) are
+    // transient and must back off, not pause the watch as a permanent error.
+    if (body?.status === "error") {
+      const code = Number(body.code);
       throw new ProviderError(
         String(body.message ?? "provider error"),
-        res.status >= 500,
+        code === 429 || code >= 500,
       );
+    }
     if (!res.ok)
       throw new ProviderError(`Twelve Data HTTP ${res.status}`, false);
     return body;
