@@ -233,6 +233,23 @@ test("expired Calendar authorization stops before the insert and is reported as 
     () => c.create("123", randomUUID(), draft),
     (e) => e instanceof CalendarNotSentError && /reconnect/.test(e.message),
   );
+  const userinfoDenied = new CalendarTools(
+    {
+      owner: "123",
+      email: "owner@example.com",
+      clientId: "x",
+      clientSecret: "x",
+      refreshToken: "x",
+    },
+    async (url) =>
+      String(url).includes("oauth2.googleapis.com")
+        ? Response.json({ access_token: "test" })
+        : new Response("", { status: 403 }),
+  );
+  await assert.rejects(
+    () => userinfoDenied.create("123", randomUUID(), draft),
+    CalendarNotSentError,
+  );
   assert.deepEqual(calls, ["https://oauth2.googleapis.com/token"]);
   const listed = await c
     .list("123", draft.start, draft.end)
@@ -323,6 +340,49 @@ test("a failure before sending is a definite non-creation that never retries or 
       (await actions.draft("123", randomUUID(), draft)).status,
       "awaiting_approval",
     );
+  } finally {
+    await pg.close();
+  }
+});
+test("failures once the insert request is sent stay uncertain, never a definite non-creation", async () => {
+  const { pg, db } = await fixture();
+  let inserts = 0;
+  const outcomes = [
+    () => Promise.reject(new Error("socket hang up")),
+    () => Promise.resolve(new Response("", { status: 500 })),
+  ];
+  try {
+    for (const outcome of outcomes) {
+      const c = new CalendarTools(
+        {
+          owner: "123",
+          email: "owner@example.com",
+          clientId: "x",
+          clientSecret: "x",
+          refreshToken: "x",
+        },
+        async (url) => {
+          if (String(url).includes("oauth2.googleapis.com"))
+            return Response.json({ access_token: "test" });
+          if (String(url).includes("userinfo"))
+            return Response.json({ email: "owner@example.com" });
+          inserts++;
+          return outcome();
+        },
+      );
+      await assert.rejects(
+        () => c.create("123", randomUUID(), draft),
+        (e) => !(e instanceof CalendarNotSentError),
+      );
+      const actions = new CalendarActions(db, c, "123");
+      const saved = await actions.draft("123", randomUUID(), draft);
+      assert.equal(
+        (await actions.decide("123", saved.approvalId, true)).status,
+        "uncertain",
+      );
+      await db.query("DELETE FROM approvals WHERE id=$1", [saved.approvalId]);
+    }
+    assert.equal(inserts, 4);
   } finally {
     await pg.close();
   }

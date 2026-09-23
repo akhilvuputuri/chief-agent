@@ -29,10 +29,10 @@ export async function googleToken(
     redirect: "error",
     signal: AbortSignal.timeout(15000),
   });
-  // invalid_grant (expired/revoked refresh token) is a 400; name it so tools report reconnection.
+  // invalid_grant (expired/revoked refresh token) and invalid_client are 400/401; name them so tools report reconnection.
   if (r.status === 400 || r.status === 401)
     throw new Error(
-      `Google authorization expired or was revoked (${r.status}); reconnect required`,
+      `Google authorization failed (${r.status}); reconnect required`,
     );
   const t = await googleJson(r);
   if (typeof t.access_token !== "string")

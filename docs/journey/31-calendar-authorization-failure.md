@@ -26,16 +26,32 @@ Alternatives considered: re-opening the approval as `pending` for a retry. That 
 
 ## Implementation and review
 
-- `src/calendar.ts`: `googleToken` reports 400/401 token responses as "Google authorization expired or was revoked … reconnect required", which tools classify as `AUTHORIZATION_REQUIRED`. The token helper is shared with the daily Sheet. Failures before the insert request is sent throw `CalendarNotSentError`.
+- `src/calendar.ts`: `googleToken` reports 400/401 token responses (`invalid_grant`, `invalid_client`) as "Google authorization failed … reconnect required", which tools classify as `AUTHORIZATION_REQUIRED`. The token helper is shared with the daily Sheet. Failures before the insert request is sent throw `CalendarNotSentError`.
 - `src/calendar-actions.ts`: that error sets `execution: "failed"` with `failure.code` `authorization` or `not_sent`, and records `calendar.not_sent`. This mirrors the library approvals' failed state. The approval is not reopened, repeated callbacks return the saved failure without contacting Google, and later drafts are allowed. Network and response failures of the insert request itself still become `uncertain`.
 - `src/telegram.ts`: the callback says no event was created and, for authorization, to reconnect Calendar and draft again. A failed status check that is caused by authorization says so.
 - Regression tests: `tests/calendar-approval.test.ts` covers the token-only request sequence, the tool error classification, the Telegram reply, the stored state, no retry, and that a later draft is allowed.
 
-Independent review: pending.
+Independent review, round 1 (2026-09-23): a separate reviewer agent in this session (Claude, harness-selected model; GPT-6 Astra was unavailable) returned **REQUEST CHANGES** on `652a3278`. It found the logic correct, but:
+
+- **F1 (blocking):** no test used the real client to prove that failures after the insert request is sent stay uncertain. Its mutation that wrapped the insert in `CalendarNotSentError` passed every test.
+- **F2:** userinfo 401/403 and missing configuration were labelled "could not be reached".
+- **F3:** the "expired or revoked" wording overstated the cause for `invalid_client` and wrong-account failures.
+- **F4:** the `calendar.not_sent` event was written even when the guarded update matched no row.
+- **F5:** the stored draft was revalidated outside the not-sent boundary.
+
+Fixes:
+
+- **F1:** a new test covers an insert network error and an insert 500; it fails under the reviewer's mutation.
+- **F2:** userinfo 401/403 and missing configuration are now classified as authorization.
+- **F3:** the wording is now a neutral "authorization failed".
+- **F4:** the event is written only when the row was updated; otherwise the callback reports uncertain.
+- **F5:** the stored draft is now validated only inside `create`.
+
+Re-review pending.
 
 ## Verification and outcome
 
-**Tested:** `npm run check` (345 application and 10 script tests) and `npm run format:check` passed locally on 2026-09-23. No live Google or Telegram check was run.
+**Tested:** `npm run check` (346 application and 10 script tests after the review fixes) and `npm run format:check` passed locally on 2026-09-23. No live Google or Telegram check was run.
 
 Remaining operator steps: reconnect Calendar with `scripts/connect-calendar.mjs` and replace `CALENDAR_REFRESH_TOKEN`, confirm whether the Sheets token also needs renewal, and inspect/clear any existing `uncertain` `calendar_create` approval created by this incident. The deployed code cannot distinguish that older row from a genuinely uncertain write.
 

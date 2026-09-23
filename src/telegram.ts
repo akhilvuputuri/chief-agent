@@ -67,8 +67,8 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
               ? "Draft declined. No event was created."
               : result.status === "failed"
                 ? result.reason === "authorization"
-                  ? "No event was created. Google Calendar authorization has expired or was revoked, so nothing was sent to Google. Reconnect Calendar, then ask me to draft the event again."
-                  : "No event was created. Google Calendar could not be reached, so nothing was sent to Google. Ask me to draft the event again."
+                  ? "No event was created. Google Calendar authorization failed (it may have expired or been revoked), so nothing was sent to Google. Reconnect Calendar, then ask me to draft the event again."
+                  : "No event was created. The request stopped before anything was sent to Google. Ask me to draft the event again."
                 : "The event's outcome is uncertain. I will not create it again. Click Check status to look for the existing event.";
         await ctx.reply(text, {
           reply_markup: {
@@ -96,7 +96,7 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
       } catch (e) {
         await ctx.reply(
           e instanceof Error && /authoriz/i.test(e.message)
-            ? "Google Calendar authorization has expired or was revoked, so this event's status could not be checked. Reconnect Calendar, then tap Check status again. No new creation request was sent."
+            ? "Google Calendar authorization failed, so this event's status could not be checked. Reconnect Calendar, then tap Check status again. No new creation request was sent."
             : "This calendar approval is unavailable, expired, or could not be checked. No new creation request will be retried automatically.",
         );
       }

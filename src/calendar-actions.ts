@@ -72,26 +72,32 @@ export class CalendarActions {
     });
     if (!approve) return { status: "denied" };
     try {
+      // create() validates the stored draft before sending, so a rejection there is also not sent.
       const result = await this.calendar.create(
         user,
         id,
-        validateDraft(claimed.payload.draft),
+        claimed.payload.draft,
       );
       return await this.record(claimed, result);
     } catch (e) {
       if (e instanceof CalendarNotSentError) {
         // Nothing reached the Calendar API, so this is a definite non-creation, not an uncertain write.
-        const reason = /authoriz|Wrong Google account/i.test(e.message)
-          ? "authorization"
-          : "not_sent";
-        await this.db.query(
-          "UPDATE approvals SET payload=payload || $3::jsonb WHERE id=$1 AND user_id=$2 AND payload->>'execution'='creating'",
+        const reason =
+          /authoriz|Wrong Google account|not configured|Invalid access token|\((?:401|403)\)/i.test(
+            e.message,
+          )
+            ? "authorization"
+            : "not_sent";
+        const saved = await this.db.query(
+          "UPDATE approvals SET payload=payload || $3::jsonb WHERE id=$1 AND user_id=$2 AND payload->>'execution'='creating' RETURNING id",
           [
             id,
             user,
             JSON.stringify({ execution: "failed", failure: { code: reason } }),
           ],
         );
+        // Another process changed the row; do not report a state that was not recorded.
+        if (!saved.rows[0]) return { status: "uncertain" };
         await event(this.db, user, claimed.run_id, "calendar.not_sent", {
           id,
           reason,
