@@ -813,6 +813,12 @@ export class ReadingEditions {
             .filter((x) => x.components.interest === 0)
             .sort((a, b) => b.components.recency - a.components.recency)
             .slice(0, 20),
+          // Caps can reach below rank 60, so both selections are always kept.
+          ...scored.filter((x) =>
+            [...picked.selected, ...baseline.selected].some(
+              (y) => y.c.canonical_url === x.c.canonical_url,
+            ),
+          ),
         ]),
       ].map((x) => ({
         url: x.c.canonical_url,
@@ -1072,12 +1078,17 @@ export class ReadingDelivery {
         `UPDATE reading_editions e SET state='muted' FROM reading_settings s
          WHERE s.user_id=e.user_id AND e.state='pending' AND e.kind='scheduled' AND (s.paused OR NOT s.enabled)`,
       );
-      const edition = (
-        await this.db
-          .query(`UPDATE reading_editions SET state='sending' WHERE id=(
-           SELECT id FROM reading_editions WHERE state='pending'
-           ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *`)
-      ).rows[0];
+      const edition =
+        // The claim itself re-checks the owner's settings, so a pause committed after
+        // the mute sweep above still stops a scheduled edition from being sent.
+        (
+          await this.db
+            .query(`UPDATE reading_editions SET state='sending' WHERE id=(
+           SELECT e.id FROM reading_editions e LEFT JOIN reading_settings s ON s.user_id=e.user_id
+           WHERE e.state='pending'
+             AND (e.kind='on_demand' OR (COALESCE(s.enabled,false) AND NOT COALESCE(s.paused,false)))
+           ORDER BY e.created_at FOR UPDATE OF e SKIP LOCKED LIMIT 1) RETURNING *`)
+        ).rows[0];
       if (!edition) return;
       try {
         if (!this.allowed(edition.user_id))
@@ -1546,12 +1557,20 @@ export class ReadingTools {
       merged.timezone !== (old.timezone ?? null);
     const row = (
       await this.db.query(
-        `INSERT INTO reading_settings(user_id,enabled,paused,interests,languages,preferred_domains,excluded_domains,muted_topics,delivery_time,timezone,items_per_edition,discovery_slots,schedule_from)
-         VALUES($1,$2,$3,$4::jsonb,$5::jsonb,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13)
-         ON CONFLICT(user_id) DO UPDATE SET enabled=$2,paused=$3,interests=$4::jsonb,languages=$5::jsonb,
-           preferred_domains=$6::jsonb,excluded_domains=$7::jsonb,muted_topics=$8::jsonb,delivery_time=$9,timezone=$10,
-           items_per_edition=$11,discovery_slots=$12,schedule_from=CASE WHEN $14 THEN $13 ELSE reading_settings.schedule_from END,updated_at=now()
-         RETURNING *`,
+        // Settings and the muting of pending scheduled editions commit together, so a
+        // delivery claim never sees a paused bulletin with a still-pending edition.
+        `WITH s AS (
+           INSERT INTO reading_settings(user_id,enabled,paused,interests,languages,preferred_domains,excluded_domains,muted_topics,delivery_time,timezone,items_per_edition,discovery_slots,schedule_from)
+           VALUES($1,$2,$3,$4::jsonb,$5::jsonb,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13)
+           ON CONFLICT(user_id) DO UPDATE SET enabled=$2,paused=$3,interests=$4::jsonb,languages=$5::jsonb,
+             preferred_domains=$6::jsonb,excluded_domains=$7::jsonb,muted_topics=$8::jsonb,delivery_time=$9,timezone=$10,
+             items_per_edition=$11,discovery_slots=$12,schedule_from=CASE WHEN $14 THEN $13 ELSE reading_settings.schedule_from END,updated_at=now()
+           RETURNING *
+         ), m AS (
+           UPDATE reading_editions SET state='muted'
+           WHERE user_id IN (SELECT user_id FROM s WHERE paused OR NOT enabled)
+             AND state='pending' AND kind='scheduled' RETURNING id
+         ) SELECT * FROM s`,
         [
           user,
           merged.enabled,
@@ -1570,11 +1589,6 @@ export class ReadingTools {
         ],
       )
     ).rows[0];
-    if (row.paused || !row.enabled)
-      await this.db.query(
-        "UPDATE reading_editions SET state='muted' WHERE user_id=$1 AND state='pending' AND kind='scheduled'",
-        [user],
-      );
     return {
       settings: row,
       nextDelivery:
@@ -1691,18 +1705,15 @@ export class ReadingTools {
     user: string,
     a: Extract<ReadingAction, { operation: "reading_preferences" }>,
   ) {
-    await this.db.query(
-      "INSERT INTO reading_settings(user_id) VALUES($1) ON CONFLICT DO NOTHING",
-      [user],
-    );
+    // Each change commits in one statement with its audit row.
     if (a.action === "reset") {
       await this.db.query(
-        "UPDATE reading_settings SET learning_reset_at=$2,overrides='{}'::jsonb,updated_at=now() WHERE user_id=$1",
+        `WITH s AS (
+           INSERT INTO reading_settings(user_id,learning_reset_at) VALUES($1,$2)
+           ON CONFLICT(user_id) DO UPDATE SET learning_reset_at=$2,overrides='{}'::jsonb,updated_at=now()
+           RETURNING user_id
+         ) INSERT INTO reading_feedback_events(user_id,action,created_at) SELECT user_id,'reset',$2 FROM s`,
         [user, this.clock()],
-      );
-      await this.db.query(
-        "INSERT INTO reading_feedback_events(user_id,action) VALUES($1,'reset')",
-        [user],
       );
     } else {
       if (!a.key)
@@ -1715,17 +1726,21 @@ export class ReadingTools {
       if (a.action === "set" && a.weight === undefined)
         throw new ToolValidationError("weight is required to set a preference");
       await this.db.query(
-        a.action === "set"
-          ? "UPDATE reading_settings SET overrides=overrides||jsonb_build_object($2::text,$3::numeric),updated_at=now() WHERE user_id=$1"
-          : "UPDATE reading_settings SET overrides=overrides-$2::text,updated_at=now() WHERE user_id=$1",
-        a.action === "set" ? [user, key, a.weight] : [user, key],
-      );
-      await this.db.query(
-        "INSERT INTO reading_feedback_events(user_id,action,detail) VALUES($1,$2,$3::jsonb)",
+        `WITH s AS (
+           INSERT INTO reading_settings(user_id,overrides)
+           VALUES($1,CASE WHEN $3::numeric IS NULL THEN '{}'::jsonb ELSE jsonb_build_object($2::text,$3::numeric) END)
+           ON CONFLICT(user_id) DO UPDATE SET overrides=CASE WHEN $3::numeric IS NULL
+             THEN reading_settings.overrides-$2::text
+             ELSE reading_settings.overrides||jsonb_build_object($2::text,$3::numeric) END,updated_at=now()
+           RETURNING user_id
+         ) INSERT INTO reading_feedback_events(user_id,action,detail,created_at)
+         SELECT user_id,$4,jsonb_build_object('key',$2::text,'weight',$3::numeric),$5 FROM s`,
         [
           user,
+          key,
+          a.action === "set" ? a.weight : null,
           `override_${a.action}`,
-          JSON.stringify({ key, weight: a.weight ?? null }),
+          this.clock(),
         ],
       );
     }

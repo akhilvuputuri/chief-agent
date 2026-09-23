@@ -1346,3 +1346,153 @@ test("review regressions: feedback writes are atomic and a reset vote can be rea
     await f.pg.close();
   }
 });
+
+test("review regressions: preference edits are atomic with their audit row", async () => {
+  const f = await fixture();
+  try {
+    await f.setup({}, [[FEED, varied]]);
+    await f.db.query(
+      "ALTER TABLE reading_feedback_events RENAME TO reading_feedback_events_off",
+    );
+    await assert.rejects(
+      f.call({ operation: "reading_preferences", action: "reset" }),
+    );
+    await assert.rejects(
+      f.call({
+        operation: "reading_preferences",
+        action: "set",
+        key: "topic:climate",
+        weight: 2,
+      }),
+    );
+    const row = (
+      await f.db.query(
+        "SELECT learning_reset_at,overrides FROM reading_settings WHERE user_id='a'",
+      )
+    ).rows[0];
+    assert.equal(row.learning_reset_at, null);
+    assert.deepEqual(row.overrides, {});
+    await f.db.query(
+      "ALTER TABLE reading_feedback_events_off RENAME TO reading_feedback_events",
+    );
+    await f.call({
+      operation: "reading_preferences",
+      action: "set",
+      key: "topic:climate",
+      weight: 2,
+    });
+    await f.call({
+      operation: "reading_preferences",
+      action: "clear",
+      key: "topic:climate",
+    });
+    const actions = (
+      await f.db.query("SELECT action FROM reading_feedback_events ORDER BY id")
+    ).rows.map((e) => e.action);
+    assert.deepEqual(actions, ["override_set", "override_clear"]);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("review regressions: the delivery claim itself refuses a paused scheduled edition", async () => {
+  const f = await fixture(new Date("2026-01-14T22:00:00Z"));
+  try {
+    await f.setup({ enabled: true }, [[FEED, varied]]);
+    f.setNow(new Date("2026-01-14T23:05:00Z"));
+    await f.scheduler.tick();
+    // The pause lands after the mute sweep has already run: simulate by skipping it.
+    await f.db.query(
+      "UPDATE reading_settings SET paused=true WHERE user_id='a'",
+    );
+    const racing = new ReadingDelivery(
+      {
+        query: (text: string, values?: unknown[]) =>
+          /SET state='muted' FROM reading_settings/.test(text)
+            ? Promise.resolve({ rows: [] })
+            : f.db.query(text, values),
+      },
+      async () => {
+        throw new Error("must not send");
+      },
+    );
+    await racing.tick();
+    assert.equal(
+      (await f.db.query("SELECT state FROM reading_editions")).rows[0].state,
+      "pending",
+    );
+    // Pausing through the tool mutes the pending edition in the same statement.
+    await f.db.query(
+      "UPDATE reading_settings SET paused=false WHERE user_id='a'",
+    );
+    await f.call({ operation: "reading_settings", paused: true });
+    assert.equal(
+      (await f.db.query("SELECT state FROM reading_editions")).rows[0].state,
+      "muted",
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("review regressions: paired Atom categories keep their term", () => {
+  const atom = parseFeed(
+    `<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>Report</title>
+      <link href="https://x.example.com/r"/><category term="Climate"></category>
+      <category term="Climate"/><category term="Energy" label="E"></category></entry></feed>`,
+    FEED,
+    NOW,
+  );
+  assert.deepEqual(atom.entries[0]!.categories, ["Climate", "Energy"]);
+  const rssFeed = parseFeed(
+    rss([
+      {
+        title: "Item",
+        link: "https://y.example.com/i",
+        cats: ["Science", "Science"],
+      },
+    ]),
+    FEED,
+    NOW,
+  );
+  assert.deepEqual(rssFeed.entries[0]!.categories, ["Science"]);
+});
+
+test("review regressions: the trace snapshot keeps selections below rank 60", async () => {
+  const f = await fixture();
+  try {
+    const words = (i: number) => `alpha${i}x bravo${i}y charlie${i}z`;
+    const many = (n: number, offset: number): Entry[] =>
+      Array.from({ length: n }, (_, i) => ({
+        title: `Climate ${words(i + offset)}`,
+        link: `https://a.example.com/c${i + offset}`,
+      }));
+    await f.setup({ discoverySlots: 0 }, [
+      [FEED, many(50, 0)],
+      [
+        FEED2,
+        [
+          ...many(20, 100),
+          {
+            title: "Climate lonely other source piece",
+            link: "https://b.example.com/other",
+            date: hoursAgo(60),
+          },
+        ],
+      ],
+    ]);
+    const r = await f.call({ operation: "reading_edition_now" });
+    const selected = (await f.items(r.editionId)).map((i) => i.canonical_url);
+    assert.ok(selected.includes("b.example.com/other"));
+    const trace = (
+      await f.db.query("SELECT trace FROM reading_editions WHERE id=$1", [
+        r.editionId,
+      ])
+    ).rows[0].trace;
+    const snapshot = new Set(trace.snapshot.map((x: any) => x.url));
+    for (const url of [...selected, ...trace.baseline])
+      assert.ok(snapshot.has(url), url);
+  } finally {
+    await f.pg.close();
+  }
+});

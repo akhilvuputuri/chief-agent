@@ -109,15 +109,6 @@ function tag(block: string, names: string[]) {
   }
   return null;
 }
-function tags(block: string, name: string) {
-  const out: string[] = [];
-  const re = new RegExp(
-    `<${escapeTag(name)}(?:\\s[^>]*)?>([\\s\\S]*?)</${escapeTag(name)}\\s*>`,
-    "gi",
-  );
-  for (const m of block.matchAll(re)) out.push(m[1]!);
-  return out;
-}
 function attr(element: string, name: string) {
   const m = new RegExp(`\\s${name}\\s*=\\s*("([^"]*)"|'([^']*)')`, "i").exec(
     element,
@@ -195,14 +186,18 @@ export function parseFeed(xml: string, base: string, now = new Date()) {
       "media:description",
     ]);
     const summary = rawSummary ? cleanText(rawSummary, 320) : "";
+    // Atom puts the label in `term` (self-closing or paired); RSS uses the element text.
     const categories = [
-      ...tags(b, "category").map((c) => cleanText(c, 60)),
-      ...[...b.matchAll(/<category\b[^>]*\/>/gi)].map((m) =>
-        cleanText(attr(m[0], "term") ?? "", 60),
+      ...new Set(
+        [
+          ...b.matchAll(
+            /<category\b([^>]*?)(?:\/>|>([\s\S]*?)<\/category\s*>)/gi,
+          ),
+        ]
+          .map((m) => cleanText(attr(m[1]!, "term") ?? m[2] ?? "", 60))
+          .filter(Boolean),
       ),
-    ]
-      .filter(Boolean)
-      .slice(0, 8);
+    ].slice(0, 8);
     entries.push({
       title,
       url,
