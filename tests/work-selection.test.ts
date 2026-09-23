@@ -87,6 +87,10 @@ test("work status lists brief owner jobs and explicit reads never bind foregroun
       null,
     );
     const list = renderWorkList(jobs);
+    assert.match(
+      list,
+      /across conversations \(not necessarily the latest request\)/,
+    );
     assert(list.includes(`/continue ${one.id}`));
     assert(list.includes(`/cancel ${two.id}`));
     assert(!list.includes(other.id));

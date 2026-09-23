@@ -66,6 +66,9 @@ export const readOperations = new Set([
 ]);
 export class Execution {
   private task?: string;
+  get trackedTaskId() {
+    return this.task;
+  }
   private attaching?: Promise<void>;
   private checkpointMessages: string[] = [];
   private delegatedMs = 0;

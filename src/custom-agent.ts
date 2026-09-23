@@ -514,7 +514,9 @@ export class CustomAgent implements Agent {
                 ? "I reached an internal context limit before I could finish. Your messages and retrieved results are saved; the request was not completed."
                 : error instanceof ModelError
                   ? error.message
-                  : "Execution stopped after an error. Saved results are retained; inspect /status before continuing.";
+                  : execution.trackedTaskId
+                    ? `Execution stopped after an error. Saved results are retained; inspect /status ${execution.trackedTaskId} before continuing this task.`
+                    : "This request stopped after an error. It was not completed; saved results remain. Ask for help before repeating any write.";
     }
     await execution.finish(reason);
     return {
