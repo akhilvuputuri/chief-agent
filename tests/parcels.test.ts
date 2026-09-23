@@ -891,7 +891,11 @@ test("the owner's correction of details applies without restating the status", a
       ...user(day(11)),
     });
     assert.equal(fixed.applied, true);
-    assert.equal(fixed.detailsApplied, true);
+    assert.deepEqual(fixed.detailsChanged, [
+      "carrier",
+      "tracking reference",
+      "note",
+    ]);
     assert.equal(fixed.carrier, "DHL");
     assert.equal(fixed.trackingRef, "JD-NEW");
     assert.equal(fixed.note, "leave with neighbour");
@@ -929,7 +933,8 @@ test("an email may fill an empty detail but not overwrite one without its status
     });
     assert.equal(stale.carrier, "Ninja Van");
     assert.equal(stale.orderRef, "ORD-EMPTY");
-    assert.equal(stale.detailsApplied, false);
+    // Reported per field: the empty order reference was filled, the carrier was not.
+    assert.deepEqual(stale.detailsChanged, ["order reference"]);
     assert.match(stale.ignoredReason, /carrier not applied/);
   } finally {
     await f.pg.close();
@@ -1139,6 +1144,151 @@ test("list and match trim to the serialised bound and keep their paging honest",
     assert.ok(matched.candidates.length < 8, "the candidates were trimmed");
     assert.ok(JSON.stringify(matched).length <= 2_500);
     assert.equal(matched.ambiguous, true);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("the owner can correct the merchant and label; an email cannot rename or clear", async () => {
+  const f = await fixture();
+  try {
+    const saved: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      label: "Coat",
+      merchant: "Lazada",
+      trackingRef: "LZ-1",
+      status: "shipped",
+      ...email("la01", day(10)),
+    });
+    const fixed: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      label: "Winter coat",
+      merchant: "Amazon",
+      ...user(day(11)),
+    });
+    assert.equal(fixed.applied, true);
+    assert.equal(fixed.label, "Winter coat");
+    assert.equal(fixed.merchant, "Amazon");
+    assert.deepEqual(fixed.detailsChanged, ["label", "merchant"]);
+    // A winning email may not rename the owner's label, nor clear a reference.
+    const later: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      label: "Order #555",
+      trackingRef: "",
+      status: "out_for_delivery",
+      ...email("la02", day(12)),
+    });
+    assert.equal(later.statusApplied, true);
+    assert.equal(later.label, "Winter coat");
+    assert.equal(later.trackingRef, "LZ-1");
+    assert.match(later.ignoredReason, /label, tracking reference not applied/);
+    // The owner may clear a detail deliberately.
+    const cleared: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      trackingRef: "",
+      ...user(day(13)),
+    });
+    assert.equal(cleared.trackingRef, undefined);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("an email echoing the owner's delivery keeps the owner as its source and the lock holds", async () => {
+  const f = await fixture();
+  try {
+    const saved: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      label: "Kettle",
+      status: "delivered",
+      ...user(day(16)),
+    });
+    const echo: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      status: "delivered",
+      ...email("lb01", day(17)),
+    });
+    assert.equal(echo.statusApplied, false);
+    assert.equal(echo.statusSource, "user");
+    assert.match(echo.ignoredReason, /already told me this/);
+    const lagging: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      status: "out_for_delivery",
+      ...email("lb02", day(18)),
+    });
+    assert.equal(lagging.statusApplied, false);
+    assert.equal(lagging.status, "delivered");
+    assert.equal(lagging.statusSource, "user");
+    // The owner can still change their own mind.
+    const retracted: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      status: "delayed",
+      note: "that was the neighbour's parcel",
+      ...user(day(19)),
+    });
+    assert.equal(retracted.statusApplied, true);
+    assert.equal(retracted.status, "delayed");
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("carrier wording without a status is refused rather than silently dropped", async () => {
+  const f = await fixture();
+  try {
+    await assert.rejects(
+      f.tools.call("a", {
+        operation: "parcel_record",
+        label: "Mystery",
+        rawStatus: "held at customs",
+        ...user(day(10)),
+      }),
+      /rawStatus needs a status/,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("archiving an archived parcel changes nothing", async () => {
+  const f = await fixture();
+  try {
+    const saved: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      label: "Old",
+      ...user(day(10)),
+    });
+    await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      archive: true,
+      ...user(day(11)),
+    });
+    const before = (
+      await f.db.query("SELECT archived_at FROM parcels WHERE id=$1", [
+        saved.id,
+      ])
+    ).rows[0].archived_at;
+    f.at(Date.UTC(2026, 8, 21, 9, 0, 0));
+    const again: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      archive: true,
+      ...user(day(12)),
+    });
+    assert.equal(again.applied, false);
+    const after = (
+      await f.db.query("SELECT archived_at FROM parcels WHERE id=$1", [
+        saved.id,
+      ])
+    ).rows[0].archived_at;
+    assert.equal(new Date(after).getTime(), new Date(before).getTime());
   } finally {
     await f.pg.close();
   }

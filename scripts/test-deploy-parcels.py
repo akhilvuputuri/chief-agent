@@ -23,6 +23,14 @@ BASE_COMPOSE = ('services:\n  migrate:\n    command:\n      [\n'
 
 
 class ParcelsRolloutTests(unittest.TestCase):
+    def test_documentation_only_follow_up_baseline(self):
+        other = sorted(release.BASES - {release.BASE})
+        self.assertEqual(len(other), 1)
+        self.scenario(baseline=other[0], expected_migration=True)
+
+    def test_unreviewed_baseline_is_refused(self):
+        self.scenario(baseline='b' * 40, expected_error='exact documented baseline')
+
     def scenario(self, *, running=0, pending=0, baseline=None, requested_sha=SHA,
                  archive_sha=SHA, changes=None, unsafe=None, health=None,
                  build_failure=False, migration_failure=False, publish_failure=False,

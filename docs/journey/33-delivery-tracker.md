@@ -1,6 +1,6 @@
 # 33 — A delivery tracker, and what a new capability costs the prompt
 
-Work date: 2026-09-21 to 2026-09-23. Status: candidate v0.3.24 on `feature/delivery-tracker`, rebased onto `798439f`. Migration 019, needing the reviewed operator rollout from the deployed `798439f` baseline. Built alongside the stock watchlist, two Gmail-account releases, a context-compaction change and the Chief rebrand, this work collided with them on migration, journal and version numbers and was renumbered three times; these are the fourth set. Not deployed, and no owner acceptance recorded.
+Work date: 2026-09-21 to 2026-09-23. Status: candidate v0.3.24 on `feature/delivery-tracker`, rebased onto `7297202`. Migration 019, needing the reviewed operator rollout from the verified-deployed `b22b09d` baseline or the docs-only `7297202` above it. Built alongside the stock watchlist, two Gmail-account releases, a context-compaction change and the Chief rebrand, this work collided with them on migration, journal and version numbers and was renumbered three times; these are the fourth set. Not deployed, and no owner acceptance recorded.
 
 ## User-visible problem
 
@@ -16,7 +16,7 @@ Order confirmations and shipment notices arrive as email, and the state of a par
 
 The first working version passed its own tests and broke one elsewhere: after a large saved answer, a follow-up could no longer retrieve it. The cause was not the feature's logic. Five new always-on operations added about 5,500 characters to the fixed model prompt, and in that scenario the compact retrieval pointer no longer fit.
 
-Measuring it made the shape clear. With every capability enabled the fixed prompt measured 50,156 characters before this work, on the base of the time, against a 48,000-character soft allowance. It was over the soft allowance before this work began. Remeasured on 23 September against the deployed `798439f`, the base is 50,971 and this branch adds 3,273: 2,658 gated behind the capability and 614 always paid. That limit arithmetic has also moved under this work: 120,000 is now the compaction threshold and the hard limit is 400,000. Each new domain is not free, and there are five more domain issues queued.
+Measuring it made the shape clear. With every capability enabled the fixed prompt measured 50,156 characters before this work, on the base of the time, against a 48,000-character soft allowance. It was over the soft allowance before this work began. Remeasured on 23 September on main at `798439f`, which in prompt terms is identical to the deployed `b22b09d`, the base is 50,971 and this branch adds 3,273: 2,658 gated behind the capability and 614 always paid. That limit arithmetic has also moved under this work: 120,000 is now the compaction threshold and the hard limit is 400,000. Each new domain is not free, and there are five more domain issues queued.
 
 Three changes brought the cost to about 3,100 characters and restored the broken behaviour:
 
@@ -49,6 +49,18 @@ Two rules were added that were not in any earlier version. A delivery the owner 
 Smaller corrections: the runtime guidance named `parcel_update`, a tool that does not exist, on the exact match-then-write path; `rawStatus` and the delivery date's own clock were invisible on the parcel; the deciding-update pointer moved on date-only changes; updating to another parcel's tracking reference was allowed; and two trim loops were unreachable in practice and untested. Limits are now injectable, so those loops are exercised directly.
 
 The pattern across three rounds is that each fix was verified against the scenario that motivated it and not against the neighbouring one it changed. The round-two identity fix passed its own stale-email test and silently broke owner corrections, which no test covered because every correction test also sent a status.
+
+## Round four: the same hole in two more fields, and a lock two emails could open
+
+Round four (Claude Fable 5.1, head `43464a5`) found no blocker and three majors.
+
+The owner-correction fix covered carrier, references and note, but the schema also lets the owner send a merchant and a label with an id, and those were silently ignored. Merchant matters more than it looks: order reference plus merchant is a decisive match, so a wrong merchant left that order permanently ambiguous. Both are now details, with two email limits: an email never renames the owner's label and never clears a field.
+
+The confirmed-delivery lock was keyed on the owner being the status source. An email saying "delivered" after the owner had said so was allowed through as harmless, took over as the source, and a third email could then walk the parcel back. An email that only repeats the owner's status now changes nothing, which keeps the owner as the source and the lock closed.
+
+The rollout baseline named `798439f` as deployed. It never was: its release failed the current-main check, and `b22b09d` deployed after it. The script now accepts exactly `b22b09d` and the journal-only `7297202` above it, and a test proves any other baseline is refused. Calling a commit deployed because it was main's tip is the same mistake as calling a feature live because it merged.
+
+Minor fixes: carrier wording without a status is refused instead of dropped, archiving an archived parcel no longer moves its timestamp, details are reported per field in `detailsChanged`, and the one-day future allowance is documented as the clock-skew trade-off it is.
 
 ## Tested
 

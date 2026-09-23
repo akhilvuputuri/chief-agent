@@ -144,6 +144,12 @@ export class ParcelTools {
     if (action.operation === "parcel_list")
       return action.id ? this.read(user, action) : this.list(user, action);
     if (action.operation === "parcel_match") return this.match(user, action);
+    // Carrier wording describes a status; alone it would be kept in history but never
+    // shown on the parcel, so require the status it qualifies (usually "unknown").
+    if (action.rawStatus !== undefined && action.status === undefined)
+      throw new ToolValidationError(
+        'Parcel validation: rawStatus needs a status; pass status "unknown" with the carrier wording',
+      );
     return action.id
       ? this.update(user, action, run)
       : this.save(user, action, run);
@@ -518,26 +524,45 @@ export class ParcelTools {
       confirmedDelivered &&
       a.status !== undefined &&
       !["delivered", "returned"].includes(a.status);
+    // An email repeating a status the owner stated adds nothing, and applying it would
+    // replace the owner's provenance, which is what the delivery lock is keyed on.
+    const echoesOwner =
+      !owner &&
+      parcel.status_source === "user" &&
+      a.status !== undefined &&
+      a.status === parcel.status;
     const statusApplies =
       a.status !== undefined &&
       !statusBlockedByOwner &&
+      !echoesOwner &&
       decides(next, statusKey);
     const etaApplies = a.eta !== undefined && decides(next, etaKey);
 
     // Details: compute final values here; the revision compare-and-swap guarantees the
     // row these were computed from is the row being written.
     const details: [string, string | undefined, string][] = [
+      ["label", a.label, "label"],
+      ["merchant", a.merchant, "merchant"],
       ["carrier", a.carrier, "carrier"],
       ["tracking_ref", a.trackingRef, "tracking reference"],
       ["order_ref", a.orderRef, "order reference"],
       ["note", a.note, "note"],
     ];
     const changes: [string, string][] = [];
+    const changedDetails: string[] = [];
     const refusedDetails: string[] = [];
     for (const [column, value, name] of details) {
       if (value === undefined || value === parcel[column]) continue;
-      if (owner || statusApplies || parcel[column] === "") {
+      // The owner may correct or clear any detail. An email may fill an empty field, or
+      // overwrite one when its own status applied, but never renames the owner's label
+      // and never clears anything.
+      const emailMay =
+        column !== "label" &&
+        value !== "" &&
+        (statusApplies || parcel[column] === "");
+      if (owner || emailMay) {
         changes.push([column, value]);
+        changedDetails.push(name);
         if (column === "tracking_ref")
           changes.push(["tracking_key", refKey(value)]);
         if (column === "order_ref") changes.push(["order_key", refKey(value)]);
@@ -550,14 +575,16 @@ export class ParcelTools {
     const losses = [
       statusBlockedByOwner
         ? "status not applied: you confirmed this parcel was delivered, and an email cannot change that"
-        : a.status !== undefined && !statusApplies && statusKey
-          ? `status not applied: ${ignoredReason(next, statusKey)}`
-          : "",
+        : echoesOwner
+          ? "status not applied: you already told me this, and your confirmation is kept as the source"
+          : a.status !== undefined && !statusApplies && statusKey
+            ? `status not applied: ${ignoredReason(next, statusKey)}`
+            : "",
       a.eta !== undefined && !etaApplies && etaKey
         ? `delivery date not applied: ${ignoredReason(next, etaKey)}`
         : "",
       refusedDetails.length
-        ? `${refusedDetails.join(", ")} not applied: an email only fills an empty field unless its status applies`
+        ? `${refusedDetails.join(", ")} not applied: an email only fills an empty field unless its status applies, and never renames or clears`
         : "",
     ].filter(Boolean);
     const ignored = losses.join("; ");
@@ -590,7 +617,7 @@ export class ParcelTools {
       set("eta_authority", authority);
     }
     if (!owner) set("last_checked_at", new Date(now).toISOString());
-    if (a.archive !== undefined)
+    if (archiveChanges)
       set("archived_at", a.archive ? new Date(now).toISOString() : null);
     const h = this.history(
       update,
@@ -625,9 +652,7 @@ export class ParcelTools {
         applied: changed,
         ...(a.status !== undefined ? { statusApplied: statusApplies } : {}),
         ...(a.eta !== undefined ? { etaApplied: etaApplies } : {}),
-        ...(changes.length || refusedDetails.length
-          ? { detailsApplied: changes.length > 0 && !refusedDetails.length }
-          : {}),
+        ...(changedDetails.length ? { detailsChanged: changedDetails } : {}),
         updateId: update,
         ...(ignored ? { ignoredReason: ignored } : {}),
       };
