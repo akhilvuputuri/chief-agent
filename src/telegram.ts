@@ -9,6 +9,7 @@ import {
   libraryPreview,
 } from "./library-actions.js";
 import { Bot, InputFile } from "grammy";
+import { ReadingFeedback, readingCallback } from "./reading.js";
 import { randomUUID } from "node:crypto";
 import type { Config } from "./config.js";
 import type { Assistant } from "./agent.js";
@@ -189,6 +190,36 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
     if (paused)
       await ctx
         .editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } })
+        .catch(() => {});
+  });
+  // Reading feedback buttons: owner-bound direct writes that set (never toggle or add)
+  // the current vote, so replayed presses cannot learn twice. Never queued behind the model.
+  const reading = new ReadingFeedback(db);
+  bot.callbackQuery(readingCallback, async (ctx) => {
+    if (!allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids)) return;
+    let result: Awaited<ReturnType<ReadingFeedback["press"]>>;
+    try {
+      result = await reading.press(String(ctx.from.id), ctx.callbackQuery.data);
+    } catch {
+      await ctx.answerCallbackQuery({
+        text: "Could not save that feedback. Nothing changed; try again.",
+      });
+      return;
+    }
+    await ctx.answerCallbackQuery({ text: result.notice });
+    if ("keyboard" in result && result.keyboard)
+      await ctx
+        .editMessageReplyMarkup({
+          reply_markup: { inline_keyboard: result.keyboard },
+        })
+        .catch(() => {});
+    if ("clear" in result && result.clear)
+      await ctx
+        .editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } })
+        .catch(() => {});
+    if ("reply" in result && result.reply)
+      await ctx
+        .reply(result.reply, { link_preview_options: { is_disabled: true } })
         .catch(() => {});
   });
   bot.on("message", async (ctx) => {

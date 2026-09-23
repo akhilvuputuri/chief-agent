@@ -17,6 +17,7 @@ import type { CalendarActions } from "./calendar-actions.js";
 import type { LibraryTools } from "./library.js";
 import type { LibraryActions } from "./library-actions.js";
 import type { WatchlistTools } from "./stocks.js";
+import type { ReadingTools } from "./reading.js";
 export class JobTools {
   constructor(
     private db: Database,
@@ -28,6 +29,7 @@ export class JobTools {
     private library?: LibraryTools,
     private libraryActions?: LibraryActions,
     private stocks?: WatchlistTools,
+    private reading?: ReadingTools,
   ) {}
   async execute(
     user: string,
@@ -191,6 +193,18 @@ export class JobTools {
     ) {
       if (!this.stocks) throw new Error("Stock watchlist is not configured");
       return this.stocks.call(user, run, a);
+    }
+    if (
+      a.operation === "reading_status" ||
+      a.operation === "reading_settings" ||
+      a.operation === "reading_source_add" ||
+      a.operation === "reading_source_remove" ||
+      a.operation === "reading_preferences" ||
+      a.operation === "reading_edition_now" ||
+      a.operation === "reading_explain"
+    ) {
+      if (!this.reading) throw new Error("Reading bulletin is not configured");
+      return this.reading.call(user, run, a);
     }
     if (
       a.operation === "item_save" ||
