@@ -68,6 +68,49 @@ const normDomain = (d: string) =>
     .replace(/^https?:\/\//, "")
     .replace(/\/.*$/, "")
     .replace(/^www\./, "");
+// ISO 639-2 codes for widely used languages, mapped to the ISO 639-1 form feeds declare.
+const ISO639_2: Record<string, string> = {
+  eng: "en",
+  fra: "fr",
+  fre: "fr",
+  deu: "de",
+  ger: "de",
+  spa: "es",
+  ita: "it",
+  por: "pt",
+  nld: "nl",
+  dut: "nl",
+  zho: "zh",
+  chi: "zh",
+  jpn: "ja",
+  kor: "ko",
+  rus: "ru",
+  ara: "ar",
+  hin: "hi",
+  msa: "ms",
+  may: "ms",
+  ind: "id",
+  tam: "ta",
+  vie: "vi",
+  tha: "th",
+  tur: "tr",
+  pol: "pl",
+  swe: "sv",
+  nor: "no",
+  dan: "da",
+  fin: "fi",
+  heb: "he",
+  ukr: "uk",
+  ell: "el",
+  gre: "el",
+  ces: "cs",
+  cze: "cs",
+};
+/** Primary language subtag in one canonical form: "en-US", "EN" and "eng" all become "en". */
+export const languageCode = (l: string) => {
+  const primary = l.toLowerCase().trim().split(/[-_]/)[0]!;
+  return ISO639_2[primary] ?? primary;
+};
 const domainIn = (domain: string, list: string[]) =>
   list.some((d) => domain === d || domain.endsWith("." + d));
 function phrase(term: string) {
@@ -279,8 +322,7 @@ export function rank(
   const deliveredStories = delivered.map((d) => storyTokens(d.title));
   const muted = s.muted_topics.map(normTopic);
   const mutedPatterns = muted.map(phrase);
-  const primary = (l: string) => l.toLowerCase().split(/[-_]/)[0]!;
-  const languages = s.languages.map(primary);
+  const languages = s.languages.map(languageCode);
   const scored: Scored[] = [];
   for (const c of candidates) {
     if (domainIn(c.domain, s.excluded_domains)) {
@@ -290,7 +332,7 @@ export function rank(
     if (
       languages.length &&
       c.language &&
-      !languages.includes(primary(c.language))
+      !languages.includes(languageCode(c.language))
     ) {
       skip("language");
       continue;
@@ -1527,7 +1569,7 @@ export class ReadingTools {
             ...new Set((i.keywords ?? []).map((k) => k.trim()).filter(Boolean)),
           ],
         })) ?? old.interests,
-      languages: a.languages?.map((l) => l.toLowerCase()) ?? old.languages,
+      languages: a.languages?.map(languageCode) ?? old.languages,
       preferred_domains:
         a.preferredDomains?.map(normDomain).filter(Boolean) ??
         old.preferred_domains,
@@ -1687,33 +1729,31 @@ export class ReadingTools {
     }
   }
   private async removeSource(user: string, id: string) {
-    await this.db.query(
-      "DELETE FROM reading_candidates WHERE source_id=$1 AND user_id=$2",
-      [id, user],
-    );
+    // One statement: removing the last active feed also switches the bulletin off and
+    // mutes pending scheduled editions, so no delivery claim can fall in between. All
+    // parts see the pre-delete snapshot, hence "no other active feed" excludes this id.
     const row = (
       await this.db.query(
-        "DELETE FROM reading_sources WHERE id=$1 AND user_id=$2 RETURNING name,url",
+        `WITH c AS (
+           DELETE FROM reading_candidates WHERE source_id=$1 AND user_id=$2 RETURNING id
+         ), d AS (
+           DELETE FROM reading_sources WHERE id=$1 AND user_id=$2 RETURNING name,url
+         ), s AS (
+           UPDATE reading_settings SET enabled=false,updated_at=now()
+           WHERE user_id=$2 AND enabled AND EXISTS(SELECT 1 FROM d)
+             AND NOT EXISTS(SELECT 1 FROM reading_sources WHERE user_id=$2 AND status='active' AND id<>$1)
+           RETURNING user_id
+         ), m AS (
+           UPDATE reading_editions SET state='muted'
+           WHERE user_id IN (SELECT user_id FROM s) AND state='pending' AND kind='scheduled' RETURNING id
+         ) SELECT d.name,d.url,EXISTS(SELECT 1 FROM s) AS disabled FROM d`,
         [id, user],
       )
     ).rows[0];
     if (!row) throw new ToolValidationError("Reading source unavailable");
-    // Without a feed the daily bulletin would only send empty editions: switch it off.
-    const disabled = (
-      await this.db.query(
-        `UPDATE reading_settings SET enabled=false,updated_at=now() WHERE user_id=$1 AND enabled
-         AND NOT EXISTS(SELECT 1 FROM reading_sources WHERE user_id=$1 AND status='active') RETURNING user_id`,
-        [user],
-      )
-    ).rows.length;
-    if (disabled)
-      await this.db.query(
-        "UPDATE reading_editions SET state='muted' WHERE user_id=$1 AND state='pending' AND kind='scheduled'",
-        [user],
-      );
     return {
-      removed: row,
-      ...(disabled
+      removed: { name: row.name, url: row.url },
+      ...(row.disabled
         ? {
             disabled: true,
             note: "That was the last feed, so the daily bulletin is now off. Add a feed and re-enable it to resume.",

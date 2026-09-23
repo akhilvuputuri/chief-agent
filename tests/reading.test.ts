@@ -1609,3 +1609,80 @@ test("review regressions: a syndicated article keeps one feed's excerpt and attr
     await f.pg.close();
   }
 });
+
+test("review regressions: last-feed removal is one statement with the switch-off", async () => {
+  const f = await fixture(new Date("2026-01-14T22:00:00Z"));
+  try {
+    await f.setup({ enabled: true }, [
+      [FEED, varied],
+      [FEED2, [varied[5]!]],
+    ]);
+    const sources = (await f.call({ operation: "reading_status" })).sources;
+    const one = await f.call({
+      operation: "reading_source_remove",
+      id: sources[0].id,
+    });
+    assert.equal(one.disabled, undefined, "another active feed remains");
+    assert.equal(
+      (await f.call({ operation: "reading_status" })).settings.enabled,
+      true,
+    );
+    // If switching the bulletin off fails, the feed is not removed either.
+    await f.db
+      .query(`CREATE FUNCTION reading_fail() RETURNS trigger LANGUAGE plpgsql AS
+      $$ BEGIN RAISE EXCEPTION 'settings down'; END $$`);
+    await f.db.query(
+      "CREATE TRIGGER reading_fail BEFORE UPDATE ON reading_settings FOR EACH ROW EXECUTE FUNCTION reading_fail()",
+    );
+    await assert.rejects(
+      f.call({ operation: "reading_source_remove", id: sources[1].id }),
+    );
+    assert.equal(
+      (await f.db.query("SELECT count(*)::int AS n FROM reading_sources"))
+        .rows[0].n,
+      1,
+    );
+    await f.db.query("DROP TRIGGER reading_fail ON reading_settings");
+    const last = await f.call({
+      operation: "reading_source_remove",
+      id: sources[1].id,
+    });
+    assert.equal(last.disabled, true);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("review regressions: language codes are canonical and prefixed Atom parses", () => {
+  const items = [
+    cand("Climate item in English", "a.example", { language: "en-us" }),
+  ];
+  const eng = rank(items, { ...S, languages: ["eng"] }, {}, [], NOW);
+  assert.equal(eng.scored.length, 1);
+  const fre = rank(items, { ...S, languages: ["fre"] }, {}, [], NOW);
+  assert.equal(fre.excluded.language, 1);
+  const atom = parseFeed(
+    `<?xml version="1.0"?><atom:feed xmlns:atom="http://www.w3.org/2005/Atom" xml:lang="en">
+      <atom:title>Prefixed</atom:title><atom:entry><atom:title>News item</atom:title>
+      <atom:link href="https://example.com/news"/><atom:updated>2026-01-15T10:00:00Z</atom:updated>
+      <atom:summary>Short summary.</atom:summary><atom:category term="Climate"/></atom:entry></atom:feed>`,
+    FEED,
+    NOW,
+  );
+  assert.equal(atom.title, "Prefixed");
+  assert.equal(atom.entries.length, 1);
+  assert.deepEqual(
+    {
+      title: atom.entries[0]!.title,
+      url: atom.entries[0]!.url,
+      summary: atom.entries[0]!.summary,
+      categories: atom.entries[0]!.categories,
+    },
+    {
+      title: "News item",
+      url: "https://example.com/news",
+      summary: "Short summary.",
+      categories: ["Climate"],
+    },
+  );
+});

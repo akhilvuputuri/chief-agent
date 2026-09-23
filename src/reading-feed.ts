@@ -141,10 +141,18 @@ export function parseDate(raw: string | null, now = new Date()) {
   return new Date(t);
 }
 export function parseFeed(xml: string, base: string, now = new Date()) {
-  const body = xml.slice(0, 2_000_000);
+  let body = xml.slice(0, 2_000_000);
   // The document's root element decides the format; text inside entries cannot.
-  const root = /<(?![?!])([\w.-]+:)?([\w.-]+)/.exec(body)?.[2]?.toLowerCase();
-  const atom = root === "feed";
+  const rootMatch = /<(?![?!])([\w.-]+:)?([\w.-]+)/.exec(
+    xml.slice(0, 2_000_000),
+  );
+  const atom = rootMatch?.[2]?.toLowerCase() === "feed";
+  // A prefixed Atom document (<atom:feed>, <atom:entry>, …) is read as if unprefixed.
+  if (atom && rootMatch?.[1])
+    body = body.replace(
+      new RegExp(`<(/?)${rootMatch[1].replace(/[.-]/g, "\\$&")}`, "g"),
+      "<$1",
+    );
   const blocks = [
     ...body.matchAll(
       atom
