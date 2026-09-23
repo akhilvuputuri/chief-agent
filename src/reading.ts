@@ -1163,17 +1163,6 @@ export class ReadingFeedback {
     private db: Database,
     private clock = () => new Date(),
   ) {}
-  private async log(
-    user: string,
-    item: string | null,
-    action: string,
-    detail = {},
-  ) {
-    await this.db.query(
-      "INSERT INTO reading_feedback_events(user_id,item_id,action,detail,created_at) VALUES($1,$2,$3,$4::jsonb,$5)",
-      [user, item, action, JSON.stringify(detail), this.clock()],
-    );
-  }
   async setVote(
     user: string,
     itemId: string,
@@ -1187,21 +1176,38 @@ export class ReadingFeedback {
       )
     ).rows[0];
     if (!item) return null;
+    // Vote and audit event are one statement, so a failure leaves neither behind.
+    // Repeating an unchanged vote keeps its timestamp (no re-learning) unless a
+    // learning reset happened since, in which case pressing it again reaffirms it.
     if (vote === null)
       await this.db.query(
-        "DELETE FROM reading_votes WHERE item_id=$1 AND user_id=$2",
-        [itemId, user],
+        `WITH d AS (DELETE FROM reading_votes WHERE item_id=$1 AND user_id=$2 RETURNING item_id)
+         INSERT INTO reading_feedback_events(user_id,item_id,action,detail,created_at)
+         VALUES($2,$1,'undo','{}'::jsonb,$3)`,
+        [itemId, user, this.clock()],
       );
     else
       await this.db.query(
-        `INSERT INTO reading_votes(item_id,user_id,vote,reason,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$5)
-         ON CONFLICT(item_id) DO UPDATE SET vote=EXCLUDED.vote,reason=EXCLUDED.reason,
-           updated_at=CASE WHEN reading_votes.vote=EXCLUDED.vote AND reading_votes.reason IS NOT DISTINCT FROM EXCLUDED.reason
-             THEN reading_votes.updated_at ELSE EXCLUDED.updated_at END
-         WHERE reading_votes.user_id=EXCLUDED.user_id`,
-        [itemId, user, vote, reason, this.clock()],
+        `WITH v AS (
+           INSERT INTO reading_votes(item_id,user_id,vote,reason,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$5)
+           ON CONFLICT(item_id) DO UPDATE SET vote=EXCLUDED.vote,reason=EXCLUDED.reason,
+             updated_at=CASE WHEN reading_votes.vote=EXCLUDED.vote AND reading_votes.reason IS NOT DISTINCT FROM EXCLUDED.reason
+               AND NOT EXISTS(SELECT 1 FROM reading_settings s WHERE s.user_id=EXCLUDED.user_id
+                 AND s.learning_reset_at IS NOT NULL AND reading_votes.updated_at<=s.learning_reset_at)
+               THEN reading_votes.updated_at ELSE EXCLUDED.updated_at END
+           WHERE reading_votes.user_id=EXCLUDED.user_id RETURNING item_id
+         )
+         INSERT INTO reading_feedback_events(user_id,item_id,action,detail,created_at)
+         SELECT $2,item_id,$3,$6::jsonb,$5 FROM v`,
+        [
+          itemId,
+          user,
+          vote,
+          reason,
+          this.clock(),
+          JSON.stringify(reason ? { reason } : {}),
+        ],
       );
-    await this.log(user, itemId, vote ?? "undo", reason ? { reason } : {});
     return { item, vote: vote ? { vote, reason } : null };
   }
   async press(user: string, data: string) {
@@ -1211,16 +1217,18 @@ export class ReadingFeedback {
     const id = m[3]!;
     if (action === "p") {
       const r = await this.db.query(
-        `UPDATE reading_settings SET paused=true,updated_at=now() WHERE user_id=$1
-         AND EXISTS(SELECT 1 FROM reading_editions WHERE id=$2 AND user_id=$1) RETURNING user_id`,
-        [user, id],
+        `WITH s AS (
+           UPDATE reading_settings SET paused=true,updated_at=now() WHERE user_id=$1
+           AND EXISTS(SELECT 1 FROM reading_editions WHERE id=$2 AND user_id=$1) RETURNING user_id
+         ), m AS (
+           UPDATE reading_editions SET state='muted'
+           WHERE user_id IN (SELECT user_id FROM s) AND state='pending' AND kind='scheduled' RETURNING id
+         ), e AS (
+           INSERT INTO reading_feedback_events(user_id,action,created_at) SELECT user_id,'pause',$3 FROM s RETURNING id
+         ) SELECT user_id FROM s`,
+        [user, id, this.clock()],
       );
       if (!r.rows.length) return { notice: "That bulletin is unavailable." };
-      await this.db.query(
-        "UPDATE reading_editions SET state='muted' WHERE user_id=$1 AND state='pending' AND kind='scheduled'",
-        [user],
-      );
-      await this.log(user, null, "pause");
       return {
         notice: "Daily readings paused. Ask me to resume anytime.",
         clear: true,
@@ -1250,20 +1258,29 @@ export class ReadingFeedback {
       const value = action === "ms" ? item.domain : item.topics?.[0];
       if (!value) return { notice: "No topic to mute for this reading." };
       await this.db.query(
-        `INSERT INTO reading_settings(user_id,${column}) VALUES($1,jsonb_build_array($2::text))
-         ON CONFLICT(user_id) DO UPDATE SET ${column}=CASE WHEN reading_settings.${column} ? $2::text
-           THEN reading_settings.${column} ELSE reading_settings.${column}||jsonb_build_array($2::text) END,updated_at=now()`,
-        [user, value],
+        `WITH s AS (
+           INSERT INTO reading_settings(user_id,${column}) VALUES($1,jsonb_build_array($2::text))
+           ON CONFLICT(user_id) DO UPDATE SET ${column}=CASE WHEN reading_settings.${column} ? $2::text
+             THEN reading_settings.${column} ELSE reading_settings.${column}||jsonb_build_array($2::text) END,updated_at=now()
+           RETURNING user_id
+         ) INSERT INTO reading_feedback_events(user_id,item_id,action,detail,created_at)
+         SELECT user_id,$3,$4,jsonb_build_object('value',$2::text),$5 FROM s`,
+        [
+          user,
+          value,
+          id,
+          action === "ms" ? "mute_source" : "mute_topic",
+          this.clock(),
+        ],
       );
-      await this.log(user, id, action === "ms" ? "mute_source" : "mute_topic", {
-        value,
-      });
+      // The mute is committed; a failed re-read only drops the keyboard refresh.
+      const vote = await current().catch(() => undefined);
       return {
         notice:
           action === "ms"
             ? `Muted ${value}. Ask me to unmute it anytime.`
             : `Muted topic “${value}”. Ask me to unmute it anytime.`,
-        keyboard: itemKeyboard(item, await current()),
+        ...(vote === undefined ? {} : { keyboard: itemKeyboard(item, vote) }),
       };
     }
     const vote: Vote | null =

@@ -69,7 +69,7 @@ Equivalent workload, model/configuration, pricing, denominators and missing acco
 
 - 20 September 2026: [24 — Scheduled independent agent work](24-scheduled-routines.md), released v0.3.15; builds on [17 — Independent jobs](17-rolling-conversation.md).
 - 20 September 2026: [25 — Stock watchlist drop alerts](25-stock-watchlist.md): the first scheduled-domain consumer, implemented as a deterministic monitor rather than a routine; installed in the v0.3.19 rollout, 23 September follow-up before provider activation.
-- 23 September 2026: [32 — Daily reading bulletin](32-reading-bulletin.md): deterministic feed ranking with explicit Like/Dislike learning, following the watchlist's monitor-and-outbox pattern; migration 019 rollout and review pending.
+- 23 September 2026: [33 — Daily reading bulletin](33-reading-bulletin.md): deterministic feed ranking with explicit Like/Dislike learning, following the watchlist's monitor-and-outbox pattern; migration 019 rollout and review pending.
 
 - [Google authorization expiry](26-google-authorization-expiry.md): 21 September 2026 investigation and long-lived OAuth recovery; operator completion pending.
 

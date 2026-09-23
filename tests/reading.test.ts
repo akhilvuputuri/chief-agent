@@ -1291,3 +1291,58 @@ test("review regressions: status shows how far a partially delivered edition got
     await f.pg.close();
   }
 });
+
+test("review regressions: feedback writes are atomic and a reset vote can be reaffirmed", async () => {
+  const f = await fixture();
+  try {
+    await f.setup({}, [[FEED, varied]]);
+    const r = await f.call({ operation: "reading_edition_now" });
+    const [item] = await f.items(r.editionId);
+    const key = `topic:${item.topics[0]}`;
+    await f.feedback.press("a", `rd:l:${item.id}`);
+    f.setNow(new Date(NOW.getTime() + 60000));
+    await f.call({ operation: "reading_preferences", action: "reset" });
+    assert.equal(
+      (await f.editions.preferences("a", "t")).weights[key],
+      undefined,
+    );
+    // Pressing the same Like after a reset counts again; a further replay does not re-date it.
+    f.setNow(new Date(NOW.getTime() + 120000));
+    await f.feedback.press("a", `rd:l:${item.id}`);
+    assert.equal((await f.editions.preferences("a", "t")).weights[key], 1);
+    const dated = (await f.db.query("SELECT updated_at FROM reading_votes"))
+      .rows[0].updated_at;
+    f.setNow(new Date(NOW.getTime() + 180000));
+    await f.feedback.press("a", `rd:l:${item.id}`);
+    assert.deepEqual(
+      (await f.db.query("SELECT updated_at FROM reading_votes")).rows[0]
+        .updated_at,
+      dated,
+    );
+    // If the audit write fails, the vote is not saved either.
+    await f.db.query(
+      "ALTER TABLE reading_feedback_events RENAME TO reading_feedback_events_off",
+    );
+    const [, second] = await f.items(r.editionId);
+    await assert.rejects(f.feedback.press("a", `rd:d:${second.id}`));
+    await assert.rejects(f.feedback.press("a", `rd:ms:${second.id}`));
+    await assert.rejects(f.feedback.press("a", `rd:p:${r.editionId}`));
+    assert.equal(
+      (
+        await f.db.query("SELECT 1 FROM reading_votes WHERE item_id=$1", [
+          second.id,
+        ])
+      ).rows.length,
+      0,
+    );
+    const settings = (
+      await f.db.query(
+        "SELECT paused,excluded_domains FROM reading_settings WHERE user_id='a'",
+      )
+    ).rows[0];
+    assert.equal(settings.paused, false);
+    assert.deepEqual(settings.excluded_domains, []);
+  } finally {
+    await f.pg.close();
+  }
+});

@@ -14,7 +14,7 @@ New context incident diagnosed on 22 September: the wire-compaction patch works 
 
 # Current work and shipped baseline
 
-Candidate for [issue #50](https://github.com/akhilvuputuri/chief-agent/issues/50) on `claude/issue-50-r75muy`: a daily reading bulletin from owner-approved feeds with Like/Dislike learning, deterministic ranking and no model call per edition. Requires the reviewed operator rollout of additive migration 019 (`scripts/deploy-reading.py`; baselines v0.3.22 `c936d7d`, the app-only `2f57b24`/`7648fca` releases and v0.3.23 `7b1cff9`); without it the feature stays off. Nothing is configured or scheduled by the rollout. See [runbook](reading-bulletin.md) and [journal 32](journey/32-reading-bulletin.md).
+Candidate for [issue #50](https://github.com/akhilvuputuri/chief-agent/issues/50) on `claude/issue-50-r75muy`: a daily reading bulletin from owner-approved feeds with Like/Dislike learning, deterministic ranking and no model call per edition. Requires the reviewed operator rollout of additive migration 019 (`scripts/deploy-reading.py`; baselines v0.3.22 `c936d7d`, the app-only `2f57b24`/`7648fca` releases and v0.3.23 `7b1cff9`); without it the feature stays off. Nothing is configured or scheduled by the rollout. See [runbook](reading-bulletin.md) and [journal 33](journey/33-reading-bulletin.md).
 
 Released v0.3.20 at `c323b34`: recoverable context repacking after serialized tool results exceed the application guard. [Incident, regression and deployment evidence](journey/28-context-wire-compaction.md). Original messages/results remain stored; fixed schema footprint optimization remains separate.
 
