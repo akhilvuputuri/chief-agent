@@ -18,7 +18,9 @@ CREATE TABLE IF NOT EXISTS parcels (
  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS parcels_active ON parcels(user_id,updated_at DESC) WHERE archived_at IS NULL;
-CREATE INDEX IF NOT EXISTS parcels_tracking ON parcels(user_id,tracking_key) WHERE tracking_key<>'';
+-- A tracking reference is decisive only if one parcel holds it; the database enforces
+-- that, so two concurrent writes cannot both pass the host's pre-write check.
+CREATE UNIQUE INDEX IF NOT EXISTS parcels_tracking ON parcels(user_id,tracking_key) WHERE tracking_key<>'';
 CREATE INDEX IF NOT EXISTS parcels_order ON parcels(user_id,order_key) WHERE order_key<>'';
 -- Append-only history. A correction is a new row; nothing here is ever mutated.
 CREATE TABLE IF NOT EXISTS parcel_updates (

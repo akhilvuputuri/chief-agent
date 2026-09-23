@@ -93,6 +93,16 @@ function sourceRef(source: Source) {
       }
     : { kind: "user" };
 }
+/** A concurrent write took the tracking reference between the check and the write. */
+function duplicateTracking(error: unknown) {
+  const e = error as { code?: string; constraint?: string; message?: string };
+  return (
+    String(e?.code) === "23505" &&
+    /parcels_tracking/.test(String(e?.constraint ?? e?.message ?? ""))
+  );
+}
+const TRACKING_TAKEN =
+  "Parcel validation: that tracking reference was just saved on another parcel; match it and pass that parcel's id";
 /** Only the one-email-per-parcel index, never some other unique violation. */
 function duplicateMessage(error: unknown) {
   const e = error as { code?: string; constraint?: string; message?: string };
@@ -444,17 +454,24 @@ export class ParcelTools {
       { changed: true, status: hasStatus, eta: !!a.eta, ignored: "" },
       run,
     );
-    const row = (
-      await this.db.query(
-        `WITH p AS (
+    let row: any;
+    try {
+      row = (
+        await this.db.query(
+          `WITH p AS (
            INSERT INTO parcels(${parcel.map(([c]) => c).join(",")})
            VALUES(${parcel.map((_, i) => `$${i + 1}`).join(",")}) RETURNING *
          ), u AS (
            ${this.insertHistory(h, parcel.length + 1)}
          ) SELECT p.* FROM p JOIN u ON true`,
-        [...parcel.map(([, v]) => v), ...h.values],
-      )
-    ).rows[0] as any;
+          [...parcel.map(([, v]) => v), ...h.values],
+        )
+      ).rows[0];
+    } catch (error) {
+      if (duplicateTracking(error))
+        throw new ToolValidationError(TRACKING_TAKEN);
+      throw error;
+    }
     return { notice: UNVERIFIED, ...shown(row), created: true };
   }
   /** A decisive reference must stay decisive: two parcels may never share one. */
@@ -531,11 +548,14 @@ export class ParcelTools {
       parcel.status_source === "user" &&
       a.status !== undefined &&
       a.status === parcel.status;
-    const statusApplies =
+    // Two different questions. Is this observation current enough to count? That decides
+    // whether an email may overwrite details. Does its status change anything? An echo
+    // of the owner's own status is current but changes nothing.
+    const statusCurrent =
       a.status !== undefined &&
       !statusBlockedByOwner &&
-      !echoesOwner &&
       decides(next, statusKey);
+    const statusApplies = statusCurrent && !echoesOwner;
     const etaApplies = a.eta !== undefined && decides(next, etaKey);
 
     // Details: compute final values here; the revision compare-and-swap guarantees the
@@ -559,7 +579,7 @@ export class ParcelTools {
       const emailMay =
         column !== "label" &&
         value !== "" &&
-        (statusApplies || parcel[column] === "");
+        (statusCurrent || parcel[column] === "");
       if (owner || emailMay) {
         changes.push([column, value]);
         changedDetails.push(name);
@@ -584,14 +604,22 @@ export class ParcelTools {
         ? `delivery date not applied: ${ignoredReason(next, etaKey)}`
         : "",
       refusedDetails.length
-        ? `${refusedDetails.join(", ")} not applied: an email only fills an empty field unless its status applies, and never renames or clears`
+        ? `${refusedDetails.join(", ")} not applied: an email only fills an empty field unless it is the most current status report, and never renames or clears`
         : "",
     ].filter(Boolean);
     const ignored = losses.join("; ");
     const archiveChanges =
       a.archive !== undefined && a.archive !== !!parcel.archived_at;
+    // Carrier wording from an echo is new information; keep it without changing the source.
+    const echoWording =
+      echoesOwner && statusCurrent && !!a.rawStatus && !parcel.raw_status;
+    if (echoWording) changedDetails.push("carrier wording");
     const changed =
-      statusApplies || etaApplies || changes.length > 0 || archiveChanges;
+      statusApplies ||
+      etaApplies ||
+      changes.length > 0 ||
+      archiveChanges ||
+      echoWording;
 
     const update = randomUUID();
     const stamp = new Date(observedAt).toISOString();
@@ -602,6 +630,7 @@ export class ParcelTools {
       sets.push(`${column}=$${values.length}`);
     };
     for (const [column, value] of changes) set(column, value);
+    if (echoWording) set("raw_status", a.rawStatus!);
     if (statusApplies) {
       set("status", a.status!);
       set("raw_status", a.rawStatus ?? "");
@@ -657,6 +686,8 @@ export class ParcelTools {
         ...(ignored ? { ignoredReason: ignored } : {}),
       };
     } catch (error) {
+      if (duplicateTracking(error))
+        throw new ToolValidationError(TRACKING_TAKEN);
       // The same message applies once per parcel; a repeat is a no-op, not an error.
       if (duplicateMessage(error))
         return {

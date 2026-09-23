@@ -983,9 +983,22 @@ test("no email can walk back a delivery the owner confirmed, but a return still 
       operation: "parcel_record",
       id: saved.id,
       status: "out_for_delivery",
+      carrier: "LateCarrier",
       ...email("kd01", day(17)),
     });
     assert.equal(lagging.statusApplied, false);
+    // Blocked by the owner's confirmation, it is not current, so it cannot overwrite details
+    // either; the carrier was empty, so it may only fill it.
+    assert.equal(lagging.carrier, "LateCarrier");
+    const overwrite: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      status: "in_transit",
+      carrier: "OtherCarrier",
+      ...email("kd03", day(18)),
+    });
+    assert.equal(overwrite.carrier, "LateCarrier");
+    assert.match(overwrite.ignoredReason, /carrier not applied/);
     assert.equal(lagging.status, "delivered");
     assert.match(lagging.ignoredReason, /confirmed this parcel was delivered/);
     const returned: any = await f.tools.call("a", {
@@ -1289,6 +1302,115 @@ test("archiving an archived parcel changes nothing", async () => {
       ])
     ).rows[0].archived_at;
     assert.equal(new Date(after).getTime(), new Date(before).getTime());
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("a current email echoing the owner's status may still correct details", async () => {
+  const f = await fixture();
+  try {
+    const saved: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      label: "Monitor",
+      carrier: "UPS",
+      status: "shipped",
+      ...user(day(10)),
+    });
+    // Newer than the owner's statement, same status wording.
+    const echo: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      status: "shipped",
+      carrier: "DHL",
+      trackingRef: "JD-1",
+      ...email("ma01", day(12)),
+    });
+    assert.equal(echo.statusApplied, false);
+    assert.equal(echo.statusSource, "user");
+    assert.equal(echo.carrier, "DHL");
+    assert.equal(echo.trackingRef, "JD-1");
+    assert.deepEqual(echo.detailsChanged, ["carrier", "tracking reference"]);
+    assert.doesNotMatch(echo.ignoredReason ?? "", /carrier not applied/);
+    // A stale echo is still refused on details: it is not the most current report.
+    const stale: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      status: "shipped",
+      carrier: "FedEx",
+      ...email("ma02", day(9)),
+    });
+    assert.equal(stale.carrier, "DHL");
+    assert.match(stale.ignoredReason, /carrier not applied/);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("an echo keeps carrier wording without taking over the source", async () => {
+  const f = await fixture();
+  try {
+    const saved: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      label: "Sofa",
+      status: "unknown",
+      ...user(day(10)),
+    });
+    const worded: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      status: "unknown",
+      rawStatus: "awaiting pickup at depot",
+      ...email("mb01", day(12)),
+    });
+    assert.equal(worded.applied, true);
+    assert.equal(worded.rawStatus, "awaiting pickup at depot");
+    assert.equal(worded.statusSource, "user");
+    assert.deepEqual(worded.detailsChanged, ["carrier wording"]);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("the database refuses a second parcel with the same tracking reference", async () => {
+  const f = await fixture();
+  try {
+    await f.tools.call("a", {
+      operation: "parcel_record",
+      label: "One",
+      trackingRef: "RACE-1",
+      ...user(day(10)),
+    });
+    // Simulate the pre-write check losing a race: skip it and write directly.
+    const raced = new ParcelTools(
+      {
+        query: async (text: string, values?: unknown[]) =>
+          text.startsWith("SELECT id,archived_at FROM parcels")
+            ? { rows: [] }
+            : f.db.query(text, values),
+      } as never,
+      () => Date.UTC(2026, 8, 21, 2, 0, 0),
+    );
+    await assert.rejects(
+      raced.call("a", {
+        operation: "parcel_record",
+        label: "Two",
+        trackingRef: "race 1",
+        ...user(day(10)),
+      }),
+      /was just saved on another parcel/,
+    );
+    const count = (
+      await f.db.query("SELECT count(*)::int n FROM parcels WHERE label='Two'")
+    ).rows[0].n;
+    assert.equal(count, 0);
+    // Another owner may hold the same reference.
+    await f.tools.call("b", {
+      operation: "parcel_record",
+      label: "Theirs",
+      trackingRef: "RACE-1",
+      ...user(day(10)),
+    });
   } finally {
     await f.pg.close();
   }

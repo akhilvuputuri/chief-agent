@@ -13,11 +13,12 @@ import time
 
 LIVE = pathlib.Path('/opt/hermes-companion')
 LOCK = pathlib.Path('/var/lock/companion-release.lock')
-# b22b09d is the release verified deployed and healthy on 23 September 2026. 7297202
-# changes only two journal files on top of it and may deploy before this rollout runs.
-# Any other RELEASE must be reconciled and re-reviewed; never rewrite RELEASE to match.
+# b22b09d is the release verified deployed and healthy on 23 September 2026.
+# 7297202 and 7b1cff9 change only journal, release-note and status documents above it;
+# either may be the live release when this runs. Any other RELEASE must be reconciled
+# and re-reviewed; never rewrite RELEASE to match.
 BASE = 'b22b09d0abca93bc6551468d0ad50ca68551f102'
-BASES = {BASE, '7297202dc13f1e14de7164ef57d7c38d74be6cbc'}
+BASES = {BASE, '7297202dc13f1e14de7164ef57d7c38d74be6cbc', '7b1cff9506ebb31159825ff166823b7377e21efa'}
 IMAGE = 'hermes-companion-gateway'
 MIGRATION = '019_parcels.sql'
 COMPOSE_ANCHOR = b'        "/migrations/018_watchlist.sql",\n'
