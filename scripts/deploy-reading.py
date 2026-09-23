@@ -22,6 +22,8 @@ BASES = {
     # PR #80 watchlist credit back-off and PR #81 Calendar authorization reporting.
     '2f57b242254124b5d92242220b61eb6ad8715e2a',
     '7648fca5cb7f2cd0590a7db5e496f3c4a6f97b33',
+    # v0.3.23 model-policy release (PRs #82-#86): Dockerfile copies a config file only.
+    '7b1cff9506ebb31159825ff166823b7377e21efa',
 }
 IMAGE = 'hermes-companion-gateway'
 MIGRATION = '019_reading.sql'

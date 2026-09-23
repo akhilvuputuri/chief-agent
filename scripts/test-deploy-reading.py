@@ -27,7 +27,8 @@ BASE_COMPOSE = ('services:\n  migrate:\n    command:\n      [\n'
 
 class ReadingRolloutTests(unittest.TestCase):
     def test_later_app_only_release_baselines(self):
-        for sha in ['2f57b242254124b5d92242220b61eb6ad8715e2a', '7648fca5cb7f2cd0590a7db5e496f3c4a6f97b33']:
+        for sha in ['2f57b242254124b5d92242220b61eb6ad8715e2a', '7648fca5cb7f2cd0590a7db5e496f3c4a6f97b33',
+                    '7b1cff9506ebb31159825ff166823b7377e21efa']:
             with self.subTest(sha=sha):
                 self.scenario(baseline=sha, expected_migration=True)
 

@@ -90,7 +90,7 @@ Each item message offers 👍 Like, 👎 Dislike, More like this, Why this?, Mut
 
 1. Independently review the exact PR head; run `npm run check`, changed-file formatting and `python3 scripts/test-deploy-reading.py`. Review `scripts/deploy-reading.py`.
 2. Merge only after approval and CI. The ordinary release refuses the DB/Compose change.
-3. Verify live `RELEASE` is one of the script's reviewed baselines (`BASES`): v0.3.22 `c936d7d630831f6f0c4b27dd62c5a06141a50201` or the app-only releases `2f57b242254124b5d92242220b61eb6ad8715e2a` (PR #80) and `7648fca5cb7f2cd0590a7db5e496f3c4a6f97b33` (PR #81). If newer, reconcile and re-review the script; do not bypass the guard.
+3. Verify live `RELEASE` is one of the script's reviewed baselines (`BASES`): v0.3.22 `c936d7d630831f6f0c4b27dd62c5a06141a50201` or the app-only releases `2f57b242254124b5d92242220b61eb6ad8715e2a` (PR #80) `7648fca5cb7f2cd0590a7db5e496f3c4a6f97b33` (PR #81) and v0.3.23 `7b1cff9506ebb31159825ff166823b7377e21efa` (PRs #82–#86). If newer, reconcile and re-review the script; do not bypass the guard.
 4. Transfer a Git archive of the exact reviewed main SHA and the reviewed script using the existing local operations connection. Run `python3 deploy-reading.py ARCHIVE SHA` on the host. It validates historical migrations and Compose (only the 019 entry may be added), locks releases, builds before stopping, refuses active work/input, applies only 019 and checks health. No secrets or environment variables are needed.
 5. Verify release SHA, health, migration marker `19` and preservation of existing records. The rollout configures no feeds and schedules nothing.
 
