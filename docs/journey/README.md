@@ -80,3 +80,7 @@ Equivalent workload, model/configuration, pricing, denominators and missing acco
 - 22 September 2026: [29 — Cloud-agent review and release harness](29-cloud-agent-harness.md), extending the deployment and incident-investigation reading path. Merged; actual cloud diagnostics acceptance passed. Release evidence and remaining boundaries are recorded in the entry.
 
 - 22 September 2026: [Chief rebrand](30-chief-rebrand.md) — product/repository identity with deployment and data compatibility preserved; v0.3.21 deployed and verified.
+
+## Calendar
+
+- 23 September 2026: [31 — Calendar authorization failure](31-calendar-authorization-failure.md): an expired Calendar token made approved events look uncertain and block later drafts; fix tested, not deployed.

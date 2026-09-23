@@ -3,6 +3,7 @@ import { TelegramViews, viewCallback } from "./telegram-views.js";
 import type { Collection, View } from "./telegram-view-render.js";
 import { formatTelegram } from "./telegram-format.js";
 import { calendarPreview, validateDraft } from "./calendar-draft.js";
+import { GoogleAuthError } from "./calendar.js";
 import {
   LibraryActions,
   libraryButtons,
@@ -65,7 +66,13 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
             ? `Calendar event created.${result.url ? "\n" + result.url : ""}`
             : result.status === "denied"
               ? "Draft declined. No event was created."
-              : "The event's outcome is uncertain. I will not create it again. Click Check status to look for the existing event.";
+              : result.status === "failed"
+                ? result.reason === "authorization"
+                  ? "No event was created. Google Calendar authorization failed (it may have expired or been revoked), so nothing was sent to Google. Reconnect Calendar, then ask me to draft the event again."
+                  : result.reason === "configuration"
+                    ? "No event was created. The server's Google Calendar connection settings were rejected, so nothing was sent to Google. The Calendar connection must be fixed on the server before drafting again."
+                    : "No event was created. The request stopped before anything was sent to Google. Ask me to draft the event again."
+                : "The event's outcome is uncertain. I will not create it again. Click Check status to look for the existing event.";
         await ctx.reply(text, {
           reply_markup: {
             inline_keyboard:
@@ -89,9 +96,11 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
             "UPDATE work_tasks SET status='queued',pause_reason=NULL,next_run=now() WHERE user_id=$1 AND id IN (SELECT w.task_id FROM work_turns w JOIN approvals a ON a.run_id=w.run_id AND a.user_id=w.user_id WHERE a.id=$2 AND a.user_id=$1) AND status='paused' AND pause_reason='awaiting_approval' AND used_ms<budget_ms AND used_models<budget_models AND used_tools<budget_tools",
             [user, ctx.match[2]],
           );
-      } catch {
+      } catch (e) {
         await ctx.reply(
-          "This calendar approval is unavailable, expired, or could not be checked. No new creation request will be retried automatically.",
+          e instanceof GoogleAuthError
+            ? "Google Calendar rejected the connection, so this event's status could not be checked. Fix or reconnect Calendar, then tap Check status again. No new creation request was sent."
+            : "This calendar approval is unavailable, expired, or could not be checked. No new creation request will be retried automatically.",
         );
       }
     });
