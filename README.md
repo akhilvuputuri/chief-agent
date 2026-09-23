@@ -1,8 +1,6 @@
 # Chief
 
-Scheduled agent routines support owner-selected one-time/recurring independent tasks with saved results and delivery state. See [architecture and domain-agent extension contract](docs/scheduled-routines.md) (migration 017).
-
-Version 0.3.9 adds ordered input steering at model/tool checkpoints, concurrent file/voice preparation and delivery-aware history. Existing installations require additive migration014; see [checkpoint steering and rollout](docs/checkpoint-steering.md). [Published releases](https://github.com/akhilvuputuri/chief-agent/releases) record verified deployment milestones; a branch push alone is not a deployment.
+Current release and open work: [current-work.md](docs/current-work.md). For an incident, start with [troubleshooting.md](docs/troubleshooting.md). [Published releases](https://github.com/akhilvuputuri/chief-agent/releases) record verified deployment milestones; a branch push alone is not a deployment.
 
 **A personal assistant with a TypeScript agent runtime we own.** Talk to it through Telegram text or voice, ask it to research, maintain notes, plan preparation, and manage reminders. Postgres is the durable source of truth; Google Sheets gives you a familiar viewing surface.
 
@@ -37,7 +35,7 @@ flowchart LR
 
 ## Runtime
 
-The runtime uses `openai/gpt-5.6-sol` through OpenRouter with explicit medium reasoning. Every request requires supported parameters and price-first provider selection, capped at $2 per million input tokens and $10 per million output tokens by default. A request fails if no eligible provider exists. Missing provider cost data is unknown, never recorded as zero.
+The runtime uses OpenRouter with explicit medium reasoning. Its checked-in `config/model-policy.json` initially leaves the main model at the existing environment/default `openai/gpt-5.6-sol`; a reviewed policy pin lets future coding agents change it through the ordinary PR and release pipeline without server access. Every request requires supported parameters and price-first provider selection, capped at $2 per million input tokens and $10 per million output tokens by default. A request fails if no eligible provider exists. Missing provider cost data is unknown, never recorded as zero. See [model selection and release](docs/deployment.md#changing-the-production-model-through-a-release).
 
 Tools have individual names and Zod-validated argument schemas. Identity comes from Telegram authentication and server-owned callbacks, never model arguments. Calls execute sequentially. Model responses and invocation records are saved before advancing. An interrupted write with an uncertain outcome pauses execution for inspection.
 
@@ -47,7 +45,7 @@ Telegram replies are model-written, guided by the mobile delivery context. The r
 
 GitHub `main` is the source of truth for integrated code. The last successful `release` workflow and server `RELEASE` identify what is live; main may be ahead after a failed or pending deployment. The production branch is **main**, not master.
 
-1. Read [AGENTS.md](AGENTS.md), [current work](docs/current-work.md), then [HANDOVER.md](HANDOVER.md).
+1. Read [AGENTS.md](AGENTS.md), [current work](docs/current-work.md), then [HANDOVER.md](HANDOVER.md). For failures, follow the [shared troubleshooting runbook](docs/troubleshooting.md).
 2. Follow [portable development](docs/portable-development.md): clone, use Node 22, install dependencies, and run the mocked checks without production keys.
 3. Develop on an independent branch or worktree, open a PR, verify checks and merge. Passing main changes deploy through GitHub Actions; no local production SSH key is needed for ordinary app releases.
 4. Watch the release and report its SHA and health. Database/Compose changes, secret rotation and trusted server-command changes still require the documented operator procedure.
