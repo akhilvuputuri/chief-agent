@@ -56,9 +56,11 @@ const server = createServer(async (req, res) => {
     return;
   }
   busy = true;
+  let stage = "consent";
   try {
     if (u.searchParams.has("error") || !u.searchParams.get("code"))
       throw new Error("Consent not completed");
+    stage = "token exchange";
     const response = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
       redirect: "error",
@@ -74,11 +76,13 @@ const server = createServer(async (req, res) => {
     });
     if (!response.ok) throw new Error("Token exchange failed");
     const t = await response.json();
+    stage = "scope verification";
     validateCalendarScopes(t.scope);
     if (!t.refresh_token || !t.access_token)
       throw new Error(
         "Offline authorization was not returned. Restart consent.",
       );
+    stage = "account verification";
     const profile = await fetch(
       "https://www.googleapis.com/oauth2/v2/userinfo",
       {
@@ -92,6 +96,7 @@ const server = createServer(async (req, res) => {
       (await profile.json()).email?.toLowerCase() !== email.toLowerCase()
     )
       throw new Error("Wrong Google account");
+    stage = "credential storage";
     await writeFile(
       outputPath,
       JSON.stringify({
@@ -116,7 +121,7 @@ const server = createServer(async (req, res) => {
     ];
     const message = safeMessages.includes(error?.message)
       ? error.message
-      : "Authorization failed during account verification or credential storage. Restart setup.";
+      : `Authorization failed during ${stage}. Restart setup.`;
     res.writeHead(400).end(message);
     console.error(message);
   } finally {
