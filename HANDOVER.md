@@ -1,5 +1,7 @@
 # Personal-agent handover
 
+Current verified milestone as of 22 September 2026 SGT: [v0.3.22](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.22), deployed `c936d7d630831f6f0c4b27dd62c5a06141a50201` with release-time health verified. Recheck the latest release and server `RELEASE` before claiming current production state. Its larger context ceiling is temporary; [issue #77](https://github.com/akhilvuputuri/chief-agent/issues/77) and the [context plan](docs/context-management.md) track bounded growth. For a Telegram or integration failure, start with the [shared troubleshooting runbook](docs/troubleshooting.md); no agent should need this chat's history to know the diagnostic paths or access limits.
+
 Start cloud tasks with [the end-to-end agent workflow](docs/cloud-agent-workflow.md). Independent review and exact deployment receipts are separate from CI.
 
 Stock watchlist PR #63 is merged; migration 018 and code were installed during the v0.3.19 operator rollout. No live market-data provider was configured. See [current work](docs/current-work.md) for release evidence; the old review-branch status is superseded.
@@ -36,7 +38,7 @@ Secrets live only in private environment/operations files and server configurati
 
 `telegram.ts` → `agent.ts` → `custom-agent.ts` → `model.ts` and the in-process owner-scoped dispatcher. `context.ts` builds context; `execution.ts` persists runs, calls and budgets. Postgres retains all state. Production Compose has gateway + Postgres and a one-shot migration service. No production Hermes service or HTTP tool callback.
 
-- Main model: `openai/gpt-5.6-sol`, explicit medium reasoning, OpenRouter price-first, default ceilings $2/M input and $10/M output.
+- Main model: the bundled `config/model-policy.json` pin wins when set; its initial `null` retains the existing `AGENT_MODEL` environment/default `openai/gpt-5.6-sol`. Medium reasoning, OpenRouter price-first and default ceilings $2/M input and $10/M output remain. Future model changes use the [reviewed PR/release procedure](docs/deployment.md#changing-the-production-model-through-a-release), not a server edit.
 - Search helper: `google/gemini-3.8-flash`.
 - Voice: ElevenLabs `scribe_v2`, `eleven_flash_v2_5`, existing stock River voice. The audio-provider boundary remains unchanged.
 - Read-only Gmail, Calendar queries plus approval-gated event creation, preparation Sheet and daily Sheet integrations are retained.

@@ -14,6 +14,12 @@ The Google event ID is derived from the random approval UUID. The application ma
 
 Draft receipts prove only that a draft was saved. Recent Calendar approval outcomes are included in runtime context so the model can distinguish pending, denied and created events. A successful callback resumes only its linked task, subject to remaining execution budget. The existing query tool can check actual calendar state.
 
+### Troubleshooting a missing event
+
+Use the [shared incident runbook](troubleshooting.md#calendar-event-incident) to determine whether the request reached `calendar_draft`, whether its preview was delivered, whether the owner clicked the exact button, and whether `calendar.created` plus a receipt exist. Do not assume a successful `calendar_list` proves the write-capable credential or Google scope was installed. The repo records the consent procedure but does not assert the current production token's scope or validity.
+
+In current source, `CalendarActions.decide` records a definite pre-send failure as `failed` with a bounded `failure.code` (`authorization`, `configuration`, or `not_sent`) and a `calendar.not_sent` event. Only an error after the insert attempt may have reached Google stays `uncertain`, without a provider error category; it must be reconciled by the deterministic event ID, never retried as another POST. The bounded production diagnostics aggregate operations and cannot identify one approval's state or error. [Issue #28](https://github.com/akhilvuputuri/chief-agent/issues/28) tracks shared private trace inspection without exposing credentials, event details, or a second write path. Check the exact deployed SHA before assuming production has this classification.
+
 ## OAuth
 
 The one-time `scripts/connect-calendar.mjs CLIENT_JSON OUTPUT_JSON EMAIL` helper requests `openid`, userinfo email and `calendar.events.owned`, checks the exact returned scopes/account, and writes a new file with mode 0600. Use a fresh private output path. This Google scope is broader than the app's exposed operations: Google permits event management on owned calendars, while our dispatcher permits only queries and approved creation. Do not change the separate Gmail token or scopes.
