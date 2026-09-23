@@ -1,8 +1,12 @@
 # Versions and release notes
 
+## Released v0.3.23 — reviewed main-model selection
+
+[PR #82](https://github.com/akhilvuputuri/chief-agent/pull/82) introduced the bundled, versioned model policy. The initial `main: null` keeps the existing environment-derived model; this release did **not** switch to GPT-6. A future agent can select an OpenRouter model in a reviewed policy-file PR and use the ordinary automatic release without a server `.env` edit. Medium reasoning and provider price ceilings are unchanged. Independent GPT-6 Astra review approved the final head; full local and CI checks passed. The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/35870399160) and exact-commit receipt verified `b22b09d0abca93bc6551468d0ad50ca68551f102` healthy, and the [v0.3.23 tag](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.23) resolves to it. No database or Compose change. See [journal 32](journey/32-repo-controlled-model.md) for the skipped stale-SHA attempt and acceptance limits.
+
 ## Released v0.3.15 — scheduled independent agent routines
 
-Latest verified published milestone: [v0.3.15](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.15). The [standard release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/35503855161) also passed for the exact SHA below.
+Historical milestone: [v0.3.15](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.15). The [standard release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/35503855161) also passed for the exact SHA below.
 
 [PR #58](https://github.com/akhilvuputuri/chief-agent/pull/58) and [release coordination #59](https://github.com/akhilvuputuri/chief-agent/pull/59) ship owner-selected schedules, durable occurrence/task identity, latest-only catch-up, non-overlap and saved Telegram delivery results. The reviewed operator rollout applied additive migration 017 and verified deployed SHA `c1f8e7088676d4ee3d041993d5e08412e4c73a70` healthy. Astra approved that exact integrated head. Full checks passed (297 application tests + 2 script tests), as did 13 offline rollout tests. Existing record counts were preserved; no paid live routine was created. See [journal 24](journey/24-scheduled-routines.md) and [the extension contract](scheduled-routines.md).
 
