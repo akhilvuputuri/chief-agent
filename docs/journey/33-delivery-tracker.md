@@ -1,6 +1,6 @@
 # 33 — A delivery tracker, and what a new capability costs the prompt
 
-Work date: 2026-09-21 to 2026-09-23. Status: candidate v0.3.24 on `feature/delivery-tracker`, rebased onto `7b1cff9`. Migration 019, needing the reviewed operator rollout from the verified-deployed `b22b09d` baseline or the docs-only `7297202` or `7b1cff9` above it. Built alongside the stock watchlist, two Gmail-account releases, a context-compaction change and the Chief rebrand, this work collided with them on migration, journal and version numbers and was renumbered three times; these are the fourth set. Not deployed, and no owner acceptance recorded.
+Work date: 2026-09-21 to 2026-09-24. Status: released in [v0.3.24](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.24) at `6927494` through the reviewed migration-019 operator rollout from `7b1cff9`. Built alongside the stock watchlist, two Gmail-account releases, a context-compaction change and the Chief rebrand, this work collided with them on migration, journal and version numbers and was renumbered three times; these are the fourth set. No owner acceptance recorded yet.
 
 ## User-visible problem
 
@@ -100,3 +100,11 @@ Not tested, because it does not exist yet: any real mailbox. Every extraction qu
 2. A second email about the same parcel, and whether matching attaches it correctly.
 3. Two parcels from one order, and whether it asks instead of guessing.
 4. Saying "this arrived", then letting an older notice arrive, and confirming the status holds.
+
+## Release closure — 2026-09-24
+
+[PR #67](https://github.com/akhilvuputuri/chief-agent/pull/67) merged as `47d90bd` after eight independent review rounds; the last approved head was `c81605d`. The merged code was not deployed by the normal release guard because migration 019 and Compose changed. Later unrelated application PRs #89 and #90 passed independent GPT-6 Astra reviews and checks. The final combined main commit `69274943db264770c1c26468dce941113eb91bce` passed [main checks](https://github.com/akhilvuputuri/chief-agent/actions/runs/35895599690). An additional independent review approved the exact baseline-to-candidate operator rollout; its 14 offline tests passed, including preservation of the owner-only environment during source publication/rollback.
+
+The reviewed `scripts/deploy-parcels.py` procedure reported `{"deployed":"69274943db264770c1c26468dce941113eb91bce","healthy":true,"migration":19}`. Separate read-only checks confirmed the exact server `RELEASE`, migration marker 19, healthy gateway and persisted Calendar approval. The immutable [v0.3.24 tag](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.24) resolves to that commit. No parcel was created during rollout, and real-mailbox matching has not been accepted by the owner.
+
+GitHub's automatic [release attempt](https://github.com/akhilvuputuri/chief-agent/actions/runs/35896375462) could not start its runner because Actions reported an account payment/spending-limit block. This was a platform billing failure, not a deployment result; the operator procedure supplied the deployment evidence above. Future automatic releases need Actions capacity restored.

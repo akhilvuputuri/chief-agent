@@ -1,6 +1,6 @@
 # Delivery tracker
 
-Implementation for [issue 64](https://github.com/akhilvuputuri/chief-agent/issues/64). Adds migration 019 and the `parcels` capability. Candidate; not yet deployed.
+Implementation for [issue 64](https://github.com/akhilvuputuri/chief-agent/issues/64). Migration 019 and the `parcels` capability were deployed in [v0.3.24](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.24); real-mailbox acceptance remains open.
 
 ## What the owner does
 
