@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
 import type { Action } from "./protocol.js";
 import { ToolValidationError } from "./tool-errors.js";
+import { SerialQueue } from "./security.js";
 import {
   SAME_STORY,
   canonicalUrl,
@@ -43,10 +44,17 @@ export const SIGNALS: Record<string, { topic: number; source: number }> = {
 export const HALF_LIFE_DAYS = 30;
 export const WEIGHT_CAP = 3;
 export const FEEDBACK_CAP = 1.5;
+/** Discovery skips only items clearly rejected: reaching this needs reasoned votes or
+ * many recent plain dislikes, so a couple of plain dislikes never hide a topic. */
+export const DISCOVERY_FLOOR = -1;
 const OLDER_THAN_DAYS = 3;
 const SOURCE_REFRESH_MINUTES = 30;
 const MAX_SOURCES = 30;
 const ON_DEMAND_PER_DAY = 3;
+/** Edition builds for one owner run one at a time across the scheduler and tools (the
+ * gateway is a single process), so concurrent builds cannot both select items that the
+ * other is about to deliver, and quota checks see every earlier edition. */
+const builds = new SerialQueue();
 
 const clamp = (v: number, lo: number, hi: number) =>
   Math.min(hi, Math.max(lo, v));
@@ -110,15 +118,21 @@ export function zonedParts(date: Date, tz: string) {
     ),
   };
 }
-/** The instant a local wall-clock time occurs in `tz`. A time skipped by a DST jump
- * resolves to the first valid instant after it; a repeated time to its first occurrence. */
+/** The instant a local wall-clock time occurs in `tz`. A repeated time (DST fall-back)
+ * resolves to its earlier occurrence; a time skipped by a spring-forward jump moves
+ * forward by the gap (02:30 becomes 03:30), never back into the previous hour. */
 export function zonedInstant(date: string, hhmm: string, tz: string) {
   const [y, m, d] = date.split("-").map(Number);
   const [h, mi] = hhmm.split(":").map(Number);
   const wall = Date.UTC(y!, m! - 1, d!, h!, mi!);
   const offset = (t: number) => zonedParts(new Date(t), tz).utcGuess - t;
-  const first = wall - offset(wall);
-  return new Date(wall - offset(first));
+  // Offsets a day either side bracket any transition on this date.
+  const before = wall - offset(wall - 86400000);
+  const after = wall - offset(wall + 86400000);
+  const exact = [before, after]
+    .sort((a, b) => a - b)
+    .find((t) => zonedParts(new Date(t), tz).utcGuess === wall);
+  return new Date(exact ?? before);
 }
 export function nextDelivery(
   settings: { delivery_time: string | null; timezone: string | null },
@@ -247,8 +261,8 @@ function topicsFor(c: Candidate, interests: Interest[]) {
   const fallback = [...c.source_topics, ...c.categories]
     .map(normTopic)
     .filter(Boolean);
-  const topics = [...new Set([...matched, ...fallback])].slice(0, 3);
-  return { matched, titleHit, topics };
+  const all = [...new Set([...matched, ...fallback])];
+  return { matched, titleHit, topics: all.slice(0, 3), all };
 }
 
 export function rank(
@@ -281,10 +295,12 @@ export function rank(
       skip("language");
       continue;
     }
-    const { matched, titleHit, topics } = topicsFor(c, s.interests);
+    const { matched, titleHit, topics, all } = topicsFor(c, s.interests);
+    // A mute is explicit, so it checks every label and the excerpt, not only the
+    // three topics kept for learning.
     if (
-      topics.some((t) => muted.includes(t)) ||
-      mutedPatterns.some((r) => r.test(c.title))
+      all.some((t) => muted.includes(t)) ||
+      mutedPatterns.some((r) => r.test(c.title) || r.test(c.summary ?? ""))
     ) {
       skip("muted_topic");
       continue;
@@ -366,7 +382,8 @@ export function select(
   }
   const matches = clusters.filter((x) => x.components.interest > 0);
   const others = clusters.filter(
-    (x) => x.components.interest === 0 && x.components.feedback > -0.3,
+    (x) =>
+      x.components.interest === 0 && x.components.feedback > DISCOVERY_FLOOR,
   );
   const discovery = Math.min(s.discovery_slots, others.length);
   const mainTarget = s.items_per_edition - discovery;
@@ -394,17 +411,25 @@ export function select(
       if (!chosen.includes(x) && allowed(x)) take(x);
     }
   const main = chosen.length;
-  const picks = others
-    .sort(
-      (a, b) =>
-        b.components.recency +
-        b.components.source +
-        (key === "score" ? b.components.feedback : 0) -
-        (a.components.recency +
-          a.components.source +
-          (key === "score" ? a.components.feedback : 0)),
-    )
-    .slice(0, discovery);
+  const discoveryOrder = others.sort(
+    (a, b) =>
+      b.components.recency +
+      b.components.source +
+      (key === "score" ? b.components.feedback : 0) -
+      (a.components.recency +
+        a.components.source +
+        (key === "score" ? a.components.feedback : 0)),
+  );
+  // Discovery honours the same source cap, relaxing it only to fill its reserved slots.
+  const picks: Scored[] = [];
+  for (const capped of [true, false])
+    for (const x of discoveryOrder) {
+      if (picks.length >= discovery) break;
+      if (picks.includes(x)) continue;
+      if (capped && (perDomain.get(x.c.domain) ?? 0) >= 2) continue;
+      picks.push(x);
+      perDomain.set(x.c.domain, (perDomain.get(x.c.domain) ?? 0) + 1);
+    }
   return {
     selected: [
       ...chosen,
@@ -652,12 +677,49 @@ export class ReadingEditions {
   async create(
     user: string,
     kind: "scheduled" | "on_demand",
-    opts: { allowRetry?: boolean } = {},
+    opts: { allowRetry?: boolean; dailyLimit?: number; at?: Date } = {},
   ) {
-    const now = this.clock();
+    return builds.run(user, () => this.build(user, kind, opts));
+  }
+  private async build(
+    user: string,
+    kind: "scheduled" | "on_demand",
+    opts: { allowRetry?: boolean; dailyLimit?: number; at?: Date },
+  ) {
+    // The scheduler passes its tick time so a build that straddles local midnight still
+    // files the edition under the date whose slot triggered it.
+    const now = opts.at ?? this.clock();
     const s = await this.settings(user);
     const tz = s.timezone ?? "UTC";
     const date = zonedParts(now, tz).date;
+    if (kind === "scheduled") {
+      const exists = await this.db.query(
+        "SELECT 1 FROM reading_editions WHERE user_id=$1 AND kind='scheduled' AND edition_date=$2",
+        [user, date],
+      );
+      if (exists.rows.length)
+        return {
+          retry: false as const,
+          editionId: null,
+          duplicate: true,
+          date,
+          items: 0,
+          target: s.items_per_edition,
+          shortfall: null,
+        };
+    }
+    if (opts.dailyLimit !== undefined) {
+      const today = (
+        await this.db.query(
+          "SELECT count(*)::int AS n FROM reading_editions WHERE user_id=$1 AND kind=$2 AND created_at>=$3",
+          [user, kind, zonedInstant(date, "00:00", tz)],
+        )
+      ).rows[0].n;
+      if (today >= opts.dailyLimit)
+        throw new ToolValidationError(
+          `At most ${opts.dailyLimit} on-demand editions per day`,
+        );
+    }
     const fetched = await this.refresh(user);
     const failed = fetched.sources.filter(
       (x) => x.status !== "ok" && x.status !== "cached",
@@ -742,15 +804,27 @@ export class ReadingEditions {
       excluded: { ...excluded, duplicate_story: picked.duplicates },
       preferenceVersion: prefs.version,
       baseline: baseline.selected.map((x) => x.c.canonical_url),
-      ranked: [...scored]
-        .sort((a, b) => order(a, b, "score"))
-        .slice(0, 15)
-        .map((x) => ({
-          url: x.c.canonical_url,
-          title: x.c.title.slice(0, 100),
-          score: x.score,
-          components: x.components,
-        })),
+      // Greedy selection only reaches a prefix of each ordering, so the top 60 by score
+      // plus the top 20 discovery candidates are enough to replay both selections.
+      snapshot: [
+        ...new Set([
+          ...[...scored].sort((a, b) => order(a, b, "score")).slice(0, 60),
+          ...scored
+            .filter((x) => x.components.interest === 0)
+            .sort((a, b) => b.components.recency - a.components.recency)
+            .slice(0, 20),
+        ]),
+      ].map((x) => ({
+        url: x.c.canonical_url,
+        title: x.c.title.slice(0, 160),
+        domain: x.c.domain,
+        topics: x.topics,
+        publishedAt: x.c.published_at?.toISOString() ?? null,
+        label: x.label,
+        score: x.score,
+        baselineScore: x.baselineScore,
+        components: x.components,
+      })),
       builtAt: now.toISOString(),
     };
     const editionId = randomUUID();
@@ -818,7 +892,8 @@ export class ReadingScheduler {
       const due = (
         await this.db.query(
           `SELECT user_id,delivery_time,timezone,schedule_from FROM reading_settings
-           WHERE enabled AND NOT paused AND delivery_time IS NOT NULL AND timezone IS NOT NULL`,
+           WHERE enabled AND NOT paused AND delivery_time IS NOT NULL AND timezone IS NOT NULL
+             AND EXISTS(SELECT 1 FROM reading_sources r WHERE r.user_id=reading_settings.user_id AND r.status='active')`,
         )
       ).rows;
       for (const s of due) {
@@ -843,6 +918,7 @@ export class ReadingScheduler {
         try {
           const r = await this.editions.create(s.user_id, "scheduled", {
             allowRetry,
+            at: now,
           });
           if (r.retry)
             this.retries.set(s.user_id, {
@@ -1270,7 +1346,8 @@ export class ReadingTools {
     const editions = (
       await this.db.query(
         `SELECT e.id,e.kind,e.edition_date,e.state,e.created_at,e.sent_at,e.trace->>'shortfall' AS shortfall,
-           (SELECT count(*)::int FROM reading_items i WHERE i.edition_id=e.id) AS items
+           (SELECT count(*)::int FROM reading_items i WHERE i.edition_id=e.id) AS items,
+           (SELECT count(*)::int FROM reading_items i WHERE i.edition_id=e.id AND i.sent_at IS NOT NULL) AS sent
          FROM reading_editions e WHERE e.user_id=$1 ORDER BY e.created_at DESC LIMIT 5`,
         [user],
       )
@@ -1570,7 +1647,28 @@ export class ReadingTools {
       )
     ).rows[0];
     if (!row) throw new ToolValidationError("Reading source unavailable");
-    return { removed: row };
+    // Without a feed the daily bulletin would only send empty editions: switch it off.
+    const disabled = (
+      await this.db.query(
+        `UPDATE reading_settings SET enabled=false,updated_at=now() WHERE user_id=$1 AND enabled
+         AND NOT EXISTS(SELECT 1 FROM reading_sources WHERE user_id=$1 AND status='active') RETURNING user_id`,
+        [user],
+      )
+    ).rows.length;
+    if (disabled)
+      await this.db.query(
+        "UPDATE reading_editions SET state='muted' WHERE user_id=$1 AND state='pending' AND kind='scheduled'",
+        [user],
+      );
+    return {
+      removed: row,
+      ...(disabled
+        ? {
+            disabled: true,
+            note: "That was the last feed, so the daily bulletin is now off. Add a feed and re-enable it to resume.",
+          }
+        : {}),
+    };
   }
   private async preferences(
     user: string,
@@ -1636,22 +1734,9 @@ export class ReadingTools {
       throw new ToolValidationError(
         "Set interests and add at least one feed before requesting an edition",
       );
-    const since = zonedInstant(
-      zonedParts(this.clock(), s.timezone ?? "UTC").date,
-      "00:00",
-      s.timezone ?? "UTC",
-    );
-    const today = (
-      await this.db.query(
-        "SELECT count(*)::int AS n FROM reading_editions WHERE user_id=$1 AND kind='on_demand' AND created_at>=$2",
-        [user, since],
-      )
-    ).rows[0].n;
-    if (today >= ON_DEMAND_PER_DAY)
-      throw new ToolValidationError(
-        `At most ${ON_DEMAND_PER_DAY} on-demand editions per day`,
-      );
-    const r = await this.editions.create(user, "on_demand");
+    const r = await this.editions.create(user, "on_demand", {
+      dailyLimit: ON_DEMAND_PER_DAY,
+    });
     if (r.retry)
       throw new ToolValidationError("Every feed failed; try again later");
     return {

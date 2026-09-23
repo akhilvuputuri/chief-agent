@@ -56,11 +56,18 @@ export function decodeEntities(s: string) {
         e[1] === "x" || e[1] === "X"
           ? parseInt(e.slice(2), 16)
           : parseInt(e.slice(1), 10);
-      return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : "";
+      // Lone surrogates would make the stored JSON invalid; drop them.
+      return code > 0 && code <= 0x10ffff && (code < 0xd800 || code > 0xdfff)
+        ? String.fromCodePoint(code)
+        : "";
     }
     return NAMED[e.toLowerCase()] ?? m;
   });
 }
+const LONE_SURROGATE = new RegExp(
+  "[\\ud800-\\udbff](?![\\udc00-\\udfff])|(?<![\\ud800-\\udbff])[\\udc00-\\udfff]",
+  "g",
+);
 // Zero-width and bidirectional-override characters can disguise a title or link.
 const INVISIBLE = new RegExp(
   "[\\u200b-\\u200f\\u202a-\\u202e\\u2066-\\u2069\\ufeff]",
@@ -69,7 +76,9 @@ const INVISIBLE = new RegExp(
 /** Plain display text: markup removed, control and bidi-override characters
  * dropped, whitespace collapsed. */
 export function cleanText(raw: string, max: number) {
-  let s = raw.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1");
+  let s = raw
+    .replace(LONE_SURROGATE, "")
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1");
   s = decodeEntities(s);
   s = s
     .replace(/<(script|style)\b[\s\S]*?<\/\1\s*>/gi, " ")
@@ -119,7 +128,12 @@ function attr(element: string, name: string) {
 export function articleUrl(raw: string | null, base: string) {
   if (!raw) return null;
   try {
-    const u = new URL(cleanText(raw, 2000), base);
+    const text = decodeEntities(
+      raw.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1"),
+    ).trim();
+    // Refuse rather than truncate: a shortened link would not be the direct article URL.
+    if (!text || text.length > 2000 || /\s/.test(text)) return null;
+    const u = new URL(text, base);
     if (!["http:", "https:"].includes(u.protocol) || u.username || u.password)
       return null;
     return u.href;
@@ -137,7 +151,9 @@ export function parseDate(raw: string | null, now = new Date()) {
 }
 export function parseFeed(xml: string, base: string, now = new Date()) {
   const body = xml.slice(0, 2_000_000);
-  const atom = /<feed\b/i.test(body) && !/<rss\b|<rdf:RDF\b/i.test(body);
+  // The document's root element decides the format; text inside entries cannot.
+  const root = /<(?![?!])([\w.-]+:)?([\w.-]+)/.exec(body)?.[2]?.toLowerCase();
+  const atom = root === "feed";
   const blocks = [
     ...body.matchAll(
       atom
@@ -267,13 +283,15 @@ for (const [net, prefix] of [
 ] as const)
   blocked.addSubnet(net, prefix, "ipv4");
 for (const [net, prefix] of [
-  ["::", 128],
-  ["::1", 128],
+  ["::", 96], // unspecified, loopback and deprecated IPv4-compatible addresses
   ["64:ff9b::", 96],
+  ["64:ff9b:1::", 48],
+  ["2002::", 16], // 6to4 can embed a private IPv4 address
   ["100::", 64],
   ["2001:db8::", 32],
   ["fc00::", 7],
   ["fe80::", 10],
+  ["fec0::", 10],
   ["ff00::", 8],
 ] as const)
   blocked.addSubnet(net, prefix, "ipv6");
@@ -329,87 +347,114 @@ const MAX_FEED_BYTES = 1_500_000;
  * no credentials or cookies, three redirects, 1.5 MB and 15 seconds at most. */
 export class PublicFeedFetcher implements FeedFetcher {
   constructor(private resolve: Resolver = systemResolver) {}
-  get(url: string, redirects = 0): Promise<{ body: string; finalUrl: string }> {
+  /** Every failure, including a refused redirect target, rejects the promise: nothing
+   * may throw inside a socket callback, where it would crash the gateway process. */
+  async get(
+    url: string,
+    redirects = 0,
+  ): Promise<{ body: string; finalUrl: string }> {
     const target = publicHttps(url);
-    return new Promise((resolve, reject) => {
-      let settled = false;
-      const finish = (error: Error | null, value?: any) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(deadline);
-        if (error) reject(error);
-        else resolve(value);
-      };
-      const req = https.request(
-        target,
-        {
-          method: "GET",
-          lookup: guardedLookup(this.resolve) as any,
-          headers: {
-            "User-Agent": "ChiefReadingBulletin/1.0 (personal feed reader)",
-            Accept:
-              "application/rss+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.1",
-          },
-        },
-        (res) => {
-          const status = res.statusCode ?? 0;
-          if (status >= 300 && status < 400 && res.headers.location) {
-            res.resume();
-            if (redirects >= 3) return finish(new Error("Too many redirects"));
-            let next: string;
-            try {
-              next = new URL(res.headers.location, target).href;
-            } catch {
-              return finish(new Error("Invalid redirect"));
-            }
-            this.get(next, redirects + 1).then(
-              (v) => finish(null, v),
-              (e) => finish(e),
-            );
-            return;
-          }
-          if (status !== 200) {
-            res.resume();
-            return finish(new Error(`Feed request failed (HTTP ${status})`));
-          }
-          const chunks: Buffer[] = [];
-          let size = 0;
-          res.on("data", (chunk: Buffer) => {
-            size += chunk.length;
-            if (size > MAX_FEED_BYTES) {
-              req.destroy();
-              finish(new Error("Feed too large"));
-              return;
-            }
-            chunks.push(chunk);
-          });
-          res.on("end", () => {
-            const bytes = Buffer.concat(chunks);
-            const declared =
-              /charset=([\w-]+)/i.exec(
-                res.headers["content-type"] ?? "",
-              )?.[1] ??
-              /<\?xml[^>]*encoding=["']([\w-]+)["']/i.exec(
-                bytes.subarray(0, 200).toString("latin1"),
-              )?.[1] ??
-              "utf-8";
-            let body: string;
-            try {
-              body = new TextDecoder(declared).decode(bytes);
-            } catch {
-              body = new TextDecoder("utf-8").decode(bytes);
-            }
-            finish(null, { body, finalUrl: target });
-          });
-          res.on("error", (e) => finish(e));
-        },
-      );
-      const deadline = setTimeout(() => {
-        req.destroy();
-        finish(new Error("Feed request timed out"));
-      }, 15000);
-      req.on("error", (e) => finish(e));
-      req.end();
-    });
+    const result = await this.once(target);
+    if ("body" in result) return { body: result.body, finalUrl: target };
+    if (redirects >= 3) throw new Error("Too many redirects");
+    let next: string;
+    try {
+      next = new URL(result.location, target).href;
+    } catch {
+      throw new Error("Invalid redirect");
+    }
+    return this.get(next, redirects + 1);
+  }
+  private once(target: string) {
+    return new Promise<{ body: string } | { location: string }>(
+      (resolve, reject) => {
+        let settled = false;
+        const finish = (error: unknown, value?: any) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(deadline);
+          if (error)
+            reject(error instanceof Error ? error : new Error("Feed error"));
+          else resolve(value);
+        };
+        let req: ReturnType<typeof https.request>;
+        const deadline = setTimeout(() => {
+          req?.destroy();
+          finish(new Error("Feed request timed out"));
+        }, 15000);
+        try {
+          req = https.request(
+            target,
+            {
+              method: "GET",
+              lookup: guardedLookup(this.resolve) as any,
+              headers: {
+                "User-Agent": "ChiefReadingBulletin/1.0 (personal feed reader)",
+                Accept:
+                  "application/rss+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.1",
+              },
+            },
+            (res) => {
+              try {
+                const status = res.statusCode ?? 0;
+                if (status >= 300 && status < 400 && res.headers.location) {
+                  res.resume();
+                  return finish(null, { location: res.headers.location });
+                }
+                if (status !== 200) {
+                  res.resume();
+                  return finish(
+                    new Error(`Feed request failed (HTTP ${status})`),
+                  );
+                }
+                const chunks: Buffer[] = [];
+                let size = 0;
+                res.on("data", (chunk: Buffer) => {
+                  size += chunk.length;
+                  if (size > MAX_FEED_BYTES) {
+                    req.destroy();
+                    finish(new Error("Feed too large"));
+                    return;
+                  }
+                  chunks.push(chunk);
+                });
+                res.on("end", () => {
+                  try {
+                    finish(null, {
+                      body: decodeBody(
+                        Buffer.concat(chunks),
+                        res.headers["content-type"],
+                      ),
+                    });
+                  } catch (error) {
+                    finish(error);
+                  }
+                });
+                res.on("error", (e) => finish(e));
+              } catch (error) {
+                finish(error);
+              }
+            },
+          );
+          req.on("error", (e) => finish(e));
+          req.end();
+        } catch (error) {
+          finish(error);
+        }
+      },
+    );
+  }
+}
+function decodeBody(bytes: Buffer, contentType: string | undefined) {
+  const declared =
+    /charset=([\w-]+)/i.exec(contentType ?? "")?.[1] ??
+    /<\?xml[^>]*encoding=["']([\w-]+)["']/i.exec(
+      bytes.subarray(0, 200).toString("latin1"),
+    )?.[1] ??
+    "utf-8";
+  try {
+    return new TextDecoder(declared).decode(bytes);
+  } catch {
+    return new TextDecoder("utf-8").decode(bytes);
   }
 }

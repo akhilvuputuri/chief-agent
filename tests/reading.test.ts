@@ -1,4 +1,6 @@
-import { test } from "node:test";
+import { mock, test } from "node:test";
+import https from "node:https";
+import { EventEmitter } from "node:events";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
@@ -28,6 +30,7 @@ import {
   guardedLookup,
   nonPublicAddress,
   parseFeed,
+  PublicFeedFetcher,
   type FeedFetcher,
 } from "../src/reading-feed.js";
 
@@ -748,7 +751,7 @@ test("fixture: diversity caps per source, clusters duplicates, keeps a discovery
   assert.equal(r.selected.at(-1)!.c.title, "Gardening tips for winter");
   assert.deepEqual(r.selected.at(-1)!.label, ["discovery"]);
   // A strongly disliked non-interest domain is not used for discovery.
-  const w = { "source:garden.example": -1 };
+  const w = { "source:garden.example": -3 };
   const r2 = select(rank(crowded, s, w, [], NOW).scored, s);
   assert.ok(!r2.selected.some((x) => x.c.domain === "garden.example"));
   assert.equal(
@@ -1052,4 +1055,239 @@ test("reading tools are only offered once the migration is present", () => {
       "reading_status",
     ],
   );
+});
+
+test("review regressions: DST gaps move forward, fall-back picks the earlier instant", () => {
+  assert.equal(
+    zonedInstant("2026-03-08", "02:30", "America/New_York").toISOString(),
+    "2026-03-08T07:30:00.000Z",
+    "skipped 02:30 becomes 03:30 EDT, not 01:30 EST",
+  );
+  assert.equal(
+    zonedInstant("2026-11-01", "01:30", "America/New_York").toISOString(),
+    "2026-11-01T05:30:00.000Z",
+  );
+  assert.equal(
+    zonedInstant("2026-11-01", "03:00", "America/New_York").toISOString(),
+    "2026-11-01T08:00:00.000Z",
+  );
+});
+
+test("review regressions: discovery honours the per-source cap when an alternative exists", () => {
+  const items = [
+    cand("Climate first from a", "a.example"),
+    cand("Climate second from a", "a.example"),
+    cand("Gardening newest from a", "a.example"),
+    cand("Cooking slightly older from b", "b.example", {
+      published_at: new Date(NOW.getTime() - 5 * 3600000),
+    }),
+  ];
+  const s = { ...S, items_per_edition: 3, discovery_slots: 1 };
+  const r = select(rank(items, s, {}, [], NOW).scored, s);
+  assert.equal(r.selected.filter((x) => x.c.domain === "a.example").length, 2);
+  assert.equal(r.selected.at(-1)!.c.title, "Cooking slightly older from b");
+});
+
+test("review regressions: concurrent scheduled and on-demand builds never repeat an item", async () => {
+  const f = await fixture(new Date("2026-01-14T23:05:00Z"));
+  try {
+    await f.setup({ discoverySlots: 0 }, [[FEED, varied]]);
+    const [a, b] = await Promise.all([
+      f.editions.create("a", "scheduled"),
+      f.call({ operation: "reading_edition_now" }),
+    ]);
+    const urls = (await f.items()).map((i) => i.canonical_url);
+    assert.equal(new Set(urls).size, urls.length);
+    assert.ok(a.editionId && b.editionId);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("review regressions: removing the last feed switches the daily bulletin off", async () => {
+  const f = await fixture(new Date("2026-01-14T22:00:00Z"));
+  try {
+    await f.setup({ enabled: true }, [[FEED, varied]]);
+    const [source] = (await f.call({ operation: "reading_status" })).sources;
+    const removed = await f.call({
+      operation: "reading_source_remove",
+      id: source.id,
+    });
+    assert.equal(removed.disabled, true);
+    assert.equal(
+      (await f.call({ operation: "reading_status" })).settings.enabled,
+      false,
+    );
+    f.setNow(new Date("2026-01-14T23:05:00Z"));
+    await f.scheduler.tick();
+    assert.equal(
+      (await f.db.query("SELECT 1 FROM reading_editions")).rows.length,
+      0,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("review regressions: a refused redirect target rejects instead of crashing the process", async () => {
+  const redirects: Record<string, string> = {
+    "https://feeds.example.com/downgrade": "http://feeds.example.com/x",
+    "https://feeds.example.com/port": "https://feeds.example.com:8443/x",
+    "https://feeds.example.com/internal": "https://metadata.internal/x",
+    "https://feeds.example.com/loop": "/loop",
+  };
+  const seen: any[] = [];
+  const request = mock.method(https, "request", ((
+    target: string,
+    options: any,
+    callback: (res: any) => void,
+  ) => {
+    seen.push(options);
+    const req: any = new EventEmitter();
+    req.destroy = () => {};
+    req.end = () =>
+      process.nextTick(() => {
+        const res: any = new EventEmitter();
+        res.resume = () => {};
+        if (redirects[target]) {
+          res.statusCode = 302;
+          res.headers = { location: redirects[target] };
+          callback(res);
+        } else {
+          res.statusCode = 200;
+          res.headers = {
+            "content-type": "application/rss+xml; charset=utf-8",
+          };
+          callback(res);
+          res.emit("data", Buffer.from("<rss><channel></channel></rss>"));
+          res.emit("end");
+        }
+      });
+    return req;
+  }) as any);
+  try {
+    const fetcher = new PublicFeedFetcher(async () => [
+      { address: "93.184.216.34", family: 4 },
+    ]);
+    for (const path of ["downgrade", "port", "internal"])
+      await assert.rejects(
+        fetcher.get(`https://feeds.example.com/${path}`),
+        /public HTTPS hostname/,
+        path,
+      );
+    await assert.rejects(
+      fetcher.get("https://feeds.example.com/loop"),
+      /Too many redirects/,
+    );
+    const ok = await fetcher.get("https://feeds.example.com/ok.xml");
+    assert.match(ok.body, /<rss>/);
+    assert.equal(typeof seen[0].lookup, "function", "DNS guard is installed");
+  } finally {
+    request.mock.restore();
+  }
+});
+
+test("review regressions: parser rejects lone surrogates, root-detects Atom and never truncates links", async () => {
+  const surrogate = parseFeed(
+    rss([{ title: "Climate &#xD800;broken", link: "https://a.example.com/s" }]),
+    FEED,
+    NOW,
+  );
+  assert.equal(surrogate.entries[0]!.title, "Climate broken");
+  assert.doesNotThrow(() => JSON.parse(JSON.stringify(surrogate)));
+  const atom = parseFeed(
+    `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><entry><title>Space</title>
+      <link href="https://x.example.com/p"/><summary><![CDATA[How <rss> feeds work]]></summary></entry></feed>`,
+    FEED,
+    NOW,
+  );
+  assert.equal(atom.entries.length, 1);
+  const long = parseFeed(
+    rss([
+      { title: "Long link", link: "https://a.example.com/" + "x".repeat(2100) },
+      { title: "Normal", link: "https://a.example.com/n" },
+    ]),
+    FEED,
+    NOW,
+  );
+  assert.deepEqual(
+    long.entries.map((e) => e.title),
+    ["Normal"],
+  );
+  for (const ip of [
+    "::10.0.0.1",
+    "::127.0.0.1",
+    "2002:0a00:0001::1",
+    "64:ff9b:1::1",
+    "fec0::1",
+  ])
+    assert.equal(nonPublicAddress(ip), true, ip);
+  // A feed containing the malformed entity still ingests.
+  const f = await fixture();
+  try {
+    f.fetcher.feeds.set(
+      FEED,
+      rss([{ title: "Carbon &#xD800;news", link: "https://a.example.com/c" }]),
+    );
+    const added = await f.call({ operation: "reading_source_add", url: FEED });
+    assert.equal(added.entries, 1);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("review regressions: mutes cover every label and the excerpt; plain dislikes never hide discovery", () => {
+  const items = [
+    cand("Climate and space and celebrity gossip", "a.example", {
+      categories: ["one", "two", "three", "celebrity"],
+    }),
+    cand("Climate item with muted excerpt", "b.example", {
+      summary: "This is really about celebrity news.",
+    }),
+    cand("Climate clean item", "c.example"),
+  ];
+  const muted = { ...S, items_per_edition: 5, muted_topics: ["celebrity"] };
+  const { scored, excluded } = rank(items, muted, {}, [], NOW);
+  assert.deepEqual(
+    scored.map((x) => x.c.title),
+    ["Climate clean item"],
+  );
+  assert.equal(excluded.muted_topic, 2);
+  const football = [
+    cand("Football final tonight", "sport.example", {
+      categories: ["football"],
+    }),
+  ];
+  const twoDislikes = learnWeights(
+    [
+      vote("dislike", ["football"], "old.example"),
+      vote("dislike", ["football"], "old.example"),
+    ],
+    {},
+    NOW,
+  );
+  const s = { ...S, items_per_edition: 2, discovery_slots: 1 };
+  const picked = select(rank(football, s, twoDislikes, [], NOW).scored, s);
+  assert.equal(
+    picked.selected.length,
+    1,
+    "two plain dislikes do not exclude a topic",
+  );
+});
+
+test("review regressions: status shows how far a partially delivered edition got", async () => {
+  const f = await fixture();
+  try {
+    await f.setup({}, [[FEED, varied]]);
+    await f.call({ operation: "reading_edition_now" });
+    f.failSend((text) => text.startsWith("4/"));
+    await f.delivery.tick();
+    const [edition] = (await f.call({ operation: "reading_status" }))
+      .recentEditions;
+    assert.equal(edition.state, "uncertain");
+    assert.equal(edition.items, 5);
+    assert.equal(edition.sent, 3);
+  } finally {
+    await f.pg.close();
+  }
 });
