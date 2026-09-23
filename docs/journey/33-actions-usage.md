@@ -16,6 +16,8 @@ The owner received a GitHub alert at 1,800 of 2,000 included Actions minutes for
 
 Run `checks` for PRs targeting main and for pushes to main, removing the duplicate feature-branch push event and tag rechecks. Cancel an older in-progress PR check when a new revision arrives; never cancel main checks. For automatic release, use the successful exact-SHA main check as validation; retain the full checks for manual dispatch and retain the SHA, idle-work, deployment and health guards. Keep Devin Review comments enabled: its mail is a separate GitHub notification preference, not an Actions charge.
 
+**Independent review, 23 September:** the first PR head used `github.ref` as the concurrency fallback for main. The reviewer found that GitHub replaces an older _pending_ run in the same group even with `cancel-in-progress: false`, which could skip a main check and its release. The fallback now uses unique `github.run_id` for non-PR events; the PR number still groups and cancels superseded PR revisions. Final exact-head verdict remains pending.
+
 This deliberately leaves full checks on documentation-only PRs and still deploys documentation-only main commits. Path-based skipping requires a stable required-check design and explicit release semantics; changing it in this incident could strand merge checks or make a docs-only commit appear deployed when it was not. The next measurement should compare repository run counts and billed runner minutes over similar development activity after deployment, while accounting for other repositories and workflow queues.
 
 ## Verification and release closure
