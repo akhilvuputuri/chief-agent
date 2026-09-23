@@ -13,8 +13,8 @@ import time
 
 LIVE = pathlib.Path('/opt/hermes-companion')
 LOCK = pathlib.Path('/var/lock/companion-release.lock')
-BASE = 'c936d7d630831f6f0c4b27dd62c5a06141a50201'
-# The deployed v0.3.22 baseline, which already carries migration 018 from the watchlist
+BASE = '798439fe1e762278113e5ce49f0b0ddf0d0b3c6a'
+# The v0.3.23 baseline, which already carries migration 018 from the watchlist
 # rollout. Reconcile any newer release before running this; do not rewrite RELEASE.
 BASES = {BASE}
 IMAGE = 'hermes-companion-gateway'

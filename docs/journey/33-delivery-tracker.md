@@ -1,6 +1,6 @@
-# 31 — A delivery tracker, and what a new capability costs the prompt
+# 33 — A delivery tracker, and what a new capability costs the prompt
 
-Work date: 2026-09-21 to 2026-09-23. Status: candidate v0.3.23 on `feature/delivery-tracker`, rebased onto `c936d7d`. Migration 019, needing the reviewed operator rollout from the deployed `c936d7d` baseline. Built alongside the stock watchlist, two Gmail-account releases, a context-compaction change and the Chief rebrand, this work collided with them on migration, journal and version numbers and was renumbered three times; these are the fourth set. Not deployed, and no owner acceptance recorded.
+Work date: 2026-09-21 to 2026-09-23. Status: candidate v0.3.24 on `feature/delivery-tracker`, rebased onto `798439f`. Migration 019, needing the reviewed operator rollout from the deployed `798439f` baseline. Built alongside the stock watchlist, two Gmail-account releases, a context-compaction change and the Chief rebrand, this work collided with them on migration, journal and version numbers and was renumbered three times; these are the fourth set. Not deployed, and no owner acceptance recorded.
 
 ## User-visible problem
 
@@ -16,7 +16,7 @@ Order confirmations and shipment notices arrive as email, and the state of a par
 
 The first working version passed its own tests and broke one elsewhere: after a large saved answer, a follow-up could no longer retrieve it. The cause was not the feature's logic. Five new always-on operations added about 5,500 characters to the fixed model prompt, and in that scenario the compact retrieval pointer no longer fit.
 
-Measuring it made the shape clear. With every capability enabled the fixed prompt measured 50,156 characters before this work, on the base of the time, against a 48,000-character soft allowance. It was over the soft allowance before this work began. Remeasured on 23 September against the deployed `c936d7d`, the base is 50,971 and this branch adds 3,273: 2,658 gated behind the capability and 614 always paid. That limit arithmetic has also moved under this work: 120,000 is now the compaction threshold and the hard limit is 400,000. Each new domain is not free, and there are five more domain issues queued.
+Measuring it made the shape clear. With every capability enabled the fixed prompt measured 50,156 characters before this work, on the base of the time, against a 48,000-character soft allowance. It was over the soft allowance before this work began. Remeasured on 23 September against the deployed `798439f`, the base is 50,971 and this branch adds 3,273: 2,658 gated behind the capability and 614 always paid. That limit arithmetic has also moved under this work: 120,000 is now the compaction threshold and the hard limit is 400,000. Each new domain is not free, and there are five more domain issues queued.
 
 Three changes brought the cost to about 3,100 characters and restored the broken behaviour:
 
