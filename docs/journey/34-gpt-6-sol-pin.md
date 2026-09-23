@@ -15,16 +15,17 @@ The owner asked to upgrade the main Chief model to GPT-6 Sol. [Journal 32](32-re
 
 ## Diagnosis and alternatives
 
-Following the [deployment runbook](../deployment.md#changing-the-production-model-through-a-release), only the policy file changes. TypeScript defaults, `.env.example`, Compose and the server `.env` stay at 5.6: they no longer control the effective model once the pin is set, and a Compose edit would block the ordinary release. Price ceilings, medium reasoning, allocations and `SEARCH_MODEL` are unchanged. `MEDIA_MODEL` is empty in production, so the media specialist follows the main model and also moves to GPT-6 Sol.
+Following the [deployment runbook](../deployment.md#changing-the-production-model-through-a-release), only the policy file changes. TypeScript defaults, `.env.example`, Compose and the server `.env` stay at 5.6: they no longer control the effective model once the pin is set, and a Compose edit would block the ordinary release. Price ceilings, medium reasoning, allocations and `SEARCH_MODEL` are unchanged. Every `CustomAgent` run without a plugin model override moves to GPT-6 Sol: foreground conversations, background jobs and routines, the public-research specialist and its job-alignment profile (`plugins/registry.json` sets no `model`), and the media specialist (production Compose does not pass `MEDIA_MODEL`). Only the `SEARCH_MODEL` search helper and speech providers stay separate.
 
 ## Implementation and review
 
 - `config/model-policy.json`: `main` set to `openai/gpt-6-sol`.
-- Independent review, merge and release are pending.
+- Independent review, 23 September: a Claude Opus 5.5 reviewer subagent (GPT-6 Astra was unavailable in this session) requested changes on `60c7370`. It found no code defects and two low-severity disclosure gaps: research and other specialist runs also move to the new model, and the smoke/eval scripts stay pinned to 5.6. Both are addressed above; re-review of the updated head is pending.
+- Merge and release are pending.
 
 ## Verification and outcome
 
-Pending. Required after release: the exact release receipt, then a small owner-initiated Telegram request whose `model.started`/`model.completed` records name `openai/gpt-6-sol` and report an eligible provider. Startup health alone does not prove OpenRouter accepted the model. If that check fails, revert the pin by PR and release normally; do not override it through the server `.env`.
+Pending. Required after release: the exact release receipt, then a small owner-initiated Telegram request whose `model.started`/`model.completed` records name `openai/gpt-6-sol` and report an eligible provider. Startup health alone does not prove OpenRouter accepted the model. `npm run smoke:runtime` (`scripts/smoke-custom.ts`) builds the adapter with its 5.6 default, and `evals/run.ts` labels runs as 5.6; neither reads the policy, so neither is evidence for this switch. If that check fails, revert the pin by PR and release normally; do not override it through the server `.env`.
 
 ## Follow-up and next iteration
 
