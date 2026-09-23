@@ -15,6 +15,7 @@ import { action } from "./protocol.js";
 import type { WebTools } from "./providers.js";
 import type { CalendarActions } from "./calendar-actions.js";
 import type { LibraryTools } from "./library.js";
+import { ParcelTools } from "./parcels.js";
 import type { LibraryActions } from "./library-actions.js";
 import type { WatchlistTools } from "./stocks.js";
 export class JobTools {
@@ -226,6 +227,12 @@ export class JobTools {
       if (!this.sheets) throw new Error("Google Sheets is not configured");
       return this.sheets.sync(user);
     }
+    if (
+      a.operation === "parcel_record" ||
+      a.operation === "parcel_list" ||
+      a.operation === "parcel_match"
+    )
+      return new ParcelTools(db).call(user, a, run);
     if (
       a.operation === "gmail_accounts" ||
       a.operation === "gmail_search" ||

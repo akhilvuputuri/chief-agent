@@ -191,6 +191,7 @@ export class Assistant {
     private availability: Record<string, boolean> = {
       web: true,
       gmail: false,
+      parcels: false,
       calendar: false,
       library: false,
       libraryAccount: false,

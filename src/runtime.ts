@@ -74,6 +74,7 @@ export function runtimeContext(
     (["library_check", "library_availability"].includes(op) &&
       !availability.library) ||
     (op === "library_shelf" && !availability.libraryAccount) ||
+    (op.startsWith("parcel_") && !availability.parcels) ||
     (op.startsWith("gmail_") && !availability.gmail) ||
     (["calendar_list", "calendar_draft"].includes(op) &&
       !availability.calendar) ||
@@ -163,6 +164,12 @@ export function runtimeContext(
                   "Read one whole conversation oldest first using a threadId from gmail_search. Bounded per message and in total; truncated messages can be read in full with gmail_read. Prefer this over reading messages one by one.",
                 gmail_read:
                   "Read one message in full plain text by its messageId. Use only when a thread read is truncated or a single message is enough. HTML and attachments are never fetched.",
+                parcel_record:
+                  "Save a parcel the owner awaits, or with id append an observation to one: status, date, correction, delivered or archive. Record only what the source states; an absent delivery date stays absent and unmappable carrier wording goes in rawStatus with status unknown. History is append-only, and an observation describing an earlier moment than the recorded one is kept without changing the status. For an email from a non-primary mailbox pass its account as gmail_search named it.",
+                parcel_match:
+                  "Find which parcel a reference belongs to. A tracking reference decides alone, an order reference with merchant decides, a merchant or label never does. Returns candidates, ambiguous and resolvedId; when ambiguous, ask the owner.",
+                parcel_list:
+                  "List awaited parcels, newest first, or pass one id for that parcel and its paged history including observations recorded but not applied. Statuses are last known from email or the owner, never carrier-checked; asOf is when the current status was last known to hold, from the owner or a confirming email.",
                 web_read:
                   "Retrieve a public source. Returned sourceId is for source evidence; recommended records are not the requested posting.",
               } as Record<string, string>
