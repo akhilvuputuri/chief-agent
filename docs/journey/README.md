@@ -32,7 +32,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 13–20 September                      | [22 — NLB library assistant](22-library-assistant.md): how can a phone-only owner check, borrow and hold library ebooks without downloads?  | Phases 1–2 released (v0.3.11, v0.3.12); first real link and owner acceptance pending                           |
 | 20 September                         | [23 — Mailbox search](23-gmail-search.md): why does the assistant miss emails a person can find by hand?                                    | Released v0.3.14; review caught an unbounded thread read that defeated the untrusted-content warning           |
 | 20 September                         | [25 — Stock watchlist drop alerts](25-stock-watchlist.md): how do threshold alerts avoid paying an LLM per poll?                            | Installed with migration 018 (v0.3.19 rollout); provider not configured; 23 Sep error-classification follow-up |
-| 23 September                         | [32 — Repo-controlled model releases](32-repo-controlled-model.md): how can coding agents switch models without server access?              | Candidate policy bundled into app image; review/release pending                                                |
+| 23 September                         | [32 — Repo-controlled model releases](32-repo-controlled-model.md): how can coding agents switch models without server access?              | Released v0.3.23 with null fallback; future model pin remains separate                                         |
 
 ## Connected case studies
 
@@ -88,4 +88,4 @@ Equivalent workload, model/configuration, pricing, denominators and missing acco
 
 ## Model configuration
 
-- 23 September 2026: [32 — Repo-controlled model releases](32-repo-controlled-model.md) — candidate policy and image-bundling path so a reviewed PR can select the main model without a server `.env` edit; review and release pending.
+- 23 September 2026: [32 — Repo-controlled model releases](32-repo-controlled-model.md) — reviewed policy and image-bundling path released in v0.3.23; a future PR can select the main model without a server `.env` edit.
