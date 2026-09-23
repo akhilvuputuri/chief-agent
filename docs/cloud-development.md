@@ -4,7 +4,7 @@
 
 The Codex cloud environment `akhilvuputuri/chief-agent` checks out this repository. Read AGENTS.md and HANDOVER.md first. Use Node 22, npm ci, npm run check, npm run build and npm run format:check. No API keys are required for mocked unit/integration tests. Automatic environment setup is enabled; internet access was enabled by the owner. Do not run the production bot in cloud development.
 
-A cloud task does not inherit this local conversation, browser login sessions or SSH files. Describe the problem, approximate Singapore time and expected behavior; attach a screenshot when useful. The repository documents constraints and historical incidents. Fresh production evidence takes precedence over old documents.
+A cloud task does not inherit this local conversation, browser login sessions or SSH files. Describe the problem, approximate Singapore time and expected behavior; attach a screenshot when useful. Start incidents with the shared [troubleshooting runbook](troubleshooting.md). The repository documents constraints and historical incidents. Fresh production evidence takes precedence over old documents.
 
 Use [the shared cloud-agent workflow](cloud-agent-workflow.md) for the full preflight, independent review and verification contract. `npm run release:status -- FULL_MERGE_SHA` reads the exact commit's durable production receipt. Release attempts publish results to their merged PR even if the coding session is asleep. Missing receipts (including older releases) require direct log inspection.
 
@@ -42,7 +42,7 @@ The reviewed entrypoint source is `scripts/cloud-release.py`. Editing that file 
 
 The manual `production-diagnostics` workflow prints the release SHA, last 15 run states/counters, structural model-failure diagnostics, tool outcome counts, reported model/search costs and job status counts. It does not export credentials, raw conversations, memory, email/calendar content or tool observations. Logs remain in the private repository under its Actions retention policy. Voice costs are not included.
 
-This supports initial failure/cost triage. If a bug requires the exact prompt, context or source content, the owner can supply it in the cloud task or we can inspect it locally. Do not describe these bounded diagnostics as full production access.
+This supports initial failure/cost triage. Calendar tool counts do not expose one approval's state, button click, Google response, or write-token status; see [Calendar troubleshooting](calendar-approval.md#troubleshooting-a-missing-event). If a bug requires the exact prompt, context or source content, the owner can supply it in the cloud task or an authorized local operator can inspect it privately. Do not describe these bounded diagnostics as full production access.
 
 ## Limitations and recovery
 
