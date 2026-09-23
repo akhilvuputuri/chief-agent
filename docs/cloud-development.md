@@ -47,6 +47,7 @@ This supports initial failure/cost triage. Calendar tool counts do not expose on
 ## Limitations and recovery
 
 - Database migration or Compose changes are deliberately refused by the automated entrypoint. Prepare and document a reviewed migration/rollback procedure, then handle that release through the local operations connection. Ordinary application changes deploy automatically.
+- The main OpenRouter model is selected through the reviewed, bundled [model policy](deployment.md#changing-the-production-model-through-a-release). Changing that non-secret file is an ordinary application release; no server `.env` edit or Compose change is needed. The initial `main: null` keeps the existing environment-derived model until a model PR is merged and released.
 - HTTP/container health confirms startup, not conversational correctness. Add focused regression tests and a user Telegram check for behavior changes.
 - Runtime work is checked before restarting; there is a small race if a new user request arrives during deployment. Restart recovery preserves records and may pause work. Avoid sending a long task during the brief release window.
 - A failed release after image tagging attempts application rollback; database rollback is not performed. No migrations run in this workflow.

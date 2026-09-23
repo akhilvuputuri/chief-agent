@@ -38,7 +38,7 @@ Secrets live only in private environment/operations files and server configurati
 
 `telegram.ts` → `agent.ts` → `custom-agent.ts` → `model.ts` and the in-process owner-scoped dispatcher. `context.ts` builds context; `execution.ts` persists runs, calls and budgets. Postgres retains all state. Production Compose has gateway + Postgres and a one-shot migration service. No production Hermes service or HTTP tool callback.
 
-- Main model: `openai/gpt-5.6-sol`, explicit medium reasoning, OpenRouter price-first, default ceilings $2/M input and $10/M output.
+- Main model: the bundled `config/model-policy.json` pin wins when set; its initial `null` retains the existing `AGENT_MODEL` environment/default `openai/gpt-5.6-sol`. Medium reasoning, OpenRouter price-first and default ceilings $2/M input and $10/M output remain. Future model changes use the [reviewed PR/release procedure](docs/deployment.md#changing-the-production-model-through-a-release), not a server edit.
 - Search helper: `google/gemini-3.8-flash`.
 - Voice: ElevenLabs `scribe_v2`, `eleven_flash_v2_5`, existing stock River voice. The audio-provider boundary remains unchanged.
 - Read-only Gmail, Calendar queries plus approval-gated event creation, preparation Sheet and daily Sheet integrations are retained.

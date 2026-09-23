@@ -35,7 +35,7 @@ flowchart LR
 
 ## Runtime
 
-The runtime uses `openai/gpt-5.6-sol` through OpenRouter with explicit medium reasoning. Every request requires supported parameters and price-first provider selection, capped at $2 per million input tokens and $10 per million output tokens by default. A request fails if no eligible provider exists. Missing provider cost data is unknown, never recorded as zero.
+The runtime uses OpenRouter with explicit medium reasoning. Its checked-in `config/model-policy.json` initially leaves the main model at the existing environment/default `openai/gpt-5.6-sol`; a reviewed policy pin lets future coding agents change it through the ordinary PR and release pipeline without server access. Every request requires supported parameters and price-first provider selection, capped at $2 per million input tokens and $10 per million output tokens by default. A request fails if no eligible provider exists. Missing provider cost data is unknown, never recorded as zero. See [model selection and release](docs/deployment.md#changing-the-production-model-through-a-release).
 
 Tools have individual names and Zod-validated argument schemas. Identity comes from Telegram authentication and server-owned callbacks, never model arguments. Calls execute sequentially. Model responses and invocation records are saved before advancing. An interrupted write with an uncertain outcome pauses execution for inspection.
 

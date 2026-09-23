@@ -4,6 +4,7 @@ import { TwelveDataProvider } from "./stock-provider.js";
 import { run as runTelegram } from "@grammyjs/runner";
 import { CustomAgent } from "./custom-agent.js";
 import { OpenRouter } from "./model.js";
+import { resolveMainModel } from "./model-policy.js";
 import { recoverRuntime } from "./execution.js";
 import { TelegramViews } from "./telegram-views.js";
 import type { Delivery } from "./answer.js";
@@ -34,6 +35,7 @@ import {
   sendLibraryApprovals,
 } from "./telegram.js";
 const c = readConfig();
+const mainModel = resolveMainModel(c.AGENT_MODEL);
 const db = connect(c.DATABASE_URL);
 await db.query("SELECT 1");
 // Refuse a stale/missing migration rather than silently losing legacy conversation context.
@@ -169,7 +171,7 @@ const assistant = new Assistant(
   new CustomAgent(
     new OpenRouter(
       c.OPENROUTER_API_KEY,
-      c.AGENT_MODEL,
+      mainModel,
       c.OPENROUTER_MAX_INPUT_PRICE,
       c.OPENROUTER_MAX_OUTPUT_PRICE,
     ),
