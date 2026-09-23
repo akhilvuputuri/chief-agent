@@ -35,6 +35,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 21–23 September                      | [33 — Delivery tracker](33-delivery-tracker.md): what does a parcel record owe the owner, and what does a capability cost the prompt?       | Candidate v0.3.24, migration 019; prompt budget measured and reduced; review and rollout pending               |
 | 23 September                         | [32 — Repo-controlled model releases](32-repo-controlled-model.md): how can coding agents switch models without server access?              | Released v0.3.23 with null fallback; future model pin remains separate                                         |
 | 23 September                         | [33 — Duplicate hosted checks](33-actions-usage.md): why did parallel PR revisions consume repeated Actions runs?                           | Review candidate; duplicate branch checks removed in workflow proposal, savings unmeasured                     |
+| 23 September                         | [34 — GPT-6 Sol pin](34-gpt-6-sol-pin.md): which model should the released policy select first?                                             | Proposed; policy pinned on review branch, not deployed                                                         |
 
 ## Connected case studies
 
