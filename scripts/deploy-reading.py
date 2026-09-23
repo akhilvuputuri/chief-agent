@@ -13,10 +13,16 @@ import time
 
 LIVE = pathlib.Path('/opt/hermes-companion')
 LOCK = pathlib.Path('/var/lock/companion-release.lock')
-# Deployable only on top of the verified v0.3.22 release (PR #79). If another release
-# lands first, add its SHA here after reviewing that it left DB/Compose unchanged.
+# Deployable on top of the verified v0.3.22 release (PR #79) or the app-only releases
+# that followed it; each was checked to leave db/, compose.yaml and the trusted release
+# handler unchanged. If another release lands first, add its SHA here after that review.
 BASE = 'c936d7d630831f6f0c4b27dd62c5a06141a50201'
-BASES = {BASE}
+BASES = {
+    BASE,
+    # PR #80 watchlist credit back-off and PR #81 Calendar authorization reporting.
+    '2f57b242254124b5d92242220b61eb6ad8715e2a',
+    '7648fca5cb7f2cd0590a7db5e496f3c4a6f97b33',
+}
 IMAGE = 'hermes-companion-gateway'
 MIGRATION = '019_reading.sql'
 COMPOSE_MIGRATION_ANCHOR = b'        "/migrations/018_watchlist.sql",\n'

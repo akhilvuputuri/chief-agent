@@ -31,7 +31,7 @@ As checked on 20 September, the latest published release is [v0.3.14](https://gi
 | 14 September                         | [21 — Preparation evidence chain](21-preparation-chain.md): why does a saved exercise exist?                                                | Released v0.3.10; migration 015 and health verified; legacy tasks preserved                                    |
 | 13–20 September                      | [22 — NLB library assistant](22-library-assistant.md): how can a phone-only owner check, borrow and hold library ebooks without downloads?  | Phases 1–2 released (v0.3.11, v0.3.12); first real link and owner acceptance pending                           |
 | 20 September                         | [23 — Mailbox search](23-gmail-search.md): why does the assistant miss emails a person can find by hand?                                    | Released v0.3.14; review caught an unbounded thread read that defeated the untrusted-content warning           |
-| 20 September                         | [25 — Stock watchlist drop alerts](25-stock-watchlist.md): how do threshold alerts avoid paying an LLM per poll?                            | Implemented and tested; deterministic monitor + outbox; review and rollout pending                             |
+| 20 September                         | [25 — Stock watchlist drop alerts](25-stock-watchlist.md): how do threshold alerts avoid paying an LLM per poll?                            | Installed with migration 018 (v0.3.19 rollout); provider not configured; 23 Sep error-classification follow-up |
 
 ## Connected case studies
 
@@ -67,8 +67,8 @@ Equivalent workload, model/configuration, pricing, denominators and missing acco
 ## Scheduled work
 
 - 20 September 2026: [24 — Scheduled independent agent work](24-scheduled-routines.md), released v0.3.15; builds on [17 — Independent jobs](17-rolling-conversation.md).
-- 20 September 2026: [25 — Stock watchlist drop alerts](25-stock-watchlist.md): the first scheduled-domain consumer, implemented as a deterministic monitor rather than a routine; review pending.
-- 23 September 2026: [31 — Daily reading bulletin](31-reading-bulletin.md): deterministic feed ranking with explicit Like/Dislike learning, following the watchlist's monitor-and-outbox pattern; migration 019 rollout and review pending.
+- 20 September 2026: [25 — Stock watchlist drop alerts](25-stock-watchlist.md): the first scheduled-domain consumer, implemented as a deterministic monitor rather than a routine; installed in the v0.3.19 rollout, 23 September follow-up before provider activation.
+- 23 September 2026: [32 — Daily reading bulletin](32-reading-bulletin.md): deterministic feed ranking with explicit Like/Dislike learning, following the watchlist's monitor-and-outbox pattern; migration 019 rollout and review pending.
 
 - [Google authorization expiry](26-google-authorization-expiry.md): 21 September 2026 investigation and long-lived OAuth recovery; operator completion pending.
 
@@ -81,3 +81,7 @@ Equivalent workload, model/configuration, pricing, denominators and missing acco
 - 22 September 2026: [29 — Cloud-agent review and release harness](29-cloud-agent-harness.md), extending the deployment and incident-investigation reading path. Merged; actual cloud diagnostics acceptance passed. Release evidence and remaining boundaries are recorded in the entry.
 
 - 22 September 2026: [Chief rebrand](30-chief-rebrand.md) — product/repository identity with deployment and data compatibility preserved; v0.3.21 deployed and verified.
+
+## Calendar
+
+- 23 September 2026: [31 — Calendar authorization failure](31-calendar-authorization-failure.md): an expired Calendar token made approved events look uncertain and block later drafts; fix tested, not deployed.
