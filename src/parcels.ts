@@ -8,6 +8,7 @@ type Source = {
   sourceKind: "email" | "user";
   messageId?: string;
   threadId?: string;
+  account?: string;
   sender?: string;
   subject?: string;
   observedAt?: string;
@@ -86,6 +87,7 @@ function sourceRef(source: Source) {
   return source.sourceKind === "email"
     ? {
         kind: "email",
+        account: source.account ?? "primary",
         messageId: source.messageId,
         ...(source.threadId ? { threadId: source.threadId } : {}),
         ...(source.sender ? { from: source.sender } : {}),
@@ -111,6 +113,16 @@ function duplicateMessage(error: unknown) {
     /parcel_updates_message/.test(String(e?.constraint ?? e?.message ?? ""))
   );
 }
+/** The later of two optional timestamps, as the database returned them. */
+function latest(a: unknown, b: unknown) {
+  const times = [a, b].filter((t) => t !== null && t !== undefined) as (
+    string | Date
+  )[];
+  if (!times.length) return undefined;
+  return times.reduce((x, y) =>
+    new Date(y).getTime() > new Date(x).getTime() ? y : x,
+  );
+}
 function shown(row: any, brief = false) {
   return {
     id: row.id,
@@ -125,7 +137,7 @@ function shown(row: any, brief = false) {
     statusSource: row.status_source ?? undefined,
     // The moment the status fact describes, not when it was recorded; absent when no
     // status has ever been observed.
-    asOf: row.observed_at ?? undefined,
+    asOf: latest(row.observed_at, row.corroborated_at),
     eta: row.eta || undefined,
     // The delivery date keeps its own clock.
     etaAsOf: row.eta_observed_at ?? undefined,
@@ -317,7 +329,14 @@ export class ParcelTools {
         return null;
       })
       .filter(Boolean) as { row: any; basis: string; decisive: boolean }[];
-    const decisive = scored.filter((c) => c.decisive);
+    // A tracking reference outranks an order reference: when one parcel holds the tracking
+    // reference, a different parcel sharing only the order does not make it ambiguous.
+    const byTracking = scored.filter(
+      (c) => c.decisive && c.basis === "tracking reference",
+    );
+    const decisive = byTracking.length
+      ? byTracking
+      : scored.filter((c) => c.decisive);
     // Two parcels under one order stay ambiguous until a tracking reference separates them.
     const ambiguous = decisive.length !== 1;
     const result = {
@@ -408,6 +427,10 @@ export class ParcelTools {
     if (!a.label)
       throw new ToolValidationError(
         "Parcel validation: a new parcel needs a label; pass id to update an existing one",
+      );
+    if (a.archive !== undefined)
+      throw new ToolValidationError(
+        "Parcel validation: archive applies to a saved parcel; save it first, then archive it by id",
       );
     const tracking = refKey(a.trackingRef);
     await this.refuseDuplicateTracking(user, tracking);
@@ -523,7 +546,12 @@ export class ParcelTools {
     const statusKey = parcel.observed_at
       ? {
           authority: Number(parcel.authority),
-          observedAt: Date.parse(parcel.observed_at),
+          observedAt: Math.max(
+            Date.parse(parcel.observed_at),
+            !owner && parcel.corroborated_at
+              ? Date.parse(parcel.corroborated_at)
+              : 0,
+          ),
         }
       : null;
     const etaKey = parcel.eta_observed_at
@@ -547,7 +575,12 @@ export class ParcelTools {
       !owner &&
       parcel.status_source === "user" &&
       a.status !== undefined &&
-      a.status === parcel.status;
+      a.status === parcel.status &&
+      !(
+        a.status === "unknown" &&
+        !!a.rawStatus &&
+        a.rawStatus !== parcel.raw_status
+      );
     // Two different questions. Is this observation current enough to count? That decides
     // whether an email may overwrite details. Does its status change anything? An echo
     // of the owner's own status is current but changes nothing.
@@ -556,6 +589,8 @@ export class ParcelTools {
       !statusBlockedByOwner &&
       decides(next, statusKey);
     const statusApplies = statusCurrent && !echoesOwner;
+    // A current echo corroborates: the owner stays the source, the moment advances.
+    const corroborates = echoesOwner && statusCurrent;
     const etaApplies = a.eta !== undefined && decides(next, etaKey);
 
     // Details: compute final values here; the revision compare-and-swap guarantees the
@@ -571,8 +606,13 @@ export class ParcelTools {
     const changes: [string, string][] = [];
     const changedDetails: string[] = [];
     const refusedDetails: string[] = [];
+    const sameReference = (column: string, value: string) =>
+      (column === "tracking_ref" && refKey(value) === parcel.tracking_key) ||
+      (column === "order_ref" && refKey(value) === parcel.order_key);
     for (const [column, value, name] of details) {
       if (value === undefined || value === parcel[column]) continue;
+      // Re-punctuating the same reference is cosmetic: the owner may, an email need not.
+      if (value !== "" && sameReference(column, value) && !owner) continue;
       // The owner may correct or clear any detail. An email may fill an empty field, or
       // overwrite one when its own status applied, but never renames the owner's label
       // and never clears anything.
@@ -596,7 +636,9 @@ export class ParcelTools {
       statusBlockedByOwner
         ? "status not applied: you confirmed this parcel was delivered, and an email cannot change that"
         : echoesOwner
-          ? "status not applied: you already told me this, and your confirmation is kept as the source"
+          ? corroborates
+            ? "status unchanged: you already told me this; your confirmation stays the source, now known to hold as of this email"
+            : "status not applied: you already told me this, and this email describes an earlier moment"
           : a.status !== undefined && !statusApplies && statusKey
             ? `status not applied: ${ignoredReason(next, statusKey)}`
             : "",
@@ -619,7 +661,8 @@ export class ParcelTools {
       etaApplies ||
       changes.length > 0 ||
       archiveChanges ||
-      echoWording;
+      echoWording ||
+      corroborates;
 
     const update = randomUUID();
     const stamp = new Date(observedAt).toISOString();
@@ -631,12 +674,15 @@ export class ParcelTools {
     };
     for (const [column, value] of changes) set(column, value);
     if (echoWording) set("raw_status", a.rawStatus!);
+    if (corroborates) set("corroborated_at", stamp);
     if (statusApplies) {
       set("status", a.status!);
       set("raw_status", a.rawStatus ?? "");
       set("status_source", a.sourceKind);
       set("authority", authority);
       set("observed_at", stamp);
+      // A new status starts a new clock; earlier corroboration was of the old one.
+      set("corroborated_at", null);
       // The deciding update is the one that decided the status, and only that.
       set("deciding_update_id", update);
     }

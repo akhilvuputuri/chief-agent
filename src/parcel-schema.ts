@@ -27,6 +27,9 @@ export const parcelSource = {
     .string()
     .regex(/^[a-f0-9]{1,64}$/i)
     .optional(),
+  // The Gmail mailbox the message lives in, as gmail_search named it; omitted means
+  // primary. A message id alone cannot reopen a message from another mailbox.
+  account: z.string().min(1).max(254).optional(),
   sender: z.string().max(200).optional(),
   subject: z.string().max(200).optional(),
   observedAt: z.string().datetime({ offset: true }).optional(),

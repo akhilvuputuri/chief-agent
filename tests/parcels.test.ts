@@ -1353,20 +1353,265 @@ test("an echo keeps carrier wording without taking over the source", async () =>
     const saved: any = await f.tools.call("a", {
       operation: "parcel_record",
       label: "Sofa",
-      status: "unknown",
+      status: "delayed",
       ...user(day(10)),
     });
     const worded: any = await f.tools.call("a", {
       operation: "parcel_record",
       id: saved.id,
-      status: "unknown",
-      rawStatus: "awaiting pickup at depot",
+      status: "delayed",
+      rawStatus: "weather hold at hub",
       ...email("mb01", day(12)),
     });
     assert.equal(worded.applied, true);
-    assert.equal(worded.rawStatus, "awaiting pickup at depot");
+    assert.equal(worded.rawStatus, "weather hold at hub");
     assert.equal(worded.statusSource, "user");
     assert.deepEqual(worded.detailsChanged, ["carrier wording"]);
+    // Existing wording is not overwritten by a later echo.
+    const again: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      status: "delayed",
+      rawStatus: "still delayed",
+      ...email("mb02", day(13)),
+    });
+    assert.equal(again.rawStatus, "weather hold at hub");
+    // A stale echo adds no wording either.
+    const fresh: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      label: "Table",
+      status: "delayed",
+      ...user(day(12)),
+    });
+    const stale: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      id: fresh.id,
+      status: "delayed",
+      rawStatus: "old wording",
+      ...email("mb03", day(9)),
+    });
+    assert.equal(stale.rawStatus, undefined);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("new wording for an unknown status is new information, not an echo", async () => {
+  const f = await fixture();
+  try {
+    const saved: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      label: "Parcel",
+      status: "unknown",
+      rawStatus: "awaiting collection at post office",
+      ...user(day(10)),
+    });
+    const moved: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      status: "unknown",
+      rawStatus: "returned to sender after 7 days uncollected",
+      ...email("mc01", day(14)),
+    });
+    assert.equal(moved.statusApplied, true);
+    assert.equal(
+      moved.rawStatus,
+      "returned to sender after 7 days uncollected",
+    );
+    assert.equal(moved.statusSource, "email");
+    assert.doesNotMatch(moved.ignoredReason ?? "", /already told me/);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("a corroborating email dates the owner's status, so an older email cannot win", async () => {
+  const f = await fixture();
+  try {
+    const saved: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      label: "Speaker",
+      status: "in_transit",
+      carrier: "UPS",
+      ...user(day(10)),
+    });
+    const newer: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      status: "in_transit",
+      carrier: "DHL",
+      ...email("md01", day(14)),
+    });
+    assert.equal(newer.statusSource, "user");
+    assert.equal(new Date(newer.asOf).getTime(), Date.parse(day(14)));
+    assert.equal(newer.carrier, "DHL");
+    // Gmail lists newest first, so an older message is often processed after a newer one.
+    const older: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      status: "shipped",
+      carrier: "FedEx",
+      ...email("md02", day(12)),
+    });
+    assert.equal(older.statusApplied, false);
+    assert.equal(older.status, "in_transit");
+    assert.equal(older.carrier, "DHL");
+    // The owner is judged only against their own moment, so they can still correct it.
+    const owner: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      status: "delayed",
+      ...user(day(13)),
+    });
+    assert.equal(owner.statusApplied, true);
+    assert.equal(owner.status, "delayed");
+    // A new status starts a new clock: the old corroboration no longer applies.
+    assert.equal(new Date(owner.asOf).getTime(), Date.parse(day(13)));
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("an email source records its mailbox, and one message applies once per mailbox", async () => {
+  const f = await fixture();
+  try {
+    const saved: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      label: "Book",
+      status: "shipped",
+      ...email("ab12", day(10), { account: "secondary" }),
+    });
+    // The same id in the primary mailbox is a different message.
+    const other: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      status: "in_transit",
+      ...email("ab12", day(11)),
+    });
+    assert.equal(other.duplicate, undefined);
+    assert.equal(other.statusApplied, true);
+    const repeat: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      status: "delivered",
+      ...email("ab12", day(12), { account: "secondary" }),
+    });
+    assert.equal(repeat.duplicate, true);
+    const read: any = await f.tools.call("a", {
+      operation: "parcel_list",
+      id: saved.id,
+    });
+    const accounts = read.history.map((h: any) => h.source.account).sort();
+    assert.deepEqual(accounts, ["primary", "secondary"]);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("archive is refused on create, and tracking outranks a shared order in matching", async () => {
+  const f = await fixture();
+  try {
+    await assert.rejects(
+      f.tools.call("a", {
+        operation: "parcel_record",
+        label: "Straight to archive",
+        archive: true,
+        ...user(day(10)),
+      }),
+      /archive applies to a saved parcel/,
+    );
+    const a1: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      label: "A",
+      merchant: "Acme",
+      orderRef: "O1",
+      trackingRef: "T1",
+      ...user(day(10)),
+    });
+    await f.tools.call("a", {
+      operation: "parcel_record",
+      label: "B",
+      merchant: "Acme",
+      orderRef: "O1",
+      ...user(day(10)),
+    });
+    const found: any = await f.tools.call("a", {
+      operation: "parcel_match",
+      trackingRef: "T1",
+      orderRef: "O1",
+      merchant: "Acme",
+    });
+    assert.equal(found.ambiguous, false);
+    assert.equal(found.resolvedId, a1.id);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("re-punctuating the same reference is not reported as a refused change", async () => {
+  const f = await fixture();
+  try {
+    const saved: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      label: "Router",
+      trackingRef: "SP-123-456",
+      status: "delivered",
+      ...user(day(20)),
+    });
+    const stale: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      trackingRef: "sp123456",
+      status: "shipped",
+      ...email("me01", day(12)),
+    });
+    assert.doesNotMatch(
+      stale.ignoredReason ?? "",
+      /tracking reference not applied/,
+    );
+    assert.equal(stale.trackingRef, "SP-123-456");
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("a lost race on update surfaces the tracking message", async () => {
+  const f = await fixture();
+  try {
+    await f.tools.call("a", {
+      operation: "parcel_record",
+      label: "Holder",
+      trackingRef: "RACE-U",
+      ...user(day(10)),
+    });
+    const second: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      label: "Second",
+      ...user(day(10)),
+    });
+    const raced = new ParcelTools(
+      {
+        query: async (text: string, values?: unknown[]) =>
+          text.startsWith("SELECT id,archived_at FROM parcels")
+            ? { rows: [] }
+            : f.db.query(text, values),
+      } as never,
+      () => Date.UTC(2026, 8, 21, 2, 0, 0),
+    );
+    await assert.rejects(
+      raced.call("a", {
+        operation: "parcel_record",
+        id: second.id,
+        trackingRef: "race u",
+        ...user(day(11)),
+      }),
+      /was just saved on another parcel/,
+    );
+    const read: any = await f.tools.call("a", {
+      operation: "parcel_list",
+      id: second.id,
+    });
+    assert.equal(read.totalUpdates, 1);
   } finally {
     await f.pg.close();
   }

@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS parcels (
  status text NOT NULL DEFAULT 'unknown' CHECK(status IN ('ordered','shipped','in_transit','out_for_delivery','delivered','delayed','returned','cancelled','unknown')),
  status_source text CHECK(status_source IN ('email','user')),
  authority integer NOT NULL DEFAULT 0, observed_at timestamptz,
- raw_status text NOT NULL DEFAULT '',
+ raw_status text NOT NULL DEFAULT '', corroborated_at timestamptz,
  eta text NOT NULL DEFAULT '' CHECK(eta='' OR to_char(to_date(eta,'YYYY-MM-DD'),'YYYY-MM-DD')=eta),
  eta_observed_at timestamptz, eta_authority integer NOT NULL DEFAULT 0,
  deciding_update_id uuid,
@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS parcel_updates (
 CREATE INDEX IF NOT EXISTS parcel_updates_history ON parcel_updates(parcel_id,observed_at DESC,recorded_at DESC);
 -- One Gmail message applies once per parcel: a single shipment email can describe
 -- two parcels of one order, but repeating it against one parcel changes nothing.
-CREATE UNIQUE INDEX IF NOT EXISTS parcel_updates_message ON parcel_updates(user_id,parcel_id,(source_ref->>'messageId')) WHERE source_kind='email';
+-- Message ids belong to a mailbox, so the mailbox is part of the identity.
+CREATE UNIQUE INDEX IF NOT EXISTS parcel_updates_message ON parcel_updates(user_id,parcel_id,(coalesce(source_ref->>'account','primary')),(source_ref->>'messageId')) WHERE source_kind='email';
 INSERT INTO runtime_migrations(version) VALUES(19) ON CONFLICT DO NOTHING;
 COMMIT;

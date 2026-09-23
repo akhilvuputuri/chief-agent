@@ -165,7 +165,7 @@ export function runtimeContext(
                 gmail_read:
                   "Read one message in full plain text by its messageId. Use only when a thread read is truncated or a single message is enough. HTML and attachments are never fetched.",
                 parcel_record:
-                  "Save a parcel the owner awaits, or with id append an observation to one: status, date, correction, delivered or archive. Record only what the source states; an absent delivery date stays absent and unmappable carrier wording goes in rawStatus with status unknown. History is append-only, and an observation describing an earlier moment than the recorded one is kept without changing the status.",
+                  "Save a parcel the owner awaits, or with id append an observation to one: status, date, correction, delivered or archive. Record only what the source states; an absent delivery date stays absent and unmappable carrier wording goes in rawStatus with status unknown. History is append-only, and an observation describing an earlier moment than the recorded one is kept without changing the status. For an email from a non-primary mailbox pass its account as gmail_search named it.",
                 parcel_match:
                   "Find which parcel a reference belongs to. A tracking reference decides alone, an order reference with merchant decides, a merchant or label never does. Returns candidates, ambiguous and resolvedId; when ambiguous, ask the owner.",
                 parcel_list:
