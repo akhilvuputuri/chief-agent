@@ -527,10 +527,20 @@ export class ReadingEditions {
          SELECT r.id,$1,$2,r.canonical_url,r.url,r.domain,r.title,r.summary,r.content_basis,r.categories,r.language,r.published_at,$4,$4
          FROM jsonb_to_recordset($3::jsonb) AS r(id uuid,canonical_url text,url text,domain text,title text,summary text,content_basis text,categories jsonb,language text,published_at timestamptz)
          ON CONFLICT(user_id,canonical_url) DO UPDATE SET last_seen_at=EXCLUDED.last_seen_at,
-           source_id=EXCLUDED.source_id,title=EXCLUDED.title,
-           summary=COALESCE(EXCLUDED.summary,reading_candidates.summary),
-           content_basis=CASE WHEN EXCLUDED.summary IS NULL THEN reading_candidates.content_basis ELSE EXCLUDED.content_basis END,
-           categories=EXCLUDED.categories,language=EXCLUDED.language,
+           -- Displayed fields always come from one feed: adopt the incoming entry as a whole
+           -- when it is the same feed or has an excerpt the stored one lacks; otherwise keep
+           -- the stored feed's tuple intact.
+           (source_id,url,title,summary,content_basis,categories,language)=(
+             SELECT CASE WHEN r.adopt THEN EXCLUDED.source_id ELSE reading_candidates.source_id END,
+                    CASE WHEN r.adopt THEN EXCLUDED.url ELSE reading_candidates.url END,
+                    CASE WHEN r.adopt THEN EXCLUDED.title ELSE reading_candidates.title END,
+                    CASE WHEN r.adopt THEN EXCLUDED.summary ELSE reading_candidates.summary END,
+                    CASE WHEN r.adopt THEN EXCLUDED.content_basis ELSE reading_candidates.content_basis END,
+                    CASE WHEN r.adopt THEN EXCLUDED.categories ELSE reading_candidates.categories END,
+                    CASE WHEN r.adopt THEN EXCLUDED.language ELSE reading_candidates.language END
+             FROM (SELECT reading_candidates.source_id IS NOT DISTINCT FROM EXCLUDED.source_id
+                      OR reading_candidates.source_id IS NULL
+                      OR (reading_candidates.summary IS NULL AND EXCLUDED.summary IS NOT NULL) AS adopt) r),
            published_at=COALESCE(reading_candidates.published_at,EXCLUDED.published_at)`,
         [user, source.id, JSON.stringify(unique), this.clock()],
       );
@@ -630,22 +640,31 @@ export class ReadingEditions {
         `SELECT v.item_id,v.vote,v.reason,v.updated_at,i.topics,i.domain
          FROM reading_votes v JOIN reading_items i ON i.id=v.item_id
          WHERE v.user_id=$1 AND ($2::timestamptz IS NULL OR v.updated_at>$2)
-         ORDER BY v.updated_at`,
+         ORDER BY v.updated_at,v.item_id`,
         [user, s.learning_reset_at ?? null],
       )
     ).rows as VoteRow[];
     const weights = learnWeights(votes, s.overrides, now);
     const latest = (
       await this.db.query(
-        "SELECT id,weights FROM reading_preference_versions WHERE user_id=$1 ORDER BY id DESC LIMIT 1",
+        "SELECT id,weights,contributing FROM reading_preference_versions WHERE user_id=$1 ORDER BY id DESC LIMIT 1",
         [user],
       )
     ).rows[0];
+    const contributing = votes.map((v) => ({
+      itemId: v.item_id,
+      vote: v.vote,
+      reason: v.reason,
+      at: new Date(v.updated_at).toISOString(),
+    }));
+    // A version names the exact votes behind its weights, so a changed vote set is a
+    // new version even when the weights happen to come out the same.
     const same =
       !persist ||
       (latest &&
         JSON.stringify(sortKeys(latest.weights)) ===
-          JSON.stringify(sortKeys(weights)));
+          JSON.stringify(sortKeys(weights)) &&
+        voteKey(latest.contributing ?? []) === voteKey(contributing));
     const version = same
       ? (latest?.id ?? null)
       : (
@@ -654,14 +673,7 @@ export class ReadingEditions {
             [
               user,
               JSON.stringify(weights),
-              JSON.stringify(
-                votes.map((v) => ({
-                  itemId: v.item_id,
-                  vote: v.vote,
-                  reason: v.reason,
-                  at: v.updated_at,
-                })),
-              ),
+              JSON.stringify(contributing),
               reason,
             ],
           )
@@ -868,6 +880,14 @@ export class ReadingEditions {
       shortfall: trace.shortfall,
     };
   }
+}
+/** Order-stable identity of a contributing-vote list (jsonb reorders object keys). */
+function voteKey(
+  list: { itemId: string; vote: string; reason: string | null; at: string }[],
+) {
+  return JSON.stringify(
+    list.map((v) => [v.itemId, v.vote, v.reason ?? null, v.at]),
+  );
 }
 function sortKeys(o: Record<string, number>) {
   return Object.fromEntries(

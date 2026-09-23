@@ -1496,3 +1496,116 @@ test("review regressions: the trace snapshot keeps selections below rank 60", as
     await f.pg.close();
   }
 });
+
+test("review regressions: a changed vote set is a new preference version even with equal weights", async () => {
+  const f = await fixture();
+  try {
+    await f.setup({}, [[FEED, varied]]);
+    const r = await f.call({ operation: "reading_edition_now" });
+    const rows = await f.items(r.editionId);
+    const a = rows.find((i) => /Carbon/.test(i.title))!;
+    const b = rows.find((i) => /Emissions/.test(i.title))!;
+    // Same topic and same source key shape: make both items share a domain.
+    await f.db.query(
+      "UPDATE reading_items SET domain='news.example' WHERE id IN ($1,$2)",
+      [a.id, b.id],
+    );
+    await f.feedback.press("a", `rd:l:${a.id}`);
+    const first = await f.editions.preferences("a", "t");
+    const again = await f.editions.preferences("a", "t");
+    assert.equal(
+      again.version,
+      first.version,
+      "unchanged votes keep the version",
+    );
+    await f.feedback.press("a", `rd:u:${a.id}`);
+    await f.feedback.press("a", `rd:l:${b.id}`);
+    const swapped = await f.editions.preferences("a", "t");
+    assert.deepEqual(swapped.weights, first.weights);
+    assert.notEqual(swapped.version, first.version);
+    const contributing = (
+      await f.db.query(
+        "SELECT contributing FROM reading_preference_versions WHERE id=$1",
+        [swapped.version],
+      )
+    ).rows[0].contributing;
+    assert.deepEqual(
+      contributing.map((c: any) => c.itemId),
+      [b.id],
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("review regressions: a syndicated article keeps one feed's excerpt and attribution together", async () => {
+  const f = await fixture();
+  try {
+    const story = "https://shared.example.com/story";
+    f.fetcher.feeds.set(
+      FEED,
+      rss([
+        {
+          title: "Climate story from A",
+          link: story,
+          desc: "Excerpt written by feed A.",
+        },
+      ]),
+    );
+    const A = (
+      await f.call({
+        operation: "reading_source_add",
+        url: FEED,
+        name: "Feed A",
+      })
+    ).added.id;
+    f.fetcher.feeds.set(
+      FEED2,
+      rss([{ title: "Climate story via B", link: story }]),
+    );
+    await f.call({
+      operation: "reading_source_add",
+      url: FEED2,
+      name: "Feed B",
+    });
+    let c = (await f.db.query("SELECT * FROM reading_candidates")).rows;
+    assert.equal(c.length, 1);
+    assert.equal(c[0].source_id, A, "title-only duplicate does not take over");
+    assert.equal(c[0].summary, "Excerpt written by feed A.");
+    assert.equal(c[0].title, "Climate story from A");
+    // Feed A drops its excerpt while B supplies one: B takes the whole tuple, whichever
+    // feed is fetched first.
+    f.fetcher.feeds.set(
+      FEED,
+      rss([{ title: "Climate story from A", link: story }]),
+    );
+    await f.db.query(
+      "UPDATE reading_candidates SET summary=NULL,content_basis='title_only'",
+    );
+    f.fetcher.feeds.set(
+      FEED2,
+      rss([
+        { title: "Climate story via B", link: story, desc: "B's own excerpt." },
+      ]),
+    );
+    await f.db.query("UPDATE reading_sources SET last_fetched_at=NULL");
+    f.setNow(new Date(NOW.getTime() + 3600000));
+    await f.call({
+      operation: "reading_settings",
+      interests: [{ topic: "climate" }],
+      timezone: "UTC",
+      deliveryTime: "07:00",
+    });
+    await f.call({ operation: "reading_edition_now" });
+    c = (
+      await f.db.query(
+        "SELECT c.*,s.name FROM reading_candidates c JOIN reading_sources s ON s.id=c.source_id",
+      )
+    ).rows;
+    assert.equal(c[0].name, "Feed B");
+    assert.equal(c[0].summary, "B's own excerpt.");
+    assert.equal(c[0].title, "Climate story via B");
+  } finally {
+    await f.pg.close();
+  }
+});
