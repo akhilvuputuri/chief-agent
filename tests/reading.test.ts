@@ -18,6 +18,7 @@ import {
   nextDelivery,
   rank,
   readingCallback,
+  reasonFor,
   select,
   zonedInstant,
   type Button,
@@ -41,8 +42,10 @@ const FEED2 = "https://other.example.org/rss";
 class FakeFetcher implements FeedFetcher {
   feeds = new Map<string, string | Error>();
   calls: string[] = [];
+  hook: (() => Promise<void>) | null = null;
   async get(url: string) {
     this.calls.push(url);
+    if (this.hook) await this.hook();
     const f = this.feeds.get(url);
     if (f === undefined) throw new Error("Feed request failed (HTTP 404)");
     if (f instanceof Error) throw f;
@@ -1684,5 +1687,73 @@ test("review regressions: language codes are canonical and prefixed Atom parses"
       summary: "Short summary.",
       categories: ["Climate"],
     },
+  );
+});
+
+test("review regressions: settings changed during a build or a settings call are not lost", async () => {
+  const f = await fixture();
+  try {
+    await f.setup({ discoverySlots: 0 }, [[FEED, varied]]);
+    // A source mute committed while feeds are being fetched applies to this edition.
+    f.setNow(new Date(NOW.getTime() + 3600000));
+    f.fetcher.hook = async () => {
+      f.fetcher.hook = null;
+      await f.db.query(
+        `UPDATE reading_settings SET excluded_domains='["c.example.org"]'::jsonb WHERE user_id='a'`,
+      );
+    };
+    const r = await f.call({ operation: "reading_edition_now" });
+    assert.ok(
+      !(await f.items(r.editionId)).some((i) => i.domain === "c.example.org"),
+    );
+    // A button mute committed between reading_settings' snapshot and its write survives.
+    const racing = new ReadingTools(
+      {
+        query: async (text: string, values?: unknown[]) => {
+          if (/INSERT INTO reading_settings\(user_id,enabled/.test(text))
+            await f.db.query(
+              `UPDATE reading_settings SET muted_topics='["space"]'::jsonb WHERE user_id='a'`,
+            );
+          return f.db.query(text, values);
+        },
+      },
+      f.fetcher,
+      () => NOW,
+    );
+    await racing.call(
+      "a",
+      f.run,
+      action.parse({
+        operation: "reading_settings",
+        deliveryTime: "08:00",
+      }) as any,
+    );
+    const row = (
+      await f.db.query(
+        "SELECT muted_topics,excluded_domains,delivery_time FROM reading_settings WHERE user_id='a'",
+      )
+    ).rows[0];
+    assert.deepEqual(row.muted_topics, ["space"]);
+    assert.deepEqual(row.excluded_domains, ["c.example.org"]);
+    assert.equal(row.delivery_time, "08:00");
+    // Regional codes are accepted and stored canonically.
+    const saved = await f.call({
+      operation: "reading_settings",
+      languages: ["en-US", "pt_BR"],
+    });
+    assert.deepEqual(saved.settings.languages, ["en", "pt"]);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("review regressions: the headline reason names the interest found in the headline", () => {
+  const item = cand("Space agency picks lunar crew", "a.example", {
+    summary: "The climate on the Moon is harsh.",
+  });
+  const { scored } = rank([item], S, {}, [], NOW);
+  assert.match(
+    reasonFor(scored[0]!, "UTC", NOW),
+    /Headline matches your interest “space”/,
   );
 });

@@ -257,7 +257,7 @@ export const action = z.discriminatedUnion("operation", [
         .max(20)
         .optional(),
       languages: z
-        .array(z.string().regex(/^[a-z]{2,3}$/))
+        .array(z.string().regex(/^[a-zA-Z]{2,3}(?:[-_][a-zA-Z0-9]{2,8})?$/))
         .max(5)
         .optional(),
       preferredDomains: z

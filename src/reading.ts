@@ -271,6 +271,8 @@ export interface Scored {
   topics: string[];
   matched: string[];
   titleHit: boolean;
+  /** The interest whose phrase appears in the headline, when one does. */
+  titleTopic: string | null;
   components: {
     interest: number;
     source: number;
@@ -289,7 +291,7 @@ export interface Delivered {
 
 function topicsFor(c: Candidate, interests: Interest[]) {
   const matched: string[] = [];
-  let titleHit = false;
+  let titleTopic: string | null = null;
   const body = [c.summary ?? "", ...c.categories, ...c.source_topics].join(
     " \n ",
   );
@@ -298,14 +300,20 @@ function topicsFor(c: Candidate, interests: Interest[]) {
     const inTitle = terms.some((r) => r.test(c.title));
     if (inTitle || terms.some((r) => r.test(body))) {
       matched.push(normTopic(i.topic));
-      titleHit ||= inTitle;
+      if (inTitle && !titleTopic) titleTopic = normTopic(i.topic);
     }
   }
   const fallback = [...c.source_topics, ...c.categories]
     .map(normTopic)
     .filter(Boolean);
   const all = [...new Set([...matched, ...fallback])];
-  return { matched, titleHit, topics: all.slice(0, 3), all };
+  return {
+    matched,
+    titleHit: titleTopic !== null,
+    titleTopic,
+    topics: all.slice(0, 3),
+    all,
+  };
 }
 
 export function rank(
@@ -337,7 +345,10 @@ export function rank(
       skip("language");
       continue;
     }
-    const { matched, titleHit, topics, all } = topicsFor(c, s.interests);
+    const { matched, titleHit, titleTopic, topics, all } = topicsFor(
+      c,
+      s.interests,
+    );
     // A mute is explicit, so it checks every label and the excerpt, not only the
     // three topics kept for learning.
     if (
@@ -383,6 +394,7 @@ export function rank(
       topics,
       matched,
       titleHit,
+      titleTopic,
       components,
       score: round(baselineScore + components.feedback),
       baselineScore,
@@ -487,7 +499,7 @@ export function reasonFor(x: Scored, tz: string, now: Date) {
   if (x.label.includes("discovery"))
     parts.push("Discovery pick outside your listed interests");
   else if (x.titleHit)
-    parts.push(`Headline matches your interest “${x.matched[0]}”`);
+    parts.push(`Headline matches your interest “${x.titleTopic}”`);
   else if (x.matched.length)
     parts.push(`Related to your interest “${x.matched[0]}”`);
   if (x.components.source > 0) parts.push("from a preferred source");
@@ -743,7 +755,7 @@ export class ReadingEditions {
     // The scheduler passes its tick time so a build that straddles local midnight still
     // files the edition under the date whose slot triggered it.
     const now = opts.at ?? this.clock();
-    const s = await this.settings(user);
+    let s = await this.settings(user);
     const tz = s.timezone ?? "UTC";
     const date = zonedParts(now, tz).date;
     if (kind === "scheduled") {
@@ -775,6 +787,9 @@ export class ReadingEditions {
         );
     }
     const fetched = await this.refresh(user);
+    // Feed fetching can take seconds; re-read the settings so a mute, exclusion or
+    // interest change made meanwhile applies to this edition's ranking.
+    s = await this.settings(user);
     const failed = fetched.sources.filter(
       (x) => x.status !== "ok" && x.status !== "cached",
     );
@@ -1613,20 +1628,37 @@ export class ReadingTools {
     // Restart the schedule clock whenever delivery becomes active or its time changes, so
     // enabling after today's slot waits for tomorrow instead of sending immediately.
     const restart =
-      (merged.enabled && !old.enabled) ||
-      (!merged.paused && old.paused) ||
-      merged.delivery_time !== (old.delivery_time ?? null) ||
-      merged.timezone !== (old.timezone ?? null);
+      (a.enabled === true && !old.enabled) ||
+      (a.paused === false && old.paused) ||
+      (a.deliveryTime !== undefined &&
+        a.deliveryTime !== (old.delivery_time ?? null)) ||
+      (a.timezone !== undefined && a.timezone !== (old.timezone ?? null));
+    const list = (provided: unknown[] | undefined, value: unknown[]) =>
+      provided === undefined ? null : JSON.stringify([...new Set(value)]);
     const row = (
       await this.db.query(
-        // Settings and the muting of pending scheduled editions commit together, so a
-        // delivery claim never sees a paused bulletin with a still-pending edition.
+        // Only fields present in this request are written (NULL keeps the stored value),
+        // so a mute or pause tapped while this call runs is never overwritten. Settings
+        // and the muting of pending scheduled editions commit together.
         `WITH s AS (
            INSERT INTO reading_settings(user_id,enabled,paused,interests,languages,preferred_domains,excluded_domains,muted_topics,delivery_time,timezone,items_per_edition,discovery_slots,schedule_from)
-           VALUES($1,$2,$3,$4::jsonb,$5::jsonb,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13)
-           ON CONFLICT(user_id) DO UPDATE SET enabled=$2,paused=$3,interests=$4::jsonb,languages=$5::jsonb,
-             preferred_domains=$6::jsonb,excluded_domains=$7::jsonb,muted_topics=$8::jsonb,delivery_time=$9,timezone=$10,
-             items_per_edition=$11,discovery_slots=$12,schedule_from=CASE WHEN $14 THEN $13 ELSE reading_settings.schedule_from END,updated_at=now()
+           VALUES($1,COALESCE($2::boolean,false),COALESCE($3::boolean,false),COALESCE($4::jsonb,'[]'::jsonb),
+             COALESCE($5::jsonb,'[]'::jsonb),COALESCE($6::jsonb,'[]'::jsonb),COALESCE($7::jsonb,'[]'::jsonb),
+             COALESCE($8::jsonb,'[]'::jsonb),$9::text,$10::text,COALESCE($11::int,5),COALESCE($12::int,1),$13::timestamptz)
+           ON CONFLICT(user_id) DO UPDATE SET
+             enabled=COALESCE($2::boolean,reading_settings.enabled),
+             paused=COALESCE($3::boolean,reading_settings.paused),
+             interests=COALESCE($4::jsonb,reading_settings.interests),
+             languages=COALESCE($5::jsonb,reading_settings.languages),
+             preferred_domains=COALESCE($6::jsonb,reading_settings.preferred_domains),
+             excluded_domains=COALESCE($7::jsonb,reading_settings.excluded_domains),
+             muted_topics=COALESCE($8::jsonb,reading_settings.muted_topics),
+             delivery_time=COALESCE($9::text,reading_settings.delivery_time),
+             timezone=COALESCE($10::text,reading_settings.timezone),
+             items_per_edition=COALESCE($11::int,reading_settings.items_per_edition),
+             discovery_slots=COALESCE($12::int,reading_settings.discovery_slots),
+             schedule_from=CASE WHEN $14::boolean THEN $13::timestamptz ELSE reading_settings.schedule_from END,
+             updated_at=now()
            RETURNING *
          ), m AS (
            UPDATE reading_editions SET state='muted'
@@ -1635,17 +1667,17 @@ export class ReadingTools {
          ) SELECT * FROM s`,
         [
           user,
-          merged.enabled,
-          merged.paused,
-          JSON.stringify(merged.interests),
-          JSON.stringify(merged.languages),
-          JSON.stringify([...new Set(merged.preferred_domains)]),
-          JSON.stringify([...new Set(merged.excluded_domains)]),
-          JSON.stringify([...new Set(merged.muted_topics)]),
-          merged.delivery_time,
-          merged.timezone,
-          merged.items_per_edition,
-          merged.discovery_slots,
+          a.enabled ?? null,
+          a.paused ?? null,
+          a.interests === undefined ? null : JSON.stringify(merged.interests),
+          list(a.languages, merged.languages),
+          list(a.preferredDomains, merged.preferred_domains),
+          list(a.excludedDomains, merged.excluded_domains),
+          list(a.mutedTopics, merged.muted_topics),
+          a.deliveryTime ?? null,
+          a.timezone ?? null,
+          a.itemsPerEdition ?? null,
+          a.discoverySlots ?? null,
           now,
           restart,
         ],
