@@ -87,7 +87,7 @@ function sourceRef(source: Source) {
   return source.sourceKind === "email"
     ? {
         kind: "email",
-        account: source.account ?? "primary",
+        account: (source.account ?? "").trim().toLowerCase() || "primary",
         messageId: source.messageId,
         ...(source.threadId ? { threadId: source.threadId } : {}),
         ...(source.sender ? { from: source.sender } : {}),
@@ -165,6 +165,11 @@ export class ParcelTools {
   async call(user: string, action: ParcelAction, run?: string) {
     if (action.operation === "parcel_list")
       return action.id ? this.read(user, action) : this.list(user, action);
+    for (const value of Object.values(action))
+      if (typeof value === "string" && value.includes("\u0000"))
+        throw new ToolValidationError(
+          "Parcel validation: text fields cannot contain a NUL character",
+        );
     if (action.operation === "parcel_match") return this.match(user, action);
     // Carrier wording describes a status; alone it would be kept in history but never
     // shown on the parcel, so require the status it qualifies (usually "unknown").
@@ -569,11 +574,9 @@ export class ParcelTools {
       confirmedDelivered &&
       a.status !== undefined &&
       !["delivered", "returned"].includes(a.status);
-    // An email repeating a status the owner stated adds nothing, and applying it would
-    // replace the owner's provenance, which is what the delivery lock is keyed on.
-    const echoesOwner =
-      !owner &&
-      parcel.status_source === "user" &&
+    // Repeating the current status is not a new status. For "unknown" the wording is the
+    // substance, so different wording is a different report.
+    const sameStatus =
       a.status !== undefined &&
       a.status === parcel.status &&
       !(
@@ -581,13 +584,29 @@ export class ParcelTools {
         !!a.rawStatus &&
         a.rawStatus !== parcel.raw_status
       );
+    // An email repeating a status the owner stated adds nothing, and applying it would
+    // replace the owner's provenance, which is what the delivery lock is keyed on.
+    const echoesOwner = !owner && parcel.status_source === "user" && sameStatus;
+    // The owner's latest word on a different status replaces their earlier one, even
+    // when they date it earlier: "it was delivered on the 11th" is a correction.
+    const ownerSupersedes =
+      owner &&
+      parcel.status_source === "user" &&
+      a.status !== undefined &&
+      !sameStatus;
+    // A later confirming email, not the owner, may be what makes this report old.
+    const corroborationLeads =
+      !owner &&
+      !!parcel.corroborated_at &&
+      !!parcel.observed_at &&
+      Date.parse(parcel.corroborated_at) > Date.parse(parcel.observed_at);
     // Two different questions. Is this observation current enough to count? That decides
     // whether an email may overwrite details. Does its status change anything? An echo
     // of the owner's own status is current but changes nothing.
     const statusCurrent =
       a.status !== undefined &&
       !statusBlockedByOwner &&
-      decides(next, statusKey);
+      (ownerSupersedes || decides(next, statusKey));
     const statusApplies = statusCurrent && !echoesOwner;
     // A current echo corroborates: the owner stays the source, the moment advances.
     const corroborates = echoesOwner && statusCurrent;
@@ -638,12 +657,25 @@ export class ParcelTools {
         : echoesOwner
           ? corroborates
             ? "status unchanged: you already told me this; your confirmation stays the source, now known to hold as of this email"
-            : "status not applied: you already told me this, and this email describes an earlier moment"
+            : corroborationLeads
+              ? "status not applied: you already told me this, and a later email already confirmed it"
+              : "status not applied: you already told me this, and this email describes an earlier moment"
           : a.status !== undefined && !statusApplies && statusKey
-            ? `status not applied: ${ignoredReason(next, statusKey)}`
+            ? corroborationLeads && !statusBlockedByOwner
+              ? "status not applied: a later email already confirmed the current status; recorded but not applied"
+              : sameStatus
+                ? "status unchanged: that is already the status, described at a later moment"
+                : `status not applied: ${ignoredReason(next, statusKey)}`
             : "",
       a.eta !== undefined && !etaApplies && etaKey
         ? `delivery date not applied: ${ignoredReason(next, etaKey)}`
+        : "",
+      echoesOwner &&
+      statusCurrent &&
+      !!a.rawStatus &&
+      !!parcel.raw_status &&
+      a.rawStatus !== parcel.raw_status
+        ? "carrier wording not applied: an email repeating your status only fills empty wording"
         : "",
       refusedDetails.length
         ? `${refusedDetails.join(", ")} not applied: an email only fills an empty field unless it is the most current status report, and never renames or clears`
@@ -680,9 +712,21 @@ export class ParcelTools {
       set("raw_status", a.rawStatus ?? "");
       set("status_source", a.sourceKind);
       set("authority", authority);
-      set("observed_at", stamp);
-      // A new status starts a new clock; earlier corroboration was of the old one.
-      set("corroborated_at", null);
+      if (sameStatus) {
+        // A restatement confirms the same status: keep the later moment and whatever
+        // corroboration exists, so a back-dated repeat cannot reopen the door.
+        const previous = parcel.observed_at
+          ? Date.parse(parcel.observed_at)
+          : 0;
+        set(
+          "observed_at",
+          new Date(Math.max(previous, observedAt)).toISOString(),
+        );
+      } else {
+        set("observed_at", stamp);
+        // A new status starts a new clock; earlier corroboration was of the old one.
+        set("corroborated_at", null);
+      }
       // The deciding update is the one that decided the status, and only that.
       set("deciding_update_id", update);
     }

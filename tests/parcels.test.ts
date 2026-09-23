@@ -1661,6 +1661,169 @@ test("the database refuses a second parcel with the same tracking reference", as
   }
 });
 
+test("the owner restating the current status never reopens the clock", async () => {
+  const f = await fixture();
+  try {
+    const saved: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      label: "Lamp",
+      status: "shipped",
+      ...user(day(10)),
+    });
+    await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      status: "shipped",
+      ...email("na01", day(14)),
+    });
+    // The owner repeats themselves, dating it between their statement and the echo.
+    const restated: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      status: "shipped",
+      ...user(day(12)),
+    });
+    assert.equal(restated.status, "shipped");
+    assert.equal(new Date(restated.asOf).getTime(), Date.parse(day(14)));
+    // An email older than the confirming echo still cannot win.
+    const older: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      status: "ordered",
+      ...email("na02", day(13)),
+    });
+    assert.equal(older.statusApplied, false);
+    assert.equal(older.status, "shipped");
+    assert.match(older.ignoredReason, /a later email already confirmed/);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("a restatement without a time does not undo a confirmation dated slightly ahead", async () => {
+  const f = await fixture();
+  try {
+    const saved: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      label: "Desk",
+      status: "in_transit",
+      ...user(day(20)),
+    });
+    // Within the one-day skew allowance: 18 hours after the fixture's now.
+    await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      status: "in_transit",
+      ...email("nb01", "2026-09-21T20:00:00Z"),
+    });
+    await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      status: "in_transit",
+      ...user(),
+    });
+    const older: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      status: "shipped",
+      ...email("nb02", "2026-09-21T10:00:00Z"),
+    });
+    assert.equal(older.statusApplied, false);
+    assert.equal(older.status, "in_transit");
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("the owner's back-dated correction of their own status applies", async () => {
+  const f = await fixture();
+  try {
+    const saved: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      label: "Kettle",
+      status: "shipped",
+      ...user(day(12)),
+    });
+    // "It was actually delivered on the 11th."
+    const corrected: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      status: "delivered",
+      ...user(day(11)),
+    });
+    assert.equal(corrected.statusApplied, true);
+    assert.equal(corrected.status, "delivered");
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("an echo's differing wording is reported, not silently dropped", async () => {
+  const f = await fixture();
+  try {
+    const saved: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      label: "Crate",
+      status: "delayed",
+      rawStatus: "weather",
+      ...user(day(10)),
+    });
+    const echo: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      status: "delayed",
+      rawStatus: "customs hold",
+      ...email("nc01", day(12)),
+    });
+    assert.equal(echo.rawStatus, "weather");
+    assert.match(echo.ignoredReason, /carrier wording not applied/);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("mailbox labels compare without case, and omitted means primary", async () => {
+  const f = await fixture();
+  try {
+    const saved: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      label: "Pens",
+      status: "shipped",
+      ...email("dd12", day(10)),
+    });
+    const same: any = await f.tools.call("a", {
+      operation: "parcel_record",
+      id: saved.id,
+      status: "delivered",
+      ...email("dd12", day(11), { account: "Primary" }),
+    });
+    assert.equal(same.duplicate, true);
+    const read: any = await f.tools.call("a", {
+      operation: "parcel_list",
+      id: saved.id,
+    });
+    assert.equal(read.totalUpdates, 1);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("a NUL character is refused as a validation error", async () => {
+  const f = await fixture();
+  try {
+    await assert.rejects(
+      f.tools.call("a", {
+        operation: "parcel_record",
+        label: "Bad\u0000label",
+        ...user(day(10)),
+      }),
+      /cannot contain a NUL character/,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
 test("parcel tools appear only where the capability is enabled", () => {
   const off = runtimeContext({}, null).tools.map((t) => t.name);
   assert.ok(!off.some((n) => n.startsWith("parcel_")));

@@ -16,7 +16,7 @@ Order confirmations and shipment notices arrive as email, and the state of a par
 
 The first working version passed its own tests and broke one elsewhere: after a large saved answer, a follow-up could no longer retrieve it. The cause was not the feature's logic. Five new always-on operations added about 5,500 characters to the fixed model prompt, and in that scenario the compact retrieval pointer no longer fit.
 
-Measuring it made the shape clear. With every capability enabled the fixed prompt measured 50,156 characters before this work, on the base of the time, against a 48,000-character soft allowance. It was over the soft allowance before this work began. Remeasured on 23 September with every capability flag on, the deployed `7297202` is 52,926 and this branch adds 3,429: 2,799 gated behind the capability and 630 always paid. An earlier remeasurement had left the watchlist flag off, which moved the absolute figures by about two thousand characters but not the differences. That limit arithmetic has also moved under this work: 120,000 is now the compaction threshold and the hard limit is 400,000. Each new domain is not free, and there are five more domain issues queued.
+Measuring it made the shape clear. With every capability enabled the fixed prompt measured 50,156 characters before this work, on the base of the time, against a 48,000-character soft allowance. It was over the soft allowance before this work began. Remeasured on 23 September with every capability flag on, the deployed `7297202` is 52,926 and this branch adds 3,475: 2,845 gated behind the capability and 630 always paid. An earlier remeasurement had left the watchlist flag off, which moved the absolute figures by about two thousand characters but not the differences. That limit arithmetic has also moved under this work: 120,000 is now the compaction threshold and the hard limit is 400,000. Each new domain is not free, and there are five more domain issues queued.
 
 Three changes brought the cost to about 3,100 characters and restored the broken behaviour:
 
@@ -79,6 +79,14 @@ For `unknown`, the wording is the whole content, so "awaiting collection" and "r
 Provenance claimed the stored fields were enough to reopen the exact message, which stopped being true when a second Gmail mailbox was connected in parallel work: a message id is only unique within its mailbox. The mailbox is now stored and is part of the one-message-per-parcel rule. The round-three Devin comment had raised this; it had not been answered.
 
 Minor: three guards survived mutation and now have tests; archive on create was silently ignored and is now refused; a parcel holding the tracking reference was reported ambiguous when another parcel shared its order; and re-punctuating a parcel's own reference was reported as a refused change.
+
+## Round seven: repeating a status is not a new status
+
+Round seven (Claude Opus 5.5, head `07d6948`) confirmed every round-six fix, found all fourteen of its mutations caught, and found one major that was the round-six major reached by a neighbouring path. Any applied status reset the clock and discarded corroboration, including the owner merely restating the status they had already given. Dated between their first statement and a confirming email, that restatement dropped the clock back and let an older email through again. A restatement now keeps the later of the two moments and the corroboration; only a different status starts a new clock.
+
+The same review showed the owner could not back-date a correction of their own status, although the runtime guidance tells the model to pass the time the owner mentions: "it was delivered on the 11th" after "shipped" on the 12th was refused as older. The owner's latest word on a different status now replaces their earlier one. Smaller fixes: refusal reasons blamed the owner for a moment a confirming email had supplied; an echo's differing wording was dropped without saying so; mailbox labels are compared without case; and a NUL character is refused as a validation error instead of reaching Postgres.
+
+Seven rounds in, the recurring shape is visible. Each fix was checked against the case that prompted it, and the next round found the neighbouring case: the same rule reached through a restatement instead of a new email, or through the owner instead of a mailbox. The reviews did not converge by finding fewer kinds of bug; they converged because the decision was split into questions that could each be tested on both sides.
 
 ## Tested
 

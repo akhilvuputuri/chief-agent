@@ -169,7 +169,7 @@ export function runtimeContext(
                 parcel_match:
                   "Find which parcel a reference belongs to. A tracking reference decides alone, an order reference with merchant decides, a merchant or label never does. Returns candidates, ambiguous and resolvedId; when ambiguous, ask the owner.",
                 parcel_list:
-                  "List awaited parcels, newest first, or pass one id for that parcel and its paged history including observations recorded but not applied. Statuses are last known from email or the owner, never carrier-checked; asOf is the moment the deciding fact describes.",
+                  "List awaited parcels, newest first, or pass one id for that parcel and its paged history including observations recorded but not applied. Statuses are last known from email or the owner, never carrier-checked; asOf is when the current status was last known to hold, from the owner or a confirming email.",
                 web_read:
                   "Retrieve a public source. Returned sourceId is for source evidence; recommended records are not the requested posting.",
               } as Record<string, string>
