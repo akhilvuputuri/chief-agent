@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { type Database, event } from "./db.js";
-import { CalendarTools } from "./calendar.js";
+import { CalendarNotSentError, CalendarTools } from "./calendar.js";
 import { validateDraft, calendarPreview } from "./calendar-draft.js";
 export class CalendarActions {
   constructor(
@@ -59,6 +59,8 @@ export class CalendarActions {
         throw new Error("Approval unavailable, expired, or already used");
       if (previous.payload.execution === "created")
         return { status: "created", url: previous.payload.result?.url };
+      if (previous.payload.execution === "failed")
+        return { status: "failed", reason: previous.payload.failure?.code };
       // Read-only reconciliation. Never replay a possibly completed POST.
       const found = await this.calendar.findCreated(user, id);
       if (!found) return { status: "uncertain" };
@@ -76,7 +78,26 @@ export class CalendarActions {
         validateDraft(claimed.payload.draft),
       );
       return await this.record(claimed, result);
-    } catch {
+    } catch (e) {
+      if (e instanceof CalendarNotSentError) {
+        // Nothing reached the Calendar API, so this is a definite non-creation, not an uncertain write.
+        const reason = /authoriz|Wrong Google account/i.test(e.message)
+          ? "authorization"
+          : "not_sent";
+        await this.db.query(
+          "UPDATE approvals SET payload=payload || $3::jsonb WHERE id=$1 AND user_id=$2 AND payload->>'execution'='creating'",
+          [
+            id,
+            user,
+            JSON.stringify({ execution: "failed", failure: { code: reason } }),
+          ],
+        );
+        await event(this.db, user, claimed.run_id, "calendar.not_sent", {
+          id,
+          reason,
+        });
+        return { status: "failed", reason };
+      }
       await this.db.query(
         "UPDATE approvals SET payload=jsonb_set(payload,'{execution}','\"uncertain\"'::jsonb) WHERE id=$1 AND user_id=$2 AND payload->>'execution'<>'created'",
         [id, user],

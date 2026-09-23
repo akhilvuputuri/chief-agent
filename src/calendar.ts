@@ -4,6 +4,8 @@ export async function googleJson(r: Response) {
   if (!r.ok) throw new Error(`Google request failed (${r.status})`);
   return JSON.parse(new TextDecoder().decode(await boundedBytes(r, 2000000)));
 }
+/** Creation stopped before the insert request was sent, so no event can exist. */
+export class CalendarNotSentError extends Error {}
 export type GoogleConfig = {
   owner: string;
   email: string;
@@ -16,19 +18,23 @@ export async function googleToken(
   request: typeof fetch = fetch,
 ) {
   if (!c.refreshToken) throw new Error("Google connection is not configured");
-  const t = await googleJson(
-    await request("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      body: new URLSearchParams({
-        client_id: c.clientId,
-        client_secret: c.clientSecret,
-        refresh_token: c.refreshToken,
-        grant_type: "refresh_token",
-      }),
-      redirect: "error",
-      signal: AbortSignal.timeout(15000),
+  const r = await request("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    body: new URLSearchParams({
+      client_id: c.clientId,
+      client_secret: c.clientSecret,
+      refresh_token: c.refreshToken,
+      grant_type: "refresh_token",
     }),
-  );
+    redirect: "error",
+    signal: AbortSignal.timeout(15000),
+  });
+  // invalid_grant (expired/revoked refresh token) is a 400; name it so tools report reconnection.
+  if (r.status === 400 || r.status === 401)
+    throw new Error(
+      `Google authorization expired or was revoked (${r.status}); reconnect required`,
+    );
+  const t = await googleJson(r);
   if (typeof t.access_token !== "string")
     throw new Error("Invalid access token");
   return t.access_token as string;
@@ -58,10 +64,17 @@ export class CalendarTools {
     return headers;
   }
   async create(user: string, approval: string, input: CalendarDraft) {
-    const draft = validateDraft(input);
-    const headers = await this.headers(user);
-    const id = approval.replaceAll("-", "");
-    if (!/^[0-9a-f]{32}$/.test(id)) throw new Error("Invalid approval ID");
+    let draft: CalendarDraft, headers: Record<string, string>, id: string;
+    try {
+      draft = validateDraft(input);
+      headers = await this.headers(user);
+      id = approval.replaceAll("-", "");
+      if (!/^[0-9a-f]{32}$/.test(id)) throw new Error("Invalid approval ID");
+    } catch (e) {
+      throw new CalendarNotSentError(
+        e instanceof Error ? e.message : "Calendar request was not sent",
+      );
+    }
     return googleJson(
       await this.request(
         "https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=none",

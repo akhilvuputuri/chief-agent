@@ -5,7 +5,8 @@ import { randomUUID } from "node:crypto";
 import { PGlite } from "@electric-sql/pglite";
 import { ensureUser, type Database } from "../src/db.js";
 import { CalendarActions } from "../src/calendar-actions.js";
-import { CalendarTools } from "../src/calendar.js";
+import { CalendarNotSentError, CalendarTools } from "../src/calendar.js";
+import { toolError } from "../src/tool-errors.js";
 import { validateDraft } from "../src/calendar-draft.js";
 import { JobTools } from "../src/tools.js";
 import { telegram, sendCalendarApprovals } from "../src/telegram.js";
@@ -212,4 +213,117 @@ test("Google creation uses primary calendar, approved fields and no guests", asy
   assert.equal(body.summary, draft.title);
   assert.equal(body.attendees, undefined);
   assert.equal(body.extendedProperties.private.companionApproval, id);
+});
+test("expired Calendar authorization stops before the insert and is reported as reconnection", async () => {
+  const calls: string[] = [];
+  const c = new CalendarTools(
+    {
+      owner: "123",
+      email: "owner@example.com",
+      clientId: "x",
+      clientSecret: "x",
+      refreshToken: "x",
+    },
+    async (url) => {
+      calls.push(String(url));
+      return Response.json({ error: "invalid_grant" }, { status: 400 });
+    },
+  );
+  await assert.rejects(
+    () => c.create("123", randomUUID(), draft),
+    (e) => e instanceof CalendarNotSentError && /reconnect/.test(e.message),
+  );
+  assert.deepEqual(calls, ["https://oauth2.googleapis.com/token"]);
+  const listed = await c
+    .list("123", draft.start, draft.end)
+    .then(() => assert.fail("list should reject"), toolError);
+  assert.equal(listed.code, "AUTHORIZATION_REQUIRED");
+});
+test("a failure before sending is a definite non-creation that never retries or blocks new drafts", async () => {
+  const { pg, db } = await fixture();
+  let attempts = 0,
+    checks = 0;
+  const calendar = {
+    create: async () => {
+      attempts++;
+      throw new CalendarNotSentError(
+        "Google authorization expired or was revoked (400); reconnect required",
+      );
+    },
+    findCreated: async () => {
+      checks++;
+      return null;
+    },
+  };
+  const actions = new CalendarActions(db, calendar, "123");
+  const tools = new JobTools(
+    db,
+    { call: async () => ({}) },
+    undefined,
+    undefined,
+    undefined,
+    actions,
+  );
+  try {
+    const saved = await actions.draft("123", randomUUID(), draft);
+    const bot = telegram(
+      readConfig({
+        DATABASE_URL: "postgres://x:x@localhost/x",
+        TELEGRAM_BOT_TOKEN: "123:test-token",
+        TELEGRAM_ALLOWED_USER_IDS: "123",
+      }),
+      { tools } as any,
+      db,
+    );
+    const sent: any[] = [];
+    bot.api.config.use(async (_prev, method, payload) => {
+      if (method === "getMe")
+        return {
+          ok: true,
+          result: { id: 999, is_bot: true, first_name: "T", username: "t" },
+        };
+      if (method === "sendMessage") sent.push(payload);
+      return { ok: true, result: { message_id: 11 } } as any;
+    });
+    await bot.init();
+    await bot.handleUpdate({
+      update_id: 1,
+      callback_query: {
+        id: "q",
+        chat_instance: "x",
+        from: { id: 123, is_bot: false, first_name: "T" },
+        data: `cal:yes:${saved.approvalId}`,
+        message: {
+          message_id: 11,
+          date: 0,
+          chat: { id: 123, type: "private" },
+        },
+      },
+    } as any);
+    assert.equal(sent.length, 1);
+    assert.match(sent[0].text, /No event was created/);
+    assert.match(sent[0].text, /Reconnect Calendar/);
+    assert.deepEqual(sent[0].reply_markup.inline_keyboard, []);
+    const row = (
+      await db.query("SELECT status,payload FROM approvals WHERE id=$1", [
+        saved.approvalId,
+      ])
+    ).rows[0];
+    assert.equal(row.status, "approved");
+    assert.equal(row.payload.execution, "failed");
+    assert.equal(row.payload.failure.code, "authorization");
+    assert.deepEqual(await actions.decide("123", saved.approvalId, true), {
+      status: "failed",
+      reason: "authorization",
+    });
+    assert.equal(attempts, 1);
+    assert.equal(checks, 0);
+    // Unlike an uncertain write, a definite non-creation must not block the next draft.
+    assert.equal(
+      (await actions.draft("123", randomUUID(), draft)).status,
+      "awaiting_approval",
+    );
+  } finally {
+    await pg.close();
+  }
 });
