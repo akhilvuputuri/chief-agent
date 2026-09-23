@@ -6,6 +6,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { WatchlistTools, StockMonitor, StockDelivery } from "../src/stocks.js";
 import {
   ProviderError,
+  TwelveDataProvider,
   quoteKey,
   rowToQuote,
   type MarketDataProvider,
@@ -1138,5 +1139,46 @@ test("an extended-hours alert is stored under the extended session's trading dat
     assert.equal((await f.alerts(itemId)).length, 1);
   } finally {
     await f.pg.close();
+  }
+});
+
+test("Twelve Data body error codes decide whether a failure is retryable", async () => {
+  // The provider can report errors with HTTP 200 and the real status in the
+  // body's `code`. Credit exhaustion must back off, not pause the watch.
+  const original = globalThis.fetch;
+  const failure = async (body: object, status = 200) => {
+    globalThis.fetch = async () => Response.json(body, { status });
+    try {
+      await new TwelveDataProvider("test-key").quotes([
+        { symbol: "ACME", mic: MIC },
+      ]);
+    } catch (error) {
+      assert.ok(error instanceof ProviderError);
+      return error;
+    }
+    assert.fail("expected a provider error");
+  };
+  try {
+    const exhausted = await failure({
+      code: 429,
+      message: "You have run out of API credits for the current minute.",
+      status: "error",
+    });
+    assert.equal(exhausted.retryable, true);
+    assert.match(exhausted.message, /run out of API credits/);
+    const fault = await failure({
+      code: 500,
+      message: "internal error",
+      status: "error",
+    });
+    assert.equal(fault.retryable, true);
+    for (const code of [400, 401, 403, 404])
+      assert.equal(
+        (await failure({ code, message: "denied", status: "error" })).retryable,
+        false,
+      );
+    assert.equal((await failure({}, 429)).retryable, true);
+  } finally {
+    globalThis.fetch = original;
   }
 });
