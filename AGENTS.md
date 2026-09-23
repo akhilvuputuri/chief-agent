@@ -1,6 +1,6 @@
 # Chief development
 
-Read `docs/current-work.md`, `HANDOVER.md`, `docs/portable-development.md`, `docs/cloud-development.md`, and the relevant source before modifying behavior. Historical incident reports and deferred candidates describe earlier states; current code and verified production diagnostics take precedence.
+Read `docs/current-work.md`, `HANDOVER.md`, `docs/portable-development.md`, `docs/cloud-development.md`, and the relevant source before modifying behavior. For an incident, begin with `docs/troubleshooting.md`. Historical incident reports and deferred candidates describe earlier states; current code, exact release evidence and verified production diagnostics take precedence.
 
 ## Commands
 
@@ -23,6 +23,7 @@ Node 22. `npm ci`, `npm run check`, `npm run build`, `npm run format:check`. Tes
 - Do not add dollar caps. Keep existing model/provider price filters and time/model/tool allocations unless asked to change them.
 - No data reset, automatic resumption of paused tasks, paid infrastructure, runtime shell access, self-deployment, subagents or deferred eval migration without a specific request.
 - No secrets in source, examples, logs, artifacts or PRs. Production .env remains on DigitalOcean.
+- Change the main OpenRouter model through `config/model-policy.json` and the normal reviewed PR/release path; do not ask the owner to edit production `.env` for an ordinary model switch. Keep provider price ceilings intact and verify the effective model from a post-release run. See [model selection](docs/deployment.md#changing-the-production-model-through-a-release).
 
 ## Cloud work and release
 

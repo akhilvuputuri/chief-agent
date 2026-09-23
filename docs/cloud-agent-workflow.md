@@ -8,7 +8,7 @@ Run `npm run doctor:cloud` from the actual cloud session. Inspect current main a
 
 Before coding, identify whether the task changes app code only or also database/Compose, host scripts, production secrets or OAuth consent. Ordinary app changes use main → checks → release. Other changes require the existing reviewed operator procedure. Surface that prerequisite in the PR before merging; do not remove the deployment guard.
 
-Define concrete acceptance scenarios and a short list of likely failure modes. For an integration, verify the provider's official contract before building mocks. Inspect production diagnostics for incidents when available; distinguish measured facts from hypotheses.
+Define concrete acceptance scenarios and a short list of likely failure modes. For an integration, verify the provider's official contract before building mocks. Start incidents with [troubleshooting](troubleshooting.md); inspect production diagnostics when available and distinguish measured facts from hypotheses. A denied read does not establish the integration's failure cause.
 
 ## Implementation and independent review
 
