@@ -214,47 +214,70 @@ test("Google creation uses primary calendar, approved fields and no guests", asy
   assert.equal(body.attendees, undefined);
   assert.equal(body.extendedProperties.private.companionApproval, id);
 });
-test("expired Calendar authorization stops before the insert and is reported as reconnection", async () => {
+test("Google credential failures stop before the insert and name the right recovery", async () => {
+  const client = (respond: (url: string) => Response, calls: string[] = []) =>
+    new CalendarTools(
+      {
+        owner: "123",
+        email: "owner@example.com",
+        clientId: "x",
+        clientSecret: "x",
+        refreshToken: "x",
+      },
+      async (url) => {
+        calls.push(String(url));
+        return respond(String(url));
+      },
+    );
+  const rejects = async (c: CalendarTools, reason: string, code: string) => {
+    await assert.rejects(
+      () => c.create("123", randomUUID(), draft),
+      (e) => e instanceof CalendarNotSentError && e.reason === reason,
+    );
+    const listed = await c
+      .list("123", draft.start, draft.end)
+      .then(() => assert.fail("list should reject"), toolError);
+    assert.equal(listed.code, code);
+  };
   const calls: string[] = [];
-  const c = new CalendarTools(
-    {
-      owner: "123",
-      email: "owner@example.com",
-      clientId: "x",
-      clientSecret: "x",
-      refreshToken: "x",
-    },
-    async (url) => {
-      calls.push(String(url));
-      return Response.json({ error: "invalid_grant" }, { status: 400 });
-    },
+  const expired = client(
+    () => Response.json({ error: "invalid_grant" }, { status: 400 }),
+    calls,
   );
-  await assert.rejects(
-    () => c.create("123", randomUUID(), draft),
-    (e) => e instanceof CalendarNotSentError && /reconnect/.test(e.message),
+  await rejects(expired, "authorization", "AUTHORIZATION_REQUIRED");
+  assert.deepEqual(calls, [
+    "https://oauth2.googleapis.com/token",
+    "https://oauth2.googleapis.com/token",
+  ]);
+  // A bad client secret is not fixed by reconnecting the account.
+  await rejects(
+    client(() => Response.json({ error: "invalid_client" }, { status: 401 })),
+    "configuration",
+    "NOT_CONFIGURED",
   );
-  const userinfoDenied = new CalendarTools(
-    {
-      owner: "123",
-      email: "owner@example.com",
-      clientId: "x",
-      clientSecret: "x",
-      refreshToken: "x",
-    },
-    async (url) =>
-      String(url).includes("oauth2.googleapis.com")
+  await rejects(
+    client(() => new Response("not json", { status: 400 })),
+    "configuration",
+    "NOT_CONFIGURED",
+  );
+  await rejects(
+    client((url) =>
+      url.includes("oauth2.googleapis.com")
         ? Response.json({ access_token: "test" })
         : new Response("", { status: 403 }),
+    ),
+    "authorization",
+    "AUTHORIZATION_REQUIRED",
   );
-  await assert.rejects(
-    () => userinfoDenied.create("123", randomUUID(), draft),
-    CalendarNotSentError,
+  await rejects(
+    client((url) =>
+      url.includes("oauth2.googleapis.com")
+        ? Response.json({ access_token: "test" })
+        : Response.json({ email: "someone@example.com" }),
+    ),
+    "authorization",
+    "AUTHORIZATION_REQUIRED",
   );
-  assert.deepEqual(calls, ["https://oauth2.googleapis.com/token"]);
-  const listed = await c
-    .list("123", draft.start, draft.end)
-    .then(() => assert.fail("list should reject"), toolError);
-  assert.equal(listed.code, "AUTHORIZATION_REQUIRED");
 });
 test("a failure before sending is a definite non-creation that never retries or blocks new drafts", async () => {
   const { pg, db } = await fixture();
@@ -264,7 +287,8 @@ test("a failure before sending is a definite non-creation that never retries or 
     create: async () => {
       attempts++;
       throw new CalendarNotSentError(
-        "Google authorization expired or was revoked (400); reconnect required",
+        "Google authorization expired or was revoked (invalid_grant); reconnect required",
+        "authorization",
       );
     },
     findCreated: async () => {

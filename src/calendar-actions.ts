@@ -82,12 +82,7 @@ export class CalendarActions {
     } catch (e) {
       if (e instanceof CalendarNotSentError) {
         // Nothing reached the Calendar API, so this is a definite non-creation, not an uncertain write.
-        const reason =
-          /authoriz|Wrong Google account|not configured|Invalid access token|\((?:401|403)\)/i.test(
-            e.message,
-          )
-            ? "authorization"
-            : "not_sent";
+        const reason = e.reason;
         const saved = await this.db.query(
           "UPDATE approvals SET payload=payload || $3::jsonb WHERE id=$1 AND user_id=$2 AND payload->>'execution'='creating' RETURNING id",
           [

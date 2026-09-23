@@ -26,8 +26,8 @@ Alternatives considered: re-opening the approval as `pending` for a retry. That 
 
 ## Implementation and review
 
-- `src/calendar.ts`: `googleToken` reports 400/401 token responses (`invalid_grant`, `invalid_client`) as "Google authorization failed … reconnect required", which tools classify as `AUTHORIZATION_REQUIRED`. The token helper is shared with the daily Sheet. Failures before the insert request is sent throw `CalendarNotSentError`.
-- `src/calendar-actions.ts`: that error sets `execution: "failed"` with `failure.code` `authorization` or `not_sent`, and records `calendar.not_sent`. This mirrors the library approvals' failed state. The approval is not reopened, repeated callbacks return the saved failure without contacting Google, and later drafts are allowed. Network and response failures of the insert request itself still become `uncertain`.
+- `src/calendar.ts`: `GoogleAuthError` records whether a rejection needs owner reconnection (`authorization`) or a server OAuth settings fix (`configuration`). Tools classify these as `AUTHORIZATION_REQUIRED` and `NOT_CONFIGURED` respectively. Only the token endpoint's `invalid_grant` code (read from a bounded error body) and userinfo 401/403 or a wrong account count as `authorization`. Other token 400/401 codes, such as `invalid_client`, or an unreadable body, count as `configuration`. `list` now reuses the same header and account check. The token helper is shared with the daily Sheet. Failures before the insert request is sent throw `CalendarNotSentError`.
+- `src/calendar-actions.ts`: that error sets `execution: "failed"` with `failure.code` `authorization`, `configuration` or `not_sent` (carried on the error, not inferred from message text), and records `calendar.not_sent`. This mirrors the library approvals' failed state. The approval is not reopened, repeated callbacks return the saved failure without contacting Google, and later drafts are allowed. Network and response failures of the insert request itself still become `uncertain`.
 - `src/telegram.ts`: the callback says no event was created and, for authorization, to reconnect Calendar and draft again. A failed status check that is caused by authorization says so.
 - Regression tests: `tests/calendar-approval.test.ts` covers the token-only request sequence, the tool error classification, the Telegram reply, the stored state, no retry, and that a later draft is allowed.
 
@@ -46,6 +46,8 @@ Fixes:
 - **F3:** the wording is now a neutral "authorization failed".
 - **F4:** the event is written only when the row was updated; otherwise the callback reports uncertain.
 - **F5:** the stored draft is now validated only inside `create`.
+
+Devin Review on `652a3278` raised two findings. The first, userinfo 401/403 classified as `not_sent`, was already fixed in `900b83c`. The second was that every token 400/401 was called expired, although `invalid_client` needs a settings fix rather than reconnection. That was addressed by parsing the OAuth `error` code and adding the structured `GoogleAuthError` classification above.
 
 Re-review pending.
 

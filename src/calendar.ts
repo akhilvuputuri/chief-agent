@@ -4,8 +4,45 @@ export async function googleJson(r: Response) {
   if (!r.ok) throw new Error(`Google request failed (${r.status})`);
   return JSON.parse(new TextDecoder().decode(await boundedBytes(r, 2000000)));
 }
+/** Google rejected credentials: the owner must reconnect (authorization) or the operator must fix OAuth settings (configuration). */
+export class GoogleAuthError extends Error {
+  constructor(
+    readonly kind: "authorization" | "configuration",
+    message: string,
+  ) {
+    super(message);
+  }
+}
 /** Creation stopped before the insert request was sent, so no event can exist. */
-export class CalendarNotSentError extends Error {}
+export class CalendarNotSentError extends Error {
+  constructor(
+    message: string,
+    readonly reason: "authorization" | "configuration" | "not_sent",
+  ) {
+    super(message);
+  }
+}
+/** Reads the OAuth `error` code from a bounded failure body; undefined when absent or unreadable. */
+async function oauthErrorCode(r: Response) {
+  try {
+    const reader = r.body?.getReader();
+    if (!reader) return undefined;
+    const decoder = new TextDecoder();
+    let text = "";
+    while (text.length < 4096) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+    }
+    await reader.cancel().catch(() => {});
+    const code = JSON.parse(text).error;
+    return typeof code === "string" && /^[a-z_]{1,40}$/.test(code)
+      ? code
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
 export type GoogleConfig = {
   owner: string;
   email: string;
@@ -17,7 +54,11 @@ export async function googleToken(
   c: GoogleConfig,
   request: typeof fetch = fetch,
 ) {
-  if (!c.refreshToken) throw new Error("Google connection is not configured");
+  if (!c.refreshToken)
+    throw new GoogleAuthError(
+      "configuration",
+      "Google connection is not configured",
+    );
   const r = await request("https://oauth2.googleapis.com/token", {
     method: "POST",
     body: new URLSearchParams({
@@ -29,11 +70,19 @@ export async function googleToken(
     redirect: "error",
     signal: AbortSignal.timeout(15000),
   });
-  // invalid_grant (expired/revoked refresh token) and invalid_client are 400/401; name them so tools report reconnection.
-  if (r.status === 400 || r.status === 401)
-    throw new Error(
-      `Google authorization failed (${r.status}); reconnect required`,
-    );
+  if (r.status === 400 || r.status === 401) {
+    // Only invalid_grant (expired/revoked refresh token) is fixed by reconnecting; other codes are client settings.
+    const code = await oauthErrorCode(r);
+    throw code === "invalid_grant"
+      ? new GoogleAuthError(
+          "authorization",
+          "Google authorization expired or was revoked (invalid_grant); reconnect required",
+        )
+      : new GoogleAuthError(
+          "configuration",
+          `Google OAuth client is not configured correctly (${code ?? r.status})`,
+        );
+  }
   const t = await googleJson(r);
   if (typeof t.access_token !== "string")
     throw new Error("Invalid access token");
@@ -52,15 +101,18 @@ export class CalendarTools {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     };
-    const profile = await googleJson(
-      await this.request("https://www.googleapis.com/oauth2/v2/userinfo", {
-        headers,
-        redirect: "error",
-        signal: AbortSignal.timeout(15000),
-      }),
+    const response = await this.request(
+      "https://www.googleapis.com/oauth2/v2/userinfo",
+      { headers, redirect: "error", signal: AbortSignal.timeout(15000) },
     );
+    if (response.status === 401 || response.status === 403)
+      throw new GoogleAuthError(
+        "authorization",
+        `Google authorization rejected (${response.status}); reconnect required`,
+      );
+    const profile = await googleJson(response);
     if (profile.email?.toLowerCase() !== this.c.email.toLowerCase())
-      throw new Error("Wrong Google account");
+      throw new GoogleAuthError("authorization", "Wrong Google account");
     return headers;
   }
   async create(user: string, approval: string, input: CalendarDraft) {
@@ -73,6 +125,7 @@ export class CalendarTools {
     } catch (e) {
       throw new CalendarNotSentError(
         e instanceof Error ? e.message : "Calendar request was not sent",
+        e instanceof GoogleAuthError ? e.kind : "not_sent",
       );
     }
     return googleJson(
@@ -120,17 +173,7 @@ export class CalendarTools {
     const duration = Date.parse(end) - Date.parse(start);
     if (!Number.isFinite(duration) || duration <= 0 || duration > 31 * 86400000)
       throw new Error("Calendar range must be between 0 and 31 days");
-    const token = await googleToken(this.c, this.request);
-    const headers = { Authorization: `Bearer ${token}` };
-    const profile = await googleJson(
-      await this.request("https://www.googleapis.com/oauth2/v2/userinfo", {
-        headers,
-        redirect: "error",
-        signal: AbortSignal.timeout(15000),
-      }),
-    );
-    if (profile.email?.toLowerCase() !== this.c.email.toLowerCase())
-      throw new Error("Wrong Google account");
+    const headers = await this.headers(user);
     const url = new URL(
       "https://www.googleapis.com/calendar/v3/calendars/primary/events",
     );
