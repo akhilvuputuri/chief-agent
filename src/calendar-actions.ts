@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { type Database, event } from "./db.js";
 import { CalendarNotSentError, CalendarTools } from "./calendar.js";
 import { validateDraft, calendarPreview } from "./calendar-draft.js";
+import { ToolValidationError } from "./tool-errors.js";
 export class CalendarActions {
   constructor(
     private db: Database,
@@ -19,8 +20,8 @@ export class CalendarActions {
       )
     ).rows[0];
     if (uncertain)
-      throw new Error(
-        "A calendar write has an uncertain outcome. Use its Telegram Check status button or request operator inspection before drafting another event.",
+      throw new ToolValidationError(
+        "A previous approved Calendar event has an uncertain outcome. No new draft was saved. Use its Telegram Check status button or request operator inspection before trying again.",
       );
     const id = randomUUID();
     await this.db.query(

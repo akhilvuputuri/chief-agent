@@ -83,3 +83,13 @@ Startup health does not show that Calendar works. Remaining steps:
 - Check whether the Sheets token also needs renewal.
 - Clear any `uncertain` `calendar_create` row left by the original incident.
 - Then the owner should confirm, with a real Telegram approval, that an event is created. Until the credential is replaced, an approval should now produce the reconnect message rather than "uncertain".
+
+### Follow-up — 2026-09-24
+
+**Owner report:** a new Calendar request failed and a later request still could not query Calendar. The owner also reported an unrelated job-data response. The bounded trace of the two latest Calendar runs did not contain that job-data reply, so its exact source is not established by this investigation.
+
+**Measured on production before repair:** the older approved Calendar action was still `uncertain`; the server's Calendar refresh request returned Google `invalid_grant`. The subsequent `calendar_list` returned `AUTHORIZATION_REQUIRED`. A new `calendar_draft` hit the stale approval guard before inserting a draft, but the generic error was classified as `TOOL_FAILED` on a write. The runtime therefore marked that tool call uncertain and stopped with a generic operational error. The model also suggested a nonexistent in-app connection screen after the read failure.
+
+**Operator repair:** the owner completed a fresh Google consent. The new credential matched the configured primary account and could read primary-calendar events. A read-only GET for the old approval's deterministic event ID returned 404 roughly a day after the failed attempt. The operator installed only the new Calendar refresh token in the server's owner-only `.env`, restarted the healthy gateway while no run was active, verified a server-side primary-calendar read (HTTP 200), and recorded a guarded `reconciled_absent` resolution plus an audit event for the old approval. No event insert or retry was performed. A successful live creation is still unverified until the owner approves a new Telegram preview.
+
+**Application follow-up:** classify the pre-draft uncertain-approval guard as `ToolValidationError`, so the runtime records a definite failed invocation and lets the model explain that no new draft was saved. The context now says that Calendar authorization requires operator reconnection and forbids an invented settings flow. The OAuth helper reports which nonsecret verification stage failed. A regression test covers the prior approval state, zero new drafts and the `VALIDATION_FAILED` classification. This code change is a release candidate until its independent review, merge and deployment are recorded here.

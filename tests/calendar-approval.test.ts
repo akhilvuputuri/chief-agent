@@ -6,7 +6,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { ensureUser, type Database } from "../src/db.js";
 import { CalendarActions } from "../src/calendar-actions.js";
 import { CalendarNotSentError, CalendarTools } from "../src/calendar.js";
-import { toolError } from "../src/tool-errors.js";
+import { ToolValidationError, toolError } from "../src/tool-errors.js";
 import { validateDraft } from "../src/calendar-draft.js";
 import { JobTools } from "../src/tools.js";
 import { telegram, sendCalendarApprovals } from "../src/telegram.js";
@@ -171,6 +171,17 @@ test("uncertain Calendar writes reconcile by GET after restart, never a second P
     assert.equal(
       (await restarted.decide("123", saved.approvalId, true)).status,
       "uncertain",
+    );
+    await assert.rejects(
+      () => restarted.draft("123", randomUUID(), draft),
+      (error) =>
+        error instanceof ToolValidationError &&
+        toolError(error).code === "VALIDATION_FAILED" &&
+        /No new draft was saved/.test(error.message),
+    );
+    assert.equal(
+      (await db.query("SELECT count(*)::int AS n FROM approvals")).rows[0].n,
+      1,
     );
     found = true;
     assert.equal(
