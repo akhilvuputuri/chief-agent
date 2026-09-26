@@ -1,3 +1,4 @@
+import { errorFields, opsLog } from "./ops-log.js";
 import { HistoryStore } from "./history.js";
 import { Canvases } from "./canvases.js";
 import { randomUUID } from "node:crypto";
@@ -197,6 +198,33 @@ export class TelegramViews {
     chat: string,
     input: string | Delivery,
     kind: "answer" | "progress" | "schedule" = "answer",
+    guard?: () => Promise<boolean>,
+  ) {
+    try {
+      return await this.deliverOnce(user, chat, input, kind, guard);
+    } catch (error) {
+      // An error anywhere in delivery handling, which can follow a partial
+      // send; phase telegram_api means the Bot API itself rejected a call.
+      const status = (error as { error_code?: unknown })?.error_code;
+      const name = (error as { name?: unknown })?.name;
+      opsLog("telegram.delivery_error", "error", {
+        runId: typeof input === "string" ? undefined : input.runId,
+        kind,
+        phase:
+          name === "GrammyError" || name === "HttpError"
+            ? "telegram_api"
+            : "delivery",
+        httpStatus: typeof status === "number" ? status : undefined,
+        ...errorFields(error),
+      });
+      throw error;
+    }
+  }
+  private async deliverOnce(
+    user: string,
+    chat: string,
+    input: string | Delivery,
+    kind: "answer" | "progress" | "schedule",
     guard?: () => Promise<boolean>,
   ) {
     const delivery = typeof input === "string" ? { reply: input } : input;

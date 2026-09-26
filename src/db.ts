@@ -1,4 +1,5 @@
 import pg from "pg";
+import { projectEvent } from "./ops-log.js";
 export interface Database {
   query(
     text: string,
@@ -23,4 +24,5 @@ export async function event(
     "INSERT INTO events(run_id,user_id,type,data) VALUES($1,$2,$3,$4::jsonb)",
     [run, user, type, JSON.stringify(data)],
   );
+  projectEvent(type, run, data);
 }

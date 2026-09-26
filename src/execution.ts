@@ -3,6 +3,8 @@ import { scrubTrace } from "./trace-scrub.js";
 import { randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
 import { event } from "./db.js";
+import { opsLog } from "./ops-log.js";
+import { action } from "./protocol.js";
 import type { Message } from "./model.js";
 export type StopReason =
   | "answer"
@@ -65,6 +67,14 @@ export const readOperations = new Set([
   "web_search",
   "web_read",
 ]);
+// Operation names the host defines. A model-invented tool name is logged as
+// "unknown" so model-chosen text never reaches the operational log.
+const knownOperations = new Set<string>([
+  ...readOperations,
+  ...action.options.map((o) => o.shape.operation.value),
+]);
+export const logOperation = (operation: string) =>
+  knownOperations.has(operation) ? operation : "unknown";
 export class Execution {
   private task?: string;
   get trackedTaskId() {
@@ -74,6 +84,7 @@ export class Execution {
   private checkpointMessages: string[] = [];
   private delegatedMs = 0;
   private used = { ms: 0, models: 0, tools: 0 };
+  private calls = new Map<string, { operation: string; started: number }>();
   constructor(
     readonly db: Database,
     readonly user: string,
@@ -87,6 +98,10 @@ export class Execution {
       this.run,
       this.user,
     ]);
+    opsLog("run.started", "info", {
+      runId: this.run,
+      parentRunId: this.parent?.run,
+    });
     await this.attach();
   }
   async attach(_force = false) {
@@ -254,6 +269,15 @@ export class Execution {
         !readOperations.has(operation),
       ],
     );
+    this.calls.set(id, { operation, started: Date.now() });
+    // callId is the journal row ID, not the provider's tool-call ID.
+    opsLog("tool.started", "info", {
+      runId: this.run,
+      taskId: this.task,
+      callId: id,
+      operation: logOperation(operation),
+      write: !readOperations.has(operation),
+    });
     return id;
   }
   async endCall(id: string, result: unknown, state = "success") {
@@ -261,6 +285,19 @@ export class Execution {
       "UPDATE runtime_calls SET result=$2::jsonb,state=$3,finished_at=now() WHERE id=$1",
       [id, JSON.stringify(result), state],
     );
+    const call = this.calls.get(id);
+    this.calls.delete(id);
+    const code = (result as { error?: { code?: unknown } } | null)?.error?.code;
+    opsLog("tool.finished", state === "success" ? "info" : "warn", {
+      runId: this.run,
+      taskId: this.task,
+      callId: id,
+      operation: call ? logOperation(call.operation) : undefined,
+      state,
+      write: call ? !readOperations.has(call.operation) : undefined,
+      latencyMs: call ? Date.now() - call.started : undefined,
+      errorCode: typeof code === "string" ? code : undefined,
+    });
   }
   async finish(reason: StopReason) {
     await this.db.query(
@@ -276,16 +313,24 @@ export async function recoverRuntime(db: Database) {
   await db.query(
     `UPDATE work_tasks t SET used_ms=LEAST(t.budget_ms,t.used_ms+COALESCE((SELECT sum(GREATEST(0,EXTRACT(EPOCH FROM now()-r.updated_at)*1000))::bigint FROM runtime_runs r WHERE r.task_id=t.id AND r.state='running'),0)) WHERE EXISTS(SELECT 1 FROM runtime_runs r WHERE r.task_id=t.id AND r.state='running')`,
   );
-  await db.query(
-    "UPDATE runtime_calls SET state=CASE WHEN is_write THEN 'uncertain' ELSE 'interrupted' END WHERE state='started'",
+  const calls = await db.query(
+    "UPDATE runtime_calls SET state=CASE WHEN is_write THEN 'uncertain' ELSE 'interrupted' END WHERE state='started' RETURNING state",
   );
-  await db.query(
-    `UPDATE work_tasks SET status='paused',lease=NULL,pause_reason=CASE WHEN EXISTS(SELECT 1 FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id WHERE r.task_id=work_tasks.id AND c.state='uncertain') THEN 'uncertain_write' ELSE 'restart' END WHERE status IN ('active','queued','running')`,
+  const tasks = await db.query(
+    `UPDATE work_tasks SET status='paused',lease=NULL,pause_reason=CASE WHEN EXISTS(SELECT 1 FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id WHERE r.task_id=work_tasks.id AND c.state='uncertain') THEN 'uncertain_write' ELSE 'restart' END WHERE status IN ('active','queued','running') RETURNING id`,
   );
-  await db.query(
-    "UPDATE runtime_runs SET state='stopped',stop_reason='failed' WHERE state='running'",
+  const runs = await db.query(
+    "UPDATE runtime_runs SET state='stopped',stop_reason='failed' WHERE state='running' RETURNING id",
   );
-  await db.query(
-    "UPDATE conversation_inputs SET state='failed',finished_at=now() WHERE state IN ('queued','running')",
+  const inputs = await db.query(
+    "UPDATE conversation_inputs SET state='failed',finished_at=now() WHERE state IN ('queued','running') RETURNING id",
   );
+  opsLog("runtime.recovered", calls.rows.length ? "warn" : "info", {
+    uncertainCalls: calls.rows.filter((r) => r.state === "uncertain").length,
+    interruptedCalls: calls.rows.filter((r) => r.state === "interrupted")
+      .length,
+    pausedTasks: tasks.rows.length,
+    failedRuns: runs.rows.length,
+    failedInputs: inputs.rows.length,
+  });
 }

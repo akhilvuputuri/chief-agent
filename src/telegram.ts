@@ -1,3 +1,4 @@
+import { errorFields, opsLog } from "./ops-log.js";
 import { WorkTools, renderWork, renderWorkList } from "./work.js";
 import { TelegramViews, viewCallback } from "./telegram-views.js";
 import type { Collection, View } from "./telegram-view-render.js";
@@ -672,8 +673,8 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
       if (deliveryRun) await assistant.finishDelivery?.(user, deliveryRun);
     }
   });
-  bot.catch(() =>
-    console.error(JSON.stringify({ event: "telegram.handler_failed" })),
+  bot.catch((error) =>
+    opsLog("telegram.handler_failed", "error", errorFields(error.error)),
   );
   return bot;
 }

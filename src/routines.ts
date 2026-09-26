@@ -1,3 +1,4 @@
+import { errorFields, opsLog } from "./ops-log.js";
 import { randomUUID } from "node:crypto";
 import { CronExpressionParser } from "cron-parser";
 import type { Database } from "./db.js";
@@ -183,7 +184,7 @@ export class RoutineScheduler {
         r.missed_policy === "skip" && now.getTime() - due.getTime() > 300000;
       const task = randomUUID();
       // The locked CAS, occurrence, task and schedule advancement commit together.
-      await this.db.query(
+      const result = await this.db.query(
         `WITH selected AS (
         SELECT * FROM agent_routines WHERE id=$1 AND revision=$2 AND next_run=$3 AND status='scheduled' FOR UPDATE
       ), classified AS (
@@ -203,9 +204,17 @@ export class RoutineScheduler {
         INSERT INTO work_revisions(task_id,revision,request,objective)
         SELECT $7,1,'Scheduled routine: '||s.name||E'\n'||s.instruction,'Scheduled: '||s.name FROM selected s,task
       ) UPDATE agent_routines SET next_run=$8,status=CASE WHEN $8::timestamptz IS NULL THEN 'completed' ELSE 'scheduled' END,updated_at=now()
-        WHERE id=$1 AND EXISTS(SELECT 1 FROM occurrence)`,
+        WHERE id=$1 AND EXISTS(SELECT 1 FROM occurrence)
+        RETURNING (SELECT id FROM occurrence) AS occurrence,(SELECT disposition FROM occurrence) AS disposition,(SELECT task_id FROM occurrence) AS task`,
         [r.id, r.revision, r.next_run, randomUUID(), due, missed, task, next],
       );
+      const o = result.rows[0];
+      if (o)
+        opsLog("routine.occurrence", "info", {
+          ref: o.occurrence,
+          state: o.disposition,
+          taskId: o.task ?? undefined,
+        });
     }
   }
 }
@@ -268,7 +277,18 @@ export class RoutineDelivery {
           "UPDATE routine_deliveries SET state='sent',sent_at=now() WHERE id=$1",
           [d.id],
         );
-      } catch {
+        opsLog("routine.delivery", "info", {
+          ref: d.id,
+          runId: d.run_id ?? undefined,
+          state: "sent",
+        });
+      } catch (error) {
+        opsLog("routine.delivery", "error", {
+          ref: d.id,
+          runId: d.run_id ?? undefined,
+          state: "uncertain",
+          ...errorFields(error),
+        });
         await this.db.query(
           "UPDATE routine_deliveries SET state='uncertain' WHERE id=$1",
           [d.id],
