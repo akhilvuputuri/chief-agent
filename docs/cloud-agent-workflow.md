@@ -26,11 +26,11 @@ npm run release:status -- FULL_MERGE_SHA
 
 This read-only check returns a commit-specific production status and exits zero only for a successful deployment receipt. Pending/unverified is exit 2; failed is 1. Authentication errors are failures, never success. It reports evidence at release time, not a continuous health check. For older commits without receipts, inspect their release logs explicitly; do not treat missing evidence as failure or success.
 
-Watch the corresponding `checks` and `release` runs using `gh run list` and `gh run watch RUN_ID --exit-status`. The release workflow posts a durable result to the merged PR and a `companion/production` commit status, so the result survives a sleeping coding session. A failed/cancelled attempt does not establish which image is now running; use `production-diagnostics` to read server RELEASE and health-related metadata. Startup health is not feature acceptance.
+Watch the corresponding `checks` and `release` runs using `gh run list` and `gh run watch RUN_ID --exit-status`. The release workflow posts a durable result to the merged PR and a `companion/production` commit status, so the result survives a sleeping coding session. A failed/cancelled attempt does not establish which image is now running; read the running release from the logs (`npm run logs:cloudwatch -- releases` or `heartbeat`; every line carries the release SHA) and check the exact-commit receipt with `npm run release:status`. `production-diagnostics` works only while the repository is private. Startup health is not feature acceptance.
 
 If a release is stale, verify that the newer main contains the change and inspect that commit's receipt. If busy, retry after the runtime is idle without cancelling user work. If database/Compose differs, follow the reviewed operator procedure and state that the release is blocked until it runs. Do not repeatedly retry a deterministic migration refusal.
 
-For authorized credentials with Actions write:
+For authorized credentials with Actions write, and only while the repository is private (the workflow is guarded to private repositories and is skipped while it is public; use `npm run logs:cloudwatch` instead):
 
 ```sh
 gh workflow run diagnostics.yml --ref main

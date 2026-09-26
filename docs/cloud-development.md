@@ -17,7 +17,7 @@ Use [the shared cloud-agent workflow](cloud-agent-workflow.md) for the full pref
 5. The gateway is recreated, health is checked, and the previous image is restored if startup health fails. The Postgres container and data volume are not replaced. Only a successful health check updates server RELEASE.
 6. Watch the release workflow. Report the deployed SHA and status. A branch push, PR creation or passing test workflow alone does not mean the Telegram bot is updated.
 
-Useful commands, when GitHub credentials are available:
+Useful commands, when GitHub credentials are available. The diagnostics workflow runs only while the repository is private. While it is public, read production logs with `npm run logs:cloudwatch` and the private reader identity.
 
 ```sh
 gh run list --workflow release
@@ -40,7 +40,7 @@ The reviewed entrypoint source is `scripts/cloud-release.py`. Editing that file 
 
 ## What diagnostics expose
 
-The manual `production-diagnostics` workflow prints the release SHA, last 15 run states/counters, structural model-failure diagnostics, tool outcome counts, reported model/search costs and job status counts. It does not export credentials, raw conversations, memory, email/calendar content or tool observations. Logs remain in the private repository under its Actions retention policy. Voice costs are not included.
+The manual `production-diagnostics` workflow prints the release SHA, last 15 run states/counters, structural model-failure diagnostics, tool outcome counts, reported model/search costs and job status counts. It does not export credentials, raw conversations, memory, email/calendar content or tool observations. Its output lands in Actions logs, which are public while the repository is public, so the workflow is guarded to private repositories and does not run now. Use `npm run logs:cloudwatch` with the private reader identity ([lightsail.md](lightsail.md#reading-logs)). Voice costs are not included.
 
 This supports initial failure/cost triage. Calendar tool counts do not expose one approval's state, button click, Google response, or write-token status; see [Calendar troubleshooting](calendar-approval.md#troubleshooting-a-missing-event). If a bug requires the exact prompt, context or source content, the owner can supply it in the cloud task or an authorized local operator can inspect it privately. Do not describe these bounded diagnostics as full production access.
 
@@ -62,16 +62,16 @@ On 9 September 2026 we inspected the remote branch, CI, server and handover befo
 
 Run `npm run doctor:cloud` at the start of a cloud task that needs to ship or investigate production. It checks Node, Git, GitHub CLI, repository read/write permission and Actions-log access without printing tokens or mutating anything. These checks describe that task's actual environment, not another desktop session. Write access does not prove workflow dispatch scope; the first required dispatch may still return a permission error.
 
-| Work                                          | Cloud path                                                           | Remaining requirement                                         |
-| --------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------- |
-| Implement and test app changes                | Repository, Node 22, mocked tests                                    | No production keys                                            |
-| Open a PR                                     | Cloud PR UI or authenticated GitHub CLI                              | Repository connection                                         |
-| Merge a passing PR                            | GitHub write-capable identity or user merges on phone                | Do not assume the CLI inherits browser login                  |
-| Deploy ordinary app code                      | Passing main → checks → release                                      | No Mac or cloud-task SSH key needed                           |
-| Inspect failures/costs                        | production-diagnostics workflow + Actions logs                       | Actions access; bounded metadata only                         |
-| Debug exact conversations                     | User supplies incident text/screenshot, or local operator inspection | Raw private content is intentionally absent from Actions      |
-| Database/Compose changes                      | Reviewed migration procedure                                         | Current restricted deploy service cannot perform these        |
-| OAuth consent, secret rotation, server repair | Account owner/operator                                               | Browser sessions and root SSH are not copied into cloud tasks |
+| Work                                          | Cloud path                                                                                                         | Remaining requirement                                         |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------- |
+| Implement and test app changes                | Repository, Node 22, mocked tests                                                                                  | No production keys                                            |
+| Open a PR                                     | Cloud PR UI or authenticated GitHub CLI                                                                            | Repository connection                                         |
+| Merge a passing PR                            | GitHub write-capable identity or user merges on phone                                                              | Do not assume the CLI inherits browser login                  |
+| Deploy ordinary app code                      | Passing main → checks → release                                                                                    | No Mac or cloud-task SSH key needed                           |
+| Inspect failures/costs                        | `npm run logs:cloudwatch` (sanitized CloudWatch logs); production-diagnostics only while the repository is private | Private log-reader identity; bounded sanitized metadata only  |
+| Debug exact conversations                     | User supplies incident text/screenshot, or local operator inspection                                               | Raw private content is intentionally absent from Actions      |
+| Database/Compose changes                      | Reviewed migration procedure                                                                                       | Current restricted deploy service cannot perform these        |
+| OAuth consent, secret rotation, server repair | Account owner/operator                                                                                             | Browser sessions and root SSH are not copied into cloud tasks |
 
 Do not put a broad GitHub token, Google refresh token or unrestricted SSH key in repository files to remove a blocker. A future GitHub App or explicitly reviewed migration service could extend remote operations, but neither is currently installed. This setup supports everyday cloud bug fixes and automatic code deployment; it does not claim complete parity with local account administration.
 

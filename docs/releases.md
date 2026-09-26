@@ -1,6 +1,6 @@
 # Versions and release notes
 
-## Released v0.3.27 — Lightsail production host and private logs
+## v0.3.27 — Lightsail production host and private logs (tag pending verified release)
 
 Production moved to one AWS Lightsail VM in Singapore with the same Compose app and Postgres. Changes:
 
@@ -9,7 +9,7 @@ Production moved to one AWS Lightsail VM in Singapore with the same Compose app 
 - [PR #98](https://github.com/akhilvuputuri/chief-agent/pull/98): reboot-safe log exporter.
 - This documentation release: corrected `errors` query and post-cutover docs.
 
-Each PR's exact head was approved by an independent Opus 5.5 reviewer after requested changes. Cutover evidence: identical row counts and per-table content hashes after restore; the normal release deployed `ebcc9dc` and later `5988e52` to Lightsail with exact-SHA receipts; reboot recovery was verified. The v0.3.27 tag points to the verified deployed merge of this documentation change. Limits:
+Each PR's merged head was independently approved by Opus 5.5. Cutover evidence: identical row counts and per-table content hashes after restore; the normal release deployed `ebcc9dc` and later `5988e52` to Lightsail with exact-SHA receipts; reboot recovery was verified. The v0.3.27 tag will point to the merge of this documentation change once its release is verified; until the tag exists, treat this entry as pending. Limits:
 
 - Owner Telegram acceptance is pending.
 - The Sheets `invalid_grant` defect predates the move.
