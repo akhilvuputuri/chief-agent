@@ -118,6 +118,7 @@ export class OpenRouter implements ModelAdapter {
           ? "No eligible provider is available within the configured price and parameter limits."
           : `Model request failed (HTTP ${response.status}); price limits remain enforced.`,
         response.status === 429 || response.status >= 500,
+        { httpStatus: response.status },
       );
     const data: any = await response.json();
     if (charge) await ledger!.settle(charge, data?.usage);

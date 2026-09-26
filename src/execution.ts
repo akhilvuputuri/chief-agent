@@ -3,6 +3,7 @@ import { scrubTrace } from "./trace-scrub.js";
 import { randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
 import { event } from "./db.js";
+import { opsLog } from "./ops-log.js";
 import type { Message } from "./model.js";
 export type StopReason =
   | "answer"
@@ -73,6 +74,10 @@ export class Execution {
   private checkpointMessages: string[] = [];
   private delegatedMs = 0;
   private used = { ms: 0, models: 0, tools: 0 };
+  private calls = new Map<
+    string,
+    { callId: string; operation: string; started: number }
+  >();
   constructor(
     readonly db: Database,
     readonly user: string,
@@ -86,6 +91,10 @@ export class Execution {
       this.run,
       this.user,
     ]);
+    opsLog("run.started", "info", {
+      runId: this.run,
+      parentRunId: this.parent?.run,
+    });
     await this.attach();
   }
   async attach(_force = false) {
@@ -253,6 +262,7 @@ export class Execution {
         !readOperations.has(operation),
       ],
     );
+    this.calls.set(id, { callId, operation, started: Date.now() });
     return id;
   }
   async endCall(id: string, result: unknown, state = "success") {
@@ -260,6 +270,19 @@ export class Execution {
       "UPDATE runtime_calls SET result=$2::jsonb,state=$3,finished_at=now() WHERE id=$1",
       [id, JSON.stringify(result), state],
     );
+    const call = this.calls.get(id);
+    this.calls.delete(id);
+    const code = (result as { error?: { code?: unknown } } | null)?.error?.code;
+    opsLog("tool.finished", state === "success" ? "info" : "warn", {
+      runId: this.run,
+      taskId: this.task,
+      callId: call?.callId,
+      operation: call?.operation,
+      state,
+      write: call ? !readOperations.has(call.operation) : undefined,
+      latencyMs: call ? Date.now() - call.started : undefined,
+      errorCode: typeof code === "string" ? code : undefined,
+    });
   }
   async finish(reason: StopReason) {
     await this.db.query(

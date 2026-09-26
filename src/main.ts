@@ -1,3 +1,5 @@
+import "./process-guard.js";
+import { errorFields, opsLog } from "./ops-log.js";
 import { RoutineScheduler, RoutineDelivery } from "./routines.js";
 import { StockMonitor, StockDelivery, WatchlistTools } from "./stocks.js";
 import { TwelveDataProvider } from "./stock-provider.js";
@@ -73,15 +75,13 @@ if (c.LIBRARY_IDENTITY_KEY && !libraryReady)
     "Library migration 016 must be applied with the gateway stopped before LIBRARY_IDENTITY_KEY is set",
   );
 if (libraryReady) {
-  const recovered = await recoverLibrary(db);
-  console.error(JSON.stringify({ event: "library.recovered", ...recovered }));
+  await recoverLibrary(db);
+  opsLog("library.recovered", "info");
   if (
     !c.LIBRARY_IDENTITY_KEY &&
     (await db.query("SELECT 1 FROM library_identities LIMIT 1")).rows.length
   )
-    console.error(
-      JSON.stringify({ event: "library.disabled_with_identity_present" }),
-    );
+    opsLog("library.disabled_with_identity_present", "warn");
 }
 const google = {
   owner: c.GMAIL_OWNER_USER_ID,
@@ -375,21 +375,21 @@ await stockDelivery.recover();
 const routineTimer = setInterval(() => {
   void routineScheduler
     .tick()
-    .catch(() =>
-      console.error(JSON.stringify({ event: "routine.tick_failed" })),
+    .catch((error) =>
+      opsLog("routine.tick_failed", "error", errorFields(error)),
     );
   void routineDelivery
     .tick()
-    .catch(() =>
-      console.error(JSON.stringify({ event: "routine.delivery_failed" })),
+    .catch((error) =>
+      opsLog("routine.delivery_failed", "error", errorFields(error)),
     );
   void stockMonitor
     ?.tick()
-    .catch(() => console.error(JSON.stringify({ event: "stock.tick_failed" })));
+    .catch((error) => opsLog("stock.tick_failed", "error", errorFields(error)));
   void stockDelivery
     .tick()
-    .catch(() =>
-      console.error(JSON.stringify({ event: "stock.delivery_failed" })),
+    .catch((error) =>
+      opsLog("stock.delivery_failed", "error", errorFields(error)),
     );
 }, 15000);
 routineTimer.unref();
@@ -417,20 +417,21 @@ const workWorker = new WorkWorker(
 const workTimer = setInterval(() => {
   void workWorker
     .tick()
-    .catch(() => console.error(JSON.stringify({ event: "work.tick_failed" })));
+    .catch((error) => opsLog("work.tick_failed", "error", errorFields(error)));
 }, 15000);
 workTimer.unref();
 const scheduleTimer = setInterval(() => {
   void worker
     .tick()
-    .catch(() =>
-      console.error(JSON.stringify({ event: "schedule.tick_failed" })),
+    .catch((error) =>
+      opsLog("schedule.tick_failed", "error", errorFields(error)),
     );
 }, 15000);
 scheduleTimer.unref();
 await app.listen({ host: "0.0.0.0", port: c.PORT });
 for (const signal of ["SIGINT", "SIGTERM"])
   process.once(signal, () => {
+    opsLog("gateway.stopping", "info");
     void (async () => {
       clearInterval(scheduleTimer);
       clearInterval(workTimer);
@@ -450,6 +451,15 @@ const runner = runTelegram(bot, {
   },
   sink: { concurrency: 8 },
 });
-console.log(
-  JSON.stringify({ event: "gateway.started", runtime: "personal-agent" }),
-);
+const started = Date.now();
+opsLog("gateway.started", "info");
+// Low-rate liveness record: its absence in CloudWatch means the gateway or the
+// log path stopped, not that nothing happened.
+setInterval(
+  () =>
+    opsLog("gateway.heartbeat", "info", {
+      uptimeS: Math.round((Date.now() - started) / 1000),
+      rssMb: Math.round(process.memoryUsage().rss / 1048576),
+    }),
+  300000,
+).unref();

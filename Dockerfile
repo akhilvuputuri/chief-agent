@@ -14,5 +14,8 @@ COPY config/model-policy.json ./config/model-policy.json
 COPY skills ./skills
 COPY plugins ./plugins
 COPY web ./web
+# Set by the release handler; the gateway reports it in operational logs.
+ARG RELEASE_SHA=
+ENV RELEASE_SHA=$RELEASE_SHA
 USER node
 CMD ["node", "dist/main.js"]

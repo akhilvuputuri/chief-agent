@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
+import { errorFields, opsLog } from "./ops-log.js";
 export class WorkWorker<T = string> {
   private busy = false;
   constructor(
@@ -20,6 +21,7 @@ export class WorkWorker<T = string> {
         )
       ).rows[0];
       if (!task) return;
+      opsLog("work.pass_started", "info", { taskId: task.id });
       try {
         const text = await this.resume(task.user_id, task.id);
         await this.db.query(
@@ -28,7 +30,12 @@ export class WorkWorker<T = string> {
         );
         if (!(await this.capture?.(task.user_id, task.id, text)))
           await this.notify(task.user_id, text);
-      } catch {
+        opsLog("work.pass_finished", "info", { taskId: task.id });
+      } catch (error) {
+        opsLog("work.pass_failed", "error", {
+          taskId: task.id,
+          ...errorFields(error),
+        });
         await this.db.query(
           `UPDATE work_tasks SET status='paused',lease=NULL,updated_at=now() WHERE id=$1 AND lease=$2`,
           [task.id, lease],

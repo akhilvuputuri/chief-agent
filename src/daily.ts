@@ -1,3 +1,4 @@
+import { errorFields, opsLog } from "./ops-log.js";
 import { randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
 import type { Action } from "./protocol.js";
@@ -166,7 +167,13 @@ export class DailyWorker<T = string> {
             `UPDATE daily_schedules SET status=$3,next_run=COALESCE($4::timestamptz,next_run),last_delivered=now(),lease=NULL,last_error=NULL WHERE id=$1 AND lease=$2`,
             [j.id, lease, n?.next ? "scheduled" : "completed", n?.next ?? null],
           );
-        } catch {
+          opsLog("daily.delivered", "info", { ref: j.id, kind: j.kind });
+        } catch (error) {
+          opsLog("daily.failed", "error", {
+            ref: j.id,
+            kind: j.kind,
+            ...errorFields(error),
+          });
           await this.db.query(
             `UPDATE daily_schedules SET status='failed',lease=NULL,last_error='Run or delivery failed; check Telegram before rescheduling' WHERE id=$1 AND lease=$2`,
             [j.id, lease],
