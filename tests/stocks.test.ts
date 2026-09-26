@@ -16,6 +16,9 @@ import {
 } from "../src/stock-provider.js";
 import { ensureUser, type Database } from "../src/db.js";
 import { runtimeContext } from "../src/runtime.js";
+import { Assistant } from "../src/agent.js";
+import { CustomAgent } from "../src/custom-agent.js";
+import { JobTools } from "../src/tools.js";
 
 const NY = "America/New_York";
 const MIC = "XNAS";
@@ -155,6 +158,114 @@ async function fixture(now: Date) {
     OPEN,
   };
 }
+
+test("uncertain writes permit owner-scoped watchlist inspection but still block additions", async () => {
+  const f = await fixture(new Date("2026-01-15T15:30:00Z"));
+  try {
+    await f.add(5);
+    const oldRun = randomUUID();
+    await f.db.query(
+      "INSERT INTO runtime_runs(id,user_id,state,stop_reason) VALUES($1,'a','stopped','failed')",
+      [oldRun],
+    );
+    await f.db.query(
+      "INSERT INTO runtime_calls(id,run_id,call_id,operation,arguments,is_write,state) VALUES($1,$2,'old-write','calendar_draft','{}',true,'uncertain')",
+      [randomUUID(), oldRun],
+    );
+    let round = 0;
+    const assistant = new Assistant(
+      f.db,
+      new CustomAgent({
+        generate: async (input) => {
+          round++;
+          const observation = input.messages.findLast((m) => m.role === "tool");
+          if (round === 2) {
+            const result = JSON.parse(observation!.content!).result;
+            assert.equal(result.items.length, 1);
+            assert.equal(result.items[0].symbol, "ACME");
+          }
+          if (round === 3) {
+            assert.match(
+              observation!.content!,
+              /An uncertain write requires inspection/,
+            );
+            return {
+              message: {
+                role: "assistant",
+                content:
+                  "The saved watch is visible; the new write is blocked.",
+              },
+            };
+          }
+          return {
+            message: {
+              role: "assistant",
+              content: null,
+              tool_calls: [
+                {
+                  id: randomUUID(),
+                  type: "function",
+                  function: {
+                    name: round === 1 ? "watchlist_list" : "watchlist_add",
+                    arguments: JSON.stringify(
+                      round === 1 ? {} : { query: "OTHER", dropPct: 5 },
+                    ),
+                  },
+                },
+              ],
+            },
+          };
+        },
+      }),
+      new JobTools(
+        f.db,
+        { call: async () => ({}) },
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        f.tools,
+      ),
+      { stocks: true },
+    );
+    const response = await assistant.respondDetailed(
+      "a",
+      "Show my watchlist and add another stock",
+    );
+    const calls = (
+      await f.db.query(
+        "SELECT operation,is_write,state FROM runtime_calls WHERE run_id=$1 ORDER BY started_at",
+        [response.runId],
+      )
+    ).rows;
+    assert.deepEqual(calls, [
+      { operation: "watchlist_list", is_write: false, state: "success" },
+      { operation: "watchlist_add", is_write: true, state: "failed" },
+    ]);
+    assert.equal(
+      f.provider.calls.search,
+      1,
+      "blocked add never reaches the provider",
+    );
+    assert.equal(
+      (await f.tools.call("b", f.run, { operation: "watchlist_list" })).items
+        .length,
+      0,
+    );
+    assert.equal(
+      (
+        await f.db.query("SELECT state FROM runtime_calls WHERE run_id=$1", [
+          oldRun,
+        ])
+      ).rows[0].state,
+      "uncertain",
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
 
 test("watchlist tools add, list, update, settings and remove with owner scope", async () => {
   const f = await fixture(new Date("2026-01-15T15:30:00Z"));

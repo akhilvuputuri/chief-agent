@@ -63,6 +63,18 @@ A second external round then found: (P2) the token bucket refilled continuously 
 
 ## Follow-up and next iteration
 
+### Follow-up — 26 September 2026: stale uncertainty blocked stock management
+
+**Owner report:** a stock-add request failed despite healthy gateway/database containers. **Private trace inspection:** the add and subsequent list call both stopped at the runtime uncertainty guard; neither reached the market-data adapter, and no stock was saved. Host and running-container inspection confirmed the provider selection and key presence without exporting their values. Container health established process health only.
+
+**Diagnosis:** an older failed `calendar_draft` remained `uncertain` in `runtime_calls`, although the separately repaired Calendar approval was no longer unresolved. The owner-wide guard therefore rejected unrelated writes. In addition, `watchlist_list` was absent from `readOperations`; the runtime treated that inspection as a write and rejected it too. Direct stock-tool tests had bypassed the Assistant boundary, so they did not detect the classification omission.
+
+**Change:** classify `watchlist_list` as a read. A new end-to-end mocked-runtime regression creates an unrelated uncertain Calendar call, reads the owner's saved stock, then attempts an add. It verifies a successful read with `is_write=false`, a rejected addition that never reaches the provider, preserved uncertainty and separation from another owner's watchlist. This deliberately preserves the existing write guard; domain-scoped recovery is separate work.
+
+**State repair:** the exact legacy draft was inspected against its local approval destination: no draft approval was saved and no Calendar approval remained unresolved. The operator reconciliation must additionally verify no successful draft receipt or created-event record, retain the original error and append a reconciliation event; see [the recovery contract](../reliable-execution.md#inspecting-uncertain-writes). That procedure is separate from deployment and must not replay the request.
+
+**Validation/status:** all 31 focused stock tests passed locally. The candidate is checkpointed on `fix/watchlist-read-classification`; full checks, independent review, deployment and the guarded operator reconciliation are deferred for v0.3.25 at the owner's request until after EC2/CloudWatch exploration. No production state was changed, no live stock was added and no live alert was triggered during this investigation. Cross-agent access to these diagnostics and structured blocker references are the next observability iteration.
+
 - Non-US listings need a paid plan or a different provider decision; the schema keeps `mic_code`/`exchange` so the choice is per-instrument, not global.
 - News digest/feedback ranking remains domain work on the routine contract.
 - If delayed quotes prove too slow for the owner's use, the provider adapter boundary allows a swap without touching the monitor.
