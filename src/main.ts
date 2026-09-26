@@ -36,6 +36,9 @@ import {
   sendCalendarApprovals,
   sendLibraryApprovals,
 } from "./telegram.js";
+// Startup refusals carry a fixed code so the sanitized crash line identifies them.
+const startupError = (code: string, message: string) =>
+  Object.assign(new Error(message), { code });
 const c = readConfig();
 const mainModel = resolveMainModel(c.AGENT_MODEL);
 const db = connect(c.DATABASE_URL);
@@ -50,33 +53,42 @@ if (
     )
   ).rows.length
 )
-  throw new Error(
+  throw startupError(
+    "STARTUP_MIGRATION_014",
     "Checkpoint steering migration 014 must be applied with the gateway stopped",
   );
 if (
   !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=17")).rows
     .length
 )
-  throw new Error(
+  throw startupError(
+    "STARTUP_MIGRATION_017",
     "Scheduled routines migration 017 must be applied with the gateway stopped",
   );
 if (
   !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=18")).rows
     .length
 )
-  throw new Error(
+  throw startupError(
+    "STARTUP_MIGRATION_018",
     "Stock watchlist migration 018 must be applied with the gateway stopped",
   );
 await recoverRuntime(db);
 // Library account features need migration 016; without the key they stay off even if tables exist.
 const libraryReady = await libraryMigrated(db);
 if (c.LIBRARY_IDENTITY_KEY && !libraryReady)
-  throw new Error(
+  throw startupError(
+    "STARTUP_MIGRATION_016",
     "Library migration 016 must be applied with the gateway stopped before LIBRARY_IDENTITY_KEY is set",
   );
 if (libraryReady) {
-  await recoverLibrary(db);
-  opsLog("library.recovered", "info");
+  const recovered = await recoverLibrary(db);
+  if (recovered.recovered)
+    opsLog("library.recovered", "info", {
+      failedCount: recovered.failed,
+      uncertainCount: recovered.uncertain,
+      abortedCount: recovered.aborted,
+    });
   if (
     !c.LIBRARY_IDENTITY_KEY &&
     (await db.query("SELECT 1 FROM library_identities LIMIT 1")).rows.length
@@ -161,7 +173,8 @@ const stockProvider =
       })
     : undefined;
 if (c.MARKET_DATA_PROVIDER === "twelvedata" && !c.TWELVE_DATA_API_KEY)
-  throw new Error(
+  throw startupError(
+    "STARTUP_MARKET_DATA_KEY",
     "MARKET_DATA_PROVIDER=twelvedata requires TWELVE_DATA_API_KEY",
   );
 const parser = new ScheduleParser();

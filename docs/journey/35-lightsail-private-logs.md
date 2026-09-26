@@ -19,12 +19,28 @@ The owner chose to move the existing Compose deployment to one AWS Lightsail VM 
 
 - **Hooking the events table:** mirroring every event would copy prompts, research inputs and rendered answers. Instead, each projection is an explicit per-type field list, and every value must also pass a shape check. Generic redaction was rejected because free text cannot be reliably cleaned.
 - **Tool outcomes:** these come from the call journal, which covers every dispatched call, rather than from `tool.*` events, which fire only for some operations. That avoids duplicate lines.
-- **Release identity:** the running app did not know its commit. A `RELEASE_SHA` build argument is set by the release handler on the new host.
+- **Release identity:** the running app did not know its commit. The image accepts a `RELEASE_SHA` build argument; the release handler installed on the new host is planned to pass it, and until then `release` is null.
 - **Compose:** the application release guard refuses `compose.yaml` changes. The journald logging driver is therefore planned as host-level Docker configuration on Lightsail, which keeps ordinary releases to DigitalOcean working until cutover.
 
 ## Implementation and review
 
-See [operational logs](../operational-logs.md). Independent review is pending.
+See [operational logs](../operational-logs.md). PR [#94](https://github.com/akhilvuputuri/chief-agent/pull/94).
+
+An independent Opus 5.5 review of `91dd0a7` requested changes. Blocking findings:
+
+- The model could put up to 80 characters of its own text into `operation` by calling a tool that does not exist, because the call is journaled before the tool name is checked.
+- No line was written when a tool started or when restart recovery ran, so an uncertain write left no trace in the logs.
+
+Smaller findings:
+
+- A progress delivery failure was logged twice.
+- A delivery-failure line could follow a successful send.
+- Extracting error fields could throw inside catch blocks.
+- Startup refusals and library recovery counts were lost.
+- An unknown cost was omitted instead of `null`.
+- The tests did not cover one-word tokens.
+
+Fixes: only host-defined operation names are logged (otherwise `unknown`), `callId` is the journal row ID, and there are `tool.started` and `runtime.recovered` lines. The duplicate projection is removed. `telegram.delivery_error` carries a `phase`, error extraction cannot throw, startup refusals have fixed codes, and unknown cost is `null`. Regression tests were added for each.
 
 ## Verification and outcome
 

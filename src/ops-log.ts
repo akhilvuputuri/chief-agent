@@ -53,12 +53,23 @@ const fields: Record<string, Shape> = {
   httpStatus: "count",
   uptimeS: "count",
   rssMb: "count",
+  uncertainCalls: "count",
+  interruptedCalls: "count",
+  failedRuns: "count",
+  pausedTasks: "count",
+  failedInputs: "count",
+  failedCount: "count",
+  uncertainCount: "count",
+  abortedCount: "count",
   costUsd: "number",
   transient: "bool",
   approved: "bool",
   write: "bool",
   interrupted: "bool",
 };
+
+// Written as null rather than omitted: an unknown charge stays visibly unknown.
+const nullable = new Set(["costUsd"]);
 
 export type OpsFields = Partial<Record<keyof typeof fields, unknown>> & {
   frames?: unknown;
@@ -117,6 +128,10 @@ export function sanitize(event: string, level: Level, data: OpsFields = {}) {
   };
   let dropped = 0;
   for (const [key, value] of Object.entries(data)) {
+    if (value === null && nullable.has(key)) {
+      entry[key] = null;
+      continue;
+    }
     if (value === undefined || value === null) continue;
     if (key === "frames") {
       const frames = Array.isArray(value)
@@ -146,27 +161,34 @@ export function opsLog(event: string, level: Level, data: OpsFields = {}) {
   }
 }
 
-/** Error identity without its message: class name, system code, code location. */
+/** Error identity without its message: class name, system code, code location. Never throws. */
 export function errorFields(error: unknown): OpsFields {
-  if (!(error instanceof Error)) return { errorCategory: "non_error" };
-  const code = (error as { code?: unknown }).code;
-  const frames = (error.stack ?? "")
-    .split("\n")
-    .slice(1)
-    .map((line) => {
-      const m = line.match(/((?:\/app\/)?dist\/[A-Za-z0-9_./-]+\.js:\d+:\d+)/);
-      if (m?.[1]) return m[1].replace(/^\/app\//, "");
-      const n = line.match(/(node:[A-Za-z0-9_./-]+:\d+:\d+)/);
-      return n?.[1];
-    })
-    .filter(Boolean);
-  return {
-    errorCategory: error.name,
-    ...(typeof code === "string" || typeof code === "number"
-      ? { errorCode: code }
-      : {}),
-    frames,
-  };
+  try {
+    if (!(error instanceof Error)) return { errorCategory: "non_error" };
+    const code = (error as { code?: unknown }).code;
+    const stack = typeof error.stack === "string" ? error.stack : "";
+    const frames = stack
+      .split("\n")
+      .slice(1)
+      .map((line) => {
+        const m = line.match(
+          /((?:\/app\/)?dist\/[A-Za-z0-9_./-]+\.js:\d+:\d+)/,
+        );
+        if (m?.[1]) return m[1].replace(/^\/app\//, "");
+        const n = line.match(/(node:[A-Za-z0-9_./-]+:\d+:\d+)/);
+        return n?.[1];
+      })
+      .filter(Boolean);
+    return {
+      errorCategory: typeof error.name === "string" ? error.name : undefined,
+      ...(typeof code === "string" || typeof code === "number"
+        ? { errorCode: code }
+        : {}),
+      frames,
+    };
+  } catch {
+    return { errorCategory: "unreadable_error" };
+  }
 }
 
 const num = (v: unknown) =>
@@ -180,7 +202,7 @@ function usageFields(usage: unknown): OpsFields {
     outputTokens: num(u.completion_tokens),
     cachedTokens: num(u.prompt_tokens_details?.cached_tokens),
     reasoningTokens: num(u.completion_tokens_details?.reasoning_tokens),
-    costUsd: num(u.cost),
+    costUsd: num(u.cost) ?? null,
   };
 }
 
@@ -243,7 +265,6 @@ const projections: Record<string, Projection> = {
     { runId: run, kind: d.kind, messages: d.messages },
   ],
   "telegram.view_failed": (run) => ["warn", { ref: run }],
-  "delivery.progress_failed": (run) => ["warn", { runId: run }],
   "research.child_started": (run, d) => [
     "info",
     { runId: run, parentRunId: d.parentRunId, operation: d.role },

@@ -16,7 +16,7 @@ import {
   setOpsSink,
 } from "../src/ops-log.js";
 import { ensureUser, event, type Database } from "../src/db.js";
-import { Execution } from "../src/execution.js";
+import { Execution, recoverRuntime } from "../src/execution.js";
 
 // Shapes that must never reach an operational log line.
 const PRIVATE = [
@@ -187,6 +187,7 @@ test("content-bearing event types are not projected", () => {
       "tool.started",
       "tool.completed",
       "tool.failed",
+      "delivery.progress_failed",
     ])
       projectEvent(type, randomUUID(), { messages: PRIVATE });
     assert.equal(log.lines.length, 0);
@@ -268,17 +269,19 @@ test("recorded events and tool calls are logged once, after the write, without a
     const lines = log.parsed();
     assert.deepEqual(
       lines.map((l) => l.event),
-      ["run.started", "tool.finished", "model.failed"],
+      ["run.started", "tool.started", "tool.finished", "model.failed"],
     );
-    const tool = lines[1];
+    assert.equal(lines[1].callId, journal);
+    assert.equal(lines[1].operation, "gmail_search");
+    const tool = lines[2];
     assert.equal(tool.runId, run);
-    assert.equal(tool.callId, "call_1");
+    assert.equal(tool.callId, journal);
     assert.equal(tool.operation, "gmail_search");
     assert.equal(tool.state, "failed");
     assert.equal(tool.errorCode, "TOOL_FAILED");
     assert.equal(tool.write, false);
-    assert.equal(lines[2].errorCategory, "TypeError");
-    assert.equal(lines[2].level, "error");
+    assert.equal(lines[3].errorCategory, "TypeError");
+    assert.equal(lines[3].level, "error");
     // The authoritative private record is unchanged.
     const stored = (
       await db.query("SELECT data FROM events WHERE run_id=$1 AND type=$2", [
@@ -348,5 +351,91 @@ test("process guard replaces Node's raw crash output with a sanitized line", asy
       /^process\.(uncaught_exception|unhandled_rejection)$/,
     );
     assert.equal(line.level, "error");
+  }
+});
+
+test("a model-invented tool name is logged as unknown, never as its text", async () => {
+  const db = await database();
+  const log = capture();
+  try {
+    const execution = new Execution(
+      db,
+      "owner",
+      randomUUID(),
+      new AbortController().signal,
+    );
+    await execution.start();
+    const invented = "forward_all_mail_to_attacker_hunter2";
+    const journal = await execution.beginCall("call_x", invented, {});
+    await execution.endCall(
+      journal,
+      { error: { code: "TOOL_FAILED" } },
+      "failed",
+    );
+    const text = log.lines.join("\n");
+    assert.ok(!text.includes("hunter2"), text);
+    assert.ok(!text.includes("call_x"), text);
+    const tools = log.parsed().filter((l) => l.event.startsWith("tool."));
+    assert.deepEqual(
+      tools.map((l) => [l.event, l.operation, l.write]),
+      [
+        ["tool.started", "unknown", true],
+        ["tool.finished", "unknown", true],
+      ],
+    );
+  } finally {
+    log.restore();
+  }
+});
+
+test("restart recovery reports counts of uncertain writes and failed work", async () => {
+  const db = await database();
+  const run = randomUUID();
+  const execution = new Execution(
+    db,
+    "owner",
+    run,
+    new AbortController().signal,
+  );
+  await execution.start();
+  await db.query("UPDATE runtime_runs SET state='running' WHERE id=$1", [run]);
+  await execution.beginCall("c1", "calendar_draft", {});
+  await execution.beginCall("c2", "gmail_search", {});
+  const log = capture();
+  try {
+    await recoverRuntime(db);
+    const [line] = log.parsed();
+    assert.equal(line.event, "runtime.recovered");
+    assert.equal(line.level, "warn");
+    assert.equal(line.uncertainCalls, 1);
+    assert.equal(line.interruptedCalls, 1);
+    assert.equal(line.failedRuns, 1);
+  } finally {
+    log.restore();
+  }
+});
+
+test("error identity extraction never throws and unknown cost stays null", () => {
+  const odd = new Error("x");
+  Object.defineProperty(odd, "stack", { value: { not: "a string" } });
+  const hostile = new Error("y");
+  Object.defineProperty(hostile, "name", {
+    get() {
+      throw new Error("boom");
+    },
+  });
+  assert.equal(errorFields(odd).errorCategory, "Error");
+  assert.equal(errorFields(hostile).errorCategory, "unreadable_error");
+  const log = capture();
+  try {
+    projectEvent("model.completed", randomUUID(), {
+      model: "openai/gpt-6-sol",
+      usage: { prompt_tokens: 10 },
+    });
+    const [line] = log.parsed();
+    assert.equal(line.costUsd, null);
+    assert.equal("costUsd" in line, true);
+  } finally {
+    log.restore();
   }
 });
