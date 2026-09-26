@@ -1,6 +1,6 @@
 # Deployment
 
-Use the existing Singapore DigitalOcean server. The source lives at `/opt/hermes-companion`; private root-readable `.env` supplies existing credentials. Production Compose runs only the Node gateway and Postgres, plus a one-shot schema job.
+Production runs on one AWS Lightsail VM in Singapore. It moved from DigitalOcean on 26 September 2026; see [Lightsail host and private logs](lightsail.md). The source lives at `/opt/hermes-companion`; private root-readable `.env` supplies existing credentials. Production Compose runs only the Node gateway and Postgres, plus a one-shot schema job.
 
 The Hermes-to-custom migration was a historical cutover; do not rerun its reset or migration procedure to change a model. Current releases follow [cloud development](cloud-development.md), with reviewed operator procedures for Compose and database changes.
 

@@ -115,7 +115,7 @@ See [evaluation guide](docs/evals/guide.md) and [development process](docs/devel
 
 ## Developing from Codex cloud
 
-Use the connected `akhilvuputuri/chief-agent` environment and read [AGENTS.md](AGENTS.md). The [cloud development guide](docs/cloud-development.md) covers testing, PRs, automatic production releases after passing main checks, bounded diagnostics and operational limits. Live credentials remain on DigitalOcean.
+Use the connected `akhilvuputuri/chief-agent` environment and read [AGENTS.md](AGENTS.md). The [cloud development guide](docs/cloud-development.md) covers testing, PRs, automatic production releases after passing main checks, bounded diagnostics and operational limits. Live credentials remain on the production host (AWS Lightsail). Sanitized operational logs are readable through `npm run logs:cloudwatch` with a scoped reader identity; see [docs/lightsail.md](docs/lightsail.md).
 
 ## Engineering journey
 
@@ -131,7 +131,7 @@ Ask about selected roles or all saved roles. The [job-alignment specialist](docs
 
 ## Telegram canvases
 
-The optional Mini App offers persistent, revisioned canvases and a read-only saved-role browser. Open `/canvases` in the bot, or ask it to save a plan or analysis as a canvas. Multiple topics stay separate; earlier revisions remain accessible. Telegram validates the owner before any private content loads. Read the [canvas contract](docs/canvases.md) and [DigitalOcean rollout](docs/miniapp-deployment.md) for configuration, migration 011 and live verification requirements. Calendar approvals remain in Telegram.
+The optional Mini App offers persistent, revisioned canvases and a read-only saved-role browser. Open `/canvases` in the bot, or ask it to save a plan or analysis as a canvas. Multiple topics stay separate; earlier revisions remain accessible. Telegram validates the owner before any private content loads. Read the [canvas contract](docs/canvases.md) and [HTTPS rollout](docs/miniapp-deployment.md) for configuration, migration 011 and live verification requirements. Calendar approvals remain in Telegram.
 
 ## Portable capability plugins
 

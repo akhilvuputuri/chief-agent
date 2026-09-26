@@ -1,4 +1,14 @@
-# Chief — verified v0.3.26 stock recovery
+# Chief — production on AWS Lightsail with private logs (v0.3.27)
+
+On 26 September 2026 SGT production moved from DigitalOcean to one AWS Lightsail VM, following the owner's migration handover. Changes:
+
+- [PR #94](https://github.com/akhilvuputuri/chief-agent/pull/94): sanitized operational log projection.
+- [PR #96](https://github.com/akhilvuputuri/chief-agent/pull/96): host procedure, least-privilege CloudWatch identities, a bounded `npm run logs:cloudwatch` reader, and the validated `CHIEF_DEPLOY_HOST` release target.
+- [PR #98](https://github.com/akhilvuputuri/chief-agent/pull/98): journal exporter that survives reboots.
+
+Each PR was independently reviewed by Opus 5.5 until approved.
+
+The cutover took about 45 seconds of downtime. The restored database matched the quiesced source on every table's row count and content hash. The normal release workflow now deploys to Lightsail with exact-SHA receipts. Details, the acceptance ledger and pending owner checks are in [journal 35](journey/35-lightsail-private-logs.md); the procedure is in [lightsail.md](lightsail.md). Existing defect: the Sheets refresh token returns `invalid_grant` on both hosts.
 
 Released v0.3.25 stock inspection fix through [PR #93](https://github.com/akhilvuputuri/chief-agent/pull/93): independent GPT-6 Astra approved head `7665709`; full checks passed (405 application tests and 10 script tests), as did formatting and CI. The [automatic release](https://github.com/akhilvuputuri/chief-agent/actions/runs/36233697974) verified merge `d96cdb70dff85343efb57baac8988462f8120601` and startup health. Separately reviewed exact-call reconciliation passed a rolled-back production dry run and committed on 26 September, preserving the old error/timestamp and appending evidence; no unresolved owner calls remained. No Calendar action was replayed. See [stock incident](journey/25-stock-watchlist.md#follow-up--26-september-2026-stale-uncertainty-blocked-stock-management).
 

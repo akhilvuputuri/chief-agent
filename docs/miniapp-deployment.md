@@ -1,6 +1,6 @@
-# Mini App HTTPS on DigitalOcean
+# Mini App HTTPS
 
-The owner selected the existing DigitalOcean host and a free hostname on 13 September 2026. AWS migration is independent and does not block this interface. No new server, purchased domain, tunnel account or paid service is needed.
+**Current origin (since 26 September 2026): `https://companion.52-77-47-24.sslip.io` on the Lightsail host; see [lightsail.md](lightsail.md).** The rest of this page records the original rollout on DigitalOcean. The owner selected the existing DigitalOcean host and a free hostname on 13 September 2026. AWS migration is independent and does not block this interface. No new server, purchased domain, tunnel account or paid service is needed.
 
 Origin: `https://companion.188-166-246-143.sslip.io`. sslip.io maps the embedded IP to the existing host. This is third-party free DNS, not an owned domain; availability and certificate issuance limits depend on that service. The hostname remains stable while the server IP remains unchanged. If the IP changes, update the origin and Telegram launch URLs as part of that migration. TLS keys stay on this server. DNS does not proxy application traffic.
 

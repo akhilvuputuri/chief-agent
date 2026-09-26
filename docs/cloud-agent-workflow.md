@@ -47,7 +47,7 @@ Close with PR, reviewed SHA, tests, deployment SHA/workflow evidence, behavioral
 
 As observed on 22 September 2026, Chief is enrolled in automatic Devin Review on readiness and each subsequent push. REVIEW.md is in its default instruction discovery path. This setting applies to this repository only. The independent reviewer task must still run.
 
-GitHub integration permissions, security profiles and the session's CLI credentials determine its actual mutation/Actions capabilities. Local Codex access proves none of these. Keep a cloud capability result in the task; do not store credentials or personal environment dumps in the repository. Native Devin web deployment is unrelated to the DigitalOcean release pipeline.
+GitHub integration permissions, security profiles and the session's CLI credentials determine its actual mutation/Actions capabilities. Local Codex access proves none of these. Keep a cloud capability result in the task; do not store credentials or personal environment dumps in the repository. Native Devin web deployment is unrelated to the repository release pipeline.
 
 Remaining boundaries: remote schema/host installation is operator-mediated; raw private trace export is not installed. Review quality must be evaluated on defects found and missed over time, not the number of approvals. See [the harness incident](journey/29-cloud-agent-harness.md).
 

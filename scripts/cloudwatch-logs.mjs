@@ -31,7 +31,7 @@ export const QUERIES = {
     group: "runtime",
     help: "warn/error lines, newest first",
     query: () =>
-      `${common} | filter level in ["error", "warn"] | sort @timestamp desc`,
+      `${common} | filter level = "error" or level = "warn" | sort @timestamp desc`,
   },
   run: {
     group: "runtime",
