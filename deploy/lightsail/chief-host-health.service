@@ -1,0 +1,8 @@
+[Unit]
+Description=Record sanitized Chief host health
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/chief-host-health
+UMask=0027

@@ -26,7 +26,8 @@
     "eval:compare": "tsx evals/compare.ts",
     "doctor:cloud": "node scripts/cloud-doctor.mjs",
     "plugins": "node --import tsx src/plugin-cli.ts",
-    "release:status": "node scripts/release-status.mjs"
+    "release:status": "node scripts/release-status.mjs",
+    "logs:cloudwatch": "node scripts/cloudwatch-logs.mjs"
   },
   "dependencies": {
     "@grammyjs/runner": "^2.0.3",
@@ -39,6 +40,7 @@
     "zod": "^3.24.2"
   },
   "devDependencies": {
+    "@aws-sdk/client-cloudwatch-logs": "3.1141.0",
     "@electric-sql/pglite": "^0.3.0",
     "@types/node": "^22.13.10",
     "@types/pg": "^8.11.11",

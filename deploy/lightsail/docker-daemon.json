@@ -1,0 +1,8 @@
+{
+  "log-driver": "journald",
+  "log-opts": {
+    "tag": "{{.Name}}",
+    "mode": "non-blocking",
+    "max-buffer-size": "4m"
+  }
+}

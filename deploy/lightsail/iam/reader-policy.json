@@ -1,0 +1,22 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "QueryChiefGroups",
+      "Effect": "Allow",
+      "Action": ["logs:StartQuery"],
+      "Resource": [
+        "arn:aws:logs:ap-southeast-1:ACCOUNT_ID:log-group:/chief/prod/runtime",
+        "arn:aws:logs:ap-southeast-1:ACCOUNT_ID:log-group:/chief/prod/runtime:*",
+        "arn:aws:logs:ap-southeast-1:ACCOUNT_ID:log-group:/chief/prod/host",
+        "arn:aws:logs:ap-southeast-1:ACCOUNT_ID:log-group:/chief/prod/host:*"
+      ]
+    },
+    {
+      "Sid": "ReadOwnQueryResults",
+      "Effect": "Allow",
+      "Action": ["logs:GetQueryResults"],
+      "Resource": "*"
+    }
+  ]
+}

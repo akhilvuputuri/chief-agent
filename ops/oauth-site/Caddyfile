@@ -1,5 +1,5 @@
 # Exact static information routes; private API authorization is unchanged.
-companion.188-166-246-143.sslip.io {
+companion.52-77-47-24.sslip.io {
   header {
     -Server
     Referrer-Policy no-referrer
