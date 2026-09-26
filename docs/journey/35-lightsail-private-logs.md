@@ -87,6 +87,10 @@ A re-review of `7ea9996` found one more problem. The new signer check piped gpg 
 - Error messages are redacted, with a test.
 - The docs describe at-least-once delivery, possible duplicates, rotation and non-blocking drops.
 
+### Reboot finding — 26 September
+
+A reboot test of the new host showed a gap in the logs. The gateway wrote `gateway.stopping` to the local journal at 10:47:48, but the exporter had stopped moments earlier, and after boot the line was never exported, although the saved cursor pointed before it. On systemd 255, `journalctl --follow --cursor-file` skipped the previous boot's entries, while the same command without `--follow` returned them. The exporter now polls without `--follow` every 5 seconds and rewrites the cursor after each pass.
+
 ## Verification and outcome
 
 Pending: independent review, CloudWatch delivery on the new host, the reader CLI, cutover and a matched acceptance ledger.
