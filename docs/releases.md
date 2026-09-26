@@ -1,5 +1,22 @@
 # Versions and release notes
 
+## v0.3.27 — Lightsail production host and private logs (tag pending verified release)
+
+Production moved to one AWS Lightsail VM in Singapore with the same Compose app and Postgres. Changes:
+
+- [PR #94](https://github.com/akhilvuputuri/chief-agent/pull/94): sanitized `chief.ops/1` operational log lines.
+- [PR #96](https://github.com/akhilvuputuri/chief-agent/pull/96): host procedure, CloudWatch publisher and reader identities, the `npm run logs:cloudwatch` reader, a release handler that passes `RELEASE_SHA` and prunes images, and the `CHIEF_DEPLOY_HOST` release target.
+- [PR #98](https://github.com/akhilvuputuri/chief-agent/pull/98): reboot-safe log exporter.
+- This documentation release: corrected `errors` query and post-cutover docs.
+
+Each PR's merged head was independently approved by Opus 5.5. Cutover evidence: identical row counts and per-table content hashes after restore; the normal release deployed `ebcc9dc` and later `5988e52` to Lightsail with exact-SHA receipts; reboot recovery was verified. The v0.3.27 tag will point to the merge of this documentation change once its release is verified; until the tag exists, treat this entry as pending. Limits:
+
+- Owner Telegram acceptance is pending.
+- The Sheets `invalid_grant` defect predates the move.
+- Log delivery is at least once.
+
+See [journal 35](journey/35-lightsail-private-logs.md).
+
 ## Released v0.3.26 — Nasdaq stock listing segments
 
 [v0.3.26](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.26) labels deployed merge `f3ab7f10bea05e436424712a03a757f8744d9c02`. [PR #95](https://github.com/akhilvuputuri/chief-agent/pull/95) accepts three US Nasdaq listing-segment MICs while retaining exact provider identity. Independent GPT-6 Astra approved exact head `1b62f05fa42b4ae787a49eef8e194dda4f80daed`; 407 application tests and 10 script tests, formatting and CI passed. The [automatic release](https://github.com/akhilvuputuri/chief-agent/actions/runs/36234286230), exact-commit receipt and separate server health inspection passed. Live provider lookup/quote and a deployed validated-dispatcher add/list check passed with transaction rollback and owner isolation; no test watch remained and no alert was sent. Actual Telegram and threshold-triggered delivery remain separate acceptance checks. No database or Compose change. See [stock journal](journey/25-stock-watchlist.md).

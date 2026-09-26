@@ -27,18 +27,18 @@ For actually running a separate development bot, copy .env.example to .env and s
 
 Use a distinct test Telegram bot, test database and test Google data. Starting a second poller with the production token can disrupt the live assistant. Check provider pricing before paid smoke tests; those are not part of routine CI.
 
-Production credentials already stay on DigitalOcean in /opt/hermes-companion/.env. Deploy authentication stays in GitHub Actions secrets. Ordinary development and deployment need neither set copied locally. No credentials have been moved by these documentation changes.
+Production credentials stay on the production host (AWS Lightsail) in /opt/hermes-companion/.env. Deploy authentication stays in GitHub Actions secrets. Ordinary development and deployment need neither set copied locally. No credentials have been moved by these documentation changes.
 
 ## Develop, merge, verify
 
 1. Make the smallest complete change, with relevant regression coverage and documentation.
 2. Run check, build and formatting. Push the branch and open a PR. Mark unfinished work as draft and describe remaining issues.
 3. Review the exact diff and check current main for conflicting changes. Merge a passing requested ordinary change using the owner's standing authorization. Never merge another agent's unfinished candidate as a shortcut.
-4. Observe main checks and release. The workflow rechecks the exact current-main SHA, builds on DigitalOcean, waits for idle runtime work and checks health. A successful release prints deployed SHA and healthy status.
+4. Observe main checks and release. The workflow rechecks the exact current-main SHA, builds on the production host, waits for idle runtime work and checks health. A successful release prints deployed SHA and healthy status.
 5. If it fails due to active work, retry when idle; do not cancel user work. If superseded by newer main, verify the newer release instead. For DB/Compose changes, follow a reviewed operator migration procedure. Do not bypass the guard.
 6. Record release status and any remaining limits. For shipped milestones, follow releases.md for tags and notes.
 
-A GitHub identity with repository/Actions permissions can inspect the bounded production-diagnostics workflow from any machine. Full private trace inspection is still unfinished. Run doctor:cloud in the actual environment; a local success does not prove another agent has permission.
+Any machine or cloud task with the private log-reader identity can read sanitized production logs with `npm run logs:cloudwatch` ([lightsail.md](lightsail.md#reading-logs)). The bounded production-diagnostics workflow runs only while the repository is private. Full private trace inspection is still unfinished. Run doctor:cloud in the actual environment; a local success does not prove another agent has permission.
 
 ## Remaining operator-only work
 

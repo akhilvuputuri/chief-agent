@@ -26,11 +26,11 @@ npm run release:status -- FULL_MERGE_SHA
 
 This read-only check returns a commit-specific production status and exits zero only for a successful deployment receipt. Pending/unverified is exit 2; failed is 1. Authentication errors are failures, never success. It reports evidence at release time, not a continuous health check. For older commits without receipts, inspect their release logs explicitly; do not treat missing evidence as failure or success.
 
-Watch the corresponding `checks` and `release` runs using `gh run list` and `gh run watch RUN_ID --exit-status`. The release workflow posts a durable result to the merged PR and a `companion/production` commit status, so the result survives a sleeping coding session. A failed/cancelled attempt does not establish which image is now running; use `production-diagnostics` to read server RELEASE and health-related metadata. Startup health is not feature acceptance.
+Watch the corresponding `checks` and `release` runs using `gh run list` and `gh run watch RUN_ID --exit-status`. The release workflow posts a durable result to the merged PR and a `companion/production` commit status, so the result survives a sleeping coding session. A failed/cancelled attempt does not establish which image is now running; read the running release from the logs (`npm run logs:cloudwatch -- releases` or `heartbeat`; every line carries the release SHA) and check the exact-commit receipt with `npm run release:status`. `production-diagnostics` works only while the repository is private. Startup health is not feature acceptance.
 
 If a release is stale, verify that the newer main contains the change and inspect that commit's receipt. If busy, retry after the runtime is idle without cancelling user work. If database/Compose differs, follow the reviewed operator procedure and state that the release is blocked until it runs. Do not repeatedly retry a deterministic migration refusal.
 
-For authorized credentials with Actions write:
+For authorized credentials with Actions write, and only while the repository is private (the workflow is guarded to private repositories and is skipped while it is public; use `npm run logs:cloudwatch` instead):
 
 ```sh
 gh workflow run diagnostics.yml --ref main
@@ -47,7 +47,7 @@ Close with PR, reviewed SHA, tests, deployment SHA/workflow evidence, behavioral
 
 As observed on 22 September 2026, Chief is enrolled in automatic Devin Review on readiness and each subsequent push. REVIEW.md is in its default instruction discovery path. This setting applies to this repository only. The independent reviewer task must still run.
 
-GitHub integration permissions, security profiles and the session's CLI credentials determine its actual mutation/Actions capabilities. Local Codex access proves none of these. Keep a cloud capability result in the task; do not store credentials or personal environment dumps in the repository. Native Devin web deployment is unrelated to the DigitalOcean release pipeline.
+GitHub integration permissions, security profiles and the session's CLI credentials determine its actual mutation/Actions capabilities. Local Codex access proves none of these. Keep a cloud capability result in the task; do not store credentials or personal environment dumps in the repository. Native Devin web deployment is unrelated to the repository release pipeline.
 
 Remaining boundaries: remote schema/host installation is operator-mediated; raw private trace export is not installed. Review quality must be evaluated on defects found and missed over time, not the number of approvals. See [the harness incident](journey/29-cloud-agent-harness.md).
 

@@ -1,7 +1,7 @@
 # 35 — Lightsail host and private operational logs
 
 Work date(s): 2026-09-26. Written/revised: 2026-09-26.
-Status: in progress. Sanitized operational logging is implemented and tested on a review branch. The Lightsail VM is provisioned but not serving; the DigitalOcean host still runs production.
+Status: released. Production has run on the Lightsail VM since 26 September 2026 at 10:40:55 UTC, with sanitized logs in CloudWatch and a scoped reader. Owner Telegram acceptance and some console follow-ups remain; see the ledger below.
 
 ## User-visible problem and preceding iteration
 
@@ -80,21 +80,66 @@ Fixes:
 - The installer restarts journald or Docker only on configuration change, and refuses a Docker change while containers run. A re-run on the staging host left Postgres's start time unchanged.
 - The `VALIDSIG` signer is checked against the pinned fingerprint.
 - CLI requests have timeouts plus a hard 75-second deadline.
-
-A re-review of `7ea9996` found one more problem. The new signer check piped gpg into `grep -q` under `pipefail`, which could abort a genuine install when gpg took SIGPIPE. It now captures gpg's status before matching. The re-review also noted that the SDK request timeout only warned (it now throws), that re-runs could upgrade Docker (the bootstrap now runs only on first install), and that replay is limited by CloudWatch's 14-day age limit (documented).
-
 - The CLI's entry-point guard now uses `pathToFileURL`, and a spaced path was tested.
 - Error messages are redacted, with a test.
 - The docs describe at-least-once delivery, possible duplicates, rotation and non-blocking drops.
 
+A re-review of `7ea9996` found one more problem. The new signer check piped gpg into `grep -q` under `pipefail`, which could abort a genuine install when gpg took SIGPIPE. It now captures gpg's status before matching. The re-review also noted that the SDK request timeout only warned (it now throws), that re-runs could upgrade Docker (the bootstrap now runs only on first install), and that replay is limited by CloudWatch's 14-day age limit (documented). `c58a709` was approved and merged as #96 (`ebcc9dc`).
+
 ### Reboot finding — 26 September
 
-A reboot test of the new host showed a gap in the logs. The gateway wrote `gateway.stopping` to the local journal at 10:47:48, but the exporter had stopped moments earlier, and after boot the line was never exported, although the saved cursor pointed before it. On systemd 255, `journalctl --follow --cursor-file` skipped the previous boot's entries, while the same command without `--follow` returned them. The exporter now polls without `--follow` every 5 seconds. It advances the saved cursor only after the lines are written, and exits after repeated failures so the stall is visible ([PR #98](https://github.com/akhilvuputuri/chief-agent/pull/98), reviewed by Opus 5.5). The cutover closure and acceptance ledger follow in the next documentation update.
+A reboot test of the new host showed a gap in the logs. The gateway wrote `gateway.stopping` to the local journal at 10:47:48, but the exporter had stopped moments earlier, and after boot the line was never exported, although the saved cursor pointed before it. On systemd 255, `journalctl --follow --cursor-file` skipped the previous boot's entries, while the same command without `--follow` returned them. The exporter now polls without `--follow` every 5 seconds. It advances the saved cursor only after the lines are written, and exits after repeated failures so the stall is visible ([PR #98](https://github.com/akhilvuputuri/chief-agent/pull/98), reviewed by Opus 5.5). After the exporter was switched on the host, it resumed from the older saved cursor. That exported the missed line and re-sent 10 already-exported lines as duplicates, as the at-least-once contract allows.
 
 ## Verification and outcome
 
-Pending: independent review, CloudWatch delivery on the new host, the reader CLI, cutover and a matched acceptance ledger.
+### Cutover — 26 September 2026 (measured)
+
+1. **Rehearsal.** A live dump was restored into the staging database. All 66 tables had identical row counts and identical per-table content hashes (MD5 over rows ordered by their text form), and the schema hash matched. The rehearsal dump was then shredded.
+2. **Quiesce.** Automatic releases were disabled for the window. DigitalOcean showed no running runs, queued or running inputs, active tasks, pending routine deliveries, processing reminders, or scheduled daily items or routines. Only the old gateway was stopped (10:40:10 UTC), and Postgres had no other connections.
+3. **Dump and restore.** A final `pg_dump -Fc` with no exclusions (5,980,952 bytes) had the same SHA-256 on the old host, the operator Mac and Lightsail. `pg_restore --exit-on-error --no-owner --no-acl` went into a freshly recreated empty database and exited 0. Only the `companion` role and the `plpgsql` extension exist on either side.
+4. **Before starting.** 66 of 66 tables, 25,675 of 25,675 rows, every per-table content hash and the schema hash were identical to the quiesced source.
+5. **Gateway.** Only the gateway was started (`up -d --no-deps --no-build`). It was healthy at 10:40:55 UTC, about 45 seconds after the old one stopped. Startup recovery found nothing uncertain. The bot polls with no webhook, and the default menu button now points to the new origin.
+6. **Release path.** `CHIEF_DEPLOY_HOST` was switched to the Lightsail IP and `COMPANION_KNOWN_HOSTS` to the verified Lightsail host keys, and the workflow was re-enabled.
+   - The manual `release` run for `ebcc9dc` printed `{"deployed": …, "healthy": true}`, and the exact-commit receipt was recorded.
+   - The next ordinary merge (#98, `5988e52`) released automatically, with a matching receipt.
+   - Pruning left only `:latest` and `:rollback`.
+7. **Reboot.** The host came back 11 seconds after the reboot command. The gateway was healthy 24 seconds after, and Postgres, the exporter, host health, Caddy, the backup timer, Docker, the agent and swap all recovered. This test found the exporter gap described above.
+
+### Acceptance ledger
+
+| Area                                | Before (DigitalOcean)                        | After (Lightsail)                                                                                         | Limit                                                                                                                                                                                                                                                                                |
+| ----------------------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Runtime and release                 | `bca5596`, later `ebcc9dc`, healthy          | `ebcc9dc`, then `5988e52` via the normal release. Log lines carry the release SHA.                        | Health checks startup, not conversation quality.                                                                                                                                                                                                                                     |
+| Data                                | 66 tables, content hashes                    | Identical, including `reset_archive_20260907`                                                             | Hashes prove equality at cutover, not correctness of earlier data.                                                                                                                                                                                                                   |
+| Gmail (both accounts)               | Configured                                   | Token refresh and profile read return 200 with the expected mailbox for each account                      | Read-only lookup; no message content inspected.                                                                                                                                                                                                                                      |
+| Calendar                            | Configured                                   | Upcoming-events read returns 200                                                                          | No live event was created; approval creation needs an owner-approved draft.                                                                                                                                                                                                          |
+| Sheets (daily and preparation)      | Token refresh fails with `invalid_grant`     | The same `invalid_grant`                                                                                  | **Existing defect, not fixed here.** The same credential fails from the old host. Re-authorization is needed (`scripts/connect-sheets.mjs`).                                                                                                                                         |
+| Mini App                            | Old origin                                   | `/miniapp/` 200; `/api/miniapp/canvases` 401 without or with forged init data; `/healthz` and `/.env` 404 | Real signed Telegram launch not yet exercised. `GET /` returns an empty 200 on both hosts. The Caddyfile's `redir /miniapp/ 302` is parsed with `/miniapp/` as a path matcher, so the intended redirect never fires. This defect already existed and was not fixed in the migration. |
+| Schedules and tasks                 | None scheduled, no active tasks              | Same data                                                                                                 | No scheduled run due to observe.                                                                                                                                                                                                                                                     |
+| Approvals, memory, skills, canvases | Present                                      | Byte-identical tables                                                                                     | Behaviour covered by fixture tests; no live exercise.                                                                                                                                                                                                                                |
+| Backups                             | Nightly encrypted, last success 26 September | Encrypted backup ran successfully on the new host; timer scheduled                                        | Off-host backup copies remain future work.                                                                                                                                                                                                                                           |
+| Telegram text, voice, media         | Working per earlier acceptance               | **Pending owner message**                                                                                 | A synthetic user cannot be forged. The owner should send a short text, a voice note and a harmless image.                                                                                                                                                                            |
+| Logs to CloudWatch                  | None                                         | Gateway and host lines in both groups; `@timestamp` from `ts`; reader and publisher denials verified      | At-least-once: duplicates possible; journald non-blocking mode can drop lines under pressure.                                                                                                                                                                                        |
+
+### Fresh-agent log reading test
+
+A fresh Sonnet subagent received only a user-style report ("something failed while checking my calendar around 18:50 SGT"), a clean clone of the public repository, and the cloud reader credentials as environment secrets. It had no SSH, database or Mac-local context. A labelled synthetic `tool.finished` failure (`errorCode: SYNTHETIC_MIGRATION_TEST`) had been injected into the gateway's journal stream, so it travelled the real exporter and agent path.
+
+Using only `AGENTS.md`, `docs/troubleshooting.md`, `docs/operational-logs.md` and `docs/lightsail.md`, the agent:
+
+- found the failed `calendar_list` call with its run ID, release SHA and 30-second latency;
+- found the gateway restarts in the preceding 10 minutes;
+- summarized the last hour's activity;
+- correctly concluded that CloudWatch cannot prove cause and that Postgres is authoritative;
+- identified the line as likely synthetic.
+
+It also found a real defect. The documented first query, `errors`, returned no rows because Logs Insights matched nothing for `level in ["error", "warn"]`, while `level = "error" or level = "warn"` works (reproduced by the operator). The query was changed, with a regression test.
 
 ## Follow-up and next iteration
 
-The remaining steps are the host installation procedure, the bounded CloudWatch reader for Claude cloud and local sessions, the cutover, and the new sslip.io origin with its Telegram and Google console changes.
+- **Owner:** send a Telegram text, voice note and image, and open the Mini App from Telegram.
+- **Owner:** in the Claude cloud environment's private settings, add the `chief-log-reader-cloud` variables (from the private operations directory). Until then, the fresh-agent test above was run locally with the same credentials, not inside claude.ai.
+- **Owner:** update the Google OAuth branding URLs to the new origin if the consent screen needs them. BotFather's Mini App domain is optional because `web_app` buttons work without it.
+- **Owner:** re-authorize Sheets (existing `invalid_grant` defect).
+- **Owner:** decide when to retire the stopped DigitalOcean VM (about $24/month while it exists). Retirement should also revoke its operator and CI key entries. The final dump stays root-only on that host until then.
+- **Future:** off-host backup copies, and removing `copytruncate` from log rotation.

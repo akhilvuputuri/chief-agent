@@ -22,7 +22,7 @@ Node 22. `npm ci`, `npm run check`, `npm run build`, `npm run format:check`. Tes
 - Preserve owner scoping, tool validation, approvals, private skill versioning, cancellation and uncertain-write handling.
 - Do not add dollar caps. Keep existing model/provider price filters and time/model/tool allocations unless asked to change them.
 - No data reset, automatic resumption of paused tasks, paid infrastructure, runtime shell access, self-deployment, subagents or deferred eval migration without a specific request.
-- No secrets in source, examples, logs, artifacts or PRs. Production .env remains on DigitalOcean.
+- No secrets in source, examples, logs, artifacts or PRs. Production runs on one AWS Lightsail VM in Singapore; its `.env` stays on that host. See [Lightsail host and private logs](docs/lightsail.md).
 - Change the main OpenRouter model through `config/model-policy.json` and the normal reviewed PR/release path; do not ask the owner to edit production `.env` for an ordinary model switch. Keep provider price ceilings intact and verify the effective model from a post-release run. See [model selection](docs/deployment.md#changing-the-production-model-through-a-release).
 
 ## Cloud work and release
@@ -37,7 +37,7 @@ A push/merge to `main` triggers `checks`, then `release`. A pushed feature branc
 
 Run `npm run doctor:cloud` early when a task needs GitHub or production access; report missing capabilities rather than discovering them only after implementation.
 
-For runtime failures, use the manual `production-diagnostics` GitHub workflow if your GitHub access permits it. This returns bounded metadata rather than raw conversations. Never invent production findings when access is unavailable. Local browser sessions and SSH credentials are not inherited by cloud tasks.
+For runtime failures, first read the sanitized production logs with `npm run logs:cloudwatch` using the private log-reader identity from your environment (see [docs/lightsail.md](docs/lightsail.md#reading-logs)). Never run it in GitHub Actions, because this repository is public. The `production-diagnostics` workflow is guarded to private repositories and does not run while the repository is public. Never invent production findings when access is unavailable. Local browser sessions and SSH credentials are not inherited by cloud tasks.
 
 ## Required independent review loop
 

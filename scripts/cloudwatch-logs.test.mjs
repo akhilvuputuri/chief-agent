@@ -75,3 +75,11 @@ test("error output removes ARNs and account IDs", () => {
   assert.doesNotMatch(out, /123456789012|chief-log-reader|arn:aws/);
   assert.match(out, /not authorized to perform: logs:StartQuery/);
 });
+
+test("errors query avoids the level in-list form that Logs Insights matched nothing for", () => {
+  // Observed 26 September 2026: `filter level in ["error","warn"]` returned 0 rows
+  // while `level = "error"` matched the same line; see journal 35.
+  const q = QUERIES.errors.query();
+  assert.doesNotMatch(q, /level in/);
+  assert.match(q, /level = "error" or level = "warn"/);
+});

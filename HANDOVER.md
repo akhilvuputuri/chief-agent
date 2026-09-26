@@ -1,5 +1,7 @@
 # Personal-agent handover
 
+**Production host, 26 September 2026:** Chief runs on one AWS Lightsail VM in Singapore with the same Compose project and database. The move was verified by per-table content hashes. Sanitized operational logs go to CloudWatch, and local or cloud agents read them with `npm run logs:cloudwatch` and a read-only identity; no SSH is needed. Read [docs/lightsail.md](docs/lightsail.md) and [journal 35](docs/journey/35-lightsail-private-logs.md) for the procedure, the acceptance ledger and the pending owner checks. DigitalOcean references below are historical.
+
 Current verified milestone as of 26 September 2026 SGT: [v0.3.26](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.26), deployed `f3ab7f10bea05e436424712a03a757f8744d9c02` with exact release/server health and a rolled-back stock add/list check verified. Recheck the latest release and server `RELEASE` before claiming current production state. The larger context ceiling remains temporary; [issue #77](https://github.com/akhilvuputuri/chief-agent/issues/77) and the [context plan](docs/context-management.md) track bounded growth. For an incident, start with the [shared troubleshooting runbook](docs/troubleshooting.md); no agent should need this chat history to know the diagnostic paths or access limits.
 
 Start cloud tasks with [the end-to-end agent workflow](docs/cloud-agent-workflow.md). Independent review and exact deployment receipts are separate from CI.
@@ -29,8 +31,10 @@ The application is a general personal assistant. Telegram text and voice are the
 - Source: `/Users/akhilvuputuri/Dev/hermes-companion`
 - Private operations directory: `/Users/akhilvuputuri/Dev/hermes-companion-ops`
 - Repository: https://github.com/akhilvuputuri/chief-agent
-- Existing DigitalOcean host: `188.166.246.143`, `/opt/hermes-companion`, $24/month, Singapore.
-- SSH identity: private ops `hermes_do`, with pinned `known_hosts`.
+- Production host (since 26 September 2026): AWS Lightsail `chief-prod`, static IP `52.77.47.24`, `/opt/hermes-companion`, $12/month plan, Singapore. See [Lightsail host and private logs](docs/lightsail.md).
+- Operator SSH: user `ubuntu` with the private ops `lightsail_operator` key and pinned `known_hosts_lightsail`. The ops `ssh_config` defines `chief-lightsail`.
+- Former DigitalOcean host `188.166.246.143`: gateway stopped, kept for rollback until the owner retires it. Its key is the ops `hermes_do`.
+- Production logs: `npm run logs:cloudwatch` with the reader identity (local profile `chief-logs`).
 
 Secrets live only in private environment/operations files and server configuration. Never print or commit their contents. Existing Telegram pairing and Google authorization should be reused. The user authorized merging passing changes and deploying on this server.
 
