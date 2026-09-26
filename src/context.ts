@@ -64,10 +64,21 @@ export class ContextLimitError extends Error {
     );
   }
 }
+/** Character sizes of the fixed envelope's parts (issue #77 measurement). */
+export type FixedParts = {
+  instructions: number;
+  memories: number;
+  runtimeContext: number;
+  tools: number;
+  toolCount: number;
+  summary: number;
+  message: number;
+};
 type ContextSelection = {
   omitted: number;
   overBudget: boolean;
   fixedSize: number;
+  fixedParts: FixedParts;
   reservedSize: number;
   exchangeSize: number;
   workingSize: number;
@@ -83,13 +94,22 @@ export function context(
   compactForWire = false,
 ): ContextSelection {
   const summary = request.conversationSummary ?? "";
+  const fixedParts: FixedParts = {
+    instructions: (request.systemInstructions ?? instructions).length,
+    memories: JSON.stringify(request.memories).length,
+    runtimeContext: request.runtime?.context.length ?? 0,
+    tools: JSON.stringify(request.runtime?.tools ?? []).length,
+    toolCount: request.runtime?.tools?.length ?? 0,
+    summary: summary.length,
+    message: reqSize(request.message),
+  };
   const fixedSize =
-    (request.systemInstructions ?? instructions).length +
-    JSON.stringify(request.memories).length +
-    (request.runtime?.context.length ?? 0) +
-    JSON.stringify(request.runtime?.tools ?? []).length +
-    summary.length +
-    reqSize(request.message) +
+    fixedParts.instructions +
+    fixedParts.memories +
+    fixedParts.runtimeContext +
+    fixedParts.tools +
+    fixedParts.summary +
+    fixedParts.message +
     2000;
   // The newest completed exchange anchors short replies (including missing date/time answers).
   // Fixed schemas and unrelated state must never silently evict this conversational relationship.
@@ -258,6 +278,7 @@ export function context(
     omitted,
     overBudget,
     fixedSize,
+    fixedParts,
     reservedSize,
     exchangeSize,
     workingSize,

@@ -53,6 +53,17 @@ const fields: Record<string, Shape> = {
   httpStatus: "count",
   uptimeS: "count",
   rssMb: "count",
+  fixedChars: "count",
+  instructionsChars: "count",
+  memoriesChars: "count",
+  runtimeContextChars: "count",
+  toolsChars: "count",
+  toolCount: "count",
+  summaryChars: "count",
+  messageChars: "count",
+  protectedHistoryChars: "count",
+  serializedChars: "count",
+  omittedCount: "count",
   uncertainCalls: "count",
   interruptedCalls: "count",
   failedRuns: "count",
@@ -253,6 +264,28 @@ const projections: Record<string, Projection> = {
     { runId: run, stopReason: d.stopReason },
   ],
   "turn.failed": (run) => ["error", { runId: run }],
+  // Sizes only, no content: lets the fixed envelope be measured per model call.
+  "context.selected": (run, d) => [
+    "info",
+    {
+      runId: run,
+      fixedChars: d.fixedSize,
+      instructionsChars: d.fixedParts?.instructions,
+      memoriesChars: d.fixedParts?.memories,
+      runtimeContextChars: d.fixedParts?.runtimeContext,
+      toolsChars: d.fixedParts?.tools,
+      toolCount: d.fixedParts?.toolCount,
+      summaryChars: d.fixedParts?.summary,
+      messageChars: d.fixedParts?.message,
+      // Exchange + current-turn working set + reserved groups; excludes bounded older history.
+      protectedHistoryChars:
+        typeof d.exchangeSize === "number" && typeof d.workingSize === "number"
+          ? d.exchangeSize + d.workingSize + (d.reservedSize ?? 0)
+          : undefined,
+      serializedChars: d.serializedSize,
+      omittedCount: d.omitted,
+    },
+  ],
   "context.over_budget": (run) => ["warn", { runId: run, phase: "context" }],
   "context.failed": (run) => ["error", { runId: run, phase: "context" }],
   "conversation.routed": (run, d) => [

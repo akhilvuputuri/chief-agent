@@ -441,3 +441,35 @@ test("error identity extraction never throws and unknown cost stays null", () =>
     log.restore();
   }
 });
+
+test("context.selected projects component sizes only", () => {
+  const log = capture();
+  try {
+    projectEvent("context.selected", randomUUID(), {
+      fixedSize: 72000,
+      fixedParts: {
+        instructions: 13463,
+        memories: 2463,
+        runtimeContext: 9000,
+        tools: 38480,
+        toolCount: 70,
+        summary: 0,
+        message: PRIVATE[0],
+      },
+      exchangeSize: 900,
+      workingSize: 500,
+      reservedSize: 100,
+      serializedSize: 76000,
+      omitted: 12,
+    });
+    assertClean(log.lines);
+    const [line] = log.parsed();
+    assert.equal(line.toolsChars, 38480);
+    assert.equal(line.toolCount, 70);
+    assert.equal(line.protectedHistoryChars, 1500);
+    assert.equal("messageChars" in line, false);
+    assert.equal(line.dropped, 1);
+  } finally {
+    log.restore();
+  }
+});
