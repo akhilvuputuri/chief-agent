@@ -135,6 +135,10 @@ Using only `AGENTS.md`, `docs/troubleshooting.md`, `docs/operational-logs.md` an
 
 It also found a real defect. The documented first query, `errors`, returned no rows because Logs Insights matched nothing for `level in ["error", "warn"]`, while `level = "error" or level = "warn"` works (reproduced by the operator). The query was changed, with a regression test.
 
+### Release closure — 26 September 2026
+
+[PR #99](https://github.com/akhilvuputuri/chief-agent/pull/99) was approved at `e667883` and merged as `9c7b67cfa19eec1e9d774b93986a922c41221eb5`. The automatic release deployed it to Lightsail, reported startup health and recorded an exact-commit receipt. The server `RELEASE` matched, and CloudWatch showed the release sequence `ebcc9dc` → `5988e52` → `9c7b67c`. The immutable [v0.3.27](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.27) tag resolves to that commit.
+
 ## Follow-up and next iteration
 
 - **Owner:** send a Telegram text, voice note and image, and open the Mini App from Telegram.
@@ -142,4 +146,4 @@ It also found a real defect. The documented first query, `errors`, returned no r
 - **Owner:** update the Google OAuth branding URLs to the new origin if the consent screen needs them. BotFather's Mini App domain is optional because `web_app` buttons work without it.
 - **Owner:** re-authorize Sheets (existing `invalid_grant` defect).
 - **Owner:** decide when to retire the stopped DigitalOcean VM (about $24/month while it exists). Retirement should also revoke its operator and CI key entries. The final dump stays root-only on that host until then.
-- **Future:** off-host backup copies, and removing `copytruncate` from log rotation.
+- **Future:** off-host backup copies, removing `copytruncate` from log rotation, and fixing the Caddy root redirect (`redir * /miniapp/ 302` or equivalent, validated before reload).

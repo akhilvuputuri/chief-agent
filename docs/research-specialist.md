@@ -18,7 +18,7 @@ Cancellation propagates to the child model request and prevents later dispatch. 
 
 ## Trace inspection
 
-While the repository is private, local and cloud tasks can use the `production-diagnostics` workflow for bounded metadata; while it is public, use `npm run logs:cloudwatch` (for example `run --run <parentRunId>` shows `research.child_started` and `research.completed` lines). Its `research` field contains up to 100 parent/child links from the last seven days, counters and stop reasons. The root-owned `scripts/cloud-release.py` handler must be installed by an operator when that script changes; deploying application code alone does not update it. Metadata is insufficient for a semantic review.
+While the repository is private, local and cloud tasks can use the `production-diagnostics` workflow for bounded metadata; while it is public, use `npm run logs:cloudwatch` (for example `run --run <parentRunId>` shows `research.child_started` and `research.completed` lines). The diagnostics `research` field contains up to 100 parent/child links from the last seven days, counters and stop reasons. The root-owned `scripts/cloud-release.py` handler must be installed by an operator when that script changes; deploying application code alone does not update it. Metadata is insufficient for a semantic review.
 
 Private Postgres records provide the detailed evidence:
 
