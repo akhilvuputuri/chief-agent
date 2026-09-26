@@ -15,9 +15,20 @@ cursor=/var/lib/chief/gateway.cursor
 work=/var/lib/chief/gateway.cursor.pass
 out=/var/log/chief/gateway.jsonl
 failures=0
+fail() {
+  failures=$((failures + 1))
+  echo "export pass failed: $1" >&2
+  # Surface a persistent failure as service restarts instead of a silent stall.
+  [ "$failures" -ge 12 ] && exit 1
+  sleep 5
+}
 while true; do
   rm -f "$work"
-  [ -f "$cursor" ] && cp "$cursor" "$work"
+  # A missing or unwritable output would look like "no new lines" to the
+  # pipeline, and a failed cursor copy would reread the whole journal: treat
+  # both as failed passes that leave the saved cursor unchanged.
+  if [ -f "$cursor" ] && ! cp "$cursor" "$work"; then fail "cursor copy"; continue; fi
+  if ! { : >>"$out"; } 2>/dev/null; then fail "output not writable"; continue; fi
   journalctl --output=cat --cursor-file="$work" CONTAINER_NAME=hermes-companion-gateway-1 |
     grep '^{"schema":"chief\.ops/1",' >>"$out"
   status=("${PIPESTATUS[@]}")
@@ -26,10 +37,8 @@ while true; do
     [ -f "$work" ] && mv "$work" "$cursor"
     failures=0
   else
-    failures=$((failures + 1))
-    echo "export pass failed: journalctl=${status[0]} grep=${status[1]}" >&2
-    # Surface a persistent failure as service restarts instead of a silent stall.
-    [ "$failures" -ge 12 ] && exit 1
+    fail "journalctl=${status[0]} grep=${status[1]}"
+    continue
   fi
   sleep 5
 done
