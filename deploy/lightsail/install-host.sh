@@ -58,6 +58,10 @@ if ! dpkg-query -W -f='${Version}' amazon-cloudwatch-agent 2>/dev/null | grep -q
 fi
 install -m 644 "$here/common-config.toml" /opt/aws/amazon-cloudwatch-agent/etc/common-config.toml
 install -m 644 "$here/cloudwatch-agent.json" /opt/aws/amazon-cloudwatch-agent/etc/chief.json
+# The agent's on-premises config translator needs the profile's region.
+install -d -m 700 /root/.aws
+printf '[profile AmazonCloudWatchAgent]\nregion = ap-southeast-1\n' > /root/.aws/config
+chmod 600 /root/.aws/config
 if [ -s /root/.aws/credentials ]; then
   /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m onPremise -s \
     -c file:/opt/aws/amazon-cloudwatch-agent/etc/chief.json

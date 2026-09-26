@@ -63,7 +63,7 @@ sudo CWAGENT_VERSION=1.300073.0b1828 deploy/lightsail/install-host.sh
 
 The script installs Docker, Compose, Caddy and the ingress routes, journald limits, the Docker log driver, the exporter, host health, logrotate, the CloudWatch agent, and the backup units. It does not start the gateway or write application secrets. It then prints the installed package versions. Separately, the operator:
 
-- installs the publisher credential file (mode 0600) and restarts the agent;
+- installs the publisher credential file `/root/.aws/credentials` (mode 0600, profile `AmazonCloudWatchAgent`; the script writes the matching region in `/root/.aws/config`) and starts the agent with `amazon-cloudwatch-agent-ctl -a fetch-config -m onPremise -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/chief.json`. The agent log may warn about "unused shared config file" even though it reports the file-based credentials provider; check ingestion instead;
 - copies `/etc/hermes-backup-recipient.pem` (public certificate) so the nightly encrypted backup is enabled;
 - installs `scripts/cloud-release.py` as `/usr/local/sbin/companion-cloud-release` (root, 0755) and the CI public key in root's `authorized_keys` with the restriction above;
 - places the source tree for the exact release in `/opt/hermes-companion` with `RELEASE`.

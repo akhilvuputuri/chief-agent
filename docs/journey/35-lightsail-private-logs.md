@@ -42,6 +42,27 @@ Smaller findings:
 
 Fixes: only host-defined operation names are logged (otherwise `unknown`), `callId` is the journal row ID, and there are `tool.started` and `runtime.recovered` lines. The duplicate projection is removed. `telegram.delivery_error` carries a `phase`, error extraction cannot throw, startup refusals have fixed codes, and unknown cost is `null`. Regression tests were added for each.
 
+### Release of the log projection — 26 September
+
+PR #94 was merged as `9af92ee1c16b28b4a6f10d7029dffed4be2152e7` after an independent Opus 5.5 approval of head `1e71e8e`. The automatic release deployed it to the DigitalOcean host. The exact-commit receipt reported startup health, and the server `RELEASE` matched. The gateway's stdout then contained `gateway.started`, `runtime.recovered` and `library.recovered` lines. `release` is null on that host because its installed handler does not pass the build argument.
+
+### Host staging — 26 September (measured)
+
+- **Host install:** `deploy/lightsail/install-host.sh` ran on the new VM. It installed Docker 29.1.3, Compose 2.40.3 (the same versions as the old host), Caddy 2.6.2 and CloudWatch agent `1.300073.0b1828`. The agent's signing-key fingerprint matched the AWS-documented value, and the package signature verified.
+- **Caddy routes:** Caddy obtained a Let's Encrypt certificate for `companion.52-77-47-24.sslip.io`. `/about` returned 200, `/healthz` and `/.env` returned 404, and HTTP redirected with 308.
+- **Log delivery:** a host-health line reached `/chief/prod/host` and was read back with `npm run logs:cloudwatch -- host` under the local reader identity.
+- **Identities:** three IAM users (publisher, local reader, cloud reader), each with one inline policy and no managed policies or groups.
+- **Real denials:**
+  - The reader could not `PutLogEvents` or query another group.
+  - The publisher could not `StartQuery`, create a stream in another group, or change retention.
+- **Policy simulator:** it agreed on the denials, but reported `PutLogEvents` and `CreateLogStream` as implicitly denied even for the publisher's own stream, although real publishing worked. The simulator is therefore not used as evidence for stream-level allows.
+- **Release access:** the restricted CI key on the new host refused `id` and a malformed deploy. The installed handler's SHA-256 matched `scripts/cloud-release.py`.
+- **Application staging:**
+  - The exact `9af92ee` tree was copied. The `compose.yaml` hash matched the old host.
+  - The private environment was copied host to host. Apart from `MINIAPP_ORIGIN`, its hash was identical, and it is root-only (0600).
+  - The image was built with `RELEASE_SHA` in 64 seconds, with peak memory in use of 973 MB of 2 GB.
+  - Only Postgres 17.11 is running. No gateway container exists.
+
 ## Verification and outcome
 
 Pending: independent review, CloudWatch delivery on the new host, the reader CLI, cutover and a matched acceptance ledger.
