@@ -7,8 +7,12 @@ BASE = pathlib.Path("/opt/hermes-companion")
 
 
 def run(*args):
-    result = subprocess.run(args, capture_output=True, text=True, timeout=20)
-    return result.stdout.strip() if result.returncode == 0 else None
+    # systemctl is-active exits non-zero for "inactive"/"failed"; keep its answer.
+    try:
+        result = subprocess.run(args, capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return result.stdout.strip() or None
 
 
 def main():
