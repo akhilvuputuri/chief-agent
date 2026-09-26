@@ -24,7 +24,7 @@ const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$/;
 const EVENT = /^[a-z][a-z0-9_.]{0,79}$/;
 
 const common =
-  "fields @timestamp, ts, level, event, runId, parentRunId, childRunId, taskId, callId, operation, state, stopReason, errorCode, errorCategory, httpStatus, latencyMs, model, release";
+  "fields @timestamp, ts, level, event, runId, parentRunId, childRunId, taskId, callId, operation, state, stopReason, errorCode, errorCategory, httpStatus, latencyMs, model, provider, kind, lane, inputId, approvalId, approved, messages, attempt, transient, costUsd, release";
 
 export const QUERIES = {
   errors: {
@@ -38,7 +38,7 @@ export const QUERIES = {
     help: "timeline for --run ID (also matches parent/child runs, input and task IDs)",
     needsRun: true,
     query: (id) =>
-      `${common}, inputId, ref | filter runId = "${id}" or parentRunId = "${id}" or childRunId = "${id}" or inputId = "${id}" or taskId = "${id}" | sort @timestamp asc`,
+      `${common}, ref | filter runId = "${id}" or parentRunId = "${id}" or childRunId = "${id}" or inputId = "${id}" or taskId = "${id}" | sort @timestamp asc`,
   },
   event: {
     group: "runtime",

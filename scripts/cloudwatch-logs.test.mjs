@@ -83,3 +83,21 @@ test("errors query avoids the level in-list form that Logs Insights matched noth
   assert.doesNotMatch(q, /level in/);
   assert.match(q, /level = "error" or level = "warn"/);
 });
+
+test("event and run queries show delivery, routing and approval fields", () => {
+  for (const name of ["event", "run", "errors"]) {
+    const q = QUERIES[name].query("run-1", "telegram.delivered");
+    for (const field of ["kind", "lane", "inputId", "approvalId", "approved"])
+      assert.match(q, new RegExp(`\\b${field}\\b`), `${name} ${field}`);
+  }
+});
+
+test("no saved query lists a display field twice", () => {
+  for (const [name, spec] of Object.entries(QUERIES)) {
+    const q = spec.query("run-1", "tool.finished");
+    const m = /^fields ([^|]+)/.exec(q);
+    if (!m) continue;
+    const fields = m[1].split(",").map((f) => f.trim());
+    assert.equal(new Set(fields).size, fields.length, name);
+  }
+});
