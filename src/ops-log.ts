@@ -61,7 +61,7 @@ const fields: Record<string, Shape> = {
   toolCount: "count",
   summaryChars: "count",
   messageChars: "count",
-  historyChars: "count",
+  protectedHistoryChars: "count",
   serializedChars: "count",
   omittedCount: "count",
   uncertainCalls: "count",
@@ -277,7 +277,8 @@ const projections: Record<string, Projection> = {
       toolCount: d.fixedParts?.toolCount,
       summaryChars: d.fixedParts?.summary,
       messageChars: d.fixedParts?.message,
-      historyChars:
+      // Exchange + current-turn working set + reserved groups; excludes bounded older history.
+      protectedHistoryChars:
         typeof d.exchangeSize === "number" && typeof d.workingSize === "number"
           ? d.exchangeSize + d.workingSize + (d.reservedSize ?? 0)
           : undefined,

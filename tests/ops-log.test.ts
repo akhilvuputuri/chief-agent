@@ -466,7 +466,7 @@ test("context.selected projects component sizes only", () => {
     const [line] = log.parsed();
     assert.equal(line.toolsChars, 38480);
     assert.equal(line.toolCount, 70);
-    assert.equal(line.historyChars, 1500);
+    assert.equal(line.protectedHistoryChars, 1500);
     assert.equal("messageChars" in line, false);
     assert.equal(line.dropped, 1);
   } finally {
