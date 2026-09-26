@@ -7,7 +7,9 @@ import {
   parseArgs,
   parseTime,
   redact,
+  clientOptions,
 } from "./cloudwatch-logs.mjs";
+import { HttpsProxyAgent } from "https-proxy-agent";
 
 const now = 1_800_000_000;
 
@@ -100,4 +102,15 @@ test("no saved query lists a display field twice", () => {
     const fields = m[1].split(",").map((f) => f.trim());
     assert.equal(new Set(fields).size, fields.length, name);
   }
+});
+
+test("uses the session proxy only when HTTPS_PROXY is set", () => {
+  const direct = clientOptions({});
+  assert.equal(direct.requestHandler.httpsAgent, undefined);
+  assert.equal(direct.region, "ap-southeast-1");
+  const proxied = clientOptions({ HTTPS_PROXY: "http://127.0.0.1:3128" });
+  assert.ok(proxied.requestHandler.httpsAgent instanceof HttpsProxyAgent);
+  assert.equal(proxied.requestHandler.throwOnRequestTimeout, true);
+  const lower = clientOptions({ https_proxy: "http://127.0.0.1:3128" });
+  assert.ok(lower.requestHandler.httpsAgent instanceof HttpsProxyAgent);
 });
