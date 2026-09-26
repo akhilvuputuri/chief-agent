@@ -52,6 +52,10 @@ change the watchlist, matching the routine-management boundary.
   use the extended quote's price and percent change for the comparison, and an
   item whose extended quote is missing or stale is skipped rather than
   silently compared against the regular-session price.
+  Nasdaq listing segments `XNGS`, `XNMS` and `XNCM` use the same US sessions
+  as operating MIC `XNAS`; the provider's original segment MIC is retained
+  for instrument identity and quote requests. Unknown/non-US MICs still fail
+  closed. See the [ISO MIC registry](https://www.iso20022.org/market-identifier-codes).
 - **Once per stock per trading day**: at most one alert row per
   `(item, trading_date)`; repeated breaches the same day are logged as
   `suppressed_today`. A new trading day may alert again. Enabling a watch that
