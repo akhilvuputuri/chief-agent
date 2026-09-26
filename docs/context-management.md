@@ -8,6 +8,17 @@ Status: **proposed**, not implemented. The v0.3.22 increase to a 400,000-charact
 
 On 22 September a mailbox run failed **before** the model request after 21 tool calls: fixed input 67,736 characters, earlier current-turn work 43,291, preceding exchange 961 and latest group 15,070 exceeded the former 120,000-character guard. A continuation failed with a 36,526-character preceding exchange. A representative local inventory had 62 tool schemas occupying 33,815 characters. These measurements identify application growth; they do not prove provider context exhaustion or a particular semantic mistake. The 400,000-character ceiling delays the same failure and may permit larger, costlier prompts.
 
+## Stage 1 measurements — 26 September 2026
+
+- **Offline inventory** (`npm run context:inventory`, repository definitions only, every integration enabled):
+  - 70 tool schemas take **38,480 characters**. The largest domains are canvas (4 tools, 8,135), work (7, 3,672), job (8, 3,402), preparation (5, 2,908) and parcel (3, 2,798). `canvas_update` and `canvas_create` are about 3,700 each.
+  - The core instructions are 13,463 characters, and the base runtime state 2,544. `TOOL_DESCRIPTION` in `protocol.ts` (3,587 characters) is imported but never sent.
+- **Production, sizes only** (26 September, 20 model calls): the fixed envelope was 72,159–73,678 characters, while the soft history allowance is 48,000. 19 of those 20 context selections omitted older history. Memories were only 2,463 characters, so most of the remaining difference is owner runtime state, conversation summary and the current message. This is not yet split per call.
+- **Tool use over 30 days** (93 runs, about 580 journaled calls): about 40 of the 70 offered tools were called. Most used were `web_search` (124), `job_analyze` (71), `web_read` (50), `job_alignment_input` (42), `finish_turn` (39) and `conversation_search` (34). Canvas tools were called **zero** times, yet their schemas are sent on every call.
+- **Instrumentation:** `context.selected` now records the fixed-envelope parts (instructions, memories, runtime context, tool schemas with count, summary, message). The sanitized operational log projects them as numbers only (see [operational logs](operational-logs.md)), so stage 2 can be compared per call with `npm run logs:cloudwatch -- event --event context.selected`.
+
+These are character counts, not provider tokens. Provider-reported token and cache usage stays in `model.completed`.
+
 ## Implementation plan
 
 1. **Baseline and replay.** Create sanitized fixtures shaped like the 21-call mailbox run, a large previous exchange, two-account source selection, a topic switch while a background job runs, and the exact selected job-role scope. Record prompt components, actual provider usage when available, cache reads, latency, cost and stop reason. Never commit private prompt text.

@@ -27,7 +27,8 @@
     "doctor:cloud": "node scripts/cloud-doctor.mjs",
     "plugins": "node --import tsx src/plugin-cli.ts",
     "release:status": "node scripts/release-status.mjs",
-    "logs:cloudwatch": "node scripts/cloudwatch-logs.mjs"
+    "logs:cloudwatch": "node scripts/cloudwatch-logs.mjs",
+    "context:inventory": "tsx scripts/context-inventory.ts"
   },
   "dependencies": {
     "@grammyjs/runner": "^2.0.3",

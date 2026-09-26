@@ -159,6 +159,7 @@ export class CustomAgent implements Agent {
             );
             await execution.trace("context.selected", {
               fixedSize: input.fixedSize,
+              fixedParts: input.fixedParts,
               reservedSize: input.reservedSize,
               exchangeSize: input.exchangeSize,
               workingSize: input.workingSize,
