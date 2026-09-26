@@ -15,11 +15,13 @@ const NY = "America/New_York";
 const US_MICS = new Set([
   "XNYS", // NYSE
   "XNAS", // Nasdaq
+  "XNGS", // Nasdaq Global Select Market (listing segment)
+  "XNMS", // Nasdaq Global Market (listing segment)
+  "XNCM", // Nasdaq Capital Market (listing segment)
   "XASE", // NYSE American
   "ARCX", // NYSE Arca
   "BATS", // Cboe BZX
   "IEXG", // IEX
-  "XNAS", // (dup guard)
   "XBOS", // Nasdaq BX
   "XPHL", // Nasdaq PHLX
   "XCIS", // National

@@ -18,6 +18,10 @@ Migration 006 is additive and applies its cutover once. It archives original Her
 
 Inspect the owner's `runtime_calls` joined to `runtime_runs`, the matching `tool_receipts`, and the destination state. Determine whether the action occurred. Record the verified result and resolve that invocation explicitly; never clear an uncertainty flag merely to retry. Then the owner may grant more budget with `/continue`. Keep this operator-only until a review UI exists.
 
+The current guard is owner-wide: one unresolved runtime write blocks unrelated runtime writes. Approval outcomes and runtime-call outcomes are separate records; fixing an approval does not reconcile an older uncertain `calendar_draft` call. Read tools must remain usable for inspection, including `watchlist_list`.
+
+For an old `calendar_draft` invocation, the destination is the local `calendar_create` approval, not Google Calendar: drafting never creates an external event. An operator may record a definite failed draft only after checking the exact call's owner/run, confirming that its run is stopped, and finding neither a matching approval, a successful draft receipt, nor a `calendar.created` event in that run. Lock and conditionally update only that invocation, retain its original error/result, append dated reconciliation evidence and a `runtime.call_reconciled` event, and verify the affected row count. If any of those checks is inconclusive, preserve `uncertain`. Never apply this rule to `calendar_create` or another external write; never automatically reset uncertain calls during release.
+
 ## Evidence limitations
 
 Completion guards require matched recorded evidence or successful receipts for the declared operation. Applicability labels and semantic coverage are still model judgments. A completed ledger is not independent factual certification. `/status` reports these records; ordinary Telegram answers remain model-written.

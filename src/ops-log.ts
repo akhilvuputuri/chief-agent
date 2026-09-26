@@ -195,7 +195,7 @@ const num = (v: unknown) =>
   typeof v === "number" && Number.isFinite(v) ? v : undefined;
 
 function usageFields(usage: unknown): OpsFields {
-  if (!usage || typeof usage !== "object") return {};
+  if (!usage || typeof usage !== "object") return { costUsd: null };
   const u = usage as Record<string, any>;
   return {
     inputTokens: num(u.prompt_tokens),

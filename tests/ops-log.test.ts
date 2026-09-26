@@ -435,6 +435,8 @@ test("error identity extraction never throws and unknown cost stays null", () =>
     const [line] = log.parsed();
     assert.equal(line.costUsd, null);
     assert.equal("costUsd" in line, true);
+    projectEvent("model.completed", randomUUID(), { usage: null });
+    assert.equal(log.parsed()[1].costUsd, null);
   } finally {
     log.restore();
   }

@@ -16,6 +16,10 @@ import {
 } from "../src/stock-provider.js";
 import { ensureUser, type Database } from "../src/db.js";
 import { runtimeContext } from "../src/runtime.js";
+import { Assistant } from "../src/agent.js";
+import { CustomAgent } from "../src/custom-agent.js";
+import { JobTools } from "../src/tools.js";
+import { marketCalendar, sessionsFor } from "../src/market-calendar.js";
 
 const NY = "America/New_York";
 const MIC = "XNAS";
@@ -155,6 +159,219 @@ async function fixture(now: Date) {
     OPEN,
   };
 }
+
+test("Nasdaq listing segments use US sessions while unknown/non-US venues remain unsupported", () => {
+  for (const mic of ["XNGS", "XNMS", "XNCM"]) {
+    assert.deepEqual(marketCalendar(mic), { timezone: NY });
+    for (const date of ["2026-01-15", "2026-01-17", "2026-07-03", "2026-11-27"])
+      assert.deepEqual(sessionsFor(mic, date), sessionsFor("XNAS", date));
+  }
+  for (const mic of ["XMEX", "XBOG", "XWAR", "XWBO", "XNDQ", "UNKNOWN", ""])
+    assert.equal(marketCalendar(mic), null);
+});
+
+test("real-shaped Nasdaq search results retain their segment MIC through add, quote and alert", async () => {
+  const f = await fixture(new Date("2026-01-15T15:30:00Z"));
+  const original = globalThis.fetch;
+  const requests: { path: string; mic: string | null }[] = [];
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    requests.push({
+      path: url.pathname,
+      mic: url.searchParams.get("mic_code"),
+    });
+    if (url.pathname === "/symbol_search")
+      return Response.json({
+        data: [
+          {
+            symbol: "AAPL",
+            instrument_name: "Apple Inc",
+            exchange: "NASDAQ",
+            mic_code: "XNGS",
+            exchange_timezone: NY,
+            currency: "USD",
+            instrument_type: "Common Stock",
+          },
+          {
+            symbol: "AAPL",
+            exchange: "BMV",
+            mic_code: "XMEX",
+            currency: "MXN",
+            instrument_type: "Common Stock",
+          },
+        ],
+      });
+    assert.equal(url.pathname, "/quote");
+    return Response.json({
+      symbol: "AAPL",
+      currency: "USD",
+      close: "90",
+      previous_close: "100",
+      percent_change: "-10",
+      last_quote_at: f.OPEN.getTime() / 1000,
+      datetime: "2026-01-15",
+      is_market_open: true,
+    });
+  };
+  try {
+    const provider = new TwelveDataProvider("test-key");
+    const tools = new WatchlistTools(f.db, provider);
+    const ambiguous = await tools.call("a", f.run, {
+      operation: "watchlist_add",
+      query: "AAPL",
+    });
+    assert.equal(
+      ambiguous.needsChoice,
+      true,
+      "exchange selection stays explicit",
+    );
+    assert.equal(
+      (await f.db.query("SELECT count(*)::int AS n FROM watchlist_items"))
+        .rows[0].n,
+      0,
+    );
+    const added = await tools.call("a", f.run, {
+      operation: "watchlist_add",
+      query: "AAPL",
+      exchange: "NASDAQ",
+      dropPct: 5,
+    });
+    assert.equal(
+      added.added.mic_code,
+      "XNGS",
+      "persist exact provider identity",
+    );
+    const monitor = new StockMonitor(
+      f.db,
+      provider,
+      (u) => u === "a",
+      () => f.OPEN,
+    );
+    await monitor.tick();
+    assert.deepEqual(
+      requests.filter((r) => r.path === "/quote"),
+      [{ path: "/quote", mic: "XNGS" }],
+    );
+    assert.equal((await f.alerts(added.added.id)).length, 1);
+    assert.equal((await f.observations(added.added.id))[0].decision, "alerted");
+    assert.equal(
+      (await tools.call("b", f.run, { operation: "watchlist_list" })).items
+        .length,
+      0,
+    );
+  } finally {
+    globalThis.fetch = original;
+    await f.pg.close();
+  }
+});
+
+test("uncertain writes permit owner-scoped watchlist inspection but still block additions", async () => {
+  const f = await fixture(new Date("2026-01-15T15:30:00Z"));
+  try {
+    await f.add(5);
+    const oldRun = randomUUID();
+    await f.db.query(
+      "INSERT INTO runtime_runs(id,user_id,state,stop_reason) VALUES($1,'a','stopped','failed')",
+      [oldRun],
+    );
+    await f.db.query(
+      "INSERT INTO runtime_calls(id,run_id,call_id,operation,arguments,is_write,state) VALUES($1,$2,'old-write','calendar_draft','{}',true,'uncertain')",
+      [randomUUID(), oldRun],
+    );
+    let round = 0;
+    const assistant = new Assistant(
+      f.db,
+      new CustomAgent({
+        generate: async (input) => {
+          round++;
+          const observation = input.messages.findLast((m) => m.role === "tool");
+          if (round === 2) {
+            const result = JSON.parse(observation!.content!).result;
+            assert.equal(result.items.length, 1);
+            assert.equal(result.items[0].symbol, "ACME");
+          }
+          if (round === 3) {
+            assert.match(
+              observation!.content!,
+              /An uncertain write requires inspection/,
+            );
+            return {
+              message: {
+                role: "assistant",
+                content:
+                  "The saved watch is visible; the new write is blocked.",
+              },
+            };
+          }
+          return {
+            message: {
+              role: "assistant",
+              content: null,
+              tool_calls: [
+                {
+                  id: randomUUID(),
+                  type: "function",
+                  function: {
+                    name: round === 1 ? "watchlist_list" : "watchlist_add",
+                    arguments: JSON.stringify(
+                      round === 1 ? {} : { query: "OTHER", dropPct: 5 },
+                    ),
+                  },
+                },
+              ],
+            },
+          };
+        },
+      }),
+      new JobTools(
+        f.db,
+        { call: async () => ({}) },
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        f.tools,
+      ),
+      { stocks: true },
+    );
+    const response = await assistant.respondDetailed(
+      "a",
+      "Show my watchlist and add another stock",
+    );
+    const calls = (
+      await f.db.query(
+        "SELECT operation,is_write,state FROM runtime_calls WHERE run_id=$1 ORDER BY started_at",
+        [response.runId],
+      )
+    ).rows;
+    assert.deepEqual(calls, [
+      { operation: "watchlist_list", is_write: false, state: "success" },
+      { operation: "watchlist_add", is_write: true, state: "failed" },
+    ]);
+    assert.equal(
+      f.provider.calls.search,
+      1,
+      "blocked add never reaches the provider",
+    );
+    assert.equal(
+      (await f.tools.call("b", f.run, { operation: "watchlist_list" })).items
+        .length,
+      0,
+    );
+    assert.equal(
+      (
+        await f.db.query("SELECT state FROM runtime_calls WHERE run_id=$1", [
+          oldRun,
+        ])
+      ).rows[0].state,
+      "uncertain",
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
 
 test("watchlist tools add, list, update, settings and remove with owner scope", async () => {
   const f = await fixture(new Date("2026-01-15T15:30:00Z"));
