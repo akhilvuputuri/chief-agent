@@ -91,3 +91,13 @@ test("event and run queries show delivery, routing and approval fields", () => {
       assert.match(q, new RegExp(`\\b${field}\\b`), `${name} ${field}`);
   }
 });
+
+test("no saved query lists a display field twice", () => {
+  for (const [name, spec] of Object.entries(QUERIES)) {
+    const q = spec.query("run-1", "tool.finished");
+    const m = /^fields ([^|]+)/.exec(q);
+    if (!m) continue;
+    const fields = m[1].split(",").map((f) => f.trim());
+    assert.equal(new Set(fields).size, fields.length, name);
+  }
+});

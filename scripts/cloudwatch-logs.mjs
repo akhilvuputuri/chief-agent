@@ -38,7 +38,7 @@ export const QUERIES = {
     help: "timeline for --run ID (also matches parent/child runs, input and task IDs)",
     needsRun: true,
     query: (id) =>
-      `${common}, inputId, ref | filter runId = "${id}" or parentRunId = "${id}" or childRunId = "${id}" or inputId = "${id}" or taskId = "${id}" | sort @timestamp asc`,
+      `${common}, ref | filter runId = "${id}" or parentRunId = "${id}" or childRunId = "${id}" or inputId = "${id}" or taskId = "${id}" | sort @timestamp asc`,
   },
   event: {
     group: "runtime",
