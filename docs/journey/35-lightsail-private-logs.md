@@ -89,7 +89,7 @@ A re-review of `7ea9996` found one more problem. The new signer check piped gpg 
 
 ### Reboot finding — 26 September
 
-A reboot test of the new host showed a gap in the logs. The gateway wrote `gateway.stopping` to the local journal at 10:47:48, but the exporter had stopped moments earlier, and after boot the line was never exported, although the saved cursor pointed before it. On systemd 255, `journalctl --follow --cursor-file` skipped the previous boot's entries, while the same command without `--follow` returned them. The exporter now polls without `--follow` every 5 seconds and rewrites the cursor after each pass.
+A reboot test of the new host showed a gap in the logs. The gateway wrote `gateway.stopping` to the local journal at 10:47:48, but the exporter had stopped moments earlier, and after boot the line was never exported, although the saved cursor pointed before it. On systemd 255, `journalctl --follow --cursor-file` skipped the previous boot's entries, while the same command without `--follow` returned them. The exporter now polls without `--follow` every 5 seconds. It advances the saved cursor only after the lines are written, and exits after repeated failures so the stall is visible ([PR #98](https://github.com/akhilvuputuri/chief-agent/pull/98), reviewed by Opus 5.5). The cutover closure and acceptance ledger follow in the next documentation update.
 
 ## Verification and outcome
 

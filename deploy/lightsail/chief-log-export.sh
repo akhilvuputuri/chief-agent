@@ -5,17 +5,31 @@
 #
 # Polls instead of `journalctl --follow`: on systemd 255, --follow with
 # --cursor-file skips entries from the previous boot (a gateway.stopping line
-# written during shutdown was never exported). Without --follow, journalctl
-# resumes exactly after the saved cursor and rewrites it after every pass, so a
-# crash replays at most one poll interval.
+# written during shutdown was never exported). Each pass reads after the saved
+# cursor using a working copy, and the copy replaces the saved cursor only when
+# journalctl succeeded and grep wrote its lines, so a failed write is retried
+# rather than skipped; a crash mid-pass replays that pass.
 set -uo pipefail
 install -d -m 750 /var/lib/chief /var/log/chief
 cursor=/var/lib/chief/gateway.cursor
+work=/var/lib/chief/gateway.cursor.pass
 out=/var/log/chief/gateway.jsonl
+failures=0
 while true; do
-  journalctl --output=cat --cursor-file="$cursor" CONTAINER_NAME=hermes-companion-gateway-1 |
+  rm -f "$work"
+  [ -f "$cursor" ] && cp "$cursor" "$work"
+  journalctl --output=cat --cursor-file="$work" CONTAINER_NAME=hermes-companion-gateway-1 |
     grep '^{"schema":"chief\.ops/1",' >>"$out"
-  # grep exits 1 when a pass has no new lines; only a journalctl failure matters.
-  [ "${PIPESTATUS[0]}" -eq 0 ] || echo "journalctl pass failed" >&2
+  status=("${PIPESTATUS[@]}")
+  # grep: 0 = lines written, 1 = none matched, 2 = error (for example disk full).
+  if [ "${status[0]}" -eq 0 ] && [ "${status[1]}" -le 1 ]; then
+    [ -f "$work" ] && mv "$work" "$cursor"
+    failures=0
+  else
+    failures=$((failures + 1))
+    echo "export pass failed: journalctl=${status[0]} grep=${status[1]}" >&2
+    # Surface a persistent failure as service restarts instead of a silent stall.
+    [ "$failures" -ge 12 ] && exit 1
+  fi
   sleep 5
 done
