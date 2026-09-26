@@ -10,6 +10,7 @@ import {
   GetQueryResultsCommand,
   StartQueryCommand,
 } from "@aws-sdk/client-cloudwatch-logs";
+import { pathToFileURL } from "node:url";
 
 export const REGION = "ap-southeast-1";
 export const GROUPS = {
@@ -23,7 +24,7 @@ const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$/;
 const EVENT = /^[a-z][a-z0-9_.]{0,79}$/;
 
 const common =
-  "fields @timestamp, level, event, runId, parentRunId, childRunId, taskId, callId, operation, state, stopReason, errorCode, errorCategory, httpStatus, latencyMs, model, release";
+  "fields @timestamp, ts, level, event, runId, parentRunId, childRunId, taskId, callId, operation, state, stopReason, errorCode, errorCategory, httpStatus, latencyMs, model, release";
 
 export const QUERIES = {
   errors: {
@@ -74,13 +75,13 @@ export const QUERIES = {
     group: "runtime",
     help: "gateway start/stop/heartbeat lines",
     query: () =>
-      `fields @timestamp, event, release, uptimeS, rssMb | filter event like /^gateway\\./ | sort @timestamp desc`,
+      `fields @timestamp, ts, event, release, uptimeS, rssMb | filter event like /^gateway\\./ | sort @timestamp desc`,
   },
   host: {
     group: "host",
     help: "host health records (disk, memory, services, backup, exporter)",
     query: () =>
-      `fields @timestamp, release, diskUsedPct, memAvailableMb, swapUsedMb, load1, services.gateway.state, services.gateway.health, services.postgres.health, backupResult, exporter, caddy | sort @timestamp desc`,
+      `fields @timestamp, ts, release, diskUsedPct, memAvailableMb, swapUsedMb, load1, services.gateway.state, services.gateway.health, services.postgres.health, backupResult, exporter, caddy | sort @timestamp desc`,
   },
 };
 
@@ -141,6 +142,13 @@ export function parseArgs(argv, now = Math.floor(Date.now() / 1000)) {
   };
 }
 
+/** Removes ARNs and account IDs from an AWS error message and bounds it. */
+export const redact = (message) =>
+  String(message ?? "")
+    .replace(/arn:aws[a-z-]*:[^\s"',]+/g, "<arn>")
+    .replace(/\b\d{12}\b/g, "<account>")
+    .slice(0, 300);
+
 const format = (epoch, offset) =>
   new Date((epoch + offset) * 1000).toISOString().replace(".000Z", "");
 
@@ -163,7 +171,15 @@ async function main() {
     );
     return;
   }
-  const client = new CloudWatchLogsClient({ region: REGION });
+  // Finite end to end: per-request timeouts plus a hard process deadline.
+  setTimeout(() => {
+    console.error("CloudWatch query did not finish in 75s");
+    process.exit(1);
+  }, 75_000).unref();
+  const client = new CloudWatchLogsClient({
+    region: REGION,
+    requestHandler: { connectionTimeout: 5_000, requestTimeout: 15_000 },
+  });
   console.error(
     `${request.name} on ${request.group}: ${format(request.start, 0)}Z → ${format(request.end, 0)}Z (SGT ${format(request.start, 8 * HOUR)} → ${format(request.end, 8 * HOUR)}), limit ${request.limit}`,
   );
@@ -204,11 +220,15 @@ async function main() {
     }
   } catch (error) {
     // AWS error names/codes only; no credential material is printed.
+    // AWS error name/status and a message with ARNs and account IDs removed;
+    // output may be pasted into a public PR.
+    const message = redact(error.message);
     console.error(
-      `CloudWatch query failed: ${error.name ?? "Error"}${error.$metadata?.httpStatusCode ? ` (HTTP ${error.$metadata.httpStatusCode})` : ""}: ${error.message}`,
+      `CloudWatch query failed: ${error.name ?? "Error"}${error.$metadata?.httpStatusCode ? ` (HTTP ${error.$metadata.httpStatusCode})` : ""}: ${message}`,
     );
     process.exit(1);
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) await main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
+  await main();

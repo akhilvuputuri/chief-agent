@@ -63,6 +63,27 @@ PR #94 was merged as `9af92ee1c16b28b4a6f10d7029dffed4be2152e7` after an indepen
   - The image was built with `RELEASE_SHA` in 64 seconds, with peak memory in use of 973 MB of 2 GB.
   - Only Postgres 17.11 is running. No gateway container exists.
 
+### Host PR review — 26 September
+
+An independent Opus 5.5 review of `d6c0b5c` requested changes:
+
+- **Timestamps (medium):** CloudWatch `@timestamp` was the time the agent read a line, not the event time. Measured on the staging host, a host-health line with `ts` 10:03:42 was stored at 10:07:49.
+- **Re-running the installer (medium):** it restarted Docker unconditionally, which would interrupt a live gateway.
+- **CLI:** no per-request timeout, and it silently did nothing when the checkout path needs URL-escaping.
+- **Signature check:** it did not require the pinned key to be the signer.
+- **Error output:** it could include ARNs and account IDs.
+- **Docs:** they overstated the cursor guarantee and omitted rotation and non-blocking caveats.
+
+Fixes:
+
+- The agent parses `ts`. After the change, a staging line with `ts` 10:23:44.157 was stored at 10:23:44.000.
+- The installer restarts journald or Docker only on configuration change, and refuses a Docker change while containers run. A re-run on the staging host left Postgres's start time unchanged.
+- The `VALIDSIG` signer is checked against the pinned fingerprint.
+- CLI requests have timeouts plus a hard 75-second deadline.
+- The CLI's entry-point guard now uses `pathToFileURL`, and a spaced path was tested.
+- Error messages are redacted, with a test.
+- The docs describe at-least-once delivery, possible duplicates, rotation and non-blocking drops.
+
 ## Verification and outcome
 
 Pending: independent review, CloudWatch delivery on the new host, the reader CLI, cutover and a matched acceptance ledger.

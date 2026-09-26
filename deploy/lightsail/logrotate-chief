@@ -7,5 +7,4 @@
   compress
   delaycompress
   copytruncate
-  create 0640 root root
 }

@@ -13,14 +13,16 @@
             "log_group_name": "/chief/prod/runtime",
             "log_stream_name": "lightsail-gateway",
             "timezone": "UTC",
-            "retention_in_days": -1
+            "retention_in_days": -1,
+            "timestamp_format": "%Y-%m-%dT%H:%M:%S"
           },
           {
             "file_path": "/var/log/chief/host-health.jsonl",
             "log_group_name": "/chief/prod/host",
             "log_stream_name": "lightsail-host",
             "timezone": "UTC",
-            "retention_in_days": -1
+            "retention_in_days": -1,
+            "timestamp_format": "%Y-%m-%dT%H:%M:%S"
           }
         ]
       }

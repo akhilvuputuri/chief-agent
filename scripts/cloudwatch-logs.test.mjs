@@ -6,6 +6,7 @@ import {
   QUERIES,
   parseArgs,
   parseTime,
+  redact,
 } from "./cloudwatch-logs.mjs";
 
 const now = 1_800_000_000;
@@ -65,4 +66,12 @@ test("no saved query selects the raw message field", () => {
     const q = spec.query("run-1", "tool.finished");
     assert.doesNotMatch(q, /@message/, name);
   }
+});
+
+test("error output removes ARNs and account IDs", () => {
+  const out = redact(
+    "User: arn:aws:iam::123456789012:user/chief-log-reader-cloud is not authorized to perform: logs:StartQuery on resource: arn:aws:logs:ap-southeast-1:123456789012:log-group:/x:* because no identity-based policy allows it (account 123456789012)",
+  );
+  assert.doesNotMatch(out, /123456789012|chief-log-reader|arn:aws/);
+  assert.match(out, /not authorized to perform: logs:StartQuery/);
 });

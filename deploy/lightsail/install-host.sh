@@ -25,11 +25,23 @@ mv /etc/caddy/Caddyfile.chief /etc/caddy/Caddyfile
 systemctl enable caddy
 systemctl reload-or-restart caddy
 
-# Container output goes to a bounded persistent journal.
-install -D -m 644 "$here/journald-chief.conf" /etc/systemd/journald.conf.d/chief.conf
-systemctl restart systemd-journald
-install -D -m 644 "$here/docker-daemon.json" /etc/docker/daemon.json
-systemctl restart docker
+# Container output goes to a bounded persistent journal. Restart journald or
+# Docker only when their configuration actually changed: this script is safe to
+# re-run on a live host (for example to upgrade the agent) without restarting
+# the gateway or Postgres. A Docker config change on a live host refuses to run.
+changed() { ! cmp -s "$1" "$2"; }
+if changed "$here/journald-chief.conf" /etc/systemd/journald.conf.d/chief.conf; then
+  install -D -m 644 "$here/journald-chief.conf" /etc/systemd/journald.conf.d/chief.conf
+  systemctl restart systemd-journald
+fi
+if changed "$here/docker-daemon.json" /etc/docker/daemon.json; then
+  if [ -n "$(docker ps -q 2>/dev/null)" ]; then
+    echo "Docker daemon.json differs but containers are running; stop the gateway in a maintenance window and re-run." >&2
+    exit 1
+  fi
+  install -D -m 644 "$here/docker-daemon.json" /etc/docker/daemon.json
+  systemctl restart docker
+fi
 
 # Export and host-health producers.
 install -m 755 "$here/chief-log-export.sh" /usr/local/sbin/chief-log-export
@@ -39,6 +51,7 @@ install -m 644 "$here/logrotate-chief" /etc/logrotate.d/chief
 install -d -m 750 /var/log/chief /var/lib/chief
 systemctl daemon-reload
 systemctl enable --now chief-log-export.service chief-host-health.timer
+systemctl try-restart chief-log-export.service
 
 # CloudWatch agent: pinned version, AWS signature and key fingerprint verified.
 if ! dpkg-query -W -f='${Version}' amazon-cloudwatch-agent 2>/dev/null | grep -qF "$CWAGENT_VERSION"; then
@@ -53,7 +66,10 @@ if ! dpkg-query -W -f='${Version}' amazon-cloudwatch-agent 2>/dev/null | grep -q
   gpg --quiet --import "$work/key.gpg"
   gpg --with-colons --fingerprint 3B789C72 | grep -q '^fpr:::::::::937616F3450B7D806CBD9725D58167303B789C72:$' ||
     { echo "CloudWatch agent key fingerprint mismatch" >&2; exit 1; }
-  gpg --verify "$work/agent.deb.sig" "$work/agent.deb"
+  # Require a valid signature made by the pinned key, not any imported key.
+  gpg --status-fd 1 --verify "$work/agent.deb.sig" "$work/agent.deb" 2>/dev/null |
+    grep -q '^\[GNUPG:\] VALIDSIG 937616F3450B7D806CBD9725D58167303B789C72 ' ||
+    { echo "CloudWatch agent package signature not made by the pinned AWS key" >&2; exit 1; }
   dpkg -i "$work/agent.deb"
 fi
 install -m 644 "$here/common-config.toml" /opt/aws/amazon-cloudwatch-agent/etc/common-config.toml

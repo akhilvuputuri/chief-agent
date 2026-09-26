@@ -22,9 +22,15 @@ SSH is open to all addresses because GitHub-hosted release runners do not have f
 The gateway writes sanitized `chief.ops/1` JSON lines to stdout ([contract](operational-logs.md)). On this host:
 
 1. Docker's default log driver is `journald` (`/etc/docker/daemon.json`), so container output lands in a persistent journal capped at 200 MB.
-2. `chief-log-export.service` follows the journal for `CONTAINER_NAME=hermes-companion-gateway-1`. It keeps only lines starting with `{"schema":"chief.ops/1",` and appends them to `/var/log/chief/gateway.jsonl`. A cursor file resumes after exporter or host restarts, so a short outage delays lines rather than dropping them, within journal retention. Anything else the container prints stays in the local journal.
+2. `chief-log-export.service` follows the journal for `CONTAINER_NAME=hermes-companion-gateway-1`. It keeps only lines starting with `{"schema":"chief.ops/1",` and appends them to `/var/log/chief/gateway.jsonl`. Anything else the container prints stays in the local journal. Delivery is at least once:
+   - A cursor file is written when the exporter stops cleanly, and the next start resumes from it. An outage therefore delays lines rather than dropping them, within journal retention.
+   - After an unclean stop (kill, OOM, power loss), lines since the last clean stop are exported again. On the very first start the retained gateway journal is exported.
+   - A duplicate has the same `ts`, `event` and IDs as the original, so deduplicate on those.
+   - Docker's journald driver runs in `non-blocking` mode with a 4 MB buffer, so the gateway never blocks on logging. If journald cannot keep up, lines are dropped rather than delayed.
 3. `chief-host-health.timer` appends a `chief.host/1` line every 5 minutes to `/var/log/chief/host-health.jsonl`. It records disk, memory, swap, load, gateway and Postgres state, backup timer result, exporter and Caddy state, and release. It holds metadata only.
-4. The CloudWatch agent (pinned version, AWS signature verified) tails both files into log groups `/chief/prod/runtime` (30-day retention) and `/chief/prod/host` (14 days). Retention is set by the operator, not by the agent. `logrotate` keeps 7 days locally.
+4. The CloudWatch agent (pinned version, AWS signature verified) tails both files into log groups `/chief/prod/runtime` (30-day retention) and `/chief/prod/host` (14 days). Retention is set by the operator, not by the agent.
+   - Each event's `@timestamp` is parsed from the line's `ts`, to the second, so delayed lines land at the time they happened. `ts` keeps milliseconds.
+   - `logrotate` rotates daily with `copytruncate` and keeps 7 days locally. If the agent is down across a rotation, lines it had not read remain only in the rotated local file.
 
 Postgres output is never shipped. There is no historical backfill: CloudWatch starts at the first line exported from this host. Logs are telemetry, not the action ledger. For what actually happened, Postgres `events`, `runtime_runs` and `runtime_calls` remain authoritative.
 
@@ -55,7 +61,7 @@ To correlate a report: find the time in Singapore time, then run `errors` for a 
 
 ## Installing or rebuilding the host
 
-Run as the operator from a reviewed source tree:
+Run as the operator from a reviewed source tree. It is safe to re-run on a live host, for example to upgrade the agent. It restarts journald or Docker only when their configuration changed, and it refuses a Docker configuration change while containers are running.
 
 ```sh
 sudo CWAGENT_VERSION=1.300073.0b1828 deploy/lightsail/install-host.sh

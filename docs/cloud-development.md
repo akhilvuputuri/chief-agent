@@ -51,7 +51,7 @@ This supports initial failure/cost triage. Calendar tool counts do not expose on
 - HTTP/container health confirms startup, not conversational correctness. Add focused regression tests and a user Telegram check for behavior changes.
 - Runtime work is checked before restarting; there is a small race if a new user request arrives during deployment. Restart recovery preserves records and may pause work. Avoid sending a long task during the brief release window.
 - A failed release after image tagging attempts application rollback; database rollback is not performed. No migrations run in this workflow.
-- The last successful image remains tagged `hermes-companion-gateway:rollback`. Image cleanup is not automatic; monitor disk usage as releases accumulate.
+- The last successful image remains tagged `hermes-companion-gateway:rollback`. On the Lightsail host the handler prunes older per-release image tags and dangling images after a healthy deploy, keeping `:latest` and `:rollback`. A handler installed before that change does not prune, so monitor disk usage there.
 - Do not remove Postgres volumes, rerun historical resets, or bypass uncertain-write checks.
 
 ## Development process
