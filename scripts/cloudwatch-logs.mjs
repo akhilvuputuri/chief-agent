@@ -11,6 +11,7 @@ import {
   StartQueryCommand,
 } from "@aws-sdk/client-cloudwatch-logs";
 import { pathToFileURL } from "node:url";
+import { HttpsProxyAgent } from "https-proxy-agent";
 
 export const REGION = "ap-southeast-1";
 export const GROUPS = {
@@ -149,6 +150,26 @@ export const redact = (message) =>
     .replace(/\b\d{12}\b/g, "<account>")
     .slice(0, 300);
 
+/**
+ * AWS SDK client options. In a Claude Code cloud session, an "AWS SigV4" API
+ * credential is applied by the session proxy named in HTTPS_PROXY. Node's https
+ * module (used by the SDK) ignores that variable, so route through it
+ * explicitly; the environment then only needs placeholder AWS keys. Locally,
+ * without a proxy, requests go direct and are signed with the reader profile.
+ */
+export function clientOptions(env = process.env) {
+  const proxy = env.HTTPS_PROXY || env.https_proxy;
+  return {
+    region: REGION,
+    requestHandler: {
+      connectionTimeout: 5_000,
+      requestTimeout: 15_000,
+      throwOnRequestTimeout: true,
+      ...(proxy ? { httpsAgent: new HttpsProxyAgent(proxy) } : {}),
+    },
+  };
+}
+
 const format = (epoch, offset) =>
   new Date((epoch + offset) * 1000).toISOString().replace(".000Z", "");
 
@@ -176,14 +197,7 @@ async function main() {
     console.error("CloudWatch query did not finish in 75s");
     process.exit(1);
   }, 75_000).unref();
-  const client = new CloudWatchLogsClient({
-    region: REGION,
-    requestHandler: {
-      connectionTimeout: 5_000,
-      requestTimeout: 15_000,
-      throwOnRequestTimeout: true,
-    },
-  });
+  const client = new CloudWatchLogsClient(clientOptions());
   console.error(
     `${request.name} on ${request.group}: ${format(request.start, 0)}Z → ${format(request.end, 0)}Z (SGT ${format(request.start, 8 * HOUR)} → ${format(request.end, 8 * HOUR)}), limit ${request.limit}`,
   );

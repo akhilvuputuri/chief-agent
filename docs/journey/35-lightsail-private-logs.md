@@ -145,9 +145,19 @@ The owner's live conversation passed the Telegram, voice, image, Calendar approv
 
 The log reader's `event`, `run` and `errors` queries now also show delivery, routing and approval fields such as `kind`, `lane`, `inputId`, `approvalId` and `approved`. They were already in the log lines but not displayed.
 
+### Claude Code cloud reader — 26 September 2026
+
+The owner added the cloud reader to the Claude Code cloud environment as an AWS SigV4 API credential scoped to `logs.ap-southeast-1.amazonaws.com`. The environment variables hold only placeholders. The first real cloud session failed with `UnrecognizedClientException`.
+
+Measured in that session:
+
+- A `curl` StartQuery through the session proxy returned a `queryId`, so the proxy's signing and the key are valid.
+- The CLI's AWS SDK bypassed the proxy. Node's `https` module ignores `HTTPS_PROXY`, and `NODE_USE_ENV_PROXY=1` on Node 22.22 did not cover it, so requests reached AWS signed with the placeholders.
+
+The CLI now routes through `HTTPS_PROXY` when it is set.
+
 ## Follow-up and next iteration
 
-- **Owner:** in the Claude cloud environment's private settings, add the `chief-log-reader-cloud` variables (from the private operations directory). Until then, the fresh-agent test above was run locally with the same credentials, not inside claude.ai.
 - **Owner:** update the Google OAuth branding URLs to the new origin if the consent screen needs them. BotFather's Mini App domain is optional because `web_app` buttons work without it.
 - **Owner:** re-authorize Sheets (existing `invalid_grant` defect).
 - **Owner:** decide when to retire the stopped DigitalOcean VM (about $24/month while it exists). Retirement should also revoke its operator and CI key entries. The final dump stays root-only on that host until then.
