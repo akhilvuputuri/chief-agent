@@ -1,0 +1,14 @@
+[Unit]
+Description=Export sanitized Chief gateway log lines for CloudWatch
+After=systemd-journald.service docker.service
+
+[Service]
+ExecStart=/usr/local/sbin/chief-log-export
+Restart=always
+KillMode=control-group
+TimeoutStopSec=10
+RestartSec=5
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

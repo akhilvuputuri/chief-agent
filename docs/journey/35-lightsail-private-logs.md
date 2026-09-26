@@ -42,6 +42,51 @@ Smaller findings:
 
 Fixes: only host-defined operation names are logged (otherwise `unknown`), `callId` is the journal row ID, and there are `tool.started` and `runtime.recovered` lines. The duplicate projection is removed. `telegram.delivery_error` carries a `phase`, error extraction cannot throw, startup refusals have fixed codes, and unknown cost is `null`. Regression tests were added for each.
 
+### Release of the log projection — 26 September
+
+PR #94 was merged as `9af92ee1c16b28b4a6f10d7029dffed4be2152e7` after an independent Opus 5.5 approval of head `1e71e8e`. The automatic release deployed it to the DigitalOcean host. The exact-commit receipt reported startup health, and the server `RELEASE` matched. The gateway's stdout then contained `gateway.started`, `runtime.recovered` and `library.recovered` lines. `release` is null on that host because its installed handler does not pass the build argument.
+
+### Host staging — 26 September (measured)
+
+- **Host install:** `deploy/lightsail/install-host.sh` ran on the new VM. It installed Docker 29.1.3, Compose 2.40.3 (the same versions as the old host), Caddy 2.6.2 and CloudWatch agent `1.300073.0b1828`. The agent's signing-key fingerprint matched the AWS-documented value, and the package signature verified.
+- **Caddy routes:** Caddy obtained a Let's Encrypt certificate for `companion.52-77-47-24.sslip.io`. `/about` returned 200, `/healthz` and `/.env` returned 404, and HTTP redirected with 308.
+- **Log delivery:** a host-health line reached `/chief/prod/host` and was read back with `npm run logs:cloudwatch -- host` under the local reader identity.
+- **Identities:** three IAM users (publisher, local reader, cloud reader), each with one inline policy and no managed policies or groups.
+- **Real denials:**
+  - The reader could not `PutLogEvents` or query another group.
+  - The publisher could not `StartQuery`, create a stream in another group, or change retention.
+- **Policy simulator:** it agreed on the denials, but reported `PutLogEvents` and `CreateLogStream` as implicitly denied even for the publisher's own stream, although real publishing worked. The simulator is therefore not used as evidence for stream-level allows.
+- **Release access:** the restricted CI key on the new host refused `id` and a malformed deploy. The installed handler's SHA-256 matched `scripts/cloud-release.py`.
+- **Application staging:**
+  - The exact `9af92ee` tree was copied. The `compose.yaml` hash matched the old host.
+  - The private environment was copied host to host. Apart from `MINIAPP_ORIGIN`, its hash was identical, and it is root-only (0600).
+  - The image was built with `RELEASE_SHA` in 64 seconds, with peak memory in use of 973 MB of 2 GB.
+  - Only Postgres 17.11 is running. No gateway container exists.
+
+### Host PR review — 26 September
+
+An independent Opus 5.5 review of `d6c0b5c` requested changes:
+
+- **Timestamps (medium):** CloudWatch `@timestamp` was the time the agent read a line, not the event time. Measured on the staging host, a host-health line with `ts` 10:03:42 was stored at 10:07:49.
+- **Re-running the installer (medium):** it restarted Docker unconditionally, which would interrupt a live gateway.
+- **CLI:** no per-request timeout, and it silently did nothing when the checkout path needs URL-escaping.
+- **Signature check:** it did not require the pinned key to be the signer.
+- **Error output:** it could include ARNs and account IDs.
+- **Docs:** they overstated the cursor guarantee and omitted rotation and non-blocking caveats.
+
+Fixes:
+
+- The agent parses `ts`. After the change, a staging line with `ts` 10:23:44.157 was stored at 10:23:44.000.
+- The installer restarts journald or Docker only on configuration change, and refuses a Docker change while containers run. A re-run on the staging host left Postgres's start time unchanged.
+- The `VALIDSIG` signer is checked against the pinned fingerprint.
+- CLI requests have timeouts plus a hard 75-second deadline.
+
+A re-review of `7ea9996` found one more problem. The new signer check piped gpg into `grep -q` under `pipefail`, which could abort a genuine install when gpg took SIGPIPE. It now captures gpg's status before matching. The re-review also noted that the SDK request timeout only warned (it now throws), that re-runs could upgrade Docker (the bootstrap now runs only on first install), and that replay is limited by CloudWatch's 14-day age limit (documented).
+
+- The CLI's entry-point guard now uses `pathToFileURL`, and a spaced path was tested.
+- Error messages are redacted, with a test.
+- The docs describe at-least-once delivery, possible duplicates, rotation and non-blocking drops.
+
 ## Verification and outcome
 
 Pending: independent review, CloudWatch delivery on the new host, the reader CLI, cutover and a matched acceptance ledger.

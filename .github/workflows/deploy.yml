@@ -66,16 +66,19 @@ jobs:
         env:
           DEPLOY_KEY: ${{ secrets.COMPANION_DEPLOY_KEY }}
           KNOWN_HOSTS: ${{ secrets.COMPANION_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ vars.CHIEF_DEPLOY_HOST }}
         run: |
           set -euo pipefail
           test -n "$DEPLOY_KEY"
           test -n "$KNOWN_HOSTS"
+          # Reviewed repository variable; a literal IPv4 address or lower-case hostname only.
+          [[ "$DEPLOY_HOST" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$|^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$ ]] || { echo "CHIEF_DEPLOY_HOST must be a literal hostname or IPv4 address" >&2; exit 1; }
           install -m 700 -d ~/.ssh
           printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/companion
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/companion ~/.ssh/known_hosts
           trap 'rm -f ~/.ssh/companion' EXIT
-          git archive HEAD | ssh -i ~/.ssh/companion -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes root@188.166.246.143 "deploy $(git rev-parse HEAD)"
+          git archive HEAD | ssh -i ~/.ssh/companion -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes "root@${DEPLOY_HOST}" "deploy $(git rev-parse HEAD)"
 
   report:
     needs: [announce, deploy]

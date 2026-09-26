@@ -1,0 +1,23 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "PublishChiefStreams",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
+      "Resource": [
+        "arn:aws:logs:ap-southeast-1:ACCOUNT_ID:log-group:/chief/prod/runtime:log-stream:*",
+        "arn:aws:logs:ap-southeast-1:ACCOUNT_ID:log-group:/chief/prod/host:log-stream:*"
+      ]
+    },
+    {
+      "Sid": "DescribeChiefStreams",
+      "Effect": "Allow",
+      "Action": ["logs:DescribeLogStreams"],
+      "Resource": [
+        "arn:aws:logs:ap-southeast-1:ACCOUNT_ID:log-group:/chief/prod/runtime:*",
+        "arn:aws:logs:ap-southeast-1:ACCOUNT_ID:log-group:/chief/prod/host:*"
+      ]
+    }
+  ]
+}

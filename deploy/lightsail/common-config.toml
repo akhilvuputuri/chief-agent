@@ -1,0 +1,6 @@
+# Installed as /opt/aws/amazon-cloudwatch-agent/etc/common-config.toml.
+# The profile holds only the publisher identity (create streams, put events on
+# the two Chief groups). It lives outside Docker and the repository.
+[credentials]
+shared_credential_profile = "AmazonCloudWatchAgent"
+shared_credential_file = "/root/.aws/credentials"

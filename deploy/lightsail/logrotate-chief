@@ -1,0 +1,10 @@
+/var/log/chief/*.jsonl {
+  daily
+  rotate 7
+  maxsize 50M
+  missingok
+  notifempty
+  compress
+  delaycompress
+  copytruncate
+}

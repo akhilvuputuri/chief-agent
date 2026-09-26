@@ -25,6 +25,19 @@ def healthy():
         time.sleep(2)
     return False
 
+def prune(sha):
+    # Keep :latest, :rollback and the deployed tag; old per-release tags filled
+    # the previous host's disk. Best effort: pruning never fails a release.
+    try:
+        tags = subprocess.run(['docker','images','--format','{{.Tag}}',IMAGE], capture_output=True, text=True, check=True).stdout.split()
+        old = [IMAGE+':'+t for t in tags if re.fullmatch(r'[0-9a-f]{40}', t) and t != sha]
+        if old:
+            subprocess.run(['docker','rmi',*old], capture_output=True)
+        subprocess.run(['docker','image','prune','-f'], capture_output=True)
+        subprocess.run(['docker','builder','prune','-f','--filter','until=168h'], capture_output=True)
+    except Exception:
+        pass
+
 def main():
     command = os.environ.get('SSH_ORIGINAL_COMMAND', '')
     if command == 'diagnose':
@@ -59,7 +72,7 @@ def main():
                 if hashes(stage/relative) != hashes(LIVE/relative):
                     raise RuntimeError('Database or Compose change requires a reviewed migration/deployment procedure')
             candidate = IMAGE+':'+sha
-            build = subprocess.run(['docker','build','-t',candidate,str(stage)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            build = subprocess.run(['docker','build','--build-arg','RELEASE_SHA='+sha,'-t',candidate,str(stage)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             if build.returncode:
                 raise RuntimeError('Image build failed; production unchanged. Reproduce Docker build in CI.')
             active = query("SELECT count(*)::int n FROM runtime_runs WHERE state='running'")[0]['n']
@@ -91,6 +104,7 @@ def main():
                     shutil.copytree(item,dest)
                 else: shutil.copy2(item,dest)
             (LIVE/'RELEASE').write_text(sha+'\n')
+            prune(sha)
             print(json.dumps({'deployed':sha,'healthy':True}))
 
 if __name__ == '__main__':
