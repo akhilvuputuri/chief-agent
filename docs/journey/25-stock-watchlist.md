@@ -75,6 +75,8 @@ A second external round then found: (P2) the token bucket refilled continuously 
 
 **Validation/status:** all 31 focused stock tests passed locally. The candidate is checkpointed on `fix/watchlist-read-classification`; full checks, independent review, deployment and the guarded operator reconciliation are deferred for v0.3.25 at the owner's request until after EC2/CloudWatch exploration. No production state was changed, no live stock was added and no live alert was triggered during this investigation. Cross-agent access to these diagnostics and structured blocker references are the next observability iteration.
 
+**Resumed — 26 September:** the owner requested completion after the exploration handover. Full local checks passed: 405 application tests and 10 script tests, plus formatting. Fresh bounded inspection confirmed one uncertain stopped Calendar draft, no approval in its run, no successful draft receipt or created event, and one failed draft receipt. This supports reviewing a narrowly conditional operator reconciliation; it does not authorize blanket clearing of uncertain calls. Independent review, release and production acceptance are still pending at this point.
+
 - Non-US listings need a paid plan or a different provider decision; the schema keeps `mic_code`/`exchange` so the choice is per-instrument, not global.
 - News digest/feedback ranking remains domain work on the routine contract.
 - If delayed quotes prove too slow for the owner's use, the provider adapter boundary allows a swap without touching the monitor.
