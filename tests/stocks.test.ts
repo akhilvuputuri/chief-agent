@@ -19,6 +19,7 @@ import { runtimeContext } from "../src/runtime.js";
 import { Assistant } from "../src/agent.js";
 import { CustomAgent } from "../src/custom-agent.js";
 import { JobTools } from "../src/tools.js";
+import { marketCalendar, sessionsFor } from "../src/market-calendar.js";
 
 const NY = "America/New_York";
 const MIC = "XNAS";
@@ -158,6 +159,111 @@ async function fixture(now: Date) {
     OPEN,
   };
 }
+
+test("Nasdaq listing segments use US sessions while unknown/non-US venues remain unsupported", () => {
+  for (const mic of ["XNGS", "XNMS", "XNCM"]) {
+    assert.deepEqual(marketCalendar(mic), { timezone: NY });
+    for (const date of ["2026-01-15", "2026-01-17", "2026-07-03", "2026-11-27"])
+      assert.deepEqual(sessionsFor(mic, date), sessionsFor("XNAS", date));
+  }
+  for (const mic of ["XMEX", "XBOG", "XWAR", "XWBO", "XNDQ", "UNKNOWN", ""])
+    assert.equal(marketCalendar(mic), null);
+});
+
+test("real-shaped Nasdaq search results retain their segment MIC through add, quote and alert", async () => {
+  const f = await fixture(new Date("2026-01-15T15:30:00Z"));
+  const original = globalThis.fetch;
+  const requests: { path: string; mic: string | null }[] = [];
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    requests.push({
+      path: url.pathname,
+      mic: url.searchParams.get("mic_code"),
+    });
+    if (url.pathname === "/symbol_search")
+      return Response.json({
+        data: [
+          {
+            symbol: "AAPL",
+            instrument_name: "Apple Inc",
+            exchange: "NASDAQ",
+            mic_code: "XNGS",
+            exchange_timezone: NY,
+            currency: "USD",
+            instrument_type: "Common Stock",
+          },
+          {
+            symbol: "AAPL",
+            exchange: "BMV",
+            mic_code: "XMEX",
+            currency: "MXN",
+            instrument_type: "Common Stock",
+          },
+        ],
+      });
+    assert.equal(url.pathname, "/quote");
+    return Response.json({
+      symbol: "AAPL",
+      currency: "USD",
+      close: "90",
+      previous_close: "100",
+      percent_change: "-10",
+      last_quote_at: f.OPEN.getTime() / 1000,
+      datetime: "2026-01-15",
+      is_market_open: true,
+    });
+  };
+  try {
+    const provider = new TwelveDataProvider("test-key");
+    const tools = new WatchlistTools(f.db, provider);
+    const ambiguous = await tools.call("a", f.run, {
+      operation: "watchlist_add",
+      query: "AAPL",
+    });
+    assert.equal(
+      ambiguous.needsChoice,
+      true,
+      "exchange selection stays explicit",
+    );
+    assert.equal(
+      (await f.db.query("SELECT count(*)::int AS n FROM watchlist_items"))
+        .rows[0].n,
+      0,
+    );
+    const added = await tools.call("a", f.run, {
+      operation: "watchlist_add",
+      query: "AAPL",
+      exchange: "NASDAQ",
+      dropPct: 5,
+    });
+    assert.equal(
+      added.added.mic_code,
+      "XNGS",
+      "persist exact provider identity",
+    );
+    const monitor = new StockMonitor(
+      f.db,
+      provider,
+      (u) => u === "a",
+      () => f.OPEN,
+    );
+    await monitor.tick();
+    assert.deepEqual(
+      requests.filter((r) => r.path === "/quote"),
+      [{ path: "/quote", mic: "XNGS" }],
+    );
+    assert.equal((await f.alerts(added.added.id)).length, 1);
+    assert.equal((await f.observations(added.added.id))[0].decision, "alerted");
+    assert.equal(
+      (await tools.call("b", f.run, { operation: "watchlist_list" })).items
+        .length,
+      0,
+    );
+  } finally {
+    globalThis.fetch = original;
+    await f.pg.close();
+  }
+});
 
 test("uncertain writes permit owner-scoped watchlist inspection but still block additions", async () => {
   const f = await fixture(new Date("2026-01-15T15:30:00Z"));
