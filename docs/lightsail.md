@@ -23,7 +23,7 @@ The gateway writes sanitized `chief.ops/1` JSON lines to stdout ([contract](oper
 
 1. Docker's default log driver is `journald` (`/etc/docker/daemon.json`), so container output lands in a persistent journal capped at 200 MB.
 2. `chief-log-export.service` follows the journal for `CONTAINER_NAME=hermes-companion-gateway-1`. It keeps only lines starting with `{"schema":"chief.ops/1",` and appends them to `/var/log/chief/gateway.jsonl`. Anything else the container prints stays in the local journal. Delivery is at least once:
-   - A cursor file is written when the exporter stops cleanly, and the next start resumes from it. An outage therefore delays lines rather than dropping them, within journal retention.
+   - A cursor file is written when the exporter stops cleanly, and the next start resumes from it. An outage therefore delays lines rather than dropping them, up to the shorter of journal retention and CloudWatch's 14-day limit for event age. Older lines are rejected by CloudWatch but remain in the local journal.
    - After an unclean stop (kill, OOM, power loss), lines since the last clean stop are exported again. On the very first start the retained gateway journal is exported.
    - A duplicate has the same `ts`, `event` and IDs as the original, so deduplicate on those.
    - Docker's journald driver runs in `non-blocking` mode with a 4 MB buffer, so the gateway never blocks on logging. If journald cannot keep up, lines are dropped rather than delayed.
@@ -61,7 +61,7 @@ To correlate a report: find the time in Singapore time, then run `errors` for a 
 
 ## Installing or rebuilding the host
 
-Run as the operator from a reviewed source tree. It is safe to re-run on a live host, for example to upgrade the agent. It restarts journald or Docker only when their configuration changed, and it refuses a Docker configuration change while containers are running.
+Run as the operator from a reviewed source tree. It can be re-run on a live host, for example to upgrade the agent. The base bootstrap (Docker packages, firewall, SSH hardening) runs only on first install. journald and Docker are restarted only when their configuration changed, and a Docker configuration change is refused while containers are running. Ubuntu security updates to `docker.io` through unattended-upgrades can still restart the daemon; the containers' `unless-stopped` policy brings them back, and recovery marks interrupted calls.
 
 ```sh
 sudo CWAGENT_VERSION=1.300073.0b1828 deploy/lightsail/install-host.sh

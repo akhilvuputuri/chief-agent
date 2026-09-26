@@ -178,7 +178,11 @@ async function main() {
   }, 75_000).unref();
   const client = new CloudWatchLogsClient({
     region: REGION,
-    requestHandler: { connectionTimeout: 5_000, requestTimeout: 15_000 },
+    requestHandler: {
+      connectionTimeout: 5_000,
+      requestTimeout: 15_000,
+      throwOnRequestTimeout: true,
+    },
   });
   console.error(
     `${request.name} on ${request.group}: ${format(request.start, 0)}Z → ${format(request.end, 0)}Z (SGT ${format(request.start, 8 * HOUR)} → ${format(request.end, 8 * HOUR)}), limit ${request.limit}`,

@@ -10,8 +10,12 @@ here=$(cd "$(dirname "$0")" && pwd)
 : "${CWAGENT_VERSION:?Set CWAGENT_VERSION to a pinned CloudWatch agent version}"
 [[ $CWAGENT_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9a-z]+$ ]] || { echo "Invalid CWAGENT_VERSION" >&2; exit 1; }
 
-# Base host: Docker, Compose, firewall, fail2ban, SSH hardening, swap.
-bash "$here/../bootstrap.sh"
+# Base host: Docker, Compose, firewall, fail2ban, SSH hardening, swap. Only on
+# first install: re-running apt-get install could upgrade docker.io and restart
+# the daemon (and with it the gateway and Postgres) on a live host.
+if ! command -v docker >/dev/null 2>&1; then
+  bash "$here/../bootstrap.sh"
+fi
 apt-get install -y -qq caddy gnupg python3 logrotate
 ufw allow 80/tcp comment 'Companion HTTPS certificate and redirect'
 ufw allow 443/tcp comment 'Companion Mini App HTTPS'
@@ -67,8 +71,10 @@ if ! dpkg-query -W -f='${Version}' amazon-cloudwatch-agent 2>/dev/null | grep -q
   gpg --with-colons --fingerprint 3B789C72 | grep -q '^fpr:::::::::937616F3450B7D806CBD9725D58167303B789C72:$' ||
     { echo "CloudWatch agent key fingerprint mismatch" >&2; exit 1; }
   # Require a valid signature made by the pinned key, not any imported key.
-  gpg --status-fd 1 --verify "$work/agent.deb.sig" "$work/agent.deb" 2>/dev/null |
-    grep -q '^\[GNUPG:\] VALIDSIG 937616F3450B7D806CBD9725D58167303B789C72 ' ||
+  # Capture all status output first; grep -q on a live pipe can SIGPIPE gpg under pipefail.
+  status=$(gpg --status-fd 1 --verify "$work/agent.deb.sig" "$work/agent.deb" 2>/dev/null) ||
+    { echo "CloudWatch agent package signature did not verify" >&2; exit 1; }
+  grep -q '^\[GNUPG:\] VALIDSIG 937616F3450B7D806CBD9725D58167303B789C72 ' <<<"$status" ||
     { echo "CloudWatch agent package signature not made by the pinned AWS key" >&2; exit 1; }
   dpkg -i "$work/agent.deb"
 fi

@@ -80,6 +80,9 @@ Fixes:
 - The installer restarts journald or Docker only on configuration change, and refuses a Docker change while containers run. A re-run on the staging host left Postgres's start time unchanged.
 - The `VALIDSIG` signer is checked against the pinned fingerprint.
 - CLI requests have timeouts plus a hard 75-second deadline.
+
+A re-review of `7ea9996` found one more problem. The new signer check piped gpg into `grep -q` under `pipefail`, which could abort a genuine install when gpg took SIGPIPE. It now captures gpg's status before matching. The re-review also noted that the SDK request timeout only warned (it now throws), that re-runs could upgrade Docker (the bootstrap now runs only on first install), and that replay is limited by CloudWatch's 14-day age limit (documented).
+
 - The CLI's entry-point guard now uses `pathToFileURL`, and a spaced path was tested.
 - Error messages are redacted, with a test.
 - The docs describe at-least-once delivery, possible duplicates, rotation and non-blocking drops.
