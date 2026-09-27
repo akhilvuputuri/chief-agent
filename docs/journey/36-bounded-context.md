@@ -1,11 +1,11 @@
 # 36 — Bounding the fixed prompt (issue #77)
 
 Work date(s): 2026-09-26. Written/revised: 2026-09-26.
-Status: in progress. Stage 1 (measurement) is on a review branch; stage 2 (relevant tool loading) is not implemented.
+Status: in progress. Stage 1 (measurement) was released on 26 September. Stage 2 (relevant tool loading) is on a review branch.
 
 ## User-visible problem and preceding iteration
 
-[Journal 28](28-context-wire-compaction.md) raised the internal ceiling to 400,000 characters as temporary headroom. That stopped context-limit failures without bounding growth. On 26 September, while checking the Lightsail migration, the owner's live conversation showed `context.over_budget` warnings on most model calls. Stored events show the same warning every day since at least 20 September, so it predates the move. It means the fixed part of each request (instructions, owner state, tool schemas, the current message) already exceeds the 48,000-character allowance for older history. Older conversation is therefore dropped from the prompt on nearly every call. The bot can still retrieve it with `conversation_search`.
+[Journal 28](28-context-wire-compaction.md) raised the internal ceiling to 400,000 characters as temporary headroom. That stopped context-limit failures without bounding growth. On 26 September, while checking the Lightsail migration, the owner's live conversation showed `context.over_budget` warnings on most model calls. Stored events show the same warning every day since at least 20 September, so it predates the move. It means the fixed part of each request (instructions, owner state, tool schemas, the current message) alone exceeds the 48,000-character soft budget, which leaves no room for older history. Older conversation is therefore dropped from the prompt on nearly every call. The bot can still retrieve it with `conversation_search`.
 
 ## Evidence
 
@@ -25,10 +25,14 @@ The largest fixed contributor we can change is the tool inventory, which is sent
 
 Stage 1: [PR #103](https://github.com/akhilvuputuri/chief-agent/pull/103). An independent Opus 5.5 review approved `b285024` with low findings: a misleading `historyChars` name, production figures that mixed sources without labels, and this missing journal entry. Those were addressed before merge.
 
+Stage 1 was merged as `8a89231` and released to Lightsail with an exact-commit receipt. No owner messages arrived between that release and the start of stage 2, so there is no per-call production baseline yet. Stage 2 is compared against the offline inventory and the 26 September stored events.
+
+Stage 2 is described in [context management](../context-management.md#stage-2--relevant-tool-loading). The first design returned a "call it again" error when the model called a tool from an unloaded domain. Seven existing test files failed, because their scripted models call such tools directly. Loading the domain and dispatching the call is equally safe, since arguments are validated and the dispatcher decides, and it avoids an extra model step, so that design replaced the first.
+
 ## Verification and outcome
 
-Pending: merge and release of stage 1, then a per-call baseline from CloudWatch (`npm run logs:cloudwatch -- event --event context.selected`).
+Offline (26 September): tool schemas offered on a first message fell from 39,030 characters (71 tools) to 4,007–10,330 (12–25 tools) across six representative scenarios. Production measurements after release are pending: fixed size, omitted history, `tools_load` frequency, and provider cache and usage.
 
 ## Follow-up and next iteration
 
-Stage 2 will add relevant tool loading: a core set, a `tools_load` discovery tool, and domains selected from the message, task state and approvals. The dispatcher stays the authority for permissions. Measure fixed size, extra discovery steps and cache effects before claiming savings.
+After stage 2 is released, measure fixed size, extra discovery steps and cache effects on real calls before claiming savings. Stages 3–4 (bounded working projection, token-aware admission) remain proposed.

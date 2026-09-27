@@ -1,6 +1,6 @@
 # Bounded context management — issue #77
 
-Status: **proposed**, not implemented. The v0.3.22 increase to a 400,000-character internal ceiling is temporary headroom, not a provider-token budget or a bounded-context design. [Issue #77](https://github.com/akhilvuputuri/chief-agent/issues/77) tracks implementation; [journal 28](journey/28-context-wire-compaction.md) contains the measured incidents.
+Status: stage 1 (measurement) is released. Stage 2 (relevant tool loading) is implemented on a review branch. Stages 3–4 are proposed. The v0.3.22 increase to a 400,000-character internal ceiling is temporary headroom, not a provider-token budget or a bounded-context design. [Issue #77](https://github.com/akhilvuputuri/chief-agent/issues/77) tracks implementation; [journal 28](journey/28-context-wire-compaction.md) contains the measured incidents.
 
 ## Why the current projection fails
 
@@ -14,7 +14,7 @@ On 22 September a mailbox run failed **before** the model request after 21 tool 
   - 70 tool schemas take **38,480 characters**. The largest domains are canvas (4 tools, 8,135), work (7, 3,672), job (8, 3,402), preparation (5, 2,908) and parcel (3, 2,798). `canvas_update` and `canvas_create` are about 3,700 each.
   - The core instructions are 13,463 characters, and the base runtime state 2,544. `TOOL_DESCRIPTION` in `protocol.ts` (3,587 characters) is imported but never sent.
 - **Production, sizes only.** An operator read the stored `context.over_budget` and `context.selected` events for 26 September (20 model attempts; numbers only).
-  - The fixed envelope was 72,159–73,678 characters, against the 48,000-character history allowance. That figure includes the 2,000-character reserve and the `finish_turn` schema.
+  - The fixed envelope was 72,159–73,678 characters, against the 48,000-character soft budget, which leaves no room for older history. That figure includes the 2,000-character reserve and the `finish_turn` schema.
   - 19 of the 20 selections omitted older history.
   - Memories, measured separately as total key and value length in the database, were 2,463 characters.
   - Hypothesis, not yet measured: most of the remaining difference from the offline figures is owner runtime state, the conversation summary and the current message. This assumes production offers the same tools as the all-enabled inventory. The per-call split below settles it.
@@ -22,6 +22,49 @@ On 22 September a mailbox run failed **before** the model request after 21 tool 
 - **Instrumentation:** `context.selected` (one per model attempt) now records the fixed-envelope parts (instructions, memories, runtime context, tool schemas with count, summary, message). The sanitized operational log projects them as numbers only (see [operational logs](operational-logs.md)), so stage 2 can be compared per call with `npm run logs:cloudwatch -- event --event context.selected`.
 
 These are character counts, not provider tokens. Provider-reported token and cache usage stays in `model.completed`.
+
+## Stage 2 — relevant tool loading
+
+The coordinator is offered a **core** set of tools on every call:
+
+- conversation search and read
+- observation and source read
+- memory
+- web search and read
+- skill list and read
+- work status
+- `tools_load`
+
+On top of the core, it gets the **domains** a request needs, from `src/tool-domains.ts`: gmail, calendar, daily, jobs, work, research, media, canvas, parcels, library, watchlist, routines, skills.
+
+**How the initial domains are chosen.** Host-visible signals decide them deterministically:
+
+- conservative word cues in the message, including attachment notes;
+- a background lane or a bound task (adds work);
+- pending Calendar or library approvals;
+- the domains of tools the owner used in the last 60 minutes or the bound task used.
+
+**Loading more.** The runtime state lists the other available domains with one-line summaries.
+
+- `tools_load` adds domains for the rest of the turn.
+- A follow-up absorbed mid-turn adds its own cue domains.
+- If the model calls a known tool whose domain is not loaded, the host loads the domain and dispatches the call. No extra model step is needed, and arguments are still schema-validated.
+
+**What does not change.** Unavailable integrations are neither offered nor loadable. The owner-scoped dispatcher remains the authority: offering a schema grants nothing. Specialists receive the full enabled definitions (`runtime.allTools`), so delegation does not depend on what the coordinator loaded.
+
+Offline effect (`npm run context:inventory`, all integrations enabled, 26 September):
+
+| First message      | Domains         | Tools | Tool-schema characters |
+| ------------------ | --------------- | ----: | ---------------------: |
+| Before (all tools) | all             |    71 |                 39,030 |
+| Plain chat         | none            |    12 |                  4,007 |
+| Email lookup       | gmail, calendar |    18 |                  6,600 |
+| Calendar           | calendar        |    14 |                  4,827 |
+| Job preparation    | jobs            |    25 |                 10,330 |
+| Image              | media           |    13 |                  4,927 |
+| Background task    | work            |    18 |                  7,317 |
+
+These are offline character counts. Measure the production effect with `context.selected` (`toolsChars`, `fixedChars`, `omittedCount`) and `tools.selected`/`tools.loaded`. Also check provider token and cache usage in `model.completed`, because a changing tool list can reduce prompt-cache reuse. Extra discovery steps show up as `tools_load` calls in `tools.finished`.
 
 ## Implementation plan
 

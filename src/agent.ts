@@ -23,6 +23,11 @@ import {
 import { SkillTools } from "./skills.js";
 import { WorkTools } from "./work.js";
 import { runtimeContext } from "./runtime.js";
+import {
+  selectDomains,
+  TOOL_DOMAINS,
+  type ToolDomain,
+} from "./tool-domains.js";
 import { SerialQueue } from "./security.js";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
@@ -488,10 +493,60 @@ export class Assistant {
         inputId: inputId ?? null,
         previousContextId: conversation.previousId ?? null,
       });
+      // Issue #77: offer the core tools plus the domains this turn needs.
+      const recentOperations = (
+        await this.db.query(
+          `SELECT DISTINCT c.operation FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id
+           WHERE r.user_id=$1 AND (c.started_at > now() - interval '60 minutes' OR ($2::text IS NOT NULL AND r.task_id::text=$2))`,
+          [user, current?.id ?? null],
+        )
+      ).rows.map((row) => row.operation as string);
+      const pendingApprovals =
+        (
+          await this.db.query(
+            "SELECT bool_or(operation='calendar_create') AS calendar,bool_or(operation LIKE 'library\\_%') AS library FROM approvals WHERE user_id=$1 AND status='pending' AND expires_at>now()",
+            [user],
+          )
+        ).rows[0] ?? {};
+      const loadedDomains = selectDomains({
+        message,
+        taskBound: background || !!current,
+        recentOperations,
+        pendingCalendarApproval: pendingApprovals.calendar === true,
+        pendingLibraryApproval: pendingApprovals.library === true,
+      });
       const runtime = runtimeContext(
         this.availability,
         current ? await work.snapshot(user, current.id) : null,
+        undefined,
+        loadedDomains,
       );
+      await execution.trace("tools.selected", {
+        domains: [...loadedDomains].sort(),
+        offered: runtime.tools.length,
+      });
+      const loadTools = async (domains: string[]) => {
+        for (const domain of domains)
+          if ((TOOL_DOMAINS as readonly string[]).includes(domain))
+            loadedDomains.add(domain as ToolDomain);
+        const fresh = runtimeContext(
+          this.availability,
+          null,
+          undefined,
+          loadedDomains,
+        );
+        runtime.tools = fresh.tools;
+        runtime.context = JSON.stringify({
+          ...JSON.parse(runtime.context),
+          toolDomains: JSON.parse(fresh.context).toolDomains,
+        });
+        const loaded = [...loadedDomains].sort();
+        await execution.trace("tools.loaded", {
+          domains: loaded,
+          offered: fresh.tools.length,
+        });
+        return { loaded, offered: fresh.tools.length };
+      };
       const catalogue = await new SkillTools(this.db).call(user, run, {
         operation: "skill_list",
       });
@@ -579,6 +634,13 @@ export class Assistant {
                   request.images = [...(request.images ?? []), ...input.images];
                 requestSnapshot += `\n\nUser follow-up (${input.id}):\n${input.message}`;
               }
+              // Follow-ups can need other capabilities than the first message.
+              const followUpDomains = [
+                ...selectDomains({
+                  message: adopted.map((x) => x.message).join("\n"),
+                }),
+              ].filter((d) => !loadedDomains.has(d));
+              if (followUpDomains.length) await loadTools(followUpDomains);
               // Do not overwrite a wakeup that arrives during an awaited state read.
               const version = this.inbox.version(user);
               const pending = await this.inbox.pending(user);
@@ -612,6 +674,7 @@ export class Assistant {
             },
         memories,
         runtime,
+        loadTools,
         progress: progress ? (text) => progress(text, run) : undefined,
         execution,
         signal: controller.signal,

@@ -22,6 +22,7 @@ export class Stop extends Error {
   }
 }
 export const readOperations = new Set([
+  "tools_load",
   "finish_turn",
   "conversation_search",
   "conversation_read",

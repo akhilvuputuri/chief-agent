@@ -290,6 +290,8 @@ export class JobTools {
       );
       return { saved: true };
     }
+    // Handled by the agent loop; it never reaches the domain dispatcher.
+    if (a.operation === "tools_load") throw new Error("Operation unavailable");
     if (a.operation === "web_search" || a.operation === "web_read") {
       const result = await this.web.call(
         a.operation,
