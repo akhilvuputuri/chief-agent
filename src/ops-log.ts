@@ -286,6 +286,8 @@ const projections: Record<string, Projection> = {
       omittedCount: d.omitted,
     },
   ],
+  "tools.selected": (run, d) => ["info", { runId: run, toolCount: d.offered }],
+  "tools.loaded": (run, d) => ["info", { runId: run, toolCount: d.offered }],
   "context.over_budget": (run) => ["warn", { runId: run, phase: "context" }],
   "context.failed": (run) => ["error", { runId: run, phase: "context" }],
   "conversation.routed": (run, d) => [

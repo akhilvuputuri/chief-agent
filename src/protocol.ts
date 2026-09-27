@@ -1,3 +1,4 @@
+import { TOOL_DOMAINS } from "./tool-domains.js";
 import {
   canvasCreate,
   canvasUpdate,
@@ -398,6 +399,12 @@ export const action = z.discriminatedUnion("operation", [
   z
     .object({ operation: z.literal("web_read"), url: z.string().url() })
     .strict(),
+  z
+    .object({
+      operation: z.literal("tools_load"),
+      domains: z.array(z.enum(TOOL_DOMAINS)).min(1).max(TOOL_DOMAINS.length),
+    })
+    .strict(),
 ]);
 export type Action = z.infer<typeof action>;
 /** An image supplied for the current turn only; bytes are never persisted in history or traces. */
@@ -427,7 +434,19 @@ export interface AgentRequest {
   afterTool?: (operation: string) => void;
   modelSignal?: AbortSignal;
   memories: { key: string; value: string }[];
-  runtime?: { context: string; tools?: import("./model.js").ToolDefinition[] };
+  runtime?: {
+    context: string;
+    tools?: import("./model.js").ToolDefinition[];
+    /** Every enabled definition, for specialist delegation, when tools are domain-limited. */
+    allTools?: import("./model.js").ToolDefinition[];
+  };
+  /** Adds tool domains for the rest of this turn (issue #77). */
+  loadTools?: (domains: string[]) => Promise<{
+    loaded: string[];
+    offered: number;
+    unavailable?: string[];
+    note?: string;
+  }>;
   specialist?: "research" | "job_alignment" | "media";
   systemInstructions?: string;
   /** Host-resolved model override from a pinned plugin, never a model tool argument. */

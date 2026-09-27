@@ -20,6 +20,7 @@ import {
 } from "./model.js";
 import { Stop, readOperations, type StopReason } from "./execution.js";
 import { toolError, NotDispatchedError } from "./tool-errors.js";
+import { domainOf } from "./tool-domains.js";
 const finishTool: ToolDefinition = {
   name: "finish_turn",
   description:
@@ -320,7 +321,18 @@ export class CustomAgent implements Agent {
               throw new NotDispatchedError(
                 req.signal.aborted ? "cancelled" : "interrupted",
               );
-            if (!enabled.has(op)) throw new Error("Operation unavailable");
+            if (!enabled.has(op)) {
+              // A known tool whose domain is not loaded yet: load the domain and
+              // dispatch. Arguments are still validated and the owner-scoped
+              // dispatcher still decides; offering a schema grants nothing.
+              const domain = domainOf(op);
+              if (req.loadTools && domain) {
+                await req.loadTools([domain]);
+                tools = [...(req.runtime?.tools ?? []), finishTool];
+                enabled = new Set(tools.map((t) => t.name));
+              }
+              if (!enabled.has(op)) throw new Error("Operation unavailable");
+            }
             const args = JSON.parse(call.function.arguments);
             if (op === "finish_turn") {
               candidate = finishSchema.parse(args);
@@ -369,15 +381,23 @@ export class CustomAgent implements Agent {
                           ? await runAlignment(req, input, (child) =>
                               this.run(child),
                             )
-                          : op === "media_delegate"
-                            ? await delegateMedia(
-                                req,
-                                input,
-                                (child) => this.run(child),
-                                (this.specialists.media ?? this.model).model ??
-                                  "",
-                              )
-                            : await req.execute(input);
+                          : op === "tools_load"
+                            ? await (async () => {
+                                if (!req.loadTools)
+                                  throw new Error("Operation unavailable");
+                                return req.loadTools(
+                                  (input as { domains: string[] }).domains,
+                                );
+                              })()
+                            : op === "media_delegate"
+                              ? await delegateMedia(
+                                  req,
+                                  input,
+                                  (child) => this.run(child),
+                                  (this.specialists.media ?? this.model)
+                                    .model ?? "",
+                                )
+                              : await req.execute(input);
                   if (
                     op === "research_report" ||
                     op === "media_report" ||

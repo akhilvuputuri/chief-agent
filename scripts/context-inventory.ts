@@ -3,6 +3,7 @@
 // no owner data, database or provider calls. Issue #77, stage 1.
 import { instructions } from "../src/context.js";
 import { runtimeContext } from "../src/runtime.js";
+import { selectDomains } from "../src/tool-domains.js";
 
 const allOn = {
   web: true,
@@ -45,4 +46,36 @@ const out = {
     .sort((a, b) => b.chars - a.chars),
   largestTools: tools.slice(0, 15),
 };
-console.log(JSON.stringify(out, null, 2));
+// Stage 2: tool schemas and runtime state offered for representative first
+// messages, with every integration enabled (repository definitions only).
+const scenarios: [string, Parameters<typeof selectDomains>[0]][] = [
+  ["plain chat", { message: "hello, how are you?" }],
+  ["email lookup", { message: "any new email from the bank this week?" }],
+  ["calendar", { message: "what's on my calendar tomorrow?" }],
+  ["job preparation", { message: "prep me for the interview at the company" }],
+  ["image", { message: "what is this?\n\n[Attached image: a.png]" }],
+  ["background task", { message: "continue", taskBound: true }],
+];
+const scenarioSizes = scenarios.map(([name, signals]) => {
+  const domains = selectDomains(signals);
+  const limited = runtimeContext(allOn, null, undefined, domains);
+  return {
+    scenario: name,
+    domains: [...domains].sort(),
+    tools: limited.tools.length,
+    toolSchemasChars: JSON.stringify(limited.tools).length,
+    runtimeContextChars: limited.context.length,
+  };
+});
+console.log(
+  JSON.stringify(
+    {
+      ...out,
+      fullToolSchemasChars: toolTotal,
+      fullRuntimeContextChars: runtime.context.length,
+      scenarios: scenarioSizes,
+    },
+    null,
+    2,
+  ),
+);

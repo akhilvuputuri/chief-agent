@@ -124,7 +124,10 @@ export async function runResearchSpecialist(
   if (
     plugin &&
     plugin.tools.some(
-      (name) => !(req.runtime?.tools ?? []).some((t) => t.name === name),
+      (name) =>
+        !(req.runtime?.allTools ?? req.runtime?.tools ?? []).some(
+          (t) => t.name === name,
+        ),
     )
   )
     throw new Error(
@@ -170,7 +173,9 @@ export async function runResearchSpecialist(
       childRunId: childRun,
       targetIds: targets.map((t) => t.targetId),
     });
-    const toolset = (req.runtime?.tools ?? []).filter((t) => reads.has(t.name));
+    const toolset = (req.runtime?.allTools ?? req.runtime?.tools ?? []).filter(
+      (t) => reads.has(t.name),
+    );
     toolset.push({
       name: reportName,
       description:

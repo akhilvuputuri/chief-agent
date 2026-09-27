@@ -2,6 +2,7 @@ import { plugins } from "./plugin-registry.js";
 import { z } from "zod";
 import { action, TOOL_DESCRIPTION } from "./protocol.js";
 import { baselineSkills } from "./baseline-skills.js";
+import { DOMAIN_SUMMARIES, domainOf, type ToolDomain } from "./tool-domains.js";
 export function jsonSchema(v: z.ZodTypeAny): any {
   if (
     v instanceof z.ZodOptional ||
@@ -54,10 +55,17 @@ export function jsonSchema(v: z.ZodTypeAny): any {
     };
   throw new Error("Unsupported tool schema type");
 }
+/**
+ * Model-facing tools and runtime state. Without `domains`, every enabled tool is
+ * offered (specialists, tests). With `domains`, the coordinator sees the core
+ * plus those domains, a catalogue of the rest (loadable with tools_load), and
+ * `allTools` keeps every enabled definition for specialist delegation.
+ */
 export function runtimeContext(
   availability: Record<string, boolean>,
   work: unknown,
   skills: typeof baselineSkills = baselineSkills,
+  domains?: ReadonlySet<ToolDomain>,
 ) {
   const disabled = (op: string) =>
     (op.startsWith("canvas_") && !availability.canvases) ||
@@ -85,101 +93,134 @@ export function runtimeContext(
   const options = action.options.filter(
     (o) => !disabled(o.shape.operation.value),
   );
+  // Core first, then domains in the order they were selected or loaded, so a
+  // mid-turn load appends to the tool list instead of reshuffling the cached prefix.
+  const offered = domains
+    ? [
+        ...options.filter((o) => !domainOf(o.shape.operation.value)),
+        ...[...domains].flatMap((d) =>
+          options.filter((o) => domainOf(o.shape.operation.value) === d),
+        ),
+      ]
+    : options;
+  const loadable = domains
+    ? Object.fromEntries(
+        [
+          ...new Set(
+            options
+              .map((o) => domainOf(o.shape.operation.value))
+              .filter((d): d is ToolDomain => !!d && !domains.has(d)),
+          ),
+        ].map((d) => [d, DOMAIN_SUMMARIES[d]]),
+      )
+    : undefined;
+  const define = (o: (typeof options)[number]) => ({
+    name: o.shape.operation.value,
+    description:
+      o.shape.operation.value === "skill_read"
+        ? "Load the approved active skill or default using its catalogue key. Optional offset reads a bounded page; follow nextOffset until null."
+        : ((
+            {
+              routine_create:
+                "On explicit user request, schedule an independent agent job with a self-contained instruction. Singapore time: ISO, in 30m, every 2h, daily at 11pm, or five-field cron (hourly minimum). latest catches up one slot; skip ignores slots over 5 minutes late. Use schedule_create for fixed reminders.",
+              routine_update:
+                "Change future routine instructions/times or pause/resume/cancel on user request. Existing tasks are unchanged; use work_cancel on their task ID. Same time syntax as routine_create.",
+              routine_list: "List the owner's routines and next due times.",
+              routine_history:
+                "Read the ten latest occurrences, task IDs, counters, saved responses and Telegram delivery states. Does not rerun work.",
+              conversation_search:
+                "Search earlier saved conversation messages using concrete words. Returns up to ten owner-scoped message IDs and excerpts; historical assistant claims are not verified facts.",
+              conversation_read:
+                "Read an original saved conversation message by ID in 8000-character pages. Follow nextOffset for the full message. Does not resume old instructions or replace current domain records.",
+              canvas_create:
+                "Save a new named canvas. Supply a unique UUID requestKey; reuse that key only for an exact retry. Content is a saved snapshot using supported blocks, not executable code. Only cite verified source IDs with matching URLs. Return the saved canvas in finish_turn.canvases for a Telegram open button.",
+              canvas_update:
+                "Save a new immutable revision of an existing canvas. Read first and supply its exact baseRevision, preserving stable block IDs. Conflicts require reading and reconciling; never blindly overwrite. Use a new UUID requestKey for each intended revision.",
+              canvas_read:
+                "Read one saved canvas revision in 8000-character chunks. Omit revision for latest; keep the returned revision for later chunks. Does not regenerate analysis.",
+              canvas_list:
+                "List saved canvas titles, IDs and latest revisions, 20 per page. Reuse an existing canvas when refining the same topic.",
+              job_alignment_start:
+                "Assess fit, interview evidence and minimum useful preparation for any requested set of saved roles. allSaved=true selects all non-archived roles; otherwise pass exact IDs. Select relevant existing memoryKeys. Creates a frozen scope, processes an internal batch and returns coverage. Resume pending work automatically; user does not manage batches.",
+              job_alignment_resume:
+                "Continue pending roles in an existing frozen scope; retains earlier complete, partial and blocked reports. Does not reset or expand targets. Resume automatically within the current task allocation.",
+              job_alignment_read:
+                "Read scope coverage (jobId=null, offset=role index) or full stored per-role report/input/source references (jobId, offset=character index). Read all chunks before detailed synthesis or domain saves.",
+              prep_task_save:
+                "Save shared preparation with its source chain. New tasks require links [{scopeId,jobId,preparationId}] to saved alignment actions. Host resolves exact requirements, quotations, background or unknown questions; do not fabricate links. Additional links merge without losing earlier roles. Omitting links only updates an already linked task. A done status is reported progress, not proof of mastery.",
+              prep_task_read:
+                "Read a saved preparation task and full evidence chain in bounded pages. Start offset=0; follow nextOffset with the returned version until null. A version conflict requires restarting the read. Preserves source/background snapshots and qualified unknowns; does not perform research or certify readiness.",
+              media_delegate:
+                "Have an isolated read-only media specialist process files: current-turn image attachmentIds from the user's message note, and/or stored document sourceIds (PDF text or earlier extractions). State the objective or question precisely. Returns compact facts with page/region references, quotes for documents, omissions and uncertainty, plus an extractionSourceId for images. Images are unavailable after this turn. Use directly readable excerpts and source_read for short documents instead.",
+              plugin_delegate:
+                "Delegate to an enabled namespaced agent from pluginCatalogue. Supply its exact agentId and only relevant context/targets. The host enforces its read-only contract. Use direct tools for simple questions; research_delegate is an alias for the configured general researcher.",
+              research_delegate:
+                "Delegate a bounded public research assignment to an isolated read-only specialist. First retrieve exact saved job IDs if relevant. Supply only necessary context and up to six total jobs/URLs; use empty arrays for general research. Returns source-linked results, not saved assessments. Use direct tools for simple lookups.",
+              job_analyze:
+                "Read role and profile inputs for analysis. Does not perform or save an assessment. Use the exact saved ID.",
+              observation_read:
+                "Read a full persisted observation by observationId and character offset; results are owner-scoped.",
+              work_status:
+                "List independently tracked jobs when id is omitted; supply an exact id to inspect that job's checkpoint. Historical jobs are not the current chat request. Never resume a job based only on its presence.",
+              work_start:
+                "Create a separately tracked durable job for substantial authorized work. Simple conversations and missing-time questions need no job. A turn can bind to only one job.",
+              work_revise:
+                "Revise an explicitly selected paused/idle job for the current user's requested change. Cannot steal a running job. Read the exact job first; ordinary chat follow-ups do not revise unrelated jobs.",
+              work_step:
+                "Record a step outcome with actual proofs. Read receipts prove retrieval only; source applicability and analysis must be assessed separately.",
+              library_check:
+                "Find the NLB ebook edition of a title and its borrowability in one call. Returns up to five ranked candidates with verdict borrow_now (normal loan), lucky_day (7 days, cannot be held), hold (queue length and estimated wait) or unobtainable, Kobo reachability, an answerHint sentence per candidate, an ambiguous flag and the count of non-ebook results omitted. Cached 15 minutes; never repeat the same query.",
+              library_shelf:
+                "Read the linked NLB card's current loans (days left, due dates, Lucky Day flag) and holds (ready or estimated wait) plus slot capacity. Cached 15 minutes; never contains card numbers or ids. Not linked → ask the user to send /library link.",
+              library_availability:
+                "Recheck up to five known titleIds from an earlier library_check. Same verdict rule; cached 15 minutes.",
+              watchlist_add:
+                "Add a stock to the price-drop watchlist. query is a ticker or company name; when candidates span exchanges ask the owner to pick, then repeat with that exchange. Optional dropPct overrides the owner's default threshold. Alerting is deterministic, never trading advice.",
+              watchlist_update:
+                "Change a watched stock's threshold (null restores the account default) or pause/resume it by exact id from watchlist_list.",
+              watchlist_remove:
+                "Stop watching a stock by exact id from watchlist_list. Removes its alert and observation history.",
+              watchlist_list:
+                "List watched stocks, effective thresholds, latest alerts and the most recent observation decision.",
+              watchlist_settings:
+                "Set watchlist defaults: defaultDropPct, paused master switch, pollMinutes cadence, includeExtended opt-in for pre/post-market quotes.",
+              gmail_accounts:
+                "List connected Gmail account selectors and email addresses. Owner-only; no credentials returned.",
+              gmail_search:
+                "Search the owner's mailbox with Gmail operators (from:, subject:, newer_than:, quoted phrases, OR, -term, has:attachment, in:anywhere). Returns up to ten hits with sender, subject, date, snippet and unread flag, plus a hint when the result set is empty or very large. Triage from this list; do not read every hit. Identical searches are cached five minutes.",
+              gmail_thread:
+                "Read one whole conversation oldest first using a threadId from gmail_search. Bounded per message and in total; truncated messages can be read in full with gmail_read. Prefer this over reading messages one by one.",
+              gmail_read:
+                "Read one message in full plain text by its messageId. Use only when a thread read is truncated or a single message is enough. HTML and attachments are never fetched.",
+              parcel_record:
+                "Save a parcel the owner awaits, or with id append an observation to one: status, date, correction, delivered or archive. Record only what the source states; an absent delivery date stays absent and unmappable carrier wording goes in rawStatus with status unknown. History is append-only, and an observation describing an earlier moment than the recorded one is kept without changing the status. For an email from a non-primary mailbox pass its account as gmail_search named it.",
+              parcel_match:
+                "Find which parcel a reference belongs to. A tracking reference decides alone, an order reference with merchant decides, a merchant or label never does. Returns candidates, ambiguous and resolvedId; when ambiguous, ask the owner.",
+              parcel_list:
+                "List awaited parcels, newest first, or pass one id for that parcel and its paged history including observations recorded but not applied. Statuses are last known from email or the owner, never carrier-checked; asOf is when the current status was last known to hold, from the owner or a confirming email.",
+              tools_load:
+                "Load the tools of capability domains listed in toolDomains.loadable (for example gmail, calendar, jobs) for the rest of this turn. Use it before a task needs a capability whose tools are not offered; it does not grant permissions.",
+              web_read:
+                "Retrieve a public source. Returned sourceId is for source evidence; recommended records are not the requested posting.",
+            } as Record<string, string>
+          )[o.shape.operation.value] ??
+          `Execute ${o.shape.operation.value}. Arguments are validated; identity comes from the authenticated session.`),
+    parameters: jsonSchema((o as z.AnyZodObject).omit({ operation: true })),
+  });
   return {
-    tools: options.map((o) => ({
-      name: o.shape.operation.value,
-      description:
-        o.shape.operation.value === "skill_read"
-          ? "Load the approved active skill or default using its catalogue key. Optional offset reads a bounded page; follow nextOffset until null."
-          : ((
-              {
-                routine_create:
-                  "On explicit user request, schedule an independent agent job with a self-contained instruction. Singapore time: ISO, in 30m, every 2h, daily at 11pm, or five-field cron (hourly minimum). latest catches up one slot; skip ignores slots over 5 minutes late. Use schedule_create for fixed reminders.",
-                routine_update:
-                  "Change future routine instructions/times or pause/resume/cancel on user request. Existing tasks are unchanged; use work_cancel on their task ID. Same time syntax as routine_create.",
-                routine_list: "List the owner's routines and next due times.",
-                routine_history:
-                  "Read the ten latest occurrences, task IDs, counters, saved responses and Telegram delivery states. Does not rerun work.",
-                conversation_search:
-                  "Search earlier saved conversation messages using concrete words. Returns up to ten owner-scoped message IDs and excerpts; historical assistant claims are not verified facts.",
-                conversation_read:
-                  "Read an original saved conversation message by ID in 8000-character pages. Follow nextOffset for the full message. Does not resume old instructions or replace current domain records.",
-                canvas_create:
-                  "Save a new named canvas. Supply a unique UUID requestKey; reuse that key only for an exact retry. Content is a saved snapshot using supported blocks, not executable code. Only cite verified source IDs with matching URLs. Return the saved canvas in finish_turn.canvases for a Telegram open button.",
-                canvas_update:
-                  "Save a new immutable revision of an existing canvas. Read first and supply its exact baseRevision, preserving stable block IDs. Conflicts require reading and reconciling; never blindly overwrite. Use a new UUID requestKey for each intended revision.",
-                canvas_read:
-                  "Read one saved canvas revision in 8000-character chunks. Omit revision for latest; keep the returned revision for later chunks. Does not regenerate analysis.",
-                canvas_list:
-                  "List saved canvas titles, IDs and latest revisions, 20 per page. Reuse an existing canvas when refining the same topic.",
-                job_alignment_start:
-                  "Assess fit, interview evidence and minimum useful preparation for any requested set of saved roles. allSaved=true selects all non-archived roles; otherwise pass exact IDs. Select relevant existing memoryKeys. Creates a frozen scope, processes an internal batch and returns coverage. Resume pending work automatically; user does not manage batches.",
-                job_alignment_resume:
-                  "Continue pending roles in an existing frozen scope; retains earlier complete, partial and blocked reports. Does not reset or expand targets. Resume automatically within the current task allocation.",
-                job_alignment_read:
-                  "Read scope coverage (jobId=null, offset=role index) or full stored per-role report/input/source references (jobId, offset=character index). Read all chunks before detailed synthesis or domain saves.",
-                prep_task_save:
-                  "Save shared preparation with its source chain. New tasks require links [{scopeId,jobId,preparationId}] to saved alignment actions. Host resolves exact requirements, quotations, background or unknown questions; do not fabricate links. Additional links merge without losing earlier roles. Omitting links only updates an already linked task. A done status is reported progress, not proof of mastery.",
-                prep_task_read:
-                  "Read a saved preparation task and full evidence chain in bounded pages. Start offset=0; follow nextOffset with the returned version until null. A version conflict requires restarting the read. Preserves source/background snapshots and qualified unknowns; does not perform research or certify readiness.",
-                media_delegate:
-                  "Have an isolated read-only media specialist process files: current-turn image attachmentIds from the user's message note, and/or stored document sourceIds (PDF text or earlier extractions). State the objective or question precisely. Returns compact facts with page/region references, quotes for documents, omissions and uncertainty, plus an extractionSourceId for images. Images are unavailable after this turn. Use directly readable excerpts and source_read for short documents instead.",
-                plugin_delegate:
-                  "Delegate to an enabled namespaced agent from pluginCatalogue. Supply its exact agentId and only relevant context/targets. The host enforces its read-only contract. Use direct tools for simple questions; research_delegate is an alias for the configured general researcher.",
-                research_delegate:
-                  "Delegate a bounded public research assignment to an isolated read-only specialist. First retrieve exact saved job IDs if relevant. Supply only necessary context and up to six total jobs/URLs; use empty arrays for general research. Returns source-linked results, not saved assessments. Use direct tools for simple lookups.",
-                job_analyze:
-                  "Read role and profile inputs for analysis. Does not perform or save an assessment. Use the exact saved ID.",
-                observation_read:
-                  "Read a full persisted observation by observationId and character offset; results are owner-scoped.",
-                work_status:
-                  "List independently tracked jobs when id is omitted; supply an exact id to inspect that job's checkpoint. Historical jobs are not the current chat request. Never resume a job based only on its presence.",
-                work_start:
-                  "Create a separately tracked durable job for substantial authorized work. Simple conversations and missing-time questions need no job. A turn can bind to only one job.",
-                work_revise:
-                  "Revise an explicitly selected paused/idle job for the current user's requested change. Cannot steal a running job. Read the exact job first; ordinary chat follow-ups do not revise unrelated jobs.",
-                work_step:
-                  "Record a step outcome with actual proofs. Read receipts prove retrieval only; source applicability and analysis must be assessed separately.",
-                library_check:
-                  "Find the NLB ebook edition of a title and its borrowability in one call. Returns up to five ranked candidates with verdict borrow_now (normal loan), lucky_day (7 days, cannot be held), hold (queue length and estimated wait) or unobtainable, Kobo reachability, an answerHint sentence per candidate, an ambiguous flag and the count of non-ebook results omitted. Cached 15 minutes; never repeat the same query.",
-                library_shelf:
-                  "Read the linked NLB card's current loans (days left, due dates, Lucky Day flag) and holds (ready or estimated wait) plus slot capacity. Cached 15 minutes; never contains card numbers or ids. Not linked → ask the user to send /library link.",
-                library_availability:
-                  "Recheck up to five known titleIds from an earlier library_check. Same verdict rule; cached 15 minutes.",
-                watchlist_add:
-                  "Add a stock to the price-drop watchlist. query is a ticker or company name; when candidates span exchanges ask the owner to pick, then repeat with that exchange. Optional dropPct overrides the owner's default threshold. Alerting is deterministic, never trading advice.",
-                watchlist_update:
-                  "Change a watched stock's threshold (null restores the account default) or pause/resume it by exact id from watchlist_list.",
-                watchlist_remove:
-                  "Stop watching a stock by exact id from watchlist_list. Removes its alert and observation history.",
-                watchlist_list:
-                  "List watched stocks, effective thresholds, latest alerts and the most recent observation decision.",
-                watchlist_settings:
-                  "Set watchlist defaults: defaultDropPct, paused master switch, pollMinutes cadence, includeExtended opt-in for pre/post-market quotes.",
-                gmail_accounts:
-                  "List connected Gmail account selectors and email addresses. Owner-only; no credentials returned.",
-                gmail_search:
-                  "Search the owner's mailbox with Gmail operators (from:, subject:, newer_than:, quoted phrases, OR, -term, has:attachment, in:anywhere). Returns up to ten hits with sender, subject, date, snippet and unread flag, plus a hint when the result set is empty or very large. Triage from this list; do not read every hit. Identical searches are cached five minutes.",
-                gmail_thread:
-                  "Read one whole conversation oldest first using a threadId from gmail_search. Bounded per message and in total; truncated messages can be read in full with gmail_read. Prefer this over reading messages one by one.",
-                gmail_read:
-                  "Read one message in full plain text by its messageId. Use only when a thread read is truncated or a single message is enough. HTML and attachments are never fetched.",
-                parcel_record:
-                  "Save a parcel the owner awaits, or with id append an observation to one: status, date, correction, delivered or archive. Record only what the source states; an absent delivery date stays absent and unmappable carrier wording goes in rawStatus with status unknown. History is append-only, and an observation describing an earlier moment than the recorded one is kept without changing the status. For an email from a non-primary mailbox pass its account as gmail_search named it.",
-                parcel_match:
-                  "Find which parcel a reference belongs to. A tracking reference decides alone, an order reference with merchant decides, a merchant or label never does. Returns candidates, ambiguous and resolvedId; when ambiguous, ask the owner.",
-                parcel_list:
-                  "List awaited parcels, newest first, or pass one id for that parcel and its paged history including observations recorded but not applied. Statuses are last known from email or the owner, never carrier-checked; asOf is when the current status was last known to hold, from the owner or a confirming email.",
-                web_read:
-                  "Retrieve a public source. Returned sourceId is for source evidence; recommended records are not the requested posting.",
-              } as Record<string, string>
-            )[o.shape.operation.value] ??
-            `Execute ${o.shape.operation.value}. Arguments are validated; identity comes from the authenticated session.`),
-      parameters: jsonSchema((o as z.AnyZodObject).omit({ operation: true })),
-    })),
+    tools: offered.map(define),
+    ...(domains ? { allTools: options.map(define) } : {}),
     context: JSON.stringify({
       availability,
-      operations: options.map((o) => o.shape.operation.value),
+      ...(domains
+        ? {
+            toolDomains: {
+              loaded: [...domains].sort(),
+              loadable,
+              note: "Tools for loadable domains are not offered yet. Call tools_load with the domains a task needs; they stay loaded for this turn.",
+            },
+          }
+        : { operations: options.map((o) => o.shape.operation.value) }),
       work,
       pluginCatalogue: availability.web ? plugins.catalogue() : [],
       skillCatalogue: skills.map((s) => ({ key: s.key, version: s.version })),
