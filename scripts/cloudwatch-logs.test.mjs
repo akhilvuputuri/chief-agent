@@ -114,3 +114,10 @@ test("uses the session proxy only when HTTPS_PROXY is set", () => {
   const lower = clientOptions({ https_proxy: "http://127.0.0.1:3128" });
   assert.ok(lower.requestHandler.httpsAgent instanceof HttpsProxyAgent);
 });
+
+test("picker query summarises decisions without the in-list form", () => {
+  const q = QUERIES.picker.query();
+  assert.match(q, /tools\.picked/);
+  assert.match(q, /by event, state/);
+  assert.doesNotMatch(q, / in \[/);
+});

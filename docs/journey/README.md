@@ -38,7 +38,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 23 September                         | [34 — GPT-6 Sol pin](34-gpt-6-sol-pin.md): which model should the released policy select first?                                               | Proposed; policy pinned on review branch, not deployed                                                                       |
 | 26 September                         | [35 — Lightsail host and private logs](35-lightsail-private-logs.md): how can agents read production outcomes without SSH or private content? | Production on Lightsail since 26 September with private CloudWatch logs; released v0.3.27; owner Telegram acceptance pending |
 | 26 September                         | [36 — Bounding the fixed prompt](36-bounded-context.md): why is older conversation dropped on almost every model call?                        | Stage 1 measurement released; stage 2 tool loading in review                                                                 |
-| 27 September                         | [37 — Picking tool domains with Jev](37-jev-tool-picker.md): can a decision model pick tool domains better than word cues?                    | In review; 97.9% synthetic recall on the pinned snapshot, production unmeasured                                              |
+| 27 September                         | [37 — Picking tool domains with Jev](37-jev-tool-picker.md): can a decision model pick tool domains better than word cues?                    | Released 27 September (`d4436df`); 97.9% synthetic recall; production unmeasured                                             |
 
 ## Connected case studies
 
