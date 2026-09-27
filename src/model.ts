@@ -49,6 +49,8 @@ export interface ModelAdapter {
     reasoning: "medium";
     signal: AbortSignal;
     sessionId?: string;
+    /** Sent as OpenRouter session_id instead of sessionId; prompt caches are partitioned by it. */
+    cacheKey?: string;
   }): Promise<Generation>;
 }
 export class ModelError extends Error {
@@ -95,7 +97,9 @@ export class OpenRouter implements ModelAdapter {
         },
         body: JSON.stringify({
           model: this.model,
-          ...(input.sessionId ? { session_id: input.sessionId } : {}),
+          ...((input.cacheKey ?? input.sessionId)
+            ? { session_id: input.cacheKey ?? input.sessionId }
+            : {}),
           messages: input.messages,
           tools: input.tools.map((f) => ({ type: "function", function: f })),
           reasoning: { enabled: true, effort: input.reasoning },

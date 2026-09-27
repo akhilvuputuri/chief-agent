@@ -86,6 +86,16 @@ test("actual OpenRouter wire preserves Sol, medium reasoning and price-first cei
     signal: new AbortController().signal,
   });
   assert.equal(sent.session_id, "stable-session");
+  // A cache key, when given, replaces the per-run session as the provider cache partition.
+  await model.generate({
+    messages: [{ role: "user", content: "hello" }],
+    tools: [],
+    reasoning: "medium",
+    sessionId: "run-2",
+    cacheKey: "chief-owner",
+    signal: new AbortController().signal,
+  });
+  assert.equal(sent.session_id, "chief-owner");
   assert.equal(sent.model, "openai/gpt-5.6-sol");
   assert.deepEqual(sent.reasoning, { enabled: true, effort: "medium" });
   assert.deepEqual(sent.provider, {
