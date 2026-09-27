@@ -419,6 +419,8 @@ export interface ImageAttachment {
 }
 export interface AgentRequest {
   runId: string;
+  /** Stable per-owner provider cache key. Provider prompt caches are partitioned by it. */
+  cacheKey?: string;
   capability: string;
   message: string;
   images?: ImageAttachment[];
