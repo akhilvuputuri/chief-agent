@@ -93,11 +93,15 @@ export function runtimeContext(
   const options = action.options.filter(
     (o) => !disabled(o.shape.operation.value),
   );
+  // Core first, then domains in the order they were selected or loaded, so a
+  // mid-turn load appends to the tool list instead of reshuffling the cached prefix.
   const offered = domains
-    ? options.filter((o) => {
-        const domain = domainOf(o.shape.operation.value);
-        return !domain || domains.has(domain);
-      })
+    ? [
+        ...options.filter((o) => !domainOf(o.shape.operation.value)),
+        ...[...domains].flatMap((d) =>
+          options.filter((o) => domainOf(o.shape.operation.value) === d),
+        ),
+      ]
     : options;
   const loadable = domains
     ? Object.fromEntries(

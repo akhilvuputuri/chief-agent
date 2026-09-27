@@ -24,6 +24,7 @@ import { SkillTools } from "./skills.js";
 import { WorkTools } from "./work.js";
 import { runtimeContext } from "./runtime.js";
 import {
+  domainOf,
   selectDomains,
   TOOL_DOMAINS,
   type ToolDomain,
@@ -496,9 +497,14 @@ export class Assistant {
       // Issue #77: offer the core tools plus the domains this turn needs.
       const recentOperations = (
         await this.db.query(
-          `SELECT DISTINCT c.operation FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id
-           WHERE r.user_id=$1 AND (c.started_at > now() - interval '60 minutes' OR ($2::text IS NOT NULL AND r.task_id::text=$2))`,
-          [user, current?.id ?? null],
+          current
+            ? `SELECT c.operation FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id
+               WHERE r.user_id=$1 AND c.started_at > now() - interval '60 minutes'
+               UNION SELECT c.operation FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id
+               WHERE r.user_id=$1 AND r.task_id=$2::uuid`
+            : `SELECT DISTINCT c.operation FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id
+               WHERE r.user_id=$1 AND c.started_at > now() - interval '60 minutes'`,
+          current ? [user, current.id] : [user],
         )
       ).rows.map((row) => row.operation as string);
       const pendingApprovals =
@@ -508,6 +514,12 @@ export class Assistant {
             [user],
           )
         ).rows[0] ?? {};
+      // Domains with at least one tool available in this deployment.
+      const availableDomains = new Set(
+        runtimeContext(this.availability, null)
+          .tools.map((t) => domainOf(t.name))
+          .filter((d): d is ToolDomain => !!d),
+      );
       const loadedDomains = selectDomains({
         message,
         taskBound: background || !!current,
@@ -515,6 +527,8 @@ export class Assistant {
         pendingCalendarApproval: pendingApprovals.calendar === true,
         pendingLibraryApproval: pendingApprovals.library === true,
       });
+      for (const domain of loadedDomains)
+        if (!availableDomains.has(domain)) loadedDomains.delete(domain);
       const runtime = runtimeContext(
         this.availability,
         current ? await work.snapshot(user, current.id) : null,
@@ -526,9 +540,14 @@ export class Assistant {
         offered: runtime.tools.length,
       });
       const loadTools = async (domains: string[]) => {
+        const unavailable: string[] = [];
         for (const domain of domains)
-          if ((TOOL_DOMAINS as readonly string[]).includes(domain))
+          if (
+            (TOOL_DOMAINS as readonly string[]).includes(domain) &&
+            availableDomains.has(domain as ToolDomain)
+          )
             loadedDomains.add(domain as ToolDomain);
+          else unavailable.push(domain);
         const fresh = runtimeContext(
           this.availability,
           null,
@@ -545,7 +564,16 @@ export class Assistant {
           domains: loaded,
           offered: fresh.tools.length,
         });
-        return { loaded, offered: fresh.tools.length };
+        return {
+          loaded,
+          offered: fresh.tools.length,
+          ...(unavailable.length
+            ? {
+                unavailable,
+                note: "These domains are not connected in this deployment; tell the user rather than retrying.",
+              }
+            : {}),
+        };
       };
       const catalogue = await new SkillTools(this.db).call(user, run, {
         operation: "skill_list",
@@ -639,7 +667,7 @@ export class Assistant {
                 ...selectDomains({
                   message: adopted.map((x) => x.message).join("\n"),
                 }),
-              ].filter((d) => !loadedDomains.has(d));
+              ].filter((d) => !loadedDomains.has(d) && availableDomains.has(d));
               if (followUpDomains.length) await loadTools(followUpDomains);
               // Do not overwrite a wakeup that arrives during an awaited state read.
               const version = this.inbox.version(user);

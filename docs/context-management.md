@@ -64,7 +64,7 @@ Offline effect (`npm run context:inventory`, all integrations enabled, 26 Septem
 | Image              | media           |    13 |                  4,927 |
 | Background task    | work            |    18 |                  7,317 |
 
-These are offline character counts. Measure the production effect with `context.selected` (`toolsChars`, `fixedChars`, `omittedCount`) and `tools.selected`/`tools.loaded`. Also check provider token and cache usage in `model.completed`, because a changing tool list can reduce prompt-cache reuse. Extra discovery steps show up as `tools_load` calls in `tools.finished`.
+These are offline character counts. Measure the production effect with `context.selected` (`toolsChars`, `fixedChars`, `omittedCount`) and `tools.selected`/`tools.loaded`. Also check provider token and cache usage in `model.completed`, because a changing tool list can reduce prompt-cache reuse. Extra discovery steps show up as `tools_load` calls in `tool.finished`.
 
 ## Implementation plan
 

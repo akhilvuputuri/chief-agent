@@ -229,9 +229,12 @@ test("a disabled integration stays unavailable even when requested", async () =>
     ).rows;
     assert.equal(calls[0].operation, "gmail_search");
     assert.equal(calls[0].state, "failed");
-    // Loading an unavailable domain succeeds but offers nothing new.
+    // Loading an unavailable domain reports it instead of pretending it loaded.
     assert.equal(calls[1].operation, "tools_load");
     assert.equal(calls[1].state, "success");
+    const loaded = calls[1].result;
+    assert.deepEqual(loaded.unavailable, ["gmail"]);
+    assert.equal(loaded.loaded.includes("gmail"), false);
   } finally {
     await f.pg.close();
   }
@@ -255,4 +258,30 @@ test("a plain message sends well under half of the full tool schemas", async () 
   } finally {
     await f.pg.close();
   }
+});
+
+test("common phrasings reach their domains", () => {
+  const pick = (message: string) => [...selectDomains({ message })];
+  for (const [message, domain] of [
+    ["Did Sarah reply to me?", "gmail"],
+    ["Check my messages from the bank", "gmail"],
+    ["What's on at 3pm?", "calendar"],
+    ["When is my dentist?", "calendar"],
+    ["Add lunch with Tom on the 5th at 1pm", "calendar"],
+    ["Did DHL deliver?", "parcels"],
+  ] as const)
+    assert.ok(pick(message).includes(domain), `${message} -> ${domain}`);
+});
+
+test("loading a domain appends its tools after the existing ones", () => {
+  const domains = selectDomains({ message: "any new email?" });
+  const before = runtimeContext(allOn, null, undefined, domains).tools.map(
+    (t) => t.name,
+  );
+  domains.add("jobs");
+  const after = runtimeContext(allOn, null, undefined, domains).tools.map(
+    (t) => t.name,
+  );
+  assert.deepEqual(after.slice(0, before.length), before);
+  assert.ok(after.slice(before.length).every((n) => domainOf(n) === "jobs"));
 });

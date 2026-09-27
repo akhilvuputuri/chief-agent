@@ -441,9 +441,12 @@ export interface AgentRequest {
     allTools?: import("./model.js").ToolDefinition[];
   };
   /** Adds tool domains for the rest of this turn (issue #77). */
-  loadTools?: (
-    domains: string[],
-  ) => Promise<{ loaded: string[]; offered: number }>;
+  loadTools?: (domains: string[]) => Promise<{
+    loaded: string[];
+    offered: number;
+    unavailable?: string[];
+    note?: string;
+  }>;
   specialist?: "research" | "job_alignment" | "media";
   systemInstructions?: string;
   /** Host-resolved model override from a pinned plugin, never a model tool argument. */

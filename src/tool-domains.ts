@@ -83,10 +83,13 @@ export function domainOf(operation: string): ToolDomain | undefined {
 // Conservative cues: a missed domain costs one tools_load step, an extra one
 // costs only schema characters. Word boundaries avoid matching inside words.
 const CUES: [ToolDomain, RegExp][] = [
-  ["gmail", /\b(e-?mails?|mails?|inbox|gmail|sender|newsletter|unread)\b/i],
+  [
+    "gmail",
+    /\b(e-?mails?|mails?|inbox|gmail|senders?|newsletters?|unread|messages? from|new messages|repl(y|ies|ied)|threads?)\b/i,
+  ],
   [
     "calendar",
-    /\b(calendar|meetings?|events?|appointments?|agenda|today|tonight|tomorrow|yesterday|this week|next week|(mon|tues|wednes|thurs|fri|satur|sun)days?|free time|busy|availability)\b/i,
+    /\b(calendar|meetings?|events?|appointments?|agenda|today|tonight|tomorrow|yesterday|this week|next week|(mon|tues|wednes|thurs|fri|satur|sun)days?|free time|busy|availability|dentist|doctor|(lunch|dinner|breakfast|coffee|call) with|\d{1,2}(:\d{2})? ?(am|pm)|on the \d{1,2}(st|nd|rd|th))\b/i,
   ],
   [
     "daily",
@@ -111,7 +114,7 @@ const CUES: [ToolDomain, RegExp][] = [
   ["canvas", /\b(canvas(es)?|mini ?app|save (this|it) as)\b/i],
   [
     "parcels",
-    /\b(parcels?|packages?|deliver(y|ies|ed)|shipment|shipping|tracking|courier|order(ed)?)\b/i,
+    /\b(parcels?|packages?|deliver\w*|shipments?|shipping|tracking|couriers?|order(ed|s)?|dhl|fedex|ups|ninja ?van|j&t|shopee|lazada)\b/i,
   ],
   ["library", /\b(library|libby|nlb|e-?books?|books?|borrow|holds?|loans?)\b/i],
   [
