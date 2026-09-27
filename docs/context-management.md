@@ -75,13 +75,14 @@ The word cues in stage 2 missed many phrasings (stock tickers, book titles, "has
 **What stays deterministic.**
 
 - A bound task, pending Calendar or library approvals and tools used in the last hour still load their domains.
-- Domains offered to the owner in the last hour (`tools.selected`/`tools.loaded` events) stay offered, so a conversation keeps its tools and the offered prefix changes less.
+- Domains Jev picked for the owner in the last hour (`tools.picked` events) stay offered, so a conversation keeps its tools. A hold is renewed only when Jev picks the domain again; domains actually used are held through recent tool use.
+- The initial domains are offered in canonical order, so the same set always produces the same tool list. Domains loaded mid-turn are appended.
 - Background job steps use the stage 2 selection without Jev.
 - `tools_load` and auto-loading on a direct tool call remain the escape hatch.
 
 **Failure behaviour.** The call times out after 1.5 seconds and is never retried. On a timeout, HTTP error, partial answer or missing key, the stage 2 word cues are used instead. After a 429 the picker is skipped for 5 minutes. A 401/402/403 is logged at error level. `TOOL_PICKER=off` disables it without a code change.
 
-**Configuration and records.** `config/tool-picker.json` holds the pinned model (`typesafe/jev-1.13-20260917`), thresholds, state limits and domain descriptions. It is bundled into the image and shared with the Python eval. Each decision is recorded as a private `tools.picked` event with per-domain probabilities. The sanitized log carries only the outcome, domain count, latency and cost. Cost is recorded in the spending ledger as `openrouter-jev`.
+**Configuration and records.** `config/tool-picker.json` holds the pinned model (`typesafe/jev-1.13-20260917`), thresholds, state limits and domain descriptions. It is bundled into the image and shared with the Python eval. Each decision is recorded as a private `tools.picked` event with per-domain probabilities. The sanitized log carries only the outcome, model, domain count, latency, cost and HTTP status. Cost is recorded in the spending ledger as `openrouter-jev`; a definite HTTP rejection is settled at zero, and accounting failures never change the pick.
 
 **Eval.** `npm run eval:picker` runs 174 synthetic labelled scenarios (101 tuning, 73 held-out) three times against the configured model and fails below 97% recall of needed domains. It is a manual, paid run (about $0.04), not a CI gate. See [evals/picker](../evals/picker/README.md) and [journal 37](journey/37-jev-tool-picker.md) for the measurements.
 

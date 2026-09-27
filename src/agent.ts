@@ -572,8 +572,9 @@ export class Assistant {
         );
         return result.ok ? result.domains : null;
       };
-      // Domains offered to this owner in the last hour stay loaded, so a
-      // conversation keeps its tools and the offered prefix stays stable.
+      // Domains Jev picked for this owner in the last hour stay loaded, so a
+      // conversation keeps its tools. Only picks renew the hold; domains
+      // actually used are held through recentOperations.
       const heldDomains = background
         ? []
         : (
@@ -582,21 +583,22 @@ export class Assistant {
                JOIN events e ON e.run_id=r.id AND e.user_id=r.user_id
                CROSS JOIN LATERAL jsonb_array_elements_text(e.data->'domains') d(domain)
                WHERE r.user_id=$1 AND r.started_at > now() - interval '60 minutes'
-                 AND e.type IN ('tools.selected','tools.loaded')
+                 AND e.type='tools.picked'
                  AND jsonb_typeof(e.data->'domains')='array'`,
               [user],
             )
           ).rows.map((row) => row.domain as string);
       const picked = await pick(message);
-      const loadedDomains = selectDomains({
-        ...signals,
-        message: picked ? "" : message,
-      });
-      for (const domain of [...heldDomains, ...(picked ?? [])])
-        if ((TOOL_DOMAINS as readonly string[]).includes(domain))
-          loadedDomains.add(domain as ToolDomain);
-      for (const domain of loadedDomains)
-        if (!availableDomains.has(domain)) loadedDomains.delete(domain);
+      const chosen = new Set<string>([
+        ...selectDomains({ ...signals, message: picked ? "" : message }),
+        ...heldDomains,
+        ...(picked ?? []),
+      ]);
+      // Canonical order: the same domains always yield the same tool list,
+      // whichever source chose them. Mid-turn loads append after these.
+      const loadedDomains = new Set(
+        TOOL_DOMAINS.filter((d) => chosen.has(d) && availableDomains.has(d)),
+      );
       const runtime = runtimeContext(
         this.availability,
         current ? await work.snapshot(user, current.id) : null,

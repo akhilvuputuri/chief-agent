@@ -217,8 +217,12 @@ export class ToolPicker {
     // After a rate limit, skip Jev for a while rather than adding latency.
     if (start < this.pausedUntil)
       return { ok: false, outcome: "paused", latencyMs: 0 };
-    const charge = await ledger?.begin("openrouter-jev", 0.001);
+    let charge: string | undefined;
+    // Usage accounting never decides the pick; its failures are ignored.
+    const settle = (usage: unknown) =>
+      charge ? ledger!.settle(charge, usage).catch(() => {}) : undefined;
     try {
+      charge = await ledger?.begin("openrouter-jev", 0.001);
       const response = await this.transport(
         "https://openrouter.ai/api/alpha/decisions",
         {
@@ -236,6 +240,8 @@ export class ToolPicker {
         },
       );
       if (!response.ok) {
+        // A definite HTTP rejection is not billed.
+        await settle({ cost: 0 });
         if (response.status === 429)
           this.pausedUntil = this.now() + this.config.pauseAfterRateLimitMs;
         return {
@@ -251,7 +257,7 @@ export class ToolPicker {
         };
       }
       const data: any = await response.json();
-      if (charge) await ledger!.settle(charge, data?.usage);
+      await settle(data?.usage);
       const probabilities: Record<string, number> = {};
       for (const d of asked) {
         const p = data?.answers?.[d]?.noul;

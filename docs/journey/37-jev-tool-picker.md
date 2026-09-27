@@ -61,6 +61,15 @@ See [context management, stage 3](../context-management.md#stage-3--jev-tool-pic
 
 - **Code.** `src/tool-picker.ts` holds the config, state, questions, pick rule and client. The wiring is in `src/agent.ts`, with the `TOOL_PICKER` switch in `src/config.ts`. The ops-log projection is `tools.picked`, and the Dockerfile bundles `config/tool-picker.json`.
 - **Eval.** `evals/picker/` is standard-library Python and implements the same state, question and pick contract. Two shared fixtures, `pick-cases.json` and `request-golden.json`, are checked by both `tests/tool-picker.test.ts` and `evals/picker/test_pick.py`, so the two implementations cannot drift silently.
+- **Code review.** An independent Opus 5.5 review of `63e7e37` requested small changes:
+  - tool order depended on which source chose a domain, which would defeat prompt caching for the same set (medium);
+  - holds renewed themselves through `tools.selected`, so a domain never expired under steady use;
+  - a usage-ledger failure could fail the turn;
+  - rejected requests left unsettled estimates;
+  - tests were missing for follow-ups, background runs, transport failures and the log projection.
+
+  All were fixed: canonical order, holds from `tools.picked` only, accounting isolated from the pick, zero settlement on HTTP rejection, and tests for each path.
+
 - **Plan review.** An independent Fable review of the plan suggested more changes: a least-recently-used cap on held domains, relabelling from production tool use, an 800 ms timeout and skipping the Python eval. The owner kept the original plan. Those remain candidates if production numbers call for them.
 
 ## Verification and outcome

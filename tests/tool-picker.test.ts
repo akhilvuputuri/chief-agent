@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PGlite } from "@electric-sql/pglite";
 import { readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { Assistant } from "../src/agent.js";
 import { CustomAgent } from "../src/custom-agent.js";
 import type { Message, ModelAdapter, ToolDefinition } from "../src/model.js";
@@ -16,7 +17,9 @@ import {
   ToolPicker,
   type PickerConfig,
 } from "../src/tool-picker.js";
-import type { Database } from "../src/db.js";
+import { ensureUser, type Database } from "../src/db.js";
+import { projectEvent, setOpsSink } from "../src/ops-log.js";
+import type { Spending } from "../src/spending.js";
 
 const config = readPickerConfig();
 const json = async (path: string) =>
@@ -186,6 +189,72 @@ test("picker times out and rejects partial answers", async () => {
   assert.deepEqual(invalid.ok ? null : invalid.outcome, "invalid");
 });
 
+test("transport and usage-accounting failures fall back instead of throwing", async () => {
+  const thrown = new ToolPicker("key", config, (async () => {
+    throw new TypeError("fetch failed");
+  }) as typeof fetch);
+  const network = await thrown.pick(input, ["library"]);
+  assert.deepEqual(network.ok ? null : network.outcome, "failed");
+  const ledger = {
+    begin: async () => {
+      throw new Error("Usage owner unavailable");
+    },
+  } as unknown as Spending;
+  const noLedger = await new ToolPicker("key", config, (async () =>
+    answers({ library: 0.9 })) as typeof fetch).pick(
+    input,
+    ["library"],
+    ledger,
+  );
+  assert.deepEqual(noLedger.ok ? null : noLedger.outcome, "failed");
+  // A settle failure after a valid answer keeps the answer.
+  const settleFails = {
+    begin: async () => "charge",
+    settle: async () => {
+      throw new Error("db down");
+    },
+  } as unknown as Spending;
+  const kept = await new ToolPicker("key", config, (async () =>
+    answers({ library: 0.9 })) as typeof fetch).pick(
+    input,
+    ["library"],
+    settleFails,
+  );
+  assert.deepEqual(kept.ok && kept.domains, ["library"]);
+});
+
+test("the operational log never carries picker probabilities or domain names", () => {
+  const lines: string[] = [];
+  const previous = setOpsSink((line) => lines.push(line));
+  try {
+    projectEvent("tools.picked", "run-1", {
+      outcome: "picked",
+      domains: ["gmail", "library"],
+      probabilities: { gmail: 0.91, library: 0.6 },
+      latencyMs: 280,
+      costUsd: 0.00007,
+      model: config.model,
+    });
+    projectEvent("tools.picked", "run-2", {
+      outcome: "rejected",
+      latencyMs: 90,
+      httpStatus: 401,
+    });
+  } finally {
+    setOpsSink(previous);
+  }
+  const [picked, rejected] = lines.map((l) => JSON.parse(l));
+  assert.equal(picked.state, "picked");
+  assert.equal(picked.domainCount, 2);
+  assert.equal(picked.level, "info");
+  assert.equal(rejected.level, "error");
+  assert.equal(rejected.httpStatus, 401);
+  for (const line of lines) {
+    assert.ok(!line.includes("gmail") && !line.includes("library"), line);
+    assert.ok(!line.includes("0.91"), line);
+  }
+});
+
 async function fixture(model: ModelAdapter, transport: typeof fetch) {
   const pg = new PGlite();
   for (const f of [
@@ -215,6 +284,19 @@ async function fixture(model: ModelAdapter, transport: typeof fetch) {
   return { pg, db, assistant };
 }
 const names = (tools: ToolDefinition[]) => tools.map((t) => t.name);
+const call = (name: string, args: unknown) => ({
+  message: {
+    role: "assistant" as const,
+    content: null,
+    tool_calls: [
+      {
+        id: `call-${name}-${Math.random()}`,
+        type: "function" as const,
+        function: { name, arguments: JSON.stringify(args) },
+      },
+    ],
+  },
+});
 const reply = (content: string) => ({
   message: { role: "assistant" as const, content },
 });
@@ -296,4 +378,104 @@ test("no picker call is made when no domain is available", async () => {
   const result = await picker.pick(input, []);
   assert.ok(result.ok && result.domains.length === 0);
   assert.equal(calls, 0);
+});
+
+test("the same domains give the same tool order whichever way they were chosen", async () => {
+  const seen: string[][] = [];
+  const responses = [
+    answers({ jobs: 0.9, daily: 0.8 }),
+    answers({ daily: 0.9, jobs: 0.8 }),
+  ];
+  const f = await fixture(
+    {
+      generate: async (i) => {
+        seen.push(names(i.tools));
+        return reply("done");
+      },
+    },
+    (async () => responses.shift()!) as typeof fetch,
+  );
+  try {
+    await f.assistant.respond("owner", "which roles and reminders?");
+    await f.assistant.respond("owner", "reminders and roles again?");
+    assert.deepEqual(seen[0], seen[1]);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("a follow-up absorbed mid-turn gets its own pick", async () => {
+  const seen: string[][] = [];
+  const messages: string[] = [];
+  const responses = [answers({}), answers({ jobs: 0.9 })];
+  let second: Promise<unknown> | undefined;
+  let f: Awaited<ReturnType<typeof fixture>>;
+  f = await fixture(
+    {
+      generate: async (i) => {
+        seen.push(names(i.tools));
+        if (seen.length === 1) {
+          const id = await f.assistant.recordInput(
+            "owner",
+            "also which roles fit me?",
+          );
+          second = f.assistant.respondDetailed(
+            "owner",
+            "also which roles fit me?",
+            undefined,
+            undefined,
+            { id },
+          );
+          return call("memory_list", {});
+        }
+        return reply("done");
+      },
+    },
+    (async (_url, init) => {
+      messages.push(JSON.parse(String(init?.body)).state.latest_user_message);
+      return responses.shift()!;
+    }) as typeof fetch,
+  );
+  try {
+    await f.assistant.respond("owner", "hello");
+    await second;
+    assert.deepEqual(messages, ["hello", "also which roles fit me?"]);
+    assert.ok(!seen[0]!.includes("job_list"));
+    assert.ok(seen.at(-1)!.includes("job_list"));
+  } finally {
+    f.assistant.shutdown();
+    await f.pg.close();
+  }
+});
+
+test("background task steps do not call the picker", async () => {
+  let calls = 0;
+  const f = await fixture(
+    { generate: async () => reply("step done") },
+    (async () => {
+      calls++;
+      return answers({});
+    }) as typeof fetch,
+  );
+  try {
+    await ensureUser(f.db, "owner");
+    const id = randomUUID();
+    await f.db.query(
+      "INSERT INTO work_tasks(id,user_id,objective,request) VALUES($1,'owner','compare laptops','compare laptops')",
+      [id],
+    );
+    await f.assistant.resume("owner", id).catch(() => undefined);
+    assert.ok(
+      (await f.db.query("SELECT 1 FROM runtime_runs WHERE user_id='owner'"))
+        .rows.length,
+    );
+    assert.equal(calls, 0);
+    assert.equal(
+      (await f.db.query("SELECT 1 FROM events WHERE type='tools.picked'")).rows
+        .length,
+      0,
+    );
+  } finally {
+    await f.pg.close();
+  }
 });
