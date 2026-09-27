@@ -1,0 +1,53 @@
+[
+  {
+    "name": "one clear group",
+    "probabilities": { "gmail": 0.93, "calendar": 0.2, "daily": 0.01 },
+    "expected": ["gmail"]
+  },
+  {
+    "name": "threshold is inclusive",
+    "probabilities": { "gmail": 0.5, "calendar": 0.49 },
+    "expected": ["gmail"]
+  },
+  {
+    "name": "capped at three, highest first",
+    "probabilities": {
+      "gmail": 0.9,
+      "calendar": 0.8,
+      "daily": 0.7,
+      "parcels": 0.95,
+      "jobs": 0.6
+    },
+    "expected": ["parcels", "gmail", "calendar"]
+  },
+  {
+    "name": "nothing clears the threshold: best group above the floor",
+    "probabilities": { "library": 0.3, "watchlist": 0.16, "gmail": 0.02 },
+    "expected": ["library"]
+  },
+  {
+    "name": "fallback floor is inclusive",
+    "probabilities": { "library": 0.15, "gmail": 0.1 },
+    "expected": ["library"]
+  },
+  {
+    "name": "small talk loads nothing",
+    "probabilities": { "gmail": 0.05, "calendar": 0.14, "daily": 0.01 },
+    "expected": []
+  },
+  {
+    "name": "ties keep the canonical group order",
+    "probabilities": {
+      "watchlist": 0.7,
+      "gmail": 0.7,
+      "calendar": 0.7,
+      "daily": 0.7
+    },
+    "expected": ["gmail", "calendar", "daily"]
+  },
+  {
+    "name": "non-numeric and unknown entries are ignored",
+    "probabilities": { "gmail": "0.9", "unknown": 0.99, "calendar": 0.6 },
+    "expected": ["calendar"]
+  }
+]

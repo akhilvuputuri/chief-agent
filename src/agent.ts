@@ -29,6 +29,7 @@ import {
   TOOL_DOMAINS,
   type ToolDomain,
 } from "./tool-domains.js";
+import { recentTurns, type ToolPicker } from "./tool-picker.js";
 import { SerialQueue } from "./security.js";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
@@ -205,6 +206,7 @@ export class Assistant {
       dailySheet: false,
     },
     private budget: Budget = defaultBudget,
+    private picker?: ToolPicker,
   ) {
     this.inbox = new InputInbox(db);
   }
@@ -520,15 +522,90 @@ export class Assistant {
           .tools.map((t) => domainOf(t.name))
           .filter((d): d is ToolDomain => !!d),
       );
-      const loadedDomains = selectDomains({
-        message,
+      const signals = {
         taskBound: background || !!current,
         recentOperations,
         pendingCalendarApproval: pendingApprovals.calendar === true,
         pendingLibraryApproval: pendingApprovals.library === true,
-      });
-      for (const domain of loadedDomains)
-        if (!availableDomains.has(domain)) loadedDomains.delete(domain);
+      };
+      const previousTurns = recentTurns(history);
+      // Foreground messages ask the picker; background job steps, a missing
+      // picker or a picker failure use the deterministic cues.
+      const pick = async (text: string, earlier = previousTurns) => {
+        if (background || !this.picker) return null;
+        const result = await this.picker.pick(
+          {
+            message: text,
+            previous: earlier,
+            pendingApprovals: [
+              ...(signals.pendingCalendarApproval
+                ? ["calendar event draft awaiting approval"]
+                : []),
+              ...(signals.pendingLibraryApproval
+                ? ["library request awaiting approval"]
+                : []),
+            ],
+            activeTask: current
+              ? String(current.objective ?? "").slice(0, 300) || null
+              : null,
+            recentTools: recentOperations,
+          },
+          availableDomains,
+          new Spending(this.db, user, run),
+        );
+        await execution.trace(
+          "tools.picked",
+          result.ok
+            ? {
+                outcome: "picked",
+                domains: result.domains,
+                probabilities: result.probabilities,
+                latencyMs: result.latencyMs,
+                costUsd: result.costUsd,
+                model: result.model,
+              }
+            : {
+                outcome: result.outcome,
+                latencyMs: result.latencyMs,
+                httpStatus: result.httpStatus,
+              },
+        );
+        return result.ok ? result.domains : null;
+      };
+      // Domains Jev picked for this owner in the last hour stay loaded, so a
+      // conversation keeps its tools. Only picks renew the hold; domains
+      // actually used are held through recentOperations.
+      const heldDomains = background
+        ? []
+        : (
+            await this.db.query(
+              `SELECT DISTINCT d.domain FROM runtime_runs r
+               JOIN events e ON e.run_id=r.id AND e.user_id=r.user_id
+               CROSS JOIN LATERAL jsonb_array_elements_text(e.data->'domains') d(domain)
+               WHERE r.user_id=$1 AND r.started_at > now() - interval '2 hours'
+                 AND e.created_at > now() - interval '60 minutes'
+                 AND e.type='tools.picked'
+                 AND jsonb_typeof(e.data->'domains')='array'`,
+              [user],
+            )
+          ).rows.map((row) => row.domain as string);
+      const picked = await pick(message);
+      // Jev sees a clipped message, so a longer one also keeps its word cues.
+      const clipped =
+        [...message].length > (this.picker?.config.state.messageChars ?? 0);
+      const chosen = new Set<string>([
+        ...selectDomains({
+          ...signals,
+          message: picked && !clipped ? "" : message,
+        }),
+        ...heldDomains,
+        ...(picked ?? []),
+      ]);
+      // Canonical order: the same domains always yield the same tool list,
+      // whichever source chose them. Mid-turn loads append after these.
+      const loadedDomains = new Set(
+        TOOL_DOMAINS.filter((d) => chosen.has(d) && availableDomains.has(d)),
+      );
       const runtime = runtimeContext(
         this.availability,
         current ? await work.snapshot(user, current.id) : null,
@@ -663,12 +740,31 @@ export class Assistant {
                 requestSnapshot += `\n\nUser follow-up (${input.id}):\n${input.message}`;
               }
               // Follow-ups can need other capabilities than the first message.
-              const followUpDomains = [
-                ...selectDomains({
-                  message: adopted.map((x) => x.message).join("\n"),
-                }),
-              ].filter((d) => !loadedDomains.has(d) && availableDomains.has(d));
-              if (followUpDomains.length) await loadTools(followUpDomains);
+              // Each absorbed follow-up gets its own decision, so none is clipped away.
+              const followUpDomains = new Set<ToolDomain>();
+              let earlier = [
+                ...previousTurns,
+                { user: message, assistant: "", tools: [] as string[] },
+              ];
+              for (const input of adopted) {
+                const picked = await pick(input.message, earlier);
+                const long =
+                  [...input.message].length >
+                  (this.picker?.config.state.messageChars ?? 0);
+                for (const d of [
+                  ...(picked ?? []),
+                  ...(!picked || long
+                    ? selectDomains({ message: input.message })
+                    : []),
+                ])
+                  if (!loadedDomains.has(d) && availableDomains.has(d))
+                    followUpDomains.add(d);
+                earlier = [
+                  ...earlier,
+                  { user: input.message, assistant: "", tools: [] },
+                ];
+              }
+              if (followUpDomains.size) await loadTools([...followUpDomains]);
               // Do not overwrite a wakeup that arrives during an awaited state read.
               const version = this.inbox.version(user);
               const pending = await this.inbox.pending(user);

@@ -1,0 +1,791 @@
+[
+  {
+    "id": "none-1",
+    "domains": [
+      "gmail",
+      "calendar",
+      "daily",
+      "jobs",
+      "work",
+      "research",
+      "media",
+      "canvas",
+      "parcels",
+      "library",
+      "watchlist",
+      "routines",
+      "skills"
+    ],
+    "state": {
+      "latest_user_message": "hi",
+      "previous_turns": [],
+      "pending_approvals": [],
+      "active_background_task": null,
+      "tools_used_last_hour": [],
+      "always_available": "Web search, reading web pages, memory, conversation-history search and skill reading are always available and are not part of these groups."
+    },
+    "questions": {
+      "gmail": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the gmail tools?",
+        "criteria": {
+          "true": "Search or read the user's Gmail (two connected accounts). Examples: did X reply, anything from my bank, find the invoice, what did the landlord say, summarise unread.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "calendar": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the calendar tools?",
+        "criteria": {
+          "true": "Read the user's Google Calendar or draft a new event. Examples: am I free Thursday, what's on at 3pm, when is my meeting, add dentist on the 12th.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "daily": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the daily tools?",
+        "criteria": {
+          "true": "The user's to-do items, notes, timed reminders and daily reminder/briefing schedules. Examples: remind me at 7pm, add milk to my list, what's open on my list, morning briefing.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "jobs": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the jobs tools?",
+        "criteria": {
+          "true": "Saved job roles and applications, role-fit analysis, interview preparation and the prep Sheet. Examples: how well does the Stripe role fit, mark application rejected, prep me for the interview.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "work": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the work tools?",
+        "criteria": {
+          "true": "Start, continue, check, pause or cancel a long-running multi-step background task. Examples: keep going on that task, cancel the background job, do this in the background step by step.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "research": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the research tools?",
+        "criteria": {
+          "true": "Delegate an in-depth multi-source research report with citations (not a quick fact). Examples: deep dive on X with sources, thorough sourced comparison.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "media": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the media tools?",
+        "criteria": {
+          "true": "Look at an attached image or read an attached or earlier PDF/document. Examples: [Attached image ...], summarise this PDF, what does clause 7 of the contract say.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "canvas": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the canvas tools?",
+        "criteria": {
+          "true": "Create, update, read or list saved canvases (documents the user opens in the Mini App). Examples: save this as a canvas, update my trip canvas, show my saved docs.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "parcels": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the parcels tools?",
+        "criteria": {
+          "true": "Track or update parcels, packages or online orders the user awaits. Examples: where's my Amazon package, did the DHL thing arrive, what am I still waiting on.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "library": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the library tools?",
+        "criteria": {
+          "true": "Singapore library (NLB/Libby) ebook availability, borrowing, loans, holds, due dates. Examples: is Atomic Habits available, can I borrow X, what do I have on loan.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "watchlist": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the watchlist tools?",
+        "criteria": {
+          "true": "The user's stock watchlist and price-drop alerts (tickers, thresholds, pausing). Examples: how is AAPL doing, alert me if NVDA drops 5%, stop watching Tesla.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "routines": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the routines tools?",
+        "criteria": {
+          "true": "Recurring automated agent routines that run on a schedule. Examples: every Monday at 9 summarise my inbox, pause my weekly routine, what automations run.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "skills": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the skills tools?",
+        "criteria": {
+          "true": "Version history, drafts, evaluation, activation or rollback of the assistant's text skills. Examples: show the history of the interview skill, roll back the research skill.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      }
+    }
+  },
+  {
+    "id": "fu-7",
+    "domains": [
+      "gmail",
+      "calendar",
+      "daily",
+      "jobs",
+      "work",
+      "research",
+      "media",
+      "canvas",
+      "parcels",
+      "library",
+      "watchlist",
+      "routines",
+      "skills"
+    ],
+    "state": {
+      "latest_user_message": "great, put it in for Tuesday 2pm",
+      "previous_turns": [
+        {
+          "user": "did Sarah reply to me?",
+          "assistant": "Yes, she replied yesterday saying she can meet next week.",
+          "tools_used": ["gmail_search"]
+        }
+      ],
+      "pending_approvals": [],
+      "active_background_task": null,
+      "tools_used_last_hour": [],
+      "always_available": "Web search, reading web pages, memory, conversation-history search and skill reading are always available and are not part of these groups."
+    },
+    "questions": {
+      "gmail": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the gmail tools?",
+        "criteria": {
+          "true": "Search or read the user's Gmail (two connected accounts). Examples: did X reply, anything from my bank, find the invoice, what did the landlord say, summarise unread.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "calendar": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the calendar tools?",
+        "criteria": {
+          "true": "Read the user's Google Calendar or draft a new event. Examples: am I free Thursday, what's on at 3pm, when is my meeting, add dentist on the 12th.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "daily": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the daily tools?",
+        "criteria": {
+          "true": "The user's to-do items, notes, timed reminders and daily reminder/briefing schedules. Examples: remind me at 7pm, add milk to my list, what's open on my list, morning briefing.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "jobs": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the jobs tools?",
+        "criteria": {
+          "true": "Saved job roles and applications, role-fit analysis, interview preparation and the prep Sheet. Examples: how well does the Stripe role fit, mark application rejected, prep me for the interview.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "work": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the work tools?",
+        "criteria": {
+          "true": "Start, continue, check, pause or cancel a long-running multi-step background task. Examples: keep going on that task, cancel the background job, do this in the background step by step.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "research": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the research tools?",
+        "criteria": {
+          "true": "Delegate an in-depth multi-source research report with citations (not a quick fact). Examples: deep dive on X with sources, thorough sourced comparison.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "media": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the media tools?",
+        "criteria": {
+          "true": "Look at an attached image or read an attached or earlier PDF/document. Examples: [Attached image ...], summarise this PDF, what does clause 7 of the contract say.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "canvas": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the canvas tools?",
+        "criteria": {
+          "true": "Create, update, read or list saved canvases (documents the user opens in the Mini App). Examples: save this as a canvas, update my trip canvas, show my saved docs.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "parcels": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the parcels tools?",
+        "criteria": {
+          "true": "Track or update parcels, packages or online orders the user awaits. Examples: where's my Amazon package, did the DHL thing arrive, what am I still waiting on.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "library": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the library tools?",
+        "criteria": {
+          "true": "Singapore library (NLB/Libby) ebook availability, borrowing, loans, holds, due dates. Examples: is Atomic Habits available, can I borrow X, what do I have on loan.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "watchlist": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the watchlist tools?",
+        "criteria": {
+          "true": "The user's stock watchlist and price-drop alerts (tickers, thresholds, pausing). Examples: how is AAPL doing, alert me if NVDA drops 5%, stop watching Tesla.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "routines": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the routines tools?",
+        "criteria": {
+          "true": "Recurring automated agent routines that run on a schedule. Examples: every Monday at 9 summarise my inbox, pause my weekly routine, what automations run.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "skills": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the skills tools?",
+        "criteria": {
+          "true": "Version history, drafts, evaluation, activation or rollback of the assistant's text skills. Examples: show the history of the interview skill, roll back the research skill.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      }
+    }
+  },
+  {
+    "id": "t-sig-1",
+    "domains": [
+      "calendar",
+      "daily",
+      "jobs",
+      "work",
+      "research",
+      "media",
+      "canvas",
+      "parcels",
+      "library",
+      "watchlist",
+      "routines",
+      "skills"
+    ],
+    "state": {
+      "latest_user_message": "yes go ahead",
+      "previous_turns": [],
+      "pending_approvals": ["calendar event draft: Dentist, 12 Oct 10:00"],
+      "active_background_task": null,
+      "tools_used_last_hour": [],
+      "always_available": "Web search, reading web pages, memory, conversation-history search and skill reading are always available and are not part of these groups."
+    },
+    "questions": {
+      "calendar": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the calendar tools?",
+        "criteria": {
+          "true": "Read the user's Google Calendar or draft a new event. Examples: am I free Thursday, what's on at 3pm, when is my meeting, add dentist on the 12th.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "daily": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the daily tools?",
+        "criteria": {
+          "true": "The user's to-do items, notes, timed reminders and daily reminder/briefing schedules. Examples: remind me at 7pm, add milk to my list, what's open on my list, morning briefing.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "jobs": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the jobs tools?",
+        "criteria": {
+          "true": "Saved job roles and applications, role-fit analysis, interview preparation and the prep Sheet. Examples: how well does the Stripe role fit, mark application rejected, prep me for the interview.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "work": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the work tools?",
+        "criteria": {
+          "true": "Start, continue, check, pause or cancel a long-running multi-step background task. Examples: keep going on that task, cancel the background job, do this in the background step by step.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "research": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the research tools?",
+        "criteria": {
+          "true": "Delegate an in-depth multi-source research report with citations (not a quick fact). Examples: deep dive on X with sources, thorough sourced comparison.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "media": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the media tools?",
+        "criteria": {
+          "true": "Look at an attached image or read an attached or earlier PDF/document. Examples: [Attached image ...], summarise this PDF, what does clause 7 of the contract say.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "canvas": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the canvas tools?",
+        "criteria": {
+          "true": "Create, update, read or list saved canvases (documents the user opens in the Mini App). Examples: save this as a canvas, update my trip canvas, show my saved docs.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "parcels": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the parcels tools?",
+        "criteria": {
+          "true": "Track or update parcels, packages or online orders the user awaits. Examples: where's my Amazon package, did the DHL thing arrive, what am I still waiting on.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "library": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the library tools?",
+        "criteria": {
+          "true": "Singapore library (NLB/Libby) ebook availability, borrowing, loans, holds, due dates. Examples: is Atomic Habits available, can I borrow X, what do I have on loan.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "watchlist": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the watchlist tools?",
+        "criteria": {
+          "true": "The user's stock watchlist and price-drop alerts (tickers, thresholds, pausing). Examples: how is AAPL doing, alert me if NVDA drops 5%, stop watching Tesla.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "routines": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the routines tools?",
+        "criteria": {
+          "true": "Recurring automated agent routines that run on a schedule. Examples: every Monday at 9 summarise my inbox, pause my weekly routine, what automations run.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "skills": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the skills tools?",
+        "criteria": {
+          "true": "Version history, drafts, evaluation, activation or rollback of the assistant's text skills. Examples: show the history of the interview skill, roll back the research skill.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      }
+    }
+  },
+  {
+    "id": "t-sig-4",
+    "domains": [
+      "gmail",
+      "calendar",
+      "daily",
+      "jobs",
+      "work",
+      "research",
+      "media",
+      "canvas",
+      "parcels",
+      "library",
+      "watchlist",
+      "routines",
+      "skills"
+    ],
+    "state": {
+      "latest_user_message": "ok and anything from the other bank?",
+      "previous_turns": [],
+      "pending_approvals": [],
+      "active_background_task": null,
+      "tools_used_last_hour": ["gmail_search", "gmail_thread"],
+      "always_available": "Web search, reading web pages, memory, conversation-history search and skill reading are always available and are not part of these groups."
+    },
+    "questions": {
+      "gmail": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the gmail tools?",
+        "criteria": {
+          "true": "Search or read the user's Gmail (two connected accounts). Examples: did X reply, anything from my bank, find the invoice, what did the landlord say, summarise unread.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "calendar": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the calendar tools?",
+        "criteria": {
+          "true": "Read the user's Google Calendar or draft a new event. Examples: am I free Thursday, what's on at 3pm, when is my meeting, add dentist on the 12th.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "daily": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the daily tools?",
+        "criteria": {
+          "true": "The user's to-do items, notes, timed reminders and daily reminder/briefing schedules. Examples: remind me at 7pm, add milk to my list, what's open on my list, morning briefing.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "jobs": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the jobs tools?",
+        "criteria": {
+          "true": "Saved job roles and applications, role-fit analysis, interview preparation and the prep Sheet. Examples: how well does the Stripe role fit, mark application rejected, prep me for the interview.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "work": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the work tools?",
+        "criteria": {
+          "true": "Start, continue, check, pause or cancel a long-running multi-step background task. Examples: keep going on that task, cancel the background job, do this in the background step by step.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "research": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the research tools?",
+        "criteria": {
+          "true": "Delegate an in-depth multi-source research report with citations (not a quick fact). Examples: deep dive on X with sources, thorough sourced comparison.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "media": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the media tools?",
+        "criteria": {
+          "true": "Look at an attached image or read an attached or earlier PDF/document. Examples: [Attached image ...], summarise this PDF, what does clause 7 of the contract say.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "canvas": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the canvas tools?",
+        "criteria": {
+          "true": "Create, update, read or list saved canvases (documents the user opens in the Mini App). Examples: save this as a canvas, update my trip canvas, show my saved docs.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "parcels": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the parcels tools?",
+        "criteria": {
+          "true": "Track or update parcels, packages or online orders the user awaits. Examples: where's my Amazon package, did the DHL thing arrive, what am I still waiting on.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "library": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the library tools?",
+        "criteria": {
+          "true": "Singapore library (NLB/Libby) ebook availability, borrowing, loans, holds, due dates. Examples: is Atomic Habits available, can I borrow X, what do I have on loan.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "watchlist": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the watchlist tools?",
+        "criteria": {
+          "true": "The user's stock watchlist and price-drop alerts (tickers, thresholds, pausing). Examples: how is AAPL doing, alert me if NVDA drops 5%, stop watching Tesla.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "routines": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the routines tools?",
+        "criteria": {
+          "true": "Recurring automated agent routines that run on a schedule. Examples: every Monday at 9 summarise my inbox, pause my weekly routine, what automations run.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "skills": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the skills tools?",
+        "criteria": {
+          "true": "Version history, drafts, evaluation, activation or rollback of the assistant's text skills. Examples: show the history of the interview skill, roll back the research skill.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      }
+    }
+  },
+  {
+    "id": "t-media-2",
+    "domains": [
+      "gmail",
+      "calendar",
+      "daily",
+      "jobs",
+      "work",
+      "research",
+      "media",
+      "canvas",
+      "parcels",
+      "library",
+      "watchlist",
+      "routines",
+      "skills"
+    ],
+    "state": {
+      "latest_user_message": "key points please\n\n[Attached PDF: report.pdf (2 MB), 30 pages, text extracted as sourceId=s9.]",
+      "previous_turns": [],
+      "pending_approvals": [],
+      "active_background_task": null,
+      "tools_used_last_hour": [],
+      "always_available": "Web search, reading web pages, memory, conversation-history search and skill reading are always available and are not part of these groups."
+    },
+    "questions": {
+      "gmail": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the gmail tools?",
+        "criteria": {
+          "true": "Search or read the user's Gmail (two connected accounts). Examples: did X reply, anything from my bank, find the invoice, what did the landlord say, summarise unread.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "calendar": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the calendar tools?",
+        "criteria": {
+          "true": "Read the user's Google Calendar or draft a new event. Examples: am I free Thursday, what's on at 3pm, when is my meeting, add dentist on the 12th.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "daily": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the daily tools?",
+        "criteria": {
+          "true": "The user's to-do items, notes, timed reminders and daily reminder/briefing schedules. Examples: remind me at 7pm, add milk to my list, what's open on my list, morning briefing.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "jobs": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the jobs tools?",
+        "criteria": {
+          "true": "Saved job roles and applications, role-fit analysis, interview preparation and the prep Sheet. Examples: how well does the Stripe role fit, mark application rejected, prep me for the interview.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "work": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the work tools?",
+        "criteria": {
+          "true": "Start, continue, check, pause or cancel a long-running multi-step background task. Examples: keep going on that task, cancel the background job, do this in the background step by step.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "research": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the research tools?",
+        "criteria": {
+          "true": "Delegate an in-depth multi-source research report with citations (not a quick fact). Examples: deep dive on X with sources, thorough sourced comparison.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "media": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the media tools?",
+        "criteria": {
+          "true": "Look at an attached image or read an attached or earlier PDF/document. Examples: [Attached image ...], summarise this PDF, what does clause 7 of the contract say.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "canvas": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the canvas tools?",
+        "criteria": {
+          "true": "Create, update, read or list saved canvases (documents the user opens in the Mini App). Examples: save this as a canvas, update my trip canvas, show my saved docs.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "parcels": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the parcels tools?",
+        "criteria": {
+          "true": "Track or update parcels, packages or online orders the user awaits. Examples: where's my Amazon package, did the DHL thing arrive, what am I still waiting on.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "library": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the library tools?",
+        "criteria": {
+          "true": "Singapore library (NLB/Libby) ebook availability, borrowing, loans, holds, due dates. Examples: is Atomic Habits available, can I borrow X, what do I have on loan.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "watchlist": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the watchlist tools?",
+        "criteria": {
+          "true": "The user's stock watchlist and price-drop alerts (tickers, thresholds, pausing). Examples: how is AAPL doing, alert me if NVDA drops 5%, stop watching Tesla.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "routines": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the routines tools?",
+        "criteria": {
+          "true": "Recurring automated agent routines that run on a schedule. Examples: every Monday at 9 summarise my inbox, pause my weekly routine, what automations run.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "skills": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the skills tools?",
+        "criteria": {
+          "true": "Version history, drafts, evaluation, activation or rollback of the assistant's text skills. Examples: show the history of the interview skill, roll back the research skill.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      }
+    }
+  },
+  {
+    "id": "t-multi-4",
+    "domains": [
+      "gmail",
+      "calendar",
+      "daily",
+      "jobs",
+      "work",
+      "research",
+      "media",
+      "canvas",
+      "parcels",
+      "library",
+      "watchlist",
+      "routines",
+      "skills"
+    ],
+    "state": {
+      "latest_user_message": "here's my CV, which saved roles fit best?\n\n[Attached PDF: cv.pdf (150 KB), 2 pages, text extracted as sourceId=s7.]",
+      "previous_turns": [],
+      "pending_approvals": [],
+      "active_background_task": null,
+      "tools_used_last_hour": [],
+      "always_available": "Web search, reading web pages, memory, conversation-history search and skill reading are always available and are not part of these groups."
+    },
+    "questions": {
+      "gmail": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the gmail tools?",
+        "criteria": {
+          "true": "Search or read the user's Gmail (two connected accounts). Examples: did X reply, anything from my bank, find the invoice, what did the landlord say, summarise unread.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "calendar": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the calendar tools?",
+        "criteria": {
+          "true": "Read the user's Google Calendar or draft a new event. Examples: am I free Thursday, what's on at 3pm, when is my meeting, add dentist on the 12th.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "daily": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the daily tools?",
+        "criteria": {
+          "true": "The user's to-do items, notes, timed reminders and daily reminder/briefing schedules. Examples: remind me at 7pm, add milk to my list, what's open on my list, morning briefing.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "jobs": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the jobs tools?",
+        "criteria": {
+          "true": "Saved job roles and applications, role-fit analysis, interview preparation and the prep Sheet. Examples: how well does the Stripe role fit, mark application rejected, prep me for the interview.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "work": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the work tools?",
+        "criteria": {
+          "true": "Start, continue, check, pause or cancel a long-running multi-step background task. Examples: keep going on that task, cancel the background job, do this in the background step by step.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "research": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the research tools?",
+        "criteria": {
+          "true": "Delegate an in-depth multi-source research report with citations (not a quick fact). Examples: deep dive on X with sources, thorough sourced comparison.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "media": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the media tools?",
+        "criteria": {
+          "true": "Look at an attached image or read an attached or earlier PDF/document. Examples: [Attached image ...], summarise this PDF, what does clause 7 of the contract say.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "canvas": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the canvas tools?",
+        "criteria": {
+          "true": "Create, update, read or list saved canvases (documents the user opens in the Mini App). Examples: save this as a canvas, update my trip canvas, show my saved docs.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "parcels": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the parcels tools?",
+        "criteria": {
+          "true": "Track or update parcels, packages or online orders the user awaits. Examples: where's my Amazon package, did the DHL thing arrive, what am I still waiting on.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "library": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the library tools?",
+        "criteria": {
+          "true": "Singapore library (NLB/Libby) ebook availability, borrowing, loans, holds, due dates. Examples: is Atomic Habits available, can I borrow X, what do I have on loan.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "watchlist": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the watchlist tools?",
+        "criteria": {
+          "true": "The user's stock watchlist and price-drop alerts (tickers, thresholds, pausing). Examples: how is AAPL doing, alert me if NVDA drops 5%, stop watching Tesla.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "routines": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the routines tools?",
+        "criteria": {
+          "true": "Recurring automated agent routines that run on a schedule. Examples: every Monday at 9 summarise my inbox, pause my weekly routine, what automations run.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      },
+      "skills": {
+        "type": "noul",
+        "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the skills tools?",
+        "criteria": {
+          "true": "Version history, drafts, evaluation, activation or rollback of the assistant's text skills. Examples: show the history of the interview skill, roll back the research skill.",
+          "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+        }
+      }
+    }
+  }
+]

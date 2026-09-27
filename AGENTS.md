@@ -4,7 +4,7 @@ Read `docs/current-work.md`, `HANDOVER.md`, `docs/portable-development.md`, `doc
 
 ## Commands
 
-Node 22. `npm ci`, `npm run check`, `npm run build`, `npm run format:check`. Tests use PGlite and mocked integrations; production credentials are unnecessary. Use Prettier on changed files. `npm run smoke:runtime` is paid and must not be run as a routine test. Paid evals remain deferred.
+Node 22. `npm ci`, `npm run check`, `npm run build`, `npm run format:check`. Tests use PGlite and mocked integrations; production credentials are unnecessary. Use Prettier on changed files. `npm run smoke:runtime` is paid and must not be run as a routine test. Paid evals remain deferred, except `npm run eval:picker` (about $0.04, run by hand after changing `config/tool-picker.json`; record results in the journal).
 
 ## Architecture
 

@@ -27,6 +27,8 @@ const schema = z.object({
   DAILY_SPREADSHEET_ID: z.string().default(""),
   OPENROUTER_API_KEY: z.string().default(""),
   AGENT_MODEL: z.string().default("openai/gpt-5.6-sol"),
+  // Jev picks the tool domains per message; "off" uses the deterministic cues.
+  TOOL_PICKER: z.enum(["jev", "off"]).default("jev"),
   AGENT_REASONING_EFFORT: z.literal("medium").default("medium"),
   AGENT_BUDGET_MS: z.coerce.number().int().positive().default(900000),
   AGENT_BUDGET_MODEL_CALLS: z.coerce.number().int().positive().default(40),

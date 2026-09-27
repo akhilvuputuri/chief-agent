@@ -59,6 +59,7 @@ const fields: Record<string, Shape> = {
   runtimeContextChars: "count",
   toolsChars: "count",
   toolCount: "count",
+  domainCount: "count",
   summaryChars: "count",
   messageChars: "count",
   protectedHistoryChars: "count",
@@ -287,6 +288,23 @@ const projections: Record<string, Projection> = {
     },
   ],
   "tools.selected": (run, d) => ["info", { runId: run, toolCount: d.offered }],
+  // Outcome and cost only; per-domain probabilities stay in the private events table.
+  "tools.picked": (run, d) => [
+    d.outcome === "picked"
+      ? "info"
+      : d.outcome === "rejected"
+        ? "error"
+        : "warn",
+    {
+      runId: run,
+      state: d.outcome,
+      model: d.model,
+      latencyMs: d.latencyMs,
+      costUsd: d.costUsd,
+      httpStatus: d.httpStatus,
+      domainCount: Array.isArray(d.domains) ? d.domains.length : undefined,
+    },
+  ],
   "tools.loaded": (run, d) => ["info", { runId: run, toolCount: d.offered }],
   "context.over_budget": (run) => ["warn", { runId: run, phase: "context" }],
   "context.failed": (run) => ["error", { runId: run, phase: "context" }],
