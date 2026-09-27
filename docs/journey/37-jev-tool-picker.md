@@ -1,7 +1,7 @@
 # 37 — Picking tool domains with Jev (issue #77 stage 3)
 
 Work date(s): 2026-09-27. Written/revised: 2026-09-27.
-Status: in review. The picker is implemented and tested on a review branch; nothing is deployed.
+Status: released 27 September 2026 in `d4436df`; production recall, latency and cache effects not yet measured on real messages.
 
 ## User-visible problem and preceding iteration
 
@@ -97,3 +97,21 @@ After release, compare these fields in `tools.picked`, `tools.selected`/`tools.l
 - `toolsChars` and cached tokens.
 
 Refit the threshold from the probabilities recorded in production if misses or extras differ from the synthetic set.
+
+### Release closure — 2026-09-27
+
+- **Merge.** [PR #105](https://github.com/akhilvuputuri/chief-agent/pull/105) was merged at approved head `b5e96eb` as `d4436df`. The independent Opus 5.5 review approved `b5e96eb` with low findings only.
+- **Release.** The `checks` and `release` workflows succeeded. The `companion/production` status reads "Exact commit deployed; startup health passed". `compose.yaml` and `db/` were unchanged, so the ordinary release path applied.
+- **Production smoke check (operator, not owner acceptance).** Three picker calls ran inside the running gateway container with the production key, without the ledger:
+  - "has the insurance company got back to me?" picked gmail;
+  - "is Dune on Libby?" picked library;
+  - "good morning!" picked nothing.
+
+  Latency was 266–598 ms, about $0.000074 per call, and the model reported was `typesafe/jev-1.13-20260917`.
+
+- **Pending.** No owner message had reached the picker at closure. Compare `npm run logs:cloudwatch -- picker` and `models` over the first days against the stage 2 period.
+- **Remaining low review findings.**
+  - Production has no quick off switch until Compose passes `TOOL_PICKER`.
+  - A usage-ledger failure falls back to word cues rather than calling Jev.
+  - `tools_used_last_hour` is bounded only by the number of distinct tools (at most 71 names).
+  - Holds ignore picks from runs that started over two hours earlier, which foreground budgets currently prevent.

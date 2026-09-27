@@ -25,7 +25,7 @@ const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$/;
 const EVENT = /^[a-z][a-z0-9_.]{0,79}$/;
 
 const common =
-  "fields @timestamp, ts, level, event, runId, parentRunId, childRunId, taskId, callId, operation, state, stopReason, errorCode, errorCategory, httpStatus, latencyMs, model, provider, kind, lane, inputId, approvalId, approved, messages, attempt, transient, costUsd, fixedChars, toolsChars, toolCount, protectedHistoryChars, serializedChars, omittedCount, release";
+  "fields @timestamp, ts, level, event, runId, parentRunId, childRunId, taskId, callId, operation, state, stopReason, errorCode, errorCategory, httpStatus, latencyMs, model, provider, kind, lane, inputId, approvalId, approved, messages, attempt, transient, costUsd, fixedChars, toolsChars, toolCount, domainCount, protectedHistoryChars, serializedChars, omittedCount, release";
 
 export const QUERIES = {
   errors: {
@@ -59,6 +59,12 @@ export const QUERIES = {
     help: "model calls, latency, tokens and reported cost",
     query: () =>
       `filter event in ["model.completed", "model.failed"] | stats count(*) as calls, avg(latencyMs) as avgMs, sum(inputTokens) as inputTokens, sum(cachedTokens) as cachedTokens, sum(outputTokens) as outputTokens, sum(costUsd) as reportedUsd by event, model, provider`,
+  },
+  picker: {
+    group: "runtime",
+    help: "tool-domain picker outcomes, latency and cost, with selected/loaded tool counts",
+    query: () =>
+      `filter event = "tools.picked" or event = "tools.selected" or event = "tools.loaded" | stats count(*) as lines, avg(latencyMs) as avgMs, max(latencyMs) as maxMs, sum(costUsd) as reportedUsd, avg(domainCount) as avgDomains, avg(toolCount) as avgTools by event, state`,
   },
   schedules: {
     group: "runtime",
