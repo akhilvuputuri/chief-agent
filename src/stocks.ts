@@ -10,6 +10,20 @@ import {
   type SymbolHit,
 } from "./stock-provider.js";
 import { marketCalendar, sessionsFor } from "./market-calendar.js";
+import {
+  describeWindow,
+  effectiveWindow,
+  inWindow,
+  upcomingChecks,
+  validateWindow,
+} from "./watch-window.js";
+
+/** Owner default window columns joined onto item rows, so every consumer
+ * resolves the same effective window (item override, else default). */
+const DEFAULT_WINDOW_COLUMNS = `s.window_start AS default_window_start,
+  s.window_end AS default_window_end, s.window_days AS default_window_days`;
+const WINDOW_OUTSIDE_NOTE =
+  "Outside the window no prices are fetched and no alerts are sent. When it reopens, the first check alerts only if the stock is still down past its threshold for that trading day; a drop that recovers while the window is closed is not reported.";
 
 /** Terminal-suppress a user's queued alerts ('muted'); delivered or uncertain
  * rows are untouched. Used when an item or the whole feature is paused. */
@@ -30,6 +44,7 @@ export class WatchlistTools {
   constructor(
     private db: Database,
     private provider?: MarketDataProvider,
+    private clock = () => new Date(),
   ) {}
   private async requireForeground(user: string, run: string) {
     const turn = (
@@ -50,6 +65,37 @@ export class WatchlistTools {
     if (a.operation === "watchlist_remove") return this.remove(user, a.id);
     if (a.operation === "watchlist_update") return this.update(user, a);
     return this.settings(user, a);
+  }
+  private sessionTypes(extended: boolean) {
+    return extended && this.provider?.supportsExtended
+      ? ["pre", "regular", "post"]
+      : ["regular"];
+  }
+  /** Adds the effective window and the next real check periods to item rows. */
+  private withMonitoring(items: any[], settings: any, now = this.clock()) {
+    return items.map((item) => {
+      const window = effectiveWindow({
+        ...item,
+        default_window_start: settings?.window_start,
+        default_window_end: settings?.window_end,
+        default_window_days: settings?.window_days,
+      });
+      return {
+        ...item,
+        monitoringWindow: window
+          ? { ...window, text: describeWindow(window) }
+          : null,
+        nextChecks:
+          item.status === "active" && !settings?.paused
+            ? upcomingChecks(
+                window,
+                item.mic_code,
+                this.sessionTypes(!!settings?.include_extended),
+                now,
+              )
+            : [],
+      };
+    });
   }
   private async list(user: string) {
     const settings = (
@@ -76,10 +122,14 @@ export class WatchlistTools {
         paused: false,
         poll_minutes: 15,
         include_extended: false,
+        window_start: null,
+        window_end: null,
+        window_days: null,
       },
-      items,
+      items: this.withMonitoring(items, settings),
       basis:
         "daily decline = (observed price / previous trading-session close - 1) x 100%",
+      window: `Monitoring windows are Singapore time and apply on top of exchange hours; nextChecks lists when each stock is actually checked. ${WINDOW_OUTSIDE_NOTE}`,
     };
   }
   private pick(hits: SymbolHit[], query: string, exchange?: string) {
@@ -211,20 +261,50 @@ export class WatchlistTools {
       )
     ).rows[0];
     if (!old) throw new ToolValidationError("Watchlist item unavailable");
+    const window =
+      a.window === undefined
+        ? {
+            start: old.window_start,
+            end: old.window_end,
+            days: old.window_days,
+          }
+        : a.window === null
+          ? { start: null, end: null, days: null }
+          : validateWindow(a.window);
     const row = (
       await this.db.query(
-        `UPDATE watchlist_items SET drop_pct=$3,status=$4,updated_at=now()
+        `UPDATE watchlist_items SET drop_pct=$3,status=$4,window_start=$5,window_end=$6,
+           window_days=$7,updated_at=now()
          WHERE id=$1 AND user_id=$2 RETURNING *`,
         [
           a.id,
           user,
           a.dropPct === undefined ? old.drop_pct : a.dropPct,
           a.status ?? old.status,
+          window.start,
+          window.end,
+          window.days,
         ],
       )
     ).rows[0];
     if (row.status === "paused") await mutePending(this.db, user, a.id);
-    return { updated: row };
+    const settings = (
+      await this.db.query("SELECT * FROM stock_settings WHERE user_id=$1", [
+        user,
+      ])
+    ).rows[0];
+    const [item] = this.withMonitoring([row], settings);
+    return {
+      updated: item,
+      ...(a.window !== undefined
+        ? {
+            window:
+              a.window === null
+                ? `${row.symbol} now follows the account default: ${describeWindow(item.monitoringWindow)}.`
+                : `${row.symbol} is checked only within ${describeWindow(item.monitoringWindow)}, on top of exchange hours. ${WINDOW_OUTSIDE_NOTE}`,
+          }
+        : {}),
+    };
   }
   private async settings(
     user: string,
@@ -254,8 +334,45 @@ export class WatchlistTools {
         ],
       )
     ).rows[0];
-    if (row.paused) await mutePending(this.db, user);
-    return { settings: row };
+    let settings = row;
+    if (a.window !== undefined) {
+      const w = a.window === null ? null : validateWindow(a.window);
+      settings = (
+        await this.db.query(
+          `UPDATE stock_settings SET window_start=$2,window_end=$3,window_days=$4,updated_at=now()
+           WHERE user_id=$1 RETURNING *`,
+          [user, w?.start ?? null, w?.end ?? null, w?.days ?? null],
+        )
+      ).rows[0];
+    }
+    if (settings.paused) await mutePending(this.db, user);
+    if (a.window === undefined) return { settings };
+    const items = (
+      await this.db.query(
+        "SELECT * FROM watchlist_items WHERE user_id=$1 ORDER BY symbol LIMIT 50",
+        [user],
+      )
+    ).rows;
+    const monitored = this.withMonitoring(items, settings);
+    const defaultWindow = effectiveWindow({
+      default_window_start: settings.window_start,
+      default_window_end: settings.window_end,
+      default_window_days: settings.window_days,
+    });
+    return {
+      settings,
+      window: defaultWindow
+        ? `Default monitoring window: ${describeWindow(defaultWindow)}, on top of exchange hours. ${WINDOW_OUTSIDE_NOTE}`
+        : "Default monitoring window cleared: stocks are checked throughout the exchange session.",
+      items: monitored.map((i) => ({
+        symbol: i.symbol,
+        exchange: i.exchange,
+        status: i.status,
+        monitoringWindow: i.monitoringWindow?.text ?? describeWindow(null),
+        windowSource: i.monitoringWindow?.source ?? null,
+        nextChecks: i.nextChecks,
+      })),
+    };
   }
 }
 
@@ -363,6 +480,24 @@ export class StockMonitor {
       [item.id],
     );
   }
+  /** Last gate decision logged per item, so gated items are not re-queried
+   * every tick; a restart falls back to the latest stored observation. */
+  private gated = new Map<string, string>();
+  private async gate(
+    item: { id: string; user_id: string },
+    decision: "market_closed" | "outside_window",
+    fields: { marketState: string; detail?: Record<string, unknown> },
+  ) {
+    if (this.gated.get(item.id) === decision) return;
+    const last = (
+      await this.db.query(
+        "SELECT decision FROM stock_observations WHERE item_id=$1 ORDER BY observed_at DESC LIMIT 1",
+        [item.id],
+      )
+    ).rows[0];
+    if (last?.decision !== decision) await this.observe(item, decision, fields);
+    this.gated.set(item.id, decision);
+  }
   private async backoff(
     item: any,
     pollMinutes: number,
@@ -453,7 +588,8 @@ export class StockMonitor {
           `SELECT i.*,COALESCE(s.default_drop_pct,5) AS eff_drop,
              COALESCE(s.paused,false) AS settings_paused,
              COALESCE(s.poll_minutes,15) AS eff_poll,
-             COALESCE(s.include_extended,false) AS eff_extended
+             COALESCE(s.include_extended,false) AS eff_extended,
+             ${DEFAULT_WINDOW_COLUMNS}
            FROM watchlist_items i LEFT JOIN stock_settings s ON s.user_id=i.user_id
            WHERE i.status='active' AND (i.next_retry_at IS NULL OR i.next_retry_at<=$1)
            ORDER BY i.last_polled_at ASC NULLS FIRST`,
@@ -496,31 +632,29 @@ export class StockMonitor {
         for (const item of group) {
           const extendedOk =
             item.eff_extended && this.provider.supportsExtended;
-          if (
-            inSessions(
-              local,
-              sessions,
-              extendedOk ? ["regular", "pre", "post"] : ["regular"],
-            )
-          ) {
+          const sessionOpen = inSessions(
+            local,
+            sessions,
+            extendedOk ? ["regular", "pre", "post"] : ["regular"],
+          );
+          const window = effectiveWindow(item);
+          if (sessionOpen && inWindow(window, now)) {
+            this.gated.delete(item.id);
             openItems.push(item);
             continue;
           }
-          const last = (
-            await this.db.query(
-              "SELECT decision FROM stock_observations WHERE item_id=$1 ORDER BY observed_at DESC LIMIT 1",
-              [item.id],
-            )
-          ).rows[0];
-          if (last?.decision !== "market_closed")
-            await this.observe(item, "market_closed", {
-              marketState: "closed",
-            });
-          // Count the closed check as a poll so off-hours items are not
-          // re-evaluated every tick.
-          await this.db.query(
-            "UPDATE watchlist_items SET last_polled_at=$2,updated_at=now() WHERE id=$1",
-            [item.id, now],
+          // A gated check does not consume the poll cursor: the first tick
+          // after the session or window opens polls at once rather than up to
+          // one interval late. The gate is logged once per transition.
+          await this.gate(
+            item,
+            sessionOpen ? "outside_window" : "market_closed",
+            sessionOpen
+              ? {
+                  marketState: "open",
+                  detail: { window: describeWindow(window) },
+                }
+              : { marketState: "closed" },
           );
         }
         // Fetch in credit-sized chunks (one credit per symbol) so a due batch
@@ -741,6 +875,7 @@ export class StockDelivery {
   constructor(
     private db: Database,
     private send: (user: string, payload: any) => Promise<unknown>,
+    private clock = () => new Date(),
   ) {}
   async recover() {
     await this.db.query(
@@ -769,6 +904,36 @@ export class StockDelivery {
           ORDER BY a.created_at FOR UPDATE OF a SKIP LOCKED LIMIT 1) RETURNING *`)
       ).rows[0];
       if (!d) return;
+      // An alert queued just before its window closed is not sent late; the
+      // row stays as the day's record, so it cannot re-alert that trading day.
+      const scope = (
+        await this.db.query(
+          `SELECT i.window_start,i.window_end,i.window_days,${DEFAULT_WINDOW_COLUMNS}
+           FROM watchlist_items i LEFT JOIN stock_settings s ON s.user_id=i.user_id
+           WHERE i.id=$1`,
+          [d.item_id],
+        )
+      ).rows[0];
+      const window = scope ? effectiveWindow(scope) : null;
+      if (!inWindow(window, this.clock())) {
+        await this.db.query(
+          "UPDATE stock_alerts SET state='muted' WHERE id=$1",
+          [d.id],
+        );
+        await this.db.query(
+          `INSERT INTO stock_observations(user_id,item_id,decision,market_state,detail)
+           VALUES($1,$2,'outside_window','unknown',$3::jsonb)`,
+          [
+            d.user_id,
+            d.item_id,
+            JSON.stringify({
+              mutedAlertId: d.id,
+              window: describeWindow(window),
+            }),
+          ],
+        );
+        return;
+      }
       try {
         await this.send(d.user_id, d.payload);
         await this.db.query(

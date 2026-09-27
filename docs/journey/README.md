@@ -40,6 +40,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 26 September                         | [36 — Bounding the fixed prompt](36-bounded-context.md): why is older conversation dropped on almost every model call?                        | Stage 1 measurement released; stage 2 tool loading in review                                                                 |
 | 27 September                         | [37 — Picking tool domains with Jev](37-jev-tool-picker.md): can a decision model pick tool domains better than word cues?                    | Released 27 September (`d4436df`); 97.9% synthetic recall; production unmeasured                                             |
 | 27 September                         | [38 — Prompt cache partitioned per run](38-prompt-cache-session.md): why did every message's first model call miss the cache?                 | In review; experiment shows caches are partitioned by `session_id`                                                           |
+| 27 September                         | [38 — Stock monitoring hours](38-watch-monitoring-window.md): how can the owner limit stock alerts to Singapore-time hours?                   | In review; migration 020 operator rollout pending                                                                            |
 
 ## Connected case studies
 

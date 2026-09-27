@@ -74,6 +74,14 @@ if (
     "STARTUP_MIGRATION_018",
     "Stock watchlist migration 018 must be applied with the gateway stopped",
   );
+if (
+  !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=20")).rows
+    .length
+)
+  throw startupError(
+    "STARTUP_MIGRATION_020",
+    "Stock monitoring-window migration 020 must be applied with the gateway stopped",
+  );
 await recoverRuntime(db);
 // Library account features need migration 016; without the key they stay off even if tables exist.
 const libraryReady = await libraryMigrated(db);

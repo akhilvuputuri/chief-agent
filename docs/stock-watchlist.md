@@ -33,6 +33,9 @@ the poll cadence (5–240 minutes, default 15) and extended-hours opt-in. The
 opt-in is refused unless the provider can actually serve `prepost` quotes
 (`MARKET_DATA_EXTENDED`, Pro+ plan); free-plan watchlists stay regular-hours.
 
+Both `watchlist_settings` and `watchlist_update` accept a monitoring `window`;
+see [Monitoring windows](#monitoring-windows).
+
 Mutations are foreground-only: a background routine or scheduled job cannot
 change the watchlist, matching the routine-management boundary.
 
@@ -72,6 +75,41 @@ change the watchlist, matching the routine-management boundary.
   delayed marker, session (regular/extended), provider name, threshold basis
   and a quote-page link, with buttons to pause that stock or all stock alerts.
 
+## Monitoring windows
+
+Added for the owner's request to watch only "from the open until midnight
+Singapore time" (migration 020, [journal 38](journey/38-watch-monitoring-window.md)).
+
+- `window={start:"HH:MM", end:"HH:MM"|"24:00", days?:["mon",…]}` in
+  **Asia/Singapore** time. An end at or before the start runs past midnight and
+  belongs to the day it starts on (`22:00–02:00` on `fri` covers Fri 22:00 →
+  Sat 02:00); `24:00` is midnight at the end of the day. Seven days is stored as
+  "every day".
+- `watchlist_settings(window)` sets the owner default; `watchlist_update(id,window)`
+  sets a per-stock override. `null` clears the default, or makes a stock follow
+  the default again. A stock that should ignore the default uses
+  `00:00–24:00`.
+- The window is applied **on top of** the exchange session: a quote is fetched
+  only when both are open. "Open until midnight" is therefore any start at or
+  before the open (e.g. `20:00`) with end `24:00`; this covers 21:30–24:00 SGT
+  in US daylight time and 22:30–24:00 SGT in US standard time.
+- Confirmations and `watchlist_list` return `nextChecks`: the next periods, in
+  SGT, when each stock will actually be checked, computed from the market
+  calendar and the window.
+- **Outside the window** no quotes are fetched (saving provider credits) and a
+  single `outside_window` observation marks the transition. When the window
+  reopens the first tick polls immediately, and alerts only if the stock is
+  still below its threshold against the previous close for that trading day.
+  A drop that recovers while the window is closed is not reported. This was the
+  owner's choice over holding alerts for later delivery.
+- Delivery rechecks the window: an alert queued just before the window closes
+  and not yet sent is muted (`outside_window` observation with its alert id),
+  not delivered late, and it still counts as that trading day's alert.
+- Gated checks (market closed or outside the window) no longer consume the
+  poll cursor, so with a 60-minute cadence the first check happens at the open
+  rather than up to an hour later. The gate is logged once per transition and
+  cached in memory, so gated items are not re-queried each tick.
+
 ## Provider limits
 
 Free-plan calls: symbol search at add time, then batched `/quote` requests —
@@ -91,7 +129,7 @@ paid fallback.
 Every poll writes a bounded `stock_observations` row (latest 200 per item):
 observation time, quote time, price, reference close, computed change, market
 state, the decision (`alerted`, `below_threshold`, `suppressed_today`,
-`market_closed`, `stale`, `invalid`, `suspect`, `error`) and detail including
+`market_closed`, `outside_window`, `stale`, `invalid`, `suspect`, `error`) and detail including
 the threshold and suppression reason. `watchlist_list` exposes the latest
 observation per item.
 
@@ -146,3 +184,14 @@ rows in `stock_alerts` and reset them to `pending` deliberately.
 Rollback restores the previous application/Compose/source, retaining the
 additive watchlist tables and any alerts already recorded. Never delete
 watchlist state or replay uncertain deliveries during recovery.
+
+## Deployment (operator-reviewed migration 020, monitoring windows)
+
+Same shape as 018/019: independent review of the exact head, `npm run check`,
+`python3 scripts/test-deploy-watch-window.py`, then merge (the ordinary release
+refuses the DB/Compose change). Verify live `RELEASE` is in `BASES` of
+`scripts/deploy-watch-window.py`; if newer, reconcile and re-review the script.
+Transfer the exact main archive and script and run
+`python3 deploy-watch-window.py ARCHIVE SHA` on the host. It applies only 020
+with the gateway stopped and checks health; rollback keeps the additive columns.
+The gateway refuses to start without migration 20.
