@@ -47,7 +47,7 @@ test("an owner's messages share one provider cache key while runs keep their own
     assert.equal(a!.cacheKey, b!.cacheKey);
     assert.notEqual(a!.sessionId, b!.sessionId);
     assert.notEqual(a!.cacheKey, c!.cacheKey);
-    // The key is derived, so the raw owner id is never sent as the session.
+    // The key is derived: the raw owner id is never sent. It is a pseudonym, not anonymous.
     assert.ok(!a!.cacheKey!.includes("owner"));
   } finally {
     await pg.close();

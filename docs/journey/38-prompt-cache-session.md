@@ -28,12 +28,15 @@ While measuring context after the Jev tool picker ([journal 37](37-jev-tool-pick
 | C2   | none again   | 8,697             | $0.0018 |
 | A3   | A again      | 8,697             | $0.0018 |
 
-The provider cache is partitioned by `session_id`. Chief sent the run ID as `session_id` (`src/custom-agent.ts`), so every message started a new partition.
+This is one call per condition, on one model and provider. It is enough to show the mechanism, not to estimate savings. The provider cache is partitioned by `session_id`. Chief sent the run ID as `session_id` (`src/custom-agent.ts`), so every message started a new partition.
 
 ## Diagnosis and alternatives
 
 - **Change:** send a stable, derived per-owner key (`chief-` plus 16 hex digits of a SHA-256 of the owner ID) as `session_id`. The run ID stays the internal `sessionId`, which tests and per-run logic rely on.
-- **Rejected alternative:** omitting `session_id` also caches (C2). But it gives up the explicit partition and would then depend on provider routing.
+- **Rejected alternative:** omitting `session_id` also caches (C2). It was rejected because, without an explicit partition, cache hits would presumably depend on provider routing. That is a hypothesis, not tested.
+- **Privacy:** the key is an unsalted hash of the owner's Telegram ID. The raw ID is never sent, but anyone holding the key could recover the ID by trying every possible Telegram ID, so the key is a pseudonym, not an anonymous value. OpenRouter already receives the owner's messages under this account, so this adds little exposure.
+- **Session grouping:** OpenRouter's own grouping becomes per owner rather than per run.
+- **Specialists are unchanged on purpose.** Research, plugin, media and alignment runs have their own instructions and tools, so they keep their child run ID as `session_id`. Their first call still misses the cache.
 - **What is still unknown:** how much of the prompt is shared between consecutive messages. That shared part is the cacheable part. It changes with the offered tool domains and with the excerpt archive in the system message, which changes each turn. Within one message the cached share was 70–85%.
 
 ## Implementation and review
