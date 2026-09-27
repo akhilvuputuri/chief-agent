@@ -70,6 +70,13 @@ See [context management, stage 3](../context-management.md#stage-3--jev-tool-pic
 
   All were fixed: canonical order, holds from `tools.picked` only, accounting isolated from the pick, zero settlement on HTTP rejection, and tests for each path.
 
+- **Devin review** of the same head found a release blocker: the release handler refuses any `compose.yaml` that differs from the installed one, and the PR had added a `TOOL_PICKER` mapping. The mapping was removed; the setting keeps its application default. It also found:
+  - the saved-answer-details pointer replaced the real reply in the picker state;
+  - messages longer than the 2,000 characters Jev sees could lose their only cue;
+  - the hold window used run start rather than event time.
+
+  All three were fixed. The Opus reviewer's remaining lows were also addressed: zero settlement only for 4xx, and a non-vacuous background test.
+
 - **Plan review.** An independent Fable review of the plan suggested more changes: a least-recently-used cap on held domains, relabelling from production tool use, an 800 ms timeout and skipping the Python eval. The owner kept the original plan. Those remain candidates if production numbers call for them.
 
 ## Verification and outcome

@@ -76,6 +76,11 @@ test("picker state keeps recent turns clipped and never tool outputs", () => {
     },
     { role: "tool", tool_call_id: "c1", content: "PRIVATE MAIL BODY" },
     { role: "assistant", content: "x".repeat(1000) },
+    {
+      role: "assistant",
+      content:
+        "[Saved answer details: observationId=o1. Use observation_read.]",
+    },
     { role: "user", content: "🙂".repeat(600) },
   ];
   const turns = recentTurns(history);
@@ -90,7 +95,8 @@ test("picker state keeps recent turns clipped and never tool outputs", () => {
   });
   assert.equal(state.previous_turns.length, config.state.previousTurns);
   assert.equal(state.previous_turns[0]!.user, "did Sarah reply?");
-  assert.equal(state.previous_turns[0]!.assistant.length, 300);
+  // The saved-details pointer does not replace the answer.
+  assert.equal(state.previous_turns[0]!.assistant, "x".repeat(300));
   assert.equal([...state.previous_turns[1]!.user].length, 500);
   assert.deepEqual(state.tools_used_last_hour, ["gmail_search"]);
   assert.ok(!JSON.stringify(state).includes("PRIVATE MAIL BODY"));
@@ -364,6 +370,13 @@ test("a picker failure falls back to the deterministic cues", async () => {
     ).rows;
     assert.equal(picked[0].data.outcome, "failed");
     assert.equal(picked[0].data.httpStatus, 503);
+    // A server error may have been billed, so its estimate stays unsettled.
+    const charge = (
+      await f.db.query(
+        "SELECT actual_usd FROM provider_charges WHERE provider='openrouter-jev'",
+      )
+    ).rows;
+    assert.equal(charge[0].actual_usd, null);
   } finally {
     await f.pg.close();
   }
@@ -470,11 +483,38 @@ test("background task steps do not call the picker", async () => {
         .rows.length,
     );
     assert.equal(calls, 0);
+    // Selection did run, so the absence of picker calls is meaningful.
+    assert.ok(
+      (await f.db.query("SELECT 1 FROM events WHERE type='tools.selected'"))
+        .rows.length,
+    );
     assert.equal(
       (await f.db.query("SELECT 1 FROM events WHERE type='tools.picked'")).rows
         .length,
       0,
     );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("a message longer than the picker sees keeps its word cues", async () => {
+  const seen: string[][] = [];
+  const f = await fixture(
+    {
+      generate: async (i) => {
+        seen.push(names(i.tools));
+        return reply("done");
+      },
+    },
+    (async () => answers({})) as typeof fetch,
+  );
+  try {
+    await f.assistant.respond(
+      "owner",
+      "background. ".repeat(200) + "Which saved roles fit me?",
+    );
+    assert.ok(seen[0]!.includes("job_list"));
   } finally {
     await f.pg.close();
   }

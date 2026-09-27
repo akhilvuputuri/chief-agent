@@ -582,15 +582,22 @@ export class Assistant {
               `SELECT DISTINCT d.domain FROM runtime_runs r
                JOIN events e ON e.run_id=r.id AND e.user_id=r.user_id
                CROSS JOIN LATERAL jsonb_array_elements_text(e.data->'domains') d(domain)
-               WHERE r.user_id=$1 AND r.started_at > now() - interval '60 minutes'
+               WHERE r.user_id=$1 AND r.started_at > now() - interval '2 hours'
+                 AND e.created_at > now() - interval '60 minutes'
                  AND e.type='tools.picked'
                  AND jsonb_typeof(e.data->'domains')='array'`,
               [user],
             )
           ).rows.map((row) => row.domain as string);
       const picked = await pick(message);
+      // Jev sees a clipped message, so a longer one also keeps its word cues.
+      const clipped =
+        [...message].length > (this.picker?.config.state.messageChars ?? 0);
       const chosen = new Set<string>([
-        ...selectDomains({ ...signals, message: picked ? "" : message }),
+        ...selectDomains({
+          ...signals,
+          message: picked && !clipped ? "" : message,
+        }),
         ...heldDomains,
         ...(picked ?? []),
       ]);
@@ -733,17 +740,31 @@ export class Assistant {
                 requestSnapshot += `\n\nUser follow-up (${input.id}):\n${input.message}`;
               }
               // Follow-ups can need other capabilities than the first message.
-              const followUp = adopted.map((x) => x.message).join("\n");
-              const followUpPicked = adopted.length
-                ? await pick(followUp, [
-                    ...previousTurns,
-                    { user: message, assistant: "", tools: [] },
-                  ])
-                : [];
-              const followUpDomains = [
-                ...(followUpPicked ?? selectDomains({ message: followUp })),
-              ].filter((d) => !loadedDomains.has(d) && availableDomains.has(d));
-              if (followUpDomains.length) await loadTools(followUpDomains);
+              // Each absorbed follow-up gets its own decision, so none is clipped away.
+              const followUpDomains = new Set<ToolDomain>();
+              let earlier = [
+                ...previousTurns,
+                { user: message, assistant: "", tools: [] as string[] },
+              ];
+              for (const input of adopted) {
+                const picked = await pick(input.message, earlier);
+                const long =
+                  [...input.message].length >
+                  (this.picker?.config.state.messageChars ?? 0);
+                for (const d of [
+                  ...(picked ?? []),
+                  ...(!picked || long
+                    ? selectDomains({ message: input.message })
+                    : []),
+                ])
+                  if (!loadedDomains.has(d) && availableDomains.has(d))
+                    followUpDomains.add(d);
+                earlier = [
+                  ...earlier,
+                  { user: input.message, assistant: "", tools: [] },
+                ];
+              }
+              if (followUpDomains.size) await loadTools([...followUpDomains]);
               // Do not overwrite a wakeup that arrives during an awaited state read.
               const version = this.inbox.version(user);
               const pending = await this.inbox.pending(user);

@@ -158,7 +158,12 @@ export function recentTurns(history: Message[]): PickerTurn[] {
     for (const call of message.tool_calls ?? [])
       if (!turn.tools.includes(call.function.name))
         turn.tools.push(call.function.name);
-    if (message.content) turn.assistant = message.content;
+    // The saved-details pointer follows long answers; keep the answer itself.
+    if (
+      message.content &&
+      !message.content.startsWith("[Saved answer details:")
+    )
+      turn.assistant = message.content;
   }
   return turns;
 }
@@ -240,8 +245,9 @@ export class ToolPicker {
         },
       );
       if (!response.ok) {
-        // A definite HTTP rejection is not billed.
-        await settle({ cost: 0 });
+        // A definite client-side rejection is not billed; server errors stay estimated.
+        if (response.status >= 400 && response.status < 500)
+          await settle({ cost: 0 });
         if (response.status === 429)
           this.pausedUntil = this.now() + this.config.pauseAfterRateLimitMs;
         return {
