@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "model": "typesafe/jev-1.13-20260917",
+  "threshold": 0.5,
+  "cap": 3,
+  "fallbackMin": 0.15,
+  "timeoutMs": 1500,
+  "pauseAfterRateLimitMs": 300000,
+  "state": {
+    "previousTurns": 2,
+    "messageChars": 2000,
+    "previousUserChars": 500,
+    "assistantChars": 300
+  },
+  "question": {
+    "instructions": "Does handling `latest_user_message` (in the context of `previous_turns` and the other state) require the {domain} tools?",
+    "true": "{description} Examples: {examples}.",
+    "false": "Not needed: small talk, general knowledge, a quick web lookup, memory, or a different capability."
+  },
+  "alwaysAvailable": "Web search, reading web pages, memory, conversation-history search and skill reading are always available and are not part of these groups.",
+  "domains": {
+    "gmail": {
+      "description": "Search or read the user's Gmail (two connected accounts).",
+      "examples": "did X reply, anything from my bank, find the invoice, what did the landlord say, summarise unread"
+    },
+    "calendar": {
+      "description": "Read the user's Google Calendar or draft a new event.",
+      "examples": "am I free Thursday, what's on at 3pm, when is my meeting, add dentist on the 12th"
+    },
+    "daily": {
+      "description": "The user's to-do items, notes, timed reminders and daily reminder/briefing schedules.",
+      "examples": "remind me at 7pm, add milk to my list, what's open on my list, morning briefing"
+    },
+    "jobs": {
+      "description": "Saved job roles and applications, role-fit analysis, interview preparation and the prep Sheet.",
+      "examples": "how well does the Stripe role fit, mark application rejected, prep me for the interview"
+    },
+    "work": {
+      "description": "Start, continue, check, pause or cancel a long-running multi-step background task.",
+      "examples": "keep going on that task, cancel the background job, do this in the background step by step"
+    },
+    "research": {
+      "description": "Delegate an in-depth multi-source research report with citations (not a quick fact).",
+      "examples": "deep dive on X with sources, thorough sourced comparison"
+    },
+    "media": {
+      "description": "Look at an attached image or read an attached or earlier PDF/document.",
+      "examples": "[Attached image ...], summarise this PDF, what does clause 7 of the contract say"
+    },
+    "canvas": {
+      "description": "Create, update, read or list saved canvases (documents the user opens in the Mini App).",
+      "examples": "save this as a canvas, update my trip canvas, show my saved docs"
+    },
+    "parcels": {
+      "description": "Track or update parcels, packages or online orders the user awaits.",
+      "examples": "where's my Amazon package, did the DHL thing arrive, what am I still waiting on"
+    },
+    "library": {
+      "description": "Singapore library (NLB/Libby) ebook availability, borrowing, loans, holds, due dates.",
+      "examples": "is Atomic Habits available, can I borrow X, what do I have on loan"
+    },
+    "watchlist": {
+      "description": "The user's stock watchlist and price-drop alerts (tickers, thresholds, pausing).",
+      "examples": "how is AAPL doing, alert me if NVDA drops 5%, stop watching Tesla"
+    },
+    "routines": {
+      "description": "Recurring automated agent routines that run on a schedule.",
+      "examples": "every Monday at 9 summarise my inbox, pause my weekly routine, what automations run"
+    },
+    "skills": {
+      "description": "Version history, drafts, evaluation, activation or rollback of the assistant's text skills.",
+      "examples": "show the history of the interview skill, roll back the research skill"
+    }
+  }
+}

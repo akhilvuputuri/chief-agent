@@ -30,6 +30,7 @@ import { connect } from "./db.js";
 import { JobTools } from "./tools.js";
 import { WebTools } from "./providers.js";
 import { Assistant } from "./agent.js";
+import { ToolPicker } from "./tool-picker.js";
 import { server } from "./server.js";
 import {
   telegram,
@@ -241,6 +242,9 @@ const assistant = new Assistant(
     models: c.AGENT_BUDGET_MODEL_CALLS,
     tools: c.AGENT_BUDGET_TOOL_CALLS,
   },
+  c.TOOL_PICKER === "jev" && c.OPENROUTER_API_KEY
+    ? new ToolPicker(c.OPENROUTER_API_KEY)
+    : undefined,
 );
 const app = server(
   db,

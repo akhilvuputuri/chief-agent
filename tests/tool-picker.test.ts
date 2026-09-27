@@ -1,0 +1,299 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { PGlite } from "@electric-sql/pglite";
+import { readFile } from "node:fs/promises";
+import { Assistant } from "../src/agent.js";
+import { CustomAgent } from "../src/custom-agent.js";
+import type { Message, ModelAdapter, ToolDefinition } from "../src/model.js";
+import { JobTools } from "../src/tools.js";
+import { TOOL_DOMAINS } from "../src/tool-domains.js";
+import {
+  pickDomains,
+  pickerQuestions,
+  pickerState,
+  readPickerConfig,
+  recentTurns,
+  ToolPicker,
+  type PickerConfig,
+} from "../src/tool-picker.js";
+import type { Database } from "../src/db.js";
+
+const config = readPickerConfig();
+const json = async (path: string) =>
+  JSON.parse(await readFile(new URL(path, import.meta.url), "utf8"));
+
+test("bundled picker config is valid and pins a Jev snapshot", () => {
+  assert.match(config.model, /^typesafe\/jev-[\d.]+-\d{8}$/);
+  assert.deepEqual(Object.keys(config.domains), [...TOOL_DOMAINS]);
+  assert.ok(config.fallbackMin < config.threshold);
+});
+
+test("pick rule matches the cases shared with the Python eval", async () => {
+  for (const c of await json("../evals/picker/pick-cases.json"))
+    assert.deepEqual(pickDomains(c.probabilities, config), c.expected, c.name);
+});
+
+test("picker requests match the golden requests shared with the Python eval", async () => {
+  const scenarios: any[] = await json("../evals/picker/scenarios.json");
+  for (const golden of await json("../evals/picker/request-golden.json")) {
+    const s = scenarios.find((x) => x.id === golden.id);
+    const sig = s.signals ?? {};
+    const state = pickerState(config, {
+      message: s.message,
+      previous: s.prior ?? [],
+      pendingApprovals: sig.pending_approvals ?? [],
+      activeTask: sig.active_background_task ?? null,
+      recentTools: sig.tools_used_last_hour ?? [],
+    });
+    // Key order is part of the request, so compare serialised text.
+    assert.equal(JSON.stringify(state), JSON.stringify(golden.state), s.id);
+    assert.equal(
+      JSON.stringify(pickerQuestions(config, golden.domains)),
+      JSON.stringify(golden.questions),
+      s.id,
+    );
+  }
+});
+
+test("picker state keeps recent turns clipped and never tool outputs", () => {
+  const history: Message[] = [
+    { role: "user", content: "first" },
+    { role: "assistant", content: "ok" },
+    { role: "user", content: "did Sarah reply?" },
+    {
+      role: "assistant",
+      content: null,
+      tool_calls: [
+        {
+          id: "c1",
+          type: "function",
+          function: { name: "gmail_search", arguments: "{}" },
+        },
+      ],
+    },
+    { role: "tool", tool_call_id: "c1", content: "PRIVATE MAIL BODY" },
+    { role: "assistant", content: "x".repeat(1000) },
+    { role: "user", content: "🙂".repeat(600) },
+  ];
+  const turns = recentTurns(history);
+  assert.equal(turns.length, 3);
+  assert.deepEqual(turns[1]!.tools, ["gmail_search"]);
+  const state = pickerState(config, {
+    message: "and the other one?",
+    previous: turns,
+    pendingApprovals: [],
+    activeTask: null,
+    recentTools: ["gmail_search", "gmail_search"],
+  });
+  assert.equal(state.previous_turns.length, config.state.previousTurns);
+  assert.equal(state.previous_turns[0]!.user, "did Sarah reply?");
+  assert.equal(state.previous_turns[0]!.assistant.length, 300);
+  assert.equal([...state.previous_turns[1]!.user].length, 500);
+  assert.deepEqual(state.tools_used_last_hour, ["gmail_search"]);
+  assert.ok(!JSON.stringify(state).includes("PRIVATE MAIL BODY"));
+});
+
+const input = {
+  message: "is Dune on Libby?",
+  previous: [],
+  pendingApprovals: [],
+  activeTask: null,
+  recentTools: [],
+};
+const answers = (p: Record<string, number>) =>
+  new Response(
+    JSON.stringify({
+      model: config.model,
+      answers: Object.fromEntries(
+        TOOL_DOMAINS.map((d) => [d, { noul: p[d] ?? 0.01 }]),
+      ),
+      usage: { cost: 0.00007 },
+    }),
+  );
+
+test("picker sends the pinned model and one question per asked domain", async () => {
+  let body: any;
+  const picker = new ToolPicker("key", config, (async (_url, init) => {
+    body = JSON.parse(String(init?.body));
+    return answers({ library: 0.97, watchlist: 0.2 });
+  }) as typeof fetch);
+  const result = await picker.pick(input, ["library", "watchlist", "gmail"]);
+  assert.equal(body.model, config.model);
+  assert.deepEqual(Object.keys(body.questions), [
+    "gmail",
+    "library",
+    "watchlist",
+  ]);
+  assert.equal(body.state.latest_user_message, "is Dune on Libby?");
+  assert.ok(result.ok);
+  assert.deepEqual(result.ok && result.domains, ["library"]);
+  assert.equal(result.ok && result.costUsd, 0.00007);
+});
+
+test("picker failures are classified and a rate limit pauses it", async () => {
+  let now = 1000;
+  let status = 429;
+  let calls = 0;
+  const picker = new ToolPicker(
+    "key",
+    config,
+    (async () => {
+      calls++;
+      return new Response("{}", { status });
+    }) as typeof fetch,
+    () => now,
+  );
+  const limited = await picker.pick(input, ["library"]);
+  assert.deepEqual(limited.ok ? null : limited.outcome, "rate_limited");
+  const paused = await picker.pick(input, ["library"]);
+  assert.deepEqual(paused.ok ? null : paused.outcome, "paused");
+  assert.equal(calls, 1);
+  now += config.pauseAfterRateLimitMs;
+  status = 401;
+  const rejected = await picker.pick(input, ["library"]);
+  assert.deepEqual(rejected.ok ? null : rejected.outcome, "rejected");
+  status = 503;
+  const failed = await picker.pick(input, ["library"]);
+  assert.deepEqual(failed.ok ? null : failed.outcome, "failed");
+});
+
+test("picker times out and rejects partial answers", async () => {
+  const quick: PickerConfig = { ...config, timeoutMs: 20 };
+  const slow = new ToolPicker(
+    "key",
+    quick,
+    ((_url, init) =>
+      new Promise((_resolve, reject) => {
+        // AbortSignal.timeout does not keep the event loop alive on its own.
+        const alive = setTimeout(() => {}, 5000);
+        init?.signal?.addEventListener("abort", () => {
+          clearTimeout(alive);
+          reject(init.signal!.reason);
+        });
+      })) as typeof fetch,
+  );
+  const timedOut = await slow.pick(input, ["library"]);
+  assert.deepEqual(timedOut.ok ? null : timedOut.outcome, "timeout");
+  const partial = new ToolPicker(
+    "key",
+    config,
+    (async () =>
+      new Response(
+        JSON.stringify({ answers: { library: { noul: 0.9 } } }),
+      )) as typeof fetch,
+  );
+  const invalid = await partial.pick(input, ["library", "gmail"]);
+  assert.deepEqual(invalid.ok ? null : invalid.outcome, "invalid");
+});
+
+async function fixture(model: ModelAdapter, transport: typeof fetch) {
+  const pg = new PGlite();
+  for (const f of [
+    "001_initial",
+    "002_preparation",
+    "003_skills",
+    "004_daily",
+    "005_work",
+    "006_runtime",
+    "008_costs",
+    "012_message_storage",
+    "013_conversation_control",
+    "014_checkpoint_steering",
+  ])
+    await pg.exec(
+      await readFile(new URL("../db/" + f + ".sql", import.meta.url), "utf8"),
+    );
+  const db = pg as unknown as Database;
+  const assistant = new Assistant(
+    db,
+    new CustomAgent(model),
+    new JobTools(db, { call: async () => ({ content: "public source" }) }),
+    { web: true },
+    { ms: 900000, models: 40, tools: 100 },
+    new ToolPicker("key", config, transport),
+  );
+  return { pg, db, assistant };
+}
+const names = (tools: ToolDefinition[]) => tools.map((t) => t.name);
+const reply = (content: string) => ({
+  message: { role: "assistant" as const, content },
+});
+
+test("picked domains are offered, recorded, costed and held for the next message", async () => {
+  const seen: string[][] = [];
+  const responses = [answers({ jobs: 0.92 }), answers({})];
+  let asked: string[] = [];
+  const f = await fixture(
+    {
+      generate: async (i) => {
+        seen.push(names(i.tools));
+        return reply("done");
+      },
+    },
+    (async (_url, init) => {
+      asked = Object.keys(JSON.parse(String(init?.body)).questions);
+      return responses.shift()!;
+    }) as typeof fetch,
+  );
+  try {
+    await f.assistant.respond("owner", "which saved roles fit me best?");
+    // Only domains available in this deployment are asked about.
+    assert.ok(!asked.includes("gmail"));
+    assert.ok(asked.includes("jobs"));
+    assert.ok(seen[0]!.includes("job_list"));
+    const picked = (
+      await f.db.query(
+        "SELECT data FROM events WHERE type='tools.picked' ORDER BY id",
+      )
+    ).rows;
+    assert.equal(picked[0].data.outcome, "picked");
+    assert.deepEqual(picked[0].data.domains, ["jobs"]);
+    assert.equal(picked[0].data.probabilities.jobs, 0.92);
+    const charge = (
+      await f.db.query(
+        "SELECT actual_usd FROM provider_charges WHERE provider='openrouter-jev'",
+      )
+    ).rows;
+    assert.equal(Number(charge[0].actual_usd), 0.00007);
+    // The next message picks nothing new, but jobs stays offered.
+    await f.assistant.respond("owner", "thanks!");
+    assert.ok(seen[1]!.includes("job_list"));
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("a picker failure falls back to the deterministic cues", async () => {
+  const seen: string[][] = [];
+  const f = await fixture(
+    {
+      generate: async (i) => {
+        seen.push(names(i.tools));
+        return reply("done");
+      },
+    },
+    (async () => new Response("{}", { status: 503 })) as typeof fetch,
+  );
+  try {
+    await f.assistant.respond("owner", "which saved roles fit me best?");
+    assert.ok(seen[0]!.includes("job_list"));
+    const picked = (
+      await f.db.query("SELECT data FROM events WHERE type='tools.picked'")
+    ).rows;
+    assert.equal(picked[0].data.outcome, "failed");
+    assert.equal(picked[0].data.httpStatus, 503);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("no picker call is made when no domain is available", async () => {
+  let calls = 0;
+  const picker = new ToolPicker("key", config, (async () => {
+    calls++;
+    return answers({});
+  }) as typeof fetch);
+  const result = await picker.pick(input, []);
+  assert.ok(result.ok && result.domains.length === 0);
+  assert.equal(calls, 0);
+});
