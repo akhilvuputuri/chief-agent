@@ -1,4 +1,4 @@
-# 38 — Stock monitoring hours in Singapore time
+# 39 — Stock monitoring hours in Singapore time
 
 Work date(s): 2026-09-27. Written/revised: 2026-09-27.
 Status: tested; in review. Needs migration 020 through the reviewed operator procedure. Not deployed.
@@ -27,7 +27,7 @@ The stock watchlist ([25](25-stock-watchlist.md)) polls US listings during the e
 - `src/stocks.ts`: the window gate in `tick`; gated checks no longer consume the poll cursor, and the gate is logged once per transition with an in-memory cache; delivery mutes a late alert; `watchlist_settings`/`watchlist_update` accept `window` and return `nextChecks` and the outside-window rule; `watchlist_list` shows the effective window.
 - `src/protocol.ts`, `src/runtime.ts`: schema and tool descriptions. The picker description is unchanged, so no picker eval was needed.
 - `src/main.ts`: refuses to start without migration 20. `compose.yaml`: migration entry.
-- `scripts/deploy-watch-window.py` and its offline tests: the migration-019 procedure with only its constants changed. The single allowed baseline is live `211b657`.
+- `scripts/deploy-watch-window.py` and its offline tests: the migration-019 procedure with only its constants changed. The single allowed baseline is the live release. That was `211b657` when first written, and became `7e6e62c` after #107 was released (that release changed no db/ or Compose file), so the script was rebased onto it.
 
 **Review round 1 (Devin Review, automated, on `d25956a`):** two valid findings. (1) A pending alert that survived a gateway outage would be sent when the _next_ window occurrence opened, which delivers a stale drop. Delivery now also mutes an alert created before the current window occurrence began (`windowOccurrence`). (2) `watchlist_settings` wrote the other fields before validating the window, so a rejected window still changed, for example, the poll interval. The window is now validated first and all fields are written in one statement. Both have regression tests.
 
@@ -39,6 +39,14 @@ The stock watchlist ([25](25-stock-watchlist.md)) polls US listings during the e
 - (P3) `days: null` is now accepted.
 
 Each has a regression test. The reviewer's own probes confirmed DST and holiday handling in `upcomingChecks`, the overnight and 24:00 edges, idempotency and NULL behaviour of the CHECK constraints, and that the rollout script changes only constants.
+
+**Review round 3 (Opus 5.5, on `9cfa1a6`): APPROVE, with three P3s.**
+
+- An all-day window (00:00–24:00) muted an alert queued at 23:59:59 and sent after midnight. Touching occurrences now count as one span.
+- The early retry is lost after a restart or when the credit budget defers the first tick. The worst case is the earlier behaviour, and this is accepted.
+- The re-arm now checks that its UPDATE matched before logging `alerted`.
+
+Afterwards the branch was rebased onto `7e6e62c` (#107). The journal became 39 because main already has a 38, and the rollout baseline became `7e6e62c`.
 
 ## Verification and outcome
 

@@ -841,13 +841,23 @@ export class StockMonitor {
                     symbol: item.symbol,
                     reply: this.alertText(item, basis, price, changePct),
                   };
-                  if (existing)
-                    await this.db.query(
-                      `UPDATE stock_alerts SET state='pending',payload=$2::jsonb,created_at=now(),sent_at=NULL
-                       WHERE id=$1 AND state='muted' AND payload->>'windowMuted'='true'`,
-                      [alertId, JSON.stringify(payload)],
-                    );
-                  else
+                  if (
+                    existing &&
+                    !(
+                      await this.db.query(
+                        `UPDATE stock_alerts SET state='pending',payload=$2::jsonb,created_at=now(),sent_at=NULL
+                         WHERE id=$1 AND state='muted' AND payload->>'windowMuted'='true' RETURNING id`,
+                        [alertId, JSON.stringify(payload)],
+                      )
+                    ).rows.length
+                  ) {
+                    await this.observe(item, "suppressed_today", {
+                      quote: basis,
+                      marketState: basisLabel,
+                      detail: { changePct, alertState: existing.state },
+                    });
+                    continue;
+                  } else if (!existing)
                     await this.db.query(
                       `INSERT INTO stock_alerts(id,user_id,item_id,trading_date,payload)
                      VALUES($1,$2,$3,$4,$5::jsonb) ON CONFLICT(item_id,trading_date) DO NOTHING`,

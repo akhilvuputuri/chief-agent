@@ -78,7 +78,7 @@ change the watchlist, matching the routine-management boundary.
 ## Monitoring windows
 
 Added for the owner's request to watch only "from the open until midnight
-Singapore time" (migration 020, [journal 38](journey/38-watch-monitoring-window.md)).
+Singapore time" (migration 020, [journal 39](journey/39-watch-monitoring-window.md)).
 
 - `window={start:"HH:MM", end:"HH:MM"|"24:00", days?:["mon",…]}` in
   **Asia/Singapore** time. An end at or before the start runs past midnight and

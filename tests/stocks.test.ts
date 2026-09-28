@@ -24,6 +24,7 @@ import {
   inWindow,
   upcomingChecks,
   validateWindow,
+  windowOccurrence,
 } from "../src/watch-window.js";
 import { action } from "../src/protocol.js";
 
@@ -1926,4 +1927,47 @@ test("the window schema accepts days: null", () => {
     window: { start: "20:00", end: "24:00", days: null },
   }) as any;
   assert.equal(validateWindow(parsed.window).days, null);
+});
+
+test("an all-day window spans midnight: an alert queued at 23:59:59 is still sent at 00:00:05", async () => {
+  const f = await fixture(new Date("2026-01-15T15:59:59Z")); // 23:59:59 SGT
+  try {
+    const itemId = await f.add(5);
+    await f.tools.call("a", f.run, {
+      operation: "watchlist_settings",
+      window: { start: "00:00", end: "24:00" },
+    });
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({
+        price: 90,
+        prevClose: 100,
+        providerChangePct: -10,
+        quoteTime: new Date("2026-01-15T15:59:00Z"),
+      }),
+    );
+    await f.monitor.tick();
+    await f.db.query("UPDATE stock_alerts SET created_at=$2 WHERE item_id=$1", [
+      itemId,
+      new Date("2026-01-15T15:59:59Z"),
+    ]);
+    const after = new StockDelivery(
+      f.db,
+      async (user, payload) => {
+        f.sent.push({ user, payload });
+      },
+      () => new Date("2026-01-15T16:00:05Z"),
+    );
+    await after.tick();
+    assert.equal(f.sent.length, 1);
+    // A day-filtered window does not join across midnight.
+    const [s, e] = windowOccurrence(
+      { start: "00:00", end: "24:00", days: ["fri"] },
+      new Date("2026-01-15T16:00:05Z"),
+    )!;
+    assert.equal(new Date(s).toISOString(), "2026-01-15T16:00:00.000Z");
+    assert.equal(new Date(e).toISOString(), "2026-01-16T16:00:00.000Z");
+  } finally {
+    await f.pg.close();
+  }
 });

@@ -186,13 +186,19 @@ function windowIntervals(w: MonitoringWindow | null, date: string) {
 }
 
 /** The [start, end) instants of the window occurrence containing `at`, or
- * null when there is no window or `at` is outside it. */
+ * null when there is no window or `at` is outside it. Occurrences that touch
+ * (00:00-24:00 on consecutive days) are one continuous span, so an alert
+ * queued just before midnight still belongs to the span it is sent in. */
 export function windowOccurrence(w: MonitoringWindow | null, at: Date) {
   if (!w) return null;
   const t = at.getTime();
-  return (
-    windowIntervals(w, local(at).date).find(([s, e]) => s <= t && t < e) ?? null
-  );
+  const spans = windowIntervals(w, local(at).date).sort((a, b) => a[0] - b[0]);
+  const i = spans.findIndex(([s, e]) => s <= t && t < e);
+  if (i < 0) return null;
+  let [start, end] = spans[i]!;
+  for (let j = i - 1; j >= 0 && spans[j]![1] >= start; j--)
+    start = Math.min(start, spans[j]![0]);
+  return [start, end] as [number, number];
 }
 
 /** The next periods (Singapore time) when an item on `mic` is actually checked:
