@@ -642,6 +642,15 @@ test("a stray closing tag with a longer name does not hide an advertised feed", 
   );
   assert.equal(parsed.entries[0]!.title, "A & B");
   assert.equal(parsed.entries[0]!.summary, "Hi a < b");
+  // Escaped markup in tech headlines keeps its words.
+  const tech = parseFeed(
+    `<rss><item><title>How &lt;script type=module&gt; loads</title><link>https://a.example/2</link></item><item><title>&lt;style&gt; tags explained</title><link>https://a.example/3</link></item><item><title>Use &lt;styleguide&gt; for x</title><link>https://a.example/4</link></item></rss>`,
+    "https://a.example/",
+  );
+  assert.deepEqual(
+    tech.entries.map((e) => e.title),
+    ["How loads", "tags explained", "Use for x"],
+  );
 });
 
 test("the edition fits one message by dropping whole items, never cutting one", () => {

@@ -90,26 +90,49 @@ function stripCdata(s: string) {
     pos = end + 3;
   }
 }
-/** Removes <script>/<style> elements in one forward pass; an unclosed one
- * drops the rest of the text rather than rescanning for every opening. */
+/** Next "<name" at or after `from` whose name ends there (">", "/" or
+ * whitespace follows), searching forward only. */
+function nextOpening(lower: string, name: string, from: number) {
+  for (let at = lower.indexOf(name, from); at >= 0;) {
+    const c = lower.charCodeAt(at + name.length);
+    if (
+      Number.isNaN(c) ||
+      c === 62 ||
+      c === 47 ||
+      c === 32 ||
+      (c >= 9 && c <= 13)
+    )
+      return at;
+    at = lower.indexOf(name, at + 1);
+  }
+  return -1;
+}
+/** Removes complete <script>/<style> elements in one forward pass. Once a
+ * kind has no closing tag left, its remaining opening tags are left for the
+ * generic tag stripper, so escaped markup in a headline keeps its words. */
 function stripCode(s: string) {
   const lower = asciiLower(s);
+  const kinds = [
+    { open: "<script", close: "</script", next: -2 },
+    { open: "<style", close: "</style", next: -2 },
+  ];
   let out = "";
   let pos = 0;
-  // Next-occurrence caches, recomputed only once passed, keep this linear.
-  let script = -2;
-  let style = -2;
   for (;;) {
-    if (script !== -1 && script < pos) script = lower.indexOf("<script", pos);
-    if (style !== -1 && style < pos) style = lower.indexOf("<style", pos);
-    const at =
-      script < 0 ? style : style < 0 ? script : Math.min(script, style);
-    if (at < 0) return out + s.slice(pos);
-    const close = lower.indexOf(at === script ? "</script" : "</style", at);
-    const end = close < 0 ? -1 : lower.indexOf(">", close);
-    out += s.slice(pos, at) + " ";
-    if (end < 0) return out;
-    pos = end + 1;
+    for (const k of kinds)
+      if (k.next !== -1 && k.next < pos)
+        k.next = nextOpening(lower, k.open, pos);
+    const live = kinds.filter((k) => k.next >= 0);
+    if (!live.length) return out + s.slice(pos);
+    const k = live.reduce((a, b) => (b.next < a.next ? b : a));
+    const close = lower.indexOf(k.close, k.next);
+    const gt = close < 0 ? -1 : lower.indexOf(">", close);
+    if (gt < 0) {
+      k.next = -1; // no complete element of this kind remains
+      continue;
+    }
+    out += s.slice(pos, k.next) + " ";
+    pos = gt + 1;
   }
 }
 export function cleanText(raw: string, max: number) {

@@ -43,6 +43,8 @@ See [the bulletin runbook](../news-bulletin.md). `db/021_news.sql` adds four tab
 - **(P3)** A closing tag with a longer name (`</linkedin>`) no longer closes `<link>`; HTML `<link>` discovery scans opening tags only.
 - **(P3)** The callback answer is now cut on code points.
 
+**Independent review round 3 (Opus 5.5, on `c9d6f7c`): APPROVE, with one P3.** The reviewer measured 13 further hostile shapes; all took at most 39 ms at 1.45 MB. The P3: escaped `<script>`/`<style>` in headlines (common in web-development news) made the forward-only stripper drop the rest of the title. It now requires a name boundary and removes only complete elements. A kind with no closing tag is left to the generic tag stripper, so words survive: "How <script type=module> loads" becomes "How loads", the same as the original regex.
+
 ## Verification and outcome
 
 - **Synthetic (PGlite, mocked fetcher):** 14 tests. They cover address normalization and refusal of private hosts, the three discovery paths plus the no-feed case and the request cap, untrusted feed text, the DNS guard, foreground-only and owner-scoped mutations, enable prerequisites, a single edition at the SGT slot with duplicate-story collapse and no repeated links the next day, enabling after the slot starting tomorrow, ranking and the per-site cap, set-state votes shifting the next edition, the on-demand limit and the "nothing new" message, all-sources-failed retries then an explanation, muting on disable, uncertain delivery across restart, and turning off when the last site is removed. `npm run check` passed 461 application and 21 script tests.
