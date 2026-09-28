@@ -1,0 +1,300 @@
+{
+  "id": "two-sams",
+  "description": "A colleague and a cousin both named Sam, with separate emails and events.",
+  "turns": [
+    {
+      "user": "any email from Sam?",
+      "calls": [
+        {
+          "operation": "gmail_search",
+          "args": {
+            "query": "from:sam"
+          },
+          "result": [
+            {
+              "from": "Sam Okafor <sam.okafor@northwind.example.com>",
+              "subject": "Planning moved",
+              "date": "2026-09-30",
+              "snippet": "Quarterly planning is now Mon 12 Oct at 9:30 am in Boardroom Orca. Please bring the Q3 chu",
+              "body": [
+                "Quarterly planning is now Mon 12 Oct at 9:30 am in Boardroom Orca. Please bring the Q3 churn numbers.",
+                {
+                  "$fill": 2500
+                }
+              ]
+            },
+            {
+              "from": "Sam Lee <samlee88@example.com>",
+              "subject": "Grandma's 80th",
+              "date": "2026-09-30",
+              "snippet": "Grandma's 80th is Sun 25 Oct, lunch at Jade Lotus, 12:30 pm. Can you bring the photo album",
+              "body": [
+                "Grandma's 80th is Sun 25 Oct, lunch at Jade Lotus, 12:30 pm. Can you bring the photo album?",
+                {
+                  "$fill": 2500
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "reply": "Two Sams wrote: Sam Okafor (work) moved the quarterly planning to Mon 12 Oct at 9:30 am; your cousin Sam Lee asked about Grandma's 80th on Sun 25 Oct."
+    },
+    {
+      "user": "ok noted",
+      "calls": [],
+      "reply": "Noted."
+    },
+    {
+      "user": "how do index funds work?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "how do index funds work?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Index funds explained",
+                "url": "https://news.example.com/index-funds-explained",
+                "text": [
+                  "They track a market index and hold its constituents at low cost.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "They track a market index and hold its constituents at low cost."
+    },
+    {
+      "user": "best stretches after running?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "best stretches after running?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Post-run stretching",
+                "url": "https://news.example.com/post-run-stretching",
+                "text": [
+                  "Calf, hamstring and hip-flexor stretches, 30 seconds each.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "Calf, hamstring and hip-flexor stretches, 30 seconds each."
+    },
+    {
+      "user": "what's new in the F1 standings?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "what's new in the F1 standings?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "F1 standings update",
+                "url": "https://news.example.com/f1-standings-update",
+                "text": [
+                  "The championship gap narrowed after the last race.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "The championship gap narrowed after the last race."
+    },
+    {
+      "user": "any interesting tech news today?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "any interesting tech news today?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Tech news roundup",
+                "url": "https://news.example.com/tech-news-roundup",
+                "text": [
+                  "A few chip and cloud stories; nothing that affects your plans.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "A few chip and cloud stories; nothing that affects your plans."
+    },
+    {
+      "user": "what's a good quick dinner idea?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "what's a good quick dinner idea?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Weeknight dinner ideas",
+                "url": "https://news.example.com/weeknight-dinner-ideas",
+                "text": [
+                  "A soy-ginger salmon traybake takes about 25 minutes.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "A soy-ginger salmon traybake takes about 25 minutes."
+    },
+    {
+      "user": "tips for sleeping better?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "tips for sleeping better?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Sleep habits guide",
+                "url": "https://news.example.com/sleep-habits-guide",
+                "text": [
+                  "Keep a fixed wake time, cut caffeine after 2pm and dim screens before bed.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "Keep a fixed wake time, cut caffeine after 2pm and dim screens before bed."
+    },
+    {
+      "user": "add grandma's lunch to my calendar",
+      "calls": [
+        {
+          "operation": "calendar_draft",
+          "args": {
+            "title": "Grandma's 80th",
+            "start": "2026-10-25T12:30:00+08:00"
+          },
+          "result": {
+            "draft": "d-602",
+            "status": "pending approval"
+          }
+        }
+      ],
+      "reply": "Drafted: Grandma's 80th, Sun 25 Oct 12:30 pm at Jade Lotus."
+    },
+    {
+      "user": "what did work Sam want me to bring?",
+      "calls": [
+        {
+          "operation": "gmail_read",
+          "args": {
+            "id": "m-okafor-1"
+          },
+          "result": {
+            "from": "Sam Okafor",
+            "body": "Please bring the Q3 churn numbers. Dial-in 6621 004 for remote folks."
+          }
+        }
+      ],
+      "reply": "Sam Okafor asked you to bring the Q3 churn numbers."
+    }
+  ],
+  "probes": [
+    {
+      "id": "two-sams/1",
+      "after": 10,
+      "message": "and what's the dial-in?",
+      "slice": "previous",
+      "evidence": ["6621 004"],
+      "accept": ["6621 ?004"],
+      "reject": [],
+      "note": ""
+    },
+    {
+      "id": "two-sams/2",
+      "after": 10,
+      "message": "what is Sam bringing up at lunch, what did he ask me to bring?",
+      "slice": "same-word",
+      "evidence": ["photo album"],
+      "accept": ["photo album"],
+      "reject": ["churn"],
+      "note": "The previous exchange is about the other Sam."
+    },
+    {
+      "id": "two-sams/3",
+      "after": 10,
+      "message": "which room is the planning meeting in?",
+      "slice": "tool-detail",
+      "evidence": ["Boardroom Orca"],
+      "accept": ["orca"],
+      "reject": [],
+      "note": ""
+    },
+    {
+      "id": "two-sams/4",
+      "after": 10,
+      "message": "when is quarterly planning?",
+      "slice": "distant",
+      "evidence": ["Mon 12 Oct at 9:30 am"],
+      "accept": ["12 oct|mon(day)?", "9:30"],
+      "reject": ["12:30"],
+      "note": ""
+    },
+    {
+      "id": "two-sams/5",
+      "after": 10,
+      "message": "where is grandma's lunch?",
+      "slice": "gap",
+      "evidence": ["Jade Lotus"],
+      "accept": ["jade lotus"],
+      "reject": [],
+      "note": ""
+    },
+    {
+      "id": "two-sams/6",
+      "after": 10,
+      "message": "new topic: what time is my cousin's family lunch?",
+      "slice": "switch",
+      "evidence": ["12:30 pm"],
+      "accept": ["12:30"],
+      "reject": ["9:30"],
+      "note": ""
+    }
+  ]
+}

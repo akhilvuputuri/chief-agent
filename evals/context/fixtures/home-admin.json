@@ -1,0 +1,347 @@
+{
+  "id": "home-admin",
+  "description": "Lease renewal, bills and an insurance claim interleaved with unrelated lookups.",
+  "turns": [
+    {
+      "user": "anything from my landlord?",
+      "calls": [
+        {
+          "operation": "gmail_thread",
+          "args": {
+            "query": "landlord lease"
+          },
+          "result": {
+            "messages": [
+              {
+                "from": "Daniel Chua <dchua@example.com>",
+                "subject": "Lease renewal",
+                "date": "2026-09-26",
+                "snippet": "Renewal at SGD 3,450/month from 1 Dec. Please confirm by 15 Oct. Aircon servicing is on me",
+                "body": [
+                  "Renewal at SGD 3,450/month from 1 Dec. Please confirm by 15 Oct. Aircon servicing is on me.",
+                  {
+                    "$fill": 2500
+                  }
+                ]
+              },
+              {
+                "from": "Daniel Chua <dchua@example.com>",
+                "subject": "Re: Lease renewal",
+                "date": "2026-09-27",
+                "snippet": "The diplomatic clause stays. Deposit remains two months.",
+                "body": [
+                  "The diplomatic clause stays. Deposit remains two months.",
+                  {
+                    "$fill": 2500
+                  }
+                ]
+              }
+            ],
+            "quoted": {
+              "$fill": 6000
+            }
+          }
+        }
+      ],
+      "reply": "Mr Chua says the lease renewal is at SGD 3,450/month (up from 3,200) and he needs your answer by 15 Oct."
+    },
+    {
+      "user": "any bills due?",
+      "calls": [
+        {
+          "operation": "gmail_search",
+          "args": {
+            "query": "bill due"
+          },
+          "result": [
+            {
+              "from": "SP Group <bills@spgroup.example.com>",
+              "subject": "Your bill",
+              "date": "2026-09-29",
+              "snippet": "Amount due SGD 142.60 by 10 Oct. Account 5510-2277.",
+              "body": [
+                "Amount due SGD 142.60 by 10 Oct. Account 5510-2277.",
+                {
+                  "$fill": 2500
+                }
+              ]
+            },
+            {
+              "from": "Singtel <billing@singtel.example.com>",
+              "subject": "Bill ready",
+              "date": "2026-09-29",
+              "snippet": "SGD 58.90 due 14 Oct.",
+              "body": [
+                "SGD 58.90 due 14 Oct.",
+                {
+                  "$fill": 2500
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "reply": "SP Group electricity SGD 142.60 is due 10 Oct, and the Singtel bill SGD 58.90 is due 14 Oct."
+    },
+    {
+      "user": "best stretches after running?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "best stretches after running?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Post-run stretching",
+                "url": "https://news.example.com/post-run-stretching",
+                "text": [
+                  "Calf, hamstring and hip-flexor stretches, 30 seconds each.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "Calf, hamstring and hip-flexor stretches, 30 seconds each."
+    },
+    {
+      "user": "what's new in the F1 standings?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "what's new in the F1 standings?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "F1 standings update",
+                "url": "https://news.example.com/f1-standings-update",
+                "text": [
+                  "The championship gap narrowed after the last race.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "The championship gap narrowed after the last race."
+    },
+    {
+      "user": "any interesting tech news today?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "any interesting tech news today?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Tech news roundup",
+                "url": "https://news.example.com/tech-news-roundup",
+                "text": [
+                  "A few chip and cloud stories; nothing that affects your plans.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "A few chip and cloud stories; nothing that affects your plans."
+    },
+    {
+      "user": "what's a good quick dinner idea?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "what's a good quick dinner idea?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Weeknight dinner ideas",
+                "url": "https://news.example.com/weeknight-dinner-ideas",
+                "text": [
+                  "A soy-ginger salmon traybake takes about 25 minutes.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "A soy-ginger salmon traybake takes about 25 minutes."
+    },
+    {
+      "user": "tips for sleeping better?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "tips for sleeping better?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Sleep habits guide",
+                "url": "https://news.example.com/sleep-habits-guide",
+                "text": [
+                  "Keep a fixed wake time, cut caffeine after 2pm and dim screens before bed.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "Keep a fixed wake time, cut caffeine after 2pm and dim screens before bed."
+    },
+    {
+      "user": "how do index funds work?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "how do index funds work?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Index funds explained",
+                "url": "https://news.example.com/index-funds-explained",
+                "text": [
+                  "They track a market index and hold its constituents at low cost.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "They track a market index and hold its constituents at low cost."
+    },
+    {
+      "user": "add pay electricity to my list",
+      "calls": [
+        {
+          "operation": "item_save",
+          "args": {
+            "title": "Pay SP Group electricity SGD 142.60 by 10 Oct"
+          },
+          "result": {
+            "id": "item-51",
+            "saved": true
+          }
+        }
+      ],
+      "reply": "Added: pay SP Group electricity SGD 142.60 by 10 Oct."
+    },
+    {
+      "user": "did the insurer reply about the claim?",
+      "calls": [
+        {
+          "operation": "gmail_search",
+          "args": {
+            "query": "claim"
+          },
+          "result": [
+            {
+              "from": "Aviva Claims <claims@aviva.example.com>",
+              "subject": "Claim approved",
+              "date": "2026-09-30",
+              "snippet": "Claim CLM-30917 approved: SGD 380, paid within 7 working days.",
+              "body": [
+                "Claim CLM-30917 approved: SGD 380, paid within 7 working days.",
+                {
+                  "$fill": 2500
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "reply": "Yes, Aviva approved claim CLM-30917 for SGD 380 and will pay within 7 working days."
+    }
+  ],
+  "probes": [
+    {
+      "id": "home-admin/1",
+      "after": 10,
+      "message": "how much are they paying out?",
+      "slice": "previous",
+      "evidence": ["SGD 380"],
+      "accept": ["380"],
+      "reject": [],
+      "note": ""
+    },
+    {
+      "id": "home-admin/2",
+      "after": 10,
+      "message": "what's the new rent?",
+      "slice": "distant",
+      "evidence": ["SGD 3,450/month"],
+      "accept": ["3,?450"],
+      "reject": ["3,?200"],
+      "note": ""
+    },
+    {
+      "id": "home-admin/3",
+      "after": 10,
+      "message": "what's my SP Group account number?",
+      "slice": "tool-detail",
+      "evidence": ["5510-2277"],
+      "accept": ["5510-?2277"],
+      "reject": [],
+      "note": ""
+    },
+    {
+      "id": "home-admin/4",
+      "after": 10,
+      "message": "how much is the electricity bill?",
+      "slice": "gap",
+      "evidence": ["SGD 142.60"],
+      "accept": ["142\\.60"],
+      "reject": ["58\\.90"],
+      "note": ""
+    },
+    {
+      "id": "home-admin/5",
+      "after": 10,
+      "message": "does the diplomatic clause stay?",
+      "slice": "tool-detail",
+      "evidence": ["The diplomatic clause stays"],
+      "accept": ["\\byes\\b|stays|remains"],
+      "reject": [],
+      "note": ""
+    },
+    {
+      "id": "home-admin/6",
+      "after": 10,
+      "message": "by when do I need to answer the landlord?",
+      "slice": "switch",
+      "evidence": ["confirm by 15 Oct"],
+      "accept": ["15 oct|oct(ober)? 15"],
+      "reject": ["7 working|10 oct"],
+      "note": ""
+    }
+  ]
+}

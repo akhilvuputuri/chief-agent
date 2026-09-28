@@ -1,0 +1,490 @@
+{
+  "id": "wedding-mixup",
+  "description": "Two weddings a month apart with different times, venues and RSVPs, interleaved with parcels, stocks and gift planning.",
+  "turns": [
+    {
+      "user": "any wedding invites in my email?",
+      "calls": [
+        {
+          "operation": "gmail_search",
+          "args": {
+            "query": "wedding invitation"
+          },
+          "result": [
+            {
+              "from": "Maya Lin <maya@lin-family.example.com>",
+              "subject": "Maya & Jonas - save the date",
+              "date": "2026-09-02",
+              "snippet": "Ceremony Sat 17 Oct 2026 at 11:00 am, Lumen Glasshouse. Dress code: garden formal. RSVP by",
+              "body": [
+                "Ceremony Sat 17 Oct 2026 at 11:00 am, Lumen Glasshouse. Dress code: garden formal. RSVP by 3 Oct.",
+                {
+                  "$fill": 2500
+                }
+              ]
+            },
+            {
+              "from": "Priya Nair <priya@nairtom.example.com>",
+              "subject": "Priya & Tom are getting married",
+              "date": "2026-09-05",
+              "snippet": "Ceremony Sat 14 Nov 2026 at 4:30 pm, Harbourline Pavilion. Black tie optional. RSVP to rsv",
+              "body": [
+                "Ceremony Sat 14 Nov 2026 at 4:30 pm, Harbourline Pavilion. Black tie optional. RSVP to rsvp@priyatom.example.com by 30 Oct.",
+                {
+                  "$fill": 2500
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "reply": "Two invites: Maya & Jonas on Sat 17 Oct, and Priya & Tom on Sat 14 Nov."
+    },
+    {
+      "user": "add Maya's one to my calendar",
+      "calls": [
+        {
+          "operation": "calendar_draft",
+          "args": {
+            "title": "Maya & Jonas wedding",
+            "start": "2026-10-17T11:00:00+08:00"
+          },
+          "result": {
+            "draft": "d-551",
+            "status": "pending approval"
+          }
+        }
+      ],
+      "reply": "Added Maya & Jonas's wedding on 17 Oct at 11:00 am, Lumen Glasshouse."
+    },
+    {
+      "user": "any interesting tech news today?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "any interesting tech news today?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Tech news roundup",
+                "url": "https://news.example.com/tech-news-roundup",
+                "text": [
+                  "A few chip and cloud stories; nothing that affects your plans.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "A few chip and cloud stories; nothing that affects your plans."
+    },
+    {
+      "user": "what's a good quick dinner idea?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "what's a good quick dinner idea?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Weeknight dinner ideas",
+                "url": "https://news.example.com/weeknight-dinner-ideas",
+                "text": [
+                  "A soy-ginger salmon traybake takes about 25 minutes.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "A soy-ginger salmon traybake takes about 25 minutes."
+    },
+    {
+      "user": "tips for sleeping better?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "tips for sleeping better?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Sleep habits guide",
+                "url": "https://news.example.com/sleep-habits-guide",
+                "text": [
+                  "Keep a fixed wake time, cut caffeine after 2pm and dim screens before bed.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "Keep a fixed wake time, cut caffeine after 2pm and dim screens before bed."
+    },
+    {
+      "user": "how do index funds work?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "how do index funds work?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Index funds explained",
+                "url": "https://news.example.com/index-funds-explained",
+                "text": [
+                  "They track a market index and hold its constituents at low cost.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "They track a market index and hold its constituents at low cost."
+    },
+    {
+      "user": "best stretches after running?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "best stretches after running?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Post-run stretching",
+                "url": "https://news.example.com/post-run-stretching",
+                "text": [
+                  "Calf, hamstring and hip-flexor stretches, 30 seconds each.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "Calf, hamstring and hip-flexor stretches, 30 seconds each."
+    },
+    {
+      "user": "what's new in the F1 standings?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "what's new in the F1 standings?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "F1 standings update",
+                "url": "https://news.example.com/f1-standings-update",
+                "text": [
+                  "The championship gap narrowed after the last race.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "The championship gap narrowed after the last race."
+    },
+    {
+      "user": "any interesting tech news today?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "any interesting tech news today?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Tech news roundup",
+                "url": "https://news.example.com/tech-news-roundup",
+                "text": [
+                  "A few chip and cloud stories; nothing that affects your plans.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "A few chip and cloud stories; nothing that affects your plans."
+    },
+    {
+      "user": "what's a good quick dinner idea?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "what's a good quick dinner idea?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Weeknight dinner ideas",
+                "url": "https://news.example.com/weeknight-dinner-ideas",
+                "text": [
+                  "A soy-ginger salmon traybake takes about 25 minutes.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "A soy-ginger salmon traybake takes about 25 minutes."
+    },
+    {
+      "user": "thanks",
+      "calls": [],
+      "reply": "You're welcome!"
+    },
+    {
+      "user": "where are my parcels at?",
+      "calls": [
+        {
+          "operation": "parcel_list",
+          "args": {},
+          "result": [
+            {
+              "item": "Keychron keyboard",
+              "carrier": "DHL",
+              "eta": "Thursday",
+              "log": {
+                "$fill": 9000
+              }
+            },
+            {
+              "item": "Blender",
+              "carrier": "Ninja Van",
+              "status": "held at customs",
+              "log": {
+                "$fill": 7000
+              }
+            }
+          ]
+        }
+      ],
+      "reply": "Two parcels: the Keychron keyboard arrives Thursday and the blender is still at customs."
+    },
+    {
+      "user": "how is NVDA doing today?",
+      "calls": [
+        {
+          "operation": "watchlist_list",
+          "args": {},
+          "result": {
+            "items": [
+              {
+                "ticker": "NVDA",
+                "price": 188.4,
+                "change": "+1.2%"
+              }
+            ],
+            "notes": {
+              "$fill": 3000
+            }
+          }
+        }
+      ],
+      "reply": "NVDA is up 1.2% today at $188.40."
+    },
+    {
+      "user": "gift ideas for a wedding, around $150?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "wedding gift ideas 150"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Wedding gift guide",
+                "url": "https://news.example.com/wedding-gift-guide",
+                "text": [
+                  "Ceramic serving sets, map prints, class vouchers.",
+                  {
+                    "$fill": 12000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "Popular picks: a ceramic serving set, a framed map print, or a cooking class voucher."
+    },
+    {
+      "user": "add to my list: silk scarf from Kiln & Loom for Priya",
+      "calls": [
+        {
+          "operation": "item_save",
+          "args": {
+            "title": "Silk scarf from Kiln & Loom for Priya"
+          },
+          "result": {
+            "id": "item-88",
+            "saved": true
+          }
+        }
+      ],
+      "reply": "Saved: silk scarf from Kiln & Loom for Priya."
+    },
+    {
+      "user": "what's the dress code for Maya's again?",
+      "calls": [],
+      "reply": "Garden formal."
+    },
+    {
+      "user": "weather this weekend?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "Singapore weekend weather"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Weekend forecast",
+                "url": "https://news.example.com/weekend-forecast",
+                "text": [
+                  "Showers Saturday, clear Sunday.",
+                  {
+                    "$fill": 9000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "Showers on Saturday, clearing Sunday."
+    },
+    {
+      "user": "ok cool",
+      "calls": [],
+      "reply": "Anything else?"
+    },
+    {
+      "user": "any update from Tom about transport?",
+      "calls": [
+        {
+          "operation": "gmail_search",
+          "args": {
+            "query": "from:tom shuttle"
+          },
+          "result": [
+            {
+              "from": "Tom Reyes <tom@nairtom.example.com>",
+              "subject": "Shuttle for 14 Nov",
+              "date": "2026-09-20",
+              "snippet": "A shuttle will leave Orchard Point Hotel at 3:15 pm for the Harbourline Pavilion.",
+              "body": [
+                "A shuttle will leave Orchard Point Hotel at 3:15 pm for the Harbourline Pavilion.",
+                {
+                  "$fill": 2500
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "reply": "Yes, Tom says a shuttle leaves Orchard Point Hotel at 3:15 pm on the wedding day."
+    }
+  ],
+  "probes": [
+    {
+      "id": "wedding-mixup/1",
+      "after": 19,
+      "message": "and where does it leave from?",
+      "slice": "previous",
+      "evidence": ["Orchard Point Hotel"],
+      "accept": ["orchard point"],
+      "reject": [],
+      "note": ""
+    },
+    {
+      "id": "wedding-mixup/2",
+      "after": 19,
+      "message": "what was I going to get Priya?",
+      "slice": "gap",
+      "evidence": ["silk scarf from Kiln & Loom"],
+      "accept": ["silk scarf|kiln"],
+      "reject": [],
+      "note": ""
+    },
+    {
+      "id": "wedding-mixup/3",
+      "after": 19,
+      "message": "what's the RSVP email for Priya and Tom?",
+      "slice": "tool-detail",
+      "evidence": ["rsvp@priyatom.example.com"],
+      "accept": ["rsvp@priyatom\\.example\\.com"],
+      "reject": [],
+      "note": ""
+    },
+    {
+      "id": "wedding-mixup/4",
+      "after": 19,
+      "message": "when do I have to RSVP to Maya by?",
+      "slice": "distant",
+      "evidence": ["RSVP by 3 Oct"],
+      "accept": ["3 oct|oct(ober)? 3"],
+      "reject": ["30 oct"],
+      "note": ""
+    },
+    {
+      "id": "wedding-mixup/5",
+      "after": 19,
+      "message": "what time is the October wedding ceremony?",
+      "slice": "same-word",
+      "evidence": ["11:00 am"],
+      "accept": ["11(:00)? ?am"],
+      "reject": ["4:30|3:15"],
+      "note": "Two weddings; the previous exchange mentions 3:15 pm for the November one."
+    },
+    {
+      "id": "wedding-mixup/6",
+      "after": 19,
+      "message": "different thing: when is the keyboard arriving?",
+      "slice": "switch",
+      "evidence": ["Thursday"],
+      "accept": ["thursday"],
+      "reject": ["3:15|14 nov"],
+      "note": ""
+    }
+  ]
+}
