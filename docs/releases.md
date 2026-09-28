@@ -1,5 +1,17 @@
 # Versions and release notes
 
+## Released v0.3.28 — stock monitoring hours and daily news bulletin
+
+[v0.3.28](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.28) points to `8f7f7f791377eaf39138def8418cad3b97d3338b`. It includes:
+
+- [PR #108](https://github.com/akhilvuputuri/chief-agent/pull/108): monitoring windows in Singapore time, migration 020, installed through the reviewed operator rollout at `069c8d5`.
+- [PR #109](https://github.com/akhilvuputuri/chief-agent/pull/109): a daily news bulletin from followed sites with 👍/👎 learning, migration 021, installed through the reviewed operator rollout at `8f7f7f7`.
+- #107 and #110–#113, which were released earlier the same day.
+
+Opus 5.5 independently approved the exact merged heads of #108 and #109; the review records are on those PRs. The other included PRs were reviewed in their own sessions (see their PRs). `npm run check` passed 496 application and 21 script tests. The automatic release then verified the exact commit with startup health. Separate read-only checks confirmed both migrations, the preserved watchlist, and live feed discovery from the gateway.
+
+Limits: owner Telegram acceptance is pending for both features. No monitoring window or news site is configured yet. See journals [39](journey/39-watch-monitoring-window.md) and [42](journey/42-news-bulletin.md).
+
 ## Released v0.3.27 — Lightsail production host and private logs
 
 Production moved to one AWS Lightsail VM in Singapore with the same Compose app and Postgres. Changes:

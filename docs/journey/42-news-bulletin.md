@@ -1,7 +1,7 @@
 # 42 — A lean daily news bulletin from followed sites
 
 Work date(s): 2026-09-27 to 2026-09-28. Written/revised: 2026-09-28.
-Status: tested; in review. Needs migration 021 through the reviewed operator procedure; migration 020 ([39](39-watch-monitoring-window.md)) is already live. Not deployed; nothing configured.
+Status: released 28 September 2026 in [v0.3.28](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.28) (`8f7f7f7`) via the migration-021 operator rollout. Nothing is configured yet, and owner acceptance is pending.
 
 ## User-visible problem and preceding iteration
 
@@ -82,10 +82,30 @@ There are 3 new regression tests (28 news tests in total). Migration 021 is not 
 
 - **Synthetic (PGlite, mocked fetcher):** 14 tests at first review; 30 after the review rounds below. They cover address normalization and refusal of private hosts, the three discovery paths plus the no-feed case and the request cap, untrusted feed text, the DNS guard, foreground-only and owner-scoped mutations, enable prerequisites, a single edition at the SGT slot with duplicate-story collapse and no repeated links the next day, enabling after the slot starting tomorrow, ranking and the per-site cap, set-state votes shifting the next edition, the on-demand limit and the "nothing new" message, all-sources-failed retries then an explanation, muting on disable, uncertain delivery across restart, and turning off when the last site is removed. `npm run check` passed 461 application and 21 script tests.
 - **Measured, picker eval (28 September, developer Mac, `typesafe/jev-1.13-20260917`, 3 runs, 543 calls):** pooled recall 97.8% (tuning 98.0%, held-out 97.5%), against 97.9% for the 27 September baseline on 522 calls. No news scenario was missed. Extra groups per call were 0.34 (baseline 0.29), schemas were 18.0% of all tools, and there were no errors. Cost $0.044, p50 374 ms. Persistent misses were the four known ones from [37](37-jev-tool-picker.md). `news-6` ("has my news been set up?") was among 12 scenarios whose picked set varied between runs. The scenarios are synthetic; this does not measure production traffic.
-- **Not verified:** real sites' feeds, Telegram rendering and buttons, and owner acceptance.
+- **Not verified at this stage:** real sites' feeds (later observed from the production gateway; see the release closure), Telegram rendering and buttons, and owner acceptance (both still pending).
+
+### Release closure — 28 September 2026
+
+- [PR #109](https://github.com/akhilvuputuri/chief-agent/pull/109) was approved by Opus 5.5 at exact head `83177d491af333c7c1d39790551896292377b69d`. The review history is recorded on the PR. CI passed, and Devin Review raised no findings on that head. It was merged as `8f7f7f791377eaf39138def8418cad3b97d3338b`.
+- **Operator rollout (observed):** from baseline `54fc145`, using an exact-SHA archive whose pax comment was verified. `scripts/deploy-news.py` was extracted with `git cat-file` and its checksum compared with the merged file. The rollout reported `{"deployed": "8f7f7f7…", "healthy": true, "migration": 21}`.
+- **Automatic release [run 36422839087](https://github.com/akhilvuputuri/chief-agent/actions/runs/36422839087) (observed):** it then redeployed the same exact commit with an exact-commit receipt and startup health, because the installed db/ and compose now matched.
+- **Separate read-only checks (observed):**
+  - `RELEASE` is `8f7f7f7`, `/healthz` is ok, and the gateway is healthy.
+  - Migration marker 21 is present, the four `news_*` tables exist, and the per-day index predicate excludes muted editions.
+  - Nothing is configured: 0 settings, sites and editions.
+  - The watchlist is unchanged, and CloudWatch showed no errors in the 20 minutes around the rollout.
+- **Live read-only check from the production gateway (observed):** `discoverFeed` found feeds for two public sites in under 400 ms. Nothing was saved.
+- **Pending (owner acceptance):**
+  - The owner tells Chief which sites to follow, the delivery time and any topics.
+  - A first edition arrives with working 👍/👎 buttons.
+  - The bulletin's usefulness has not been assessed.
 
 ## Follow-up and next iteration
 
 `scripts/deploy-news.py` is the migration-020 script with only its constants changed. Its baseline is the live release, which was `069c8d5` when first written then `7e8dfd3` after #110 and #111, `b01c4e8` after #112, and `54fc145` after #113 (all app-only), and 14 offline tests pass. Its test allows only the `ON DELETE SET NULL` foreign-key clause among destructive keywords. The package version is bumped to 0.3.28, which will label #107, #108 and #109 once this is verified live.
 
-Pending: re-review of the fixes, merge, operator rollout, then the owner configuring sites, time and topics in Telegram and receiving a first edition.
+Follow-ups:
+
+- Serialize `news_source_add` with builds, if a site added mid-build ever matters.
+- Abort underlying requests when a deadline fires (for example with an `AbortSignal`).
+- Assess ranking against real votes once some have accumulated.
