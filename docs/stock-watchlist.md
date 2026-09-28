@@ -110,7 +110,11 @@ Singapore time" (migration 020, [journal 39](journey/39-watch-monitoring-window.
   An alert muted only because the window closed before it was sent is marked
   `windowMuted`. If the window reopens within the same US trading day and the
   stock is still below its threshold, that alert is re-armed and sent. Alerts
-  muted by a pause still keep the day silent.
+  muted by a pause still keep the day silent. Pausing (by tool, button, or
+  the master switch) also withdraws that re-arm eligibility.
+- The poll interval still governs how often a stock is checked. If the window
+  closes and reopens within one interval (a gap shorter than `pollMinutes`),
+  the next check comes when the interval elapses, not at the reopening.
 - At the open, a delayed feed can still return the previous session's quote,
   which is logged as `stale`. On the first poll after a gate, that result is
   retried after 15 minutes instead of waiting the whole interval, once per

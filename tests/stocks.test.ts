@@ -1971,3 +1971,60 @@ test("an all-day window spans midnight: an alert queued at 23:59:59 is still sen
     await f.pg.close();
   }
 });
+
+test("a pause withdraws re-arm eligibility from a window-muted alert", async () => {
+  const f = await fixture(new Date("2026-01-15T14:59:50Z")); // 22:59:50 SGT
+  try {
+    const itemId = await f.add(5);
+    await f.tools.call("a", f.run, {
+      operation: "watchlist_settings",
+      window: { start: "00:00", end: "23:00" },
+    });
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({
+        price: 90,
+        prevClose: 100,
+        providerChangePct: -10,
+        quoteTime: new Date("2026-01-15T14:59:00Z"),
+      }),
+    );
+    await f.monitor.tick();
+    await new StockDelivery(
+      f.db,
+      async () => {},
+      () => new Date("2026-01-15T15:00:05Z"),
+    ).tick();
+    assert.equal((await f.alerts(itemId))[0].payload.windowMuted, "true");
+    // Pause and resume before the window reopens the same trading day.
+    await f.tools.call("a", f.run, {
+      operation: "watchlist_update",
+      id: itemId,
+      status: "paused",
+    });
+    await f.tools.call("a", f.run, {
+      operation: "watchlist_update",
+      id: itemId,
+      status: "active",
+    });
+    assert.equal((await f.alerts(itemId))[0].payload.windowMuted, undefined);
+    f.setNow(new Date("2026-01-15T16:00:00Z"));
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({
+        price: 90,
+        prevClose: 100,
+        providerChangePct: -10,
+        quoteTime: new Date("2026-01-15T16:00:00Z"),
+      }),
+    );
+    await f.monitor.tick();
+    assert.equal((await f.alerts(itemId))[0].state, "muted");
+    assert.equal(
+      (await f.observations(itemId)).at(-1)!.decision,
+      "suppressed_today",
+    );
+  } finally {
+    await f.pg.close();
+  }
+});

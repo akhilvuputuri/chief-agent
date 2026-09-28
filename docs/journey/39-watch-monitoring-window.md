@@ -48,6 +48,11 @@ Each has a regression test. The reviewer's own probes confirmed DST and holiday 
 
 Afterwards the branch was rebased onto `7e6e62c` (#107). The journal became 39 because main already has a 38, and the rollout baseline became `7e6e62c`.
 
+**Review round 4 (Devin Review, automated, on `e32dee3`):**
+
+- A window-muted alert kept its re-arm flag through a pause and resume, so it could be re-sent. This was fixed: every pause path (tool, Telegram button, master switch, and the delivery sweep) now clears the flag.
+- A window gap shorter than the poll interval resumes on the normal cadence. This is kept by design and documented.
+
 ## Verification and outcome
 
 - Synthetic (PGlite, mocked provider): 7 new tests. They cover validation, overnight and weekday ownership, DST-correct `nextChecks` (21:30 SGT in September, 22:30 SGT in January, MLK Day skipped), the owner's scenario (checked at 23:30 SGT, silent at 00:30 with one `outside_window` row and no quote call, alert at the next reopen when still down), a recovered drop that is not reported, the first poll at the open with a 60-minute cadence, override/inherit/clear, and a late alert muted at delivery. The full `npm run check` passed 453 application and 21 script tests. The 14 offline rollout tests passed. Migration 020 applied twice in PGlite, and the CHECKs rejected a partial window, an unknown day and start = end.

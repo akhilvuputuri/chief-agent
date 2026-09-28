@@ -27,12 +27,19 @@ const WINDOW_OUTSIDE_NOTE =
   "Outside the window no prices are fetched and no alerts are sent. When it reopens, the first check alerts only if the stock is still down past its threshold for that trading day; a drop that recovers while the window is closed is not reported.";
 
 /** Terminal-suppress a user's queued alerts ('muted'); delivered or uncertain
- * rows are untouched. Used when an item or the whole feature is paused. */
-async function mutePending(db: Database, userId: string, itemId?: string) {
+ * rows are untouched. Used when an item or the whole feature is paused. A pause
+ * also withdraws re-arm eligibility from alerts muted earlier by a window
+ * gap, so pausing keeps the trading day silent after a resume. */
+export async function mutePending(
+  db: Database,
+  userId: string,
+  itemId?: string,
+) {
   await db.query(
-    `UPDATE stock_alerts SET state='muted' WHERE user_id=$1 AND state='pending'${
-      itemId ? " AND item_id=$2" : ""
-    }`,
+    `UPDATE stock_alerts SET state='muted',payload=payload-'windowMuted'
+     WHERE user_id=$1 AND (state='pending' OR (state='muted' AND payload ? 'windowMuted'))${
+       itemId ? " AND item_id=$2" : ""
+     }`,
     itemId ? [userId, itemId] : [userId],
   );
 }
@@ -926,8 +933,11 @@ export class StockDelivery {
       // Pauses can land after an alert was queued: mute those rows, then only
       // claim an alert whose monitoring is still enabled.
       await this.db.query(
-        `UPDATE stock_alerts SET state='muted' FROM watchlist_items i
-         WHERE stock_alerts.item_id=i.id AND stock_alerts.state='pending'
+        `UPDATE stock_alerts SET state='muted',payload=stock_alerts.payload-'windowMuted'
+         FROM watchlist_items i
+         WHERE stock_alerts.item_id=i.id
+           AND (stock_alerts.state='pending'
+             OR (stock_alerts.state='muted' AND stock_alerts.payload ? 'windowMuted'))
            AND (i.status<>'active' OR EXISTS(
              SELECT 1 FROM stock_settings s
              WHERE s.user_id=stock_alerts.user_id AND s.paused))`,
