@@ -61,9 +61,17 @@ Each has a regression test (23 news tests). The branch was then rebased onto `7e
 - Site removal and settings changes now go through the owner's build queue, which closes the reviewer's two build-interleaving races.
 - **Known limit, not changed:** when the 45 s or 90 s deadline fires, it stops waiting, but the underlying request keeps running until its own timeout (15 s per request, up to three redirects). Up to four fetches are in flight at a time, so this stays bounded.
 
+**Devin Review (automated, on `d2d5bf1`), fixed:**
+
+- A scheduled build that crossed midnight was muted, because expiry was by date. Pending editions now expire by age: 6 hours for scheduled, 1 hour for on-demand, with `created_at` taken from the gateway clock. This also withdraws an on-demand edition that is still pending after a restart.
+- Removing a site muted the day's edition but left its slot taken, so no bulletin came that day. Moving the delivery time left the old edition queued. The per-day unique index now excludes muted editions: a withdrawn edition frees the day, and the next due tick rebuilds it from current sites and settings. A time change mutes the pending edition.
+- Votes on items from undelivered editions are ignored.
+
+There are 3 new regression tests (28 news tests in total). Migration 021 is not deployed yet, so its index predicate could change without a second migration.
+
 ## Verification and outcome
 
-- **Synthetic (PGlite, mocked fetcher):** 14 tests at first review; 25 after the review rounds below. They cover address normalization and refusal of private hosts, the three discovery paths plus the no-feed case and the request cap, untrusted feed text, the DNS guard, foreground-only and owner-scoped mutations, enable prerequisites, a single edition at the SGT slot with duplicate-story collapse and no repeated links the next day, enabling after the slot starting tomorrow, ranking and the per-site cap, set-state votes shifting the next edition, the on-demand limit and the "nothing new" message, all-sources-failed retries then an explanation, muting on disable, uncertain delivery across restart, and turning off when the last site is removed. `npm run check` passed 461 application and 21 script tests.
+- **Synthetic (PGlite, mocked fetcher):** 14 tests at first review; 28 after the review rounds below. They cover address normalization and refusal of private hosts, the three discovery paths plus the no-feed case and the request cap, untrusted feed text, the DNS guard, foreground-only and owner-scoped mutations, enable prerequisites, a single edition at the SGT slot with duplicate-story collapse and no repeated links the next day, enabling after the slot starting tomorrow, ranking and the per-site cap, set-state votes shifting the next edition, the on-demand limit and the "nothing new" message, all-sources-failed retries then an explanation, muting on disable, uncertain delivery across restart, and turning off when the last site is removed. `npm run check` passed 461 application and 21 script tests.
 - **Measured, picker eval (28 September, developer Mac, `typesafe/jev-1.13-20260917`, 3 runs, 543 calls):** pooled recall 97.8% (tuning 98.0%, held-out 97.5%), against 97.9% for the 27 September baseline on 522 calls. No news scenario was missed. Extra groups per call were 0.34 (baseline 0.29), schemas were 18.0% of all tools, and there were no errors. Cost $0.044, p50 374 ms. Persistent misses were the four known ones from [37](37-jev-tool-picker.md). `news-6` ("has my news been set up?") was among 12 scenarios whose picked set varied between runs. The scenarios are synthetic; this does not measure production traffic.
 - **Not verified:** real sites' feeds, Telegram rendering and buttons, and owner acceptance.
 

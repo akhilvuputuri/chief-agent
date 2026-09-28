@@ -36,8 +36,10 @@ CREATE TABLE IF NOT EXISTS news_editions (
  created_at timestamptz NOT NULL DEFAULT now(),
  sent_at timestamptz
 );
+-- One live scheduled edition per owner and Singapore date. A muted edition was
+-- never shown (switched off, site removed, time moved), so it frees the day.
 CREATE UNIQUE INDEX IF NOT EXISTS news_editions_scheduled_day
- ON news_editions(user_id, edition_date) WHERE kind='scheduled';
+ ON news_editions(user_id, edition_date) WHERE kind='scheduled' AND state<>'muted';
 CREATE TABLE IF NOT EXISTS news_items (
  id uuid PRIMARY KEY,
  edition_id uuid NOT NULL REFERENCES news_editions(id),

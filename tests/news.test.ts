@@ -543,22 +543,23 @@ test("turning off mutes a queued edition; send failures become uncertain; last s
     await f.call({ operation: "news_settings", enabled: false });
     await f.bulletin.tick();
     assert.equal(f.sent.length, 0);
-    const state = async () =>
+    const state = async (kind: string) =>
       (
         await f.db.query(
-          "SELECT state FROM news_editions ORDER BY created_at DESC LIMIT 1",
+          "SELECT state FROM news_editions WHERE kind=$1 ORDER BY created_at DESC LIMIT 1",
+          [kind],
         )
       ).rows[0].state;
-    assert.equal(await state(), "muted");
+    assert.equal(await state("scheduled"), "muted");
     f.failSends(true);
     await f.call({ operation: "news_edition_now" });
     await f.bulletin.tick();
-    assert.equal(await state(), "uncertain");
+    assert.equal(await state("on_demand"), "uncertain");
     await f.db.query(
       "UPDATE news_editions SET state='sending' WHERE state='uncertain'",
     );
     await f.bulletin.recover();
-    assert.equal(await state(), "uncertain");
+    assert.equal(await state("on_demand"), "uncertain");
     await f.call({ operation: "news_settings", enabled: true });
     const status = await f.call({ operation: "news_status" });
     for (const s of status.sources)
@@ -797,7 +798,7 @@ test("an edition built while the owner switches the bulletin off is never sent l
   }
 });
 
-test("removing a site withdraws a queued edition that carries its items", async () => {
+test("removing a site withdraws a queued edition and today's is rebuilt from the rest", async () => {
   const f = await fixture(sgtAt("2026-09-28T07:00"));
   try {
     await followTwoSites(f, sgtAt("2026-09-28T07:00"));
@@ -812,13 +813,14 @@ test("removing a site withdraws a queued edition that carries its items", async 
       (s: any) => s.name === "Alpha",
     );
     await f.call({ operation: "news_source_remove", id: alpha.id });
+    // The withdrawn edition frees today's slot: the next tick rebuilds it
+    // from the remaining site, whose items were never shown.
     await f.bulletin.tick();
-    assert.equal(f.sent.length, 0);
-    // Beta's items were never shown, so an on-demand edition can include them.
-    await f.call({ operation: "news_edition_now" });
-    await f.bulletin.tick();
+    assert.equal(f.sent.length, 1);
     assert.match(f.sent[0]!.payload.text, /Gardening in small flats/);
     assert.doesNotMatch(f.sent[0]!.payload.text, /alpha\.example/);
+    await f.bulletin.tick();
+    assert.equal(f.sent.length, 1);
   } finally {
     await f.pg.close();
   }
@@ -959,4 +961,83 @@ test("when two feeds carry one link, the better-scoring copy is kept", () => {
   assert.equal(r.selected.length, 1);
   assert.equal(r.selected[0]!.sourceId, "b");
   assert.deepEqual(r.selected[0]!.topics, ["ai"]);
+});
+
+test("a bulletin built across midnight is still sent; an hour-old on-demand one is not", async () => {
+  const f = await fixture(sgtAt("2026-09-28T23:00"));
+  try {
+    await followTwoSites(f, sgtAt("2026-09-28T23:00"));
+    await f.call({
+      operation: "news_settings",
+      deliveryTime: "23:59",
+      enabled: true,
+    });
+    f.setNow(sgtAt("2026-09-28T23:59"));
+    // Feeds are slow: the edition is stored for Monday but delivered Tuesday.
+    f.fetcher.onGet = async () => {
+      f.fetcher.onGet = null;
+      f.setNow(sgtAt("2026-09-29T00:00"));
+    };
+    await f.bulletin.tick();
+    assert.equal(f.sent.length, 1);
+    assert.match(f.sent[0]!.payload.text, /Mon 28 Sep/);
+    // An on-demand edition left queued for over an hour is withdrawn.
+    await f.bulletin.build("a", "on_demand");
+    f.setNow(sgtAt("2026-09-29T01:30"));
+    await f.bulletin.tick();
+    assert.equal(f.sent.length, 1);
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT state FROM news_editions WHERE kind='on_demand'",
+        )
+      ).rows[0].state,
+      "muted",
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("moving the time withdraws a queued edition and builds at the new time", async () => {
+  const f = await fixture(sgtAt("2026-09-28T07:00"));
+  try {
+    await followTwoSites(f, sgtAt("2026-09-28T07:00"));
+    await f.call({
+      operation: "news_settings",
+      deliveryTime: "08:00",
+      enabled: true,
+    });
+    f.setNow(sgtAt("2026-09-28T08:00"));
+    await f.bulletin.build("a", "scheduled");
+    const moved = await f.call({
+      operation: "news_settings",
+      deliveryTime: "20:00",
+    });
+    assert.equal(moved.nextEdition, "Mon 28 Sep 20:00 SGT");
+    f.setNow(sgtAt("2026-09-28T08:00:05"));
+    await f.bulletin.tick();
+    assert.equal(f.sent.length, 0);
+    f.setNow(sgtAt("2026-09-28T20:00"));
+    await f.bulletin.tick();
+    assert.equal(f.sent.length, 1);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("votes count only on bulletins that were delivered", async () => {
+  const f = await fixture(sgtAt("2026-09-28T08:00"));
+  try {
+    await followTwoSites(f, sgtAt("2026-09-28T08:00"));
+    f.failSends(true);
+    await f.bulletin.build("a", "on_demand");
+    const item = (await f.db.query("SELECT id FROM news_items LIMIT 1"))
+      .rows[0];
+    assert.equal(await recordVote(f.db, "a", item.id, 1), null); // still pending
+    await f.bulletin.tick(); // send fails: uncertain, possibly shown
+    assert.ok(await recordVote(f.db, "a", item.id, 1));
+  } finally {
+    await f.pg.close();
+  }
 });

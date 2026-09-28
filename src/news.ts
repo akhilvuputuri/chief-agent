@@ -34,6 +34,11 @@ const FETCH_CONCURRENCY = 4;
 const ALL_FAILED_RETRIES = 4; // every 15 minutes, then send the explanation
 const GATHER_MS = 90000; // whole-edition fetch budget
 const MAX_URL = 600;
+// A queued edition older than this is withdrawn instead of sent: a scheduled
+// one may cross midnight while it is built, but never arrive hours late; an
+// on-demand one is only worth sending shortly after it was asked for.
+const SCHEDULED_TTL_MS = 6 * 3600000;
+const ON_DEMAND_TTL_MS = 3600000;
 
 type NewsAction = Extract<Action, { operation: `news_${string}` }>;
 
@@ -349,7 +354,9 @@ export async function recordVote(
 ) {
   const before = (
     await db.query(
-      "SELECT edition_id,vote,domain,topics FROM news_items WHERE id=$1 AND user_id=$2",
+      `SELECT i.edition_id,i.vote,i.domain,i.topics FROM news_items i
+       JOIN news_editions e ON e.id=i.edition_id
+       WHERE i.id=$1 AND i.user_id=$2 AND e.state IN ('sent','uncertain')`,
       [itemId, user],
     )
   ).rows[0];
@@ -488,7 +495,7 @@ export class NewsBulletin {
       } else if (
         (
           await this.db.query(
-            "SELECT 1 FROM news_editions WHERE user_id=$1 AND edition_date=$2 AND kind='scheduled'",
+            "SELECT 1 FROM news_editions WHERE user_id=$1 AND edition_date=$2 AND kind='scheduled' AND state<>'muted'",
             [user, date],
           )
         ).rows.length
@@ -579,9 +586,9 @@ export class NewsBulletin {
       const stored = (
         await this.db.query(
           `WITH e AS (
-             INSERT INTO news_editions(id,user_id,edition_date,kind,payload,trace)
-             VALUES($1,$2,$3,$4,$5::jsonb,$6::jsonb)
-             ON CONFLICT (user_id,edition_date) WHERE kind='scheduled' DO NOTHING
+             INSERT INTO news_editions(id,user_id,edition_date,kind,payload,trace,created_at)
+             VALUES($1,$2,$3,$4,$5::jsonb,$6::jsonb,$8)
+             ON CONFLICT (user_id,edition_date) WHERE kind='scheduled' AND state<>'muted' DO NOTHING
              RETURNING id),
            i AS (
              INSERT INTO news_items(id,edition_id,user_id,position,source_id,source_name,url,
@@ -601,6 +608,7 @@ export class NewsBulletin {
             JSON.stringify(payload),
             JSON.stringify(traceDoc),
             JSON.stringify(items),
+            now,
           ],
         )
       ).rows[0];
@@ -629,7 +637,7 @@ export class NewsBulletin {
         `SELECT s.user_id,s.delivery_time,s.schedule_from FROM news_settings s
          WHERE s.enabled AND s.delivery_time IS NOT NULL
            AND NOT EXISTS (SELECT 1 FROM news_editions e WHERE e.user_id=s.user_id
-             AND e.edition_date=$1 AND e.kind='scheduled')`,
+             AND e.edition_date=$1 AND e.kind='scheduled' AND e.state<>'muted')`,
         [date],
       )
     ).rows;
@@ -647,20 +655,22 @@ export class NewsBulletin {
     }
   }
   private async deliver() {
-    // A scheduled edition belongs to its day: one left pending (for example
-    // built while the owner was switching the bulletin off) is never sent later.
+    // A queued edition that has waited too long (a gateway outage, or one
+    // built while the owner switched the bulletin off) is withdrawn, not sent.
+    const now = this.clock().getTime();
+    const scheduledCutoff = new Date(now - SCHEDULED_TTL_MS);
+    const onDemandCutoff = new Date(now - ON_DEMAND_TTL_MS);
     await this.db.query(
-      "UPDATE news_editions SET state='muted' WHERE state='pending' AND kind='scheduled' AND edition_date<$1",
-      [sgt(this.clock()).date],
+      `UPDATE news_editions SET state='muted' WHERE state='pending'
+         AND ((kind='scheduled' AND created_at<$1) OR (kind='on_demand' AND created_at<$2))`,
+      [scheduledCutoff, onDemandCutoff],
     );
     const d = (
       await this.db.query(
         `UPDATE news_editions SET state='sending' WHERE id=(
         SELECT e.id FROM news_editions e LEFT JOIN news_settings s ON s.user_id=e.user_id
-        WHERE e.state='pending' AND (e.kind='on_demand'
-          OR (COALESCE(s.enabled,false) AND e.edition_date=$1))
+        WHERE e.state='pending' AND (e.kind='on_demand' OR COALESCE(s.enabled,false))
         ORDER BY e.created_at FOR UPDATE OF e SKIP LOCKED LIMIT 1) RETURNING *`,
-        [sgt(this.clock()).date],
       )
     ).rows[0];
     if (!d) return;
@@ -744,7 +754,7 @@ export class NewsTools {
     const { date } = sgt(now);
     const builtToday = (
       await this.db.query(
-        "SELECT 1 FROM news_editions WHERE user_id=$1 AND edition_date=$2 AND kind='scheduled'",
+        "SELECT 1 FROM news_editions WHERE user_id=$1 AND edition_date=$2 AND kind='scheduled' AND state<>'muted'",
         [user, date],
       )
     ).rows.length;
@@ -951,6 +961,13 @@ export class NewsTools {
         ],
       )
     ).rows[0];
+    // A pending edition built for the old time is withdrawn, and the new
+    // time builds a fresh one (a muted edition frees the day's slot).
+    if (enabled && deliveryTime !== old?.delivery_time)
+      await this.db.query(
+        "UPDATE news_editions SET state='muted' WHERE user_id=$1 AND state='pending' AND kind='scheduled'",
+        [user],
+      );
     if (!enabled) await this.disable(user);
     return {
       settings: row,
