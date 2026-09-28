@@ -207,6 +207,24 @@ function visibleText(messages: ModelMessage[]) {
     .join("\n");
 }
 
+/** "context": in the prompt; "pointer": inside a stored result whose ID is in the prompt. */
+async function visibility(db: Database, text: string, evidence: string) {
+  if (text.includes(evidence)) return "context";
+  const ids = [
+    ...new Set(
+      text.match(
+        /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g,
+      ) ?? [],
+    ),
+  ];
+  if (!ids.length) return "absent";
+  const found = await db.query(
+    "SELECT 1 FROM runtime_calls WHERE id::text = ANY($1) AND strpos(result::text, $2) > 0 LIMIT 1",
+    [ids, JSON.stringify(evidence).slice(1, -1)],
+  );
+  return found.rows.length ? "pointer" : "absent";
+}
+
 async function runProbe(fixture: Fixture, probe: Probe) {
   const pg = await database();
   const db = pg as unknown as Database;
@@ -277,7 +295,9 @@ async function runProbe(fixture: Fixture, probe: Probe) {
       mode,
       turnsLoaded: probe.after,
       evidence: Object.fromEntries(
-        probe.evidence.map((e) => [e, text.includes(e) ? "context" : "absent"]),
+        await Promise.all(
+          probe.evidence.map(async (e) => [e, await visibility(db, text, e)]),
+        ),
       ),
       sizes: {
         fixed: selected?.fixedSize ?? null,

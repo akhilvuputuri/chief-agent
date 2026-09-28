@@ -43,7 +43,8 @@ def grade(row: dict) -> dict:
     reply = row.get("reply") or ""
     matches = lambda patterns: any(re.search(p, reply, re.I) for p in patterns)
     visible = all(v == "context" for v in row["evidence"].values())
-    out = {"visible": visible, "searched": bool(SEARCH_TOOLS & set(row["toolCalls"]))}
+    reachable = all(v in ("context", "pointer") for v in row["evidence"].values())
+    out = {"visible": visible, "reachable": reachable, "searched": bool(SEARCH_TOOLS & set(row["toolCalls"]))}
     if row["mode"] == "answer":
         # A correct reply may mention the other value for contrast ("3,450, up from 3,200").
         correct = matches(row["accept"])
@@ -62,12 +63,12 @@ def summarise(rows: list[dict]) -> str:
     for row in rows:
         by_slice[row["slice"]].append(row)
     by_slice["all"] = rows
-    head = "| Slice | Probes | Evidence visible |" + (" Correct | Confused | Searched |" if answer else "")
-    lines = [head, "|" + " --- |" * (6 if answer else 3)]
+    head = "| Slice | Probes | Evidence visible | One read away |" + (" Correct | Confused | Searched |" if answer else "")
+    lines = [head, "|" + " --- |" * (7 if answer else 4)]
     for name in [*sorted(k for k in by_slice if k != "all"), "all"]:
         group = by_slice[name]
         g = [r["grade"] for r in group]
-        cells = [name, str(len(group)), pct([x["visible"] for x in g])]
+        cells = [name, str(len(group)), pct([x["visible"] for x in g]), pct([x["reachable"] for x in g])]
         if answer:
             cells += [pct([x["correct"] for x in g]), pct([x["confused"] for x in g]), pct([x["searched"] for x in g])]
         lines.append("| " + " | ".join(cells) + " |")
