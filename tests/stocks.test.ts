@@ -20,6 +20,13 @@ import { Assistant } from "../src/agent.js";
 import { CustomAgent } from "../src/custom-agent.js";
 import { JobTools } from "../src/tools.js";
 import { marketCalendar, sessionsFor } from "../src/market-calendar.js";
+import {
+  inWindow,
+  upcomingChecks,
+  validateWindow,
+  windowOccurrence,
+} from "../src/watch-window.js";
+import { action } from "../src/protocol.js";
 
 const NY = "America/New_York";
 const MIC = "XNAS";
@@ -103,8 +110,8 @@ async function fixture(now: Date) {
     [run],
   );
   const provider = new FakeProvider();
-  const tools = new WatchlistTools(db, provider);
   let clock = now;
+  const tools = new WatchlistTools(db, provider, () => clock);
   const monitor = new StockMonitor(
     db,
     provider,
@@ -1397,5 +1404,627 @@ test("Twelve Data body error codes decide whether a failure is retryable", async
     assert.equal((await failure({}, 429)).retryable, true);
   } finally {
     globalThis.fetch = original;
+  }
+});
+
+test("monitoring windows: validation, overnight spans, 24:00 and weekday ownership", () => {
+  assert.throws(
+    () => validateWindow({ start: "24:00", end: "02:00" }),
+    /start/,
+  );
+  assert.throws(() => validateWindow({ start: "9:00", end: "17:00" }), /start/);
+  assert.throws(() => validateWindow({ start: "09:00", end: "09:00" }), /same/);
+  assert.deepEqual(
+    validateWindow({ start: "09:00", end: "17:00", days: ["fri", "mon"] }),
+    { start: "09:00", end: "17:00", days: ["mon", "fri"] },
+  );
+  // All seven days is the same as no day filter.
+  assert.equal(
+    validateWindow({
+      start: "00:00",
+      end: "24:00",
+      days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+    }).days,
+    null,
+  );
+  const sgt = (iso: string) => new Date(`${iso}+08:00`);
+  const evening = { start: "20:00", end: "24:00" };
+  assert.equal(inWindow(evening, sgt("2026-09-28T23:59")), true);
+  assert.equal(inWindow(evening, sgt("2026-09-29T00:00")), false);
+  assert.equal(inWindow(evening, sgt("2026-09-28T19:59")), false);
+  // An overnight window belongs to the day it starts: Fri 22:00 → Sat 02:00.
+  const overnight = { start: "22:00", end: "02:00", days: ["fri"] as any };
+  assert.equal(inWindow(overnight, sgt("2026-10-02T23:00")), true); // Fri
+  assert.equal(inWindow(overnight, sgt("2026-10-03T01:30")), true); // Sat early
+  assert.equal(inWindow(overnight, sgt("2026-10-03T23:00")), false); // Sat late
+  assert.equal(inWindow(overnight, sgt("2026-10-02T01:30")), false); // Fri early
+  assert.equal(inWindow(null, sgt("2026-10-03T03:00")), true);
+});
+
+test("upcoming checks intersect the SGT window with US sessions across DST", () => {
+  const evening = { start: "20:00", end: "24:00" };
+  // Sunday 27 Sep 2026, 21:30 SGT: US daylight time, open is 21:30 SGT.
+  assert.deepEqual(
+    upcomingChecks(
+      evening,
+      "XNGS",
+      ["regular"],
+      new Date("2026-09-27T13:30:00Z"),
+    ),
+    [
+      "Mon 28 Sep 21:30-24:00 SGT",
+      "Tue 29 Sep 21:30-24:00 SGT",
+      "Wed 30 Sep 21:30-24:00 SGT",
+    ],
+  );
+  // January: US standard time, open is 22:30 SGT; MLK Day (19 Jan) is skipped.
+  assert.deepEqual(
+    upcomingChecks(
+      evening,
+      "XNAS",
+      ["regular"],
+      new Date("2026-01-17T00:00:00Z"),
+    ),
+    [
+      "Tue 20 Jan 22:30-24:00 SGT",
+      "Wed 21 Jan 22:30-24:00 SGT",
+      "Thu 22 Jan 22:30-24:00 SGT",
+    ],
+  );
+  // No window: the whole regular session, which runs past SGT midnight.
+  assert.deepEqual(
+    upcomingChecks(
+      null,
+      "XNAS",
+      ["regular"],
+      new Date("2026-09-27T13:30:00Z"),
+      1,
+    ),
+    ["Mon 28 Sep 21:30-Tue 04:00 SGT"],
+  );
+});
+
+test("the owner's window: hourly checks from the open until midnight SGT, silent after", async () => {
+  // Thu 15 Jan 2026 10:30 ET = 23:30 SGT, inside the 20:00-24:00 window.
+  const f = await fixture(new Date("2026-01-15T15:30:00Z"));
+  try {
+    const itemId = await f.add(5);
+    const confirmed = await f.tools.call("a", f.run, {
+      operation: "watchlist_settings",
+      pollMinutes: 60,
+      window: { start: "20:00", end: "24:00" },
+    });
+    assert.match(confirmed.window, /20:00-24:00 Singapore time/);
+    assert.match(confirmed.window, /still down past its threshold/);
+    assert.equal(confirmed.items[0].windowSource, "default");
+    assert.match(confirmed.items[0].nextChecks[0], /23:30-24:00 SGT$/);
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({ price: 97, prevClose: 100, providerChangePct: -3 }),
+    );
+    await f.monitor.tick();
+    assert.equal(f.provider.calls.quotes, 1);
+    assert.equal(
+      (await f.observations(itemId)).at(-1)!.decision,
+      "below_threshold",
+    );
+    // 00:30 SGT Friday: the US session is open but the window is closed. A
+    // drop now is not fetched, logged once, and never alerted.
+    f.setNow(new Date("2026-01-15T16:30:00Z"));
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({
+        price: 90,
+        prevClose: 100,
+        providerChangePct: -10,
+        quoteTime: new Date("2026-01-15T16:30:00Z"),
+      }),
+    );
+    await f.monitor.tick();
+    f.setNow(new Date("2026-01-15T18:30:00Z"));
+    await f.monitor.tick();
+    assert.equal(f.provider.calls.quotes, 1);
+    assert.equal((await f.alerts(itemId)).length, 0);
+    const gated = (await f.observations(itemId)).filter(
+      (o: any) => o.decision === "outside_window",
+    );
+    assert.equal(gated.length, 1);
+    assert.equal(gated[0].market_state, "open");
+    // Friday 22:30 SGT: window and session reopen; the stock is still down
+    // for that trading day, so the first check alerts immediately even
+    // though the last real poll was less than a day ago.
+    f.setNow(new Date("2026-01-16T14:30:00Z"));
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({
+        price: 93,
+        prevClose: 100,
+        providerChangePct: -7,
+        quoteTime: new Date("2026-01-16T14:30:00Z"),
+        tradingDate: "2026-01-16",
+      }),
+    );
+    await f.monitor.tick();
+    assert.equal(f.provider.calls.quotes, 2);
+    const alerts = await f.alerts(itemId);
+    assert.equal(alerts.length, 1);
+    assert.equal(
+      alerts[0].trading_date.toISOString().slice(0, 10),
+      "2026-01-16",
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("a drop that recovers while the window is closed is never reported", async () => {
+  const f = await fixture(new Date("2026-01-15T16:30:00Z")); // 00:30 SGT, outside
+  try {
+    const itemId = await f.add(5);
+    await f.tools.call("a", f.run, {
+      operation: "watchlist_settings",
+      window: { start: "20:00", end: "24:00" },
+    });
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({ price: 90, prevClose: 100, providerChangePct: -10 }),
+    );
+    await f.monitor.tick();
+    f.setNow(new Date("2026-01-16T14:30:00Z")); // reopen, recovered
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({
+        price: 101,
+        prevClose: 100,
+        providerChangePct: 1,
+        quoteTime: new Date("2026-01-16T14:30:00Z"),
+      }),
+    );
+    await f.monitor.tick();
+    assert.equal(f.provider.calls.quotes, 1);
+    assert.equal((await f.alerts(itemId)).length, 0);
+    assert.equal(
+      (await f.observations(itemId)).at(-1)!.decision,
+      "below_threshold",
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("a gated check does not delay the first poll after the session opens", async () => {
+  const f = await fixture(new Date("2026-01-15T14:10:00Z")); // 09:10 ET, closed
+  try {
+    const itemId = await f.add(5);
+    await f.tools.call("a", f.run, {
+      operation: "watchlist_settings",
+      pollMinutes: 60,
+    });
+    await f.monitor.tick();
+    assert.equal(f.provider.calls.quotes, 0);
+    f.setNow(new Date("2026-01-15T14:30:00Z")); // 09:30 ET, 20 min later
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({
+        price: 90,
+        prevClose: 100,
+        providerChangePct: -10,
+        quoteTime: new Date("2026-01-15T14:30:00Z"),
+      }),
+    );
+    await f.monitor.tick();
+    assert.equal(f.provider.calls.quotes, 1);
+    assert.equal((await f.alerts(itemId)).length, 1);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("item windows override the default; null follows it again; settings null clears", async () => {
+  const f = await fixture(new Date("2026-01-15T16:30:00Z")); // 00:30 SGT Fri
+  try {
+    const itemId = await f.add(5);
+    await f.tools.call("a", f.run, {
+      operation: "watchlist_settings",
+      window: { start: "20:00", end: "24:00" },
+    });
+    const own = await f.tools.call("a", f.run, {
+      operation: "watchlist_update",
+      id: itemId,
+      window: { start: "21:00", end: "02:00", days: ["thu"] },
+    });
+    assert.equal(own.updated.monitoringWindow.source, "item");
+    assert.match(own.window, /21:00-02:00 Singapore time, Thu/);
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({
+        price: 97,
+        prevClose: 100,
+        quoteTime: new Date("2026-01-15T16:30:00Z"),
+      }),
+    );
+    await f.monitor.tick();
+    assert.equal(f.provider.calls.quotes, 1); // Thursday's overnight window
+    const back = await f.tools.call("a", f.run, {
+      operation: "watchlist_update",
+      id: itemId,
+      window: null,
+    });
+    assert.equal(back.updated.monitoringWindow.source, "default");
+    f.setNow(new Date("2026-01-15T17:45:00Z"));
+    await f.monitor.tick();
+    assert.equal(f.provider.calls.quotes, 1); // default window is closed
+    const cleared = await f.tools.call("a", f.run, {
+      operation: "watchlist_settings",
+      window: null,
+    });
+    assert.match(cleared.window, /cleared/);
+    assert.equal(cleared.settings.window_start, null);
+    const listed = await f.tools.call("a", f.run, {
+      operation: "watchlist_list",
+    });
+    assert.equal(listed.items[0].monitoringWindow, null);
+    await assert.rejects(
+      f.tools.call("a", f.run, {
+        operation: "watchlist_settings",
+        window: { start: "10:00", end: "10:00" },
+      }),
+      /same/,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("an alert queued before the window closes is muted rather than sent late", async () => {
+  const f = await fixture(new Date("2026-01-15T15:59:50Z")); // 23:59:50 SGT
+  try {
+    const itemId = await f.add(5);
+    await f.tools.call("a", f.run, {
+      operation: "watchlist_settings",
+      window: { start: "20:00", end: "24:00" },
+    });
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({
+        price: 90,
+        prevClose: 100,
+        providerChangePct: -10,
+        quoteTime: new Date("2026-01-15T15:59:00Z"),
+      }),
+    );
+    await f.monitor.tick();
+    assert.equal((await f.alerts(itemId))[0].state, "pending");
+    const late = new StockDelivery(
+      f.db,
+      async (user, payload) => {
+        f.sent.push({ user, payload });
+      },
+      () => new Date("2026-01-15T16:00:05Z"),
+    );
+    await late.tick();
+    assert.equal(f.sent.length, 0);
+    assert.equal((await f.alerts(itemId))[0].state, "muted");
+    assert.equal(
+      (await f.observations(itemId)).at(-1)!.decision,
+      "outside_window",
+    );
+    // Same trading day, window closed: nothing re-queues.
+    f.setNow(new Date("2026-01-15T17:00:00Z"));
+    await f.monitor.tick();
+    assert.equal((await f.alerts(itemId)).length, 1);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("an alert still pending from an earlier window occurrence is muted, not sent at the next opening", async () => {
+  const f = await fixture(new Date("2026-01-15T15:59:50Z")); // Thu 23:59:50 SGT
+  try {
+    const itemId = await f.add(5);
+    await f.tools.call("a", f.run, {
+      operation: "watchlist_settings",
+      window: { start: "20:00", end: "24:00" },
+    });
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({
+        price: 90,
+        prevClose: 100,
+        providerChangePct: -10,
+        quoteTime: new Date("2026-01-15T15:59:00Z"),
+      }),
+    );
+    await f.monitor.tick();
+    // The gateway was down until Friday's window: the row is still pending.
+    await f.db.query("UPDATE stock_alerts SET created_at=$2 WHERE item_id=$1", [
+      itemId,
+      new Date("2026-01-15T15:59:50Z"),
+    ]);
+    const late = new StockDelivery(
+      f.db,
+      async (user, payload) => {
+        f.sent.push({ user, payload });
+      },
+      () => new Date("2026-01-16T14:30:00Z"), // Fri 22:30 SGT, window open
+    );
+    await late.tick();
+    assert.equal(f.sent.length, 0);
+    assert.equal((await f.alerts(itemId))[0].state, "muted");
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("a rejected window leaves the other requested settings unchanged", async () => {
+  const f = await fixture(new Date("2026-01-15T15:30:00Z"));
+  try {
+    await f.add(5);
+    await assert.rejects(
+      f.tools.call("a", f.run, {
+        operation: "watchlist_settings",
+        pollMinutes: 60,
+        window: { start: "09:00", end: "09:00" },
+      }),
+      /same/,
+    );
+    const listed = await f.tools.call("a", f.run, {
+      operation: "watchlist_list",
+    });
+    assert.equal(listed.settings.poll_minutes, 15);
+    // A valid combined request applies both, and omitting window keeps it.
+    await f.tools.call("a", f.run, {
+      operation: "watchlist_settings",
+      pollMinutes: 60,
+      window: { start: "20:00", end: "24:00", days: ["mon", "tue"] },
+    });
+    const kept = await f.tools.call("a", f.run, {
+      operation: "watchlist_settings",
+      defaultDropPct: 4,
+    });
+    assert.equal(kept.settings.poll_minutes, 60);
+    assert.equal(kept.settings.window_start, "20:00");
+    assert.deepEqual(kept.settings.window_days, ["mon", "tue"]);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("at the open a stale previous-session quote is retried after 15 minutes, not a whole hour", async () => {
+  const f = await fixture(new Date("2026-01-15T14:10:00Z")); // 09:10 ET, closed
+  try {
+    const itemId = await f.add(5);
+    await f.tools.call("a", f.run, {
+      operation: "watchlist_settings",
+      pollMinutes: 60,
+    });
+    await f.monitor.tick(); // gated: market closed
+    // 09:30 ET: the delayed feed still returns yesterday's closing quote.
+    f.setNow(new Date("2026-01-15T14:30:00Z"));
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({
+        price: 90,
+        prevClose: 100,
+        providerChangePct: -10,
+        quoteTime: new Date("2026-01-14T21:00:00Z"),
+      }),
+    );
+    await f.monitor.tick();
+    assert.equal((await f.observations(itemId)).at(-1)!.decision, "stale");
+    f.setNow(new Date("2026-01-15T14:40:00Z")); // too soon
+    await f.monitor.tick();
+    assert.equal(f.provider.calls.quotes, 1);
+    f.setNow(new Date("2026-01-15T14:45:00Z")); // 15 minutes later
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({
+        price: 90,
+        prevClose: 100,
+        providerChangePct: -10,
+        quoteTime: new Date("2026-01-15T14:30:00Z"),
+      }),
+    );
+    await f.monitor.tick();
+    assert.equal(f.provider.calls.quotes, 2);
+    assert.equal((await f.alerts(itemId)).length, 1);
+    // A later stale quote (not the first after a gate) waits the full interval.
+    f.setNow(new Date("2026-01-15T15:45:00Z"));
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({ quoteTime: new Date("2026-01-15T12:00:00Z") }),
+    );
+    await f.monitor.tick();
+    f.setNow(new Date("2026-01-15T16:00:00Z"));
+    await f.monitor.tick();
+    assert.equal(f.provider.calls.quotes, 3);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("an alert muted only by a window gap is re-armed when the window reopens the same trading day", async () => {
+  // Window 00:00-23:00 SGT leaves 23:00-24:00 closed inside the US session.
+  const f = await fixture(new Date("2026-01-15T14:59:50Z")); // 22:59:50 SGT, 09:59 ET
+  try {
+    const itemId = await f.add(5);
+    await f.tools.call("a", f.run, {
+      operation: "watchlist_settings",
+      window: { start: "00:00", end: "23:00" },
+    });
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({
+        price: 90,
+        prevClose: 100,
+        providerChangePct: -10,
+        quoteTime: new Date("2026-01-15T14:59:00Z"),
+      }),
+    );
+    await f.monitor.tick();
+    const late = new StockDelivery(
+      f.db,
+      async (user, payload) => {
+        f.sent.push({ user, payload });
+      },
+      () => new Date("2026-01-15T15:00:05Z"), // 23:00:05 SGT
+    );
+    await late.tick();
+    assert.equal((await f.alerts(itemId))[0].state, "muted");
+    // 00:00 SGT = 11:00 ET, same US trading day, still down: alert again.
+    f.setNow(new Date("2026-01-15T16:00:00Z"));
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({
+        price: 91,
+        prevClose: 100,
+        providerChangePct: -9,
+        quoteTime: new Date("2026-01-15T16:00:00Z"),
+      }),
+    );
+    await f.monitor.tick();
+    const rows = await f.alerts(itemId);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].state, "pending");
+    const reopened = new StockDelivery(
+      f.db,
+      async (user, payload) => {
+        f.sent.push({ user, payload });
+      },
+      () => new Date("2026-01-15T16:00:10Z"),
+    );
+    await reopened.tick();
+    assert.equal(f.sent.length, 1);
+    assert.match(f.sent[0]!.payload.reply, /9\.0%/);
+    // A pause-muted alert still keeps the day silent (existing contract).
+    await f.db.query(
+      "UPDATE stock_alerts SET state='muted',payload=payload-'windowMuted' WHERE item_id=$1",
+      [itemId],
+    );
+    f.setNow(new Date("2026-01-15T17:00:00Z"));
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({
+        price: 91,
+        prevClose: 100,
+        providerChangePct: -9,
+        quoteTime: new Date("2026-01-15T17:00:00Z"),
+      }),
+    );
+    await f.monitor.tick();
+    assert.equal(
+      (await f.observations(itemId)).at(-1)!.decision,
+      "suppressed_today",
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("the window schema accepts days: null", () => {
+  const parsed = action.parse({
+    operation: "watchlist_settings",
+    window: { start: "20:00", end: "24:00", days: null },
+  }) as any;
+  assert.equal(validateWindow(parsed.window).days, null);
+});
+
+test("an all-day window spans midnight: an alert queued at 23:59:59 is still sent at 00:00:05", async () => {
+  const f = await fixture(new Date("2026-01-15T15:59:59Z")); // 23:59:59 SGT
+  try {
+    const itemId = await f.add(5);
+    await f.tools.call("a", f.run, {
+      operation: "watchlist_settings",
+      window: { start: "00:00", end: "24:00" },
+    });
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({
+        price: 90,
+        prevClose: 100,
+        providerChangePct: -10,
+        quoteTime: new Date("2026-01-15T15:59:00Z"),
+      }),
+    );
+    await f.monitor.tick();
+    await f.db.query("UPDATE stock_alerts SET created_at=$2 WHERE item_id=$1", [
+      itemId,
+      new Date("2026-01-15T15:59:59Z"),
+    ]);
+    const after = new StockDelivery(
+      f.db,
+      async (user, payload) => {
+        f.sent.push({ user, payload });
+      },
+      () => new Date("2026-01-15T16:00:05Z"),
+    );
+    await after.tick();
+    assert.equal(f.sent.length, 1);
+    // A day-filtered window does not join across midnight.
+    const [s, e] = windowOccurrence(
+      { start: "00:00", end: "24:00", days: ["fri"] },
+      new Date("2026-01-15T16:00:05Z"),
+    )!;
+    assert.equal(new Date(s).toISOString(), "2026-01-15T16:00:00.000Z");
+    assert.equal(new Date(e).toISOString(), "2026-01-16T16:00:00.000Z");
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("a pause withdraws re-arm eligibility from a window-muted alert", async () => {
+  const f = await fixture(new Date("2026-01-15T14:59:50Z")); // 22:59:50 SGT
+  try {
+    const itemId = await f.add(5);
+    await f.tools.call("a", f.run, {
+      operation: "watchlist_settings",
+      window: { start: "00:00", end: "23:00" },
+    });
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({
+        price: 90,
+        prevClose: 100,
+        providerChangePct: -10,
+        quoteTime: new Date("2026-01-15T14:59:00Z"),
+      }),
+    );
+    await f.monitor.tick();
+    await new StockDelivery(
+      f.db,
+      async () => {},
+      () => new Date("2026-01-15T15:00:05Z"),
+    ).tick();
+    assert.equal((await f.alerts(itemId))[0].payload.windowMuted, "true");
+    // Pause and resume before the window reopens the same trading day.
+    await f.tools.call("a", f.run, {
+      operation: "watchlist_update",
+      id: itemId,
+      status: "paused",
+    });
+    await f.tools.call("a", f.run, {
+      operation: "watchlist_update",
+      id: itemId,
+      status: "active",
+    });
+    assert.equal((await f.alerts(itemId))[0].payload.windowMuted, undefined);
+    f.setNow(new Date("2026-01-15T16:00:00Z"));
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({
+        price: 90,
+        prevClose: 100,
+        providerChangePct: -10,
+        quoteTime: new Date("2026-01-15T16:00:00Z"),
+      }),
+    );
+    await f.monitor.tick();
+    assert.equal((await f.alerts(itemId))[0].state, "muted");
+    assert.equal(
+      (await f.observations(itemId)).at(-1)!.decision,
+      "suppressed_today",
+    );
+  } finally {
+    await f.pg.close();
   }
 });

@@ -177,13 +177,13 @@ export function runtimeContext(
               watchlist_add:
                 "Add a stock to the price-drop watchlist. query is a ticker or company name; when candidates span exchanges ask the owner to pick, then repeat with that exchange. Optional dropPct overrides the owner's default threshold. Alerting is deterministic, never trading advice.",
               watchlist_update:
-                "Change a watched stock's threshold (null restores the account default) or pause/resume it by exact id from watchlist_list.",
+                "Change a watched stock's threshold (null restores the account default), pause/resume it, or set its own monitoring window, by exact id from watchlist_list. window null makes it follow the account default window.",
               watchlist_remove:
                 "Stop watching a stock by exact id from watchlist_list. Removes its alert and observation history.",
               watchlist_list:
-                "List watched stocks, effective thresholds, latest alerts and the most recent observation decision.",
+                "List watched stocks, effective thresholds and monitoring windows, the next periods each stock is actually checked (nextChecks, Singapore time), latest alerts and the most recent observation decision.",
               watchlist_settings:
-                "Set watchlist defaults: defaultDropPct, paused master switch, pollMinutes cadence, includeExtended opt-in for pre/post-market quotes.",
+                "Set watchlist defaults: defaultDropPct, paused master switch, pollMinutes cadence, includeExtended opt-in for pre/post-market quotes, and window: the default Singapore-time hours to monitor ({start:'HH:MM', end:'HH:MM' or '24:00', days?:['mon',...]}; end before start runs past midnight; null removes it). The window applies on top of exchange hours, so 'from market open until midnight' is start at or before the open (e.g. 20:00) and end 24:00. No quotes are fetched and no alerts are sent outside it; report the returned nextChecks to the owner as the confirmation.",
               gmail_accounts:
                 "List connected Gmail account selectors and email addresses. Owner-only; no credentials returned.",
               gmail_search:
