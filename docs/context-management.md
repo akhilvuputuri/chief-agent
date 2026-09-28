@@ -88,6 +88,26 @@ The word cues in stage 2 missed many phrasings (stock tickers, book titles, "has
 
 **Eval.** `npm run eval:picker` runs 174 synthetic labelled scenarios (101 tuning, 73 held-out) three times against the configured model and fails below 97% recall of needed domains. It is a manual, paid run (about $0.04), not a CI gate. See [evals/picker](../evals/picker/README.md) and [journal 37](journey/37-jev-tool-picker.md) for the measurements.
 
+## Previous-exchange excerpts and the exchange index
+
+These are compaction stages 2 and 3 of the plan in the compaction research. They are not the tool-loading stages above.
+
+**Previous exchange.** The previous exchange keeps all its user and assistant text. Its tool results over 1,800 characters that carry an observation or source ID become head and tail excerpts that keep those IDs (`compactToolGroup`). Before this change that happened only when a request passed 120,000 characters. The projection changes only when a new owner message arrives, so it does not change the prompt prefix within a turn.
+
+**Exchange index.** `exchangeIndex` in `src/context-continuity.ts` replaces the extractive archive of messages about 13–40 back. `conversationState` builds it from the heads of the last 400 conversation rows.
+
+- It has one line per earlier exchange except the previous one, newest kept first within 8,000 characters.
+- Each line holds how many exchanges back it is, the Singapore time, the user message ID, the heads of the owner's message and of the reply, and the tools used with their observation IDs.
+- A header tells the model to read a full message with `conversation_read` and a stored result with `observation_read`, and to use `conversation_search` for older exchanges.
+- It is built by code with no model call. The saved-answer-details pointer is not treated as the reply.
+
+**Measured effect** ([journal 40](journey/40-exchange-index.md); one answer run each on the synthetic eval):
+
+- correct answers rose from 83% to 97%;
+- tool-detail answers rose from 44% to 89%;
+- evidence in the prompt or one read away rose from 67% to 97%;
+- eval cost per run was $1.09 before and $1.18 after.
+
 ## Implementation plan
 
 1. **Baseline and replay.** Create sanitized fixtures shaped like the 21-call mailbox run, a large previous exchange, two-account source selection, a topic switch while a background job runs, and the exact selected job-role scope. Record prompt components, actual provider usage when available, cache reads, latency, cost and stop reason. Never commit private prompt text.

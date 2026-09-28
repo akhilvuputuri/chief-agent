@@ -40,6 +40,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 26 September                         | [36 — Bounding the fixed prompt](36-bounded-context.md): why is older conversation dropped on almost every model call?                        | Stage 1 measurement released; stage 2 tool loading in review                                                                 |
 | 27 September                         | [37 — Picking tool domains with Jev](37-jev-tool-picker.md): can a decision model pick tool domains better than word cues?                    | Released 27 September (`d4436df`); 97.9% synthetic recall; production unmeasured                                             |
 | 28 September                         | [39 — A recall eval for one long chat](39-context-recall-eval.md): what can the model see and answer after topic switches?                    | In review; baseline 81% correct, tool details 44%                                                                            |
+| 28 September                         | [40 — Pointing the model at what it cannot see](40-exchange-index.md): can an ID-carrying exchange index replace the extractive archive?      | In review; eval 83% → 97% correct, tool details 44% → 89%                                                                    |
 
 ## Connected case studies
 

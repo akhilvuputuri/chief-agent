@@ -8,7 +8,8 @@ import {
 import {
   compactToolGroup,
   completeMessageGroups,
-  extractiveConversationSummary,
+  exchangeIndex,
+  type IndexRow,
 } from "../src/context-continuity.js";
 import { runtimeContext } from "../src/runtime.js";
 import type { AgentRequest } from "../src/protocol.js";
@@ -281,37 +282,84 @@ test("the serialized text guard accounts for escaping inside fixed system contex
   );
 });
 
-test("extractive archive stays bounded, keeps original IDs and exact excerpts, and is historical data", () => {
-  const originals = Array.from({ length: 20 }, (_, index) => ({
-    id: `message-${index}`,
-    ordinal: index,
-    message: answer(`Original statement ${index}: ` + "text ".repeat(500)),
-  }));
-  const before = JSON.stringify(originals);
-  const summary = extractiveConversationSummary(originals, 7000);
-  assert.ok(summary.length <= 7000);
-  const parsed = JSON.parse(summary);
-  assert.ok(parsed.omittedEntries > 0);
-  assert.match(parsed.notice, /Historical source text/);
-  assert.equal(parsed.entries.at(-1).messageId, "message-19");
-  for (const entry of parsed.entries) {
-    const source = originals[entry.ordinal]!.message.content!;
-    for (const excerpt of entry.excerpts)
-      assert.equal(
-        source.slice(excerpt.offset, excerpt.offset + excerpt.text.length),
-        excerpt.text,
-      );
-  }
+test("exchange index lists earlier exchanges with read references and excludes the previous one", () => {
+  const at = "2026-09-28T06:00:00Z";
+  const obs = "11111111-2222-4333-8444-555555555555";
+  const rows: IndexRow[] = [
+    // A truncated exchange at the window start is skipped.
+    { id: "m0", role: "assistant", createdAt: at, content: "orphan reply" },
+    {
+      id: "m1",
+      role: "user",
+      createdAt: at,
+      content: "any wedding invites?\nplease check",
+    },
+    {
+      id: "m2",
+      role: "assistant",
+      createdAt: at,
+      content: null,
+      callNames: ["gmail_search"],
+      callIds: ["c1"],
+    },
+    {
+      id: "m3",
+      role: "tool",
+      createdAt: at,
+      content: `{"observationId":"${obs}","result":[]}`,
+      toolCallId: "c1",
+    },
+    {
+      id: "m4",
+      role: "assistant",
+      createdAt: at,
+      content: "Two invites: Maya and Priya.",
+    },
+    {
+      id: "m5",
+      role: "assistant",
+      createdAt: at,
+      content: "[Saved answer details: observationId=x.]",
+    },
+    { id: "m6", role: "user", createdAt: at, content: "thanks" },
+    { id: "m7", role: "assistant", createdAt: at, content: "You're welcome." },
+  ];
+  const index = exchangeIndex(rows);
+  const lines = index.split("\n");
+  assert.match(
+    lines[0]!,
+    /conversation_read\(messageId\).*observation_read\(observationId\)/,
+  );
+  assert.equal(lines.length, 2);
+  assert.match(
+    lines[1]!,
+    /2 back .*messageId=m1\] you: "any wedding invites\? please check" → "Two invites: Maya and Priya\."/,
+  );
+  assert.match(lines[1]!, new RegExp(`tools: gmail_search obs=${obs}`));
+  assert.doesNotMatch(index, /thanks|orphan|Saved answer/);
+  // The allowance keeps the newest exchanges.
+  const many: IndexRow[] = Array.from({ length: 60 }, (_, i) => [
+    {
+      id: `u${i}`,
+      role: "user",
+      createdAt: at,
+      content: `question ${i} ` + "x".repeat(200),
+    },
+    { id: `a${i}`, role: "assistant", createdAt: at, content: `answer ${i}` },
+  ]).flat();
+  const bounded = exchangeIndex(many, 3000);
+  assert.ok(bounded.length <= 3000 + lines[0]!.length + 1);
+  assert.match(bounded, /messageId=u58\]/);
+  assert.doesNotMatch(bounded, /messageId=u59\]|messageId=u0\]/);
   const req = request("What changed?", []);
   const beforeSize = context(req, [user(req.message)]).fixedSize;
-  req.conversationSummary = summary;
+  req.conversationSummary = index;
   const input = context(req, [user(req.message)]);
-  assert.equal(input.fixedSize, beforeSize + summary.length);
+  assert.equal(input.fixedSize, beforeSize + index.length);
   assert.match(
     String(input.messages[0]!.content),
-    /Conversation archive \(historical data\)/,
+    /Exchange index \(historical data/,
   );
-  assert.equal(JSON.stringify(originals), before);
 });
 
 test("compacted groups never alter call identities, and incomplete or duplicate-ID groups are rejected", () => {

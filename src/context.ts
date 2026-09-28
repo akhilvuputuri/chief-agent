@@ -125,9 +125,9 @@ export function context(
   const exchangeStart = previousUser >= 0 ? previousUser : 0;
   const earlier = prior.slice(0, exchangeStart);
   const exchangeGroups = completeMessageGroups(prior.slice(exchangeStart));
-  let exchange = compactForWire
-    ? exchangeGroups.flatMap((group) => compactToolGroup(group))
-    : exchangeGroups.flat().map(withoutReasoning);
+  // The previous exchange keeps its text; its large tool results become excerpts with read
+  // references (issue #77 stage 2). This projection only changes when a new message arrives.
+  const exchange = exchangeGroups.flatMap((group) => compactToolGroup(group));
   const currentUser: Message =
     start >= 0 ? messages[start]! : { role: "user", content: request.message };
   const tail = start >= 0 ? messages.slice(start + 1) : [];
@@ -143,13 +143,7 @@ export function context(
   );
   const olderTail = lastCall >= 0 ? tail.slice(0, lastCall) : tail;
   const reservedSize = reserved.length ? JSON.stringify(reserved).length : 0;
-  let exchangeSize = exchange.length ? JSON.stringify(exchange).length : 0;
-  if (fixedSize + reservedSize + exchangeSize >= contextCompactionThreshold) {
-    // A long previous exchange may contain large observations. Preserve its user/assistant
-    // text and every complete group, reducing only recoverable result bodies when necessary.
-    exchange = exchangeGroups.flatMap((group) => compactToolGroup(group));
-    exchangeSize = exchange.length ? JSON.stringify(exchange).length : 0;
-  }
+  const exchangeSize = exchange.length ? JSON.stringify(exchange).length : 0;
   if (fixedSize + reservedSize + exchangeSize >= contextHardLimit) {
     if (!compactForWire) return context(request, messages, true);
     throw new ContextLimitError({ fixedSize, reservedSize, exchangeSize });
@@ -162,7 +156,7 @@ export function context(
   let working = compactForWire
     ? workingGroups.flatMap((group) => compactToolGroup(group))
     : workingGroups.flat().map(withoutReasoning);
-  let available = contextHardLimit - fixedSize - reservedSize - exchangeSize;
+  const available = contextHardLimit - fixedSize - reservedSize - exchangeSize;
   let workingSize = working.length ? JSON.stringify(working).length : 0;
   if (
     fixedSize + reservedSize + exchangeSize + workingSize >=
@@ -170,11 +164,6 @@ export function context(
   ) {
     working = workingGroups.flatMap((group) => compactToolGroup(group));
     workingSize = working.length ? JSON.stringify(working).length : 0;
-  }
-  if (workingSize >= available) {
-    exchange = exchangeGroups.flatMap((group) => compactToolGroup(group));
-    exchangeSize = exchange.length ? JSON.stringify(exchange).length : 0;
-    available = contextHardLimit - fixedSize - reservedSize - exchangeSize;
   }
   if (workingSize >= available) {
     if (!compactForWire) return context(request, messages, true);
@@ -216,7 +205,7 @@ export function context(
         (request.systemInstructions ?? instructions) +
         "\nExplicit memories: " +
         JSON.stringify(request.memories) +
-        (summary ? "\nConversation archive (historical data): " + summary : ""),
+        (summary ? "\n" + summary : ""),
     },
     ...current,
     {
