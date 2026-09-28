@@ -1,7 +1,7 @@
 import type { Database } from "./db.js";
-import { extractiveConversationSummary } from "./context-continuity.js";
+import { exchangeIndex } from "./context-continuity.js";
 
-/** Small disposable projection of original text; no extra model call or recursive summary. */
+/** Small disposable projection of recent exchanges; no extra model call or summary. */
 export async function conversationState(
   db: Database,
   user: string,
@@ -13,24 +13,20 @@ export async function conversationState(
       [user],
     )
   ).rows[0];
-  // Fetch only bounded original text, never full observation payloads into the process.
+  // Bounded heads of recent messages for the exchange index; never full observation payloads.
   const rows = (
     await db.query(
-      `SELECT e.id,e.ordinal,c.payload->>'role' AS role,left(c.payload->>'content',2000) AS content
-     FROM conversation_messages e JOIN message_contents c USING(user_id,hash)
-     WHERE e.user_id=$1 AND e.delivery_state IN ('recorded','sent') AND c.payload->>'role' IN ('user','assistant')
-       AND NOT (c.payload ? 'tool_calls')
-     ORDER BY e.ordinal DESC LIMIT 40`,
+      `SELECT e.id,e.run_id AS "runId",e.created_at AS "createdAt",c.payload->>'role' AS role,left(c.payload->>'content',400) AS content,
+         jsonb_path_query_array(c.payload,'$.tool_calls[*].function.name') AS "callNames",
+         jsonb_path_query_array(c.payload,'$.tool_calls[*].id') AS "callIds",
+         c.payload->>'tool_call_id' AS "toolCallId"
+       FROM conversation_messages e JOIN message_contents c USING(user_id,hash)
+       WHERE e.user_id=$1 AND e.delivery_state IN ('recorded','sent') AND c.payload->>'role' IN ('user','assistant','tool')
+       ORDER BY e.ordinal DESC LIMIT 400`,
       [user],
     )
   ).rows.reverse();
-  const summary = extractiveConversationSummary(
-    rows.slice(0, Math.max(0, rows.length - 12)).map((r) => ({
-      id: r.id,
-      ordinal: r.ordinal,
-      message: { role: r.role, content: r.content },
-    })),
-  );
+  const summary = exchangeIndex(rows);
   let replyTarget = null;
   if (inputId) {
     const input = (

@@ -42,6 +42,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 27 September                         | [38 — Prompt cache partitioned per run](38-prompt-cache-session.md): why did every message's first model call miss the cache?                 | In review; experiment shows caches are partitioned by `session_id`                                                           |
 | 27 September                         | [39 — Stock monitoring hours](39-watch-monitoring-window.md): how can the owner limit stock alerts to Singapore-time hours?                   | In review; migration 020 operator rollout pending                                                                            |
 | 28 September                         | [40 — A recall eval for one long chat](40-context-recall-eval.md): what can the model see and answer after topic switches?                    | In review; baseline 81% correct, tool details 44%                                                                            |
+| 28 September                         | [41 — Pointing the model at what it cannot see](41-exchange-index.md): can an ID-carrying exchange index replace the extractive archive?      | In review; eval 81% → 97% correct, tool details 44% → 100%                                                                   |
 
 ## Connected case studies
 

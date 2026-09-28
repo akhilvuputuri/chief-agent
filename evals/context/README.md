@@ -4,7 +4,7 @@ This eval measures whether Chief's context pipeline gives the model what it need
 
 ## How it works
 
-`replay.ts` loads each synthetic conversation in `fixtures/` into an in-memory PGlite database. It stores each turn the way a completed run would: journaled tool calls, projected tool results with observation IDs, and conversation history rows. Each probe is then sent as the next owner message through the real `Assistant` pipeline, which covers history loading, the excerpt archive, context selection and tool-domain selection.
+`replay.ts` loads each synthetic conversation in `fixtures/` into an in-memory PGlite database. It stores each turn the way a completed run would: journaled tool calls, projected tool results with observation IDs, and conversation history rows. Each probe is then sent as the next owner message through the real `Assistant` pipeline, which covers history loading, the exchange index, context selection and tool-domain selection.
 
 `run.py` runs the replay and scores each probe. Results go to `eval-results/context-<mode>-<time>/`, which is ignored by git.
 
