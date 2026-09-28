@@ -38,7 +38,7 @@ The research on Codex, Claude Code, Cursor and Hermes found that recall after co
 Chief already stores every message and tool result by ID. It lacked a contiguous map of recent exchanges that carries those IDs.
 
 - **Chosen, stage 2:** the previous exchange keeps its text, and its large tool results become excerpts with read references. This happens only when a new message arrives, which is cache-friendly.
-- **Chosen, stage 3:** a code-built exchange index (8,000 characters maximum) replaces the extractive archive of messages about 13–40 back, which left a gap 2–6 turns back.
+- **Chosen, stage 3:** a code-built exchange index (lines capped at 8,000 characters, plus a header of about 470) replaces the extractive archive of messages about 13–40 back, which left a gap 2–6 turns back.
 - **Deferred:**
   - per-layer budgets (stage 1);
   - a background summary (stage 4);
@@ -47,14 +47,27 @@ Chief already stores every message and tool result by ID. It lacked a contiguous
 ## Implementation and review
 
 - **`src/context.ts`.** The previous exchange is always projected through `compactToolGroup`. The now-redundant recompaction branches were removed.
-- **`src/context-continuity.ts`.** `exchangeIndex` replaces `extractiveConversationSummary`. It reads tool names from assistant calls, observation IDs from tool results, and skips the saved-answer-details pointer.
+- **`src/context-continuity.ts`.** `exchangeIndex` replaces `extractiveConversationSummary`. It reads tool names from assistant calls and observation IDs from tool results, and skips the saved-answer-details pointer. It also:
+  - gives a background delivery from another run its own line;
+  - lists at most 8 tools per line, excluding `finish_turn`;
+  - JSON-quotes message heads.
 - **`src/conversation-state.ts`.** Selects bounded heads of the last 400 rows (user, assistant and tool) and builds the index.
-- **Tests.** The archive test is replaced by an index test covering ordering, exclusion of the previous exchange, observation IDs, the character allowance and prompt placement.
+- **Tests.** The archive test is replaced by index tests covering:
+  - ordering, exclusion of the previous exchange, observation IDs (including after a receipt ID), the allowance and prompt placement;
+  - background deliveries, the tool cap and quoting;
+  - excerpting of the previous exchange;
+  - a PGlite test of the real `conversationState` query.
+- **Review.** An independent Opus 5.5 review of `908fe04` approved with low findings, and all were addressed:
+  - background deliveries overwrote an earlier reply;
+  - tool lists were unbounded;
+  - the risky paths had no tests;
+  - some docs were stale;
+  - message heads were quoted raw.
 
 ## Verification and outcome
 
 - `npm test` passes, and the eval results above are measured.
 - Still to measure in production after release:
-  - fixed size, which should change little (index at most 8,000 characters, against about 10,200 for the archive);
+  - fixed size, which should change little (index lines at most 8,000 characters plus a header, against about 10,200 for the archive);
   - how often `observation_read` and `conversation_read` are called;
   - replies on topic switches, which need owner acceptance.

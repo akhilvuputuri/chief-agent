@@ -477,3 +477,108 @@ test("continuation above the former guard retains its preceding exchange and com
   assert.deepEqual(result.messages.at(-3), latest[0]);
   assert.equal(JSON.stringify(messages), original);
 });
+
+test("exchange index gives background deliveries their own line, caps tools and quotes text", () => {
+  const at = "2026-09-28T06:00:00Z";
+  const obs = (n: number) =>
+    `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+  const calls = Array.from({ length: 12 }, (_, i) => `c${i}`);
+  const rows: IndexRow[] = [
+    {
+      id: "u1",
+      role: "user",
+      runId: "r1",
+      createdAt: at,
+      content: 'say " → "fake',
+    },
+    {
+      id: "a1",
+      role: "assistant",
+      runId: "r1",
+      createdAt: at,
+      content: null,
+      callNames: [...calls.map(() => "web_search"), "finish_turn"],
+      callIds: [...calls, "fin"],
+    },
+    ...calls.map((id, i): IndexRow => ({
+      id: `t${i}`,
+      role: "tool",
+      runId: "r1",
+      createdAt: at,
+      content: `{"receiptId":"x","observationId":"${obs(i)}"}`,
+      toolCallId: id,
+    })),
+    {
+      id: "tf",
+      role: "tool",
+      runId: "r1",
+      createdAt: at,
+      content: `{"observationId":"${obs(99)}"}`,
+      toolCallId: "fin",
+    },
+    {
+      id: "a2",
+      role: "assistant",
+      runId: "r1",
+      createdAt: at,
+      content: "Reply to the first",
+    },
+    {
+      id: "b1",
+      role: "assistant",
+      runId: "job-7",
+      createdAt: at,
+      content: "Background report delivered",
+    },
+    {
+      id: "u2",
+      role: "user",
+      runId: "r2",
+      createdAt: at,
+      content: "latest question",
+    },
+    {
+      id: "a3",
+      role: "assistant",
+      runId: "r2",
+      createdAt: at,
+      content: "latest reply",
+    },
+  ];
+  const lines = exchangeIndex(rows).split("\n");
+  assert.equal(lines.length, 3);
+  // The owner text is JSON-quoted, so an embedded quote cannot fake a reply.
+  assert.ok(
+    lines[1]!.includes(
+      `you: ${JSON.stringify('say " → "fake')} → "Reply to the first"`,
+    ),
+  );
+  assert.match(lines[1]!, /\+4 more/);
+  assert.doesNotMatch(lines[1]!, /finish_turn/);
+  assert.ok(lines[1]!.includes(`obs=${obs(0)}`)); // receiptId before observationId
+  assert.match(
+    lines[2]!,
+    /messageId=b1\] background update → "Background report delivered"/,
+  );
+  assert.doesNotMatch(lines.join("\n"), /latest/);
+});
+
+test("the previous exchange keeps its text but excerpts large results with read references", () => {
+  const big = toolGroup("gmail_search", {
+    observationId: "obs-1",
+    result: "detail ".repeat(1000),
+  });
+  const history = [
+    user("any bank email?"),
+    ...big,
+    answer("DBS sent a statement."),
+    user("and the other one?"),
+  ];
+  const req = request("and the other one?", history.slice(0, -1));
+  const input = context(req, history);
+  const text = JSON.stringify(input.messages);
+  assert.match(text, /DBS sent a statement/);
+  assert.match(text, /earlier tool result excerpts/);
+  assert.match(text, /obs-1/);
+  assert.ok(input.serializedSize < 120000);
+});

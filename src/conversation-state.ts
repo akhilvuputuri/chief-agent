@@ -16,7 +16,7 @@ export async function conversationState(
   // Bounded heads of recent messages for the exchange index; never full observation payloads.
   const rows = (
     await db.query(
-      `SELECT e.id,e.created_at AS "createdAt",c.payload->>'role' AS role,left(c.payload->>'content',400) AS content,
+      `SELECT e.id,e.run_id AS "runId",e.created_at AS "createdAt",c.payload->>'role' AS role,left(c.payload->>'content',400) AS content,
          jsonb_path_query_array(c.payload,'$.tool_calls[*].function.name') AS "callNames",
          jsonb_path_query_array(c.payload,'$.tool_calls[*].id') AS "callIds",
          c.payload->>'tool_call_id' AS "toolCallId"

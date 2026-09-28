@@ -124,6 +124,8 @@ export type IndexRow = {
   id: string;
   role: string;
   createdAt: Date | string;
+  /** Run that appended the row; another run's assistant row is a background delivery. */
+  runId?: string | null;
   /** Leading content only; enough for a head and an observationId. */
   content: string | null;
   callNames?: string[] | null;
@@ -132,6 +134,7 @@ export type IndexRow = {
 };
 
 const OBSERVATION = /"observationId":"([0-9a-f-]{36})"/;
+const MAX_TOOLS = 8;
 
 function head(text: string, max: number) {
   const flat = text.replace(/\s+/g, " ").trim();
@@ -153,12 +156,14 @@ function when(value: Date | string) {
 /**
  * One line per earlier exchange, newest kept first within the allowance (issue #77 stage 3).
  * Contiguous and built by code: message heads, tools used and their read references. The
- * previous exchange is excluded because it is in context. Rows are oldest first.
+ * previous exchange is excluded because it is in context. Rows are oldest first. The
+ * allowance covers the lines; the header adds about 470 characters.
  */
 export function exchangeIndex(rows: IndexRow[], maxChars = 8000) {
   type Entry = {
     at: Date | string;
-    messageId?: string;
+    messageId: string;
+    runId?: string | null;
     you?: string;
     reply?: string;
     tools: string[];
@@ -166,41 +171,70 @@ export function exchangeIndex(rows: IndexRow[], maxChars = 8000) {
   const entries: Entry[] = [];
   const names = new Map<string, string>();
   for (const row of rows) {
+    const last = entries.at(-1);
     if (row.role === "user") {
       entries.push({
         at: row.createdAt,
         messageId: row.id,
+        runId: row.runId,
         you: row.content ?? "",
         tools: [],
       });
       continue;
     }
-    // Rows before the window's first user message belong to a truncated exchange.
-    const entry = entries.at(-1);
-    if (!entry) continue;
+    // Rows before the window's first owner message belong to a truncated exchange.
+    if (!last) continue;
     if (row.role === "assistant") {
+      // A final from another run (a background job delivery) gets its own line.
+      if (
+        !row.callIds?.length &&
+        row.runId &&
+        last.runId &&
+        row.runId !== last.runId
+      ) {
+        entries.push({
+          at: row.createdAt,
+          messageId: row.id,
+          runId: row.runId,
+          reply: row.content ?? "",
+          tools: [],
+        });
+        continue;
+      }
       (row.callIds ?? []).forEach((id, i) =>
         names.set(id, row.callNames?.[i] ?? "tool"),
       );
       const text = row.content ?? "";
-      if (text && !text.startsWith("[Saved answer details:"))
-        entry.reply = text;
+      if (text && !text.startsWith("[Saved answer details:")) last.reply = text;
     } else if (row.role === "tool") {
       const observation = OBSERVATION.exec(row.content ?? "")?.[1];
       const name = names.get(row.toolCallId ?? "") ?? "tool";
-      entry.tools.push(observation ? `${name} obs=${observation}` : name);
+      if (name !== "finish_turn")
+        last.tools.push(observation ? `${name} obs=${observation}` : name);
     }
   }
-  entries.pop(); // the previous exchange is in context in full
+  // The previous exchange (the last owner message and anything after it) is in context.
+  const previous = entries.findLastIndex((e) => e.you !== undefined);
+  if (previous >= 0) entries.length = previous;
   const lines: string[] = [];
   let size = 0;
   for (let i = entries.length - 1; i >= 0; i--) {
     const e = entries[i]!;
-    const back = entries.length - i + 1;
+    const tools =
+      e.tools.length > MAX_TOOLS
+        ? [
+            ...e.tools.slice(0, MAX_TOOLS),
+            `+${e.tools.length - MAX_TOOLS} more`,
+          ]
+        : e.tools;
+    // JSON quoting keeps message text from imitating the line structure.
     const line =
-      `[${back} back · ${when(e.at)} · messageId=${e.messageId}] you: "${head(e.you ?? "", 140)}"` +
-      (e.reply ? ` → "${head(e.reply, 180)}"` : "") +
-      (e.tools.length ? ` · tools: ${e.tools.join(", ")}` : "");
+      `[${entries.length - i + 1} back · ${when(e.at)} · messageId=${e.messageId}] ` +
+      (e.you !== undefined
+        ? `you: ${JSON.stringify(head(e.you, 140))}`
+        : "background update") +
+      (e.reply ? ` → ${JSON.stringify(head(e.reply, 180))}` : "") +
+      (tools.length ? ` · tools: ${tools.join(", ")}` : "");
     if (size + line.length + 1 > maxChars) break;
     lines.unshift(line);
     size += line.length + 1;

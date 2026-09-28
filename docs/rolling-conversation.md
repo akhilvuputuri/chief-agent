@@ -12,7 +12,7 @@ flowchart TD
   I --> C[Foreground conversation queue]
   I --> N[Interrupt model reasoning; finish active tool before yielding]
   C --> A[Assistant: foreground run, no implicit job]
-  A --> X[Protected recent exchange + pending question + bounded archive excerpts]
+  A --> X[Protected recent exchange + pending question + exchange index with read IDs]
   A --> D[Owner-scoped validated tools]
   A --> J[Explicitly create or revise a durable job]
   J --> W[Worker: exact task ID, its own history and budget]
@@ -29,7 +29,12 @@ Multiple unfinished jobs may coexist. `/status` lists them; `/status <id>` reads
 
 The latest complete conversational exchange and the current turn's working observations take precedence over optional older history. A large tool catalogue cannot silently erase the previous question. The 48,000-character target now applies to optional history; protected continuity may exceed it. Older recoverable tool results can be projected into exact excerpts plus observation/source IDs. The newest tool round remains complete. A 120,000-character hard textual bound refuses an oversized request rather than sending it without required context. Raw current image bytes remain separately bounded by attachment limits.
 
-Full message payloads, tool calls and results remain immutable in normalized Postgres storage. Context projection never modifies the saved journal. Older provider reasoning is excluded from optional model context; the newest round retains provider continuity. `conversation_contexts` versions contain bounded extractive archive text and a pending-reply record. This is intentionally an excerpt index, **not** an LLM-written or recursive semantic summary. It currently considers forty recent original conversational messages and excerpts older than the latest twelve. It does not promise recall of the entire archive.
+Full message payloads, tool calls and results remain immutable in normalized Postgres storage. Context projection never modifies the saved journal. Older provider reasoning is excluded from optional model context; the newest round retains provider continuity. `conversation_contexts` versions contain the exchange index and a pending-reply record. The index is built by code, **not** an LLM-written or recursive semantic summary.
+
+- It has one line per earlier exchange except the previous one.
+- Each line holds the heads of the owner's message and of the reply, the message ID, and the tools used with their observation IDs.
+- It covers the last 400 stored conversation rows, capped at 8,000 characters and keeping the newest lines.
+- The model reads details with `conversation_read` or `observation_read`, and finds older exchanges with `conversation_search`. It does not promise recall of the entire archive.
 
 When the model ends with `awaiting_user` or `awaiting_approval`, the host saves its question, preceding request and owner-checked source/approval IDs produced or read during that run. The latest foreground pending reply is a reference for a follow-up; it is never an instruction to resume a background job or approve a draft. Later completed foreground replies supersede that active reference, while older versions remain inspectable. Telegram's explicit reply-to message ID can recover the corresponding delivered reply and pending context. The model must still resolve whether a new message answers a question or changes topic.
 
