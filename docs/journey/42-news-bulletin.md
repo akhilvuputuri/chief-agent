@@ -54,9 +54,16 @@ See [the bulletin runbook](../news-bulletin.md). `db/021_news.sql` adds four tab
 
 Each has a regression test (23 news tests). The branch was then rebased onto `7e8dfd3` (#110 and #111). Those PRs took journal numbers 40 and 41, so this entry is 42.
 
+**Independent review round 4 (Opus 5.5, on `b962916`): APPROVE, with three P3s.** Devin Review on the same head found three more issues. All of these were addressed except the last:
+
+- A saved feed that starts serving an HTML page with HTTP 200 (an expired feed or a bot block) was read as an empty feed. That used up the day's edition on "Nothing new". Such a body is now a fetch failure, so the site is reported and the retry path applies.
+- When two feeds carried one link, whichever copy arrived first was kept. Now every copy is scored first, and the best one is kept.
+- Site removal and settings changes now go through the owner's build queue, which closes the reviewer's two build-interleaving races.
+- **Known limit, not changed:** when the 45 s or 90 s deadline fires, it stops waiting, but the underlying request keeps running until its own timeout (15 s per request, up to three redirects). Up to four fetches are in flight at a time, so this stays bounded.
+
 ## Verification and outcome
 
-- **Synthetic (PGlite, mocked fetcher):** 14 tests. They cover address normalization and refusal of private hosts, the three discovery paths plus the no-feed case and the request cap, untrusted feed text, the DNS guard, foreground-only and owner-scoped mutations, enable prerequisites, a single edition at the SGT slot with duplicate-story collapse and no repeated links the next day, enabling after the slot starting tomorrow, ranking and the per-site cap, set-state votes shifting the next edition, the on-demand limit and the "nothing new" message, all-sources-failed retries then an explanation, muting on disable, uncertain delivery across restart, and turning off when the last site is removed. `npm run check` passed 461 application and 21 script tests.
+- **Synthetic (PGlite, mocked fetcher):** 14 tests at first review; 25 after the review rounds below. They cover address normalization and refusal of private hosts, the three discovery paths plus the no-feed case and the request cap, untrusted feed text, the DNS guard, foreground-only and owner-scoped mutations, enable prerequisites, a single edition at the SGT slot with duplicate-story collapse and no repeated links the next day, enabling after the slot starting tomorrow, ranking and the per-site cap, set-state votes shifting the next edition, the on-demand limit and the "nothing new" message, all-sources-failed retries then an explanation, muting on disable, uncertain delivery across restart, and turning off when the last site is removed. `npm run check` passed 461 application and 21 script tests.
 - **Measured, picker eval (28 September, developer Mac, `typesafe/jev-1.13-20260917`, 3 runs, 543 calls):** pooled recall 97.8% (tuning 98.0%, held-out 97.5%), against 97.9% for the 27 September baseline on 522 calls. No news scenario was missed. Extra groups per call were 0.34 (baseline 0.29), schemas were 18.0% of all tools, and there were no errors. Cost $0.044, p50 374 ms. Persistent misses were the four known ones from [37](37-jev-tool-picker.md). `news-6` ("has my news been set up?") was among 12 scenarios whose picked set varied between runs. The scenarios are synthetic; this does not measure production traffic.
 - **Not verified:** real sites' feeds, Telegram rendering and buttons, and owner acceptance.
 

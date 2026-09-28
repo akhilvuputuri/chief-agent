@@ -14,6 +14,7 @@ import {
   cleanText,
   discoverFeed,
   domainOf,
+  looksLikeFeed,
   parseFeed,
   similarity,
   withDeadline,
@@ -144,7 +145,6 @@ export function rankCandidates(
   },
 ) {
   const excluded = { delivered: 0, old: 0, duplicate: 0 };
-  const seen = new Set<string>();
   const scored: Scored[] = [];
   for (const c of candidates) {
     let domain: string, canonical: string;
@@ -159,8 +159,6 @@ export function rankCandidates(
       excluded.delivered++;
       continue;
     }
-    if (seen.has(canonical)) continue;
-    seen.add(canonical);
     const published = c.entry.publishedAt;
     const ageHours = published
       ? (opts.now.getTime() - published.getTime()) / 3600000
@@ -205,10 +203,16 @@ export function rankCandidates(
       b.score.total - a.score.total ||
       (b.entry.publishedAt?.getTime() ?? 0) -
         (a.entry.publishedAt?.getTime() ?? 0) ||
-      a.canonical.localeCompare(b.canonical),
+      a.canonical.localeCompare(b.canonical) ||
+      a.sourceId.localeCompare(b.sourceId),
   );
+  // Scored before deduplication, so when several feeds carry one link the
+  // best-scoring copy (its date, topics and site) is the one kept.
+  const seen = new Set<string>();
   const stories: Set<string>[] = [];
   const unique = scored.filter((s) => {
+    if (seen.has(s.canonical)) return false;
+    seen.add(s.canonical);
     const tokens = storyTokens(s.entry.title);
     if (stories.some((t) => similarity(t, tokens) >= SAME_STORY)) {
       excluded.duplicate++;
@@ -385,6 +389,10 @@ export class NewsBulletin {
     private send: (user: string, payload: any) => Promise<unknown>,
     private clock = () => new Date(),
   ) {}
+  /** Runs `work` in the owner's build queue. */
+  exclusive<T>(user: string, work: () => Promise<T>) {
+    return this.builds.run(user, work);
+  }
   /** When today's all-sites-failed retry is due, if one is pending. */
   retryAt(user: string, date: string) {
     const failed = this.allFailed.get(user);
@@ -416,6 +424,10 @@ export class NewsBulletin {
             this.fetcher.get(s.feed_url),
             deadline - Date.now(),
           );
+          // A saved feed that now serves a web page (expired feed, bot
+          // block) is a failure to report and retry, not an empty feed.
+          if (!looksLikeFeed(body))
+            throw new Error("the feed address returned a web page, not a feed");
           const feed = parseFeed(body, finalUrl, this.clock());
           for (const entry of feed.entries.slice(0, 50))
             candidates.push({
@@ -715,9 +727,12 @@ export class NewsTools {
     if (a.operation === "news_status") return this.status(user);
     await this.requireForeground(user, run);
     if (a.operation === "news_source_add") return this.addSource(user, a);
+    // Site removal and settings changes wait for an in-flight build for this
+    // owner, so a build cannot interleave with them.
     if (a.operation === "news_source_remove")
-      return this.removeSource(user, a.id);
-    if (a.operation === "news_settings") return this.settings(user, a);
+      return this.bulletin.exclusive(user, () => this.removeSource(user, a.id));
+    if (a.operation === "news_settings")
+      return this.bulletin.exclusive(user, () => this.settings(user, a));
     const built = await this.bulletin.build(user, "on_demand");
     return {
       ...built,

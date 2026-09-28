@@ -766,7 +766,9 @@ test("an edition built while the owner switches the bulletin off is never sent l
     // The owner turns it off while feeds are being fetched.
     f.fetcher.onGet = async () => {
       f.fetcher.onGet = null;
-      await f.call({ operation: "news_settings", enabled: false });
+      await f.db.query(
+        "UPDATE news_settings SET enabled=false WHERE user_id='a'",
+      );
     };
     await f.bulletin.tick();
     assert.equal(f.sent.length, 0);
@@ -900,4 +902,61 @@ test("status reports today's retry instead of tomorrow while sites are unreachab
   } finally {
     await f.pg.close();
   }
+});
+
+test("a saved feed that starts serving a web page is a failure, not an empty feed", async () => {
+  const f = await fixture(sgtAt("2026-09-28T07:00"));
+  try {
+    await followTwoSites(f, sgtAt("2026-09-28T07:00"));
+    await f.call({
+      operation: "news_settings",
+      deliveryTime: "08:00",
+      enabled: true,
+    });
+    f.fetcher.pages.set(
+      "https://alpha.example/",
+      "<html>Feed unavailable</html>",
+    );
+    f.fetcher.pages.set(
+      "https://beta.example/",
+      "<html>Please verify you are human</html>",
+    );
+    f.setNow(sgtAt("2026-09-28T08:00"));
+    await f.bulletin.tick();
+    assert.equal(f.sent.length, 0); // retried, not an empty edition
+    const status = await f.call({ operation: "news_status" });
+    assert.match(status.sources[0].last_error, /web page, not a feed/);
+    assert.match(status.nextEdition, /^today, retrying at 08:15/);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("when two feeds carry one link, the better-scoring copy is kept", () => {
+  const now = new Date("2026-09-28T00:00:00Z");
+  const copy = (
+    sourceId: string,
+    h: number | null,
+    categories: string[],
+  ): Candidate => ({
+    sourceId,
+    sourceName: sourceId,
+    entry: {
+      title: "Chips get cheaper",
+      url: "https://pub.example/chips?utm_source=feed",
+      summary: null,
+      categories,
+      publishedAt: h === null ? null : new Date(now.getTime() - h * 3600000),
+    },
+  });
+  const r = rankCandidates([copy("a", null, []), copy("b", 1, ["ai"])], {
+    topics: ["ai"],
+    weights: { source: new Map(), topic: new Map() },
+    delivered: new Set(),
+    now,
+    count: 5,
+  });
+  assert.equal(r.selected.length, 1);
+  assert.equal(r.selected[0]!.sourceId, "b");
+  assert.deepEqual(r.selected[0]!.topics, ["ai"]);
 });
