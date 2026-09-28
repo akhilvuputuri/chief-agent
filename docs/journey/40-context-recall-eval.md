@@ -1,4 +1,4 @@
-# 39 — A recall eval for one long chat
+# 40 — A recall eval for one long chat
 
 Work date(s): 2026-09-28. Written/revised: 2026-09-28.
 Status: in review. This adds an eval and a measured baseline. It changes no runtime behaviour.
