@@ -616,6 +616,32 @@ test("hostile feed shapes parse in linear time (unclosed or unterminated tags)",
   const started = Date.now();
   advertisedFeeds("<link ".repeat(100_000), "https://x.example/");
   assert.ok(Date.now() - started < 1500);
+  // Many bounded fields full of markup starts: each field is cleaned linearly.
+  const field = (unit: string, n: number) =>
+    unit.repeat(Math.ceil(n / unit.length)).slice(0, n);
+  for (const unit of ["<", "<![CDATA[", "<script", "<style"]) {
+    const item = `<item><title>${field(unit, 3900)}</title><link>https://a.example/x</link><description>${field(unit, 4000)}</description>${`<category>${field(unit, 3000)}</category>`.repeat(20)}</item>`;
+    const body = ("<rss><channel>" + item.repeat(22)).slice(0, 1_450_000);
+    const t = Date.now();
+    parseFeed(body, "https://x.example/");
+    assert.ok(Date.now() - t < 1500, `fields of ${unit}`);
+  }
+});
+
+test("a stray closing tag with a longer name does not hide an advertised feed", () => {
+  assert.deepEqual(
+    advertisedFeeds(
+      `<link rel="stylesheet" href="/a.css"></linkedin><link rel="alternate" type="application/rss+xml" href="/f.xml">`,
+      "https://s.example/",
+    ),
+    ["https://s.example/f.xml"],
+  );
+  const parsed = parseFeed(
+    `<rss><item><title>A &amp; <b>B</b><script>x()</script></title><link>https://a.example/1</link><description><![CDATA[<p>Hi</p>]]> a < b</description></item></rss>`,
+    "https://a.example/",
+  );
+  assert.equal(parsed.entries[0]!.title, "A & B");
+  assert.equal(parsed.entries[0]!.summary, "Hi a < b");
 });
 
 test("the edition fits one message by dropping whole items, never cutting one", () => {

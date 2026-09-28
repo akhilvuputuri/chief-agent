@@ -76,19 +76,53 @@ const INVISIBLE = new RegExp(
 );
 /** Plain display text: markup removed, control and bidi-override characters
  * dropped, whitespace collapsed. */
+/** Unwraps CDATA sections with forward-only searches (an unterminated
+ * section keeps its remaining text). */
+function stripCdata(s: string) {
+  let out = "";
+  let pos = 0;
+  for (;;) {
+    const at = s.indexOf("<![CDATA[", pos);
+    if (at < 0) return out + s.slice(pos);
+    const end = s.indexOf("]]>", at + 9);
+    if (end < 0) return out + s.slice(pos, at) + s.slice(at + 9);
+    out += s.slice(pos, at) + s.slice(at + 9, end);
+    pos = end + 3;
+  }
+}
+/** Removes <script>/<style> elements in one forward pass; an unclosed one
+ * drops the rest of the text rather than rescanning for every opening. */
+function stripCode(s: string) {
+  const lower = asciiLower(s);
+  let out = "";
+  let pos = 0;
+  // Next-occurrence caches, recomputed only once passed, keep this linear.
+  let script = -2;
+  let style = -2;
+  for (;;) {
+    if (script !== -1 && script < pos) script = lower.indexOf("<script", pos);
+    if (style !== -1 && style < pos) style = lower.indexOf("<style", pos);
+    const at =
+      script < 0 ? style : style < 0 ? script : Math.min(script, style);
+    if (at < 0) return out + s.slice(pos);
+    const close = lower.indexOf(at === script ? "</script" : "</style", at);
+    const end = close < 0 ? -1 : lower.indexOf(">", close);
+    out += s.slice(pos, at) + " ";
+    if (end < 0) return out;
+    pos = end + 1;
+  }
+}
 export function cleanText(raw: string, max: number) {
-  // Bound the input first: the markup-stripping expressions below are only
-  // cheap on short text, and the result is truncated to `max` anyway.
-  let s = raw
-    .slice(0, Math.max(4000, max * 12))
-    .replace(LONE_SURROGATE, "")
-    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1");
+  // Bound the input and use only linear steps: feed text is hostile input
+  // and parsing runs on the gateway's event loop.
+  let s = stripCdata(
+    raw.slice(0, Math.max(4000, max * 12)).replace(LONE_SURROGATE, ""),
+  );
   s = decodeEntities(s);
-  s = s
-    .replace(/<(script|style)\b[\s\S]*?<\/\1\s*>/gi, " ")
-    .replace(/<[^>]*>/g, " ");
+  // [^<>] keeps each tag match local: a run of "<" without ">" is linear.
+  s = stripCode(s).replace(/<[^<>]*>/g, " ");
   s = decodeEntities(s)
-    .replace(/<[^>]*>/g, " ")
+    .replace(/<[^<>]*>/g, " ")
     .replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, " ")
     .replace(INVISIBLE, "")
     .replace(/\s+/g, " ")
@@ -119,7 +153,11 @@ interface Element {
  * closing tag moves only forward and is reused across opening tags, so a feed
  * full of unclosed or unterminated tags cannot make parsing quadratic (a
  * regex like /<item>([\s\S]*?)<\/item>/g rescans to the end per opening). */
-function* elements(text: string, name: string): Generator<Element> {
+function* elements(
+  text: string,
+  name: string,
+  pairs = true,
+): Generator<Element> {
   const lower = asciiLower(text);
   const opening = "<" + name.toLowerCase();
   const closing = "</" + name.toLowerCase();
@@ -148,12 +186,20 @@ function* elements(text: string, name: string): Generator<Element> {
       continue;
     }
     const open = text.slice(at, end + 1);
-    if (text.charCodeAt(end - 1) === 47) {
+    if (!pairs || text.charCodeAt(end - 1) === 47) {
       yield { open, inner: null };
       pos = end + 1;
       continue;
     }
-    if (close !== -1 && close < end) close = lower.indexOf(closing, end);
+    // The closing name must end too: "</linkedin>" does not close <link>.
+    while (close !== -1 && close < end) {
+      close = lower.indexOf(closing, end);
+      while (close !== -1) {
+        const c = lower.charCodeAt(close + closing.length);
+        if (c === 62 || c === 32 || (c >= 9 && c <= 13)) break;
+        close = lower.indexOf(closing, close + 1);
+      }
+    }
     if (close === -1) {
       yield { open, inner: null };
       pos = end + 1;
@@ -201,9 +247,7 @@ function attr(element: string, name: string) {
 export function articleUrl(raw: string | null, base: string) {
   if (!raw || raw.length > 4000) return null;
   try {
-    const text = decodeEntities(
-      raw.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1"),
-    ).trim();
+    const text = decodeEntities(stripCdata(raw)).trim();
     // Refuse rather than truncate: a shortened link would not be the direct article URL.
     if (!text || text.length > 2000 || /\s/.test(text)) return null;
     const u = new URL(text, base);
@@ -545,7 +589,8 @@ export function looksLikeFeed(body: string) {
 /** Feed links a page advertises with <link rel="alternate" type="…rss/atom…">. */
 export function advertisedFeeds(html: string, base: string) {
   const out: string[] = [];
-  for (const { open } of elements(html.slice(0, 500_000), "link")) {
+  // HTML <link> elements have no closing tag: scan opening tags only.
+  for (const { open } of elements(html.slice(0, 500_000), "link", false)) {
     const rel = (attr(open, "rel") ?? "").toLowerCase().split(/\s+/);
     const type = (attr(open, "type") ?? "").toLowerCase();
     if (!rel.includes("alternate") || !/(rss|atom)\+xml/.test(type)) continue;

@@ -219,7 +219,10 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
         : vote === 1
           ? `👍 Noted: more like this from ${result.domain}${result.topics.length ? ` and on ${result.topics.join(", ")}` : ""}.`
           : `👎 Noted: less like this from ${result.domain}${result.topics.length ? ` and on ${result.topics.join(", ")}` : ""}.`
-      ).slice(0, 190),
+      )
+        .split(/(?=[\s\S])/u)
+        .slice(0, 190)
+        .join(""),
     });
     if (result?.changed)
       await ctx

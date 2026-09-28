@@ -37,6 +37,12 @@ See [the bulletin runbook](../news-bulletin.md). `db/021_news.sql` adds four tab
   - untrusted markers in `news_status`;
   - journal renumbering.
 
+**Independent review round 2 (Opus 5.5, on `1e8e079`): REQUEST CHANGES.** The earlier findings were confirmed fixed.
+
+- **(P2, measured by the reviewer)** `cleanText`'s `<[^>]*>` was still quadratic within its 4 KB bound. Across many fields, a 1.42 MB feed took 7.2 s. It now uses `<[^<>]*>` plus forward-only CDATA and script/style stripping. The same shapes (`<`, CDATA, `<script`, `<style`, `</item`) at 1.45 MB now take at most 41 ms on the author's Mac, and are added to the timing test.
+- **(P3)** A closing tag with a longer name (`</linkedin>`) no longer closes `<link>`; HTML `<link>` discovery scans opening tags only.
+- **(P3)** The callback answer is now cut on code points.
+
 ## Verification and outcome
 
 - **Synthetic (PGlite, mocked fetcher):** 14 tests. They cover address normalization and refusal of private hosts, the three discovery paths plus the no-feed case and the request cap, untrusted feed text, the DNS guard, foreground-only and owner-scoped mutations, enable prerequisites, a single edition at the SGT slot with duplicate-story collapse and no repeated links the next day, enabling after the slot starting tomorrow, ranking and the per-site cap, set-state votes shifting the next edition, the on-demand limit and the "nothing new" message, all-sources-failed retries then an explanation, muting on disable, uncertain delivery across restart, and turning off when the last site is removed. `npm run check` passed 461 application and 21 script tests.
