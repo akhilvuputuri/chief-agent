@@ -104,7 +104,9 @@ Singapore time" (migration 020, [journal 38](journey/38-watch-monitoring-window.
   owner's choice over holding alerts for later delivery.
 - Delivery rechecks the window: an alert queued just before the window closes
   and not yet sent is muted (`outside_window` observation with its alert id),
-  not delivered late, and it still counts as that trading day's alert.
+  not delivered late, and it still counts as that trading day's alert. An alert still
+  pending from an earlier window occurrence (for example across a gateway
+  outage) is muted too, rather than sent when the next window opens.
 - Gated checks (market closed or outside the window) no longer consume the
   poll cursor, so with a 60-minute cadence the first check happens at the open
   rather than up to an hour later. The gate is logged once per transition and

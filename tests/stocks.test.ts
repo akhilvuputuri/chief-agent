@@ -1715,3 +1715,75 @@ test("an alert queued before the window closes is muted rather than sent late", 
     await f.pg.close();
   }
 });
+
+test("an alert still pending from an earlier window occurrence is muted, not sent at the next opening", async () => {
+  const f = await fixture(new Date("2026-01-15T15:59:50Z")); // Thu 23:59:50 SGT
+  try {
+    const itemId = await f.add(5);
+    await f.tools.call("a", f.run, {
+      operation: "watchlist_settings",
+      window: { start: "20:00", end: "24:00" },
+    });
+    f.provider.quotes_.set(
+      `${MIC}:ACME`,
+      quote({
+        price: 90,
+        prevClose: 100,
+        providerChangePct: -10,
+        quoteTime: new Date("2026-01-15T15:59:00Z"),
+      }),
+    );
+    await f.monitor.tick();
+    // The gateway was down until Friday's window: the row is still pending.
+    await f.db.query("UPDATE stock_alerts SET created_at=$2 WHERE item_id=$1", [
+      itemId,
+      new Date("2026-01-15T15:59:50Z"),
+    ]);
+    const late = new StockDelivery(
+      f.db,
+      async (user, payload) => {
+        f.sent.push({ user, payload });
+      },
+      () => new Date("2026-01-16T14:30:00Z"), // Fri 22:30 SGT, window open
+    );
+    await late.tick();
+    assert.equal(f.sent.length, 0);
+    assert.equal((await f.alerts(itemId))[0].state, "muted");
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("a rejected window leaves the other requested settings unchanged", async () => {
+  const f = await fixture(new Date("2026-01-15T15:30:00Z"));
+  try {
+    await f.add(5);
+    await assert.rejects(
+      f.tools.call("a", f.run, {
+        operation: "watchlist_settings",
+        pollMinutes: 60,
+        window: { start: "09:00", end: "09:00" },
+      }),
+      /same/,
+    );
+    const listed = await f.tools.call("a", f.run, {
+      operation: "watchlist_list",
+    });
+    assert.equal(listed.settings.poll_minutes, 15);
+    // A valid combined request applies both, and omitting window keeps it.
+    await f.tools.call("a", f.run, {
+      operation: "watchlist_settings",
+      pollMinutes: 60,
+      window: { start: "20:00", end: "24:00", days: ["mon", "tue"] },
+    });
+    const kept = await f.tools.call("a", f.run, {
+      operation: "watchlist_settings",
+      defaultDropPct: 4,
+    });
+    assert.equal(kept.settings.poll_minutes, 60);
+    assert.equal(kept.settings.window_start, "20:00");
+    assert.deepEqual(kept.settings.window_days, ["mon", "tue"]);
+  } finally {
+    await f.pg.close();
+  }
+});

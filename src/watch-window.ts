@@ -185,6 +185,16 @@ function windowIntervals(w: MonitoringWindow | null, date: string) {
   return out;
 }
 
+/** The [start, end) instants of the window occurrence containing `at`, or
+ * null when there is no window or `at` is outside it. */
+export function windowOccurrence(w: MonitoringWindow | null, at: Date) {
+  if (!w) return null;
+  const t = at.getTime();
+  return (
+    windowIntervals(w, local(at).date).find(([s, e]) => s <= t && t < e) ?? null
+  );
+}
+
 /** The next periods (Singapore time) when an item on `mic` is actually checked:
  * exchange sessions intersected with the window. Confirmations show this so the
  * owner sees the combined effect instead of two rules to combine mentally. */

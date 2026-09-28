@@ -29,6 +29,8 @@ The stock watchlist ([25](25-stock-watchlist.md)) polls US listings during the e
 - `src/main.ts`: refuses to start without migration 20. `compose.yaml`: migration entry.
 - `scripts/deploy-watch-window.py` and its offline tests: the migration-019 procedure with only its constants changed. The single allowed baseline is live `211b657`.
 
+**Review round 1 (Devin Review, automated, on `d25956a`):** two valid findings. (1) A pending alert that survived a gateway outage would be sent when the _next_ window occurrence opened, which delivers a stale drop. Delivery now also mutes an alert created before the current window occurrence began (`windowOccurrence`). (2) `watchlist_settings` wrote the other fields before validating the window, so a rejected window still changed, for example, the poll interval. The window is now validated first and all fields are written in one statement. Both have regression tests.
+
 ## Verification and outcome
 
 - Synthetic (PGlite, mocked provider): 7 new tests. They cover validation, overnight and weekday ownership, DST-correct `nextChecks` (21:30 SGT in September, 22:30 SGT in January, MLK Day skipped), the owner's scenario (checked at 23:30 SGT, silent at 00:30 with one `outside_window` row and no quote call, alert at the next reopen when still down), a recovered drop that is not reported, the first poll at the open with a 60-minute cadence, override/inherit/clear, and a late alert muted at delivery. The full `npm run check` passed 453 application and 21 script tests. The 14 offline rollout tests passed. Migration 020 applied twice in PGlite, and the CHECKs rejected a partial window, an unknown day and start = end.

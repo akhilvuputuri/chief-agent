@@ -16,6 +16,7 @@ import {
   inWindow,
   upcomingChecks,
   validateWindow,
+  windowOccurrence,
 } from "./watch-window.js";
 
 /** Owner default window columns joined onto item rows, so every consumer
@@ -314,15 +315,22 @@ export class WatchlistTools {
       throw new ToolValidationError(
         "Extended-hours quotes need a paid provider plan (prepost data); enable MARKET_DATA_EXTENDED after upgrading, or keep regular hours",
       );
-    const row = (
+    // Validate before writing, and write everything in one statement, so a
+    // rejected window cannot leave the other requested changes half-applied.
+    const w = a.window ? validateWindow(a.window) : null;
+    const settings = (
       await this.db.query(
-        `INSERT INTO stock_settings(user_id,default_drop_pct,paused,poll_minutes,include_extended)
-         VALUES($1,COALESCE($2,5),COALESCE($3,false),COALESCE($4,15),COALESCE($5,false))
+        `INSERT INTO stock_settings(user_id,default_drop_pct,paused,poll_minutes,include_extended,
+           window_start,window_end,window_days)
+         VALUES($1,COALESCE($2,5),COALESCE($3,false),COALESCE($4,15),COALESCE($5,false),$7,$8,$9)
          ON CONFLICT(user_id) DO UPDATE SET
            default_drop_pct=COALESCE($2,stock_settings.default_drop_pct),
            paused=COALESCE($3,stock_settings.paused),
            poll_minutes=COALESCE($4,stock_settings.poll_minutes),
            include_extended=COALESCE($5,stock_settings.include_extended),
+           window_start=CASE WHEN $6 THEN $7 ELSE stock_settings.window_start END,
+           window_end=CASE WHEN $6 THEN $8 ELSE stock_settings.window_end END,
+           window_days=CASE WHEN $6 THEN $9::text[] ELSE stock_settings.window_days END,
            updated_at=now()
          RETURNING *`,
         [
@@ -331,20 +339,13 @@ export class WatchlistTools {
           a.paused ?? null,
           a.pollMinutes ?? null,
           a.includeExtended ?? null,
+          a.window !== undefined,
+          w?.start ?? null,
+          w?.end ?? null,
+          w?.days ?? null,
         ],
       )
     ).rows[0];
-    let settings = row;
-    if (a.window !== undefined) {
-      const w = a.window === null ? null : validateWindow(a.window);
-      settings = (
-        await this.db.query(
-          `UPDATE stock_settings SET window_start=$2,window_end=$3,window_days=$4,updated_at=now()
-           WHERE user_id=$1 RETURNING *`,
-          [user, w?.start ?? null, w?.end ?? null, w?.days ?? null],
-        )
-      ).rows[0];
-    }
     if (settings.paused) await mutePending(this.db, user);
     if (a.window === undefined) return { settings };
     const items = (
@@ -915,7 +916,14 @@ export class StockDelivery {
         )
       ).rows[0];
       const window = scope ? effectiveWindow(scope) : null;
-      if (!inWindow(window, this.clock())) {
+      // Also mute an alert queued in an earlier window occurrence (for example
+      // across a gateway outage): it belongs to a period that already closed.
+      const now = this.clock();
+      const opened = windowOccurrence(window, now)?.[0];
+      if (
+        !inWindow(window, now) ||
+        (opened !== undefined && new Date(d.created_at).getTime() < opened)
+      ) {
         await this.db.query(
           "UPDATE stock_alerts SET state='muted' WHERE id=$1",
           [d.id],
