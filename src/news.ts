@@ -38,6 +38,16 @@ const MAX_URL = 600;
 // one may cross midnight while it is built, but never arrive hours late; an
 // on-demand one is only worth sending shortly after it was asked for.
 const SCHEDULED_TTL_MS = 6 * 3600000;
+/** Whether today's scheduled edition is due now under these settings: at or
+ * after the slot, not before the schedule clock restarted, and not so late
+ * (after an outage) that a morning bulletin would arrive in the evening. */
+function scheduledDue(s: any, now: Date) {
+  if (!s?.enabled || !s.delivery_time) return false;
+  const slot = slotAt(sgt(now).date, s.delivery_time);
+  if (now < slot || now.getTime() - slot.getTime() > SCHEDULED_TTL_MS)
+    return false;
+  return !(s.schedule_from && new Date(s.schedule_from) > slot);
+}
 const ON_DEMAND_TTL_MS = 3600000;
 
 type NewsAction = Extract<Action, { operation: `news_${string}` }>;
@@ -506,6 +516,10 @@ export class NewsBulletin {
           user,
         ])
       ).rows[0];
+      // Settings may have changed while this build waited in the owner's
+      // queue (time moved, switched off): re-check before fetching.
+      if (kind === "scheduled" && !scheduledDue(settings, now))
+        return { skipped: "no longer due" as const };
       const { sources, candidates, failures, trace } = await this.gather(user);
       if (!sources.length)
         throw new ToolValidationError(
@@ -634,7 +648,7 @@ export class NewsBulletin {
     const { date } = sgt(now);
     const due = (
       await this.db.query(
-        `SELECT s.user_id,s.delivery_time,s.schedule_from FROM news_settings s
+        `SELECT s.user_id,s.enabled,s.delivery_time,s.schedule_from FROM news_settings s
          WHERE s.enabled AND s.delivery_time IS NOT NULL
            AND NOT EXISTS (SELECT 1 FROM news_editions e WHERE e.user_id=s.user_id
              AND e.edition_date=$1 AND e.kind='scheduled' AND e.state<>'muted')`,
@@ -643,9 +657,7 @@ export class NewsBulletin {
     ).rows;
     for (const s of due) {
       if (!this.allowed(s.user_id)) continue;
-      const slot = slotAt(date, s.delivery_time);
-      if (now < slot) continue;
-      if (s.schedule_from && new Date(s.schedule_from) > slot) continue;
+      if (!scheduledDue(s, now)) continue;
       const failed = this.allFailed.get(s.user_id);
       if (failed?.date === date && now.getTime() < failed.next) continue;
       // One owner's failure must not stop others' builds or any delivery.
@@ -760,7 +772,12 @@ export class NewsTools {
     ).rows.length;
     let slot = slotAt(date, s.delivery_time);
     const skipToday = s.schedule_from && new Date(s.schedule_from) > slot;
-    if (!builtToday && !skipToday && slot <= now) {
+    if (
+      !builtToday &&
+      !skipToday &&
+      slot <= now &&
+      now.getTime() - slot.getTime() <= SCHEDULED_TTL_MS
+    ) {
       // Today's slot has passed without an edition: it is being built now,
       // or waiting to retry after every site failed.
       const retry = this.bulletin.retryAt(user, date);

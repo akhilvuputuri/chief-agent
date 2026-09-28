@@ -438,8 +438,16 @@ for (const [net, prefix] of [
   ["fe80::", 10],
   ["fec0::", 10],
   ["ff00::", 8],
+  ["2001::", 23], // IETF protocol assignments, including Teredo (2001::/32)
+  ["3fff::", 20], // documentation (RFC 9637)
 ] as const)
   blocked.addSubnet(net, prefix, "ipv6");
+// Only global unicast IPv6 (2000::/3) is ever public; everything else is
+// refused, so a translation form outside it (IPv4-mapped or SIIT ::ffff:…)
+// cannot reach a private network through an embedded IPv4 address. Do not add
+// ::ffff:0:0/96 to `blocked`: Node's BlockList would then match every IPv4.
+const globalUnicast = new BlockList();
+globalUnicast.addSubnet("2000::", 3, "ipv6");
 /** True for loopback, private, link-local (including cloud metadata), CGNAT,
  * documentation, multicast and reserved addresses. */
 export function nonPublicAddress(address: string) {
@@ -448,6 +456,7 @@ export function nonPublicAddress(address: string) {
   const family = isIP(ip);
   if (!family) return true;
   if (family === 6 && /^::ffff:/i.test(ip)) return true;
+  if (family === 6 && !globalUnicast.check(ip, "ipv6")) return true;
   return blocked.check(ip, family === 4 ? "ipv4" : "ipv6");
 }
 type Resolver = (

@@ -18,6 +18,7 @@ import {
   advertisedFeeds,
   discoverFeed,
   guardedLookup,
+  nonPublicAddress,
   parseFeed,
   type FeedFetcher,
 } from "../src/news-feed.js";
@@ -1037,6 +1038,49 @@ test("votes count only on bulletins that were delivered", async () => {
     assert.equal(await recordVote(f.db, "a", item.id, 1), null); // still pending
     await f.bulletin.tick(); // send fails: uncertain, possibly shown
     assert.ok(await recordVote(f.db, "a", item.id, 1));
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("only public unicast addresses are reachable, including through IPv6 translation forms", () => {
+  for (const address of [
+    "10.0.0.5",
+    "169.254.169.254",
+    "::1",
+    "::ffff:10.0.0.1",
+    "::ffff:0:a00:1", // SIIT-translated 10.0.0.1
+    "64:ff9b::a00:1", // NAT64 well-known prefix
+    "2001:0:4136:e378:8000:63bf:f5ff:fffe", // Teredo
+    "2002:0a00:0001::1", // 6to4 of 10.0.0.1
+    "fd00::1",
+    "fe80::1",
+    "3fff::1", // documentation (RFC 9637)
+    "4000::1", // not global unicast
+  ])
+    assert.equal(nonPublicAddress(address), true, address);
+  // Public addresses stay reachable (an IPv4-mapped rule would block them all).
+  for (const address of ["93.184.216.34", "8.8.8.8", "2606:4700::6810:84e5"])
+    assert.equal(nonPublicAddress(address), false, address);
+});
+
+test("after a same-day outage, a bulletin more than six hours late is skipped", async () => {
+  const f = await fixture(sgtAt("2026-09-28T07:00"));
+  try {
+    await followTwoSites(f, sgtAt("2026-09-28T07:00"));
+    await f.call({
+      operation: "news_settings",
+      deliveryTime: "08:00",
+      enabled: true,
+    });
+    f.setNow(sgtAt("2026-09-28T16:00")); // gateway back eight hours late
+    await f.bulletin.tick();
+    assert.equal(f.sent.length, 0);
+    const status = await f.call({ operation: "news_status" });
+    assert.equal(status.nextEdition, "Tue 29 Sep 08:00 SGT");
+    f.setNow(sgtAt("2026-09-29T08:00"));
+    await f.bulletin.tick();
+    assert.equal(f.sent.length, 1);
   } finally {
     await f.pg.close();
   }

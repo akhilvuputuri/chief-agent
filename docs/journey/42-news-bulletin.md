@@ -69,9 +69,18 @@ Each has a regression test (23 news tests). The branch was then rebased onto `7e
 
 There are 3 new regression tests (28 news tests in total). Migration 021 is not deployed yet, so its index predicate could change without a second migration.
 
+**Final round, on `c99f6d1`.** Opus 5.5 approved, with P3s. Devin Review found two more issues. All of these were addressed except the dev-database note:
+
+- **IPv6 guard.** The guard now refuses anything outside global unicast `2000::/3`. It also blocks `2001::/23` (including Teredo) and the RFC 9637 documentation prefix `3fff::/20`.
+  - An attempted `::ffff:0:0/96` rule was dropped after the new test showed that Node's `BlockList` matches it against every IPv4 address, which would have blocked all feeds. The global-unicast rule covers those forms anyway.
+  - A live read-only discovery against two public sites still succeeded.
+- **Catch-up bound.** Catch-up after an outage is limited to 6 hours after the slot, matching the outbox expiry. A bulletin more than 6 hours late is skipped, and status reports tomorrow.
+- **Stale settings.** `build()` re-checks with fresh settings that a scheduled edition is still due.
+- **Not fixed:** a development database that applied an earlier draft of 021 keeps the old index. Drop and recreate it there; production never applied it.
+
 ## Verification and outcome
 
-- **Synthetic (PGlite, mocked fetcher):** 14 tests at first review; 28 after the review rounds below. They cover address normalization and refusal of private hosts, the three discovery paths plus the no-feed case and the request cap, untrusted feed text, the DNS guard, foreground-only and owner-scoped mutations, enable prerequisites, a single edition at the SGT slot with duplicate-story collapse and no repeated links the next day, enabling after the slot starting tomorrow, ranking and the per-site cap, set-state votes shifting the next edition, the on-demand limit and the "nothing new" message, all-sources-failed retries then an explanation, muting on disable, uncertain delivery across restart, and turning off when the last site is removed. `npm run check` passed 461 application and 21 script tests.
+- **Synthetic (PGlite, mocked fetcher):** 14 tests at first review; 30 after the review rounds below. They cover address normalization and refusal of private hosts, the three discovery paths plus the no-feed case and the request cap, untrusted feed text, the DNS guard, foreground-only and owner-scoped mutations, enable prerequisites, a single edition at the SGT slot with duplicate-story collapse and no repeated links the next day, enabling after the slot starting tomorrow, ranking and the per-site cap, set-state votes shifting the next edition, the on-demand limit and the "nothing new" message, all-sources-failed retries then an explanation, muting on disable, uncertain delivery across restart, and turning off when the last site is removed. `npm run check` passed 461 application and 21 script tests.
 - **Measured, picker eval (28 September, developer Mac, `typesafe/jev-1.13-20260917`, 3 runs, 543 calls):** pooled recall 97.8% (tuning 98.0%, held-out 97.5%), against 97.9% for the 27 September baseline on 522 calls. No news scenario was missed. Extra groups per call were 0.34 (baseline 0.29), schemas were 18.0% of all tools, and there were no errors. Cost $0.044, p50 374 ms. Persistent misses were the four known ones from [37](37-jev-tool-picker.md). `news-6` ("has my news been set up?") was among 12 scenarios whose picked set varied between runs. The scenarios are synthetic; this does not measure production traffic.
 - **Not verified:** real sites' feeds, Telegram rendering and buttons, and owner acceptance.
 
