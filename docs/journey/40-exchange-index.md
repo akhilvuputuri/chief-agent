@@ -7,28 +7,31 @@ Status: in review. The change is on a review branch; the production effect is no
 
 [Journal 39](39-context-recall-eval.md) measured the current context pipeline on synthetic multi-topic chats:
 
-- 83% of probes were answered correctly;
+- 81% of probes were answered correctly;
 - only 44% of the probes whose answer sat inside an earlier tool result;
-- the evidence was in the prompt for 67% of probes.
+- the evidence was in the prompt, or one read away, for 72% of probes.
 
 Nothing in the prompt said which stored result held a detail. Conversation search rarely surfaced facts inside tool results, and the previous exchange's raw tool output was always sent whole. In production, a 36,700-character parcel result once rode into an unrelated stock question.
 
 ## Evidence
 
-Measured on 28 September with the same 36 probes, integrations off, `openai/gpt-6-sol`, one answer run per arm:
+Measured on 28 September with the same 36 probes and the grader as fixed after review. Integrations were off, the model was `openai/gpt-6-sol`, and there was one answer run per arm. The two arms ran in parallel on the same fixtures.
 
-|                            | Baseline (journal 39) | This change   |
-| -------------------------- | --------------------- | ------------- |
-| Correct                    | 83% (30/36)           | 97% (35/36)   |
-| Tool-detail correct        | 44% (4/9)             | 89% (8/9)     |
-| Distant correct            | 86% (6/7)             | 100% (7/7)    |
-| Evidence in prompt         | 67%                   | 67%           |
-| In prompt or one read away | 67%                   | 97%           |
-| Median fixed characters    | 29,997                | 30,472        |
-| Eval cost / median latency | $1.09 / 6.1 s         | $1.18 / 6.6 s |
+|                                               | Baseline      | This change   |
+| --------------------------------------------- | ------------- | ------------- |
+| Correct                                       | 81% (29/36)   | 97% (35/36)   |
+| Tool-detail correct                           | 44% (4/9)     | 100% (9/9)    |
+| Distant correct                               | 71% (5/7)     | 86% (6/7)     |
+| Hedged (right value plus the known wrong one) | 1             | 1             |
+| Confused                                      | 0             | 0             |
+| Evidence in prompt                            | 72%           | 72%           |
+| In prompt or one read away                    | 72%           | 100%          |
+| Median fixed characters                       | 29,997        | 30,472        |
+| Eval cost / median latency                    | $1.08 / 6.5 s | $1.21 / 7.0 s |
 
 - **How the model now answers.** In the new arm, correct tool-detail answers followed a `conversation_search` or index line, then `observation_read` on the listed ID.
-- **The remaining miss** is an eval artefact: the model kept calling `job_list`, which reads the eval's empty jobs table.
+- **The one non-correct reply** in the new arm was hedged: it named the Grab interviewer and also mentioned the recruiter.
+- **An earlier, looser grader** reported 83% and 97%. Those figures are superseded.
 - **Caveats.** These are single runs on developer-written synthetic fixtures, so they measure direction rather than a success rate.
 
 ## Diagnosis and alternatives

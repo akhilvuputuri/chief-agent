@@ -103,10 +103,10 @@ These are compaction stages 2 and 3 of the plan in the compaction research. They
 
 **Measured effect** ([journal 40](journey/40-exchange-index.md); one answer run each on the synthetic eval):
 
-- correct answers rose from 83% to 97%;
-- tool-detail answers rose from 44% to 89%;
-- evidence in the prompt or one read away rose from 67% to 97%;
-- eval cost per run was $1.09 before and $1.18 after.
+- correct answers rose from 81% to 97%;
+- tool-detail answers rose from 44% to 100%;
+- evidence in the prompt or one read away rose from 72% to 100%;
+- eval cost per run was $1.08 before and $1.21 after.
 
 ## Implementation plan
 
