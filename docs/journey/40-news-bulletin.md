@@ -1,7 +1,7 @@
 # 40 — A lean daily news bulletin from followed sites
 
 Work date(s): 2026-09-27 to 2026-09-28. Written/revised: 2026-09-28.
-Status: tested; in review. Needs migration 021 through the reviewed operator procedure after migration 020 ([38](39-watch-monitoring-window.md)). Not deployed; nothing configured.
+Status: tested; in review. Needs migration 021 through the reviewed operator procedure; migration 020 ([39](39-watch-monitoring-window.md)) is already live. Not deployed; nothing configured.
 
 ## User-visible problem and preceding iteration
 
@@ -45,4 +45,6 @@ See [the bulletin runbook](../news-bulletin.md). `db/021_news.sql` adds four tab
 
 ## Follow-up and next iteration
 
-Pending: independent review, the rollout script (written once 020's merge SHA is known, since it is the baseline), merge, operator rollout, then the owner configuring sites, time and topics in Telegram and receiving a first edition.
+`scripts/deploy-news.py` is the migration-020 script with only its constants changed. Its baseline is the live `069c8d5`, and 14 offline tests pass. Its test allows only the `ON DELETE SET NULL` foreign-key clause among destructive keywords. The package version is bumped to 0.3.28, which will label #107, #108 and #109 once this is verified live.
+
+Pending: re-review of the fixes, merge, operator rollout, then the owner configuring sites, time and topics in Telegram and receiving a first edition.

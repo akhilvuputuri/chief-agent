@@ -1,7 +1,7 @@
 # 39 — Stock monitoring hours in Singapore time
 
 Work date(s): 2026-09-27. Written/revised: 2026-09-27.
-Status: tested; in review. Needs migration 020 through the reviewed operator procedure. Not deployed.
+Status: released 28 September 2026 via the migration-020 operator rollout (`069c8d5`). Owner Telegram acceptance is pending.
 
 ## User-visible problem and preceding iteration
 
@@ -58,6 +58,19 @@ Afterwards the branch was rebased onto `7e6e62c` (#107). The journal became 39 b
 - Synthetic (PGlite, mocked provider): 7 new tests. They cover validation, overnight and weekday ownership, DST-correct `nextChecks` (21:30 SGT in September, 22:30 SGT in January, MLK Day skipped), the owner's scenario (checked at 23:30 SGT, silent at 00:30 with one `outside_window` row and no quote call, alert at the next reopen when still down), a recovered drop that is not reported, the first poll at the open with a 60-minute cadence, override/inherit/clear, and a late alert muted at delivery. The full `npm run check` passed 453 application and 21 script tests. The 14 offline rollout tests passed. Migration 020 applied twice in PGlite, and the CHECKs rejected a partial window, an unknown day and start = end.
 - Not verified: live behavior, real quote timing at the open, and owner Telegram acceptance.
 
+### Release closure — 28 September 2026
+
+- [PR #108](https://github.com/akhilvuputuri/chief-agent/pull/108) was approved by Opus 5.5 at exact head `83d497887518a82ecd583fa834205156b4474857` (reviews are recorded on the PR). CI passed, and it was merged as `069c8d5c7e08a57cee5e4c795e2048717ab082df`.
+- The automatic release [run 36416396040](https://github.com/akhilvuputuri/chief-agent/actions/runs/36416396040) refused, as designed: "Database or Compose change requires a reviewed migration/deployment procedure". Production stayed on `7e6e62c`.
+- **Operator rollout (observed).** An exact-SHA `git archive` (pax comment verified) and the merged `scripts/deploy-watch-window.py` were used; the script's checksum matched the merged file. It ran from baseline `7e6e62c` and reported `{"deployed": "069c8d5…", "healthy": true, "migration": 20}`.
+  - An earlier invocation had failed at a Python syntax error before doing anything. zsh read `$SHA:s…` as a substitution modifier, so the wrong content was uploaded as the script. Use `${SHA}:path`.
+- **Separate read-only checks (observed).**
+  - `RELEASE` is `069c8d5`, `/healthz` returns ok, and the gateway is healthy.
+  - Migration marker 20 is present, the six window columns exist, and the decision constraint includes `outside_window`.
+  - The owner's AAPL watch and 60-minute cadence are unchanged, with no window set.
+  - No runtime was running, and CloudWatch showed no errors in the 30 minutes around the rollout.
+- **Pending (owner acceptance):** ask Chief in Telegram to monitor only from the market open until midnight SGT. Then confirm the stored window, the returned `nextChecks`, and that no alert arrives after midnight.
+
 ## Follow-up and next iteration
 
-Pending: independent review, merge, operator rollout of migration 020, then asking the owner to set the window in Telegram and confirming the stored settings and `nextChecks`.
+Pending: the owner sets the window in Telegram, and we confirm the stored settings and `nextChecks`. Real quote timing at the open, including whether the 15-minute retry is enough for the provider's delay, is still unmeasured.
