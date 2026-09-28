@@ -1,0 +1,341 @@
+{
+  "id": "job-search",
+  "description": "Job applications and interview prep interleaved with reminders and unrelated lookups.",
+  "turns": [
+    {
+      "user": "which roles have I saved?",
+      "calls": [
+        {
+          "operation": "job_list",
+          "args": {},
+          "result": [
+            {
+              "company": "Stripe",
+              "title": "Backend Engineer",
+              "status": "applied",
+              "salary": "SGD 180-210k",
+              "notes": {
+                "$fill": 4000
+              }
+            },
+            {
+              "company": "Grab",
+              "title": "Platform Engineer",
+              "status": "interviewing",
+              "salary": "SGD 160-190k",
+              "notes": {
+                "$fill": 4000
+              }
+            },
+            {
+              "company": "Wise",
+              "title": "Payments Engineer",
+              "status": "saved",
+              "salary": "SGD 170-200k",
+              "notes": {
+                "$fill": 4000
+              }
+            },
+            {
+              "company": "Canva",
+              "title": "Infra Engineer",
+              "status": "rejected",
+              "notes": {
+                "$fill": 3000
+              }
+            }
+          ]
+        }
+      ],
+      "reply": "Four saved roles: Stripe backend (applied), Grab platform (interviewing), Wise payments (not applied), Canva infra (rejected)."
+    },
+    {
+      "user": "any recruiter emails?",
+      "calls": [
+        {
+          "operation": "gmail_search",
+          "args": {
+            "query": "grab interview"
+          },
+          "result": [
+            {
+              "from": "Lina Tan <lina@grab-careers.example.com>",
+              "subject": "System design round",
+              "date": "2026-09-29",
+              "snippet": "Your system design round is Fri 9 Oct at 3:00 pm with Marcus Webb. Zoom ID 884 213 0071.",
+              "body": [
+                "Your system design round is Fri 9 Oct at 3:00 pm with Marcus Webb. Zoom ID 884 213 0071.",
+                {
+                  "$fill": 2500
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "reply": "Grab's recruiter Lina Tan confirmed your system design round on Fri 9 Oct at 3:00 pm with interviewer Marcus Webb."
+    },
+    {
+      "user": "great, thanks",
+      "calls": [],
+      "reply": "Good luck!"
+    },
+    {
+      "user": "what's a good quick dinner idea?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "what's a good quick dinner idea?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Weeknight dinner ideas",
+                "url": "https://news.example.com/weeknight-dinner-ideas",
+                "text": [
+                  "A soy-ginger salmon traybake takes about 25 minutes.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "A soy-ginger salmon traybake takes about 25 minutes."
+    },
+    {
+      "user": "tips for sleeping better?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "tips for sleeping better?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Sleep habits guide",
+                "url": "https://news.example.com/sleep-habits-guide",
+                "text": [
+                  "Keep a fixed wake time, cut caffeine after 2pm and dim screens before bed.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "Keep a fixed wake time, cut caffeine after 2pm and dim screens before bed."
+    },
+    {
+      "user": "how do index funds work?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "how do index funds work?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Index funds explained",
+                "url": "https://news.example.com/index-funds-explained",
+                "text": [
+                  "They track a market index and hold its constituents at low cost.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "They track a market index and hold its constituents at low cost."
+    },
+    {
+      "user": "best stretches after running?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "best stretches after running?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Post-run stretching",
+                "url": "https://news.example.com/post-run-stretching",
+                "text": [
+                  "Calf, hamstring and hip-flexor stretches, 30 seconds each.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "Calf, hamstring and hip-flexor stretches, 30 seconds each."
+    },
+    {
+      "user": "what's new in the F1 standings?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "what's new in the F1 standings?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "F1 standings update",
+                "url": "https://news.example.com/f1-standings-update",
+                "text": [
+                  "The championship gap narrowed after the last race.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "The championship gap narrowed after the last race."
+    },
+    {
+      "user": "any interesting tech news today?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "any interesting tech news today?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Tech news roundup",
+                "url": "https://news.example.com/tech-news-roundup",
+                "text": [
+                  "A few chip and cloud stories; nothing that affects your plans.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "A few chip and cloud stories; nothing that affects your plans."
+    },
+    {
+      "user": "remind me to prep rate limiting on Thursday evening",
+      "calls": [
+        {
+          "operation": "schedule_create",
+          "args": {
+            "text": "prep rate limiting",
+            "at": "2026-10-08T19:00:00+08:00"
+          },
+          "result": {
+            "id": "sch-41",
+            "created": true
+          }
+        }
+      ],
+      "reply": "Reminder set for Thu 8 Oct, 7 pm: prep rate limiting."
+    },
+    {
+      "user": "what topics should I cover for system design?",
+      "calls": [],
+      "reply": "Rate limiting, idempotent payments, queues and back-pressure, and caching strategy."
+    },
+    {
+      "user": "mark Canva as rejected and note they want more Go experience",
+      "calls": [
+        {
+          "operation": "job_update",
+          "args": {
+            "company": "Canva",
+            "status": "rejected",
+            "note": "wants more Go experience"
+          },
+          "result": {
+            "updated": true
+          }
+        }
+      ],
+      "reply": "Updated Canva: rejected, note added about Go experience."
+    }
+  ],
+  "probes": [
+    {
+      "id": "job-search/1",
+      "after": 12,
+      "message": "what did they want more of?",
+      "slice": "previous",
+      "evidence": ["more Go experience"],
+      "accept": ["\\bgo\\b|golang", "experience"],
+      "reject": [],
+      "note": ""
+    },
+    {
+      "id": "job-search/2",
+      "after": 12,
+      "message": "when is my prep reminder?",
+      "slice": "gap",
+      "evidence": ["Thu 8 Oct, 7 pm"],
+      "accept": ["thu(rsday)?|8 oct", "7 ?pm|19:00"],
+      "reject": [],
+      "note": ""
+    },
+    {
+      "id": "job-search/3",
+      "after": 12,
+      "message": "what's the Zoom ID for the Grab interview?",
+      "slice": "tool-detail",
+      "evidence": ["884 213 0071"],
+      "accept": ["884 ?213 ?0071"],
+      "reject": [],
+      "note": ""
+    },
+    {
+      "id": "job-search/4",
+      "after": 12,
+      "message": "who is interviewing me at Grab?",
+      "slice": "distant",
+      "evidence": ["Marcus Webb"],
+      "accept": ["marcus"],
+      "reject": ["lina"],
+      "note": ""
+    },
+    {
+      "id": "job-search/5",
+      "after": 12,
+      "message": "what's the salary range for the Wise role?",
+      "slice": "tool-detail",
+      "evidence": ["SGD 170-200k"],
+      "accept": ["170", "200"],
+      "reject": ["180|160"],
+      "note": ""
+    },
+    {
+      "id": "job-search/6",
+      "after": 12,
+      "message": "switching topics: when is the Grab round?",
+      "slice": "switch",
+      "evidence": ["Fri 9 Oct at 3:00 pm"],
+      "accept": ["fri(day)?|9 oct", "3(:00)? ?pm|15:00"],
+      "reject": ["7 ?pm"],
+      "note": ""
+    }
+  ]
+}

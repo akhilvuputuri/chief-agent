@@ -1,0 +1,325 @@
+{
+  "id": "wrong-meeting",
+  "description": "A design review is discussed, then a different coffee meeting must be scheduled without reusing the first meeting's details.",
+  "turns": [
+    {
+      "user": "what's on my calendar next week?",
+      "calls": [
+        {
+          "operation": "calendar_list",
+          "args": {
+            "from": "2026-10-05",
+            "to": "2026-10-11"
+          },
+          "result": {
+            "events": [
+              {
+                "title": "Design review with Aisha Karim",
+                "start": "Tue 6 Oct 2:00 pm",
+                "room": "Level 12 Room Kestrel",
+                "link": "meet.example.com/kst-4410"
+              },
+              {
+                "title": "Dentist - Dr Lowe",
+                "start": "Thu 8 Oct 9:40 am",
+                "place": "Bright Smile Dental, Tanjong Pagar"
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "Design review with Aisha on Tue 6 Oct at 2:00 pm, and the dentist on Thu 8 Oct at 9:40 am."
+    },
+    {
+      "user": "did Aisha send an agenda?",
+      "calls": [
+        {
+          "operation": "gmail_search",
+          "args": {
+            "query": "from:aisha agenda"
+          },
+          "result": [
+            {
+              "from": "Aisha Karim <aisha@northwind.example.com>",
+              "subject": "Agenda for Tuesday",
+              "date": "2026-09-28",
+              "snippet": "1) onboarding flow 2) pricing page. Please share the Figma file by Monday.",
+              "body": [
+                "1) onboarding flow 2) pricing page. Please share the Figma file by Monday.",
+                {
+                  "$fill": 2500
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "reply": "Yes: review the onboarding flow, then the pricing page. She wants the Figma file shared beforehand."
+    },
+    {
+      "user": "any interesting tech news today?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "any interesting tech news today?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Tech news roundup",
+                "url": "https://news.example.com/tech-news-roundup",
+                "text": [
+                  "A few chip and cloud stories; nothing that affects your plans.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "A few chip and cloud stories; nothing that affects your plans."
+    },
+    {
+      "user": "what's a good quick dinner idea?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "what's a good quick dinner idea?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Weeknight dinner ideas",
+                "url": "https://news.example.com/weeknight-dinner-ideas",
+                "text": [
+                  "A soy-ginger salmon traybake takes about 25 minutes.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "A soy-ginger salmon traybake takes about 25 minutes."
+    },
+    {
+      "user": "tips for sleeping better?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "tips for sleeping better?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Sleep habits guide",
+                "url": "https://news.example.com/sleep-habits-guide",
+                "text": [
+                  "Keep a fixed wake time, cut caffeine after 2pm and dim screens before bed.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "Keep a fixed wake time, cut caffeine after 2pm and dim screens before bed."
+    },
+    {
+      "user": "how do index funds work?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "how do index funds work?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Index funds explained",
+                "url": "https://news.example.com/index-funds-explained",
+                "text": [
+                  "They track a market index and hold its constituents at low cost.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "They track a market index and hold its constituents at low cost."
+    },
+    {
+      "user": "best stretches after running?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "best stretches after running?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Post-run stretching",
+                "url": "https://news.example.com/post-run-stretching",
+                "text": [
+                  "Calf, hamstring and hip-flexor stretches, 30 seconds each.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "Calf, hamstring and hip-flexor stretches, 30 seconds each."
+    },
+    {
+      "user": "what's new in the F1 standings?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "what's new in the F1 standings?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "F1 standings update",
+                "url": "https://news.example.com/f1-standings-update",
+                "text": [
+                  "The championship gap narrowed after the last race.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "The championship gap narrowed after the last race."
+    },
+    {
+      "user": "remind me to renew my passport",
+      "calls": [
+        {
+          "operation": "item_save",
+          "args": {
+            "title": "Renew passport"
+          },
+          "result": {
+            "id": "item-12",
+            "saved": true
+          }
+        }
+      ],
+      "reply": "Saved a reminder to renew your passport."
+    },
+    {
+      "user": "what room is the design review in?",
+      "calls": [],
+      "reply": "Level 12 Room Kestrel."
+    },
+    {
+      "user": "Ben emailed about a coffee catch-up?",
+      "calls": [
+        {
+          "operation": "gmail_search",
+          "args": {
+            "query": "from:ben coffee"
+          },
+          "result": [
+            {
+              "from": "Ben Ortiz <ben@ortiz.example.com>",
+              "subject": "coffee?",
+              "date": "2026-09-29",
+              "snippet": "Coffee at Tiong Bahru Bakery next week? I'm free Wed 7 Oct at 10:30 am.",
+              "body": [
+                "Coffee at Tiong Bahru Bakery next week? I'm free Wed 7 Oct at 10:30 am.",
+                {
+                  "$fill": 2500
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "reply": "Ben Ortiz suggests coffee at Tiong Bahru Bakery, any morning next week, and says he is free Wed 7 Oct at 10:30 am."
+    }
+  ],
+  "probes": [
+    {
+      "id": "wrong-meeting/1",
+      "after": 11,
+      "message": "where did he want to meet?",
+      "slice": "previous",
+      "evidence": ["Tiong Bahru Bakery"],
+      "accept": ["tiong bahru"],
+      "reject": [],
+      "note": ""
+    },
+    {
+      "id": "wrong-meeting/2",
+      "after": 11,
+      "message": "put the coffee with Ben in my calendar",
+      "slice": "switch",
+      "evidence": ["Wed 7 Oct at 10:30 am"],
+      "accept": ["7 oct|wed(nesday)?", "10:30"],
+      "reject": ["kestrel|2:00 ?pm|aisha"],
+      "note": "Must not reuse the design review's time, room or attendee."
+    },
+    {
+      "id": "wrong-meeting/3",
+      "after": 11,
+      "message": "what time is the design review?",
+      "slice": "distant",
+      "evidence": ["Tue 6 Oct 2:00 pm"],
+      "accept": ["2(:00)? ?pm|14:00"],
+      "reject": ["10:30"],
+      "note": ""
+    },
+    {
+      "id": "wrong-meeting/4",
+      "after": 11,
+      "message": "what's the meeting link for Tuesday?",
+      "slice": "tool-detail",
+      "evidence": ["meet.example.com/kst-4410"],
+      "accept": ["kst-4410"],
+      "reject": [],
+      "note": ""
+    },
+    {
+      "id": "wrong-meeting/5",
+      "after": 11,
+      "message": "what did Aisha want before the meeting?",
+      "slice": "distant",
+      "evidence": ["share the Figma file by Monday"],
+      "accept": ["figma"],
+      "reject": [],
+      "note": ""
+    },
+    {
+      "id": "wrong-meeting/6",
+      "after": 11,
+      "message": "which meeting is on Wednesday?",
+      "slice": "same-word",
+      "evidence": ["Wed 7 Oct at 10:30 am"],
+      "accept": ["ben|coffee"],
+      "reject": ["design review|aisha"],
+      "note": ""
+    }
+  ]
+}

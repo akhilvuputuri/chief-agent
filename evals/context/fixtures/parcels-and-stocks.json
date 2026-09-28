@@ -1,0 +1,371 @@
+{
+  "id": "parcels-and-stocks",
+  "description": "Parcel tracking and stock watchlist checks interleaved with unrelated lookups.",
+  "turns": [
+    {
+      "user": "what am I still waiting on?",
+      "calls": [
+        {
+          "operation": "parcel_list",
+          "args": {},
+          "result": [
+            {
+              "item": "Aeron chair",
+              "carrier": "Ninja Van",
+              "tracking": "NV-77120-SG",
+              "eta": "Mon 12 Oct",
+              "log": {
+                "$fill": 8000
+              }
+            },
+            {
+              "item": "Running shoes",
+              "carrier": "J&T",
+              "tracking": "JT559023",
+              "eta": "tomorrow",
+              "log": {
+                "$fill": 5000
+              }
+            },
+            {
+              "item": "Lens cap",
+              "carrier": "Qxpress",
+              "status": "delayed at sorting hub",
+              "log": {
+                "$fill": 4000
+              }
+            }
+          ]
+        }
+      ],
+      "reply": "Three parcels: the Aeron chair (Ninja Van, Mon 12 Oct), running shoes (J&T, tomorrow) and a lens cap (Qxpress, delayed)."
+    },
+    {
+      "user": "how's my watchlist?",
+      "calls": [
+        {
+          "operation": "watchlist_list",
+          "args": {},
+          "result": {
+            "items": [
+              {
+                "ticker": "AAPL",
+                "price": 231.1,
+                "change": "-0.4%",
+                "threshold": "5%"
+              },
+              {
+                "ticker": "NVDA",
+                "price": 188.4,
+                "change": "+1.2%",
+                "threshold": "7%"
+              },
+              {
+                "ticker": "D05",
+                "price": 41.02,
+                "change": "+0.3%",
+                "threshold": "3.5%"
+              }
+            ],
+            "history": {
+              "$fill": 6000
+            }
+          }
+        }
+      ],
+      "reply": "AAPL $231.10 (-0.4%), NVDA $188.40 (+1.2%), D05 $41.02 (+0.3%). Alert thresholds: AAPL 5%, NVDA 7%."
+    },
+    {
+      "user": "nice",
+      "calls": [],
+      "reply": "Anything else?"
+    },
+    {
+      "user": "tips for sleeping better?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "tips for sleeping better?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Sleep habits guide",
+                "url": "https://news.example.com/sleep-habits-guide",
+                "text": [
+                  "Keep a fixed wake time, cut caffeine after 2pm and dim screens before bed.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "Keep a fixed wake time, cut caffeine after 2pm and dim screens before bed."
+    },
+    {
+      "user": "how do index funds work?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "how do index funds work?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Index funds explained",
+                "url": "https://news.example.com/index-funds-explained",
+                "text": [
+                  "They track a market index and hold its constituents at low cost.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "They track a market index and hold its constituents at low cost."
+    },
+    {
+      "user": "best stretches after running?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "best stretches after running?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Post-run stretching",
+                "url": "https://news.example.com/post-run-stretching",
+                "text": [
+                  "Calf, hamstring and hip-flexor stretches, 30 seconds each.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "Calf, hamstring and hip-flexor stretches, 30 seconds each."
+    },
+    {
+      "user": "what's new in the F1 standings?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "what's new in the F1 standings?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "F1 standings update",
+                "url": "https://news.example.com/f1-standings-update",
+                "text": [
+                  "The championship gap narrowed after the last race.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "The championship gap narrowed after the last race."
+    },
+    {
+      "user": "any interesting tech news today?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "any interesting tech news today?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Tech news roundup",
+                "url": "https://news.example.com/tech-news-roundup",
+                "text": [
+                  "A few chip and cloud stories; nothing that affects your plans.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "A few chip and cloud stories; nothing that affects your plans."
+    },
+    {
+      "user": "what's a good quick dinner idea?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "what's a good quick dinner idea?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Weeknight dinner ideas",
+                "url": "https://news.example.com/weeknight-dinner-ideas",
+                "text": [
+                  "A soy-ginger salmon traybake takes about 25 minutes.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "A soy-ginger salmon traybake takes about 25 minutes."
+    },
+    {
+      "user": "tips for sleeping better?",
+      "calls": [
+        {
+          "operation": "web_search",
+          "args": {
+            "query": "tips for sleeping better?"
+          },
+          "result": {
+            "results": [
+              {
+                "title": "Sleep habits guide",
+                "url": "https://news.example.com/sleep-habits-guide",
+                "text": [
+                  "Keep a fixed wake time, cut caffeine after 2pm and dim screens before bed.",
+                  {
+                    "$fill": 8000
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "reply": "Keep a fixed wake time, cut caffeine after 2pm and dim screens before bed."
+    },
+    {
+      "user": "set NVDA alert to 5%",
+      "calls": [
+        {
+          "operation": "watchlist_update",
+          "args": {
+            "ticker": "NVDA",
+            "threshold": "5%"
+          },
+          "result": {
+            "ticker": "NVDA",
+            "threshold": "5%",
+            "updated": true
+          }
+        }
+      ],
+      "reply": "Done, NVDA now alerts on a 5% drop."
+    },
+    {
+      "user": "and how's D05 doing?",
+      "calls": [],
+      "reply": "D05 is at $41.02, up 0.3% today."
+    },
+    {
+      "user": "track the chair please",
+      "calls": [
+        {
+          "operation": "parcel_list",
+          "args": {
+            "tracking": "NV-77120-SG"
+          },
+          "result": {
+            "item": "Aeron chair",
+            "status": "at hub",
+            "window": "Mon 12 Oct, 2-6 pm",
+            "log": {
+              "$fill": 9000
+            }
+          }
+        }
+      ],
+      "reply": "The Aeron chair is at the Ninja Van hub; delivery window Mon 12 Oct, 2-6 pm."
+    }
+  ],
+  "probes": [
+    {
+      "id": "parcels-and-stocks/1",
+      "after": 13,
+      "message": "what time window was that?",
+      "slice": "previous",
+      "evidence": ["2-6 pm"],
+      "accept": ["2 ?(-|to|–) ?6 ?pm|2pm|14:00"],
+      "reject": [],
+      "note": ""
+    },
+    {
+      "id": "parcels-and-stocks/2",
+      "after": 13,
+      "message": "what's my NVDA alert threshold now?",
+      "slice": "gap",
+      "evidence": ["NVDA now alerts on a 5% drop"],
+      "accept": ["5 ?%"],
+      "reject": ["7 ?%"],
+      "note": ""
+    },
+    {
+      "id": "parcels-and-stocks/3",
+      "after": 13,
+      "message": "what's the tracking number for the running shoes?",
+      "slice": "tool-detail",
+      "evidence": ["JT559023"],
+      "accept": ["JT559023"],
+      "reject": [],
+      "note": ""
+    },
+    {
+      "id": "parcels-and-stocks/4",
+      "after": 13,
+      "message": "which parcel was delayed?",
+      "slice": "distant",
+      "evidence": ["Lens cap"],
+      "accept": ["lens cap"],
+      "reject": ["chair"],
+      "note": ""
+    },
+    {
+      "id": "parcels-and-stocks/5",
+      "after": 13,
+      "message": "what's D05's alert threshold?",
+      "slice": "tool-detail",
+      "evidence": ["3.5%"],
+      "accept": ["(?<![\\d.])3\\.5 ?%"],
+      "reject": ["(?<![\\d.])(5|7) ?%"],
+      "note": ""
+    },
+    {
+      "id": "parcels-and-stocks/6",
+      "after": 13,
+      "message": "unrelated: which carrier has my shoes?",
+      "slice": "switch",
+      "evidence": ["J&T"],
+      "accept": ["j ?& ?t"],
+      "reject": ["ninja"],
+      "note": ""
+    }
+  ]
+}
