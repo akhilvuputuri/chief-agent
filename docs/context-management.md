@@ -101,7 +101,7 @@ These are compaction stages 2 and 3 of the plan in the compaction research. They
 - A header tells the model to read a full message with `conversation_read` and a stored result with `observation_read`, and to use `conversation_search` for older exchanges.
 - It is built by code with no model call. The saved-answer-details pointer is not treated as the reply.
 
-**Measured effect** ([journal 40](journey/40-exchange-index.md); one answer run each on the synthetic eval):
+**Measured effect** ([journal 41](journey/41-exchange-index.md); one answer run each on the synthetic eval):
 
 - correct answers rose from 81% to 97%;
 - tool-detail answers rose from 44% to 100%;

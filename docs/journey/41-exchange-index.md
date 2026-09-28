@@ -1,11 +1,11 @@
-# 40 — Pointing the model at what it cannot see
+# 41 — Pointing the model at what it cannot see
 
 Work date(s): 2026-09-28. Written/revised: 2026-09-28.
 Status: in review. The change is on a review branch; the production effect is not measured.
 
 ## User-visible problem and preceding iteration
 
-[Journal 39](39-context-recall-eval.md) measured the current context pipeline on synthetic multi-topic chats:
+[Journal 40](40-context-recall-eval.md) measured the current context pipeline on synthetic multi-topic chats:
 
 - 81% of probes were answered correctly;
 - only 44% of the probes whose answer sat inside an earlier tool result;

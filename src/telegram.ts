@@ -1,3 +1,4 @@
+import { mutePending } from "./stocks.js";
 import { errorFields, opsLog } from "./ops-log.js";
 import { WorkTools, renderWork, renderWorkList } from "./work.js";
 import { TelegramViews, viewCallback } from "./telegram-views.js";
@@ -183,11 +184,10 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
           ).rows.length > 0;
     if (paused)
       // A queued alert for a just-paused stock (or all stocks) must not still deliver.
-      await db.query(
-        `UPDATE stock_alerts SET state='muted' WHERE user_id=$1 AND state='pending'${
-          ctx.match[1] === "item" ? " AND item_id=$2" : ""
-        }`,
-        ctx.match[1] === "item" ? [user, ctx.match[2]] : [user],
+      await mutePending(
+        db,
+        user,
+        ctx.match[1] === "item" ? ctx.match[2] : undefined,
       );
     await ctx.answerCallbackQuery({
       text: paused

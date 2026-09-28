@@ -31,7 +31,7 @@ import {
 } from "./tool-domains.js";
 import { recentTurns, type ToolPicker } from "./tool-picker.js";
 import { SerialQueue } from "./security.js";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
 import { ensureUser, event } from "./db.js";
 import {
@@ -696,6 +696,8 @@ export class Assistant {
       });
       const request: AgentRequest = {
         runId: run,
+        // One key per owner: a per-run key made every message's first call a cache miss.
+        cacheKey: `chief-${createHash("sha256").update(user).digest("hex").slice(0, 16)}`,
         capability,
         message,
         ...(images?.length ? { images } : {}),

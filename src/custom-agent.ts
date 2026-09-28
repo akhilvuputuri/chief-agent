@@ -200,6 +200,7 @@ export class CustomAgent implements Agent {
               tools,
               reasoning: "medium",
               sessionId: req.runId,
+              ...(req.cacheKey ? { cacheKey: req.cacheKey } : {}),
               signal: AbortSignal.any([
                 req.signal,
                 ...(req.modelSignal ? [req.modelSignal] : []),

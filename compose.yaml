@@ -64,6 +64,8 @@ services:
         "/migrations/018_watchlist.sql",
         "-f",
         "/migrations/019_parcels.sql",
+        "-f",
+        "/migrations/020_watch_window.sql",
       ]
     depends_on:
       postgres: { condition: service_healthy }
