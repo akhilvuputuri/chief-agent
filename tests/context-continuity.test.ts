@@ -328,7 +328,7 @@ test("exchange index lists earlier exchanges with read references and excludes t
   const lines = index.split("\n");
   assert.match(
     lines[0]!,
-    /conversation_read\(messageId\).*observation_read\(observationId\)/,
+    /conversation_read\(messageId or replyId\).*observation_read\(observationId\)/,
   );
   assert.equal(lines.length, 2);
   assert.match(
@@ -553,7 +553,10 @@ test("exchange index gives background deliveries their own line, caps tools and 
       `you: ${JSON.stringify('say " → "fake')} → "Reply to the first"`,
     ),
   );
-  assert.match(lines[1]!, /\+4 more/);
+  // All twelve results keep read IDs; names only for the first eight.
+  for (let i = 0; i < 12; i++) assert.ok(lines[1]!.includes(`obs=${obs(i)}`));
+  assert.equal(lines[1]!.match(/web_search obs=/g)!.length, 8);
+  assert.doesNotMatch(lines[1]!, /more/);
   assert.doesNotMatch(lines[1]!, /finish_turn/);
   assert.ok(lines[1]!.includes(`obs=${obs(0)}`)); // receiptId before observationId
   assert.match(
@@ -581,4 +584,89 @@ test("the previous exchange keeps its text but excerpts large results with read 
   assert.match(text, /earlier tool result excerpts/);
   assert.match(text, /obs-1/);
   assert.ok(input.serializedSize < 120000);
+});
+
+test("exchange index keeps reply, saved-answer and every tool read reference", () => {
+  const at = "2026-09-28T06:00:00Z";
+  const id = (n: number) =>
+    `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+  const calls = Array.from({ length: 30 }, (_, i) => `c${i}`);
+  const rows: IndexRow[] = [
+    // A migrated exchange has no run; a later job delivery still gets its own line.
+    {
+      id: "legacy-u",
+      role: "user",
+      runId: null,
+      createdAt: at,
+      content: "old question",
+    },
+    {
+      id: "legacy-a",
+      role: "assistant",
+      runId: null,
+      createdAt: at,
+      content: "old answer",
+    },
+    {
+      id: "job-a",
+      role: "assistant",
+      runId: "job-1",
+      createdAt: at,
+      content: "Job finished",
+    },
+    {
+      id: "u1",
+      role: "user",
+      runId: "r1",
+      createdAt: at,
+      content: "plan my trip",
+    },
+    {
+      id: "a1",
+      role: "assistant",
+      runId: "r1",
+      createdAt: at,
+      content: null,
+      callNames: calls.map(() => "web_read"),
+      callIds: calls,
+    },
+    ...calls.map((c, i): IndexRow => ({
+      id: `t${i}`,
+      role: "tool",
+      runId: "r1",
+      createdAt: at,
+      content: `{"observationId":"${id(i)}"}`,
+      toolCallId: c,
+    })),
+    {
+      id: "a2",
+      role: "assistant",
+      runId: "r1",
+      createdAt: at,
+      content: "Ten stops planned.",
+    },
+    {
+      id: "a3",
+      role: "assistant",
+      runId: "r1",
+      createdAt: at,
+      content: `[Saved answer details: observationId=${id(99)}. Use observation_read.]`,
+    },
+    { id: "u2", role: "user", runId: "r2", createdAt: at, content: "thanks" },
+  ];
+  const lines = exchangeIndex(rows).split("\n");
+  assert.equal(lines.length, 4);
+  assert.match(
+    lines[1]!,
+    /messageId=legacy-u\] you: "old question" → "old answer" · replyId=legacy-a/,
+  );
+  assert.match(
+    lines[2]!,
+    /messageId=job-a\] background update → "Job finished"/,
+  );
+  assert.match(lines[3]!, /→ "Ten stops planned\." · replyId=a2/);
+  for (let i = 0; i < 24; i++) assert.ok(lines[3]!.includes(`obs=${id(i)}`));
+  assert.ok(!lines[3]!.includes(id(24)));
+  assert.match(lines[3]!, /\+6 more/);
+  assert.ok(lines[3]!.includes(`saved answer obs=${id(99)}`));
 });
