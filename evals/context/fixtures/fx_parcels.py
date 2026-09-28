@@ -11,7 +11,7 @@ T = [
          call("watchlist_list", {}, {"items": [
              {"ticker": "AAPL", "price": 231.1, "change": "-0.4%", "threshold": "5%"},
              {"ticker": "NVDA", "price": 188.4, "change": "+1.2%", "threshold": "7%"},
-             {"ticker": "D05", "price": 41.02, "change": "+0.3%", "threshold": "3%"}], "history": fill(6000)})),
+             {"ticker": "D05", "price": 41.02, "change": "+0.3%", "threshold": "3.5%"}], "history": fill(6000)})),
     chat("nice", "Anything else?"),
 ] + filler(7, start=2) + [
     turn("set NVDA alert to 5%", "Done, NVDA now alerts on a 5% drop.",
@@ -26,7 +26,7 @@ P = [
     probe(ID, 2, N, "what's my NVDA alert threshold now?", "gap", ["NVDA now alerts on a 5% drop"], [r"5 ?%"], [r"7 ?%"]),
     probe(ID, 3, N, "what's the tracking number for the running shoes?", "tool-detail", ["JT559023"], [r"JT559023"]),
     probe(ID, 4, N, "which parcel was delayed?", "distant", ["Lens cap"], [r"lens cap"], [r"chair"]),
-    probe(ID, 5, N, "what's D05's alert threshold?", "tool-detail", ['"threshold": "3%"'], [r"3 ?%"], [r"5 ?%|7 ?%"]),
+    probe(ID, 5, N, "what's D05's alert threshold?", "tool-detail", ["3.5%"], [r"(?<![\d.])3\.5 ?%"], [r"(?<![\d.])(5|7) ?%"]),
     probe(ID, 6, N, "unrelated: which carrier has my shoes?", "switch", ["J&T"], [r"j ?& ?t"], [r"ninja"]),
 ]
 FIXTURE = {"id": ID, "description": "Parcel tracking and stock watchlist checks interleaved with unrelated lookups.", "turns": T, "probes": P}

@@ -22,7 +22,7 @@ T = [
 ]
 N = len(T)
 P = [
-    probe(ID, 1, N, "what did they want more of?", "previous", ["more Go experience"], [r"\bgo\b|golang"]),
+    probe(ID, 1, N, "what did they want more of?", "previous", ["more Go experience"], [r"\bgo\b|golang", r"experience"]),
     probe(ID, 2, N, "when is my prep reminder?", "gap", ["Thu 8 Oct, 7 pm"], [r"thu(rsday)?|8 oct", r"7 ?pm|19:00"]),
     probe(ID, 3, N, "what's the Zoom ID for the Grab interview?", "tool-detail", ["884 213 0071"], [r"884 ?213 ?0071"]),
     probe(ID, 4, N, "who is interviewing me at Grab?", "distant", ["Marcus Webb"], [r"marcus"], [r"lina"]),

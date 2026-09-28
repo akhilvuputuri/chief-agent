@@ -89,6 +89,7 @@ def validate(f, known_ops):
         assert 1 <= p["after"] <= len(f["turns"]), p["id"]
         seen = json.dumps(strip_fills(f["turns"][: p["after"]]), ensure_ascii=False)
         for e in p["evidence"]:
+            assert '"' not in e, f"{p['id']}: evidence must not depend on JSON quoting"
             assert e in seen, f"{p['id']}: evidence {e!r} not in turns[:{p['after']}]"
         for r in p["accept"] + p["reject"]:
             re.compile(r, re.I)
@@ -111,6 +112,9 @@ def main():
         results = sum(size(c["result"]) for t in f["turns"] for c in t["calls"])
         rows.append(f"{f['id']:24} turns {len(f['turns']):3}  probes {len(f['probes'])}  {slices}  result chars {results:,}")
     print("\n".join(rows))
+    # Match the repository's formatting so format:check passes after regeneration.
+    import subprocess
+    subprocess.run(["npx", "prettier", "--write", str(HERE / "*.json")], cwd=HERE.parents[2], check=False, capture_output=True)
 
 
 if __name__ == "__main__":

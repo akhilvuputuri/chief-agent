@@ -283,7 +283,7 @@
       "message": "what did they want more of?",
       "slice": "previous",
       "evidence": ["more Go experience"],
-      "accept": ["\\bgo\\b|golang"],
+      "accept": ["\\bgo\\b|golang", "experience"],
       "reject": [],
       "note": ""
     },

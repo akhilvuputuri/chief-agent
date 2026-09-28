@@ -25,7 +25,7 @@ P = [
     probe(ID, 2, N, "what's the new rent?", "distant", ["SGD 3,450/month"], [r"3,?450"], [r"3,?200"]),
     probe(ID, 3, N, "what's my SP Group account number?", "tool-detail", ["5510-2277"], [r"5510-?2277"]),
     probe(ID, 4, N, "how much is the electricity bill?", "gap", ["SGD 142.60"], [r"142\.60"], [r"58\.90"]),
-    probe(ID, 5, N, "does the diplomatic clause stay?", "tool-detail", ["The diplomatic clause stays"], [r"\byes\b|stays|remains"]),
-    probe(ID, 6, N, "by when do I need to answer the landlord?", "switch", ["confirm by 15 Oct"], [r"15 oct|oct(ober)? 15"], [r"7 working|10 oct"]),
+    probe(ID, 5, N, "does the diplomatic clause stay?", "tool-detail", ["The diplomatic clause stays"], [r"\b(stays|remains|is staying|will stay|is kept|keeps?)\b"], [r"not sure|unsure|don't know|can't (confirm|tell)|no mention"]),
+    probe(ID, 6, N, "by when do I need to answer the landlord?", "switch", ["by 15 Oct"], [r"15 oct|oct(ober)? 15"], [r"7 working|10 oct"]),
 ]
 FIXTURE = {"id": ID, "description": "Lease renewal, bills and an insurance claim interleaved with unrelated lookups.", "turns": T, "probes": P}

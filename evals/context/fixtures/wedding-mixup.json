@@ -462,8 +462,8 @@
       "message": "when do I have to RSVP to Maya by?",
       "slice": "distant",
       "evidence": ["RSVP by 3 Oct"],
-      "accept": ["3 oct|oct(ober)? 3"],
-      "reject": ["30 oct"],
+      "accept": ["\\b3(rd)? oct|oct(ober)? 3(rd)?\\b"],
+      "reject": ["30 oct|oct(ober)? 30"],
       "note": ""
     },
     {

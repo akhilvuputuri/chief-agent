@@ -207,9 +207,15 @@ function visibleText(messages: ModelMessage[]) {
     .join("\n");
 }
 
-/** "context": in the prompt; "pointer": inside a stored result whose ID is in the prompt. */
+const squash = (value: string) => value.toLowerCase().replace(/\s+/g, "");
+
+/**
+ * "context": in the prompt; "pointer": inside a stored tool result or conversation message
+ * whose ID is in the prompt. Comparison ignores case and whitespace, so JSON spacing and
+ * capitalisation do not matter.
+ */
 async function visibility(db: Database, text: string, evidence: string) {
-  if (text.includes(evidence)) return "context";
+  if (squash(text).includes(squash(evidence))) return "context";
   const ids = [
     ...new Set(
       text.match(
@@ -219,8 +225,14 @@ async function visibility(db: Database, text: string, evidence: string) {
   ];
   if (!ids.length) return "absent";
   const found = await db.query(
-    "SELECT 1 FROM runtime_calls WHERE id::text = ANY($1) AND strpos(result::text, $2) > 0 LIMIT 1",
-    [ids, JSON.stringify(evidence).slice(1, -1)],
+    `SELECT 1 FROM runtime_calls WHERE id::text = ANY($1)
+       AND strpos(lower(regexp_replace(result::text, '\\s', '', 'g')), $2) > 0
+     UNION ALL
+     SELECT 1 FROM conversation_messages e JOIN message_contents c USING(user_id,hash)
+     WHERE e.id::text = ANY($1)
+       AND strpos(lower(regexp_replace(c.payload->>'content', '\\s', '', 'g')), $2) > 0
+     LIMIT 1`,
+    [ids, squash(evidence)],
   );
   return found.rows.length ? "pointer" : "absent";
 }

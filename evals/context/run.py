@@ -34,8 +34,9 @@ def read_env_key(path: Path) -> str | None:
     if not path.is_file():
         return None
     for line in path.read_text().splitlines():
+        line = line.strip().removeprefix("export ").strip()
         if line.startswith("OPENROUTER_API_KEY="):
-            return line.split("=", 1)[1].strip() or None
+            return line.split("=", 1)[1].strip().strip("'\"") or None
     return None
 
 
@@ -46,10 +47,13 @@ def grade(row: dict) -> dict:
     reachable = all(v in ("context", "pointer") for v in row["evidence"].values())
     out = {"visible": visible, "reachable": reachable, "searched": bool(SEARCH_TOOLS & set(row["toolCalls"]))}
     if row["mode"] == "answer":
-        # A correct reply may mention the other value for contrast ("3,450, up from 3,200").
-        correct = matches(row["accept"])
-        out["correct"] = correct
-        out["confused"] = matches(row["reject"]) and not correct
+        # Every accept pattern must match. A reply that also matches a known confusion is
+        # "hedged", counted apart from correct (it may only be contrast: "3,450, up from 3,200").
+        answered = bool(row["accept"]) and all(re.search(p, reply, re.I) for p in row["accept"])
+        rejected = matches(row["reject"])
+        out["correct"] = answered and not rejected
+        out["hedged"] = answered and rejected
+        out["confused"] = rejected and not answered
     return out
 
 
@@ -63,14 +67,14 @@ def summarise(rows: list[dict]) -> str:
     for row in rows:
         by_slice[row["slice"]].append(row)
     by_slice["all"] = rows
-    head = "| Slice | Probes | Evidence visible | One read away |" + (" Correct | Confused | Searched |" if answer else "")
-    lines = [head, "|" + " --- |" * (7 if answer else 4)]
+    head = "| Slice | Probes | Evidence visible | One read away |" + (" Correct | Hedged | Confused | Searched |" if answer else "")
+    lines = [head, "|" + " --- |" * (8 if answer else 4)]
     for name in [*sorted(k for k in by_slice if k != "all"), "all"]:
         group = by_slice[name]
         g = [r["grade"] for r in group]
         cells = [name, str(len(group)), pct([x["visible"] for x in g]), pct([x["reachable"] for x in g])]
         if answer:
-            cells += [pct([x["correct"] for x in g]), pct([x["confused"] for x in g]), pct([x["searched"] for x in g])]
+            cells += [pct([x[k] for x in g]) for k in ("correct", "hedged", "confused", "searched")]
         lines.append("| " + " | ".join(cells) + " |")
     sizes = [r["sizes"] for r in rows if r["sizes"]["fixed"] is not None]
     lines += [
@@ -88,7 +92,8 @@ def summarise(rows: list[dict]) -> str:
             absent = [k for k, v in r["evidence"].items() if v != "context"]
             detail = f"absent {absent}" if absent else "visible"
             if answer:
-                detail += f"; {'confused' if r['grade']['confused'] else 'correct' if r['grade']['correct'] else 'wrong'}; tools {r['toolCalls']}"
+                verdict = next((k for k in ("correct", "hedged", "confused") if r["grade"][k]), "wrong")
+                detail += f"; {verdict}; tools {r['toolCalls']}"
             lines.append(f"- {r['probe']} ({r['slice']}): {detail}")
     return "\n".join(lines)
 

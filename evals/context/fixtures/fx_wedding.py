@@ -38,7 +38,7 @@ P = [
     probe(ID, 1, N, "and where does it leave from?", "previous", ["Orchard Point Hotel"], [r"orchard point"]),
     probe(ID, 2, N, "what was I going to get Priya?", "gap", ["silk scarf from Kiln & Loom"], [r"silk scarf|kiln"]),
     probe(ID, 3, N, "what's the RSVP email for Priya and Tom?", "tool-detail", ["rsvp@priyatom.example.com"], [r"rsvp@priyatom\.example\.com"]),
-    probe(ID, 4, N, "when do I have to RSVP to Maya by?", "distant", ["RSVP by 3 Oct"], [r"3 oct|oct(ober)? 3"], [r"30 oct"]),
+    probe(ID, 4, N, "when do I have to RSVP to Maya by?", "distant", ["RSVP by 3 Oct"], [r"\b3(rd)? oct|oct(ober)? 3(rd)?\b"], [r"30 oct|oct(ober)? 30"]),
     probe(ID, 5, N, "what time is the October wedding ceremony?", "same-word", ["11:00 am"], [r"11(:00)? ?am"], [r"4:30|3:15"],
           "Two weddings; the previous exchange mentions 3:15 pm for the November one."),
     probe(ID, 6, N, "different thing: when is the keyboard arriving?", "switch", ["Thursday"], [r"thursday"], [r"3:15|14 nov"]),

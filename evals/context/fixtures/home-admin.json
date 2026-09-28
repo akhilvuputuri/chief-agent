@@ -329,8 +329,8 @@
       "message": "does the diplomatic clause stay?",
       "slice": "tool-detail",
       "evidence": ["The diplomatic clause stays"],
-      "accept": ["\\byes\\b|stays|remains"],
-      "reject": [],
+      "accept": ["\\b(stays|remains|is staying|will stay|is kept|keeps?)\\b"],
+      "reject": ["not sure|unsure|don't know|can't (confirm|tell)|no mention"],
       "note": ""
     },
     {
@@ -338,7 +338,7 @@
       "after": 10,
       "message": "by when do I need to answer the landlord?",
       "slice": "switch",
-      "evidence": ["confirm by 15 Oct"],
+      "evidence": ["by 15 Oct"],
       "accept": ["15 oct|oct(ober)? 15"],
       "reject": ["7 working|10 oct"],
       "note": ""

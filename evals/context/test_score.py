@@ -24,10 +24,15 @@ class GradeTest(unittest.TestCase):
         self.assertTrue(g["confused"])
         self.assertFalse(g["correct"])
 
-    def test_contrast_with_the_other_value_is_correct(self):
+    def test_contrast_with_the_other_value_is_hedged(self):
         g = grade(row(reply="4:30 pm; the other one is at 11am."))
-        self.assertTrue(g["correct"])
-        self.assertFalse(g["confused"])
+        self.assertTrue(g["hedged"])
+        self.assertFalse(g["correct"] or g["confused"])
+
+    def test_every_accept_pattern_must_match(self):
+        g = grade(row(accept=["wed(nesday)?", "10:30"], reject=["2:00"], reply="Wed 7 Oct at 2:00 pm in Kestrel"))
+        self.assertFalse(g["correct"])
+        self.assertTrue(g["confused"])
 
     def test_absent_evidence_and_search(self):
         g = grade(row(evidence={"4:30 pm": "absent"}, toolCalls=["conversation_search"]))

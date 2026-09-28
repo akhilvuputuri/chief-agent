@@ -64,7 +64,7 @@
                 "ticker": "D05",
                 "price": 41.02,
                 "change": "+0.3%",
-                "threshold": "3%"
+                "threshold": "3.5%"
               }
             ],
             "history": {
@@ -352,9 +352,9 @@
       "after": 13,
       "message": "what's D05's alert threshold?",
       "slice": "tool-detail",
-      "evidence": ["\"threshold\": \"3%\""],
-      "accept": ["3 ?%"],
-      "reject": ["5 ?%|7 ?%"],
+      "evidence": ["3.5%"],
+      "accept": ["(?<![\\d.])3\\.5 ?%"],
+      "reject": ["(?<![\\d.])(5|7) ?%"],
       "note": ""
     },
     {
