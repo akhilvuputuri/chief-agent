@@ -106,6 +106,9 @@ export async function learnedWeights(
 export interface Candidate {
   sourceId: string;
   sourceName: string;
+  /** Domain of the followed site. Votes and the per-site cap use it, so an
+   * aggregator linking to many publishers still counts as one site. */
+  sourceDomain?: string;
   entry: FeedEntry;
 }
 export interface Scored extends Candidate {
@@ -146,7 +149,7 @@ export function rankCandidates(
   for (const c of candidates) {
     let domain: string, canonical: string;
     try {
-      domain = domainOf(c.entry.url);
+      domain = c.sourceDomain ?? domainOf(c.entry.url);
       canonical = canonicalUrl(c.entry.url);
     } catch {
       continue;
@@ -382,6 +385,11 @@ export class NewsBulletin {
     private send: (user: string, payload: any) => Promise<unknown>,
     private clock = () => new Date(),
   ) {}
+  /** When today's all-sites-failed retry is due, if one is pending. */
+  retryAt(user: string, date: string) {
+    const failed = this.allFailed.get(user);
+    return failed?.date === date ? failed.next : undefined;
+  }
   async recover() {
     await this.db.query(
       "UPDATE news_editions SET state='uncertain' WHERE state='sending'",
@@ -410,7 +418,12 @@ export class NewsBulletin {
           );
           const feed = parseFeed(body, finalUrl, this.clock());
           for (const entry of feed.entries.slice(0, 50))
-            candidates.push({ sourceId: s.id, sourceName: s.name, entry });
+            candidates.push({
+              sourceId: s.id,
+              sourceName: s.name,
+              sourceDomain: s.domain,
+              entry,
+            });
           await this.db.query(
             "UPDATE news_sources SET last_fetched_at=$2,last_error=NULL WHERE id=$1",
             [s.id, this.clock()],
@@ -580,6 +593,13 @@ export class NewsBulletin {
         )
       ).rows[0];
       if (!stored.editions) return { skipped: "already built" as const };
+      // The owner may have switched the bulletin off while feeds were fetched.
+      if (kind === "scheduled")
+        await this.db.query(
+          `UPDATE news_editions SET state='muted' WHERE id=$1 AND state='pending'
+             AND NOT EXISTS (SELECT 1 FROM news_settings WHERE user_id=$2 AND enabled)`,
+          [id, user],
+        );
       return {
         editionId: id,
         items: items.length,
@@ -615,11 +635,21 @@ export class NewsBulletin {
     }
   }
   private async deliver() {
+    // A scheduled edition belongs to its day: one left pending (for example
+    // built while the owner was switching the bulletin off) is never sent later.
+    await this.db.query(
+      "UPDATE news_editions SET state='muted' WHERE state='pending' AND kind='scheduled' AND edition_date<$1",
+      [sgt(this.clock()).date],
+    );
     const d = (
-      await this.db.query(`UPDATE news_editions SET state='sending' WHERE id=(
+      await this.db.query(
+        `UPDATE news_editions SET state='sending' WHERE id=(
         SELECT e.id FROM news_editions e LEFT JOIN news_settings s ON s.user_id=e.user_id
-        WHERE e.state='pending' AND (e.kind='on_demand' OR COALESCE(s.enabled,false))
-        ORDER BY e.created_at FOR UPDATE OF e SKIP LOCKED LIMIT 1) RETURNING *`)
+        WHERE e.state='pending' AND (e.kind='on_demand'
+          OR (COALESCE(s.enabled,false) AND e.edition_date=$1))
+        ORDER BY e.created_at FOR UPDATE OF e SKIP LOCKED LIMIT 1) RETURNING *`,
+        [sgt(this.clock()).date],
+      )
     ).rows[0];
     if (!d) return;
     try {
@@ -704,11 +734,16 @@ export class NewsTools {
       )
     ).rows.length;
     let slot = slotAt(date, s.delivery_time);
-    if (
-      builtToday ||
-      slot <= now ||
-      (s.schedule_from && new Date(s.schedule_from) > slot)
-    )
+    const skipToday = s.schedule_from && new Date(s.schedule_from) > slot;
+    if (!builtToday && !skipToday && slot <= now) {
+      // Today's slot has passed without an edition: it is being built now,
+      // or waiting to retry after every site failed.
+      const retry = this.bulletin.retryAt(user, date);
+      return retry
+        ? `today, retrying at ${sgtLabel(new Date(retry)).slice(-5)} SGT because no site could be reached`
+        : "today, due now";
+    }
+    if (builtToday || slot <= now || skipToday)
       slot = slotAt(shift(date, 1), s.delivery_time);
     return `${sgtLabel(slot)} SGT`;
   }
@@ -808,6 +843,13 @@ export class NewsTools {
     };
   }
   private async removeSource(user: string, id: string) {
+    // A queued edition carrying the removed site's items is withdrawn; its
+    // other items were never shown, so they stay eligible for the next one.
+    await this.db.query(
+      `UPDATE news_editions SET state='muted' WHERE user_id=$2 AND state='pending'
+         AND id IN (SELECT edition_id FROM news_items WHERE source_id=$1 AND user_id=$2)`,
+      [id, user],
+    );
     const row = (
       await this.db.query(
         "DELETE FROM news_sources WHERE id=$1 AND user_id=$2 RETURNING name",

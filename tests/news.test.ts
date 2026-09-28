@@ -30,8 +30,10 @@ class FakeFetcher implements FeedFetcher {
   pages = new Map<string, string>();
   fail = new Set<string>();
   calls: string[] = [];
+  onGet: ((url: string) => Promise<void>) | null = null;
   async get(url: string) {
     this.calls.push(url);
+    if (this.onGet) await this.onGet(url);
     if (this.fail.has(url)) throw new Error("HTTP 503");
     const body = this.pages.get(url);
     if (body === undefined) throw new Error("Feed request failed (HTTP 404)");
@@ -746,6 +748,155 @@ test("one owner's failing build neither blocks others nor stops delivery", async
     await f.bulletin.tick();
     await f.bulletin.tick();
     assert.equal(f.sent.filter((s) => s.user === "a").length, 2);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("an edition built while the owner switches the bulletin off is never sent later", async () => {
+  const f = await fixture(sgtAt("2026-09-28T07:00"));
+  try {
+    await followTwoSites(f, sgtAt("2026-09-28T07:00"));
+    await f.call({
+      operation: "news_settings",
+      deliveryTime: "08:00",
+      enabled: true,
+    });
+    f.setNow(sgtAt("2026-09-28T08:00"));
+    // The owner turns it off while feeds are being fetched.
+    f.fetcher.onGet = async () => {
+      f.fetcher.onGet = null;
+      await f.call({ operation: "news_settings", enabled: false });
+    };
+    await f.bulletin.tick();
+    assert.equal(f.sent.length, 0);
+    // A leftover pending scheduled edition from an earlier day is also stale.
+    await f.db.query(
+      "UPDATE news_editions SET state='pending' WHERE edition_date='2026-09-28'",
+    );
+    f.setNow(sgtAt("2026-09-29T07:00"));
+    await f.call({ operation: "news_settings", enabled: true });
+    await f.bulletin.tick();
+    assert.equal(f.sent.length, 0);
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT state FROM news_editions WHERE edition_date='2026-09-28'",
+        )
+      ).rows[0].state,
+      "muted",
+    );
+    f.setNow(sgtAt("2026-09-29T08:00"));
+    await f.bulletin.tick();
+    assert.equal(f.sent.length, 1);
+    assert.match(f.sent[0]!.payload.text, /Tue 29 Sep/);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("removing a site withdraws a queued edition that carries its items", async () => {
+  const f = await fixture(sgtAt("2026-09-28T07:00"));
+  try {
+    await followTwoSites(f, sgtAt("2026-09-28T07:00"));
+    await f.call({
+      operation: "news_settings",
+      deliveryTime: "08:00",
+      enabled: true,
+    });
+    f.setNow(sgtAt("2026-09-28T08:00"));
+    await f.bulletin.build("a", "scheduled");
+    const alpha = (await f.call({ operation: "news_status" })).sources.find(
+      (s: any) => s.name === "Alpha",
+    );
+    await f.call({ operation: "news_source_remove", id: alpha.id });
+    await f.bulletin.tick();
+    assert.equal(f.sent.length, 0);
+    // Beta's items were never shown, so an on-demand edition can include them.
+    await f.call({ operation: "news_edition_now" });
+    await f.bulletin.tick();
+    assert.match(f.sent[0]!.payload.text, /Gardening in small flats/);
+    assert.doesNotMatch(f.sent[0]!.payload.text, /alpha\.example/);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("an aggregator counts as one site for the per-site cap and for votes", async () => {
+  const now = sgtAt("2026-09-28T08:00");
+  const f = await fixture(now);
+  try {
+    f.fetcher.pages.set(
+      "https://agg.example/",
+      rss("Aggregator", [
+        {
+          title: "Rust release notes",
+          url: "https://x.example/1",
+          at: hoursBefore(now, 1),
+        },
+        {
+          title: "Kubernetes pricing",
+          url: "https://y.example/2",
+          at: hoursBefore(now, 1),
+        },
+        {
+          title: "Postgres indexing",
+          url: "https://z.example/3",
+          at: hoursBefore(now, 1),
+        },
+      ]),
+    );
+    f.fetcher.pages.set(
+      "https://blog.example/",
+      rss("Blog", [
+        {
+          title: "A slower essay",
+          url: "https://blog.example/e",
+          at: hoursBefore(now, 30),
+        },
+      ]),
+    );
+    await f.call({ operation: "news_source_add", site: "agg.example" });
+    await f.call({ operation: "news_source_add", site: "blog.example" });
+    await f.call({ operation: "news_settings", itemsPerEdition: 3 });
+    await f.call({ operation: "news_edition_now" });
+    await f.bulletin.tick();
+    const items = (
+      await f.db.query("SELECT id,domain FROM news_items ORDER BY position")
+    ).rows;
+    assert.equal(items.filter((i) => i.domain === "agg.example").length, 2);
+    assert.ok(items.some((i) => i.domain === "blog.example"));
+    const vote = await recordVote(
+      f.db,
+      "a",
+      items.find((i) => i.domain === "agg.example")!.id,
+      -1,
+    );
+    assert.equal(vote!.domain, "agg.example");
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("status reports today's retry instead of tomorrow while sites are unreachable", async () => {
+  const f = await fixture(sgtAt("2026-09-28T07:00"));
+  try {
+    await followTwoSites(f, sgtAt("2026-09-28T07:00"));
+    await f.call({
+      operation: "news_settings",
+      deliveryTime: "08:00",
+      enabled: true,
+    });
+    f.fetcher.fail.add("https://alpha.example/");
+    f.fetcher.fail.add("https://beta.example/");
+    f.setNow(sgtAt("2026-09-28T08:00"));
+    await f.bulletin.tick();
+    f.setNow(sgtAt("2026-09-28T08:05"));
+    const status = await f.call({ operation: "news_status" });
+    assert.equal(
+      status.nextEdition,
+      "today, retrying at 08:15 SGT because no site could be reached",
+    );
   } finally {
     await f.pg.close();
   }
