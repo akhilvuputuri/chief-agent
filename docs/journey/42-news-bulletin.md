@@ -77,6 +77,6 @@ There are 3 new regression tests (28 news tests in total). Migration 021 is not 
 
 ## Follow-up and next iteration
 
-`scripts/deploy-news.py` is the migration-020 script with only its constants changed. Its baseline is the live release, which was `069c8d5` when first written then `7e8dfd3` after #110 and #111, and `b01c4e8` after #112 (all app-only), and 14 offline tests pass. Its test allows only the `ON DELETE SET NULL` foreign-key clause among destructive keywords. The package version is bumped to 0.3.28, which will label #107, #108 and #109 once this is verified live.
+`scripts/deploy-news.py` is the migration-020 script with only its constants changed. Its baseline is the live release, which was `069c8d5` when first written then `7e8dfd3` after #110 and #111, `b01c4e8` after #112, and `54fc145` after #113 (all app-only), and 14 offline tests pass. Its test allows only the `ON DELETE SET NULL` foreign-key clause among destructive keywords. The package version is bumped to 0.3.28, which will label #107, #108 and #109 once this is verified live.
 
 Pending: re-review of the fixes, merge, operator rollout, then the owner configuring sites, time and topics in Telegram and receiving a first edition.
