@@ -212,12 +212,14 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
       ctx.match[2]!,
       vote,
     );
+    // Telegram caps callback answers at 200 characters; names come from feeds.
     await ctx.answerCallbackQuery({
-      text: !result
+      text: (!result
         ? "That bulletin item is no longer available."
         : vote === 1
           ? `👍 Noted: more like this from ${result.domain}${result.topics.length ? ` and on ${result.topics.join(", ")}` : ""}.`
-          : `👎 Noted: less like this from ${result.domain}${result.topics.length ? ` and on ${result.topics.join(", ")}` : ""}.`,
+          : `👎 Noted: less like this from ${result.domain}${result.topics.length ? ` and on ${result.topics.join(", ")}` : ""}.`
+      ).slice(0, 190),
     });
     if (result?.changed)
       await ctx

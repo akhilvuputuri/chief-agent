@@ -1,7 +1,7 @@
-# 39 — A lean daily news bulletin from followed sites
+# 40 — A lean daily news bulletin from followed sites
 
 Work date(s): 2026-09-27 to 2026-09-28. Written/revised: 2026-09-28.
-Status: tested; in review. Needs migration 021 through the reviewed operator procedure after migration 020 ([38](38-watch-monitoring-window.md)). Not deployed; nothing configured.
+Status: tested; in review. Needs migration 021 through the reviewed operator procedure after migration 020 ([38](39-watch-monitoring-window.md)). Not deployed; nothing configured.
 
 ## User-visible problem and preceding iteration
 
@@ -22,6 +22,20 @@ On 27 September the owner asked in Telegram whether their news bulletin had been
 ## Implementation and review
 
 See [the bulletin runbook](../news-bulletin.md). `db/021_news.sql` adds four tables: settings, sources, editions (the outbox) and items (which hold votes). `src/news.ts` is about 700 lines and `src/news-feed.ts` about 550 (mostly from PR #83). A new picker domain `news` with cues, a picker description and seven synthetic eval scenarios (four tuning, three held-out). Telegram `nw:` callbacks. The gateway refuses to start without migration 21.
+
+**Independent review round 1 (Opus 5.5, on `2f428fa`): REQUEST CHANGES.**
+
+- **(P1, measured by the reviewer)** The regex-based feed parser slowed quadratically on unclosed tags: 49.8 s for a 1.45 MB body of unclosed `<item>`, which is under the fetch cap. Parsing is synchronous, so one hostile or broken feed could stall the whole gateway. It was replaced by a linear element scanner: closing-tag and `>` searches only move forward and are reused, open tags are capped at 4 KB, and text-cleaning input is bounded. Re-measured on the author's Mac with the same shapes at 1.2–1.56 MB, the worst case (unclosed categories) was 179 ms, and a regression test enforces a 1.5 s limit.
+- **(P3)** Also fixed:
+  - the 200-character callback limit (answers are truncated);
+  - overall deadlines of 45 s for discovery and 90 s for gathering, with the docs corrected;
+  - separate scheduling and delivery lanes, with per-owner error isolation;
+  - fitting whole items instead of cutting text mid-item;
+  - undated items are never re-sent;
+  - `nextEdition` after today's edition is built;
+  - wording when every site fails;
+  - untrusted markers in `news_status`;
+  - journal renumbering.
 
 ## Verification and outcome
 

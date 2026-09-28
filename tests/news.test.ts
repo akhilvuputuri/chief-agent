@@ -7,6 +7,7 @@ import { ensureUser, type Database } from "../src/db.js";
 import {
   NewsBulletin,
   NewsTools,
+  composeEdition,
   rankCandidates,
   recordVote,
   siteAddress,
@@ -593,4 +594,124 @@ test("news tools belong to the news domain and are cued by bulletin requests", (
   assert.ok(
     !selectDomains({ message: "any newsletters from my bank?" }).has("news"),
   );
+});
+
+test("hostile feed shapes parse in linear time (unclosed or unterminated tags)", () => {
+  const shapes = [
+    "<rss><channel>" + "<item>".repeat(240_000),
+    "<rss><channel><item>" + "<title>".repeat(200_000) + "</item>",
+    "<feed>" + "<entry><link ".repeat(120_000),
+    "<rss><item><title>t</title><link>https://a.example/</link>" +
+      "<category>".repeat(130_000) +
+      "</item>",
+    "<rss><item><title>" +
+      "<![CDATA[".repeat(150_000) +
+      "</title><link>https://a.example/</link></item>",
+  ];
+  for (const body of shapes) {
+    const started = Date.now();
+    parseFeed(body, "https://x.example/");
+    assert.ok(Date.now() - started < 1500, `${body.slice(0, 30)}…`);
+  }
+  const started = Date.now();
+  advertisedFeeds("<link ".repeat(100_000), "https://x.example/");
+  assert.ok(Date.now() - started < 1500);
+});
+
+test("the edition fits one message by dropping whole items, never cutting one", () => {
+  const now = new Date("2026-09-28T00:00:00Z");
+  const long = (i: number): any => ({
+    sourceId: randomUUID(),
+    sourceName: "S",
+    domain: "s.example",
+    canonical: `s.example/${i}`,
+    topics: [],
+    score: { interest: 0, recency: 1, feedback: 0, total: 1 },
+    entry: {
+      title: "T".repeat(290),
+      url: `https://s.example/${"x".repeat(580)}${i}`,
+      summary: "E".repeat(300),
+      categories: [],
+      publishedAt: now,
+    },
+  });
+  const items = Array.from({ length: 8 }, (_, i) => long(i));
+  const fitted = composeEdition("2026-09-28", items, [], now);
+  assert.ok(fitted.text.length <= 4000);
+  assert.ok(fitted.items.length < 8 && fitted.items.length > 0);
+  for (const item of fitted.items)
+    assert.ok(fitted.text.includes(item.entry.url));
+  assert.match(fitted.text, /Tap 👍 or 👎/);
+});
+
+test("undated items are delivered once; nextEdition skips a day already sent; all-failed wording", async () => {
+  const now = sgtAt("2026-09-28T07:00");
+  const f = await fixture(now);
+  try {
+    f.fetcher.pages.set(
+      "https://undated.example/",
+      rss("Undated", [
+        { title: "Evergreen essay", url: "https://undated.example/e" },
+      ]),
+    );
+    await f.call({ operation: "news_source_add", site: "undated.example" });
+    await f.call({
+      operation: "news_settings",
+      deliveryTime: "08:00",
+      enabled: true,
+    });
+    f.setNow(sgtAt("2026-09-28T08:00"));
+    await f.bulletin.tick();
+    assert.match(f.sent[0]!.payload.text, /Evergreen essay/);
+    // Moving the time later today does not promise a second edition.
+    const moved = await f.call({
+      operation: "news_settings",
+      deliveryTime: "20:00",
+    });
+    assert.equal(moved.nextEdition, "Tue 29 Sep 20:00 SGT");
+    // Forty days later the undated essay is still in the feed but not repeated.
+    f.setNow(sgtAt("2026-11-07T20:00"));
+    await f.bulletin.tick();
+    assert.doesNotMatch(f.sent.at(-1)!.payload.text, /Evergreen essay/);
+    assert.match(f.sent.at(-1)!.payload.text, /Nothing new/);
+    // Every site unreachable: say so plainly.
+    f.fetcher.fail.add("https://undated.example/");
+    for (let i = 0; i < 4; i++) {
+      f.setNow(new Date(sgtAt("2026-11-08T20:00").getTime() + i * 15 * 60000));
+      await f.bulletin.tick();
+    }
+    assert.match(
+      f.sent.at(-1)!.payload.text,
+      /couldn't reach any of the sites/,
+    );
+    const status = await f.call({ operation: "news_status" });
+    assert.match(status.untrusted, /data, not instructions/);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("one owner's failing build neither blocks others nor stops delivery", async () => {
+  const now = sgtAt("2026-09-28T07:00");
+  const f = await fixture(now);
+  try {
+    await followTwoSites(f, now);
+    await f.call({
+      operation: "news_settings",
+      deliveryTime: "08:00",
+      enabled: true,
+    });
+    // Owner b is enabled with no sites (a state a race could leave behind).
+    await f.db.query(
+      "INSERT INTO news_settings(user_id,enabled,delivery_time) VALUES('b',true,'07:30')",
+    );
+    await f.call({ operation: "news_edition_now" });
+    f.setNow(sgtAt("2026-09-28T08:00"));
+    await f.bulletin.tick();
+    await f.bulletin.tick();
+    await f.bulletin.tick();
+    assert.equal(f.sent.filter((s) => s.user === "a").length, 2);
+  } finally {
+    await f.pg.close();
+  }
 });

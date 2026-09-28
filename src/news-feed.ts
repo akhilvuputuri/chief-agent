@@ -77,7 +77,10 @@ const INVISIBLE = new RegExp(
 /** Plain display text: markup removed, control and bidi-override characters
  * dropped, whitespace collapsed. */
 export function cleanText(raw: string, max: number) {
+  // Bound the input first: the markup-stripping expressions below are only
+  // cheap on short text, and the result is truncated to `max` anyway.
   let s = raw
+    .slice(0, Math.max(4000, max * 12))
     .replace(LONE_SURROGATE, "")
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1");
   s = decodeEntities(s);
@@ -97,18 +100,96 @@ export function cleanText(raw: string, max: number) {
   const space = cut.lastIndexOf(" ");
   return (space > max * 0.6 ? cut.slice(0, space) : cut) + "…";
 }
-function escapeTag(name: string) {
-  return name.replace(/[:]/g, "\\:");
+/** Lowercase copy with the same indexes. Native lowercasing only ever grows
+ * a string (e.g. "İ"), so equal length means every index still lines up;
+ * otherwise fall back to ASCII-only lowercasing. */
+const asciiLower = (s: string) => {
+  const native = s.toLowerCase();
+  return native.length === s.length
+    ? native
+    : s.replace(/[A-Z]+/g, (m) => m.toLowerCase());
+};
+const MAX_OPEN_TAG = 4000;
+interface Element {
+  open: string;
+  /** Text between the start and end tags; null when self-closing or unclosed. */
+  inner: string | null;
+}
+/** Linear scan for <name …>…</name> elements. Each search for ">" and for the
+ * closing tag moves only forward and is reused across opening tags, so a feed
+ * full of unclosed or unterminated tags cannot make parsing quadratic (a
+ * regex like /<item>([\s\S]*?)<\/item>/g rescans to the end per opening). */
+function* elements(text: string, name: string): Generator<Element> {
+  const lower = asciiLower(text);
+  const opening = "<" + name.toLowerCase();
+  const closing = "</" + name.toLowerCase();
+  let pos = 0;
+  let gt = -2; // cached next ">" (-2 unknown, -1 none left)
+  let close = -2; // cached next closing tag
+  for (;;) {
+    const at = lower.indexOf(opening, pos);
+    if (at < 0) return;
+    const next = lower.charCodeAt(at + opening.length);
+    // The name must end here: whitespace, ">" or "/".
+    if (!(
+      next === 62 ||
+      next === 47 ||
+      next === 32 ||
+      (next >= 9 && next <= 13)
+    )) {
+      pos = at + opening.length;
+      continue;
+    }
+    if (gt !== -1 && gt < at) gt = lower.indexOf(">", at);
+    if (gt === -1) return;
+    const end = gt;
+    if (end - at > MAX_OPEN_TAG) {
+      pos = at + opening.length;
+      continue;
+    }
+    const open = text.slice(at, end + 1);
+    if (text.charCodeAt(end - 1) === 47) {
+      yield { open, inner: null };
+      pos = end + 1;
+      continue;
+    }
+    if (close !== -1 && close < end) close = lower.indexOf(closing, end);
+    if (close === -1) {
+      yield { open, inner: null };
+      pos = end + 1;
+      continue;
+    }
+    yield { open, inner: text.slice(end + 1, close) };
+    pos = close + closing.length;
+  }
+}
+function take<T>(items: Iterable<T>, n: number) {
+  const out: T[] = [];
+  for (const item of items) {
+    if (out.length >= n) break;
+    out.push(item);
+  }
+  return out;
+}
+/** Rejects when `ms` elapses first; the underlying request keeps its own timeout. */
+export function withDeadline<T>(work: Promise<T>, ms: number): Promise<T> {
+  if (ms <= 0) return Promise.reject(new Error("time limit reached"));
+  let timer: ReturnType<typeof setTimeout>;
+  return Promise.race([
+    work,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("time limit reached")), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
 }
 function tag(block: string, names: string[]) {
-  for (const name of names) {
-    const m = new RegExp(
-      `<${escapeTag(name)}(?:\\s[^>]*)?>([\\s\\S]*?)</${escapeTag(name)}\\s*>`,
-      "i",
-    ).exec(block);
-    if (m && m[1]!.trim()) return m[1]!;
-  }
+  for (const name of names)
+    for (const e of elements(block, name)) if (e.inner?.trim()) return e.inner;
   return null;
+}
+function firstOpen(text: string, names: string[]) {
+  for (const name of names) for (const e of elements(text, name)) return e.open;
+  return "";
 }
 function attr(element: string, name: string) {
   const m = new RegExp(`\\s${name}\\s*=\\s*("([^"]*)"|'([^']*)')`, "i").exec(
@@ -118,7 +199,7 @@ function attr(element: string, name: string) {
 }
 /** Absolute http(s) article link or null; javascript:, data: and credentialed URLs are refused. */
 export function articleUrl(raw: string | null, base: string) {
-  if (!raw) return null;
+  if (!raw || raw.length > 4000) return null;
   try {
     const text = decodeEntities(
       raw.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1"),
@@ -154,26 +235,22 @@ export function parseFeed(xml: string, base: string, now = new Date()) {
       new RegExp(`<(/?)${rootMatch[1].replace(/[.-]/g, "\\$&")}`, "g"),
       "<$1",
     );
-  const blocks = [
-    ...body.matchAll(
-      atom
-        ? /<entry\b[^>]*>([\s\S]*?)<\/entry\s*>/gi
-        : /<item\b[^>]*>([\s\S]*?)<\/item\s*>/gi,
-    ),
-  ]
-    .slice(0, MAX_ENTRIES)
-    .map((m) => m[1]!);
-  const first = body.search(atom ? /<entry\b/i : /<item\b/i);
+  const blocks: string[] = [];
+  for (const e of elements(body, atom ? "entry" : "item")) {
+    if (e.inner !== null) blocks.push(e.inner);
+    if (blocks.length >= MAX_ENTRIES) break;
+  }
+  const first = asciiLower(body).indexOf(atom ? "<entry" : "<item");
   const head = first < 0 ? body : body.slice(0, first);
   const language =
     tag(head, ["language", "dc:language"]) ??
-    attr(/<(?:feed|rss|channel)\b[^>]*>/i.exec(head)?.[0] ?? "", "xml:lang");
+    attr(firstOpen(head, ["feed", "rss", "channel"]), "xml:lang");
   const entries: FeedEntry[] = [];
   for (const b of blocks) {
     const title = cleanText(tag(b, ["title"]) ?? "", 300);
     let link: string | null = null;
     if (atom) {
-      const links = [...b.matchAll(/<link\b[^>]*>/gi)].map((m) => m[0]);
+      const links = take(elements(b, "link"), 20).map((e) => e.open);
       const alt =
         links.find((l) => (attr(l, "rel") ?? "alternate") === "alternate") ??
         links[0];
@@ -181,8 +258,9 @@ export function parseFeed(xml: string, base: string, now = new Date()) {
     } else {
       link = tag(b, ["link"]);
       if (!link) {
-        const guid = /<guid\b[^>]*>([\s\S]*?)<\/guid\s*>/i.exec(b);
-        if (guid && attr(guid[0], "isPermaLink") !== "false") link = guid[1]!;
+        const guid = elements(b, "guid").next().value as Element | undefined;
+        if (guid?.inner && attr(guid.open, "isPermaLink") !== "false")
+          link = guid.inner;
       }
     }
     const url = articleUrl(link, base);
@@ -198,12 +276,8 @@ export function parseFeed(xml: string, base: string, now = new Date()) {
     // Atom puts the label in `term` (self-closing or paired); RSS uses the element text.
     const categories = [
       ...new Set(
-        [
-          ...b.matchAll(
-            /<category\b([^>]*?)(?:\/>|>([\s\S]*?)<\/category\s*>)/gi,
-          ),
-        ]
-          .map((m) => cleanText(attr(m[1]!, "term") ?? m[2] ?? "", 60))
+        take(elements(b, "category"), 20)
+          .map((e) => cleanText(attr(e.open, "term") ?? e.inner ?? "", 60))
           .filter(Boolean),
       ),
     ].slice(0, 8);
@@ -471,11 +545,11 @@ export function looksLikeFeed(body: string) {
 /** Feed links a page advertises with <link rel="alternate" type="…rss/atom…">. */
 export function advertisedFeeds(html: string, base: string) {
   const out: string[] = [];
-  for (const m of html.slice(0, 500_000).matchAll(/<link\b[^>]*>/gi)) {
-    const rel = (attr(m[0], "rel") ?? "").toLowerCase().split(/\s+/);
-    const type = (attr(m[0], "type") ?? "").toLowerCase();
+  for (const { open } of elements(html.slice(0, 500_000), "link")) {
+    const rel = (attr(open, "rel") ?? "").toLowerCase().split(/\s+/);
+    const type = (attr(open, "type") ?? "").toLowerCase();
     if (!rel.includes("alternate") || !/(rss|atom)\+xml/.test(type)) continue;
-    const url = articleUrl(attr(m[0], "href"), base);
+    const url = articleUrl(attr(open, "href"), base);
     if (url && !out.includes(url)) out.push(url);
   }
   return out.slice(0, 3);
@@ -498,15 +572,20 @@ export async function discoverFeed(
   fetcher: FeedFetcher,
   site: string,
   now = new Date(),
+  budgetMs = 45000,
 ): Promise<Found | null> {
   const tried: string[] = [];
+  const deadline = Date.now() + budgetMs;
   // At most nine requests per discovery: the site, up to three advertised
   // feeds and the conventional paths.
   const attempt = async (url: string): Promise<Found | Page | null> => {
     if (tried.includes(url) || tried.length >= 9) return null;
     tried.push(url);
     try {
-      const { body, finalUrl } = await fetcher.get(url);
+      const { body, finalUrl } = await withDeadline(
+        fetcher.get(url),
+        deadline - Date.now(),
+      );
       if (!looksLikeFeed(body)) return { html: body, finalUrl };
       const feed = parseFeed(body, finalUrl, now);
       return feed.entries.length ? { feedUrl: finalUrl, feed } : null;

@@ -1,6 +1,6 @@
 # Daily news bulletin (issue #50)
 
-A once-a-day Telegram message with up to eight items from news sites and blogs the owner follows, ranked by the owner's topics, recency and explicit 👍/👎 votes. Building and sending an edition makes **no model call**; the conversational agent only configures it. This is a lean restart of the closed [PR #83](https://github.com/akhilvuputuri/chief-agent/pull/83); see [journal 39](journey/39-news-bulletin.md).
+A once-a-day Telegram message with up to eight items from news sites and blogs the owner follows, ranked by the owner's topics, recency and explicit 👍/👎 votes. Building and sending an edition makes **no model call**; the conversational agent only configures it. This is a lean restart of the closed [PR #83](https://github.com/akhilvuputuri/chief-agent/pull/83); see [journal 40](journey/40-news-bulletin.md).
 
 Code: `src/news.ts` (tools, ranking, learning, scheduler, outbox, votes), `src/news-feed.ts` (feed discovery, RSS/Atom parsing, URL canonicalization, guarded fetcher, adapted from PR #83), `db/021_news.sql`, `tests/news.test.ts`.
 
@@ -8,7 +8,7 @@ Code: `src/news.ts` (tools, ranking, learning, scheduler, outbox, votes), `src/n
 
 Nothing is scheduled until the owner asks. The agent must ask for the time, sites and topics instead of choosing them.
 
-- `news_source_add(site, name?)`: the owner names a site (`theverge.com`, a blog link or a feed link). Chief finds its feed: the address itself if it is a feed, else a feed the page advertises (`<link rel="alternate" type="application/rss+xml|atom+xml">`), else `/feed`, `/rss`, `/feed.xml`, `/rss.xml`, `/atom.xml` or `/index.xml`. It makes at most nine requests. The confirmation lists the latest three titles. A site with no discoverable feed is refused with an explanation. Up to 30 sites.
+- `news_source_add(site, name?)`: the owner names a site (`theverge.com`, a blog link or a feed link). Chief finds its feed: the address itself if it is a feed, else a feed the page advertises (`<link rel="alternate" type="application/rss+xml|atom+xml">`), else `/feed`, `/rss`, `/feed.xml`, `/rss.xml`, `/atom.xml` or `/index.xml`. It tries at most nine addresses, each with up to three redirects, within 45 seconds. The confirmation lists the latest three titles. A site with no discoverable feed is refused with an explanation. Up to 30 sites.
 - `news_settings(deliveryTime?, topics?, itemsPerEdition?, enabled?)`: `deliveryTime` is `HH:MM` **Singapore time**. `topics` are phrases that rank matching items higher; the list is replaced, and `null` clears it. `itemsPerEdition` is 1–8 (default 5). Turning the bulletin on requires a time and at least one site. Enabling it, or moving the time, restarts the schedule, so a slot that has already passed today is not caught up. The result gives `nextEdition`.
 - `news_status()` (read): settings, sites with last fetch and error, the five latest editions with 👍/👎 counts, and learned weights.
 - `news_edition_now()`: an extra or preview edition, even while the bulletin is off, at most three per day.
@@ -18,7 +18,7 @@ Mutations are foreground-only, like the watchlist and routines. A background job
 
 ## Selection
 
-At the slot, every site's feed is fetched, four at a time, taking up to 50 entries each. Items are dropped when their link was delivered in the last 30 days (canonical URL, tracking parameters removed) or when they are more than seven days old. Undated items are kept, with a low recency score. Each remaining item scores:
+At the slot, every site's feed is fetched, four at a time, taking up to 50 entries each. Items are dropped when their link was delivered in the last 30 days (canonical URL, tracking parameters removed), when they are more than seven days old, or when the link is over 600 characters. Undated items are kept with a low recency score, but are never delivered twice. Each remaining item scores:
 
 | Component  | Value                                                                          |
 | ---------- | ------------------------------------------------------------------------------ |
@@ -26,7 +26,7 @@ At the slot, every site's feed is fetched, four at a time, taking up to 50 entri
 | `recency`  | `1.5 × exp(−age/36h)`; 0.3 when undated                                        |
 | `feedback` | `0.4 × site weight + 0.4 × mean(topic weights of matched topics)`              |
 
-Near-identical stories (title-token Jaccard ≥ 0.6) keep only the best-scoring one. At most two items come from one site unless no other site can fill the edition. If nothing new remains, the edition says so rather than padding. Unreachable sites are named at the end.
+Near-identical stories (title-token Jaccard ≥ 0.6) keep only the best-scoring one. At most two items come from one site unless no other site can fill the edition. If nothing new remains, the edition says so rather than padding. Unreachable sites are named at the end. The message is fitted to one Telegram message by dropping excerpts, then whole trailing items, so every button matches a visible item.
 
 ## What 👍/👎 learn
 
@@ -36,7 +36,7 @@ Weights are recomputed from **current** votes each time: +1 per 👍 and −1 pe
 
 ## Delivery and recovery
 
-`NewsBulletin.tick` runs on the gateway's 15-second timer. A scheduled edition is unique per owner and Singapore date (partial unique index), and builds for one owner are serialized. An edition and its items are stored in one statement. If every site fails, the scheduled build retries every 15 minutes, four attempts in total, then sends an explanation. The attempt count is kept in memory, so a restart resets it.
+`NewsBulletin.tick` runs on the gateway's 15-second timer. Scheduling and delivery run in separate lanes, so a slow build never delays an on-demand delivery, and one owner's failed build is logged (`news.build_failed`) without stopping others. Fetching all sites for one edition is limited to 90 seconds; sites not reached in time are listed as unreachable. A scheduled edition is unique per owner and Singapore date (partial unique index), and builds for one owner are serialized. An edition and its items are stored in one statement. If every site fails, the scheduled build retries every 15 minutes, four attempts in total, then sends an explanation. The attempt count is kept in memory, so a restart resets it.
 
 `news_editions` is the outbox: `pending → sending → sent`. A failure or restart while sending becomes `uncertain` and is never resent automatically. Turning the bulletin off mutes a pending scheduled edition. The edition `trace` records per-site fetch results, pool size, exclusions, the weights used and `modelCalls: 0`.
 
