@@ -640,7 +640,9 @@ export class StockMonitor {
           );
           const window = effectiveWindow(item);
           if (sessionOpen && inWindow(window, now)) {
-            this.gated.delete(item.id);
+            // The first poll after a gate opens may see a delayed feed's
+            // previous-session quote; a stale result then retries sooner.
+            item.firstAfterGate = this.gated.delete(item.id);
             openItems.push(item);
             continue;
           }
@@ -747,6 +749,17 @@ export class StockMonitor {
                       : {}),
                   },
                 });
+                // At the open a delayed feed can still return the previous
+                // session's quote: check again in 15 minutes instead of
+                // spending the whole interval (once per opening).
+                if (item.firstAfterGate && item.eff_poll > 15)
+                  await this.db.query(
+                    "UPDATE watchlist_items SET last_polled_at=$2 WHERE id=$1",
+                    [
+                      item.id,
+                      new Date(now.getTime() - (item.eff_poll - 15) * 60000),
+                    ],
+                  );
                 continue;
               }
               const useExtended = wantExtendedQuote;
@@ -779,7 +792,7 @@ export class StockMonitor {
                   zoned(q.quoteTime, item.exchange_timezone).date;
               const existing = (
                 await this.db.query(
-                  "SELECT state FROM stock_alerts WHERE item_id=$1 AND trading_date=$2",
+                  "SELECT id,state,payload->>'windowMuted' AS window_muted FROM stock_alerts WHERE item_id=$1 AND trading_date=$2",
                   [item.id, tradingDate],
                 )
               ).rows[0];
@@ -808,31 +821,44 @@ export class StockMonitor {
                     marketState: basisLabel,
                     detail: { changePct, reason: "paused during poll" },
                   });
-                } else if (existing) {
+                } else if (
+                  existing &&
+                  !(existing.state === "muted" && existing.window_muted)
+                ) {
                   await this.observe(item, "suppressed_today", {
                     quote: basis,
                     marketState: basisLabel,
                     detail: { changePct, alertState: existing.state },
                   });
                 } else {
-                  const alertId = randomUUID();
+                  // An alert muted only because its window closed before it
+                  // was sent is re-armed when the window reopens the same
+                  // trading day and the stock is still down.
+                  const alertId: string = existing?.id ?? randomUUID();
                   const payload = {
                     alertId,
                     itemId: item.id,
                     symbol: item.symbol,
                     reply: this.alertText(item, basis, price, changePct),
                   };
-                  await this.db.query(
-                    `INSERT INTO stock_alerts(id,user_id,item_id,trading_date,payload)
-                   VALUES($1,$2,$3,$4,$5::jsonb) ON CONFLICT(item_id,trading_date) DO NOTHING`,
-                    [
-                      alertId,
-                      item.user_id,
-                      item.id,
-                      tradingDate,
-                      JSON.stringify(payload),
-                    ],
-                  );
+                  if (existing)
+                    await this.db.query(
+                      `UPDATE stock_alerts SET state='pending',payload=$2::jsonb,created_at=now(),sent_at=NULL
+                       WHERE id=$1 AND state='muted' AND payload->>'windowMuted'='true'`,
+                      [alertId, JSON.stringify(payload)],
+                    );
+                  else
+                    await this.db.query(
+                      `INSERT INTO stock_alerts(id,user_id,item_id,trading_date,payload)
+                     VALUES($1,$2,$3,$4,$5::jsonb) ON CONFLICT(item_id,trading_date) DO NOTHING`,
+                      [
+                        alertId,
+                        item.user_id,
+                        item.id,
+                        tradingDate,
+                        JSON.stringify(payload),
+                      ],
+                    );
                   await this.observe(item, "alerted", {
                     quote: basis,
                     marketState: basisLabel,
@@ -925,7 +951,8 @@ export class StockDelivery {
         (opened !== undefined && new Date(d.created_at).getTime() < opened)
       ) {
         await this.db.query(
-          "UPDATE stock_alerts SET state='muted' WHERE id=$1",
+          `UPDATE stock_alerts SET state='muted',
+             payload=COALESCE(payload,'{}'::jsonb)||'{"windowMuted":"true"}'::jsonb WHERE id=$1`,
           [d.id],
         );
         await this.db.query(

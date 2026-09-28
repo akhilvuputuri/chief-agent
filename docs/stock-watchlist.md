@@ -107,6 +107,14 @@ Singapore time" (migration 020, [journal 38](journey/38-watch-monitoring-window.
   not delivered late, and it still counts as that trading day's alert. An alert still
   pending from an earlier window occurrence (for example across a gateway
   outage) is muted too, rather than sent when the next window opens.
+  An alert muted only because the window closed before it was sent is marked
+  `windowMuted`. If the window reopens within the same US trading day and the
+  stock is still below its threshold, that alert is re-armed and sent. Alerts
+  muted by a pause still keep the day silent.
+- At the open, a delayed feed can still return the previous session's quote,
+  which is logged as `stale`. On the first poll after a gate, that result is
+  retried after 15 minutes instead of waiting the whole interval, once per
+  opening.
 - Gated checks (market closed or outside the window) no longer consume the
   poll cursor, so with a 60-minute cadence the first check happens at the open
   rather than up to an hour later. The gate is logged once per transition and

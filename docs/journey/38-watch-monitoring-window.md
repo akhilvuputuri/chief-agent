@@ -31,6 +31,15 @@ The stock watchlist ([25](25-stock-watchlist.md)) polls US listings during the e
 
 **Review round 1 (Devin Review, automated, on `d25956a`):** two valid findings. (1) A pending alert that survived a gateway outage would be sent when the _next_ window occurrence opened, which delivers a stale drop. Delivery now also mutes an alert created before the current window occurrence began (`windowOccurrence`). (2) `watchlist_settings` wrote the other fields before validating the window, so a rejected window still changed, for example, the poll interval. The window is now validated first and all fields are written in one statement. Both have regression tests.
 
+**Review round 2 (Opus 5.5, independent, on `d25956a`): APPROVE, with one P2 and three P3s.** The approval is historical, because the head has changed since.
+
+- (P2) With 60-minute polling, the first check now fires exactly at the open. There, a ~15-minute-delayed quote is most likely still yesterday's, so it is `stale` and the hour is spent. The first stale result after a gate now retries after 15 minutes.
+- (P3) Settings were not atomic; this was already fixed in round 1.
+- (P3) An alert muted by the window blocked a re-alert when the window reopened within the same trading day. It is now re-armed (`windowMuted`); pause-muted alerts keep the day silent.
+- (P3) `days: null` is now accepted.
+
+Each has a regression test. The reviewer's own probes confirmed DST and holiday handling in `upcomingChecks`, the overnight and 24:00 edges, idempotency and NULL behaviour of the CHECK constraints, and that the rollout script changes only constants.
+
 ## Verification and outcome
 
 - Synthetic (PGlite, mocked provider): 7 new tests. They cover validation, overnight and weekday ownership, DST-correct `nextChecks` (21:30 SGT in September, 22:30 SGT in January, MLK Day skipped), the owner's scenario (checked at 23:30 SGT, silent at 00:30 with one `outside_window` row and no quote call, alert at the next reopen when still down), a recovered drop that is not reported, the first poll at the open with a 60-minute cadence, override/inherit/clear, and a late alert muted at delivery. The full `npm run check` passed 453 application and 21 script tests. The 14 offline rollout tests passed. Migration 020 applied twice in PGlite, and the CHECKs rejected a partial window, an unknown day and start = end.

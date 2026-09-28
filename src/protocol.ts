@@ -34,6 +34,7 @@ const monitoringWindow = z
       .array(z.enum(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]))
       .min(1)
       .max(7)
+      .nullable()
       .optional(),
   })
   .strict();
