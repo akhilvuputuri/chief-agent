@@ -233,20 +233,19 @@ export function exchangeIndex(rows: IndexRow[], maxChars = 8000) {
   let size = 0;
   for (let i = entries.length - 1; i >= 0; i--) {
     const e = entries[i]!;
-    // Every result keeps its read ID up to the cap; names only for the first few.
-    const tools = e.tools
-      .slice(0, MAX_TOOL_IDS)
-      .map((t, n) =>
-        n < MAX_TOOLS
-          ? t.observation
-            ? `${t.name} obs=${t.observation}`
-            : t.name
-          : t.observation
-            ? `obs=${t.observation}`
-            : t.name,
-      );
-    if (e.tools.length > MAX_TOOL_IDS)
-      tools.push(`+${e.tools.length - MAX_TOOL_IDS} more`);
+    // Read IDs are capped, not tool entries: failed calls without an ID never crowd out
+    // a stored result. The first few tools are named; later ones show only their IDs.
+    const tools: string[] = [];
+    let ids = 0;
+    let omitted = 0;
+    e.tools.forEach((t, n) => {
+      if (t.observation && ids >= MAX_TOOL_IDS) return void omitted++;
+      if (t.observation) ids++;
+      if (n < MAX_TOOLS)
+        tools.push(t.observation ? `${t.name} obs=${t.observation}` : t.name);
+      else if (t.observation) tools.push(`obs=${t.observation}`);
+    });
+    if (omitted) tools.push(`+${omitted} more`);
     if (e.answer) tools.push(`saved answer obs=${e.answer}`);
     // JSON quoting keeps message text from imitating the line structure.
     const line =
