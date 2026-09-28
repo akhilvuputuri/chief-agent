@@ -74,3 +74,20 @@ Chief already stores every message and tool result by ID. It lacked a contiguous
   - fixed size, which should change little (index lines at most 8,000 characters plus a header, against about 10,200 for the archive);
   - how often `observation_read` and `conversation_read` are called;
   - replies on topic switches, which need owner acceptance.
+
+### Release closure and follow-up — 2026-09-28
+
+**Release.** Merged in [PR #111](https://github.com/akhilvuputuri/chief-agent/pull/111) as `7e8dfd3`, after the eval in PR #110 (`2290fc3`). The release workflow deployed `7e8dfd3`, with the exact-commit status "startup health passed". The release attempt for `2290fc3` stopped at its guard because `main` had moved to `7e8dfd3` before it ran; nothing was deployed from it.
+
+**Operator check in production, sizes only.** `conversationState` built the owner's index in 181 ms:
+
+- 8,377 characters, covering 20 exchanges;
+- 11 lines carrying tool observation IDs;
+- a longest line of 750 characters.
+
+**Follow-up from Devin review** of the merged head, done on a separate branch:
+
+- Each owner line now carries `replyId`, so the full reply can be read with `conversation_read`.
+- The saved-answer-details observation ID is kept as `saved answer obs=…`.
+- Every tool result keeps its read ID, up to 24 per line; only the first 8 are named.
+- A job delivery that follows a migrated exchange with no run ID gets its own line.
