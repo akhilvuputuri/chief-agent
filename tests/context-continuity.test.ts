@@ -670,3 +670,40 @@ test("exchange index keeps reply, saved-answer and every tool read reference", (
   assert.match(lines[3]!, /\+6 more/);
   assert.ok(lines[3]!.includes(`saved answer obs=${id(99)}`));
 });
+
+test("failed tool calls without IDs never crowd out a stored result's read ID", () => {
+  const at = "2026-09-28T06:00:00Z";
+  const calls = Array.from({ length: 26 }, (_, i) => `c${i}`);
+  const good = "00000000-0000-4000-8000-000000000025";
+  const rows: IndexRow[] = [
+    { id: "u1", role: "user", runId: "r1", createdAt: at, content: "check" },
+    {
+      id: "a1",
+      role: "assistant",
+      runId: "r1",
+      createdAt: at,
+      content: null,
+      callNames: calls.map(() => "gmail_read"),
+      callIds: calls,
+    },
+    ...calls.map((c, i): IndexRow => ({
+      id: `t${i}`,
+      role: "tool",
+      runId: "r1",
+      createdAt: at,
+      content: i === 25 ? `{"observationId":"${good}"}` : '{"error":"failed"}',
+      toolCallId: c,
+    })),
+    {
+      id: "a2",
+      role: "assistant",
+      runId: "r1",
+      createdAt: at,
+      content: "Found it.",
+    },
+    { id: "u2", role: "user", runId: "r2", createdAt: at, content: "thanks" },
+  ];
+  const line = exchangeIndex(rows).split("\n")[1]!;
+  assert.ok(line.includes(`obs=${good}`));
+  assert.doesNotMatch(line, /more/);
+});
