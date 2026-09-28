@@ -1,3 +1,4 @@
+import type { NewsTools } from "./news.js";
 import { RoutineTools } from "./routines.js";
 import { HistoryStore } from "./history.js";
 import { Canvases } from "./canvases.js";
@@ -29,6 +30,7 @@ export class JobTools {
     private library?: LibraryTools,
     private libraryActions?: LibraryActions,
     private stocks?: WatchlistTools,
+    private news?: NewsTools,
   ) {}
   async execute(
     user: string,
@@ -183,6 +185,16 @@ export class JobTools {
       a.operation === "routine_history"
     )
       return new RoutineTools(db).call(user, run, a);
+    if (
+      a.operation === "news_source_add" ||
+      a.operation === "news_source_remove" ||
+      a.operation === "news_settings" ||
+      a.operation === "news_status" ||
+      a.operation === "news_edition_now"
+    ) {
+      if (!this.news) throw new Error("News bulletin is not configured");
+      return this.news.call(user, run, a);
+    }
     if (
       a.operation === "watchlist_add" ||
       a.operation === "watchlist_update" ||

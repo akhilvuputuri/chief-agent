@@ -31,6 +31,7 @@ export const TOOL_DOMAINS = [
   "parcels",
   "library",
   "watchlist",
+  "news",
   "routines",
   "skills",
 ] as const;
@@ -49,6 +50,7 @@ export const DOMAIN_SUMMARIES: Record<ToolDomain, string> = {
   parcels: "awaited parcels from email or the owner",
   library: "NLB ebook availability and the linked card's shelf",
   watchlist: "stock price-drop watchlist",
+  news: "daily news bulletin from followed sites, topics and 👍/👎 learning",
   routines: "scheduled independent agent routines",
   skills: "skill version history, drafts, evaluation and activation",
 };
@@ -70,6 +72,7 @@ const PREFIXES: [string, ToolDomain][] = [
   ["parcel_", "parcels"],
   ["library_", "library"],
   ["watchlist_", "watchlist"],
+  ["news_", "news"],
   ["routine_", "routines"],
   ["skill_", "skills"],
 ];
@@ -120,6 +123,10 @@ const CUES: [ToolDomain, RegExp][] = [
   [
     "watchlist",
     /\b(stocks?|shares?|ticker|watchlist|nasdaq|nyse|sgx|price drop|market)\b/i,
+  ],
+  [
+    "news",
+    /\b(news|bulletin|headlines?|digest|blogs?|articles?|substack|feeds?|reading picks?)\b/i,
   ],
   [
     "routines",

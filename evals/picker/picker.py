@@ -23,6 +23,7 @@ DOMAINS = (
     "parcels",
     "library",
     "watchlist",
+    "news",
     "routines",
     "skills",
 )

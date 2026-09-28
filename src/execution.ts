@@ -44,6 +44,7 @@ export const readOperations = new Set([
   "routine_list",
   "routine_history",
   "watchlist_list",
+  "news_status",
   "calendar_list",
   "library_check",
   "library_availability",

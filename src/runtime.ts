@@ -89,6 +89,7 @@ export function runtimeContext(
     (op === "sheet_sync" && !availability.preparationSheet) ||
     (op === "daily_sync" && !availability.dailySheet) ||
     (op.startsWith("watchlist_") && !availability.stocks) ||
+    (op.startsWith("news_") && !availability.news) ||
     (op.startsWith("web_") && !availability.web);
   const options = action.options.filter(
     (o) => !disabled(o.shape.operation.value),
@@ -184,6 +185,16 @@ export function runtimeContext(
                 "List watched stocks, effective thresholds and monitoring windows, the next periods each stock is actually checked (nextChecks, Singapore time), latest alerts and the most recent observation decision.",
               watchlist_settings:
                 "Set watchlist defaults: defaultDropPct, paused master switch, pollMinutes cadence, includeExtended opt-in for pre/post-market quotes, and window: the default Singapore-time hours to monitor ({start:'HH:MM', end:'HH:MM' or '24:00', days?:['mon',...]}; end before start runs past midnight; null removes it). The window applies on top of exchange hours, so 'from market open until midnight' is start at or before the open (e.g. 20:00) and end 24:00. No quotes are fetched and no alerts are sent outside it; report the returned nextChecks to the owner as the confirmation.",
+              news_source_add:
+                "Follow a news site or blog the owner names (a domain like example.com or a link). The feed is found automatically and the latest titles are returned as confirmation; if none is found, tell the owner and ask for another address. Never add sites the owner did not ask for.",
+              news_source_remove:
+                "Stop following a site by exact id from news_status. Removing the last site turns the daily bulletin off.",
+              news_settings:
+                "Configure the daily bulletin: deliveryTime 'HH:MM' Singapore time (null clears), topics (phrases that rank matching items higher; replaces the list, null clears), itemsPerEdition 1-8 (default 5), enabled. Turning it on needs a time and at least one site; ask the owner for missing preferences instead of choosing them. Report the returned nextEdition.",
+              news_status:
+                "Show bulletin settings, followed sites and their fetch health, recent editions with 👍/👎 counts, and what the owner's votes have taught (per site and topic).",
+              news_edition_now:
+                "Send a bulletin now (preview or extra edition, at most 3 per day). It arrives as its own Telegram message with 👍/👎 buttons; do not repeat its items in your reply.",
               gmail_accounts:
                 "List connected Gmail account selectors and email addresses. Owner-only; no credentials returned.",
               gmail_search:

@@ -63,6 +63,10 @@
       "description": "The user's stock watchlist and price-drop alerts (tickers, thresholds, pausing).",
       "examples": "how is AAPL doing, alert me if NVDA drops 5%, stop watching Tesla"
     },
+    "news": {
+      "description": "The user's daily news bulletin: following news sites or blogs, delivery time, topics, sending one now, and what their thumbs up/down taught.",
+      "examples": "follow theverge.com, send my news at 8am, add AI as a topic, send me a bulletin now, stop following that blog"
+    },
     "routines": {
       "description": "Recurring automated agent routines that run on a schedule.",
       "examples": "every Monday at 9 summarise my inbox, pause my weekly routine, what automations run"

@@ -1,5 +1,10 @@
 [
-  { "id": "none-1", "message": "hi", "gold": [], "split": "tuning" },
+  {
+    "id": "none-1",
+    "message": "hi",
+    "gold": [],
+    "split": "tuning"
+  },
   {
     "id": "none-2",
     "message": "thanks, that's perfect!",
@@ -720,7 +725,12 @@
     "gold": [],
     "split": "held-out"
   },
-  { "id": "t-none-7", "message": "lol ok", "gold": [], "split": "held-out" },
+  {
+    "id": "t-none-7",
+    "message": "lol ok",
+    "gold": [],
+    "split": "held-out"
+  },
   {
     "id": "t-none-8",
     "message": "what's the latest news on the Fed rate decision?",
@@ -1062,35 +1072,45 @@
   },
   {
     "id": "t-sig-2",
-    "signals": { "pending_approvals": ["library hold: Project Hail Mary"] },
+    "signals": {
+      "pending_approvals": ["library hold: Project Hail Mary"]
+    },
     "message": "sure",
     "gold": ["library"],
     "split": "held-out"
   },
   {
     "id": "t-sig-3",
-    "signals": { "active_background_task": "Comparing 15 laptops under $2000" },
+    "signals": {
+      "active_background_task": "Comparing 15 laptops under $2000"
+    },
     "message": "how far along are you?",
     "gold": ["work"],
     "split": "held-out"
   },
   {
     "id": "t-sig-4",
-    "signals": { "tools_used_last_hour": ["gmail_search", "gmail_thread"] },
+    "signals": {
+      "tools_used_last_hour": ["gmail_search", "gmail_thread"]
+    },
     "message": "ok and anything from the other bank?",
     "gold": ["gmail"],
     "split": "held-out"
   },
   {
     "id": "t-sig-5",
-    "signals": { "tools_used_last_hour": ["watchlist_list"] },
+    "signals": {
+      "tools_used_last_hour": ["watchlist_list"]
+    },
     "message": "drop the first one",
     "gold": ["watchlist"],
     "split": "held-out"
   },
   {
     "id": "t-sig-6",
-    "signals": { "tools_used_last_hour": ["calendar_list"] },
+    "signals": {
+      "tools_used_last_hour": ["calendar_list"]
+    },
     "message": "thanks! what's a good gift for a 5 year old?",
     "gold": [],
     "split": "held-out"
@@ -1158,6 +1178,48 @@
     ],
     "message": "now one about the sea",
     "gold": [],
+    "split": "held-out"
+  },
+  {
+    "id": "news-1",
+    "message": "follow stratechery.com in my news bulletin",
+    "gold": ["news"],
+    "split": "tuning"
+  },
+  {
+    "id": "news-2",
+    "message": "send my news bulletin at 7:30am instead",
+    "gold": ["news"],
+    "split": "tuning"
+  },
+  {
+    "id": "news-3",
+    "message": "add AI and Singapore as bulletin topics",
+    "gold": ["news"],
+    "split": "tuning"
+  },
+  {
+    "id": "news-4",
+    "message": "can you send me the bulletin now?",
+    "gold": ["news"],
+    "split": "tuning"
+  },
+  {
+    "id": "news-5",
+    "message": "I want to read the Pragmatic Engineer blog every morning",
+    "gold": ["news"],
+    "split": "held-out"
+  },
+  {
+    "id": "news-6",
+    "message": "has my news been set up?",
+    "gold": ["news"],
+    "split": "held-out"
+  },
+  {
+    "id": "news-7",
+    "message": "stop sending me articles from that site",
+    "gold": ["news"],
     "split": "held-out"
   }
 ]
