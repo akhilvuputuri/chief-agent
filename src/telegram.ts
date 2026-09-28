@@ -1,4 +1,5 @@
 import { mutePending } from "./stocks.js";
+import { recordVote } from "./news.js";
 import { errorFields, opsLog } from "./ops-log.js";
 import { WorkTools, renderWork, renderWorkList } from "./work.js";
 import { TelegramViews, viewCallback } from "./telegram-views.js";
@@ -199,6 +200,35 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
     if (paused)
       await ctx
         .editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } })
+        .catch(() => {});
+  });
+  // News 👍/👎: owner-scoped set-state votes, never queued behind the model.
+  bot.callbackQuery(/^nw:(up|dn):([0-9a-f-]{36})$/, async (ctx) => {
+    if (!allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids)) return;
+    const vote = ctx.match[1] === "up" ? 1 : -1;
+    const result = await recordVote(
+      db,
+      String(ctx.from.id),
+      ctx.match[2]!,
+      vote,
+    );
+    // Telegram caps callback answers at 200 characters; names come from feeds.
+    await ctx.answerCallbackQuery({
+      text: (!result
+        ? "That bulletin item is no longer available."
+        : vote === 1
+          ? `👍 Noted: more like this from ${result.domain}${result.topics.length ? ` and on ${result.topics.join(", ")}` : ""}.`
+          : `👎 Noted: less like this from ${result.domain}${result.topics.length ? ` and on ${result.topics.join(", ")}` : ""}.`
+      )
+        .split(/(?=[\s\S])/u)
+        .slice(0, 190)
+        .join(""),
+    });
+    if (result?.changed)
+      await ctx
+        .editMessageReplyMarkup({
+          reply_markup: { inline_keyboard: result.keyboard },
+        })
         .catch(() => {});
   });
   bot.on("message", async (ctx) => {

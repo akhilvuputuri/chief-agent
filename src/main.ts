@@ -3,6 +3,8 @@ import { errorFields, opsLog } from "./ops-log.js";
 import { RoutineScheduler, RoutineDelivery } from "./routines.js";
 import { StockMonitor, StockDelivery, WatchlistTools } from "./stocks.js";
 import { TwelveDataProvider } from "./stock-provider.js";
+import { NewsBulletin, NewsTools, voteKeyboard } from "./news.js";
+import { PublicFeedFetcher } from "./news-feed.js";
 import { run as runTelegram } from "@grammyjs/runner";
 import { CustomAgent } from "./custom-agent.js";
 import { OpenRouter } from "./model.js";
@@ -81,6 +83,14 @@ if (
   throw startupError(
     "STARTUP_MIGRATION_020",
     "Stock monitoring-window migration 020 must be applied with the gateway stopped",
+  );
+if (
+  !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=21")).rows
+    .length
+)
+  throw startupError(
+    "STARTUP_MIGRATION_021",
+    "News bulletin migration 021 must be applied with the gateway stopped",
   );
 await recoverRuntime(db);
 // Library account features need migration 016; without the key they stay off even if tables exist.
@@ -187,6 +197,21 @@ if (c.MARKET_DATA_PROVIDER === "twelvedata" && !c.TWELVE_DATA_API_KEY)
     "MARKET_DATA_PROVIDER=twelvedata requires TWELVE_DATA_API_KEY",
   );
 const parser = new ScheduleParser();
+// Editions are plain text with link previews off; 👍/👎 buttons carry item ids.
+const newsFetcher = new PublicFeedFetcher();
+const newsBulletin = new NewsBulletin(
+  db,
+  newsFetcher,
+  (user) => allowed.has(user),
+  async (user, payload) => {
+    await bot.api.sendMessage(user, payload.text, {
+      link_preview_options: { is_disabled: true },
+      ...(payload.items?.length
+        ? { reply_markup: { inline_keyboard: voteKeyboard(payload.items) } }
+        : {}),
+    });
+  },
+);
 const daily = new DailyTools(db, parser, calendar, mirror);
 const assistant = new Assistant(
   db,
@@ -232,6 +257,7 @@ const assistant = new Assistant(
     library,
     libraryActions,
     new WatchlistTools(db, stockProvider),
+    new NewsTools(db, newsFetcher, newsBulletin),
   ),
   {
     canvases: !!c.MINIAPP_ORIGIN,
@@ -244,6 +270,7 @@ const assistant = new Assistant(
     preparationSheet: !!(c.SHEETS_REFRESH_TOKEN && c.SHEETS_SPREADSHEET_ID),
     dailySheet: !!(c.SHEETS_REFRESH_TOKEN && c.DAILY_SPREADSHEET_ID),
     stocks: !!stockProvider,
+    news: true,
   },
   {
     ms: c.AGENT_BUDGET_MS,
@@ -397,6 +424,7 @@ const stockDelivery = new StockDelivery(db, async (user, payload) => {
   });
 });
 await stockDelivery.recover();
+await newsBulletin.recover();
 const routineTimer = setInterval(() => {
   void routineScheduler
     .tick()
@@ -416,6 +444,9 @@ const routineTimer = setInterval(() => {
     .catch((error) =>
       opsLog("stock.delivery_failed", "error", errorFields(error)),
     );
+  void newsBulletin
+    .tick()
+    .catch((error) => opsLog("news.tick_failed", "error", errorFields(error)));
 }, 15000);
 routineTimer.unref();
 const workWorker = new WorkWorker(

@@ -1,3 +1,8 @@
+# Stock monitoring hours and news bulletin — 28 September 2026
+
+- **Stock monitoring hours (released):** [PR #108](https://github.com/akhilvuputuri/chief-agent/pull/108) was installed through the migration-020 operator rollout at `069c8d5`; health and schema were verified. The owner can now ask Chief to monitor only during Singapore-time hours, such as from the open until midnight. Owner Telegram acceptance is pending. See [journal 39](journey/39-watch-monitoring-window.md).
+- **Daily news bulletin (in review):** [PR #109](https://github.com/akhilvuputuri/chief-agent/pull/109) restarts issue #50 after closing the ~5k-line PR #83. Needs migration 021 through `scripts/deploy-news.py`. See [journal 42](journey/42-news-bulletin.md) and the [runbook](news-bulletin.md).
+
 # Chief — production on AWS Lightsail with private logs (v0.3.27)
 
 On 26 September 2026 SGT production moved from DigitalOcean to one AWS Lightsail VM, following the owner's migration handover. Changes:
