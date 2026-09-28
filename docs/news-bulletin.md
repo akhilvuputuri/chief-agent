@@ -1,6 +1,6 @@
 # Daily news bulletin (issue #50)
 
-A once-a-day Telegram message with up to eight items from news sites and blogs the owner follows, ranked by the owner's topics, recency and explicit 👍/👎 votes. Building and sending an edition makes **no model call**; the conversational agent only configures it. This is a lean restart of the closed [PR #83](https://github.com/akhilvuputuri/chief-agent/pull/83); see [journal 40](journey/40-news-bulletin.md).
+A once-a-day Telegram message with up to eight items from news sites and blogs the owner follows, ranked by the owner's topics, recency and explicit 👍/👎 votes. Building and sending an edition makes **no model call**; the conversational agent only configures it. This is a lean restart of the closed [PR #83](https://github.com/akhilvuputuri/chief-agent/pull/83); see [journal 42](journey/42-news-bulletin.md).
 
 Code: `src/news.ts` (tools, ranking, learning, scheduler, outbox, votes), `src/news-feed.ts` (feed discovery, RSS/Atom parsing, URL canonicalization, guarded fetcher, adapted from PR #83), `db/021_news.sql`, `tests/news.test.ts`.
 

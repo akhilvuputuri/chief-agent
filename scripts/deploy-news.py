@@ -13,10 +13,11 @@ import time
 
 LIVE = pathlib.Path('/opt/hermes-companion')
 LOCK = pathlib.Path('/var/lock/companion-release.lock')
-# 069c8d5 (PR #108, migration 020) is the release installed and verified live on
-# the Lightsail host on 28 September 2026 through deploy-watch-window.py. Any
-# other RELEASE must be reconciled and re-reviewed; never rewrite RELEASE to match.
-BASE = '069c8d5c7e08a57cee5e4c795e2048717ab082df'
+# 7e8dfd3 (PRs #110/#111, app-only) is the release verified live on the Lightsail
+# host on 28 September 2026, above the migration-020 rollout at 069c8d5; its
+# compose.yaml and db/ match main. Any other RELEASE must be reconciled and
+# re-reviewed; never rewrite RELEASE to match.
+BASE = '7e8dfd351d323c155277103fec2f478b2497422b'
 BASES = {BASE}
 IMAGE = 'hermes-companion-gateway'
 MIGRATION = '021_news.sql'

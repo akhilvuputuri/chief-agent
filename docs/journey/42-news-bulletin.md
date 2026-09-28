@@ -1,4 +1,4 @@
-# 40 — A lean daily news bulletin from followed sites
+# 42 — A lean daily news bulletin from followed sites
 
 Work date(s): 2026-09-27 to 2026-09-28. Written/revised: 2026-09-28.
 Status: tested; in review. Needs migration 021 through the reviewed operator procedure; migration 020 ([39](39-watch-monitoring-window.md)) is already live. Not deployed; nothing configured.
@@ -45,6 +45,15 @@ See [the bulletin runbook](../news-bulletin.md). `db/021_news.sql` adds four tab
 
 **Independent review round 3 (Opus 5.5, on `c9d6f7c`): APPROVE, with one P3.** The reviewer measured 13 further hostile shapes; all took at most 39 ms at 1.45 MB. The P3: escaped `<script>`/`<style>` in headlines (common in web-development news) made the forward-only stripper drop the rest of the title. It now requires a name boundary and removes only complete elements. A kind with no closing tag is left to the generic tag stripper, so words survive: "How <script type=module> loads" becomes "How loads", the same as the original regex.
 
+**Devin Review (automated, on `1e8e079`), fixed in `c00bfdc`:**
+
+- A build that finished after the owner switched the bulletin off left a dormant pending edition, which re-enabling would have sent days later. Now a build mutes its own edition if the bulletin is off, and scheduled editions are sent only on their own day (older ones are muted).
+- Removing a site withdraws a queued edition that carries its items.
+- An aggregator feed linking to many publishers counts as one site for the per-site cap and for votes. The followed site's domain is used, not the article's.
+- Status reports a pending same-day retry ("today, retrying at 08:15 SGT") instead of tomorrow.
+
+Each has a regression test (23 news tests). The branch was then rebased onto `7e8dfd3` (#110 and #111). Those PRs took journal numbers 40 and 41, so this entry is 42.
+
 ## Verification and outcome
 
 - **Synthetic (PGlite, mocked fetcher):** 14 tests. They cover address normalization and refusal of private hosts, the three discovery paths plus the no-feed case and the request cap, untrusted feed text, the DNS guard, foreground-only and owner-scoped mutations, enable prerequisites, a single edition at the SGT slot with duplicate-story collapse and no repeated links the next day, enabling after the slot starting tomorrow, ranking and the per-site cap, set-state votes shifting the next edition, the on-demand limit and the "nothing new" message, all-sources-failed retries then an explanation, muting on disable, uncertain delivery across restart, and turning off when the last site is removed. `npm run check` passed 461 application and 21 script tests.
@@ -53,6 +62,6 @@ See [the bulletin runbook](../news-bulletin.md). `db/021_news.sql` adds four tab
 
 ## Follow-up and next iteration
 
-`scripts/deploy-news.py` is the migration-020 script with only its constants changed. Its baseline is the live `069c8d5`, and 14 offline tests pass. Its test allows only the `ON DELETE SET NULL` foreign-key clause among destructive keywords. The package version is bumped to 0.3.28, which will label #107, #108 and #109 once this is verified live.
+`scripts/deploy-news.py` is the migration-020 script with only its constants changed. Its baseline is the live release, which was `069c8d5` when first written and `7e8dfd3` after #110 and #111 were released (both app-only), and 14 offline tests pass. Its test allows only the `ON DELETE SET NULL` foreign-key clause among destructive keywords. The package version is bumped to 0.3.28, which will label #107, #108 and #109 once this is verified live.
 
 Pending: re-review of the fixes, merge, operator rollout, then the owner configuring sites, time and topics in Telegram and receiving a first edition.
