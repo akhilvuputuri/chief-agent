@@ -9,12 +9,22 @@ export class NotDispatchedError extends Error {
   }
 }
 import { ZodError } from "zod";
+/** This call form already failed the same way in consecutive steps of the run; it was not dispatched. */
+export class RepeatedFailureError extends Error {
+  constructor(operation: string, code: string, count: number) {
+    super(
+      `${operation} failed the same way (${code}) in ${count} steps of this request with no success in between, so this call with the same argument names was not made. Do not retry it in this request: use another form (for example listing without an id), answer with what you have, or ask the owner.`,
+    );
+  }
+}
 /** The host has established that this invocation made no domain mutation. */
 export class ToolValidationError extends Error {}
 export function toolError(error: unknown) {
   const message = error instanceof Error ? error.message : "";
   if (error instanceof ToolValidationError)
     return { code: "VALIDATION_FAILED", retryable: false, message };
+  if (error instanceof RepeatedFailureError)
+    return { code: "REPEATED_FAILURE", retryable: false, message };
   if (error instanceof ZodError)
     return {
       code: "INVALID_INPUT",

@@ -19,7 +19,22 @@ import {
   type ToolDefinition,
 } from "./model.js";
 import { Stop, readOperations, type StopReason } from "./execution.js";
-import { toolError, NotDispatchedError } from "./tool-errors.js";
+import {
+  toolError,
+  NotDispatchedError,
+  RepeatedFailureError,
+} from "./tool-errors.js";
+/** Model steps, with no successful call between them, in which one call form failed the same way before it is refused. */
+const REPEAT_LIMIT = 3;
+/** An operation plus its argument names: listing without an id is a different form than reading one. */
+function callForm(op: string, raw: string) {
+  try {
+    const args = JSON.parse(raw);
+    return `${op}(${args && typeof args === "object" ? Object.keys(args).sort().join(",") : ""})`;
+  } catch {
+    return `${op}(?)`;
+  }
+}
 import { domainOf } from "./tool-domains.js";
 const finishTool: ToolDefinition = {
   name: "finish_turn",
@@ -80,6 +95,14 @@ export class CustomAgent implements Agent {
         indices,
       );
     };
+    // Per call form: the last failure code, in how many model steps it recurred since the last success,
+    // and the step that last counted. A model that keeps retrying the same failing form
+    // is refused instead of looping; parallel calls in one step count once.
+    const failures = new Map<
+      string,
+      { code: string; count: number; step: number }
+    >();
+    let step = 0;
     const steer = async () => {
       if (req.signal!.aborted) throw new Stop("cancelled");
       if (!req.shouldYield?.()) return false;
@@ -92,7 +115,11 @@ export class CustomAgent implements Agent {
           [input.id, execution.user, execution.run, messages.length - 1],
         );
       }
-      if (inputs.length) req.message = inputs.at(-1)!.message;
+      if (inputs.length) {
+        req.message = inputs.at(-1)!.message;
+        // New owner input (for example the id the model asked for) can make a refused form valid.
+        failures.clear();
+      }
       await execution.checkpoint(messages);
       if (inputs.length)
         await execution.trace("input.checkpointed", {
@@ -292,6 +319,7 @@ export class CustomAgent implements Agent {
         }
         let finish: (Answer & { reason: StopReason }) | undefined;
         let finishObservation: string | undefined;
+        step++;
         for (const [callIndex, call] of calls.entries()) {
           if (req.shouldYield?.() || req.signal.aborted) {
             await skipCalls(callIndex);
@@ -299,6 +327,7 @@ export class CustomAgent implements Agent {
             continue turn;
           }
           const op = call.function.name;
+          const form = callForm(op, call.function.arguments);
           let result: unknown;
           let candidate: typeof finish;
           const start = Date.now();
@@ -322,6 +351,14 @@ export class CustomAgent implements Agent {
               throw new NotDispatchedError(
                 req.signal.aborted ? "cancelled" : "interrupted",
               );
+            const repeated = failures.get(form);
+            // Refuse from the next step on, never the rest of the step that reached the limit.
+            if (
+              repeated &&
+              repeated.count >= REPEAT_LIMIT &&
+              repeated.step !== step
+            )
+              throw new RepeatedFailureError(op, repeated.code, repeated.count);
             if (!enabled.has(op)) {
               // A known tool whose domain is not loaded yet: load the domain and
               // dispatch. Arguments are still validated and the owner-scoped
@@ -431,6 +468,9 @@ export class CustomAgent implements Agent {
               }
             }
             await execution.endCall(journal, result);
+            // Any success is progress and may supply what a failing form lacked
+            // (such as an id from parcel_match), so every count starts again.
+            failures.clear();
             if (candidate) {
               finish = candidate;
               finishObservation = op === "finish_turn" ? journal : undefined;
@@ -443,6 +483,24 @@ export class CustomAgent implements Agent {
             }
             if (error instanceof Stop) throw error;
             result = { error: toolError(error) };
+            // finish_turn stays available: refusing it would leave no way to answer.
+            if (
+              op !== "finish_turn" &&
+              !(error instanceof RepeatedFailureError)
+            ) {
+              const code = (result as any).error.code as string;
+              const last = failures.get(form);
+              failures.set(form, {
+                code,
+                step,
+                count:
+                  last?.code !== code
+                    ? 1
+                    : last.step === step
+                      ? last.count
+                      : last.count + 1,
+              });
+            }
             const uncertain =
               dispatched &&
               op !== "finish_turn" &&
