@@ -13,7 +13,7 @@ import { ZodError } from "zod";
 export class RepeatedFailureError extends Error {
   constructor(operation: string, code: string, count: number) {
     super(
-      `${operation} failed the same way (${code}) in ${count} steps in a row of this request, so this call with the same argument names was not made. Do not retry it in this request: use another form (for example listing without an id), answer with what you have, or ask the owner.`,
+      `${operation} failed the same way (${code}) in ${count} steps of this request with no success in between, so this call with the same argument names was not made. Do not retry it in this request: use another form (for example listing without an id), answer with what you have, or ask the owner.`,
     );
   }
 }

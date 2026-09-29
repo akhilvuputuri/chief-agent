@@ -19,7 +19,7 @@ Two gaps combined. The error gave no route to a valid ID, and the loop had no li
 
 - **Chosen:**
   - The "Parcel not found" message now says that parcel IDs come only from `parcel_list` (without an ID) or `parcel_match`, and not to guess or reuse other record IDs.
-  - A generic guard in `CustomAgent`, keyed by _call form_: the operation plus its argument names. Once one form has failed with the same error code in three model steps in a row, later calls of that form in the run are refused without dispatch. They return `REPEATED_FAILURE`, which tells the model to use another form, answer with what it has, or ask the owner.
+  - A generic guard in `CustomAgent`, keyed by _call form_: the operation plus its argument names. Once one form has failed with the same error code in three model steps with no successful call in between, calls of that form from the next step on are refused without dispatch. They return `REPEATED_FAILURE`, which tells the model to use another form, answer with what it has, or ask the owner.
 - **Reset rules:**
   - Any successful call clears every count, because a success may supply what the failing form lacked (Devin Review: an ID found by `parcel_match` must still be readable). A different error code resets that form's count. A loop that makes no progress, like 28 September's, is still stopped.
   - Parallel calls in one step count once, so a batch ("watch these six tickers") is not cut short by its own failures.
@@ -55,7 +55,13 @@ Devin Review (same head) raised two more points:
 - **Red:** a correct ID recovered through `parcel_match` would still be refused. Fixed: any success clears all counts.
 - **Yellow:** refused calls still consume model calls. Kept as is: the run's model budget caps them, and the refusal tells the model to stop.
 
-Re-review is pending.
+Re-review of `0843897`: **APPROVE**, with Low notes.
+
+- **Fixed:** a form reaching the limit mid-step no longer refuses the rest of that step.
+- **Fixed:** the wording "in a row" is now "with no successful call in between".
+- **Accepted:** fan-out within one step is bounded only by the tool budget.
+- **Accepted:** a changed argument name makes a new form. This is loop protection, not enforcement.
+- **Accepted:** the steering reset has no test.
 
 ## Verification and outcome
 
