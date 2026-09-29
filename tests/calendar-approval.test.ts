@@ -418,6 +418,130 @@ test("failures once the insert request is sent stay uncertain, never a definite 
       await db.query("DELETE FROM approvals WHERE id=$1", [saved.approvalId]);
     }
     assert.equal(inserts, 4);
+    // The cause is recorded as a category and HTTP status, never provider text.
+    assert.deepEqual(
+      (
+        await db.query(
+          "SELECT data FROM events WHERE type='calendar.uncertain' ORDER BY id",
+        )
+      ).rows.map((r) => [r.data.cause, r.data.httpStatus]),
+      [
+        ["error", undefined],
+        ["http", 500],
+      ],
+    );
+  } finally {
+    await pg.close();
+  }
+});
+test("an uncertain write with no event is settled once no attempt can be in flight, unblocking new drafts", async () => {
+  const { pg, db } = await fixture();
+  let writes = 0,
+    checks = 0,
+    found = false,
+    checkFails = false;
+  const calendar = {
+    create: async () => {
+      writes++;
+      throw new Error("connection lost");
+    },
+    findCreated: async (_u: string, id: string) => {
+      checks++;
+      if (checkFails) throw new Error("Google request failed (503)");
+      return found ? { id: id.replaceAll("-", "") } : null;
+    },
+  };
+  const age = (id: string) =>
+    db.query(
+      "UPDATE approvals SET expires_at=now()-interval '6 minutes' WHERE id=$1",
+      [id],
+    );
+  const blocked = (actions: CalendarActions, pattern: RegExp) =>
+    assert.rejects(
+      () => actions.draft("123", randomUUID(), draft),
+      (error) =>
+        error instanceof ToolValidationError &&
+        /No new draft was saved/.test(error.message) &&
+        pattern.test(error.message),
+    );
+  try {
+    const actions = new CalendarActions(db, calendar, "123");
+    const first = await actions.draft("123", randomUUID(), draft);
+    assert.equal(
+      (await actions.decide("123", first.approvalId, true)).status,
+      "uncertain",
+    );
+    // While the attempt could still be in flight, absence proves nothing.
+    await blocked(actions, /checked again automatically/);
+    assert.equal(
+      (await actions.decide("123", first.approvalId, true)).status,
+      "uncertain",
+    );
+    await age(first.approvalId);
+    checkFails = true;
+    await blocked(actions, /checking Google Calendar for it failed/);
+    checkFails = false;
+    // Check status after the window confirms it was never created.
+    assert.deepEqual(await actions.decide("123", first.approvalId, true), {
+      status: "failed",
+      reason: "not_found",
+    });
+    const row = (
+      await db.query("SELECT status,payload FROM approvals WHERE id=$1", [
+        first.approvalId,
+      ])
+    ).rows[0];
+    assert.equal(row.status, "approved");
+    assert.equal(row.payload.execution, "failed");
+    assert.equal(row.payload.failure.code, "not_found");
+    assert.equal(
+      (
+        await db.query(
+          "SELECT count(*)::int n FROM events WHERE type='calendar.reconciled' AND data->>'id'=$1",
+          [first.approvalId],
+        )
+      ).rows[0].n,
+      1,
+    );
+    assert.equal(
+      (await actions.draft("123", randomUUID(), draft)).status,
+      "awaiting_approval",
+    );
+
+    // An old stuck approval is settled by the next draft itself.
+    await db.query("DELETE FROM approvals");
+    const stuck = await actions.draft("123", randomUUID(), draft);
+    await actions.decide("123", stuck.approvalId, true);
+    await age(stuck.approvalId);
+    const next = await actions.draft("123", randomUUID(), draft);
+    assert.equal(next.status, "awaiting_approval");
+    assert.equal(
+      (
+        await db.query("SELECT payload FROM approvals WHERE id=$1", [
+          stuck.approvalId,
+        ])
+      ).rows[0].payload.failure.code,
+      "not_found",
+    );
+
+    // If the event did land, it is recorded as created and the owner confirms first.
+    await db.query("DELETE FROM approvals");
+    const landed = await actions.draft("123", randomUUID(), draft);
+    await actions.decide("123", landed.approvalId, true);
+    await age(landed.approvalId);
+    found = true;
+    await blocked(actions, /recorded as created/);
+    assert.equal(
+      (await actions.decide("123", landed.approvalId, true)).status,
+      "created",
+    );
+    assert.equal(
+      (await actions.draft("123", randomUUID(), draft)).status,
+      "awaiting_approval",
+    );
+    // Settlement only ever reads: one insert per approved draft.
+    assert.equal(writes, 3);
+    assert.ok(checks > 0);
   } finally {
     await pg.close();
   }

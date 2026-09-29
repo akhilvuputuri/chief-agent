@@ -1,7 +1,13 @@
 import { type CalendarDraft, validateDraft } from "./calendar-draft.js";
 import { boundedBytes } from "./providers.js";
+/** Google answered with a non-success HTTP status. */
+export class GoogleHttpError extends Error {
+  constructor(readonly status: number) {
+    super(`Google request failed (${status})`);
+  }
+}
 export async function googleJson(r: Response) {
-  if (!r.ok) throw new Error(`Google request failed (${r.status})`);
+  if (!r.ok) throw new GoogleHttpError(r.status);
   return JSON.parse(new TextDecoder().decode(await boundedBytes(r, 2000000)));
 }
 /** Google rejected credentials: the owner must reconnect (authorization) or the operator must fix OAuth settings (configuration). */

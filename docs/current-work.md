@@ -1,3 +1,7 @@
+# Calendar stuck-uncertain fix — 29 September 2026 (in review)
+
+- **Calendar retries blocked (tested, not released):** one approved Calendar write left `uncertain` blocked every later draft, and **Check status** could never clear it (the same mechanism as [journal 31](journey/31-calendar-authorization-failure.md)). Branch `claude/calendar-event-creation-bug-nad2ub` settles such approvals by a read-only GET once no attempt can be in flight. It also records why an insert became uncertain. After release, the owner's next Calendar request should settle the stuck approval and show a new card. See [journal 43](journey/43-calendar-stuck-uncertain.md).
+
 # Stock monitoring hours and news bulletin (v0.3.28) — 28 September 2026
 
 - **Stock monitoring hours (released):** [PR #108](https://github.com/akhilvuputuri/chief-agent/pull/108) was installed through the migration-020 operator rollout at `069c8d5`; health and schema were verified. The owner can now ask Chief to monitor only during Singapore-time hours, such as from the open until midnight. Owner Telegram acceptance is pending. See [journal 39](journey/39-watch-monitoring-window.md).

@@ -74,8 +74,10 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
                   ? "No event was created. Google Calendar authorization failed (it may have expired or been revoked), so nothing was sent to Google. Reconnect Calendar, then ask me to draft the event again."
                   : result.reason === "configuration"
                     ? "No event was created. The server's Google Calendar connection settings were rejected, so nothing was sent to Google. The Calendar connection must be fixed on the server before drafting again."
-                    : "No event was created. The request stopped before anything was sent to Google. Ask me to draft the event again."
-                : "The event's outcome is uncertain. I will not create it again. Click Check status to look for the existing event.";
+                    : result.reason === "not_found"
+                      ? "No event was created. Google Calendar has no event for this approval, and the attempt can no longer complete. Ask me to draft the event again."
+                      : "No event was created. The request stopped before anything was sent to Google. Ask me to draft the event again."
+                : "The event's outcome is uncertain. I will not create it again. Click Check status to look for the existing event; from 20 minutes after it was drafted, a missing event is confirmed as not created.";
         await ctx.reply(text, {
           reply_markup: {
             inline_keyboard:

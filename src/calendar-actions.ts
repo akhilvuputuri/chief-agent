@@ -1,8 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { type Database, event } from "./db.js";
-import { CalendarNotSentError, CalendarTools } from "./calendar.js";
+import {
+  CalendarNotSentError,
+  CalendarTools,
+  GoogleHttpError,
+} from "./calendar.js";
 import { validateDraft, calendarPreview } from "./calendar-draft.js";
 import { ToolValidationError } from "./tool-errors.js";
+type Decision = { status: string; url?: string; reason?: string };
+// The insert starts before the approval expires and every Google request is
+// time-bounded, so this long after expiry no attempt can still be in flight and
+// a missing deterministic event ID means it was never created.
+const SETTLED =
+  "expires_at < now() - interval '5 minutes' AND payload->>'execution' IN ('creating','uncertain')";
 export class CalendarActions {
   constructor(
     private db: Database,
@@ -13,16 +23,23 @@ export class CalendarActions {
     if (!this.owner || user !== this.owner)
       throw new Error("Calendar is not connected for this user");
     const draft = validateDraft(input);
-    const uncertain = (
+    const unresolved = (
       await this.db.query(
-        "SELECT id FROM approvals WHERE user_id=$1 AND operation='calendar_create' AND status='approved' AND payload->>'execution' IN ('creating','uncertain') LIMIT 1",
+        "SELECT * FROM approvals WHERE user_id=$1 AND operation='calendar_create' AND status='approved' AND payload->>'execution' IN ('creating','uncertain') ORDER BY created_at",
         [user],
       )
-    ).rows[0];
-    if (uncertain)
+    ).rows;
+    for (const previous of unresolved) {
+      const settled = await this.settle(previous).catch(() => null);
+      if (settled?.status === "failed") continue;
       throw new ToolValidationError(
-        "A previous approved Calendar event has an uncertain outcome. No new draft was saved. Use its Telegram Check status button or request operator inspection before trying again.",
+        settled?.status === "created"
+          ? "A previous approved Calendar event was found in Google Calendar and is now recorded as created. No new draft was saved; confirm with the owner before drafting another."
+          : settled
+            ? "A previous approved Calendar event has an uncertain outcome. No new draft was saved. It is checked again automatically from 20 minutes after it was drafted; ask the owner to try again then, or use its Telegram Check status button."
+            : "A previous approved Calendar event has an uncertain outcome and checking Google Calendar for it failed. No new draft was saved. Use its Telegram Check status button or request operator inspection before trying again.",
       );
+    }
     const id = randomUUID();
     await this.db.query(
       "INSERT INTO approvals(id,user_id,run_id,operation,payload) VALUES($1,$2,$3,'calendar_create',$4::jsonb)",
@@ -35,7 +52,7 @@ export class CalendarActions {
       note: "Only saved a draft. The user must approve the exact event using the Telegram button. No event exists yet.",
     };
   }
-  async decide(user: string, id: string, approve: boolean) {
+  async decide(user: string, id: string, approve: boolean): Promise<Decision> {
     if (!this.owner || user !== this.owner)
       throw new Error("Calendar is not connected for this user");
     const claimed = (
@@ -62,10 +79,7 @@ export class CalendarActions {
         return { status: "created", url: previous.payload.result?.url };
       if (previous.payload.execution === "failed")
         return { status: "failed", reason: previous.payload.failure?.code };
-      // Read-only reconciliation. Never replay a possibly completed POST.
-      const found = await this.calendar.findCreated(user, id);
-      if (!found) return { status: "uncertain" };
-      return this.record(previous, found);
+      return this.settle(previous);
     }
     await event(this.db, user, claimed.run_id, "calendar.approval_decided", {
       id,
@@ -104,10 +118,52 @@ export class CalendarActions {
         "UPDATE approvals SET payload=jsonb_set(payload,'{execution}','\"uncertain\"'::jsonb) WHERE id=$1 AND user_id=$2 AND payload->>'execution'<>'created'",
         [id, user],
       );
+      await event(this.db, user, claimed.run_id, "calendar.uncertain", {
+        id,
+        cause:
+          e instanceof GoogleHttpError
+            ? "http"
+            : (e as Error)?.name === "TimeoutError"
+              ? "timeout"
+              : "error",
+        httpStatus: e instanceof GoogleHttpError ? e.status : undefined,
+      });
       return { status: "uncertain" };
     }
   }
-  private async record(approval: any, result: any) {
+  /**
+   * Read-only reconciliation of an approved attempt by its deterministic event
+   * ID. Never replays a possibly completed POST. Absence counts as a definite
+   * non-creation only once no attempt can still be in flight.
+   */
+  private async settle(approval: any): Promise<Decision> {
+    const found = await this.calendar.findCreated(
+      approval.user_id,
+      approval.id,
+    );
+    if (found) return this.record(approval, found);
+    const saved = await this.db.query(
+      `UPDATE approvals SET payload=payload || $3::jsonb WHERE id=$1 AND user_id=$2 AND ${SETTLED} RETURNING id`,
+      [
+        approval.id,
+        approval.user_id,
+        JSON.stringify({ execution: "failed", failure: { code: "not_found" } }),
+      ],
+    );
+    if (!saved.rows[0]) return { status: "uncertain" };
+    await event(
+      this.db,
+      approval.user_id,
+      approval.run_id,
+      "calendar.reconciled",
+      {
+        id: approval.id,
+        state: "absent",
+      },
+    );
+    return { status: "failed", reason: "not_found" };
+  }
+  private async record(approval: any, result: any): Promise<Decision> {
     if (result.id !== approval.id.replaceAll("-", ""))
       throw new Error("Unexpected created event identity");
     const url =
