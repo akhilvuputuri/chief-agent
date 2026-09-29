@@ -19,18 +19,37 @@ Two gaps combined. The error gave no route to a valid ID, and the loop had no li
 
 - **Chosen:**
   - The "Parcel not found" message now says that parcel IDs come only from `parcel_list` (without an ID) or `parcel_match`, and not to guess or reuse other record IDs.
-  - A generic guard in `CustomAgent`: after the same operation fails with the same error code three times in a row in one run, further calls to it are refused without dispatch. They return `REPEATED_FAILURE`, which tells the model to answer with what it has or ask the owner.
-  - A success of that operation, or a different error code, resets the count. `finish_turn` is exempt so the model can always answer.
+  - A generic guard in `CustomAgent`, keyed by _call form_: the operation plus its argument names. Once one form has failed with the same error code in three model steps in a row, later calls of that form in the run are refused without dispatch. They return `REPEATED_FAILURE`, which tells the model to use another form, answer with what it has, or ask the owner.
+- **Reset rules:**
+  - A success of that form, or a different error code, resets the count.
+  - Parallel calls in one step count once, so a batch ("watch these six tickers") is not cut short by its own failures.
+  - New owner input adopted mid-run (steering) clears every count. The model can then act on an ID the owner supplies.
+  - `finish_turn` is exempt, so the model can always answer.
 - **Rejected:**
+  - Keying on the operation alone (the first draft). Independent review found it blocked the recovery call the new message recommends: `parcel_list` without an ID after three bad-ID reads.
   - Keying on identical arguments. The 28 September loop may have used a different ID each time.
   - Stopping the whole run. The model can still use other tools and give a useful answer.
+- **Accepted trade-off:** sequential per-item batches whose first three items fail the same way stop there; the fourth call of that form is refused. Remaining items need another request.
 
 ## Implementation and review
 
-`src/custom-agent.ts` (the per-run `failures` map, `REPEAT_LIMIT = 3`), `src/tool-errors.ts` (`RepeatedFailureError` → `REPEATED_FAILURE`) and `src/parcels.ts`. Tests: `tests/custom-runtime.test.ts` (a model that guesses a new ID on every call gets three real failures, then a refusal, then answers) and `tests/parcels.test.ts` (the message).
+`src/custom-agent.ts` (the per-run `failures` map, `REPEAT_LIMIT = 3`), `src/tool-errors.ts` (`RepeatedFailureError` → `REPEATED_FAILURE`) and `src/parcels.ts`. Tests in `tests/custom-runtime.test.ts` cover:
 
-Independent review: pending.
+- A scripted run where parallel calls count once and a different code restarts the count. After three consecutive failing steps the next call is refused, another form is still dispatched, and repeated invalid `finish_turn` calls are never refused.
+- A success resetting the count.
+
+`tests/parcels.test.ts` covers the message. The steering reset is verified by reading the code only.
+
+Independent review (Claude Opus 5.5 subagent, head `0046f00`): **REQUEST CHANGES.**
+
+1. **Medium:** keying on the operation alone blocked the recommended recovery (`parcel_list` without an ID).
+2. **Medium:** steering did not reset the counts.
+3. **Low–medium:** broad error codes cut per-item batches short.
+4. **Low:** thin tests.
+5. **Low:** "this turn" wording.
+
+All were addressed by the call-form key, per-step counting, the steering reset, the new tests and the reworded message. Re-review is pending.
 
 ## Verification and outcome
 
-`npm run check` and `format:check` pass. Not yet released. After release, a repeat would show three failed calls of one operation followed by a `REPEATED_FAILURE`, instead of dozens.
+`npm run check` and `format:check` pass. Not yet released. After release, a repeat would show three failed steps of one call form followed by a `REPEATED_FAILURE`, instead of dozens.

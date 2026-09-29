@@ -9,11 +9,11 @@ export class NotDispatchedError extends Error {
   }
 }
 import { ZodError } from "zod";
-/** The operation already failed the same way repeatedly in this run; it was not dispatched. */
+/** This call form already failed the same way in consecutive steps of the run; it was not dispatched. */
 export class RepeatedFailureError extends Error {
   constructor(operation: string, code: string, count: number) {
     super(
-      `${operation} already failed ${count} times in a row this turn (${code}), so it was not called again. Do not retry it this turn: answer with what you have, or ask the owner.`,
+      `${operation} failed the same way (${code}) in ${count} steps in a row of this request, so this call with the same argument names was not made. Do not retry it in this request: use another form (for example listing without an id), answer with what you have, or ask the owner.`,
     );
   }
 }

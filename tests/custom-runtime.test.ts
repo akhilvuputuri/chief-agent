@@ -952,45 +952,111 @@ test("a finish result that fails persistence is not returned as a successful env
     await f.pg.close();
   }
 });
-test("an operation that keeps failing the same way is refused for the rest of the run", async () => {
-  let n = 0,
-    refusal: any;
+test("a call form that keeps failing the same way is refused, without blocking recovery or finishing", async () => {
+  const read = (args: object) => ({
+    id: randomUUID(),
+    type: "function" as const,
+    function: { name: "observation_read", arguments: JSON.stringify(args) },
+  });
+  const step = (...calls: ReturnType<typeof read>[]) => ({
+    message: { role: "assistant" as const, content: null, tool_calls: calls },
+  });
+  const guess = () => read({ id: randomUUID() });
+  const badFinish = () => call("finish_turn", { reason: "answer" });
+  // Guessing a new id every step, as in the 28 September parcel loop.
+  const script = [
+    step(guess(), guess(), guess()), // parallel calls in one step count once
+    step(guess()),
+    step(read({ id: "not-a-uuid" })), // a different code restarts the count
+    step(guess()),
+    step(guess()),
+    step(guess()),
+    step(guess()), // refused: third step in a row with the same form and code
+    step(read({ id: randomUUID(), offset: 0 })), // another form is still allowed
+    badFinish(),
+    badFinish(),
+    badFinish(),
+    badFinish(), // finish_turn is never refused
+  ];
+  let n = 0;
   const f = await fixture({
-    generate: async (req) => {
-      n++;
-      const last = req.messages.findLast((m) => m.role === "tool");
-      if (String(last?.content).includes("REPEATED_FAILURE")) {
-        refusal = JSON.parse(String(last!.content));
-        return text("I could not find that record.");
-      }
-      if (n > 10) return text("gave up");
-      // Guessing a different id each time, as in the 28 September parcel loop.
-      return call("observation_read", { id: randomUUID() });
-    },
+    generate: async () => script[n++] ?? text("I could not find that record."),
   });
   try {
-    const reply = await f.assistant.respond("owner", "Show that record");
-    assert.match(reply.text ?? String(reply), /could not find/);
+    await f.assistant.respond("owner", "Show that record");
     const calls = (
       await f.db.query(
-        "SELECT state,result FROM runtime_calls ORDER BY started_at",
+        "SELECT operation,state,result FROM runtime_calls ORDER BY started_at,id",
       )
     ).rows;
+    const NF = "NOT_FOUND_OR_UNAVAILABLE";
     assert.deepEqual(
       calls.map((c) => c.result.error.code),
       [
-        "NOT_FOUND_OR_UNAVAILABLE",
-        "NOT_FOUND_OR_UNAVAILABLE",
-        "NOT_FOUND_OR_UNAVAILABLE",
+        NF,
+        NF,
+        NF,
+        NF,
+        "INVALID_INPUT",
+        NF,
+        NF,
+        NF,
         "REPEATED_FAILURE",
+        NF,
+        "INVALID_INPUT",
+        "INVALID_INPUT",
+        "INVALID_INPUT",
+        "INVALID_INPUT",
       ],
     );
     assert.ok(calls.every((c) => c.state === "failed"));
-    assert.equal(refusal.error.retryable, false);
-    assert.match(
-      refusal.error.message,
-      /observation_read already failed 3 times/,
-    );
+    const refusal = calls.find(
+      (c) => c.result.error.code === "REPEATED_FAILURE",
+    )!.result.error;
+    assert.equal(refusal.retryable, false);
+    assert.match(refusal.message, /observation_read failed the same way/);
+    assert.match(refusal.message, /listing without an id/);
+  } finally {
+    await f.pg.close();
+  }
+});
+test("a success of the same call form resets its failure count", async () => {
+  let n = 0,
+    real = "";
+  const f = await fixture({
+    generate: async () => {
+      n++;
+      if (n === 1) return call("memory_list", {});
+      if (n === 4) {
+        real = (
+          await f.db.query(
+            "SELECT id FROM runtime_calls WHERE operation='memory_list' AND state='success'",
+          )
+        ).rows[0].id;
+        return call("observation_read", { id: real });
+      }
+      if (n <= 8) return call("observation_read", { id: randomUUID() });
+      return text("done");
+    },
+  });
+  try {
+    await f.assistant.respond("owner", "Read it");
+    const codes = (
+      await f.db.query(
+        "SELECT state,result FROM runtime_calls WHERE operation='observation_read' ORDER BY started_at,id",
+      )
+    ).rows.map((c) => c.result?.error?.code ?? c.state);
+    const NF = "NOT_FOUND_OR_UNAVAILABLE";
+    // Two failures, a success, then three more failures before a refusal.
+    assert.deepEqual(codes, [
+      NF,
+      NF,
+      "success",
+      NF,
+      NF,
+      NF,
+      "REPEATED_FAILURE",
+    ]);
   } finally {
     await f.pg.close();
   }
