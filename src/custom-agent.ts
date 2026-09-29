@@ -463,7 +463,9 @@ export class CustomAgent implements Agent {
               }
             }
             await execution.endCall(journal, result);
-            failures.delete(form);
+            // Any success is progress and may supply what a failing form lacked
+            // (such as an id from parcel_match), so every count starts again.
+            failures.clear();
             if (candidate) {
               finish = candidate;
               finishObservation = op === "finish_turn" ? journal : undefined;

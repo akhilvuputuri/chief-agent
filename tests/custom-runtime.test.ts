@@ -1061,3 +1061,27 @@ test("a success of the same call form resets its failure count", async () => {
     await f.pg.close();
   }
 });
+test("a success of another operation lets a refused form through again", async () => {
+  // After three bad reads, another tool can supply a real id (as parcel_match would).
+  let n = 0;
+  const f = await fixture({
+    generate: async () => {
+      n++;
+      if (n === 4) return call("memory_list", {});
+      if (n <= 8) return call("observation_read", { id: randomUUID() });
+      return text("done");
+    },
+  });
+  try {
+    await f.assistant.respond("owner", "Read it");
+    const codes = (
+      await f.db.query(
+        "SELECT result FROM runtime_calls WHERE operation='observation_read' ORDER BY started_at,id",
+      )
+    ).rows.map((c) => c.result.error.code);
+    const NF = "NOT_FOUND_OR_UNAVAILABLE";
+    assert.deepEqual(codes, [NF, NF, NF, NF, NF, NF, "REPEATED_FAILURE"]);
+  } finally {
+    await f.pg.close();
+  }
+});

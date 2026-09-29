@@ -21,7 +21,7 @@ Two gaps combined. The error gave no route to a valid ID, and the loop had no li
   - The "Parcel not found" message now says that parcel IDs come only from `parcel_list` (without an ID) or `parcel_match`, and not to guess or reuse other record IDs.
   - A generic guard in `CustomAgent`, keyed by _call form_: the operation plus its argument names. Once one form has failed with the same error code in three model steps in a row, later calls of that form in the run are refused without dispatch. They return `REPEATED_FAILURE`, which tells the model to use another form, answer with what it has, or ask the owner.
 - **Reset rules:**
-  - A success of that form, or a different error code, resets the count.
+  - Any successful call clears every count, because a success may supply what the failing form lacked (Devin Review: an ID found by `parcel_match` must still be readable). A different error code resets that form's count. A loop that makes no progress, like 28 September's, is still stopped.
   - Parallel calls in one step count once, so a batch ("watch these six tickers") is not cut short by its own failures.
   - New owner input adopted mid-run (steering) clears every count. The model can then act on an ID the owner supplies.
   - `finish_turn` is exempt, so the model can always answer.
@@ -36,7 +36,7 @@ Two gaps combined. The error gave no route to a valid ID, and the loop had no li
 `src/custom-agent.ts` (the per-run `failures` map, `REPEAT_LIMIT = 3`), `src/tool-errors.ts` (`RepeatedFailureError` → `REPEATED_FAILURE`) and `src/parcels.ts`. Tests in `tests/custom-runtime.test.ts` cover:
 
 - A scripted run where parallel calls count once and a different code restarts the count. After three consecutive failing steps the next call is refused, another form is still dispatched, and repeated invalid `finish_turn` calls are never refused.
-- A success resetting the count.
+- A success of the same form, and a success of another operation, each resetting the count.
 
 `tests/parcels.test.ts` covers the message. The steering reset is verified by reading the code only.
 
@@ -48,7 +48,14 @@ Independent review (Claude Opus 5.5 subagent, head `0046f00`): **REQUEST CHANGES
 4. **Low:** thin tests.
 5. **Low:** "this turn" wording.
 
-All were addressed by the call-form key, per-step counting, the steering reset, the new tests and the reworded message. Re-review is pending.
+All were addressed by the call-form key, per-step counting, the steering reset, the new tests and the reworded message.
+
+Devin Review (same head) raised two more points:
+
+- **Red:** a correct ID recovered through `parcel_match` would still be refused. Fixed: any success clears all counts.
+- **Yellow:** refused calls still consume model calls. Kept as is: the run's model budget caps them, and the refusal tells the model to stop.
+
+Re-review is pending.
 
 ## Verification and outcome
 
