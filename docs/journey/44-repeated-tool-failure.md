@@ -1,7 +1,7 @@
 # 44 — Why did one request call parcel_list 25 times?
 
 Work date(s): 2026-09-29. Written/revised: 2026-09-29.
-Status: tested (PR open on `claude/calendar-event-creation-bug-nad2ub`). Not released.
+Status: released (`4042743`, 29 September 2026).
 
 ## User-visible problem and preceding iteration
 
@@ -21,7 +21,7 @@ Two gaps combined. The error gave no route to a valid ID, and the loop had no li
   - The "Parcel not found" message now says that parcel IDs come only from `parcel_list` (without an ID) or `parcel_match`, and not to guess or reuse other record IDs.
   - A generic guard in `CustomAgent`, keyed by _call form_: the operation plus its argument names. Once one form has failed with the same error code in three model steps with no successful call in between, calls of that form from the next step on are refused without dispatch. They return `REPEATED_FAILURE`, which tells the model to use another form, answer with what it has, or ask the owner.
 - **Reset rules:**
-  - Any successful call clears every count, because a success may supply what the failing form lacked (Devin Review: an ID found by `parcel_match` must still be readable). A different error code resets that form's count. A loop that makes no progress, like 28 September's, is still stopped.
+  - Any successful call clears every count, because a success may supply what the failing form lacked (Devin Review: an ID found by `parcel_match` must still be readable). A different error code resets that form's count. A run of consecutive failures, like 28 September's, is still stopped. A loop that alternates a successful call with a failing one is not: only the run budget bounds it (accepted limit, same as before this change).
   - Parallel calls in one step count once, so a batch ("watch these six tickers") is not cut short by its own failures.
   - New owner input adopted mid-run (steering) clears every count. The model can then act on an ID the owner supplies.
   - `finish_turn` is exempt, so the model can always answer.
@@ -63,6 +63,15 @@ Re-review of `0843897`: **APPROVE**, with Low notes.
 - **Accepted:** a changed argument name makes a new form. This is loop protection, not enforcement.
 - **Accepted:** the steering reset has no test.
 
+Re-review of `a132a2a`: **APPROVE**. One Low note is accepted as a limit and recorded above: a loop that alternates success and failure is not caught.
+
 ## Verification and outcome
 
-`npm run check` and `format:check` pass. Not yet released. After release, a repeat would show three failed steps of one call form followed by a `REPEATED_FAILURE`, instead of dozens.
+`npm run check` and `format:check` pass. A repeat would now show three failed steps of one call form followed by a `REPEATED_FAILURE`, instead of dozens.
+
+### Release closure — 2026-09-29
+
+- **Merge:** [PR #116](https://github.com/akhilvuputuri/chief-agent/pull/116) merged as `4042743`. Its exact head `a132a2a` was independently approved and CI passed. Both Devin threads were answered and resolved.
+- **Release:** CloudWatch logged release `4042743` from 04:28:20 UTC, with gateway heartbeats every five minutes and no warn or error lines in the first 15 minutes.
+- **Not checked:** `release:status` was not run from the cloud session, which has no `gh` authentication.
+- **Pending:** no live repeat has occurred yet, so the guard has not been observed in production.
