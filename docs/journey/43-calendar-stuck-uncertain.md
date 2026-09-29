@@ -1,7 +1,7 @@
 # 43 — Why did one uncertain Calendar write block every later event?
 
 Work date(s): 2026-09-29. Written/revised: 2026-09-29.
-Status: tested (PR open on `claude/calendar-event-creation-bug-nad2ub`). Not released; live acceptance pending.
+Status: released (`78d6f4e`, 29 September 2026). Owner acceptance pending.
 
 ## User-visible problem and preceding iteration
 
@@ -60,3 +60,10 @@ Regression tests for both races fail on `20e664b` and pass on the fix.
 
 - Live acceptance: after release, ask Chief to add the event again; expect a `calendar.reconciled` line, then a new approval card.
 - If `calendar.uncertain` recurs with `httpStatus` 401/403, check the write scope of the production Calendar token (a successful `calendar_list` does not prove it).
+
+### Release closure — 2026-09-29
+
+- **Merge:** [PR #115](https://github.com/akhilvuputuri/chief-agent/pull/115) merged as `78d6f4e`. Its exact head `37e67cb` was independently approved, and both Devin Review threads were fixed and resolved.
+- **Release:** main [checks](https://github.com/akhilvuputuri/chief-agent/actions/runs/36519164235) and the [release run](https://github.com/akhilvuputuri/chief-agent/actions/runs/36519465617) succeeded. CloudWatch logged `gateway.started` with release `78d6f4e` at 03:59:22 UTC, and no warn/error lines followed in the next few minutes.
+- **Not checked:** `release:status` could not read GitHub deployment evidence from the cloud session (no `gh` authentication).
+- **Pending:** owner acceptance. The next Calendar request or **Check status** should settle the 26 September approval (`calendar.reconciled`) and show a new approval card.
