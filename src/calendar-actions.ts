@@ -44,6 +44,7 @@ export class CalendarActions {
     private db: Database,
     private calendar: Pick<CalendarTools, "create" | "findCreated">,
     private owner: string,
+    private clock: () => number = () => performance.now(),
   ) {}
   async draft(user: string, run: string, input: unknown) {
     if (!this.owner || user !== this.owner)
@@ -88,6 +89,10 @@ export class CalendarActions {
   async decide(user: string, id: string, approve: boolean): Promise<Decision> {
     if (!this.owner || user !== this.owner)
       throw new Error("Calendar is not connected for this user");
+    // Measured before the claim is sent: the claim commits after this instant and
+    // before expiry, so however late its response arrives, no insert is sent
+    // later than ATTEMPT_WINDOW_MS after expiry.
+    const sendBy = this.clock() + ATTEMPT_WINDOW_MS;
     const claimed = (
       await this.db.query(
         "UPDATE approvals SET status=$3,payload=jsonb_set(payload,'{execution}',$4::jsonb) WHERE id=$1 AND user_id=$2 AND operation='calendar_create' AND status='pending' AND expires_at>now() RETURNING *",
@@ -110,8 +115,6 @@ export class CalendarActions {
         throw new Error("Approval unavailable, expired, or already used");
       return recorded(previous.payload) ?? this.settle(previous);
     }
-    // Bounds the untimed steps (audit write, token and account checks) before the insert.
-    const sendBy = performance.now() + ATTEMPT_WINDOW_MS;
     await event(this.db, user, claimed.run_id, "calendar.approval_decided", {
       id,
       approved: approve,
@@ -138,18 +141,20 @@ export class CalendarActions {
             JSON.stringify({ execution: "failed", failure: { code: reason } }),
           ],
         );
-        // Another process changed the row; do not report a state that was not recorded.
-        if (!saved.rows[0]) return { status: "uncertain" };
+        // Another process settled the row; report what was recorded.
+        if (!saved.rows[0]) return this.current(claimed);
         await event(this.db, user, claimed.run_id, "calendar.not_sent", {
           id,
           reason,
         });
         return { status: "failed", reason };
       }
-      await this.db.query(
-        "UPDATE approvals SET payload=jsonb_set(payload,'{execution}','\"uncertain\"'::jsonb) WHERE id=$1 AND user_id=$2 AND payload->>'execution'<>'created'",
+      const marked = await this.db.query(
+        "UPDATE approvals SET payload=jsonb_set(payload,'{execution}','\"uncertain\"'::jsonb) WHERE id=$1 AND user_id=$2 AND payload->>'execution'='creating' RETURNING id",
         [id, user],
       );
+      // A settlement already recorded a terminal outcome; never reopen it.
+      if (!marked.rows[0]) return this.current(claimed);
       await event(this.db, user, claimed.run_id, "calendar.uncertain", {
         id,
         ...cause(e),
@@ -199,13 +204,17 @@ export class CalendarActions {
       return recorded(saved.rows[0].payload)!;
     }
     // Still inside the attempt window, or another check settled it first.
-    const current = (
+    return this.current(approval);
+  }
+  /** The approval's recorded outcome, or uncertain while it is unresolved. */
+  private async current(approval: any): Promise<Decision> {
+    const row = (
       await this.db.query(
         "SELECT payload FROM approvals WHERE id=$1 AND user_id=$2",
         [approval.id, approval.user_id],
       )
     ).rows[0];
-    return (current && recorded(current.payload)) ?? { status: "uncertain" };
+    return (row && recorded(row.payload)) ?? { status: "uncertain" };
   }
   private async record(approval: any, result: any): Promise<Decision> {
     if (result.id !== approval.id.replaceAll("-", ""))
@@ -217,14 +226,14 @@ export class CalendarActions {
       )
         ? result.htmlLink
         : undefined;
-    await this.db.query(
+    const saved = await this.db.query(
       `WITH saved AS (
-        UPDATE approvals SET payload=payload || $4::jsonb WHERE id=$1 AND user_id=$2 AND payload->>'execution'<>'created' RETURNING id
+        UPDATE approvals SET payload=payload || $4::jsonb WHERE id=$1 AND user_id=$2 AND ${UNRESOLVED} RETURNING id
       ), receipt AS (
         INSERT INTO tool_receipts(id,user_id,run_id,task_id,operation,status,details)
         SELECT $1,$2,$3,(SELECT task_id FROM work_turns WHERE run_id=$3),'calendar_create','success',$5::jsonb FROM saved
         ON CONFLICT(id) DO NOTHING
-      ) INSERT INTO events(user_id,run_id,type,data) SELECT $2,$3,'calendar.created',$5::jsonb FROM saved`,
+      ) INSERT INTO events(user_id,run_id,type,data) SELECT $2,$3,'calendar.created',$5::jsonb FROM saved RETURNING id`,
       [
         approval.id,
         approval.user_id,
@@ -236,6 +245,8 @@ export class CalendarActions {
         JSON.stringify({ id: result.id, url, approvalId: approval.id }),
       ],
     );
+    // Already recorded (a duplicate callback, or a settlement that won): report that.
+    if (!saved.rows[0]) return this.current(approval);
     return { status: "created", url };
   }
 }

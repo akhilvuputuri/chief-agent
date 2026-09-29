@@ -43,7 +43,14 @@ Independent review (Claude Opus 5.5 subagent, head `385c811`): **REQUEST CHANGES
 5. **Low:** test gaps (`creating` rows, the 4-minute boundary, concurrency, the real 404/cancelled paths, projections). Tests added.
 6. **Low:** a stale troubleshooting sentence. Fixed.
 
-Re-review of the updated head is pending.
+Re-review of `20e664b` (same reviewer): **APPROVE**, with Low notes that included the next two items.
+
+Devin Review on PR #115 (`20e664b`) raised two red-circle findings:
+
+1. **A late callback could reopen a settled approval.** The uncertain handler overwrote any execution except `created`, and the success recorder could overwrite `deleted`. Fixed: every post-claim write is conditional on an unresolved state. A write that loses returns the recorded outcome.
+2. **A delayed claim response restarted the send window.** The deadline was measured after the claim returned. Fixed: it is measured before the claim is issued.
+
+Regression tests for both races fail on `20e664b` and pass on the fix.
 
 ## Verification and outcome
 

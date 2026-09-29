@@ -691,3 +691,110 @@ test("settlement covers interrupted, concurrent and deleted attempts and logs fa
     await pg.close();
   }
 });
+test("late callbacks never reopen or overwrite a settled approval, and a delayed claim cannot send", async () => {
+  const { pg, db } = await fixture();
+  const settleNow = (id: string, payload: object) =>
+    db.query("UPDATE approvals SET payload=payload || $2::jsonb WHERE id=$1", [
+      id,
+      JSON.stringify(payload),
+    ]);
+  const notFound = { execution: "failed", failure: { code: "not_found" } };
+  const row = async (id: string) =>
+    (await db.query("SELECT payload FROM approvals WHERE id=$1", [id])).rows[0]
+      .payload;
+  const count = async (type: string) =>
+    (await db.query("SELECT count(*)::int n FROM events WHERE type=$1", [type]))
+      .rows[0].n;
+  try {
+    // An insert error handled after settlement leaves the settled outcome alone.
+    let fail = new CalendarActions(
+      db,
+      {
+        create: async (_u, id) => {
+          await settleNow(id, notFound);
+          throw new Error("connection lost");
+        },
+        findCreated: async () => null,
+      },
+      "123",
+    );
+    let saved = await fail.draft("123", randomUUID(), draft);
+    assert.deepEqual(await fail.decide("123", saved.approvalId, true), {
+      status: "failed",
+      reason: "not_found",
+    });
+    assert.equal((await row(saved.approvalId)).execution, "failed");
+    assert.equal((await row(saved.approvalId)).failure.code, "not_found");
+    assert.equal(await count("calendar.uncertain"), 0);
+    assert.equal(
+      (await fail.draft("123", randomUUID(), draft)).status,
+      "awaiting_approval",
+    );
+    await db.query("DELETE FROM approvals");
+    // A late success does not overwrite a recorded deletion or add a receipt.
+    fail = new CalendarActions(
+      db,
+      {
+        create: async (_u, id) => {
+          await settleNow(id, { execution: "deleted" });
+          return { id: id.replaceAll("-", "") };
+        },
+        findCreated: async () => null,
+      },
+      "123",
+    );
+    saved = await fail.draft("123", randomUUID(), draft);
+    assert.deepEqual(await fail.decide("123", saved.approvalId, true), {
+      status: "deleted",
+    });
+    assert.equal((await row(saved.approvalId)).execution, "deleted");
+    assert.equal(
+      (await db.query("SELECT count(*)::int n FROM tool_receipts")).rows[0].n,
+      0,
+    );
+    await db.query("DELETE FROM approvals");
+    // The claim commits, but its response arrives after settlement: the send
+    // deadline was fixed before the claim, so the insert is never sent.
+    let clock = 0,
+      posts = 0,
+      deadline = 0;
+    const slow = new Proxy(db, {
+      get: (target, key) =>
+        key === "query"
+          ? async (text: string, values?: unknown[]) => {
+              const result = await target.query(text, values);
+              if (text.startsWith("UPDATE approvals SET status=$3")) {
+                clock += 7 * 60_000;
+                await settleNow(result.rows[0].id, notFound);
+              }
+              return result;
+            }
+          : (target as any)[key],
+    });
+    const delayed = new CalendarActions(
+      slow,
+      {
+        create: async (_u, _id, _d, sendBy) => {
+          deadline = sendBy!;
+          if (clock > sendBy!)
+            throw new CalendarNotSentError("window passed", "not_sent");
+          posts++;
+          return {};
+        },
+        findCreated: async () => null,
+      },
+      "123",
+      () => clock,
+    );
+    saved = await delayed.draft("123", randomUUID(), draft);
+    assert.deepEqual(await delayed.decide("123", saved.approvalId, true), {
+      status: "failed",
+      reason: "not_found",
+    });
+    assert.equal(deadline, 60_000);
+    assert.equal(posts, 0);
+    assert.equal((await row(saved.approvalId)).failure.code, "not_found");
+  } finally {
+    await pg.close();
+  }
+});
