@@ -19,7 +19,13 @@ import {
   type ToolDefinition,
 } from "./model.js";
 import { Stop, readOperations, type StopReason } from "./execution.js";
-import { toolError, NotDispatchedError } from "./tool-errors.js";
+import {
+  toolError,
+  NotDispatchedError,
+  RepeatedFailureError,
+} from "./tool-errors.js";
+/** Identical consecutive failures of one operation before it is refused for the run. */
+const REPEAT_LIMIT = 3;
 import { domainOf } from "./tool-domains.js";
 const finishTool: ToolDefinition = {
   name: "finish_turn",
@@ -129,6 +135,9 @@ export class CustomAgent implements Agent {
       return false;
     };
     await execution.checkpoint(messages);
+    // The last failure code of each operation and how many times in a row it recurred.
+    // A model that keeps retrying the same failing call is refused instead of looping.
+    const failures = new Map<string, { code: string; count: number }>();
     try {
       turn: while (true) {
         if (await steer()) continue;
@@ -322,6 +331,9 @@ export class CustomAgent implements Agent {
               throw new NotDispatchedError(
                 req.signal.aborted ? "cancelled" : "interrupted",
               );
+            const repeated = failures.get(op);
+            if (repeated && repeated.count >= REPEAT_LIMIT)
+              throw new RepeatedFailureError(op, repeated.code, repeated.count);
             if (!enabled.has(op)) {
               // A known tool whose domain is not loaded yet: load the domain and
               // dispatch. Arguments are still validated and the owner-scoped
@@ -431,6 +443,7 @@ export class CustomAgent implements Agent {
               }
             }
             await execution.endCall(journal, result);
+            failures.delete(op);
             if (candidate) {
               finish = candidate;
               finishObservation = op === "finish_turn" ? journal : undefined;
@@ -443,6 +456,18 @@ export class CustomAgent implements Agent {
             }
             if (error instanceof Stop) throw error;
             result = { error: toolError(error) };
+            // finish_turn stays available: refusing it would leave no way to answer.
+            if (
+              op !== "finish_turn" &&
+              !(error instanceof RepeatedFailureError)
+            ) {
+              const code = (result as any).error.code as string;
+              const last = failures.get(op);
+              failures.set(op, {
+                code,
+                count: last?.code === code ? last.count + 1 : 1,
+              });
+            }
             const uncertain =
               dispatched &&
               op !== "finish_turn" &&

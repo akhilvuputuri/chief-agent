@@ -159,7 +159,10 @@ export class ParcelTools {
         user,
       ])
     ).rows[0];
-    if (!row) throw new ToolValidationError("Parcel not found");
+    if (!row)
+      throw new ToolValidationError(
+        "Parcel not found: no parcel of the owner has this id. Parcel ids come only from parcel_list (without id) or parcel_match; do not guess or reuse other record ids.",
+      );
     return row as any;
   }
   async call(user: string, action: ParcelAction, run?: string) {

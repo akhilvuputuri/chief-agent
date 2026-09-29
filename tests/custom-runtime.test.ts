@@ -952,3 +952,46 @@ test("a finish result that fails persistence is not returned as a successful env
     await f.pg.close();
   }
 });
+test("an operation that keeps failing the same way is refused for the rest of the run", async () => {
+  let n = 0,
+    refusal: any;
+  const f = await fixture({
+    generate: async (req) => {
+      n++;
+      const last = req.messages.findLast((m) => m.role === "tool");
+      if (String(last?.content).includes("REPEATED_FAILURE")) {
+        refusal = JSON.parse(String(last!.content));
+        return text("I could not find that record.");
+      }
+      if (n > 10) return text("gave up");
+      // Guessing a different id each time, as in the 28 September parcel loop.
+      return call("observation_read", { id: randomUUID() });
+    },
+  });
+  try {
+    const reply = await f.assistant.respond("owner", "Show that record");
+    assert.match(reply.text ?? String(reply), /could not find/);
+    const calls = (
+      await f.db.query(
+        "SELECT state,result FROM runtime_calls ORDER BY started_at",
+      )
+    ).rows;
+    assert.deepEqual(
+      calls.map((c) => c.result.error.code),
+      [
+        "NOT_FOUND_OR_UNAVAILABLE",
+        "NOT_FOUND_OR_UNAVAILABLE",
+        "NOT_FOUND_OR_UNAVAILABLE",
+        "REPEATED_FAILURE",
+      ],
+    );
+    assert.ok(calls.every((c) => c.state === "failed"));
+    assert.equal(refusal.error.retryable, false);
+    assert.match(
+      refusal.error.message,
+      /observation_read already failed 3 times/,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});

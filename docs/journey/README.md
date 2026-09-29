@@ -45,6 +45,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 28 September                         | [41 — Pointing the model at what it cannot see](41-exchange-index.md): can an ID-carrying exchange index replace the extractive archive?      | In review; eval 81% → 97% correct, tool details 44% → 100%                                                                   |
 | 27–28 September                      | [42 — News bulletin](42-news-bulletin.md): how can the owner get a daily bulletin from sites they follow, and have it learn from 👍/👎?       | Released v0.3.28 (`8f7f7f7`) via migration-021 rollout; owner configuration and acceptance pending                           |
 | 29 September                         | [43 — Stuck uncertain Calendar approval](43-calendar-stuck-uncertain.md): why did one uncertain write block every later event?                | Tested; read-only settlement after the attempt window; not released                                                          |
+| 29 September                         | [44 — Repeated tool failure](44-repeated-tool-failure.md): why did one request call parcel_list 25 times?                                     | Tested; clearer parcel error and a per-run repeat guard; not released                                                        |
 
 ## Connected case studies
 

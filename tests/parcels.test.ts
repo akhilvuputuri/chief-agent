@@ -7,6 +7,7 @@ import { ParcelTools, decides, refKey, parcelLimits } from "../src/parcels.js";
 import { action } from "../src/protocol.js";
 import { runtimeContext } from "../src/runtime.js";
 import { projectObservation } from "../src/observations.js";
+import { ToolValidationError, toolError } from "../src/tool-errors.js";
 async function fixture() {
   const pg = new PGlite();
   for (const file of (await readdir(new URL("../db/", import.meta.url)))
@@ -1872,4 +1873,23 @@ test("the precedence rule and reference normalisation are exactly as documented"
   assert.equal(refKey("sp 123-456"), "SP123456");
   assert.equal(refKey("SP123456"), refKey("sp-123.456"));
   assert.equal(refKey(undefined), "");
+});
+test("an unknown parcel id says where valid ids come from", async () => {
+  const f = await fixture();
+  try {
+    await assert.rejects(
+      () =>
+        f.tools.call("a", {
+          operation: "parcel_list",
+          id: "3f0c8a52-7d4b-4c1e-9a3f-2b6d8e1f0a79",
+        }),
+      (e: Error) =>
+        e instanceof ToolValidationError &&
+        toolError(e).code === "VALIDATION_FAILED" &&
+        /Parcel not found/.test(e.message) &&
+        /only from parcel_list \(without id\) or parcel_match/.test(e.message),
+    );
+  } finally {
+    await f.pg.close();
+  }
 });

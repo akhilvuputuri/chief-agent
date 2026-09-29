@@ -1,6 +1,7 @@
-# Calendar stuck-uncertain fix — 29 September 2026 (in review)
+# Calendar stuck-uncertain fix and repeated-failure guard — 29 September 2026
 
-- **Calendar retries blocked (tested, not released):** one approved Calendar write left `uncertain` blocked every later draft, and **Check status** could never clear it (the same mechanism as [journal 31](journey/31-calendar-authorization-failure.md)). Branch `claude/calendar-event-creation-bug-nad2ub` settles such approvals by a read-only GET once no attempt can be in flight. It also records why an insert became uncertain. After release, the owner's next Calendar request should settle the stuck approval and show a new card. See [journal 43](journey/43-calendar-stuck-uncertain.md).
+- **Repeated tool failures (tested, not released):** one request on 28 September called `parcel_list` 25 times with an unknown parcel ID. The parcel error now says where valid IDs come from, and the agent refuses an operation after three identical failures in a row within a run. See [journal 44](journey/44-repeated-tool-failure.md).
+- **Calendar retries blocked (merged in [PR #115](https://github.com/akhilvuputuri/chief-agent/pull/115) as `78d6f4e`; release verification pending):** one approved Calendar write left `uncertain` blocked every later draft, and **Check status** could never clear it (the same mechanism as [journal 31](journey/31-calendar-authorization-failure.md)). Branch `claude/calendar-event-creation-bug-nad2ub` settles such approvals by a read-only GET once no attempt can be in flight. It also records why an insert became uncertain. After release, the owner's next Calendar request should settle the stuck approval and show a new card. See [journal 43](journey/43-calendar-stuck-uncertain.md).
 
 # Stock monitoring hours and news bulletin (v0.3.28) — 28 September 2026
 
