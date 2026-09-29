@@ -21,9 +21,9 @@ Status: tested (PR open on `claude/calendar-event-creation-bug-nad2ub`). Not rel
 
 ## Diagnosis and alternatives
 
-The approval's insert starts before `expires_at` (15 minutes after drafting). Token refresh, account check and insert are each time-bounded (≤50 seconds in total). Well after expiry, no attempt can still be in flight. A 404 for the deterministic ID then means the event was never created. This is the same judgment the operator applied manually in journal 31, a day later.
+The approval is claimed only before `expires_at` (15 minutes after drafting). After review, the insert is sent only within 60 seconds of the claim, which bounds the untimed audit write, token refresh and account check; the insert then times out after 20 seconds. Well after expiry, no attempt can still be in flight. A 404 for the deterministic ID then means the event was never created. This is the same judgment the operator applied manually in journal 31, a day later.
 
-- **Chosen:** read-only settlement. After `expires_at + 5 minutes`, a GET that returns 404 records the approval as `failed` with `failure.code = not_found` and a `calendar.reconciled` event. A found event is recorded as created. **Check status** and the `calendar_draft` guard both run it, so "try again" works without a button or an operator. Within the window, absence is still treated as uncertain. The guarded `UPDATE` repeats the time condition, so a concurrent in-flight attempt cannot be settled.
+- **Chosen:** read-only settlement. After `expires_at + 5 minutes`, a GET that returns 404 records the approval as `failed` with `failure.code = not_found` and a `calendar.reconciled` event. A found event is recorded as created. **Check status** and the `calendar_draft` guard both run it, so "try again" works without a button or an operator. Within the window, absence is still treated as uncertain. The guarded `UPDATE` repeats the time condition. A concurrent checker that loses the race re-reads and reports the recorded outcome.
 - **Rejected:** retrying the insert or resetting the approval to pending. That still violates one attempt per approval.
 - **Deferred:** classifying definite 4xx insert responses as non-creation (journal 31's open item). Settlement now resolves those cases within minutes anyway. A 409 still needs its own analysis.
 
@@ -34,7 +34,16 @@ The approval's insert starts before `expires_at` (15 minutes after drafting). To
 - Telegram explains a `not_found` settlement. The model context now tells it to call `calendar_draft` for a retry instead of refusing from chat history.
 - Tests (`tests/calendar-approval.test.ts`): blocked inside the window, and a failed check stays blocked. After the window, Check status settles `not_found` and the next draft saves. A stuck approval is settled by the next draft itself. A found event is recorded as created and blocks once. Exactly one insert per approval. Recorded uncertain causes.
 
-Independent review: pending.
+Independent review (Claude Opus 5.5 subagent, head `385c811`): **REQUEST CHANGES.** Findings and corrections:
+
+1. **Medium:** the audit write between the claim and the insert had no time limit, so a stalled database could send a POST after settlement. Fixed: `create()` refuses to send more than 60 seconds after the claim (`not_sent`).
+2. **Low–medium:** a created event the owner deleted made `findCreated` throw, which would block again. Fixed: a `cancelled` event with the deterministic ID settles as `deleted`.
+3. **Low:** a concurrent checker reported "uncertain" after another had settled the row. Fixed: it re-reads the row.
+4. **Low:** failed settlement checks were silent. Fixed: `calendar.check_failed` logs a bounded cause.
+5. **Low:** test gaps (`creating` rows, the 4-minute boundary, concurrency, the real 404/cancelled paths, projections). Tests added.
+6. **Low:** a stale troubleshooting sentence. Fixed.
+
+Re-review of the updated head is pending.
 
 ## Verification and outcome
 

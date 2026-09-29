@@ -3,16 +3,42 @@ import { type Database, event } from "./db.js";
 import {
   CalendarNotSentError,
   CalendarTools,
+  GoogleAuthError,
   GoogleHttpError,
 } from "./calendar.js";
 import { validateDraft, calendarPreview } from "./calendar-draft.js";
 import { ToolValidationError } from "./tool-errors.js";
 type Decision = { status: string; url?: string; reason?: string };
-// The insert starts before the approval expires and every Google request is
-// time-bounded, so this long after expiry no attempt can still be in flight and
-// a missing deterministic event ID means it was never created.
-const SETTLED =
-  "expires_at < now() - interval '5 minutes' AND payload->>'execution' IN ('creating','uncertain')";
+// An approval is claimed only before it expires, its insert is sent only within
+// ATTEMPT_WINDOW_MS of the claim, and the insert itself times out after 20s. Five
+// minutes after expiry no attempt can still be in flight, so a missing
+// deterministic event ID then means it was never created.
+const ATTEMPT_WINDOW_MS = 60_000;
+const UNRESOLVED = "payload->>'execution' IN ('creating','uncertain')";
+const PAST_ATTEMPTS = "expires_at < now() - interval '5 minutes'";
+/** The recorded outcome of an approved attempt, or null while unresolved. */
+function recorded(payload: any): Decision | null {
+  if (payload.execution === "created")
+    return { status: "created", url: payload.result?.url };
+  if (payload.execution === "failed")
+    return { status: "failed", reason: payload.failure?.code };
+  if (payload.execution === "deleted") return { status: "deleted" };
+  return null;
+}
+/** A bounded error category for logs; never provider text. */
+function cause(e: unknown) {
+  return {
+    cause:
+      e instanceof GoogleHttpError
+        ? "http"
+        : e instanceof GoogleAuthError
+          ? e.kind
+          : (e as Error)?.name === "TimeoutError"
+            ? "timeout"
+            : "error",
+    httpStatus: e instanceof GoogleHttpError ? e.status : undefined,
+  };
+}
 export class CalendarActions {
   constructor(
     private db: Database,
@@ -30,8 +56,15 @@ export class CalendarActions {
       )
     ).rows;
     for (const previous of unresolved) {
-      const settled = await this.settle(previous).catch(() => null);
-      if (settled?.status === "failed") continue;
+      const settled = await this.settle(previous).catch(async (e) => {
+        await event(this.db, user, previous.run_id, "calendar.check_failed", {
+          id: previous.id,
+          ...cause(e),
+        });
+        return null;
+      });
+      if (settled?.status === "failed" || settled?.status === "deleted")
+        continue;
       throw new ToolValidationError(
         settled?.status === "created"
           ? "A previous approved Calendar event was found in Google Calendar and is now recorded as created. No new draft was saved; confirm with the owner before drafting another."
@@ -75,12 +108,10 @@ export class CalendarActions {
       ).rows[0];
       if (!previous || previous.status !== "approved" || !approve)
         throw new Error("Approval unavailable, expired, or already used");
-      if (previous.payload.execution === "created")
-        return { status: "created", url: previous.payload.result?.url };
-      if (previous.payload.execution === "failed")
-        return { status: "failed", reason: previous.payload.failure?.code };
-      return this.settle(previous);
+      return recorded(previous.payload) ?? this.settle(previous);
     }
+    // Bounds the untimed steps (audit write, token and account checks) before the insert.
+    const sendBy = performance.now() + ATTEMPT_WINDOW_MS;
     await event(this.db, user, claimed.run_id, "calendar.approval_decided", {
       id,
       approved: approve,
@@ -92,6 +123,7 @@ export class CalendarActions {
         user,
         id,
         claimed.payload.draft,
+        sendBy,
       );
       return await this.record(claimed, result);
     } catch (e) {
@@ -120,13 +152,7 @@ export class CalendarActions {
       );
       await event(this.db, user, claimed.run_id, "calendar.uncertain", {
         id,
-        cause:
-          e instanceof GoogleHttpError
-            ? "http"
-            : (e as Error)?.name === "TimeoutError"
-              ? "timeout"
-              : "error",
-        httpStatus: e instanceof GoogleHttpError ? e.status : undefined,
+        ...cause(e),
       });
       return { status: "uncertain" };
     }
@@ -141,27 +167,45 @@ export class CalendarActions {
       approval.user_id,
       approval.id,
     );
+    // Created, then deleted by the owner in Google Calendar: settled, never recreated.
+    if (found?.status === "cancelled")
+      return this.conclude(approval, { execution: "deleted" }, "deleted", "");
     if (found) return this.record(approval, found);
+    return this.conclude(
+      approval,
+      { execution: "failed", failure: { code: "not_found" } },
+      "absent",
+      `AND ${PAST_ATTEMPTS}`,
+    );
+  }
+  private async conclude(
+    approval: any,
+    outcome: Record<string, unknown>,
+    state: string,
+    guard: string,
+  ): Promise<Decision> {
     const saved = await this.db.query(
-      `UPDATE approvals SET payload=payload || $3::jsonb WHERE id=$1 AND user_id=$2 AND ${SETTLED} RETURNING id`,
-      [
-        approval.id,
+      `UPDATE approvals SET payload=payload || $3::jsonb WHERE id=$1 AND user_id=$2 AND ${UNRESOLVED} ${guard} RETURNING payload`,
+      [approval.id, approval.user_id, JSON.stringify(outcome)],
+    );
+    if (saved.rows[0]) {
+      await event(
+        this.db,
         approval.user_id,
-        JSON.stringify({ execution: "failed", failure: { code: "not_found" } }),
-      ],
-    );
-    if (!saved.rows[0]) return { status: "uncertain" };
-    await event(
-      this.db,
-      approval.user_id,
-      approval.run_id,
-      "calendar.reconciled",
-      {
-        id: approval.id,
-        state: "absent",
-      },
-    );
-    return { status: "failed", reason: "not_found" };
+        approval.run_id,
+        "calendar.reconciled",
+        { id: approval.id, state },
+      );
+      return recorded(saved.rows[0].payload)!;
+    }
+    // Still inside the attempt window, or another check settled it first.
+    const current = (
+      await this.db.query(
+        "SELECT payload FROM approvals WHERE id=$1 AND user_id=$2",
+        [approval.id, approval.user_id],
+      )
+    ).rows[0];
+    return (current && recorded(current.payload)) ?? { status: "uncertain" };
   }
   private async record(approval: any, result: any): Promise<Decision> {
     if (result.id !== approval.id.replaceAll("-", ""))

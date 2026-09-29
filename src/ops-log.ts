@@ -369,6 +369,15 @@ const projections: Record<string, Projection> = {
       httpStatus: d.httpStatus,
     },
   ],
+  "calendar.check_failed": (run, d) => [
+    "warn",
+    {
+      runId: run,
+      approvalId: d.id,
+      errorCode: d.cause,
+      httpStatus: d.httpStatus,
+    },
+  ],
   "calendar.reconciled": (run, d) => [
     "info",
     { runId: run, approvalId: d.id, state: d.state },
