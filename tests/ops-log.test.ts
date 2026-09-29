@@ -473,3 +473,30 @@ test("context.selected projects component sizes only", () => {
     log.restore();
   }
 });
+
+test("Calendar settlement events project category, HTTP status and state only", () => {
+  const log = capture();
+  const run = randomUUID();
+  const id = randomUUID();
+  try {
+    projectEvent("calendar.uncertain", run, {
+      id,
+      cause: "http",
+      httpStatus: 403,
+    });
+    projectEvent("calendar.uncertain", run, { id, cause: "timeout" });
+    projectEvent("calendar.check_failed", run, { id, cause: "authorization" });
+    projectEvent("calendar.reconciled", run, { id, state: "absent" });
+    const [http, timeout, check, reconciled] = log.parsed();
+    assert.equal(http.approvalId, id);
+    assert.equal(http.errorCode, "http");
+    assert.equal(http.httpStatus, 403);
+    assert.equal(timeout.errorCode, "timeout");
+    assert.equal("httpStatus" in timeout, false);
+    assert.equal(check.level, "warn");
+    assert.equal(check.errorCode, "authorization");
+    assert.equal(reconciled.state, "absent");
+  } finally {
+    log.restore();
+  }
+});

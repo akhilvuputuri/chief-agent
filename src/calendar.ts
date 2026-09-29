@@ -1,7 +1,13 @@
 import { type CalendarDraft, validateDraft } from "./calendar-draft.js";
 import { boundedBytes } from "./providers.js";
+/** Google answered with a non-success HTTP status. */
+export class GoogleHttpError extends Error {
+  constructor(readonly status: number) {
+    super(`Google request failed (${status})`);
+  }
+}
 export async function googleJson(r: Response) {
-  if (!r.ok) throw new Error(`Google request failed (${r.status})`);
+  if (!r.ok) throw new GoogleHttpError(r.status);
   return JSON.parse(new TextDecoder().decode(await boundedBytes(r, 2000000)));
 }
 /** Google rejected credentials: the owner must reconnect (authorization) or the operator must fix OAuth settings (configuration). */
@@ -115,13 +121,21 @@ export class CalendarTools {
       throw new GoogleAuthError("authorization", "Wrong Google account");
     return headers;
   }
-  async create(user: string, approval: string, input: CalendarDraft) {
+  /** sendBy: a performance.now() deadline; past it the insert is not sent. */
+  async create(
+    user: string,
+    approval: string,
+    input: CalendarDraft,
+    sendBy = Infinity,
+  ) {
     let draft: CalendarDraft, headers: Record<string, string>, id: string;
     try {
       draft = validateDraft(input);
       headers = await this.headers(user);
       id = approval.replaceAll("-", "");
       if (!/^[0-9a-f]{32}$/.test(id)) throw new Error("Invalid approval ID");
+      if (performance.now() > sendBy)
+        throw new Error("Approval attempt window passed before sending");
     } catch (e) {
       throw new CalendarNotSentError(
         e instanceof Error ? e.message : "Calendar request was not sent",
@@ -160,10 +174,10 @@ export class CalendarTools {
     );
     if (response.status === 404) return null;
     const result = await googleJson(response);
-    if (
-      result.extendedProperties?.private?.companionApproval !== approval ||
-      result.status === "cancelled"
-    )
+    const id = approval.replaceAll("-", "");
+    // A deleted event keeps its ID but may lose its private properties.
+    if (result.status === "cancelled" && result.id === id) return result;
+    if (result.extendedProperties?.private?.companionApproval !== approval)
       throw new Error("Event identity mismatch");
     return result;
   }

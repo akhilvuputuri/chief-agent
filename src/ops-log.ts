@@ -360,6 +360,28 @@ const projections: Record<string, Projection> = {
     "warn",
     { runId: run, approvalId: d.id, errorCode: d.reason },
   ],
+  "calendar.uncertain": (run, d) => [
+    "warn",
+    {
+      runId: run,
+      approvalId: d.id,
+      errorCode: d.cause,
+      httpStatus: d.httpStatus,
+    },
+  ],
+  "calendar.check_failed": (run, d) => [
+    "warn",
+    {
+      runId: run,
+      approvalId: d.id,
+      errorCode: d.cause,
+      httpStatus: d.httpStatus,
+    },
+  ],
+  "calendar.reconciled": (run, d) => [
+    "info",
+    { runId: run, approvalId: d.id, state: d.state },
+  ],
   "library.approval_decided": (run, d) => [
     "info",
     {
