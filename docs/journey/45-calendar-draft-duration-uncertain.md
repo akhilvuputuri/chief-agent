@@ -1,7 +1,7 @@
 # 45 — Why did a rejected Calendar draft block every later write?
 
 Work date(s): 2026-09-30. Written/revised: 2026-09-30.
-Status: the classification fix merged as `55843bb` (PR #118), release pending. The follow-up removing the seven-day limit and adding all-day events (PR #119) is in review. The stuck call still needs an operator reconciliation.
+Status: released (`55843bb`, `5296dbb`, 30 September 2026); owner accepted. The stuck call was settled by journal 46, not by the operator SQL.
 
 ## User-visible problem and preceding iteration
 
@@ -98,3 +98,14 @@ Independent review (Claude Opus 5.5 subagent, head `0a065b4`): **REQUEST CHANGES
 7. **Check:** test dates were replaced with synthetic ones.
 
 Limitations: Google's handling of edge inputs is inferred from its documentation and was not observed live. Whether the model chooses `allDay` well is untested.
+
+### Release closure — 2026-09-30
+
+- #118 merged as `55843bb`, first logged 10:32:41 UTC. #119 merged as `5296dbb`, first logged 12:00:05 UTC. #120 merged as `03ae852`, first logged 14:18:41 UTC. Each squash-merged at an independently approved head with CI passing. No warn or error lines followed each switch.
+- **Live acceptance (measured, CloudWatch metadata, 14:22 UTC):**
+  - one `runtime.call_reconciled` settled the 30 September uncertain draft
+  - a `calendar_draft` succeeded in the same request
+  - `calendar.approval_decided approved=1` followed eight seconds later
+  - no `runtime.settle_failed`
+- The owner reported the event was added.
+- **Not checked:** `release:status` (no `gh` authentication in the cloud session). `calendar.created` is not projected to the logs, so creation rests on the owner's report.

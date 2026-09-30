@@ -1,7 +1,7 @@
 # 46 — Can a provably empty Calendar draft clear its own uncertainty?
 
 Work date(s): 2026-09-30. Written/revised: 2026-09-30.
-Status: in review. Not released.
+Status: released (`03ae852`, 30 September 2026); owner accepted.
 
 ## User-visible problem and preceding iteration
 
@@ -84,3 +84,14 @@ The reviewer confirmed child runs, owner scoping, the restart path, concurrent g
 
 - Live acceptance: after release, the owner retries the Calendar request. Expect `runtime.call_reconciled`, then a new approval card.
 - A review UI for other uncertain call types remains deferred.
+
+### Release closure — 2026-09-30
+
+- #118 merged as `55843bb`, first logged 10:32:41 UTC. #119 merged as `5296dbb`, first logged 12:00:05 UTC. #120 merged as `03ae852`, first logged 14:18:41 UTC. Each squash-merged at an independently approved head with CI passing. No warn or error lines followed each switch.
+- **Live acceptance (measured, CloudWatch metadata, 14:22 UTC):**
+  - one `runtime.call_reconciled` settled the 30 September uncertain draft
+  - a `calendar_draft` succeeded in the same request
+  - `calendar.approval_decided approved=1` followed eight seconds later
+  - no `runtime.settle_failed`
+- The owner reported the event was added.
+- **Not checked:** `release:status` (no `gh` authentication in the cloud session). `calendar.created` is not projected to the logs, so creation rests on the owner's report.

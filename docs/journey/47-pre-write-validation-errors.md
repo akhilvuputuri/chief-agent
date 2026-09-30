@@ -1,7 +1,7 @@
 # 47 — Which other rejected writes would have blocked every later write?
 
 Work date(s): 2026-09-30. Written/revised: 2026-09-30.
-Status: in review. Not released.
+Status: released (`fd05962`, 30 September 2026).
 
 ## User-visible problem and preceding iteration
 
@@ -34,7 +34,7 @@ Status: in review. Not released.
 
   Both tests fail on the previous code.
 
-Independent review: pending.
+Independent review (Claude Opus 5.5 subagent): **APPROVE** at `59de517`, with no correctness findings. It confirmed each converted throw fires before any local or Google write and that no background worker path changes behaviour. Low notes: mangled cron examples, the scan count, and an exception label were fixed in `fc68b4d`, re-approved. Also accepted as Low: the behaviour tests cover `schedule_create` only, and the static guard is a tripwire, not a proof.
 
 ## Verification and outcome
 
@@ -44,3 +44,9 @@ Independent review: pending.
 
 - The guard's module list must grow with new write domains.
 - Constraint and library errors remain deferred, as described above.
+
+### Release closure — 2026-09-30
+
+- **Merge:** [PR #123](https://github.com/akhilvuputuri/chief-agent/pull/123) merged as `fd05962`. Its exact head `fc68b4d` was independently approved and CI passed. There were no Devin threads.
+- **Release:** CloudWatch logged release `fd05962` from 15:02:03 UTC, with no warn or error lines in the following minutes.
+- **Not checked:** `release:status` was not run (no `gh` authentication in the cloud session). None of the fixed paths has been exercised in production yet.
