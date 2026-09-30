@@ -1,7 +1,7 @@
 # 45 — Why did a rejected Calendar draft block every later write?
 
 Work date(s): 2026-09-30. Written/revised: 2026-09-30.
-Status: in review. The code fix is tested and not yet released. The stuck call still needs an operator reconciliation.
+Status: the classification fix merged as `55843bb` (PR #118), release pending. The follow-up removing the seven-day limit and adding all-day events (PR #119) is in review. The stuck call still needs an operator reconciliation.
 
 ## User-visible problem and preceding iteration
 
@@ -70,4 +70,31 @@ Synthetic check (PGlite): the clean case reconciles one call. Each of five refus
 
 - Other write tools may also throw plain `Error`s from pre-write validation. An audit that moves those to `ToolValidationError` would prevent the same class of block. Deferred.
 - The owner-wide guard has no self-service path for a runtime call, unlike journal 43's approval settlement. A read-only "prove non-mutation" check for local-only writes such as `calendar_draft` could remove the operator step. Deferred; it needs its own review.
-- Product question: support events longer than seven days, or all-day events, for multi-week events.
+- Product question: support events longer than seven days, or all-day events. Resolved by the follow-up below.
+
+### Follow-up — 2026-09-30: no length limit, all-day events
+
+**Requirement (owner):** Chief should not impose a length limit, and should draft whatever event fits the request.
+
+- **Change:** `validateDraft` no longer caps duration. A timed event still has to end after it starts.
+- **Added:** optional `allDay`. It takes `YYYY-MM-DD` dates, and `end` is the event's last day. Google receives `start.date` plus the exclusive next day as `end.date`. The approval preview shows the day range and the number of days.
+- **Kept:** the Telegram approval button remains the only way an event is created. No guests, recurrence, editing or deletion.
+- **Schema:** the tool-schema converter in `runtime.ts` has no union support, so `start`/`end` use one string pattern (date, or date-time with an offset) with a message that says which. A shape error is a `ZodError` (`INVALID_INPUT`). `validateDraft` rejects the rest as `ToolValidationError`: the wrong form for the event type, an unparseable offset, an end not after the start, or an all-day end on or after 9999-12-31. Neither class can be recorded as an uncertain write.
+- **Tests:**
+  - a 15-day timed draft saves
+  - one-day and multi-day all-day drafts preview correctly
+  - an all-day insert sends the exclusive end date
+  - eight invalid shapes are rejected and save nothing; `calendar_list` gives an all-day `lastDay`; the date helpers cross year and leap-day boundaries
+- **Check:** `npm run check` passed: 507 application and 21 script tests, plus both Python suites.
+
+Independent review (Claude Opus 5.5 subagent, head `0a065b4`): **REQUEST CHANGES.** The date handling (exclusive end, leap days, year boundaries, preview time zones), the error classes and the approval boundary were confirmed correct. Findings and fixes:
+
+1. **Medium:** the `personal-assistance` skill still said drafts are timed. Fixed: the skill text is updated and its repository version bumped to `repo:personal-assistance:5`. An owner-approved private version of that skill, if one exists, is not changed by this; not checked from the cloud session.
+2. **Low–medium:** `calendar_list` returned Google's exclusive all-day end with no hint. Fixed: all-day events also carry `lastDay`, and the skill states the convention.
+3. **Low:** an unparseable offset such as `+99:99` passed as NaN. Fixed: the end must parse strictly after the start.
+4. **Low:** an all-day end of 9999-12-31 produced a malformed exclusive date. Fixed: rejected.
+5. **Low:** a pattern failure gave "Invalid". Fixed: the pattern message gives the expected forms. Offsets without a colon (`+0800`) are no longer accepted; a pending stored draft in that form fails as not sent on approval.
+6. **Low:** the `AGENTS.md` scope line and this entry's error-class sentence were inaccurate. Fixed.
+7. **Check:** test dates were replaced with synthetic ones.
+
+Limitations: Google's handling of edge inputs is inferred from its documentation and was not observed live. Whether the model chooses `allDay` well is untested.

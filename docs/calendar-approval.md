@@ -4,7 +4,7 @@
 
 Ask about upcoming events as before. For creation, describe the event, date, start and end time. The agent asks for missing details and saves a draft. Telegram shows an authoritative preview with **Approve event** and **Decline**. Only that button can authorize creation; natural-language assent and `/approve UUID` cannot approve Calendar writes. Approval expires after 15 minutes. Changing details requires a new draft and fresh approval.
 
-Initial scope: timed, non-recurring events of at most seven days on the connected owner's primary calendar. Dates carry explicit UTC offsets; previews show Singapore time. No guests, invitations, all-day events, editing or deletion. Gmail remains read-only. Ordinary model replies stay natural; the structured card is the transaction approval preview, not a general response template.
+Scope: non-recurring events of any length on the connected owner's primary calendar. A timed event carries date-times with explicit UTC offsets; an all-day event (`allDay: true`) carries `YYYY-MM-DD` dates, with `end` as its last day (sent to Google as the exclusive next day). Previews show Singapore time, or the day range and count for an all-day event. The seven-day limit was removed on 30 September 2026 at the owner's request ([journal 45](journey/45-calendar-draft-duration-uncertain.md)). No guests, invitations, editing or deletion. Gmail remains read-only. Ordinary model replies stay natural; the structured card is the transaction approval preview, not a general response template.
 
 ## Execution and recovery
 
