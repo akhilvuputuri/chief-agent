@@ -309,6 +309,40 @@ export class Execution {
     await this.trace("runtime.stopped", { stopReason: reason });
   }
 }
+/**
+ * Settles the owner's uncertain calendar_draft calls that provably saved nothing.
+ * A draft only ever inserts a local approval (never a Google event), so once its
+ * run has stopped and no statement can still commit, the absence of an approval
+ * or a successful draft receipt in that run since the call started means the
+ * call failed. Anything else stays uncertain for an operator. Never replays.
+ */
+export async function settleUncertainDrafts(db: Database, user: string) {
+  const settled = await db.query(
+    `WITH target AS (
+      SELECT c.id, c.run_id FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id
+      WHERE r.user_id=$1 AND c.operation='calendar_draft' AND c.state='uncertain'
+        AND r.state<>'running' AND c.started_at < now() - interval '2 minutes'
+        AND NOT EXISTS(SELECT 1 FROM approvals a WHERE a.user_id=$1 AND a.run_id=c.run_id
+          AND a.operation='calendar_create' AND a.created_at >= c.started_at)
+        AND NOT EXISTS(SELECT 1 FROM tool_receipts t WHERE t.user_id=$1 AND t.run_id=c.run_id
+          AND t.operation='calendar_draft' AND t.status='success' AND t.created_at >= c.started_at)
+      FOR UPDATE OF c
+    )
+    UPDATE runtime_calls c SET state='failed',
+      result=COALESCE(c.result,'{}'::jsonb) || jsonb_build_object('reconciliation',
+        jsonb_build_object('at',now(),'from','uncertain','to','failed',
+          'basis','no approval or successful draft receipt in the run since the call started'))
+    FROM target WHERE c.id=target.id AND c.state='uncertain'
+    RETURNING c.id, target.run_id`,
+    [user],
+  );
+  for (const row of settled.rows)
+    await event(db, user, row.run_id, "runtime.call_reconciled", {
+      id: row.id,
+      operation: "calendar_draft",
+    });
+  return settled.rows.length;
+}
 // Startup recovery is deliberately conservative. No old invocation is replayed.
 export async function recoverRuntime(db: Database) {
   // Charge interrupted active execution conservatively, capped at remaining allocation.

@@ -18,6 +18,7 @@ import {
   Stop,
   defaultBudget,
   readOperations,
+  settleUncertainDrafts,
   type Budget,
 } from "./execution.js";
 import { SkillTools } from "./skills.js";
@@ -1056,13 +1057,21 @@ export class Assistant {
     )
       throw new Error("Task scope changed; inspect current work");
     if (!readOperations.has(op)) {
-      const uncertain = await this.db.query(
-        "SELECT 1 FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id WHERE r.user_id=$1 AND c.state='uncertain' LIMIT 1",
-        [scope.user],
-      );
+      const unresolved = () =>
+        this.db.query(
+          "SELECT c.operation FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id WHERE r.user_id=$1 AND c.state='uncertain'",
+          [scope.user],
+        );
+      let uncertain = await unresolved();
+      if (uncertain.rows.some((r) => r.operation === "calendar_draft")) {
+        await settleUncertainDrafts(this.db, scope.user);
+        uncertain = await unresolved();
+      }
       if (uncertain.rows.length)
         throw new Error(
-          "An uncertain write requires inspection before further writes",
+          uncertain.rows.every((r) => r.operation === "calendar_draft")
+            ? "An uncertain write requires inspection before further writes. It is an earlier Calendar draft attempt, which is checked again automatically from two minutes after it failed and cleared when it saved nothing; ask the owner to try again then, or request operator inspection if it persists."
+            : "An uncertain write requires inspection before further writes",
         );
     }
     // Authorization awaits above may overlap new input. This is the actual dispatcher boundary.
