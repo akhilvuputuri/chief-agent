@@ -3,7 +3,7 @@ export const researchAssignment = z
   .object({
     operation: z.literal("research_delegate"),
     objective: z.string().min(1).max(2000),
-    context: z.string().max(3000),
+    context: z.string().max(4000),
     jobIds: z.array(z.string().uuid()).max(6),
     urls: z.array(z.string().url().max(2000)).max(6),
   })

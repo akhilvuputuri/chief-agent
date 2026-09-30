@@ -4,7 +4,7 @@ export const mediaAssignment = z
   .object({
     operation: z.literal("media_delegate"),
     objective: z.string().min(1).max(2000),
-    context: z.string().max(2000),
+    context: z.string().max(4000),
     attachmentIds: z.array(uuid).max(4),
     sourceIds: z.array(uuid).max(4),
   })

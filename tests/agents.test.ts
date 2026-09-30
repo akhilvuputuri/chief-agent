@@ -589,3 +589,48 @@ test("an agent inherits its parent's lane, so a background job's agent cannot ch
     await pg.close();
   }
 });
+
+test("a brief naming more targets than a contract allows is refused, never silently cut", async () => {
+  const { pg, db } = await database();
+  try {
+    const signal = new AbortController().signal,
+      runId = randomUUID();
+    const execution = new Execution(db, "owner", runId, signal);
+    await execution.start();
+    const links = Array.from(
+      { length: 7 },
+      (_, i) => `https://example.com/page-${i}`,
+    ).join(" ");
+    let childStarted = false;
+    await assert.rejects(
+      runAgentType(
+        {
+          runId,
+          capability: "",
+          execution,
+          signal,
+          history: [],
+          memories: [],
+          message: "research these",
+          runtime: runtimeContext({ web: true }, null),
+          executeResearch: async () => ({}),
+        },
+        {
+          operation: "agent_run",
+          type: "research",
+          objective: "Compare these pages",
+          context: links,
+        },
+        async () => {
+          childStarted = true;
+          throw new Error("unexpected child");
+        },
+        "main/model",
+      ),
+      /at most six|too_big|at most 6/i,
+    );
+    assert.equal(childStarted, false);
+  } finally {
+    await pg.close();
+  }
+});

@@ -163,7 +163,17 @@ export async function delegateMedia(
       retrievedAt: row.retrieved_at,
     });
   }
-  const cacheKey = mediaCacheKey(a.objective, imageTargets, a.sourceIds, model);
+  // The brief's context can change what is asked, so it is part of the question's identity.
+  // The IDs it names are keyed separately (by content hash and source ID), so they are removed.
+  const context = a.context
+    .replace(/\b[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}\b/gi, "")
+    .trim();
+  const cacheKey = mediaCacheKey(
+    context ? `${a.objective}\n${context}` : a.objective,
+    imageTargets,
+    a.sourceIds,
+    model,
+  );
   const cached = (
     await db.query(
       `SELECT data FROM events WHERE user_id=$1 AND type='media.processed' AND data->>'cacheKey'=$2 AND (data->>'reusable')::boolean AND created_at>now()-($3||' days')::interval ORDER BY id DESC LIMIT 1`,

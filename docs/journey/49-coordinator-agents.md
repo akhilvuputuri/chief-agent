@@ -100,11 +100,16 @@ The agent catalogue adds 1,963 characters of runtime state.
     - `skill_read` can never be granted;
     - tier keys are strict;
     - the model decision above is recorded, and the media and research docs are corrected.
-- Independent review of the fixes: pending.
+- **Independent review of the fixes:** approved at `f5b1f6f`. Its one nit is also fixed: `agent.completed` and `agent.failed` trace failures are logged, not thrown, so a finished agent is never reported as failed and repeated.
+- **Devin, on `f5b1f6f`:**
+  - A brief naming more targets than a contract allows was silently cut. It is now refused, and a test covers it.
+  - A findings report was accepted even when the child then stopped on a failed write or newer input. It now counts only when the child finished normally (answer or waiting for approval or the owner).
+  - The media cache ignored the brief's context. It now keys on the context without the IDs it names.
+- Final review of these changes: pending.
 
 ## Verification and outcome
 
-`npm test` passes 530 TypeScript tests and 21 Python context-eval tests. This is mocked-model behaviour only. After release, check:
+`npm test` passes 531 TypeScript tests and 21 Python context-eval tests. This is mocked-model behaviour only. After release, check:
 
 - `agent.completed` counts by `agentType` and `state`;
 - `model.completed` tokens and cost for child runs against Chief's;

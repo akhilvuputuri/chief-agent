@@ -13,6 +13,7 @@ import { NotDispatchedError } from "./tool-errors.js";
 import { skillPage } from "./skill-content.js";
 import { delegateResearch, checkResearchQuote } from "./research.js";
 import { delegateMedia } from "./media.js";
+import { opsLog, errorFields } from "./ops-log.js";
 
 /** The model and effort a child run uses, as resolved by the host. */
 export type AgentChoice = {
@@ -49,10 +50,14 @@ export async function resolveReferences(
     ...new Set(
       (text.match(URL_TEXT) ?? []).map((u) => u.replace(/[.,;:!?]+$/, "")),
     ),
-  ].slice(0, 6);
+  ];
+  if (urls.length > 12)
+    throw new Error("Agent validation: name at most 12 links in one brief");
   const ids = [
     ...new Set((text.match(UUID) ?? []).map((u) => u.toLowerCase())),
-  ].slice(0, 24);
+  ];
+  if (ids.length > 24)
+    throw new Error("Agent validation: name at most 24 IDs in one brief");
   const attachments = ids.filter((id) =>
     (req.images ?? []).some((i) => i.id === id),
   );
@@ -72,10 +77,10 @@ export async function resolveReferences(
   );
   return {
     urls,
-    attachments: attachments.slice(0, 4),
-    sources: sources.slice(0, 8),
-    jobs: jobs.slice(0, 6),
-    observations: observations.slice(0, 8),
+    attachments,
+    sources,
+    jobs,
+    observations,
     unresolved: rest.filter(
       (id) =>
         !sources.includes(id) &&
@@ -124,9 +129,9 @@ export async function runAgentType(
             {
               operation: "research_delegate",
               objective: a.objective,
-              context: a.context.slice(0, 3000),
-              jobIds: refs.jobs.slice(0, 6),
-              urls: refs.urls.slice(0, Math.max(0, 6 - refs.jobs.length)),
+              context: a.context,
+              jobIds: refs.jobs,
+              urls: refs.urls,
             },
             runAgent,
             definition,
@@ -147,9 +152,9 @@ export async function runAgentType(
                 {
                   operation: "media_delegate",
                   objective: a.objective,
-                  context: a.context.slice(0, 2000),
+                  context: a.context,
                   attachmentIds: refs.attachments,
-                  sourceIds: refs.sources.slice(0, 4 - refs.attachments.length),
+                  sourceIds: refs.sources,
                 },
                 runAgent,
                 choice,
@@ -158,27 +163,33 @@ export async function runAgentType(
             })()
           : await runFindingsAgent(req, a, definition, refs, choice, runAgent);
   } catch (error) {
-    await req.execution.trace("agent.failed", {
-      version: 1,
-      type: a.type,
-      agentId,
-      contract: definition.contract,
-      cancelled: req.signal.aborted,
-    });
+    // A trace failure must never replace the agent's own error.
+    await req.execution
+      .trace("agent.failed", {
+        version: 1,
+        type: a.type,
+        agentId,
+        contract: definition.contract,
+        cancelled: req.signal.aborted,
+      })
+      .catch((e) => opsLog("agent.trace_failed", "warn", errorFields(e)));
     throw error;
   }
   // One outcome record per agent_run, whatever the contract.
-  await req.execution.trace("agent.completed", {
-    version: 1,
-    childRunId: result.childRunId,
-    type: a.type,
-    agentId,
-    contract: definition.contract,
-    status: result.status,
-    stopReason: result.stopReason,
-    model: choice,
-    approvals: Array.isArray(result.approvals) ? result.approvals.length : 0,
-  });
+  // The work is done; a failed trace must not make the coordinator repeat its writes.
+  await req.execution
+    .trace("agent.completed", {
+      version: 1,
+      childRunId: result.childRunId,
+      type: a.type,
+      agentId,
+      contract: definition.contract,
+      status: result.status,
+      stopReason: result.stopReason,
+      model: choice,
+      approvals: Array.isArray(result.approvals) ? result.approvals.length : 0,
+    })
+    .catch((e) => opsLog("agent.trace_failed", "warn", errorFields(e)));
   return {
     type: a.type,
     agentId,
@@ -373,23 +384,31 @@ export async function runFindingsAgent(
         [user, childRun],
       )
     ).rows;
-    const status = report ? report.status : "incomplete";
+    // A report counts only if the child then finished normally; a later failed write or
+    // newer input leaves the work incomplete even though a report was recorded.
+    const finished = ["answer", "awaiting_approval", "awaiting_user"].includes(
+      output.stopReason ?? "answer",
+    );
+    const accepted = finished ? report : undefined;
+    const status = accepted ? accepted.status : "incomplete";
     return {
       childRunId: childRun,
       status,
       stopReason: output.stopReason,
-      ...(report
+      ...(accepted
         ? {
-            summary: report.summary,
-            findings: report.findings,
-            refs: report.refs,
-            ...(report.needsOwner ? { needsOwner: report.needsOwner } : {}),
+            summary: accepted.summary,
+            findings: accepted.findings,
+            refs: accepted.refs,
+            ...(accepted.needsOwner ? { needsOwner: accepted.needsOwner } : {}),
           }
         : {
             summary:
               output.stopReason === "interrupted"
                 ? "The agent paused for newer input; its completed calls remain stored in its run."
-                : "The agent stopped without a report. Its completed calls remain stored in its run.",
+                : report
+                  ? `The agent reported but then stopped (${output.stopReason}), so its report is not relied on. Its completed calls remain stored in its run.`
+                  : "The agent stopped without a report. Its completed calls remain stored in its run.",
             findings: [],
             refs: [],
           }),
