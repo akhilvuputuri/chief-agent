@@ -1,4 +1,4 @@
-# Chief as coordinator with typed agents (in review) — 1 October 2026
+# Chief as coordinator with typed agents (released `5222e33`) — 1 October 2026
 
 - **One generic delegation tool:** `agent_run(type, objective, context?, model?, effort?)` replaces `research_delegate`, `plugin_delegate` and `media_delegate`. Every agent is a plugin agent. Chief's domain work (email, parcels, calendar, daily, jobs, stocks, news, library, web lookups, media) moves into the bundled `core` plugin, and Chief keeps coordination, recall, memory, work tracking, canvases and job alignment. Subagents default to Gemini 3.8 Flash through model tiers in `config/model-policy.json`, and Chief runs on GPT-6.1 Sol (PR #126). See [coordinator and agents](agents.md) and [journal 49](journey/49-coordinator-agents.md). Production latency, cost and Flash answer quality are not measured yet.
 

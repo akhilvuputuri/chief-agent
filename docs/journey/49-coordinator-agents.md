@@ -1,7 +1,7 @@
 # 49 — Chief as coordinator: typed agents behind one generic tool
 
 Work date(s): 2026-10-01. Written/revised: 2026-10-01.
-Status: in review. Tested with mocked models; the production effect is not measured.
+Status: released at `5222e33` on 1 October 2026. Tested with mocked models; the production effect is not measured.
 
 ## User-visible problem and preceding iteration
 
@@ -105,7 +105,16 @@ The agent catalogue adds 1,963 characters of runtime state.
   - A brief naming more targets than a contract allows was silently cut. It is now refused, and a test covers it.
   - A findings report was accepted even when the child then stopped on a failed write or newer input. It now counts only when the child finished normally (answer or waiting for approval or the owner).
   - The media cache ignored the brief's context. It now keys on the context without the IDs it names.
-- Final review of these changes: pending.
+- Final review: approved at `cc0767b`, and again at `7fc3dcd` after one more change. That change puts the child run ID on `agent.failed`, from Devin.
+
+### Release closure — 2026-10-01
+
+- **Merged:** [PR #129](https://github.com/akhilvuputuri/chief-agent/pull/129) at head `7fc3dcd`, merge commit `5222e33`.
+- **Checks:** CI and Devin passed on that head.
+- **Deployed:** the automatic release reported "Exact commit deployed; startup health passed". The plugin registry, including the `core` package pin, therefore loaded in production.
+- **Scope:** app-only; no migration or Compose change.
+- **Logs:** the operational log showed no errors in the 30 minutes after the release.
+- **Not yet run:** no owner message has gone through an agent.
 
 ## Verification and outcome
 
