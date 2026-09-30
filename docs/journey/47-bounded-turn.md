@@ -15,10 +15,10 @@ Tested on synthetic mailbox tasks: a fixed part of 67,736 characters as in the i
 
 | Calls | Before: serialized characters | After: serialized characters | Calls kept |
 | ----: | ----------------------------: | ---------------------------: | ---------: |
-|    21 |                       124,445 |                       94,326 |          5 |
-|    40 |                       173,294 |                      103,319 |          8 |
-|    80 |                       276,134 |                      106,520 |          8 |
-|   160 |           failed (hard limit) |                      107,177 |          8 |
+|    21 |                       124,445 |                       94,060 |          5 |
+|    40 |                       173,294 |                      102,191 |          8 |
+|    80 |                       276,134 |                      103,232 |          8 |
+|   160 |           failed (hard limit) |                      105,466 |          8 |
 
 ## Diagnosis and alternatives
 
@@ -28,7 +28,7 @@ Tested on synthetic mailbox tasks: a fixed part of 67,736 characters as in the i
 
 ## Implementation and review
 
-- `src/context.ts`: after excerpting, if the request still reaches 120,000 characters, the oldest call groups of the current turn are dropped in blocks of 8. The allowance keeps 6,000 characters for the digest and 4,000 for escaping. Only call groups leave: the owner's message, owner input sent during the task, text-only replies, the previous exchange and the latest group stay. `trimmed` is returned and traced.
+- `src/context.ts`: after excerpting, if the request still reaches 120,000 characters, the oldest call groups of the current turn are dropped in blocks of 8. The allowance keeps 9,000 characters for the digest and 4,000 for escaping. Only call groups leave: the owner's message, owner input sent during the task, text-only replies, the previous exchange and the latest group stay. `trimmed` is returned and traced.
 - `src/context-continuity.ts`: `turnDigest` writes one line per dropped call with the step, tool name, the start of its arguments, any read IDs and a failure mark, keeping the newest lines within its cap.
 - `src/custom-agent.ts` and `src/ops-log.ts`: `context.selected` carries `trimmed`, logged as `trimmedGroups`.
 - Tests in `tests/context-continuity.test.ts`:
@@ -43,6 +43,7 @@ Tested on synthetic mailbox tasks: a fixed part of 67,736 characters as in the i
   - **Major:** owner input steered into a long task was a one-message group and could be trimmed without appearing in the digest. Fixed: only call groups leave, with a regression test that steers after call 4 of 60.
   - The digest's header was outside its cap, and the fixed-part estimate ignores escaping, so the wire pass could still excerpt the latest group. Fixed with a cap that includes the header, a 4,000-character margin and a `wireCompacted === false` assertion.
   - The header named the wrong argument for `observation_read`, which takes `id`. Fixed; `approvalId` is now listed, and the header says receipt and approval IDs are proofs, not read IDs.
+  - Devin, on the approved head `97a2412`: when many calls left, the digest's cap dropped the oldest read IDs, and a failed call kept only the word "failed", not its error. Fixed: the newest 8 calls keep full lines with the error message; older ones keep short lines with their read IDs, and the digest grows to 9,000 characters. A test at the 100-call run budget checks that every call's read ID is still in the prompt.
   - Re-reading many dropped results can push earlier reads out in turn. The header now asks the model to record findings before reading many results again. This is not measured; see follow-up.
 
 ## Verification and outcome

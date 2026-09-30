@@ -115,10 +115,10 @@ The previous two stages bound earlier exchanges. A single long task could still 
 **What happens now** (`context()` in `src/context.ts`):
 
 - Once the fixed part, the previous exchange, the latest call group and this turn's excerpted calls reach 120,000 characters, the oldest call groups of this turn leave the prompt.
-- The newest call groups that fit in what remains stay. What remains is 120,000 minus 6,000 for the digest and 4,000 for JSON escaping that the fixed-part estimate does not count.
+- The newest call groups that fit in what remains stay. What remains is 120,000 minus 9,000 for the digest and 4,000 for JSON escaping that the fixed-part estimate does not count.
 - Only call groups leave. The owner's message, anything the owner sent during the task, text-only replies, the previous exchange and the latest group are never removed. The latest group can still be excerpted if the wire check after assembly reaches 120,000, but the margin keeps that from happening in the tested tasks.
 - Groups leave in blocks of 8, so the kept part of the prompt stays the same for several calls and the provider cache keeps matching it.
-- `turnDigest` in `src/context-continuity.ts` lists every call that left, one line each, oldest first: step, tool name, the start of its arguments, and its `observationId`, `receiptId`, `sourceId` or `extractionSourceId`. Failed calls are marked. The digest, including its header, keeps its newest lines within 6,000 characters and goes in the closing system message. Its header tells the model to read with `observation_read(id=…)` or `source_read(id=…)`, and to record findings before reading many results again, because older reads also leave.
+- `turnDigest` in `src/context-continuity.ts` lists every call that left, one line each, oldest first: step, tool name, the start of its arguments, and its `observationId`, `receiptId`, `sourceId` or `extractionSourceId`. Failed calls are marked. The newest 8 dropped calls get full lines, including a failed call's error message and any progress text. Older ones get a short line with only the step, tool and read IDs, so a task at the 100-call run budget keeps a read ID for every call. The digest, including its header, stays within 9,000 characters and goes in the closing system message. Its header tells the model to read with `observation_read(id=…)` or `source_read(id=…)`, and to record findings before reading many results again, because older reads also leave.
 - The journal and `runtime_calls` keep every original. The model reads a dropped result with `observation_read` instead of calling the tool again.
 - `context.selected` records `trimmed`, and the operational log shows it as `trimmedGroups`.
 
@@ -126,10 +126,10 @@ The previous two stages bound earlier exchanges. A single long task could still 
 
 | Calls | Before: serialized characters | After: serialized characters | Calls kept in full or as excerpts |
 | ----: | ----------------------------: | ---------------------------: | --------------------------------: |
-|    21 |                       124,445 |                       94,326 |                                 5 |
-|    40 |                       173,294 |                      103,319 |                                 8 |
-|    80 |                       276,134 |                      106,520 |                                 8 |
-|   160 |           failed (hard limit) |                      107,177 |                                 8 |
+|    21 |                       124,445 |                       94,060 |                                 5 |
+|    40 |                       173,294 |                      102,191 |                                 8 |
+|    80 |                       276,134 |                      103,232 |                                 8 |
+|   160 |           failed (hard limit) |                      105,466 |                                 8 |
 
 The 400,000 hard limit remains as a backstop. It now leaves more than 280,000 characters of room above the working size for the reply. Limits are still counted in characters, not tokens. In the incident, requests of about 117,000 characters reported about 26,000–31,000 prompt tokens, against a provider window advertised at over 900,000 tokens, so the character threshold is a cost and focus target, not a capacity limit. The provider's actual prompt tokens per call are recorded in `model.completed`.
 

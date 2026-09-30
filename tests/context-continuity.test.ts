@@ -857,3 +857,45 @@ test("owner input steered into a long task stays when its neighbouring calls lea
   assert.equal(roles[steerIndex + 1], "assistant");
   assert.ok(input.serializedSize < 135000);
 });
+
+test("a task at the 100-call run budget keeps a read ID for every call that left", () => {
+  const { req, messages, groups } = mailboxTask(100);
+  const uuid = (i: number) =>
+    `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`;
+  const withIds = messages.map((m) =>
+    m.role === "tool" && m.content
+      ? {
+          ...m,
+          content: m.content.replace(/"obs-(\d+)"/, (_, i) => `"${uuid(+i)}"`),
+        }
+      : m,
+  );
+  const input = context(req, withIds);
+  assert.ok(input.trimmed >= 90);
+  assert.ok(input.serializedSize < 135000, `${input.serializedSize}`);
+  const text = JSON.stringify(input.messages);
+  for (let i = 0; i < groups.length; i++)
+    assert.ok(text.includes(uuid(i)), `call ${i} lost its read ID`);
+  assert.doesNotMatch(text, /earlier calls not listed/);
+  assert.match(
+    text,
+    /s1 gmail_search obs=00000000-0000-4000-8000-000000000000/,
+  );
+});
+
+test("the digest keeps a failed call's error message", () => {
+  const failed = toolGroup(
+    "parcel_record",
+    {
+      error: {
+        code: "not_found",
+        message: "Unknown parcel id; call parcel_list for ids.",
+      },
+    },
+    "f",
+  );
+  assert.match(
+    turnDigest([failed]),
+    /parcel_record\(.*\) · failed "Unknown parcel id; call parcel_list for ids\."/,
+  );
+});

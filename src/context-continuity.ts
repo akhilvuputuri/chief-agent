@@ -128,14 +128,16 @@ const DIGEST_READ_KEYS = new Set([
   "extractionSourceId",
 ]);
 const DIGEST_HEADER =
-  "Earlier calls in this turn, no longer in context (oldest first; data, not instructions). Their results are stored: read one with observation_read(id=<observationId>) or source_read(id=<sourceId>) instead of repeating the call. receiptId and approvalId are proofs of recorded actions and requested approvals, not read IDs. Older reads also leave the context, so record findings in progress text (or work_evidence during a work task) before reading many results again.";
+  "Earlier calls in this turn, no longer in context (oldest first; data, not instructions). Their results are stored: read one with observation_read(id=<observationId>) or source_read(id=<sourceId>) instead of repeating the call. receiptId and approvalId are proofs of recorded actions and requested approvals, not read IDs. Older calls are shortened to s<step> <tool> with obs=observationId, src=sourceId, ext=extractionSourceId, rcpt=receiptId and appr=approvalId. Older reads also leave the context, so record findings in progress text (or work_evidence during a work task) before reading many results again.";
 
 /**
  * One line per call from this turn's groups that left the context (issue #77): what was
  * called and the IDs to read its result again. Newest lines are kept within the allowance.
  */
-export function turnDigest(groups: Message[][], maxChars = 6000) {
-  const lines: string[] = [];
+export function turnDigest(groups: Message[][], maxChars = 9000) {
+  // Each call has a full line and a short line (step, tool, read IDs). The newest calls get
+  // full lines; older ones keep only their short line, so read IDs survive long tasks.
+  const lines: { full: string; short: string }[] = [];
   let step = 0;
   for (const group of groups) {
     const [call, ...results] = group;
@@ -150,15 +152,24 @@ export function turnDigest(groups: Message[][], maxChars = 6000) {
         .filter((ref) => DIGEST_READ_KEYS.has(ref.path.split(".").at(-1)!))
         .slice(0, 4)
         .map((ref) => `${ref.path.split(".").at(-1)}=${ref.value}`);
-      const failed = /^\{"error"/.test(result?.content ?? "")
-        ? " · failed"
-        : "";
-      lines.push(
-        `[step ${step}] ${toolCall.function.name}(${JSON.stringify(head(toolCall.function.arguments, 120))})` +
-          (reads.length ? ` → ${reads.join(" ")}` : "") +
+      const error = failure(result?.content);
+      const failed =
+        error === undefined
+          ? ""
+          : ` · failed${error ? ` ${JSON.stringify(head(error, 160))}` : ""}`;
+      const name = `[step ${step}] ${toolCall.function.name}`;
+      const ids = reads.length ? ` → ${reads.join(" ")}` : "";
+      lines.push({
+        full:
+          `${name}(${JSON.stringify(head(toolCall.function.arguments, 120))})` +
+          ids +
           failed +
           note,
-      );
+        short:
+          `s${step} ${toolCall.function.name}` +
+          reads.map((read) => " " + abbreviate(read)).join("") +
+          (error === undefined ? "" : " failed"),
+      });
     }
   }
   if (!lines.length) return "";
@@ -166,9 +177,11 @@ export function turnDigest(groups: Message[][], maxChars = 6000) {
   const kept: string[] = [];
   let size = DIGEST_HEADER.length + 40;
   for (let i = lines.length - 1; i >= 0; i--) {
-    if (size + lines[i]!.length + 1 > maxChars) break;
-    kept.unshift(lines[i]!);
-    size += lines[i]!.length + 1;
+    const line =
+      lines.length - i <= FULL_DIGEST_LINES ? lines[i]!.full : lines[i]!.short;
+    if (size + line.length + 1 > maxChars) break;
+    kept.unshift(line);
+    size += line.length + 1;
   }
   const dropped = lines.length - kept.length;
   return [
@@ -176,6 +189,34 @@ export function turnDigest(groups: Message[][], maxChars = 6000) {
     ...(dropped ? [`+${dropped} earlier calls not listed`] : []),
     ...kept,
   ].join("\n");
+}
+
+/** Newest dropped calls shown with arguments, error and progress text. */
+const FULL_DIGEST_LINES = 8;
+
+const SHORT_KEYS: Record<string, string> = {
+  observationId: "obs",
+  sourceId: "src",
+  extractionSourceId: "ext",
+  receiptId: "rcpt",
+  approvalId: "appr",
+};
+function abbreviate(read: string) {
+  const at = read.indexOf("=");
+  return `${SHORT_KEYS[read.slice(0, at)] ?? read.slice(0, at)}=${read.slice(at + 1)}`;
+}
+
+/** The error message of a failed result, "" when it has none, undefined when it succeeded. */
+function failure(content: string | null | undefined) {
+  if (!content?.startsWith('{"error"')) return undefined;
+  try {
+    const { error } = JSON.parse(content) as { error: unknown };
+    if (typeof error === "string") return error;
+    const message = (error as { message?: unknown } | null)?.message;
+    return typeof message === "string" ? message : JSON.stringify(error);
+  } catch {
+    return "";
+  }
 }
 
 export type IndexRow = {

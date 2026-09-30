@@ -56,7 +56,7 @@ export const contextBudget = 48000;
 /** Keep existing compaction pressure even while the temporary ceiling is higher. */
 const contextCompactionThreshold = 120000;
 /** Room kept for the digest of this turn's calls that left the context. */
-const turnDigestChars = 6000;
+const turnDigestChars = 9000;
 /** Covers JSON escaping of the fixed part, which its size estimate does not count. */
 const trimMargin = 4000;
 /** Groups leave the context in blocks, so the kept prefix stays stable across several calls. */
