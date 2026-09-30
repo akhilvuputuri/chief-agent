@@ -5,7 +5,7 @@ Status: in review. The code fix is tested and not yet released. The stuck call s
 
 ## User-visible problem and preceding iteration
 
-**Reported (owner, 30 September, about 18:04 SGT):** Chief would not add a two-week National Service call-up event. It said an earlier write had an uncertain status that needed inspection, and a retry was refused the same way. The owner asked whether a draft existed, to avoid creating a duplicate.
+**Reported (owner, 30 September, about 18:04 SGT):** Chief would not add a multi-week event. It said an earlier write had an uncertain status that needed inspection, and a retry was refused the same way. The owner asked whether a draft existed, to avoid creating a duplicate.
 
 [Journal 43](43-calendar-stuck-uncertain.md) fixed a different block: an uncertain Calendar _approval_ that stopped later drafts. It now settles itself by a read-only GET. This incident is an uncertain _runtime call_. It is a separate record, and the owner-wide write guard in `agent.ts` blocks every non-read tool until an operator resolves it ([recovery contract](../reliable-execution.md#inspecting-uncertain-writes)). Journal 43's settlement never sees it.
 
@@ -14,13 +14,13 @@ Status: in review. The code fix is tested and not yet released. The stuck call s
 **Measured (sanitized CloudWatch metadata, `npm run logs:cloudwatch`, 29–30 September):**
 
 - 10:04:33 UTC: one foreground run read Gmail, then called `calendar_draft` once. That call finished in 12 ms as `state=uncertain`, `errorCode=TOOL_FAILED`, and the run stopped `failed`.
-- No `calendar.*` event (drafted, uncertain, reconciled, check_failed, created) appears in the 24-hour window.
+- No `calendar.uncertain`, `calendar.reconciled` or `calendar.check_failed` line appears in the 24-hour window. This is weak evidence: saving a draft emits no calendar event, and `calendar.created` is not projected to the logs.
 - 10:07:27 and 10:08:01 UTC: two later `calendar_draft` calls failed in 6 ms and 44 ms with `VALIDATION_FAILED`, which is how the guard's "uncertain write requires inspection" error is classified.
-- Unknown: the logs keep no tool arguments, so the requested times are not visible. The owner's report gives the dates as 14–29 January 2027, which is 15 days.
+- Unknown: the logs keep no tool arguments, so the requested times are not visible. The owner's report implies an event of about 15 days.
 
 **Tested from source:** `validateDraft` rejects an event longer than seven days with a plain `Error`. `toolError` does not recognize that message, so it becomes `TOOL_FAILED`. `CustomAgent` records any `TOOL_FAILED` from a dispatched non-read call as `uncertain` and stops the run. The rejection happens before the approvals query and the insert, so nothing was saved. A new test showed the old code classified it as `TOOL_FAILED`.
 
-**Hypothesis (strong, not confirmed by a database read):** no NS call-up draft or approval exists. That is consistent with the 12 ms latency, no calendar events and the source order. The operator reconciliation below checks it directly.
+**Hypothesis (strong, not confirmed by a database read):** no such draft or approval exists. That is consistent with the 12 ms latency, the `TOOL_FAILED` result and the source order. The operator reconciliation below checks it directly.
 
 ## Diagnosis and alternatives
 
@@ -29,14 +29,26 @@ A definite pre-write validation failure used an error class that the runtime can
 - **Chosen:** `validateDraft` throws `ToolValidationError`, the type the host already uses for "established no mutation". It maps to `VALIDATION_FAILED`, and the model can tell the owner about the limit. `CalendarTools.create` still wraps the same check as `CalendarNotSentError`, so the approval path is unchanged.
 - **Rejected:** adding the message to `toolError`'s pattern list. That works, but it keys the safety classification on wording.
 - **Rejected:** a broader rule such as "a write that fails in under N ms is not uncertain". Timing does not prove non-mutation.
-- **Not changed:** the seven-day limit and timed-only events. A multi-week event (or an all-day event) is a product decision for the owner.
+- **Not changed:** the seven-day limit and timed-only events. A longer event (or an all-day event) is a product decision for the owner.
 
 ## Implementation and review
 
 - `src/calendar-draft.ts`: the duration check throws `ToolValidationError`.
 - `tests/calendar-approval.test.ts`: a 15-day draft and a zero-length draft are each rejected as `VALIDATION_FAILED`, and no approval is saved. The test fails on the previous code.
 
-Independent review: pending.
+Independent review (Claude Opus 5.5 subagent, head `bcfb277`): **REQUEST CHANGES**. The code was judged correct:
+
+- every `validateDraft` caller rejects before any mutation
+- `CalendarTools.create` still wraps the check as `CalendarNotSentError`
+- there is no import cycle
+- the test fails on the old code
+
+Findings:
+
+1. **Medium:** the entry named the owner's event and its dates, which is private schedule data in a public repository. Fixed: generalized.
+2. **Low:** "no calendar events" was overstated as evidence, because drafting emits no event. Fixed: reworded.
+3. **Low, optional:** the test stops at `toolError`, not the `failed`/`uncertain` state in `CustomAgent`. The reviewer confirmed that step through `JobTools.execute` with a scratch test. Kept as is.
+4. **Informational:** database failures during drafting still become `TOOL_FAILED` → uncertain. That is intended.
 
 ## Operator reconciliation (pending)
 
