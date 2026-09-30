@@ -1,0 +1,61 @@
+# 45 — Why did a rejected Calendar draft block every later write?
+
+Work date(s): 2026-09-30. Written/revised: 2026-09-30.
+Status: in review. The code fix is tested and not yet released. The stuck call still needs an operator reconciliation.
+
+## User-visible problem and preceding iteration
+
+**Reported (owner, 30 September, about 18:04 SGT):** Chief would not add a two-week National Service call-up event. It said an earlier write had an uncertain status that needed inspection, and a retry was refused the same way. The owner asked whether a draft existed, to avoid creating a duplicate.
+
+[Journal 43](43-calendar-stuck-uncertain.md) fixed a different block: an uncertain Calendar _approval_ that stopped later drafts. It now settles itself by a read-only GET. This incident is an uncertain _runtime call_. It is a separate record, and the owner-wide write guard in `agent.ts` blocks every non-read tool until an operator resolves it ([recovery contract](../reliable-execution.md#inspecting-uncertain-writes)). Journal 43's settlement never sees it.
+
+## Evidence
+
+**Measured (sanitized CloudWatch metadata, `npm run logs:cloudwatch`, 29–30 September):**
+
+- 10:04:33 UTC: one foreground run read Gmail, then called `calendar_draft` once. That call finished in 12 ms as `state=uncertain`, `errorCode=TOOL_FAILED`, and the run stopped `failed`.
+- No `calendar.*` event (drafted, uncertain, reconciled, check_failed, created) appears in the 24-hour window.
+- 10:07:27 and 10:08:01 UTC: two later `calendar_draft` calls failed in 6 ms and 44 ms with `VALIDATION_FAILED`, which is how the guard's "uncertain write requires inspection" error is classified.
+- Unknown: the logs keep no tool arguments, so the requested times are not visible. The owner's report gives the dates as 14–29 January 2027, which is 15 days.
+
+**Tested from source:** `validateDraft` rejects an event longer than seven days with a plain `Error`. `toolError` does not recognize that message, so it becomes `TOOL_FAILED`. `CustomAgent` records any `TOOL_FAILED` from a dispatched non-read call as `uncertain` and stops the run. The rejection happens before the approvals query and the insert, so nothing was saved. A new test showed the old code classified it as `TOOL_FAILED`.
+
+**Hypothesis (strong, not confirmed by a database read):** no NS call-up draft or approval exists. That is consistent with the 12 ms latency, no calendar events and the source order. The operator reconciliation below checks it directly.
+
+## Diagnosis and alternatives
+
+A definite pre-write validation failure used an error class that the runtime cannot distinguish from a failure partway through a write. The conservative default (unknown error on a write → uncertain) is right, so the fix belongs at the source of the error.
+
+- **Chosen:** `validateDraft` throws `ToolValidationError`, the type the host already uses for "established no mutation". It maps to `VALIDATION_FAILED`, and the model can tell the owner about the limit. `CalendarTools.create` still wraps the same check as `CalendarNotSentError`, so the approval path is unchanged.
+- **Rejected:** adding the message to `toolError`'s pattern list. That works, but it keys the safety classification on wording.
+- **Rejected:** a broader rule such as "a write that fails in under N ms is not uncertain". Timing does not prove non-mutation.
+- **Not changed:** the seven-day limit and timed-only events. A multi-week event (or an all-day event) is a product decision for the owner.
+
+## Implementation and review
+
+- `src/calendar-draft.ts`: the duration check throws `ToolValidationError`.
+- `tests/calendar-approval.test.ts`: a 15-day draft and a zero-length draft are each rejected as `VALIDATION_FAILED`, and no approval is saved. The test fails on the previous code.
+
+Independent review: pending.
+
+## Operator reconciliation (pending)
+
+The existing uncertain call is not cleared by a release (AGENTS.md: never automatically reset uncertain calls). A guarded one-call SQL script follows the contract in [reliable execution](../reliable-execution.md#inspecting-uncertain-writes). It is kept in the operator's private directory, not in this repository. It changes the call to `failed` only if all of these hold:
+
+- the call is an uncertain `calendar_draft` with `TOOL_FAILED`
+- its run is stopped
+- the run has no `calendar_create` approval, no successful draft or create receipt, and no `calendar.created` event
+
+It keeps the original error, adds a `reconciliation` object to the result and appends a `runtime.call_reconciled` event. It ends in `ROLLBACK` for a dry run.
+
+Synthetic check (PGlite): the clean case reconciles one call. Each of five refusal cases (an approval exists, the run is still running, a `calendar.created` event exists, a success receipt exists, the call is not uncertain) changes nothing.
+
+## Verification and outcome
+
+`npm run check` passed: 506 application and 21 script tests, plus both Python eval suites. Not released. The owner stays blocked from all writes until the operator reconciliation commits.
+
+## Follow-up and next iteration
+
+- Other write tools may also throw plain `Error`s from pre-write validation. An audit that moves those to `ToolValidationError` would prevent the same class of block. Deferred.
+- The owner-wide guard has no self-service path for a runtime call, unlike journal 43's approval settlement. A read-only "prove non-mutation" check for local-only writes such as `calendar_draft` could remove the operator step. Deferred; it needs its own review.
+- Product question: support events longer than seven days, or all-day events, for leave and call-ups.

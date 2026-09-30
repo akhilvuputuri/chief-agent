@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ToolValidationError } from "./tool-errors.js";
 export const calendarDraft = z
   .object({
     title: z.string().trim().min(1).max(200),
@@ -12,8 +13,9 @@ export type CalendarDraft = z.infer<typeof calendarDraft>;
 export function validateDraft(input: unknown): CalendarDraft {
   const draft = calendarDraft.parse(input);
   const duration = Date.parse(draft.end) - Date.parse(draft.start);
+  // Rejected before anything is saved, so this is a definite non-mutation.
   if (duration <= 0 || duration > 7 * 86400000)
-    throw new Error(
+    throw new ToolValidationError(
       "Event must end after it starts and last at most seven days",
     );
   return draft;
