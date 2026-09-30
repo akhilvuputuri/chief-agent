@@ -49,6 +49,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 30 September                         | [45 — Rejected draft left uncertain](45-calendar-draft-duration-uncertain.md): why did a rejected Calendar draft block every later write?     | Fix merged `55843bb`; no length limit and all-day events in review (#119); operator reconciliation pending                   |
 | 30 September                         | [46 — Draft self-settlement](46-calendar-draft-self-settlement.md): can a provably empty Calendar draft clear its own uncertainty?            | In review                                                                                                                    |
 | 30 September                         | [47 — Pre-write validation errors](47-pre-write-validation-errors.md): which other rejected writes would have blocked every later write?      | In review                                                                                                                    |
+| 30 September                         | [48 — Bounded turn](48-bounded-turn.md): how can one long task stop growing with every tool call?                                             | In review; synthetic tests only                                                                                              |
 
 ## Connected case studies
 
