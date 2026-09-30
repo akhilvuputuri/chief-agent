@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
 import type { Action } from "./protocol.js";
+import { ToolValidationError } from "./tool-errors.js";
 export type WorkAction = Extract<Action, { operation: `work_${string}` }>;
 export class WorkTools {
   constructor(private db: Database) {}
@@ -78,14 +79,17 @@ export class WorkTools {
         [run, user],
       )
     ).rows[0];
-    if (!turn) throw new Error("Work needs an active authenticated turn");
+    if (!turn)
+      throw new ToolValidationError("Work needs an active authenticated turn");
     if (a.operation === "work_start") {
       if (turn.task_id)
-        throw new Error(
+        throw new ToolValidationError(
           "This turn is already bound to a task; inspect its scope",
         );
       if (turn.background)
-        throw new Error("Only a foreground request can start a task");
+        throw new ToolValidationError(
+          "Only a foreground request can start a task",
+        );
       const id = randomUUID();
       const bound = await this.db.query(
         `WITH available AS (
@@ -101,7 +105,7 @@ export class WorkTools {
         [id, user, a.objective, turn.request, JSON.stringify(a.steps), run],
       );
       if (!bound.rows.length)
-        throw new Error(
+        throw new ToolValidationError(
           "This turn is already bound to a task; inspect its scope",
         );
       return this.snapshot(user, id);
@@ -125,7 +129,9 @@ export class WorkTools {
       if (turn.background)
         throw new Error("Only a user follow-up can revise scope");
       if (turn.task_id && turn.task_id !== task.id)
-        throw new Error("This turn is already bound to another task");
+        throw new ToolValidationError(
+          "This turn is already bound to another task",
+        );
       if (turn.task_id && turn.revision !== task.revision)
         throw new Error("Task scope changed; inspect current work");
       // Preserve audit history, conservatively invalidate prior completion against revised scope.

@@ -9,6 +9,7 @@ import {
   compactToolGroup,
   completeMessageGroups,
   exchangeIndex,
+  turnDigest,
   type IndexRow,
 } from "../src/context-continuity.js";
 import { runtimeContext } from "../src/runtime.js";
@@ -245,9 +246,12 @@ test("large previous tool observations can shrink without losing the preceding u
   assert.equal(input.messages.filter((m) => m.role === "tool").length, 8);
 });
 
-test("an uncompactable current working set fails explicitly and leaves its original messages unchanged", () => {
+test("an oversized earlier call of this turn leaves the context through the digest, not a failure", () => {
   const message = "Continue checking";
-  const huge = toolGroup("canvas_create", { result: "saved" });
+  const huge = toolGroup("canvas_create", {
+    observationId: "huge-observation",
+    result: "saved",
+  });
   huge[0]!.tool_calls![0]!.function.arguments = JSON.stringify({
     content: "x".repeat(contextHardLimit),
   });
@@ -257,10 +261,12 @@ test("an uncompactable current working set fails explicitly and leaves its origi
     ...toolGroup("source_read", { result: "last" }),
   ];
   const original = JSON.stringify(messages);
-  assert.throws(
-    () => context(request(message, []), messages),
-    ContextLimitError,
-  );
+  const input = context(request(message, []), messages);
+  assert.equal(input.trimmed, 1);
+  assert.ok(input.serializedSize < 130000);
+  const text = JSON.stringify(input.messages);
+  assert.match(text, /canvas_create.*observationId=huge-observation/);
+  assert.doesNotMatch(text, /x{1000}/);
   assert.equal(JSON.stringify(messages), original);
 });
 
@@ -706,4 +712,190 @@ test("failed tool calls without IDs never crowd out a stored result's read ID", 
   const line = exchangeIndex(rows).split("\n")[1]!;
   assert.ok(line.includes(`obs=${good}`));
   assert.doesNotMatch(line, /more/);
+});
+
+/** A mailbox task shaped like the issue #77 incident: each call returns a projected ~12k result. */
+function mailboxTask(calls: number) {
+  const history = [
+    user("Anything from the courier?"),
+    answer("No new courier mail since Monday."),
+  ];
+  const message = "Find every order confirmation from this month and list them";
+  const groups = Array.from({ length: calls }, (_, index) =>
+    toolGroup(
+      index % 3 ? "gmail_thread" : "gmail_search",
+      {
+        observationId: `obs-${index}`,
+        result: {
+          account: "primary",
+          threadId: `thread-${index}`,
+          excerpt: `Order ${index} confirmed. ` + "mail text ".repeat(1150),
+          truncated: true,
+        },
+      },
+      `call-${index}`,
+    ),
+  );
+  groups.forEach((group, index) => {
+    group[0]!.reasoning_details = [{ text: "Checking the next thread." }];
+    group[0]!.tool_calls![0]!.function.arguments = JSON.stringify({
+      threadId: `thread-${index}`,
+    });
+  });
+  const messages = [...history, user(message), ...groups.flat()];
+  return { req: request(message, history, 67736), messages, groups };
+}
+
+test("a long single-turn task stays bounded as calls grow (issue #77)", () => {
+  const sizes: number[] = [];
+  for (const calls of [21, 40, 80, 160]) {
+    const { req, messages, groups } = mailboxTask(calls);
+    const original = JSON.stringify(messages);
+    const input = context(req, messages);
+    sizes.push(input.serializedSize);
+    // The incident failed at 127k characters after 21 calls; growth now stops near the threshold.
+    assert.ok(
+      input.serializedSize < 135000,
+      `${calls}: ${input.serializedSize}`,
+    );
+    assert.ok(input.trimmed > 0 && input.trimmed % 8 === 0, `${calls}`);
+    // Trimming leaves room for escaping, so the newest group is never excerpted.
+    assert.equal(input.wireCompacted, false);
+    // Every call in context still has exactly its result.
+    const tools = input.messages.flatMap((m) =>
+      m.role === "assistant" ? (m.tool_calls ?? []).map((c) => c.id) : [],
+    );
+    const results = input.messages.flatMap((m) =>
+      m.role === "tool" ? [m.tool_call_id] : [],
+    );
+    assert.deepEqual(results, tools);
+    // The newest call is untouched, and the kept calls are the newest ones.
+    const latest = groups.at(-1)!;
+    assert.deepEqual(input.messages.at(-3), latest[0]);
+    assert.deepEqual(input.messages.at(-2), latest[1]);
+    assert.equal(tools[0], `call-${input.trimmed}`);
+    // The last call to leave is listed with its read reference, and the question stays.
+    const text = JSON.stringify(input.messages);
+    assert.match(text, new RegExp(`obs-${input.trimmed - 1}\\b`));
+    assert.match(text, /Earlier calls in this turn, no longer in context/);
+    assert.match(text, /Find every order confirmation from this month/);
+    assert.match(text, /No new courier mail since Monday/);
+    assert.equal(JSON.stringify(messages), original);
+  }
+  assert.ok(sizes.at(-1)! - sizes[0]! < 15000, sizes.join(","));
+});
+
+test("trimming moves in blocks, so the kept prefix stays stable across several calls", () => {
+  const trimmed = [30, 31, 32, 33, 34, 35, 36, 37, 38, 39].map(
+    (calls) =>
+      context(mailboxTask(calls).req, mailboxTask(calls).messages).trimmed,
+  );
+  assert.ok(new Set(trimmed).size <= 3, trimmed.join(","));
+  for (let i = 1; i < trimmed.length; i++)
+    assert.ok(
+      [0, 8].includes(trimmed[i]! - trimmed[i - 1]!),
+      trimmed.join(","),
+    );
+});
+
+test("a short task keeps every call and adds no digest", () => {
+  const { req, messages } = mailboxTask(4);
+  const input = context(req, messages);
+  assert.equal(input.trimmed, 0);
+  assert.equal(input.messages.filter((m) => m.role === "tool").length, 4);
+  assert.doesNotMatch(
+    JSON.stringify(input.messages),
+    /Earlier calls in this turn/,
+  );
+});
+
+test("the turn digest lists calls with read IDs, marks failures and keeps the newest within its cap", () => {
+  const ok = toolGroup(
+    "gmail_search",
+    {
+      observationId: "obs-a",
+      receiptId: "rcpt-a",
+      result: { sourceId: "src-a" },
+    },
+    "a",
+  );
+  ok[0]!.content = "Searching the primary mailbox first.";
+  ok[0]!.tool_calls![0]!.function.arguments = '{"query":"from:shop"}';
+  const failed = toolGroup("gmail_read", { error: "not found" }, "b");
+  const digest = turnDigest([ok, failed]);
+  assert.match(
+    digest,
+    /\[step 1\] gmail_search\(.*from:shop.*\) → observationId=obs-a receiptId=rcpt-a sourceId=src-a · said "Searching the primary mailbox first\."/,
+  );
+  assert.match(digest, /\[step 2\] gmail_read\(.*\) · failed/);
+  const many = Array.from({ length: 200 }, (_, i) =>
+    toolGroup("source_read", { observationId: `o-${i}` }, `c-${i}`),
+  );
+  const capped = turnDigest(many, 2000);
+  assert.ok(capped.length <= 2000);
+  assert.match(capped, /o-199\b/);
+  assert.doesNotMatch(capped, /o-0\b/);
+  assert.match(capped, /\+\d+ earlier calls not listed/);
+});
+
+test("owner input steered into a long task stays when its neighbouring calls leave", () => {
+  const { req, messages, groups } = mailboxTask(60);
+  const steered = user("Also include refunds from the same shops");
+  const at = messages.indexOf(groups[4]![0]!);
+  const withSteer = [...messages.slice(0, at), steered, ...messages.slice(at)];
+  const input = context(req, withSteer);
+  assert.ok(input.trimmed >= 8);
+  const text = JSON.stringify(input.messages);
+  assert.match(text, /Also include refunds from the same shops/);
+  assert.doesNotMatch(text, /"call-0"/);
+  assert.match(text, /obs-0\b/);
+  // The steered message sits after the owner's question and before the calls that remain.
+  const roles = input.messages.map((m) => m.role);
+  const steerIndex = input.messages.findIndex(
+    (m) => m.role === "user" && m.content === steered.content,
+  );
+  assert.equal(roles[steerIndex + 1], "assistant");
+  assert.ok(input.serializedSize < 135000);
+});
+
+test("a task at the 100-call run budget keeps a read ID for every call that left", () => {
+  const { req, messages, groups } = mailboxTask(100);
+  const uuid = (i: number) =>
+    `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`;
+  const withIds = messages.map((m) =>
+    m.role === "tool" && m.content
+      ? {
+          ...m,
+          content: m.content.replace(/"obs-(\d+)"/, (_, i) => `"${uuid(+i)}"`),
+        }
+      : m,
+  );
+  const input = context(req, withIds);
+  assert.ok(input.trimmed >= 90);
+  assert.ok(input.serializedSize < 135000, `${input.serializedSize}`);
+  const text = JSON.stringify(input.messages);
+  for (let i = 0; i < groups.length; i++)
+    assert.ok(text.includes(uuid(i)), `call ${i} lost its read ID`);
+  assert.doesNotMatch(text, /earlier calls not listed/);
+  assert.match(
+    text,
+    /s1 gmail_search obs=00000000-0000-4000-8000-000000000000/,
+  );
+});
+
+test("the digest keeps a failed call's error message", () => {
+  const failed = toolGroup(
+    "parcel_record",
+    {
+      error: {
+        code: "not_found",
+        message: "Unknown parcel id; call parcel_list for ids.",
+      },
+    },
+    "f",
+  );
+  assert.match(
+    turnDigest([failed]),
+    /parcel_record\(.*\) · failed "Unknown parcel id; call parcel_list for ids\."/,
+  );
 });

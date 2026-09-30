@@ -48,6 +48,8 @@ For the latest verified release and open work, read [current work](../current-wo
 | 29 September                         | [44 — Repeated tool failure](44-repeated-tool-failure.md): why did one request call parcel_list 25 times?                                     | Released `4042743`; clearer parcel error and a per-run repeat guard                                                          |
 | 30 September                         | [45 — Rejected draft left uncertain](45-calendar-draft-duration-uncertain.md): why did a rejected Calendar draft block every later write?     | Released `55843bb`/`5296dbb`; no length limit, all-day events; owner accepted                                                |
 | 30 September                         | [46 — Draft self-settlement](46-calendar-draft-self-settlement.md): can a provably empty Calendar draft clear its own uncertainty?            | Released `03ae852`; the 30 September draft settled live; owner accepted                                                      |
+| 30 September                         | [47 — Pre-write validation errors](47-pre-write-validation-errors.md): which other rejected writes would have blocked every later write?      | Released `fd05962`; schedules, work and sheets pre-write rejections are validation failures                                  |
+| 30 September                         | [48 — Bounded turn](48-bounded-turn.md): how can one long task stop growing with every tool call?                                             | Released `1c0e480`; synthetic tests only, no production measurement yet                                                      |
 
 ## Connected case studies
 
