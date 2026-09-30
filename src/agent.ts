@@ -35,6 +35,7 @@ import { SerialQueue } from "./security.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
 import { ensureUser, event } from "./db.js";
+import { opsLog } from "./ops-log.js";
 import {
   type AgentRequest,
   type AgentResponse,
@@ -1064,13 +1065,19 @@ export class Assistant {
         );
       let uncertain = await unresolved();
       if (uncertain.rows.some((r) => r.operation === "calendar_draft")) {
-        await settleUncertainDrafts(this.db, scope.user);
-        uncertain = await unresolved();
+        // This runs after the call was marked dispatched, so a failure here must
+        // fall back to the ordinary refusal, never become this write's error.
+        try {
+          await settleUncertainDrafts(this.db, scope.user);
+          uncertain = await unresolved();
+        } catch {
+          opsLog("runtime.settle_failed", "warn", { runId: scope.run });
+        }
       }
       if (uncertain.rows.length)
         throw new Error(
           uncertain.rows.every((r) => r.operation === "calendar_draft")
-            ? "An uncertain write requires inspection before further writes. It is an earlier Calendar draft attempt, which is checked again automatically from two minutes after it failed and cleared when it saved nothing; ask the owner to try again then, or request operator inspection if it persists."
+            ? "An uncertain write requires inspection before further writes. It is an earlier Calendar draft attempt. It is checked again on the owner's next write, from two minutes after it started, and cleared if it saved nothing; ask the owner to try again then, or request operator inspection if it persists."
             : "An uncertain write requires inspection before further writes",
         );
     }

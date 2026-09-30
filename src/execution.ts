@@ -3,7 +3,7 @@ import { scrubTrace } from "./trace-scrub.js";
 import { randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
 import { event } from "./db.js";
-import { opsLog } from "./ops-log.js";
+import { opsLog, projectEvent } from "./ops-log.js";
 import { action } from "./protocol.js";
 import type { Message } from "./model.js";
 export type StopReason =
@@ -311,36 +311,46 @@ export class Execution {
 }
 /**
  * Settles the owner's uncertain calendar_draft calls that provably saved nothing.
- * A draft only ever inserts a local approval (never a Google event), so once its
- * run has stopped and no statement can still commit, the absence of an approval
- * or a successful draft receipt in that run since the call started means the
- * call failed. Anything else stays uncertain for an operator. Never replays.
+ * A draft's only new records are one approval and one success receipt in its run,
+ * and a successful draft call stores both IDs in its result. A call only becomes
+ * uncertain after its dispatch has returned, and restart recovery stops the run of
+ * any call a crash interrupted. So once the run has stopped, an approval or success
+ * receipt in the run that no successful draft call accounts for is the only trace
+ * this call could have left; with none, it failed. The two-minute wait is margin.
+ * Anything else stays uncertain for an operator. Never replays. The update and its
+ * event are one statement.
  */
 export async function settleUncertainDrafts(db: Database, user: string) {
   const settled = await db.query(
-    `WITH target AS (
+    `WITH accounted AS (
+      SELECT run_id, result->'result'->>'approvalId' AS approval, result->>'receiptId' AS receipt
+      FROM runtime_calls WHERE operation='calendar_draft' AND state='success'
+    ), target AS (
       SELECT c.id, c.run_id FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id
       WHERE r.user_id=$1 AND c.operation='calendar_draft' AND c.state='uncertain'
         AND r.state<>'running' AND c.started_at < now() - interval '2 minutes'
         AND NOT EXISTS(SELECT 1 FROM approvals a WHERE a.user_id=$1 AND a.run_id=c.run_id
-          AND a.operation='calendar_create' AND a.created_at >= c.started_at)
+          AND a.operation='calendar_create'
+          AND NOT EXISTS(SELECT 1 FROM accounted k WHERE k.run_id=c.run_id AND k.approval=a.id::text))
         AND NOT EXISTS(SELECT 1 FROM tool_receipts t WHERE t.user_id=$1 AND t.run_id=c.run_id
-          AND t.operation='calendar_draft' AND t.status='success' AND t.created_at >= c.started_at)
+          AND t.operation='calendar_draft' AND t.status='success'
+          AND NOT EXISTS(SELECT 1 FROM accounted k WHERE k.run_id=c.run_id AND k.receipt=t.id::text))
       FOR UPDATE OF c
+    ), fixed AS (
+      UPDATE runtime_calls c SET state='failed',
+        result=COALESCE(c.result,'{}'::jsonb) || jsonb_build_object('reconciliation',
+          jsonb_build_object('at',now(),'from','uncertain','to','failed',
+            'basis','run stopped with no approval or successful draft receipt that a successful draft call does not account for'))
+      FROM target WHERE c.id=target.id AND c.state='uncertain'
+      RETURNING c.id, target.run_id
     )
-    UPDATE runtime_calls c SET state='failed',
-      result=COALESCE(c.result,'{}'::jsonb) || jsonb_build_object('reconciliation',
-        jsonb_build_object('at',now(),'from','uncertain','to','failed',
-          'basis','no approval or successful draft receipt in the run since the call started'))
-    FROM target WHERE c.id=target.id AND c.state='uncertain'
-    RETURNING c.id, target.run_id`,
+    INSERT INTO events(run_id,user_id,type,data)
+    SELECT run_id,$1,'runtime.call_reconciled',jsonb_build_object('id',id,'operation','calendar_draft') FROM fixed
+    RETURNING run_id,data`,
     [user],
   );
   for (const row of settled.rows)
-    await event(db, user, row.run_id, "runtime.call_reconciled", {
-      id: row.id,
-      operation: "calendar_draft",
-    });
+    projectEvent("runtime.call_reconciled", row.run_id, row.data);
   return settled.rows.length;
 }
 // Startup recovery is deliberately conservative. No old invocation is replayed.
