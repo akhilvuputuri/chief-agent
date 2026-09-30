@@ -35,7 +35,7 @@ import { SerialQueue } from "./security.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
 import { ensureUser, event } from "./db.js";
-import { opsLog } from "./ops-log.js";
+import { errorFields, opsLog } from "./ops-log.js";
 import {
   type AgentRequest,
   type AgentResponse,
@@ -289,6 +289,11 @@ export class Assistant {
     ).rows;
     const chosen = candidates.length === 1 ? candidates[0] : undefined;
     if (!chosen) return { rows: [], ambiguous: !id && candidates.length > 1 };
+    // A provably empty draft must not keep its own task paused; any other
+    // uncertainty still refuses below. A settlement failure only means no change.
+    await settleUncertainDrafts(this.db, user).catch((error) =>
+      opsLog("runtime.settle_failed", "warn", errorFields(error)),
+    );
     return this.db.query(
       `UPDATE work_tasks SET status='queued',budget_initialized=true,budget_ms=budget_ms+$2,budget_models=budget_models+$3,budget_tools=budget_tools+$4,pause_reason=NULL,next_run=now(),updated_at=now() WHERE user_id=$1 AND id=$5 AND status IN ('paused','active') AND lease IS NULL AND NOT EXISTS(SELECT 1 FROM runtime_runs r WHERE r.task_id=work_tasks.id AND r.state='running') AND NOT EXISTS(SELECT 1 FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id WHERE r.task_id=work_tasks.id AND c.state='uncertain') RETURNING id`,
       [user, this.budget.ms, this.budget.models, this.budget.tools, chosen.id],
@@ -1069,9 +1074,19 @@ export class Assistant {
         // fall back to the ordinary refusal, never become this write's error.
         try {
           await settleUncertainDrafts(this.db, scope.user);
+        } catch (error) {
+          opsLog("runtime.settle_failed", "warn", {
+            runId: scope.run,
+            ...errorFields(error),
+          });
+        }
+        try {
           uncertain = await unresolved();
-        } catch {
-          opsLog("runtime.settle_failed", "warn", { runId: scope.run });
+        } catch (error) {
+          opsLog("runtime.settle_recheck_failed", "warn", {
+            runId: scope.run,
+            ...errorFields(error),
+          });
         }
       }
       if (uncertain.rows.length)
