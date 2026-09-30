@@ -30,8 +30,8 @@ const NOT_PRE_WRITE: Record<string, string> = {
     "may follow a write",
   // Thrown inside a try whose catch rethrows it as ToolValidationError.
   "routines.ts:Choose a future time for this routine": "rewrapped",
-  // Raised while building an edition from saved sources, not by a model tool call.
-  "news.ts:the feed address returned a web page, not a feed": "background",
+  // Raised per source while building an edition and caught by the gatherer.
+  "news.ts:the feed address returned a web page, not a feed": "caught",
   "news.ts:Unauthorized delivery": "background",
 };
 test("write-path modules never raise a generic error that would be recorded as uncertain", async () => {

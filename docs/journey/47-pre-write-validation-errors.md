@@ -9,11 +9,11 @@ Status: in review. Not released.
 
 ## Evidence
 
-- **Tested (static scan):** every `throw new Error("…")` literal in `src/` was passed through `toolError`, and 125 fall through to `TOOL_FAILED`. Most are in authentication, plugin, CLI or background code that never runs as a model tool call. The ones reachable from model write tools, before any write, are:
+- **Tested (static scan):** every `throw new Error("…")` literal in `src/` was passed through `toolError`: 125 by the first scan, 120 with the guard test's stricter pattern, fall through to `TOOL_FAILED`. Most are in authentication, plugin, CLI or background code that never runs as a model tool call. The ones reachable from model write tools, before any write, are:
   - `schedule_create`/`schedule_update` (`daily.ts` and the shared `schedule.ts` parser): "Choose a future time", "Limit of 50 active schedules reached" (after a conditional insert that saved nothing), "Supply a new future schedule…", and every parser error.
   - `work_start` and `work_revise` (`work.ts`): "Work needs an active authenticated turn", "This turn is already bound to a task" (twice, including after an atomic insert that saved nothing), "Only a foreground request can start a task", "This turn is already bound to another task".
   - `sheet_sync`/`daily_sync`: the 5,000-row limits, checked before anything is sent to Google.
-- **Tested (probe):** with the real parser, "every 30 minutes", "every day at 13pm", "0 25 * * _" and "_/30 * * * *" all produced `TOOL_FAILED`. These are ordinary reminder phrasings, so this was the most likely path to a repeat of journal 45.
+- **Tested (probe):** with the real parser, `every 30 minutes`, `every day at 13pm`, `0 25 * * *` and `*/30 * * * *` all produced `TOOL_FAILED`. These are ordinary reminder phrasings, so this was the most likely path to a repeat of journal 45.
 - **Already correct:** `routines.ts` wraps the same parser's errors in `ToolValidationError`. Parcels, stocks, news, the watch window and calendar drafts reject with `ToolValidationError`.
 - **Measured (CloudWatch, 26–30 September, the whole retained window):** apart from the journal 45 call, no write was recorded as `uncertain`. None of these paths had occurred yet.
 
