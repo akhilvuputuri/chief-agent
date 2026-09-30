@@ -47,6 +47,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 29 September                         | [43 — Stuck uncertain Calendar approval](43-calendar-stuck-uncertain.md): why did one uncertain write block every later event?                | Released `78d6f4e`; read-only settlement; owner acceptance pending                                                           |
 | 29 September                         | [44 — Repeated tool failure](44-repeated-tool-failure.md): why did one request call parcel_list 25 times?                                     | Released `4042743`; clearer parcel error and a per-run repeat guard                                                          |
 | 30 September                         | [45 — Rejected draft left uncertain](45-calendar-draft-duration-uncertain.md): why did a rejected Calendar draft block every later write?     | Fix merged `55843bb`; no length limit and all-day events in review (#119); operator reconciliation pending                   |
+| 30 September                         | [46 — Draft self-settlement](46-calendar-draft-self-settlement.md): can a provably empty Calendar draft clear its own uncertainty?            | In review                                                                                                                    |
 
 ## Connected case studies
 

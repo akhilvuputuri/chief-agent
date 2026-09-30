@@ -53,7 +53,7 @@ Secrets live only in private environment/operations files and server configurati
 
 Initial task allocation: 15 minutes active execution, 40 model calls, 100 tool calls. `/continue` adds capacity without resetting completed steps. `/cancel` (or `/workcancel`) aborts the foreground model request; `/cancel <id>` selects a background job. It and prevents later dispatch. Already-started tools can finish and remain recorded.
 
-Migration `006_runtime.sql` archives old histories, seeds text-only context and pauses active tasks once. Do not automatically resume the 22-role request or erase its steps. Restart recovery conservatively pauses work and marks started writes uncertain. Uncertain writes require inspection before further writes. See [recovery](docs/reliable-execution.md).
+Migration `006_runtime.sql` archives old histories, seeds text-only context and pauses active tasks once. Do not automatically resume the 22-role request or erase its steps. Restart recovery conservatively pauses work and marks started writes uncertain. Uncertain writes require inspection before further writes, except an uncertain `calendar_draft` that provably saved nothing, which the write guard settles itself. See [recovery](docs/reliable-execution.md).
 
 ## Verification and next work
 

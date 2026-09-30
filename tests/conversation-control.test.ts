@@ -490,6 +490,38 @@ test("new input waits for a dispatched write, records its result and marks remai
   }
 });
 
+test("/continue settles a task's provably empty draft but still refuses any other uncertainty", async () => {
+  const f = await fixture({ generate: async () => text("Unused model") });
+  try {
+    const uncertainIn = async (task: string, operation: string) => {
+      const run = randomUUID();
+      await f.db.query(
+        "INSERT INTO runtime_runs(id,user_id,task_id,state,stop_reason) VALUES($1,'owner',$2,'stopped','failed')",
+        [run, task],
+      );
+      await f.db.query(
+        "INSERT INTO runtime_calls(id,run_id,call_id,operation,arguments,is_write,state,started_at) VALUES($1,$2,'c',$3,'{}',true,'uncertain',now()-interval '10 minutes')",
+        [randomUUID(), run, operation],
+      );
+      await f.db.query(
+        "UPDATE work_tasks SET pause_reason='uncertain_write' WHERE id=$1",
+        [task],
+      );
+    };
+    const drafted = await f.task("Job with an empty draft");
+    await uncertainIn(drafted, "calendar_draft");
+    assert.deepEqual((await f.assistant.grant("owner", drafted)).rows, [
+      { id: drafted },
+    ]);
+    const other = await f.task("Job with another uncertain write");
+    await uncertainIn(other, "memory_set");
+    assert.equal((await f.assistant.grant("owner", other)).rows.length, 0);
+  } finally {
+    f.assistant.shutdown();
+    await f.pg.close();
+  }
+});
+
 test("continuation and cancellation choose exact owner jobs and never guess among candidates", async () => {
   const f = await fixture({ generate: async () => text("Unused model") });
   try {

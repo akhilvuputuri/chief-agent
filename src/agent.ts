@@ -18,6 +18,7 @@ import {
   Stop,
   defaultBudget,
   readOperations,
+  settleUncertainDrafts,
   type Budget,
 } from "./execution.js";
 import { SkillTools } from "./skills.js";
@@ -34,6 +35,7 @@ import { SerialQueue } from "./security.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
 import { ensureUser, event } from "./db.js";
+import { errorFields, opsLog } from "./ops-log.js";
 import {
   type AgentRequest,
   type AgentResponse,
@@ -287,6 +289,11 @@ export class Assistant {
     ).rows;
     const chosen = candidates.length === 1 ? candidates[0] : undefined;
     if (!chosen) return { rows: [], ambiguous: !id && candidates.length > 1 };
+    // A provably empty draft must not keep its own task paused; any other
+    // uncertainty still refuses below. A settlement failure only means no change.
+    await settleUncertainDrafts(this.db, user).catch((error) =>
+      opsLog("runtime.settle_failed", "warn", errorFields(error)),
+    );
     return this.db.query(
       `UPDATE work_tasks SET status='queued',budget_initialized=true,budget_ms=budget_ms+$2,budget_models=budget_models+$3,budget_tools=budget_tools+$4,pause_reason=NULL,next_run=now(),updated_at=now() WHERE user_id=$1 AND id=$5 AND status IN ('paused','active') AND lease IS NULL AND NOT EXISTS(SELECT 1 FROM runtime_runs r WHERE r.task_id=work_tasks.id AND r.state='running') AND NOT EXISTS(SELECT 1 FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id WHERE r.task_id=work_tasks.id AND c.state='uncertain') RETURNING id`,
       [user, this.budget.ms, this.budget.models, this.budget.tools, chosen.id],
@@ -1056,13 +1063,37 @@ export class Assistant {
     )
       throw new Error("Task scope changed; inspect current work");
     if (!readOperations.has(op)) {
-      const uncertain = await this.db.query(
-        "SELECT 1 FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id WHERE r.user_id=$1 AND c.state='uncertain' LIMIT 1",
-        [scope.user],
-      );
+      const unresolved = () =>
+        this.db.query(
+          "SELECT c.operation FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id WHERE r.user_id=$1 AND c.state='uncertain'",
+          [scope.user],
+        );
+      let uncertain = await unresolved();
+      if (uncertain.rows.some((r) => r.operation === "calendar_draft")) {
+        // This runs after the call was marked dispatched, so a failure here must
+        // fall back to the ordinary refusal, never become this write's error.
+        try {
+          await settleUncertainDrafts(this.db, scope.user);
+        } catch (error) {
+          opsLog("runtime.settle_failed", "warn", {
+            runId: scope.run,
+            ...errorFields(error),
+          });
+        }
+        try {
+          uncertain = await unresolved();
+        } catch (error) {
+          opsLog("runtime.settle_recheck_failed", "warn", {
+            runId: scope.run,
+            ...errorFields(error),
+          });
+        }
+      }
       if (uncertain.rows.length)
         throw new Error(
-          "An uncertain write requires inspection before further writes",
+          uncertain.rows.every((r) => r.operation === "calendar_draft")
+            ? "An uncertain write requires inspection before further writes. It is an earlier Calendar draft attempt. It is checked again on the owner's next write, from two minutes after it started, and cleared if it saved nothing; ask the owner to try again then, or request operator inspection if it persists."
+            : "An uncertain write requires inspection before further writes",
         );
     }
     // Authorization awaits above may overlap new input. This is the actual dispatcher boundary.
