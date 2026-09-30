@@ -70,4 +70,4 @@ Synthetic check (PGlite): the clean case reconciles one call. Each of five refus
 
 - Other write tools may also throw plain `Error`s from pre-write validation. An audit that moves those to `ToolValidationError` would prevent the same class of block. Deferred.
 - The owner-wide guard has no self-service path for a runtime call, unlike journal 43's approval settlement. A read-only "prove non-mutation" check for local-only writes such as `calendar_draft` could remove the operator step. Deferred; it needs its own review.
-- Product question: support events longer than seven days, or all-day events, for leave and call-ups.
+- Product question: support events longer than seven days, or all-day events, for multi-week events.
