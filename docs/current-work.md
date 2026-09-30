@@ -1,3 +1,7 @@
+# Bounded context within one long task (released) — 30 September 2026
+
+- **Issue #77 closed (released `1c0e480` via [PR #122](https://github.com/akhilvuputuri/chief-agent/pull/122)):** a single long task no longer grows until the hard limit. Past 120,000 characters, the oldest call groups of the current turn leave the prompt in blocks of 8. A digest lists each with its read IDs, and failed calls keep their errors. Owner input sent during the task always stays. Synthetic tasks of 21–160 calls stay at 94k–105k characters; before, 160 calls failed. After real long tasks, check `trimmedGroups` and repeated `observation_read` of the same ID. See [journal 48](journey/48-bounded-turn.md) and [context management](context-management.md).
+
 # Calendar stuck-uncertain fix and repeated-failure guard (released) — 29 September 2026
 
 - **Repeated tool failures (released `4042743` via [PR #116](https://github.com/akhilvuputuri/chief-agent/pull/116)):** one request on 28 September called `parcel_list` 25 times with an unknown parcel ID. The parcel error now says where valid IDs come from, and the agent refuses a call form (an operation plus its argument names) after it fails the same way in three model steps with no successful call in between. See [journal 44](journey/44-repeated-tool-failure.md).

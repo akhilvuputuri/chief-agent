@@ -1,7 +1,7 @@
 # 48 — Stopping one long task from growing without bound
 
 Work date(s): 2026-09-30. Written/revised: 2026-09-30.
-Status: in review. Tested on synthetic tasks; the production effect is not measured.
+Status: released at `1c0e480` on 30 September 2026. Tested on synthetic tasks; the production effect is not measured.
 
 ## User-visible problem and preceding iteration
 
@@ -49,6 +49,15 @@ Tested on synthetic mailbox tasks: a fixed part of 67,736 characters as in the i
 ## Verification and outcome
 
 Tested only. No provider run or production trace yet. After release, check `trimmedGroups` and `serializedChars` in the operational log on a real long task. Also check whether the model reads dropped results with `observation_read` rather than repeating calls.
+
+### Release closure — 2026-09-30
+
+- **Merged:** [PR #122](https://github.com/akhilvuputuri/chief-agent/pull/122) at head `3fe8f07`, merge commit `1c0e480`.
+- **Reviewed:** Opus 5.5 approved the code at `ee24827`. What followed was a docs clarification and a merge of main, which touched only the journal index.
+- **CI:** Devin's findings were resolved and main CI passed.
+- **Deployed:** the automatic release reported "Exact commit deployed; startup health passed".
+- **Scope:** app-only; no migration or Compose change.
+- **Issue:** #77 closed with a summary of all its stages.
 
 ## Follow-up and next iteration
 

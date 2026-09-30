@@ -1,5 +1,9 @@
 # Versions and release notes
 
+## Deployed after v0.3.28 (untagged)
+
+- `1c0e480`, [PR #122](https://github.com/akhilvuputuri/chief-agent/pull/122): bounded context within one long task (issue #77). App-only. The automatic release verified the exact commit with startup health on 30 September 2026. See [journal 48](journey/48-bounded-turn.md).
+
 ## Released v0.3.28 — stock monitoring hours and daily news bulletin
 
 [v0.3.28](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.28) points to `8f7f7f791377eaf39138def8418cad3b97d3338b`. It includes:
