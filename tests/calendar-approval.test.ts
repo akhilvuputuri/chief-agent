@@ -7,7 +7,7 @@ import { ensureUser, type Database } from "../src/db.js";
 import { CalendarActions } from "../src/calendar-actions.js";
 import { CalendarNotSentError, CalendarTools } from "../src/calendar.js";
 import { ToolValidationError, toolError } from "../src/tool-errors.js";
-import { validateDraft } from "../src/calendar-draft.js";
+import { dayAfter, dayBefore, validateDraft } from "../src/calendar-draft.js";
 import { JobTools } from "../src/tools.js";
 import { telegram, sendCalendarApprovals } from "../src/telegram.js";
 import { readConfig } from "../src/config.js";
@@ -43,7 +43,7 @@ test("calendar drafts validate exact dates and reject extra authority", () => {
   );
   assert.throws(() => validateDraft({ ...draft, user: "456" }));
 });
-test("a draft over seven days is a definite validation failure, never an uncertain write", async () => {
+test("drafts of any length save; invalid shapes are definite validation failures", async () => {
   const { pg, db } = await fixture();
   const calendar = {
     create: async () => assert.fail("no insert"),
@@ -51,20 +51,56 @@ test("a draft over seven days is a definite validation failure, never an uncerta
   };
   try {
     const actions = new CalendarActions(db, calendar, "123");
-    for (const end of [
-      "2026-10-05T16:00:00+08:00", // fifteen days
-      draft.start, // zero length
-    ])
+    const long = await actions.draft("123", randomUUID(), {
+      ...draft,
+      end: "2026-10-05T16:00:00+08:00", // fifteen days
+    });
+    assert.equal(long.status, "awaiting_approval");
+    const allDay = await actions.draft("123", randomUUID(), {
+      title: "Away",
+      start: "2026-11-02",
+      end: "2026-11-17",
+      allDay: true,
+    });
+    assert.match(allDay.preview, /All day, 16 days/);
+    assert.match(allDay.preview, /First day: Monday, 2 November 2026/);
+    assert.match(allDay.preview, /Last day: Tuesday, 17 November 2026/);
+    const single = await actions.draft("123", randomUUID(), {
+      title: "Away",
+      start: "2026-11-09",
+      end: "2026-11-09",
+      allDay: true,
+    });
+    assert.match(single.preview, /All day, 1 day\n/);
+    for (const [bad, message] of [
+      [{ ...draft, end: draft.start }, /end after it starts/],
+      [{ ...draft, end: "2026-09-19T16:00:00+08:00" }, /end after it starts/],
+      [{ ...draft, start: "2026-09-20", end: "2026-09-21" }, /set allDay/],
+      [{ ...draft, allDay: true }, /YYYY-MM-DD/],
+      [{ ...draft, end: "2026-09-20T16:00:00+99:99" }, /end after it starts/],
+      [
+        { title: "x", start: "2026-11-09", end: "9999-12-31", allDay: true },
+        /before 9999-12-31/,
+      ],
+      [
+        { title: "x", start: "2027-02-28", end: "2027-02-29", allDay: true },
+        /YYYY-MM-DD/,
+      ],
+      [
+        { title: "x", start: "2026-11-09", end: "2026-11-08", allDay: true },
+        /on or after its first day/,
+      ],
+    ] as const)
       await assert.rejects(
-        () => actions.draft("123", randomUUID(), { ...draft, end }),
+        () => actions.draft("123", randomUUID(), bad),
         (error) =>
           error instanceof ToolValidationError &&
           toolError(error).code === "VALIDATION_FAILED" &&
-          /at most seven days/.test(error.message),
+          message.test(error.message),
       );
     assert.equal(
       (await db.query("SELECT count(*)::int AS n FROM approvals")).rows[0].n,
-      0,
+      3,
     );
   } finally {
     await pg.close();
@@ -251,6 +287,56 @@ test("Google creation uses primary calendar, approved fields and no guests", asy
   assert.equal(body.summary, draft.title);
   assert.equal(body.attendees, undefined);
   assert.equal(body.extendedProperties.private.companionApproval, id);
+  // All-day: Google's end date is exclusive, so the inclusive last day moves forward one day.
+  await c.create("123", id, {
+    title: "Away",
+    start: "2026-12-31",
+    end: "2027-01-01",
+    allDay: true,
+  });
+  const allDay = JSON.parse(calls.at(-1).init.body);
+  assert.deepEqual(allDay.start, { date: "2026-12-31" });
+  assert.deepEqual(allDay.end, { date: "2027-01-02" });
+  assert.equal(dayAfter("2028-02-28"), "2028-02-29");
+  assert.equal(dayBefore("2028-03-01"), "2028-02-29");
+});
+test("calendar_list gives an all-day event's inclusive last day", async () => {
+  const c = new CalendarTools(
+    {
+      owner: "123",
+      email: "owner@example.com",
+      clientId: "x",
+      clientSecret: "x",
+      refreshToken: "x",
+    },
+    async (url) => {
+      if (String(url).includes("oauth2.googleapis.com"))
+        return Response.json({ access_token: "test" });
+      if (String(url).includes("userinfo"))
+        return Response.json({ email: "owner@example.com" });
+      return Response.json({
+        items: [
+          {
+            id: "a",
+            start: { date: "2026-11-02" },
+            end: { date: "2026-11-18" },
+          },
+          {
+            id: "b",
+            start: { dateTime: "2026-11-03T09:00:00+08:00" },
+            end: { dateTime: "2026-11-03T10:00:00+08:00" },
+          },
+        ],
+      });
+    },
+  );
+  const { events } = await c.list(
+    "123",
+    "2026-11-01T00:00:00+08:00",
+    "2026-11-30T00:00:00+08:00",
+  );
+  assert.equal(events[0].lastDay, "2026-11-17");
+  assert.equal(events[1].lastDay, undefined);
 });
 test("Google credential failures stop before the insert and name the right recovery", async () => {
   const client = (respond: (url: string) => Response, calls: string[] = []) =>
