@@ -1,7 +1,7 @@
 # 45 — Why did a rejected Calendar draft block every later write?
 
 Work date(s): 2026-09-30. Written/revised: 2026-09-30.
-Status: in review. The code fix is tested and not yet released. The stuck call still needs an operator reconciliation.
+Status: the classification fix merged as `55843bb` (PR #118), release pending. The follow-up removing the seven-day limit and adding all-day events (PR #119) is in review. The stuck call still needs an operator reconciliation.
 
 ## User-visible problem and preceding iteration
 
@@ -70,4 +70,19 @@ Synthetic check (PGlite): the clean case reconciles one call. Each of five refus
 
 - Other write tools may also throw plain `Error`s from pre-write validation. An audit that moves those to `ToolValidationError` would prevent the same class of block. Deferred.
 - The owner-wide guard has no self-service path for a runtime call, unlike journal 43's approval settlement. A read-only "prove non-mutation" check for local-only writes such as `calendar_draft` could remove the operator step. Deferred; it needs its own review.
-- Product question: support events longer than seven days, or all-day events, for multi-week events.
+- Product question: support events longer than seven days, or all-day events. Resolved by the follow-up below.
+
+### Follow-up — 2026-09-30: no length limit, all-day events
+
+**Requirement (owner):** Chief should not impose a length limit, and should draft whatever event fits the request.
+
+- **Change:** `validateDraft` no longer caps duration. A timed event still has to end after it starts.
+- **Added:** optional `allDay`. It takes `YYYY-MM-DD` dates, and `end` is the event's last day. Google receives `start.date` plus the exclusive next day as `end.date`. The approval preview shows the day range and the number of days.
+- **Kept:** the Telegram approval button remains the only way an event is created. No guests, recurrence, editing or deletion.
+- **Schema:** the tool-schema converter in `runtime.ts` has no union support, so `start`/`end` use one string pattern (date or date-time with an offset). `validateDraft` checks which form each event needs, and every rejection is `ToolValidationError`.
+- **Tests:**
+  - a 15-day timed draft saves
+  - one-day and multi-day all-day drafts preview correctly
+  - an all-day insert sends the exclusive end date
+  - five invalid shapes are `VALIDATION_FAILED` and save nothing
+- **Check:** `npm run check` passed: 506 application and 21 script tests, plus both Python suites.

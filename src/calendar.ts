@@ -1,4 +1,8 @@
-import { type CalendarDraft, validateDraft } from "./calendar-draft.js";
+import {
+  type CalendarDraft,
+  dayAfter,
+  validateDraft,
+} from "./calendar-draft.js";
 import { boundedBytes } from "./providers.js";
 /** Google answered with a non-success HTTP status. */
 export class GoogleHttpError extends Error {
@@ -155,8 +159,15 @@ export class CalendarTools {
             summary: draft.title,
             description: draft.description,
             location: draft.location,
-            start: { dateTime: draft.start, timeZone: "Asia/Singapore" },
-            end: { dateTime: draft.end, timeZone: "Asia/Singapore" },
+            ...(draft.allDay
+              ? {
+                  start: { date: draft.start },
+                  end: { date: dayAfter(draft.end) },
+                }
+              : {
+                  start: { dateTime: draft.start, timeZone: "Asia/Singapore" },
+                  end: { dateTime: draft.end, timeZone: "Asia/Singapore" },
+                }),
             extendedProperties: { private: { companionApproval: approval } },
           }),
         },

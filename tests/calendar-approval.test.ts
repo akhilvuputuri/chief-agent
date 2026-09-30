@@ -43,7 +43,7 @@ test("calendar drafts validate exact dates and reject extra authority", () => {
   );
   assert.throws(() => validateDraft({ ...draft, user: "456" }));
 });
-test("a draft over seven days is a definite validation failure, never an uncertain write", async () => {
+test("drafts of any length save; invalid shapes are definite validation failures", async () => {
   const { pg, db } = await fixture();
   const calendar = {
     create: async () => assert.fail("no insert"),
@@ -51,20 +51,47 @@ test("a draft over seven days is a definite validation failure, never an uncerta
   };
   try {
     const actions = new CalendarActions(db, calendar, "123");
-    for (const end of [
-      "2026-10-05T16:00:00+08:00", // fifteen days
-      draft.start, // zero length
-    ])
+    const long = await actions.draft("123", randomUUID(), {
+      ...draft,
+      end: "2026-10-05T16:00:00+08:00", // fifteen days
+    });
+    assert.equal(long.status, "awaiting_approval");
+    const allDay = await actions.draft("123", randomUUID(), {
+      title: "Away",
+      start: "2027-01-14",
+      end: "2027-01-29",
+      allDay: true,
+    });
+    assert.match(allDay.preview, /All day, 16 days/);
+    assert.match(allDay.preview, /First day: Thursday, 14 January 2027/);
+    assert.match(allDay.preview, /Last day: Friday, 29 January 2027/);
+    const single = await actions.draft("123", randomUUID(), {
+      title: "Away",
+      start: "2027-01-14",
+      end: "2027-01-14",
+      allDay: true,
+    });
+    assert.match(single.preview, /All day, 1 day\n/);
+    for (const [bad, message] of [
+      [{ ...draft, end: draft.start }, /end after it starts/],
+      [{ ...draft, end: "2026-09-19T16:00:00+08:00" }, /end after it starts/],
+      [{ ...draft, start: "2026-09-20", end: "2026-09-21" }, /set allDay/],
+      [{ ...draft, allDay: true }, /YYYY-MM-DD/],
+      [
+        { title: "x", start: "2027-01-14", end: "2027-01-13", allDay: true },
+        /on or after its first day/,
+      ],
+    ] as const)
       await assert.rejects(
-        () => actions.draft("123", randomUUID(), { ...draft, end }),
+        () => actions.draft("123", randomUUID(), bad),
         (error) =>
           error instanceof ToolValidationError &&
           toolError(error).code === "VALIDATION_FAILED" &&
-          /at most seven days/.test(error.message),
+          message.test(error.message),
       );
     assert.equal(
       (await db.query("SELECT count(*)::int AS n FROM approvals")).rows[0].n,
-      0,
+      3,
     );
   } finally {
     await pg.close();
@@ -251,6 +278,16 @@ test("Google creation uses primary calendar, approved fields and no guests", asy
   assert.equal(body.summary, draft.title);
   assert.equal(body.attendees, undefined);
   assert.equal(body.extendedProperties.private.companionApproval, id);
+  // All-day: Google's end date is exclusive, so the inclusive last day moves forward one day.
+  await c.create("123", id, {
+    title: "Away",
+    start: "2026-12-31",
+    end: "2027-01-01",
+    allDay: true,
+  });
+  const allDay = JSON.parse(calls.at(-1).init.body);
+  assert.deepEqual(allDay.start, { date: "2026-12-31" });
+  assert.deepEqual(allDay.end, { date: "2027-01-02" });
 });
 test("Google credential failures stop before the insert and name the right recovery", async () => {
   const client = (respond: (url: string) => Response, calls: string[] = []) =>
