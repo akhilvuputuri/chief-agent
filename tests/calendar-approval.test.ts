@@ -43,6 +43,33 @@ test("calendar drafts validate exact dates and reject extra authority", () => {
   );
   assert.throws(() => validateDraft({ ...draft, user: "456" }));
 });
+test("a draft over seven days is a definite validation failure, never an uncertain write", async () => {
+  const { pg, db } = await fixture();
+  const calendar = {
+    create: async () => assert.fail("no insert"),
+    findCreated: async () => null,
+  };
+  try {
+    const actions = new CalendarActions(db, calendar, "123");
+    for (const end of [
+      "2026-10-05T16:00:00+08:00", // fifteen days
+      draft.start, // zero length
+    ])
+      await assert.rejects(
+        () => actions.draft("123", randomUUID(), { ...draft, end }),
+        (error) =>
+          error instanceof ToolValidationError &&
+          toolError(error).code === "VALIDATION_FAILED" &&
+          /at most seven days/.test(error.message),
+      );
+    assert.equal(
+      (await db.query("SELECT count(*)::int AS n FROM approvals")).rows[0].n,
+      0,
+    );
+  } finally {
+    await pg.close();
+  }
+});
 test("only authenticated Telegram buttons create; expiry, denial, restart and duplicate delivery remain safe", async () => {
   const { pg, db } = await fixture();
   let writes = 0;
