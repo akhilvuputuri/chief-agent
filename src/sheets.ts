@@ -2,6 +2,7 @@ import type { Database } from "./db.js";
 import { boundedBytes } from "./providers.js";
 import { SerialQueue } from "./security.js";
 import { z } from "zod";
+import { ToolValidationError } from "./tool-errors.js";
 function chainText(task: any, render: (chain: any) => string): string {
   const text = (task.evidence_chain ?? []).map(render).join("\n\n");
   return text.length <= 30000
@@ -233,7 +234,10 @@ export class SheetsTools {
       ],
     ];
     if (tables.some((t) => t.length > 5000))
-      throw new Error("Sheet snapshot exceeds the supported 5000 rows per tab");
+      // Checked before anything is sent to Google.
+      throw new ToolValidationError(
+        "Sheet snapshot exceeds the supported 5000 rows per tab",
+      );
     const read = async (r: Response) =>
       JSON.parse(new TextDecoder().decode(await boundedBytes(r, 1000000)));
     const token = z.object({ access_token: z.string().min(1) }).parse(
