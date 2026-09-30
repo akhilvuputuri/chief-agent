@@ -44,6 +44,7 @@ export function toolError(error: unknown) {
     /^Skill validation:/,
     /^Canvas validation:/,
     /^Media validation:/,
+    /^Agent validation:/,
     /Only a user follow-up can revise scope/,
     /uncertain write requires inspection/,
     /Task cancelled/,

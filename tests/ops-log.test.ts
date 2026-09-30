@@ -500,3 +500,36 @@ test("Calendar settlement events project category, HTTP status and state only", 
     log.restore();
   }
 });
+
+test("agent events log type, tier, model and outcome, never the brief", () => {
+  const log = capture();
+  try {
+    const child = randomUUID(),
+      parent = randomUUID();
+    projectEvent("agent.child_started", child, {
+      parentRunId: parent,
+      type: "public-research/researcher",
+      agentId: "public-research/researcher",
+      model: { tier: "fast", model: "google/gemini-3.8-flash", effort: "low" },
+      references: { urls: ["https://example.com/private"] },
+    });
+    projectEvent("agent.completed", parent, {
+      childRunId: child,
+      type: "email",
+      status: "complete",
+      stopReason: "answer",
+      approvals: 1,
+    });
+    const [started, completed] = log.parsed();
+    assert.equal(started.agentType, "public-research/researcher");
+    assert.equal(started.tier, "fast");
+    assert.equal(started.model, "google/gemini-3.8-flash");
+    assert.equal(started.effort, "low");
+    assert.equal(completed.agentType, "email");
+    assert.equal(completed.state, "complete");
+    assert.equal(completed.approvalCount, 1);
+    assert.doesNotMatch(log.lines.join("\n"), /example\.com/);
+  } finally {
+    log.restore();
+  }
+});

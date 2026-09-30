@@ -283,7 +283,7 @@ async function fixture(model: ModelAdapter, transport: typeof fetch) {
     db,
     new CustomAgent(model),
     new JobTools(db, { call: async () => ({ content: "public source" }) }),
-    { web: true },
+    { web: true, delegation: false },
     { ms: 900000, models: 40, tools: 100 },
     new ToolPicker("key", config, transport),
   );

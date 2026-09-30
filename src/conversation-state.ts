@@ -1,5 +1,6 @@
 import type { Database } from "./db.js";
 import { exchangeIndex } from "./context-continuity.js";
+import { runFamily } from "./run-family.js";
 
 /** Small disposable projection of recent exchanges; no extra model call or summary. */
 export async function conversationState(
@@ -124,7 +125,7 @@ export async function saveConversationState(
     ).rows.map((r) => r.id);
     const approvalIds = (
       await db.query(
-        "SELECT id FROM approvals WHERE user_id=$1 AND run_id=$2 AND status='pending' LIMIT 12",
+        `SELECT id FROM approvals WHERE user_id=$1 AND run_id IN ${runFamily()} AND status='pending' LIMIT 12`,
         [user, run],
       )
     ).rows.map((r) => r.id);

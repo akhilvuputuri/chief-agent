@@ -1,6 +1,6 @@
 # Bounded research delegation
 
-Issue #27 phase 1. The main agent acts as coordinator and can call `research_delegate`. This reuses the same TypeScript loop and configured model with an isolated prompt, not a new service or framework. Simple requests can stay direct. Only one specialist executes at a time; recursive delegation is rejected. No model-selection changes or dollar caps.
+Issue #27 phase 1. The main agent acts as coordinator and starts it with `agent_run(type="research")` (it was `research_delegate` before [coordinator agents](agents.md)). This reuses the same TypeScript loop with an isolated prompt, not a new service or framework. It runs on its agent tier's model (Gemini 3.8 Flash by default; see [coordinator and agents](agents.md#models-and-effort)). Simple requests can stay direct. Only one specialist executes at a time; recursive delegation is rejected. No dollar caps.
 
 ## Assignment and authority
 

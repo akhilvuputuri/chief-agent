@@ -1,6 +1,6 @@
 # Bounded media processing
 
-Issue #27 phase 2. The main agent can call `media_delegate` to have an isolated, read-only media specialist read images and stored documents. It reuses the specialist runner, traces and shared allocations from [research delegation](research-specialist.md); there is no new service, queue or database table.
+Issue #27 phase 2. The main agent starts the media agent with `agent_run(type="media")`, naming the attachmentIds or sourceIds in its brief (it was `media_delegate` before [coordinator agents](agents.md)), to have an isolated, read-only media specialist read images and stored documents. It reuses the specialist runner, traces and shared allocations from [research delegation](research-specialist.md); there is no new service, queue or database table.
 
 ## Why a specialist rather than direct vision
 
@@ -23,13 +23,13 @@ Limits per child: two minutes, six model calls, twelve tool calls, further bound
 - Image bytes exist in process memory for the turn only. They are never written to conversation history, runtime checkpoints, memory sources, events or research sources. `research.model_input` traces replace image parts with a size placeholder.
 - The specialist's image extraction (question, summary, facts, omissions, uncertainty) is stored as an owner-scoped `research_sources` row under `telegram:image/<sha256>/<name>` and returned as `extractionSourceId`, so later turns can `source_read` it. The image itself cannot be re-examined unless the user resends it.
 - PDF text continues to be stored in full at intake, as before.
-- Identical content and question within seven days reuse the stored result: the cache key is a hash of the normalized objective, the image content hashes, the source IDs and the media model identity, looked up in owner-scoped `media.processed` events marked reusable. Only reports whose targets are all complete or partial are reusable or stored as extractions; a blocked reading is returned to the coordinator but neither cached nor stored, so resending the file runs the specialist again. A cache hit records `media.cache_hit` and makes no model call. A different question, or a changed `MEDIA_MODEL`, runs a new child.
+- Identical content and question within seven days reuse the stored result: the cache key is a hash of the normalized objective, the image content hashes, the source IDs and the media model identity, looked up in owner-scoped `media.processed` events marked reusable. Only reports whose targets are all complete or partial are reusable or stored as extractions; a blocked reading is returned to the coordinator but neither cached nor stored, so resending the file runs the specialist again. A cache hit records `media.cache_hit` and makes no model call. A different question, or a different media model, runs a new child.
 
 Scanned PDFs without selectable text are still reported at intake; OCR and page rendering are not implemented.
 
 ## Model selection
 
-`MEDIA_MODEL` (blank by default) selects a separate OpenRouter model for media children only, using the same price ceilings and provider filters. Nothing verifies a model's vision or document capability before use; a provider that cannot accept image input fails with the existing provider error, which the specialist reports as incomplete. Validate a candidate model with a real photo and PDF before relying on it.
+The media agent's model comes from its tier in the model policy (`fast`, Gemini 3.8 Flash, by default; see [coordinator and agents](agents.md#models-and-effort)). `MEDIA_MODEL` is used only by a runtime built without a model factory, so it has no effect in production. Nothing verifies a model's vision or document capability before use; a provider that cannot accept image input fails with the existing provider error, which the specialist reports as incomplete. Validate a candidate model with a real photo and PDF before relying on it.
 
 ## Trace inspection
 

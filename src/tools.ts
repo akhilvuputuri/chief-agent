@@ -105,10 +105,9 @@ export class JobTools {
     if (a.operation === "canvas_read")
       return canvases.toolRead(user, run, a.id, a.revision, a.offset);
     if (
-      a.operation === "research_delegate" ||
-      a.operation === "plugin_delegate" ||
+      a.operation === "agent_run" ||
+      a.operation === "agent_report" ||
       a.operation === "research_report" ||
-      a.operation === "media_delegate" ||
       a.operation === "media_report" ||
       a.operation === "job_alignment_start" ||
       a.operation === "job_alignment_resume" ||

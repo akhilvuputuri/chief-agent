@@ -341,7 +341,7 @@ test("uncertain writes permit owner-scoped watchlist inspection but still block 
         undefined,
         f.tools,
       ),
-      { stocks: true },
+      { stocks: true, delegation: false },
     );
     const response = await assistant.respondDetailed(
       "a",
@@ -448,7 +448,7 @@ test("a stuck calendar_draft that saved nothing is cleared, so later writes proc
         undefined,
         f.tools,
       ),
-      { stocks: true },
+      { stocks: true, delegation: false },
     );
     const response = await assistant.respondDetailed(
       "a",
@@ -558,7 +558,7 @@ test("a failure while settling a stuck draft falls back to the refusal, never an
         undefined,
         f.tools,
       ),
-      { stocks: true },
+      { stocks: true, delegation: false },
     );
     const response = await assistant.respondDetailed(
       "a",

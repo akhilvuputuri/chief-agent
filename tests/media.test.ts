@@ -124,11 +124,10 @@ test("images reach only the media specialist; the coordinator gets compact facts
       assert.doesNotMatch(serialized, /data:image|fake-jpeg/);
       if (parentCalls === 1) {
         attachmentId = /attachmentId=([0-9a-f-]{36})/.exec(note)![1]!;
-        return call("media_delegate", {
+        return call("agent_run", {
+          type: "media",
           objective: "What does this sign say?",
-          context: "",
-          attachmentIds: [attachmentId],
-          sourceIds: [],
+          context: String(attachmentId),
         });
       }
       const o = observation(input).result;
@@ -199,25 +198,22 @@ test("identical content and question reuse the stored result; stale attachment I
       );
       const id = /attachmentId=([0-9a-f-]{36})/.exec(user)?.[1];
       if (fresh(input) && id)
-        return call("media_delegate", {
+        return call("agent_run", {
+          type: "media",
           objective: "What does this sign say?",
-          context: "",
-          attachmentIds: [id],
-          sourceIds: [],
+          context: String(id),
         });
       if (fresh(input) && user.startsWith("stale"))
-        return call("media_delegate", {
+        return call("agent_run", {
+          type: "media",
           objective: "Describe",
-          context: "",
-          attachmentIds: [first.id],
-          sourceIds: [],
+          context: String(first.id),
         });
       if (fresh(input) && user.startsWith("foreign"))
-        return call("media_delegate", {
+        return call("agent_run", {
+          type: "media",
           objective: "Summarise",
-          context: "",
-          attachmentIds: [],
-          sourceIds: ["44444444-4444-4444-8444-444444444444"],
+          context: String("44444444-4444-4444-8444-444444444444"),
         });
       const o = observation(input);
       return text(
@@ -319,11 +315,10 @@ test("document questions require the specialist to read the stored text and quot
         if (childCalls === 2) {
           assert.ok(observation(input).error);
           // A child cannot delegate again: the operation is outside its tool set.
-          return call("media_delegate", {
+          return call("agent_run", {
+            type: "media",
             objective: "nested",
-            context: "",
-            attachmentIds: [],
-            sourceIds: [sourceId],
+            context: String(sourceId),
           });
         }
         if (childCalls === 3) {
@@ -350,11 +345,11 @@ test("document questions require the specialist to read the stored text and quot
         return call("media_report", report("two (2) months"));
       }
       if (fresh(input))
-        return call("media_delegate", {
+        return call("agent_run", {
+          type: "media",
           objective: "What is the notice period?",
-          context: "Employment contract sent by the user",
-          attachmentIds: [],
-          sourceIds: [sourceId],
+          context:
+            "Employment contract sent by the user" + " " + String(sourceId),
         });
       const o = observation(input).result;
       assert.equal(o.status, "reported");
@@ -436,11 +431,10 @@ test("blocked readings are neither stored nor reused, so resending the same phot
       );
       const id = /attachmentId=([0-9a-f-]{36})/.exec(user)?.[1];
       if (fresh(input) && id)
-        return call("media_delegate", {
+        return call("agent_run", {
+          type: "media",
           objective: "Read the label",
-          context: "",
-          attachmentIds: [id],
-          sourceIds: [],
+          context: String(id),
         });
       const o = observation(input).result;
       return text(
@@ -487,11 +481,10 @@ test("a configured media model handles only specialist calls, and incomplete pro
     generate: async (input) => {
       seen.push("main");
       if (fresh(input))
-        return call("media_delegate", {
+        return call("agent_run", {
+          type: "media",
           objective: "Read the receipt total",
-          context: "",
-          attachmentIds: [photo.id],
-          sourceIds: [],
+          context: String(photo.id),
         });
       const o = observation(input).result;
       assert.equal(o.status, "incomplete");

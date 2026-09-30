@@ -92,7 +92,8 @@ test("domain-limited runtime offers the core plus selected domains and lists the
   );
   // Unavailable integrations are neither offered nor loadable.
   const noGmail = JSON.parse(
-    runtimeContext({ web: true }, null, undefined, new Set()).context,
+    runtimeContext({ web: true, delegation: false }, null, undefined, new Set())
+      .context,
   ).toolDomains;
   assert.equal("gmail" in noGmail.loadable, false);
   assert.ok(TOOL_DOMAINS.includes("gmail"));
@@ -120,7 +121,7 @@ async function fixture(model: ModelAdapter) {
     db,
     new CustomAgent(model),
     new JobTools(db, { call: async () => ({ content: "public source" }) }),
-    { web: true },
+    { web: true, delegation: false },
     { ms: 900000, models: 40, tools: 100 },
   );
   return { pg, db, assistant };
@@ -250,7 +251,7 @@ test("a plain message sends well under half of the full tool schemas", async () 
   });
   try {
     await f.assistant.respond("owner", "hello");
-    const full = runtimeContext({ web: true }, null).tools;
+    const full = runtimeContext({ web: true, delegation: false }, null).tools;
     assert.ok(
       JSON.stringify(first).length < JSON.stringify(full).length / 2,
       `${JSON.stringify(first).length} vs ${JSON.stringify(full).length}`,

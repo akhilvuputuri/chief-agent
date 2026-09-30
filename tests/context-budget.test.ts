@@ -59,7 +59,7 @@ test("an over-budget turn keeps the preceding exchange and its own tool results"
     db,
     new CustomAgent(model),
     new JobTools(db, { call: async () => ({}) }),
-    { web: true },
+    { web: true, delegation: false },
   );
   try {
     await assistant.respond("owner", "earlier turn");

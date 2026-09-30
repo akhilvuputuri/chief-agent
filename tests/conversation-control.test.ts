@@ -83,6 +83,7 @@ async function fixture(model: ModelAdapter, sync?: () => Promise<unknown>) {
   );
   const assistant = new Assistant(db, new CustomAgent(model), tools, {
     web: true,
+    delegation: false,
     preparationSheet: Boolean(sync),
   });
   async function task(objective: string, user = "owner", status = "paused") {
@@ -698,7 +699,7 @@ test("a pending question retains exact sources across restart and text assent ca
         },
       }),
       tools,
-      { calendar: true },
+      { calendar: true, delegation: false },
     );
     const draft = await restarted.respondDetailed(
       "owner",

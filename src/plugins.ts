@@ -2,6 +2,9 @@ import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, realpathSync, readdirSync } from "node:fs";
 import { resolve, sep } from "node:path";
 import { z } from "zod";
+import { MODEL_TIERS } from "./model-policy.js";
+import { action } from "./protocol.js";
+import { REASONING_EFFORTS } from "./model.js";
 
 const id = z
   .string()
@@ -11,23 +14,35 @@ const file = z
   .string()
   .regex(/^[a-zA-Z0-9_/-]+\.(md|json)$/)
   .max(160);
-const reads = z.enum(["web_search", "web_read", "source_read"]);
+/** An operation name; the registry checks it against real operations and the host's grant. */
+const operation = z.string().regex(/^[a-z][a-z_]{1,47}$/);
+/** Report contracts the host knows how to validate. A package picks one; it cannot add its own. */
+export const AGENT_CONTRACTS = [
+  "public-research/v1",
+  "findings/v1",
+  "media/v1",
+] as const;
 const agent = z
   .object({
     id,
     description: z.string().min(1).max(600),
     instructions: file,
-    contract: z.literal("public-research/v1"),
-    tools: z.array(reads).min(1).max(3),
+    contract: z.enum(AGENT_CONTRACTS),
+    tools: z.array(operation).min(1).max(24),
     skills: z.array(id).max(8),
     // These are host ceilings, not permissions a package can raise.
     limits: z
       .object({
-        ms: z.number().int().min(1000).max(120000),
-        models: z.number().int().min(1).max(8),
-        tools: z.number().int().min(1).max(20),
+        ms: z.number().int().min(1000).max(180000),
+        models: z.number().int().min(1).max(12),
+        tools: z.number().int().min(1).max(40),
       })
       .strict(),
+    /** Default model tier and reasoning effort; a call may ask for others. */
+    model: z.enum(MODEL_TIERS).optional(),
+    effort: z.enum(REASONING_EFFORTS).optional(),
+    /** False keeps an agent for host workflows only; it is not in the coordinator's catalogue. */
+    invocable: z.boolean().optional(),
   })
   .strict();
 export const pluginManifest = z
@@ -39,7 +54,7 @@ export const pluginManifest = z
       .regex(/^\d+\.\d+\.\d+$/)
       .max(32),
     description: z.string().min(1).max(1000),
-    agents: z.array(agent).max(8),
+    agents: z.array(agent).max(16),
     skills: z.array(z.object({ id, path: file }).strict()).max(16),
   })
   .strict();
@@ -63,21 +78,26 @@ export type PluginAgent = z.infer<typeof agent> & {
   pluginId: string;
   pluginVersion: string;
   pluginHash: string;
-  model?: string;
+  /** Host-pinned model ID from the registry; wins over any tier. */
+  hostModel?: string;
   skillDefinitions: PluginSkill[];
 };
 const registrySchema = z
   .object({
     format: z.literal("companion.plugin-registry/v1"),
     researchAgent: z.string().max(100).nullable(),
+    /** Short agent types, such as "email" for "core/email". */
+    aliases: z.record(id, z.string().max(100)).optional(),
+    /** Operations the coordinator does not get: an agent in the catalogue does that work. */
+    delegated: z.array(operation).max(80).optional(),
     enabled: z
       .array(
         z
           .object({
             path: id,
             sha256: z.string().regex(/^[a-f0-9]{64}$/),
-            agents: z.array(id).max(8),
-            allowTools: z.array(reads).max(3),
+            agents: z.array(id).max(16),
+            allowTools: z.array(operation).max(80),
             // Host configuration only; never taken from package instructions/model arguments.
             model: z
               .string()
@@ -94,6 +114,35 @@ function unique(values: string[], what: string) {
   if (new Set(values).size !== values.length)
     throw new Error(`Plugin compatibility: duplicate ${what}`);
 }
+/** Coordinator and report operations; an agent can never be granted these. */
+export const NEVER_GRANTED = new Set([
+  "agent_run",
+  "agent_report",
+  "research_report",
+  "media_report",
+  "finish_turn",
+  "tools_load",
+  "job_alignment_start",
+  "job_alignment_resume",
+  "job_alignment_read",
+  "job_alignment_report",
+  "job_alignment_input",
+  "work_start",
+  "work_revise",
+  "work_step",
+  "work_evidence",
+  "work_yield",
+  "work_cancel",
+  "memory_set",
+  "skill_draft",
+  "skill_evaluate",
+  "skill_activate",
+  // Agents read only their own pinned skills, through the runner's skill_read.
+  "skill_read",
+]);
+const OPERATIONS = new Set(
+  action.options.map((o) => o.shape.operation.value as string),
+);
 export function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (value && typeof value === "object")
@@ -283,6 +332,20 @@ export class PluginRegistry {
           throw new Error(
             `Plugin compatibility: host has not granted required tools for ${m.id}/${a.id}`,
           );
+        const refused = a.tools.filter(
+          (t) => !OPERATIONS.has(t) || NEVER_GRANTED.has(t),
+        );
+        if (refused.length)
+          throw new Error(
+            `Plugin compatibility: ${m.id}/${a.id} requests tools no agent can have: ${refused.join(", ")}`,
+          );
+        if (
+          a.contract === "media/v1" &&
+          a.tools.some((t) => t !== "source_read")
+        )
+          throw new Error(
+            "Plugin compatibility: media/v1 agents may only read stored sources",
+          );
         const agentId = `${m.id}/${a.id}`;
         this.agents.set(agentId, {
           ...a,
@@ -290,7 +353,7 @@ export class PluginRegistry {
           pluginId: m.id,
           pluginVersion: m.version,
           pluginHash: hash,
-          ...(enabled.model ? { model: enabled.model } : {}),
+          ...(enabled.model ? { hostModel: enabled.model } : {}),
           instructions: bundle.files[a.instructions]!,
           skillDefinitions: a.skills.map((id) =>
             this.skillMap.get(`${m.id}/${id}`)!,
@@ -309,11 +372,62 @@ export class PluginRegistry {
       throw new Error(
         "Plugin compatibility: research alias references a disabled or missing agent",
       );
+    this.delegated = config.delegated ?? [];
+    for (const op of this.delegated)
+      if (![...this.agents.values()].some((a) => a.tools.includes(op)))
+        throw new Error(
+          `Plugin compatibility: delegated operation ${op} is not a tool of any enabled agent`,
+        );
+    this.aliases = {
+      ...(this.researchAgent ? { research: this.researchAgent } : {}),
+      ...(config.aliases ?? {}),
+    };
+    for (const [alias, target] of Object.entries(this.aliases))
+      if (!this.agents.has(target) || this.agents.has(alias))
+        throw new Error(
+          `Plugin compatibility: alias ${alias} must name an enabled agent and not shadow one`,
+        );
+  }
+  readonly aliases: Record<string, string>;
+  private delegated: string[] = [];
+  /**
+   * Operations to withhold from the coordinator. One is withheld only while an agent that can
+   * use it is in the catalogue, so a disconnected agent never strands its tools.
+   */
+  delegatedOperations(catalogue: { tools: string[] }[]) {
+    const reachable = new Set(catalogue.flatMap((a) => a.tools));
+    return new Set(this.delegated.filter((op) => reachable.has(op)));
   }
   get(agentId: string) {
     const agent = this.agents.get(agentId);
     if (!agent) throw new Error("Plugin validation: agent is not enabled");
     return structuredClone(agent);
+  }
+  /** The agent ID for a type the coordinator names: an alias or a full plugin/agent ID. */
+  resolve(type: string) {
+    const agentId = this.aliases[type] ?? type;
+    if (!this.agents.has(agentId))
+      throw new Error(
+        `Agent validation: unknown agent type "${type}"; use a type from agentCatalogue`,
+      );
+    return agentId;
+  }
+  /** What the coordinator can invoke with agent_run, one entry per type. */
+  agentCatalogue(available: ReadonlySet<string>) {
+    const names = new Map(
+      Object.entries(this.aliases).map(([alias, id]) => [id, alias]),
+    );
+    return [...this.agents.values()]
+      .filter(
+        (a) => a.invocable !== false && a.tools.every((t) => available.has(t)),
+      )
+      .map((a) => ({
+        type: names.get(a.agentId) ?? a.agentId,
+        description: a.description,
+        tools: a.tools,
+        model: a.model ?? null,
+        effort: a.effort ?? null,
+      }));
   }
   catalogue() {
     return structuredClone(

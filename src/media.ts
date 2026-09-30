@@ -11,6 +11,8 @@ import {
   type MediaTarget,
 } from "./media-schema.js";
 import { runResearchSpecialist, checkResearchQuote } from "./research.js";
+import type { AgentChoice } from "./agents.js";
+import type { PluginAgent } from "./plugins.js";
 const fail = (message: string): never => {
   throw new Error("Media validation: " + message);
 };
@@ -103,9 +105,13 @@ export async function delegateMedia(
   req: AgentRequest,
   raw: unknown,
   runAgent: (req: AgentRequest) => Promise<AgentResponse>,
-  /** Identity of the model that will process media; part of the reuse key. */
-  model = "",
+  /** Host-resolved model and effort; the model ID is part of the reuse key. */
+  choice?: AgentChoice,
+  /** The media agent's definition; its instructions and limits replace the built-in ones. */
+  definition?: PluginAgent,
 ) {
+  const model = choice?.model ?? "";
+  const limits = definition?.limits ?? mediaLimits;
   if (req.specialist || !req.executeResearch || !req.execution || !req.signal)
     fail("delegation unavailable");
   const a = mediaAssignment.parse(raw);
@@ -118,7 +124,9 @@ export async function delegateMedia(
     a.attachmentIds.length + a.sourceIds.length === 0 ||
     a.attachmentIds.length + a.sourceIds.length > 4
   )
-    fail("assign one to four distinct attachments or stored sources");
+    fail(
+      "name one to four attachmentIds or stored sourceIds in the objective or context",
+    );
   const images: ImageAttachment[] = [];
   const imageTargets: ImageTarget[] = [];
   for (const id of a.attachmentIds) {
@@ -155,7 +163,17 @@ export async function delegateMedia(
       retrievedAt: row.retrieved_at,
     });
   }
-  const cacheKey = mediaCacheKey(a.objective, imageTargets, a.sourceIds, model);
+  // The brief's context can change what is asked, so it is part of the question's identity.
+  // The IDs it names are keyed separately (by content hash and source ID), so they are removed.
+  const context = a.context
+    .replace(/\b[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}\b/gi, "")
+    .trim();
+  const cacheKey = mediaCacheKey(
+    context ? `${a.objective}\n${context}` : a.objective,
+    imageTargets,
+    a.sourceIds,
+    model,
+  );
   const cached = (
     await db.query(
       `SELECT data FROM events WHERE user_id=$1 AND type='media.processed' AND data->>'cacheKey'=$2 AND (data->>'reusable')::boolean AND created_at>now()-($3||' days')::interval ORDER BY id DESC LIMIT 1`,
@@ -210,15 +228,16 @@ export async function delegateMedia(
     a: { objective: a.objective, context: a.context },
     targets,
     images,
+    choice,
     profile: {
       role: "media",
       reportName: "media_report",
       reportSchema: mediaReport,
       reads: mediaReads,
       limits: {
-        ms: Math.min(mediaLimits.ms, left.ms - 2000),
-        models: Math.min(mediaLimits.models, left.models - 1),
-        tools: Math.min(mediaLimits.tools, left.tools - 1),
+        ms: Math.min(limits.ms, left.ms - 2000),
+        models: Math.min(limits.models, left.models - 1),
+        tools: Math.min(limits.tools, left.tools - 1),
       },
       allowRead: (input: any) =>
         input.operation === "source_read" &&
@@ -235,7 +254,7 @@ export async function delegateMedia(
         })),
         sourceIds: a.sourceIds,
       },
-      instructions,
+      instructions: definition?.instructions ?? instructions,
       validate: async (candidate, childRun) => {
         const report = mediaReport.parse(candidate);
         for (const item of report.targets) {
