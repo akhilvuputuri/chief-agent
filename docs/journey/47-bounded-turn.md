@@ -15,10 +15,10 @@ Tested on synthetic mailbox tasks: a fixed part of 67,736 characters as in the i
 
 | Calls | Before: serialized characters | After: serialized characters | Calls kept |
 | ----: | ----------------------------: | ---------------------------: | ---------: |
-|    21 |                       124,445 |                      114,019 |         13 |
-|    40 |                       173,294 |                      103,089 |          8 |
-|    80 |                       276,134 |                      106,290 |          8 |
-|   160 |           failed (hard limit) |                      107,508 |          8 |
+|    21 |                       124,445 |                       94,326 |          5 |
+|    40 |                       173,294 |                      103,319 |          8 |
+|    80 |                       276,134 |                      106,520 |          8 |
+|   160 |           failed (hard limit) |                      107,177 |          8 |
 
 ## Diagnosis and alternatives
 
@@ -28,7 +28,7 @@ Tested on synthetic mailbox tasks: a fixed part of 67,736 characters as in the i
 
 ## Implementation and review
 
-- `src/context.ts`: after excerpting, if the request still reaches 120,000 characters, the oldest groups of the current turn are dropped in blocks of 8, keeping 6,000 characters for the digest. The latest group, the owner's message and the previous exchange are never removed. `trimmed` is returned and traced.
+- `src/context.ts`: after excerpting, if the request still reaches 120,000 characters, the oldest call groups of the current turn are dropped in blocks of 8. The allowance keeps 6,000 characters for the digest and 4,000 for escaping. Only call groups leave: the owner's message, owner input sent during the task, text-only replies, the previous exchange and the latest group stay. `trimmed` is returned and traced.
 - `src/context-continuity.ts`: `turnDigest` writes one line per dropped call with the step, tool name, the start of its arguments, any read IDs and a failure mark, keeping the newest lines within its cap.
 - `src/custom-agent.ts` and `src/ops-log.ts`: `context.selected` carries `trimmed`, logged as `trimmedGroups`.
 - Tests in `tests/context-continuity.test.ts`:
@@ -39,6 +39,11 @@ Tested on synthetic mailbox tasks: a fixed part of 67,736 characters as in the i
   - a short task is unchanged;
   - the digest's cap and failure marks work.
 - An earlier test expected an oversized earlier call in the current turn to fail the request. It now expects that call to leave through the digest, since the original is in the journal.
+- Independent review (Opus 5.5, first revision) requested changes:
+  - **Major:** owner input steered into a long task was a one-message group and could be trimmed without appearing in the digest. Fixed: only call groups leave, with a regression test that steers after call 4 of 60.
+  - The digest's header was outside its cap, and the fixed-part estimate ignores escaping, so the wire pass could still excerpt the latest group. Fixed with a cap that includes the header, a 4,000-character margin and a `wireCompacted === false` assertion.
+  - The header named the wrong argument for `observation_read`, which takes `id`. Fixed; `approvalId` is now listed, and the header says receipt and approval IDs are proofs, not read IDs.
+  - Re-reading many dropped results can push earlier reads out in turn. The header now asks the model to record findings before reading many results again. This is not measured; see follow-up.
 
 ## Verification and outcome
 
@@ -46,4 +51,6 @@ Tested only. No provider run or production trace yet. After release, check `trim
 
 ## Follow-up and next iteration
 
-Per-layer budgets and a background summary (stages 1 and 4 in [context management](../context-management.md)) remain optional and unrequested.
+- **Read churn is not measured.** A task that aggregates many dropped results can read them back, and those reads leave in turn. The only guard is the header's instruction to record findings first. If production shows repeated `observation_read` of the same ID in one run, mark re-read lines in the digest or keep re-read pages longer.
+- **No provider run yet.** The before/after numbers are offline character counts.
+- Per-layer budgets and a background summary (stages 1 and 4 in [context management](../context-management.md)) remain optional and unrequested.

@@ -759,6 +759,8 @@ test("a long single-turn task stays bounded as calls grow (issue #77)", () => {
       `${calls}: ${input.serializedSize}`,
     );
     assert.ok(input.trimmed > 0 && input.trimmed % 8 === 0, `${calls}`);
+    // Trimming leaves room for escaping, so the newest group is never excerpted.
+    assert.equal(input.wireCompacted, false);
     // Every call in context still has exactly its result.
     const tools = input.messages.flatMap((m) =>
       m.role === "assistant" ? (m.tool_calls ?? []).map((c) => c.id) : [],
@@ -830,8 +832,28 @@ test("the turn digest lists calls with read IDs, marks failures and keeps the ne
     toolGroup("source_read", { observationId: `o-${i}` }, `c-${i}`),
   );
   const capped = turnDigest(many, 2000);
-  assert.ok(capped.length < 2600);
+  assert.ok(capped.length <= 2000);
   assert.match(capped, /o-199\b/);
   assert.doesNotMatch(capped, /o-0\b/);
   assert.match(capped, /\+\d+ earlier calls not listed/);
+});
+
+test("owner input steered into a long task stays when its neighbouring calls leave", () => {
+  const { req, messages, groups } = mailboxTask(60);
+  const steered = user("Also include refunds from the same shops");
+  const at = messages.indexOf(groups[4]![0]!);
+  const withSteer = [...messages.slice(0, at), steered, ...messages.slice(at)];
+  const input = context(req, withSteer);
+  assert.ok(input.trimmed >= 8);
+  const text = JSON.stringify(input.messages);
+  assert.match(text, /Also include refunds from the same shops/);
+  assert.doesNotMatch(text, /"call-0"/);
+  assert.match(text, /obs-0\b/);
+  // The steered message sits after the owner's question and before the calls that remain.
+  const roles = input.messages.map((m) => m.role);
+  const steerIndex = input.messages.findIndex(
+    (m) => m.role === "user" && m.content === steered.content,
+  );
+  assert.equal(roles[steerIndex + 1], "assistant");
+  assert.ok(input.serializedSize < 135000);
 });

@@ -57,6 +57,8 @@ export const contextBudget = 48000;
 const contextCompactionThreshold = 120000;
 /** Room kept for the digest of this turn's calls that left the context. */
 const turnDigestChars = 6000;
+/** Covers JSON escaping of the fixed part, which its size estimate does not count. */
+const trimMargin = 4000;
 /** Groups leave the context in blocks, so the kept prefix stays stable across several calls. */
 const trimBlock = 8;
 /** Text-character ceiling, not the provider token window; see issue #77. */
@@ -173,38 +175,46 @@ export function context(
     workingSize = working.length ? JSON.stringify(working).length : 0;
   }
   // Bounded growth (issue #77): excerpts alone still grow with every call. Past the threshold
-  // the oldest complete groups of this turn leave the context and a digest lists their calls
-  // with read references. The journal keeps every original, so nothing is lost.
+  // the oldest call groups of this turn leave the context and a digest lists them with read
+  // references. Owner input steered into the turn and text-only replies always stay. The
+  // journal keeps every original, so nothing is lost.
   let trimmed = 0;
   let digest = "";
   if (
     fixedSize + reservedSize + exchangeSize + workingSize >=
     contextCompactionThreshold
   ) {
-    const allowance =
+    const isCall = (group: Message[]) => !!group[0]?.tool_calls?.length;
+    const size = (group: Message[]) =>
+      JSON.stringify(compactToolGroup(group)).length;
+    const calls = workingGroups.filter(isCall);
+    let allowance =
       contextCompactionThreshold -
       turnDigestChars -
+      trimMargin -
       fixedSize -
       reservedSize -
       exchangeSize;
-    const sizes = workingGroups.map(
-      (group) => JSON.stringify(compactToolGroup(group)).length,
-    );
+    for (const group of workingGroups)
+      if (!isCall(group)) allowance -= size(group);
     let kept = 0;
-    let size = 0;
-    while (
-      kept < sizes.length &&
-      size + sizes[sizes.length - 1 - kept]! <= allowance
-    )
-      size += sizes[sizes.length - 1 - kept++]!;
+    let used = 0;
+    while (kept < calls.length) {
+      const next = size(calls[calls.length - 1 - kept]!);
+      if (used + next > allowance) break;
+      used += next;
+      kept++;
+    }
     trimmed = Math.min(
-      sizes.length,
-      Math.ceil((sizes.length - kept) / trimBlock) * trimBlock,
+      calls.length,
+      Math.ceil((calls.length - kept) / trimBlock) * trimBlock,
     );
-    const keptGroups = workingGroups.slice(trimmed);
-    working = keptGroups.flatMap((group) => compactToolGroup(group));
+    const leaving = new Set(calls.slice(0, trimmed));
+    working = workingGroups
+      .filter((group) => !leaving.has(group))
+      .flatMap((group) => compactToolGroup(group));
     workingSize = working.length ? JSON.stringify(working).length : 0;
-    digest = turnDigest(workingGroups.slice(0, trimmed), turnDigestChars);
+    digest = turnDigest(calls.slice(0, trimmed), turnDigestChars);
   }
   if (workingSize >= available) {
     if (!compactForWire) return context(request, messages, true);
