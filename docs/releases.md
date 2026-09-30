@@ -2,6 +2,8 @@
 
 ## Deployed after v0.3.28 (untagged)
 
+- `5222e33`, [PR #129](https://github.com/akhilvuputuri/chief-agent/pull/129): Chief becomes a coordinator. One generic `agent_run` tool replaces the delegate tools, typed domain agents come from the bundled `core` plugin, and subagents default to Gemini 3.8 Flash. App-only. The release verified the exact commit with startup health on 1 October 2026. See [journal 49](journey/49-coordinator-agents.md) and [coordinator and agents](agents.md).
+- `ebd3d0b`, [PR #126](https://github.com/akhilvuputuri/chief-agent/pull/126): the main model is GPT-6.1 Sol. The release verified the exact commit with startup health.
 - `1c0e480`, [PR #122](https://github.com/akhilvuputuri/chief-agent/pull/122): bounded context within one long task (issue #77). App-only. The automatic release verified the exact commit with startup health on 30 September 2026. See [journal 48](journey/48-bounded-turn.md).
 
 ## Released v0.3.28 — stock monitoring hours and daily news bulletin
