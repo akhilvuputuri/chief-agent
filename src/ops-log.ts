@@ -38,6 +38,10 @@ const fields: Record<string, Shape> = {
   lane: "name",
   dependency: "name",
   phase: "name",
+  // An agent type such as "email" or "public-research/researcher".
+  agentType: "model",
+  tier: "name",
+  effort: "name",
   errorCode: "code",
   errorCategory: "code",
   model: "model",
@@ -66,6 +70,7 @@ const fields: Record<string, Shape> = {
   serializedChars: "count",
   omittedCount: "count",
   trimmedGroups: "count",
+  approvalCount: "count",
   uncertainCalls: "count",
   interruptedCalls: "count",
   failedRuns: "count",
@@ -320,6 +325,33 @@ const projections: Record<string, Projection> = {
     { runId: run, kind: d.kind, messages: d.messages },
   ],
   "telegram.view_failed": (run) => ["warn", { ref: run }],
+  // Agents: which type ran on which tier and model, and how it ended. No briefs or reports.
+  "agent.child_started": (run, d) => [
+    "info",
+    {
+      runId: run,
+      parentRunId: d.parentRunId,
+      agentType: d.type,
+      model: d.model?.model,
+      tier: d.model?.tier,
+      effort: d.model?.effort,
+    },
+  ],
+  "agent.completed": (run, d) => [
+    "info",
+    {
+      runId: run,
+      childRunId: d.childRunId,
+      agentType: d.type,
+      state: d.status,
+      stopReason: d.stopReason,
+      approvalCount: d.approvals,
+    },
+  ],
+  "agent.failed": (run, d) => [
+    d.cancelled ? "warn" : "error",
+    { runId: run, childRunId: d.childRunId, agentType: d.type },
+  ],
   "research.child_started": (run, d) => [
     "info",
     { runId: run, parentRunId: d.parentRunId, operation: d.role },

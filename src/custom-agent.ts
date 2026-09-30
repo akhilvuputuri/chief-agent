@@ -3,9 +3,8 @@ import { finishSchema, type Answer } from "./answer.js";
 import { jsonSchema } from "./runtime.js";
 import { runAlignment } from "./alignment.js";
 import { randomUUID } from "node:crypto";
-import { pinPlugin } from "./plugin-execution.js";
-import { delegateResearch } from "./research.js";
-import { delegateMedia } from "./media.js";
+import { runAgentType } from "./agents.js";
+import { resolveAgentModel } from "./model-policy.js";
 import { projectObservation } from "./observations.js";
 import { action } from "./protocol.js";
 import type { AgentRequest, AgentResponse } from "./protocol.js";
@@ -36,6 +35,7 @@ function callForm(op: string, raw: string) {
   }
 }
 import { domainOf } from "./tool-domains.js";
+import { runFamily } from "./run-family.js";
 const finishTool: ToolDefinition = {
   name: "finish_turn",
   description:
@@ -66,16 +66,27 @@ export class CustomAgent implements Agent {
   constructor(
     private model: ModelAdapter,
     private specialists: { media?: ModelAdapter } = {},
-    private pluginModel?: (id: string) => ModelAdapter,
+    private modelFor?: (id: string) => ModelAdapter,
   ) {}
   async run(req: AgentRequest): Promise<AgentResponse> {
-    if (req.pluginModel && (!req.specialist || !this.pluginModel))
-      throw new Error("Plugin model override is unavailable");
-    const model = req.pluginModel
-      ? this.pluginModel!(req.pluginModel)
-      : req.specialist === "media" && this.specialists.media
-        ? this.specialists.media
-        : this.model;
+    if (req.childModel && !req.specialist)
+      throw new Error("Only agent runs can select a model");
+    // A child uses its host-resolved model, or the default agent tier (Flash when configured).
+    // A runtime built without a model factory runs every agent on its one model.
+    const childModel = !this.modelFor
+      ? undefined
+      : (req.childModel ??
+        (req.specialist &&
+        !(req.specialist === "media" && this.specialists.media)
+          ? resolveAgentModel(undefined, this.model.model ?? "").model
+          : undefined));
+    const model =
+      childModel && childModel !== this.model.model
+        ? this.modelFor!(childModel)
+        : req.specialist === "media" && this.specialists.media && !childModel
+          ? this.specialists.media
+          : this.model;
+    const effort = req.effort ?? "medium";
     const execution = req.execution;
     if (!execution || !req.execute || !req.signal)
       throw new Error("Owner-scoped execution is required");
@@ -138,7 +149,7 @@ export class CustomAgent implements Agent {
         reason === "answer" &&
         (
           await execution.db.query(
-            "SELECT 1 FROM approvals WHERE user_id=$1 AND run_id=$2 AND status='pending' AND expires_at>now() LIMIT 1",
+            `SELECT 1 FROM approvals WHERE user_id=$1 AND run_id IN ${runFamily()} AND status='pending' AND expires_at>now() LIMIT 1`,
             [execution.user, execution.run],
           )
         ).rows.length;
@@ -217,7 +228,8 @@ export class CustomAgent implements Agent {
                 invocationId,
                 messages: omitImages(input.messages),
                 tools,
-                reasoning: "medium",
+                reasoning: effort,
+                model: model.model ?? null,
                 omitted: input.omitted,
               });
             // Context/journal writes are await points, so recheck before starting a model.
@@ -226,7 +238,7 @@ export class CustomAgent implements Agent {
             generation = await model.generate({
               messages: input.messages,
               tools,
-              reasoning: "medium",
+              reasoning: effort,
               sessionId: req.runId,
               ...(req.cacheKey ? { cacheKey: req.cacheKey } : {}),
               signal: AbortSignal.any([
@@ -389,58 +401,35 @@ export class CustomAgent implements Agent {
                     );
                   dispatched = true;
                   result =
-                    op === "plugin_delegate"
-                      ? await (async () => {
-                          if (req.specialist)
-                            throw new Error(
-                              "Plugin validation: recursive delegation is unavailable",
-                            );
-                          const { agentId, operation, ...assignment } =
-                            input as any;
-                          const definition = await pinPlugin(
-                            execution,
-                            agentId,
-                          );
-                          return delegateResearch(
-                            req,
-                            { ...assignment, operation: "research_delegate" },
-                            (child) => this.run(child),
-                            definition,
-                          );
-                        })()
-                      : op === "research_delegate"
-                        ? await delegateResearch(req, input, (child) =>
+                    op === "agent_run"
+                      ? await runAgentType(
+                          req,
+                          input,
+                          (child) => this.run(child),
+                          this.model.model ?? "",
+                        )
+                      : [
+                            "job_alignment_start",
+                            "job_alignment_resume",
+                            "job_alignment_read",
+                          ].includes(op)
+                        ? await runAlignment(req, input, (child) =>
                             this.run(child),
                           )
-                        : [
-                              "job_alignment_start",
-                              "job_alignment_resume",
-                              "job_alignment_read",
-                            ].includes(op)
-                          ? await runAlignment(req, input, (child) =>
-                              this.run(child),
-                            )
-                          : op === "tools_load"
-                            ? await (async () => {
-                                if (!req.loadTools)
-                                  throw new Error("Operation unavailable");
-                                return req.loadTools(
-                                  (input as { domains: string[] }).domains,
-                                );
-                              })()
-                            : op === "media_delegate"
-                              ? await delegateMedia(
-                                  req,
-                                  input,
-                                  (child) => this.run(child),
-                                  (this.specialists.media ?? this.model)
-                                    .model ?? "",
-                                )
-                              : await req.execute(input);
+                        : op === "tools_load"
+                          ? await (async () => {
+                              if (!req.loadTools)
+                                throw new Error("Operation unavailable");
+                              return req.loadTools(
+                                (input as { domains: string[] }).domains,
+                              );
+                            })()
+                          : await req.execute(input);
                   if (
                     op === "research_report" ||
                     op === "media_report" ||
-                    op === "job_alignment_report"
+                    op === "job_alignment_report" ||
+                    op === "agent_report"
                   )
                     candidate = {
                       reply: JSON.stringify(result),
@@ -451,9 +440,7 @@ export class CustomAgent implements Agent {
                   // Only retry known transient reads; all writes have a single dispatch.
                   if (
                     !readOperations.has(op) ||
-                    op === "research_delegate" ||
-                    op === "plugin_delegate" ||
-                    op === "media_delegate" ||
+                    op === "agent_run" ||
                     op.startsWith("job_alignment_") ||
                     attempt >= 2 ||
                     !(

@@ -33,6 +33,12 @@ const assignment = {
   jobIds: [],
   urls: ["https://example.com/product"],
 };
+/** The coordinator's generic brief: the URL travels as ordinary text. */
+const brief = {
+  type: "research",
+  objective: assignment.objective,
+  context: "Source to check: https://example.com/product",
+};
 const report = (sourceId: string) => ({
   targets: [
     {
@@ -111,7 +117,7 @@ test("research isolates context, returns sourced targets and correlates traces/c
           report(observation(input).result.sourceId),
         );
       }
-      if (++parentCalls === 1) return call("research_delegate", assignment);
+      if (++parentCalls === 1) return call("agent_run", brief);
       const o = observation(input).result;
       assert.equal(o.status, "reported");
       assert.equal(o.targets[0].status, "complete");
@@ -175,31 +181,44 @@ test("research isolates context, returns sourced targets and correlates traces/c
     await f.pg.close();
   }
 });
-test("simple requests remain direct and another owner's saved target cannot be delegated", async () => {
+test("simple requests remain direct and another owner's saved role never reaches an agent", async () => {
   let n = 0;
   const foreign = randomUUID();
+  let childMessage = "";
   const f = await fixture({
     generate: async (input) => {
-      assert(!child(input));
+      if (child(input)) {
+        childMessage = String(
+          input.messages.find((m) => m.role === "user")?.content,
+        );
+        return call("research_report", {
+          targets: [
+            {
+              targetId: "topic",
+              status: "blocked",
+              summary: "Nothing to research.",
+              evidence: [],
+            },
+          ],
+        });
+      }
       if (++n === 1) return text("Hello");
       if (n === 2)
-        return call("research_delegate", {
-          ...assignment,
-          urls: [],
-          jobIds: [foreign],
+        return call("agent_run", {
+          type: "research",
+          objective: "Research this saved role",
+          context: `Saved role ${foreign}`,
         });
-      assert.equal(observation(input).error.code, "VALIDATION_FAILED");
-      return text("That saved target is unavailable.");
+      return text("That saved role is unavailable.");
     },
   });
   try {
     await ensureUser(f.db, "other");
     await f.db.query(
-      "INSERT INTO jobs(id,user_id,title,company) VALUES($1,'other','Engineer','Example')",
+      "INSERT INTO jobs(id,user_id,title,company) VALUES($1,'other','Secret Engineer','Example')",
       [foreign],
     );
     assert.equal(await f.assistant.respond("owner", "Hello"), "Hello");
-    await f.assistant.respond("owner", "Research a role");
     assert.equal(
       (
         await f.db.query(
@@ -208,6 +227,10 @@ test("simple requests remain direct and another owner's saved target cannot be d
       ).rows[0].n,
       0,
     );
+    await f.assistant.respond("owner", "Research a role");
+    // An ID the owner does not own stays plain text: it is never resolved into a target.
+    assert.doesNotMatch(childMessage, /Secret Engineer/);
+    assert.match(childMessage, /"targetId":"topic"/);
   } finally {
     await f.pg.close();
   }
@@ -220,13 +243,13 @@ test("specialist rejects writes, recursive delegation, unassigned targets and in
     generate: async (input) => {
       if (!child(input))
         return ++p === 1
-          ? call("research_delegate", assignment)
+          ? call("agent_run", brief)
           : text("Research received.");
       c++;
       if (c === 1) return call("memory_set", { key: "bad", value: "bad" });
       if (c === 2) {
         assert(observation(input).error);
-        return call("research_delegate", assignment);
+        return call("agent_run", brief);
       }
       if (c === 3) {
         assert(observation(input).error);
@@ -289,7 +312,7 @@ test("child model calls consume the parent's allocation and incomplete results a
         count++;
         return child(input)
           ? call("web_read", { url: assignment.urls[0] })
-          : call("research_delegate", assignment);
+          : call("agent_run", brief);
       },
     },
     2,
@@ -299,7 +322,7 @@ test("child model calls consume the parent's allocation and incomplete results a
     assert.equal(count, 2);
     const result = (
       await f.db.query(
-        "SELECT result FROM runtime_calls WHERE operation='research_delegate'",
+        "SELECT result FROM runtime_calls WHERE operation='agent_run'",
       )
     ).rows[0].result;
     assert.equal(result.status, "incomplete");
@@ -321,7 +344,7 @@ test("cancelling the parent aborts the in-flight child and prevents tool dispatc
   const started = new Promise<void>((r) => (announce = r));
   const f = await fixture({
     generate: async (input) => {
-      if (!child(input)) return call("research_delegate", assignment);
+      if (!child(input)) return call("agent_run", brief);
       announce();
       return await new Promise((_, reject) =>
         input.signal.addEventListener(
@@ -364,7 +387,7 @@ test("restart does not replay delegated reads; trace scrubbing preserves non-sec
     const controller = new AbortController();
     const root = new Execution(f.db, "owner", randomUUID(), controller.signal);
     await root.start();
-    await root.beginCall("call", "research_delegate", assignment);
+    await root.beginCall("call", "agent_run", brief);
     const sub = new Execution(
       f.db,
       "owner",

@@ -6,9 +6,9 @@ Product requirement: [issue #37](https://github.com/akhilvuputuri/chief-agent/is
 
 The host owns the conversation loop, authenticated user identity, sequential execution, cancellation, model/provider price filters, parent/child budgets, database access, approvals and report validation. Packages contain text and configuration; they cannot execute scripts, choose provider credentials, add HTTP endpoints, grant themselves tools or remove approval gates.
 
-`src/plugins.ts` validates packages and builds immutable registries. `src/plugin-registry.ts` loads the reviewed `plugins/registry.json` at startup. `src/plugin-execution.ts` selects and pins definitions. `src/research.ts` executes the supported contract with existing owner-scoped callbacks. `src/custom-agent.ts` routes the generic `plugin_delegate` tool through that runner. Job alignment and media still use their existing specialized host profiles; they have not been converted to plugins.
+`src/plugins.ts` validates packages and builds immutable registries. `src/plugin-registry.ts` loads the reviewed `plugins/registry.json` at startup. `src/plugin-execution.ts` selects and pins definitions. `src/agents.ts` resolves an `agent_run` call to a pinned definition, a model and an effort, and runs it under its contract: `src/research.ts` for `public-research/v1`, `src/media.ts` for `media/v1` and `runFindingsAgent` for `findings/v1`. Chief's built-in domain agents are themselves a plugin (`plugins/core`); see [coordinator and agents](agents.md). Job alignment keeps its own host workflow.
 
-A plugin agent is another isolated invocation of the same runtime. It is not an always-on service or an autonomous deployment unit. Plugin instructions are procedural guidance and cannot expand the tool allowlist. No nested delegation or parallel squads are introduced.
+A plugin agent is another isolated invocation of the same runtime. It is not an always-on service or an autonomous deployment unit. Plugin instructions are procedural guidance and cannot expand the tool allowlist. Agents cannot start other agents.
 
 ## Package and enabled registry
 
@@ -21,26 +21,28 @@ public-research/
   skills/source-research/SKILL.md
 ```
 
-The manifest format is `companion.plugin/v1`. It declares `id`, `version`, `description`, `agents` and `skills`. IDs are lowercase words/digits separated by hyphens. Each agent declares its local ID, delegation description, instruction path, host contract, required tools, skills and execution limits. Each skill declares its local ID and path. Agent and skill identities are namespaced as `<plugin-id>/<local-id>`.
+The manifest format is `companion.plugin/v1`. It declares `id`, `version`, `description`, `agents` and `skills`. IDs are lowercase words/digits separated by hyphens. Each agent declares its local ID, delegation description, instruction path, host contract, required tools, skills and execution limits, and optionally a default model tier (`fast`, `standard` or `strong`), a default reasoning effort and `invocable: false` for host-only agents. Each skill declares its local ID and path. Agent and skill identities are namespaced as `<plugin-id>/<local-id>`.
 
 Agent instructions must live at `agents/<id>.md`; skills at `skills/<id>/SKILL.md`. This version supports a restricted Agent Skills frontmatter subset: plain single-line `name` and `description`, followed by Markdown. The name must match the skill directory. Other YAML fields/forms, references/assets/scripts, executable hooks, extra files, symlinks, unknown manifest fields and undeclared dependencies fail validation. Markdown files are limited to 32,000 UTF-8 bytes each and serialized bundles to 256 KB. Larger content should be split or supported through a future explicit contract.
 
 The separate host registry declares enabled package directories, their exact SHA-256 content pins, enabled agent IDs and granted tools. A package cannot edit this registry by invoking a model tool. Changing installed files without updating the reviewed content pin prevents startup. Disabled agent IDs cannot be invoked even if an old task has their definition saved.
 
-The registry also sets `researchAgent`, the agent used by the existing `research_delegate` alias. Set it to null to remove that alias. Additional compatible agents appear in `pluginCatalogue` and can be invoked using `plugin_delegate(agentId, objective, context, jobIds, urls)` without editing the conversation loop. Only enabled public research agents are exposed when web capability is configured. Package skills appear in the normal skill catalogue; contents are loaded on demand with `skill_read`.
+The registry also sets `researchAgent`, which becomes the `research` alias, and optional `aliases` (short types such as `email` for `core/email`) and `delegated` (operations the coordinator is not offered because an agent in the catalogue does that work). Every enabled invocable agent whose tools are connected appears in `agentCatalogue` and is started with `agent_run(type, objective, context?, model?, effort?)` without editing the conversation loop. Package skills appear in the normal skill catalogue; contents are loaded on demand with `skill_read`.
 
-Operator configuration can specify an optional OpenRouter `model` ID on an enabled package entry. That applies to its agents; it is absent by default, so they inherit the main model. Overrides use the existing OpenRouter adapter, medium reasoning and the same price-first routing/price ceilings. The runtime never accepts a model override from plugin text or delegation arguments. New adapters are constructed from server-side credentials only. Changing a model does not grant a larger budget. The inherited main model is not pinned by this plugin layer; actual model/provider identities remain in normal execution traces.
+A package may name a model tier; the reviewed `config/model-policy.json` maps tiers to model IDs. Operator configuration can still pin an OpenRouter `model` ID on an enabled package entry, which wins over any tier. The runtime never accepts a model ID from plugin text or tool arguments. Overrides use the existing OpenRouter adapter and the same price-first routing and price ceilings. Changing a model does not grant a larger budget.
+
+Tools are operation names. The registry refuses an agent whose tools the host has not granted, that are not real operations, or that no agent may have (`NEVER_GRANTED` in `src/plugins.ts`: `agent_run`, report operations, `finish_turn`, `tools_load`, job alignment, work-task control, `memory_set`, skill drafting and activation). Media agents may only read stored sources.
 
 ## Supported execution contract
 
-`public-research/v1` is the only agent contract in this release:
+Three contracts exist: `findings/v1` (the general contract, described in [coordinator and agents](agents.md#contracts)), `media/v1` ([media specialist](media-specialist.md)) and `public-research/v1`:
 
 - Assignment: objective, relevant context, and up to six distinct saved job IDs/public HTTPS URLs, or a general topic with no explicit targets. Host ownership and public-URL checks remain in force.
 - Read capabilities: any declared subset of `web_search`, `web_read`, `source_read`, explicitly granted by the host and available in the parent session.
 - Agent context: assignment only, empty conversation history/memories, compact pinned skill catalogue. Relevant skill text is loaded only when requested, in bounded pages using `skill_read(key, offset?)`; follow `nextOffset` until null. Pages account for JSON escaping so they survive the observation size limit. The coordinator's full conversation and memories are not injected.
 - Output: `research_report` with exactly one result per target, statuses complete/partial/blocked, summary and evidence. The Zod definition in `src/research-schema.ts` is authoritative.
 - Evidence: complete results require evidence; exact quotations must occur in an owner-scoped source actually read by that child. These checks establish recorded support, not semantic correctness.
-- Limits: at most 120 seconds, eight model calls and twenty tool calls per child, further constrained by the parent's remaining allocation. All child usage is charged to the parent once. No dollar caps are introduced.
+- Limits: the definition's limits (at most 180 seconds, 12 model calls and 40 tool calls), further constrained by the parent's remaining allocation. All child usage is charged to the parent once. No dollar caps are introduced.
 - Side effects: source storage and execution traces are host-managed. No user-record writes, private email/Calendar access, memory saves, external messages, recursive delegation or arbitrary shell execution.
 
 The coordinator may use its ordinary authorized tools after receiving a report. Importing a plugin does not authorize downstream changes.

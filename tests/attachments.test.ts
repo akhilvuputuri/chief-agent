@@ -145,7 +145,7 @@ test("attachment messages persist notes and bounded excerpts, never image bytes"
   };
   const note = imageMessage("What is this?", [image]);
   assert.match(note, /attachmentId=22222222-2222-4222-8222-222222222222/);
-  assert.match(note, /call media_delegate/);
+  assert.match(note, /call agent_run with type media/);
   assert.match(
     note,
     /^What is this\?\n\n\[Attached image: photo\.jpg \(image\/jpeg, 250 KB\)/,

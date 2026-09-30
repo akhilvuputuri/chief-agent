@@ -1,4 +1,5 @@
 import type { Database } from "./db.js";
+import { runFamily } from "./run-family.js";
 
 /** Retrieval aid, not an inferred or enforced user scope. No new domain writes. */
 export async function recordContext(db: Database, user: string, run: string) {
@@ -10,7 +11,7 @@ export async function recordContext(db: Database, user: string, run: string) {
          row_number() OVER (PARTITION BY c.operation ORDER BY c.started_at DESC,c.id DESC) AS last_rank
        FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id
        WHERE r.user_id=$1 AND c.state='success' AND c.operation IN ('job_list','item_list')
-         AND (r.id=$2 OR (r.task_id IS NOT NULL AND r.task_id=(SELECT task_id FROM runtime_runs WHERE id=$2 AND user_id=$1)))
+         AND (r.id IN ${runFamily()} OR (r.task_id IS NOT NULL AND r.task_id=(SELECT task_id FROM runtime_runs WHERE id=$2 AND user_id=$1)))
      ) SELECT * FROM eligible WHERE first_rank=1 OR last_rank=1 ORDER BY operation,started_at`,
       [user, run],
     )

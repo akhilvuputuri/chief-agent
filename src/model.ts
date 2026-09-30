@@ -41,12 +41,14 @@ export type Generation = {
   usage?: Record<string, unknown>;
   model?: string;
 };
+export const REASONING_EFFORTS = ["low", "medium", "high"] as const;
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 export interface ModelAdapter {
   readonly model?: string;
   generate(input: {
     messages: ModelMessage[];
     tools: ToolDefinition[];
-    reasoning: "medium";
+    reasoning: ReasoningEffort;
     signal: AbortSignal;
     sessionId?: string;
     /** Sent as OpenRouter session_id instead of sessionId; prompt caches are partitioned by it. */

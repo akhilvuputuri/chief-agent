@@ -21,12 +21,14 @@ import { NotDispatchedError } from "./tool-errors.js";
 import { plugins } from "./plugin-registry.js";
 import type { PluginAgent } from "./plugins.js";
 import { pinPlugin } from "./plugin-execution.js";
+import type { AgentChoice } from "./agents.js";
 
 export async function delegateResearch(
   req: AgentRequest,
   raw: unknown,
   runAgent: (req: AgentRequest) => Promise<AgentResponse>,
   selected?: PluginAgent,
+  choice?: AgentChoice,
 ) {
   if (req.specialist || !req.executeResearch || !req.execution || !req.signal)
     throw new Error("Research validation: delegation unavailable");
@@ -77,6 +79,7 @@ export async function delegateResearch(
     a,
     targets,
     plugin: definition,
+    choice,
   });
 }
 
@@ -105,6 +108,8 @@ export async function runResearchSpecialist(
     plugin?: PluginAgent;
     /** Current-turn images supplied to the child model input only; never persisted. */
     images?: ImageAttachment[];
+    /** Host-resolved model and effort; without it the child uses the default agent tier. */
+    choice?: AgentChoice;
   },
 ) {
   if (req.specialist || !req.executeResearch || !req.execution || !req.signal)
@@ -157,6 +162,7 @@ export async function runResearchSpecialist(
       role: profile?.role ?? "research",
       assignment: { ...a, targets },
       limits,
+      model: options.choice ?? null,
       profile: profile?.metadata ?? null,
       plugin: plugin
         ? {
@@ -207,7 +213,10 @@ export async function runResearchSpecialist(
         capability: "",
         specialist: profile?.role ?? "research",
         systemInstructions: profile?.instructions ?? plugin!.instructions,
-        ...(plugin?.model ? { pluginModel: plugin.model } : {}),
+        ...((options.choice?.model ?? plugin?.hostModel)
+          ? { childModel: options.choice?.model ?? plugin?.hostModel }
+          : {}),
+        ...(options.choice ? { effort: options.choice.effort } : {}),
         message: JSON.stringify({
           objective: a.objective,
           context: a.context,

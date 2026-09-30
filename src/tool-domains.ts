@@ -17,6 +17,7 @@ export const CORE_OPERATIONS = new Set([
   "skill_read",
   "work_status",
   "tools_load",
+  "agent_run",
 ]);
 
 export const TOOL_DOMAINS = [
@@ -66,7 +67,7 @@ const PREFIXES: [string, ToolDomain][] = [
   ["sheet_", "jobs"],
   ["work_", "work"],
   ["research_", "research"],
-  ["plugin_", "research"],
+  ["agent_", "research"],
   ["media_", "media"],
   ["canvas_", "canvas"],
   ["parcel_", "parcels"],

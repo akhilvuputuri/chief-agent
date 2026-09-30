@@ -1,3 +1,7 @@
+# Chief as coordinator with typed agents (in review) — 1 October 2026
+
+- **One generic delegation tool:** `agent_run(type, objective, context?, model?, effort?)` replaces `research_delegate`, `plugin_delegate` and `media_delegate`. Every agent is a plugin agent. Chief's domain work (email, parcels, calendar, daily, jobs, stocks, news, library, web lookups, media) moves into the bundled `core` plugin, and Chief keeps coordination, recall, memory, work tracking, canvases and job alignment. Subagents default to Gemini 3.8 Flash through model tiers in `config/model-policy.json`, and Chief runs on GPT-6.1 Sol (PR #126). See [coordinator and agents](agents.md) and [journal 49](journey/49-coordinator-agents.md). Production latency, cost and Flash answer quality are not measured yet.
+
 # Bounded context within one long task (released) — 30 September 2026
 
 - **Issue #77 closed (released `1c0e480` via [PR #122](https://github.com/akhilvuputuri/chief-agent/pull/122)):** a single long task no longer grows until the hard limit. Past 120,000 characters, the oldest call groups of the current turn leave the prompt in blocks of 8. A digest lists each with its read IDs, and failed calls keep their errors. Owner input sent during the task always stays. Synthetic tasks of 21–160 calls stay at 94k–105k characters; before, 160 calls failed. After real long tasks, check `trimmedGroups` and repeated `observation_read` of the same ID. See [journal 48](journey/48-bounded-turn.md) and [context management](context-management.md).

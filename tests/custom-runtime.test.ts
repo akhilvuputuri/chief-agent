@@ -44,7 +44,7 @@ async function fixture(
     db,
     new CustomAgent(model),
     new JobTools(db, { call: async () => ({ content: "public source" }) }),
-    { web: true },
+    { web: true, delegation: false },
     budget,
   );
   return { pg, db, assistant };

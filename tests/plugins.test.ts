@@ -116,7 +116,7 @@ test("unsupported code/hooks/contracts, paths, missing dependencies and duplicat
   const changes: ((b: any) => void)[] = [
     (b) => (b.manifest.hooks = { start: "exec" }),
     (b) => (b.manifest.agents[0].contract = "shell/v1"),
-    (b) => b.manifest.agents[0].tools.push("calendar_draft"),
+    (b) => b.manifest.agents[0].tools.push("Not a tool"),
     (b) => (b.manifest.agents[0].limits.models = 100),
     (b) => (b.manifest.agents[0].instructions = "../outside.md"),
     (b) => b.manifest.agents.push(b.manifest.agents[0]),
@@ -187,12 +187,15 @@ test("host override comes from registry; package cannot pick a model or grant pe
     config.enabled[0].model = "example/research-model";
     writeFileSync(path, JSON.stringify(config));
     assert.equal(
-      new PluginRegistry(root).get("public-research/researcher").model,
+      new PluginRegistry(root).get("public-research/researcher").hostModel,
       "example/research-model",
     );
+    // A package may ask for a model tier, never name a model; the host maps tiers.
     const bundle = original() as any;
     bundle.manifest.agents[0].model = "example/research-model";
     assert.throws(() => validateBundle(bundle));
+    bundle.manifest.agents[0].model = "fast";
+    assert.doesNotThrow(() => validateBundle(bundle));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -334,12 +337,9 @@ test("generic plugin delegation discovers agents, loads only assigned skills laz
             }
             if (childCalls === 3) {
               assert.equal(obs(input).error.code, "VALIDATION_FAILED");
-              return call("plugin_delegate", {
-                agentId: "public-research/researcher",
+              return call("agent_run", {
+                type: "research",
                 objective: "Recursive",
-                context: "",
-                jobIds: [],
-                urls: [],
               });
             }
             assert(obs(input).error);
@@ -357,15 +357,12 @@ test("generic plugin delegation discovers agents, loads only assigned skills laz
           if (++coordinatorCalls === 1) {
             assert(
               JSON.stringify(input.messages).includes(
-                "public-research/researcher",
+                '\\"type\\":\\"research\\"',
               ),
             );
-            return call("plugin_delegate", {
-              agentId: "public-research/researcher",
+            return call("agent_run", {
+              type: "research",
               objective: "Investigate platform",
-              context: "",
-              jobIds: [],
-              urls: [],
             });
           }
           assert.equal(obs(input).result.targets[0].status, "blocked");
@@ -405,8 +402,18 @@ test("generic plugin delegation discovers agents, loads only assigned skills laz
       (await db.query("SELECT count(*)::int n FROM runtime_runs")).rows[0].n,
       2,
     );
-    const off = runtimeContext({ web: false }, null);
-    assert(!off.tools.some((t) => t.name === "plugin_delegate"));
+    const off = runtimeContext(
+      { web: false },
+      null,
+      undefined,
+      undefined,
+      true,
+    );
+    assert(
+      !JSON.parse(off.context).agentCatalogue.some(
+        (a: { type: string }) => a.type === "research",
+      ),
+    );
     const skill = (await new SkillTools(db).call("owner", randomUUID(), {
       operation: "skill_read",
       key: "public-research/source-research",

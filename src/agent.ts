@@ -42,6 +42,7 @@ import {
   type ImageAttachment,
 } from "./protocol.js";
 import type { JobTools } from "./tools.js";
+import { runFamily } from "./run-family.js";
 export interface Agent {
   run(request: AgentRequest): Promise<AgentResponse>;
 }
@@ -211,6 +212,13 @@ export class Assistant {
     private picker?: ToolPicker,
   ) {
     this.inbox = new InputInbox(db);
+  }
+  /**
+   * Chief coordinates: domain work goes to agents through agent_run. availability.delegation
+   * false keeps the older direct-tools mode (every enabled tool offered to Chief).
+   */
+  private get coordinator() {
+    return this.availability.delegation !== false;
   }
   shutdown() {
     for (const controller of this.controllers.values()) controller.abort();
@@ -525,7 +533,13 @@ export class Assistant {
         ).rows[0] ?? {};
       // Domains with at least one tool available in this deployment.
       const availableDomains = new Set(
-        runtimeContext(this.availability, null)
+        runtimeContext(
+          this.availability,
+          null,
+          undefined,
+          undefined,
+          this.coordinator,
+        )
           .tools.map((t) => domainOf(t.name))
           .filter((d): d is ToolDomain => !!d),
       );
@@ -618,6 +632,7 @@ export class Assistant {
         current ? await work.snapshot(user, current.id) : null,
         undefined,
         loadedDomains,
+        this.coordinator,
       );
       await execution.trace("tools.selected", {
         domains: [...loadedDomains].sort(),
@@ -637,6 +652,7 @@ export class Assistant {
           null,
           undefined,
           loadedDomains,
+          this.coordinator,
         );
         runtime.tools = fresh.tools;
         runtime.context = JSON.stringify({
@@ -822,6 +838,38 @@ export class Assistant {
           if (!child.rows.length) throw new Error("Research scope unavailable");
           return this.call(capability, input, childRun);
         },
+        executeAgent: async (childRun, input) => {
+          const op = (input as any)?.operation;
+          // Authorize from the host's own record of the child, never from the child's arguments.
+          const child = await this.db.query(
+            "SELECT e.data->'tools' AS tools FROM runtime_runs r JOIN events e ON e.run_id=r.id AND e.user_id=r.user_id WHERE r.id=$1 AND r.user_id=$2 AND r.state='running' AND e.type='agent.child_started' AND e.data->>'parentRunId'=$3",
+            [childRun, user, run],
+          );
+          const granted: unknown = child.rows[0]?.tools;
+          if (!Array.isArray(granted) || !granted.includes(op))
+            throw new Error("Operation unavailable to this agent");
+          return this.call(capability, input, childRun);
+        },
+        agentState: async (agentId) =>
+          agentId === "core/calendar"
+            ? {
+                calendarApprovals: (
+                  await this.db.query(
+                    "SELECT id,status,expires_at,payload->'draft' AS draft,payload->>'execution' AS execution FROM approvals WHERE user_id=$1 AND operation='calendar_create' AND status='pending' AND expires_at>now() ORDER BY created_at DESC LIMIT 3",
+                    [user],
+                  )
+                ).rows,
+              }
+            : agentId === "core/library"
+              ? {
+                  libraryApprovals: (
+                    await this.db.query(
+                      "SELECT id,operation,expires_at,payload->'draft' AS draft,payload->>'execution' AS execution FROM approvals WHERE user_id=$1 AND operation LIKE 'library\\_%' AND status='pending' AND expires_at>now() ORDER BY created_at DESC LIMIT 5",
+                      [user],
+                    )
+                  ).rows,
+                }
+              : null,
         refreshContext: async () => {
           runtime.context = JSON.stringify({
             ...JSON.parse(runtime.context),
@@ -941,7 +989,7 @@ export class Assistant {
       });
       const approvals = (
         await this.db.query(
-          "SELECT id,operation,payload FROM approvals WHERE user_id=$1 AND run_id=$2 AND status='pending' AND expires_at>now() ORDER BY created_at",
+          `SELECT id,operation,payload FROM approvals WHERE user_id=$1 AND run_id IN ${runFamily()} AND status='pending' AND expires_at>now() ORDER BY created_at`,
           [user, run],
         )
       ).rows;

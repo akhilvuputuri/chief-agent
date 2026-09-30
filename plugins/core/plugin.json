@@ -1,0 +1,165 @@
+{
+  "format": "companion.plugin/v1",
+  "id": "core",
+  "version": "1.0.0",
+  "description": "Chief's built-in domain agents. The coordinator delegates each domain's work to one of these with agent_run.",
+  "agents": [
+    {
+      "id": "email",
+      "description": "Search and read the owner's Gmail (read-only, both connected accounts) and report the relevant emails with sender, date and the facts asked for.",
+      "instructions": "agents/email.md",
+      "contract": "findings/v1",
+      "tools": [
+        "gmail_accounts",
+        "gmail_search",
+        "gmail_thread",
+        "gmail_read",
+        "observation_read"
+      ],
+      "skills": [],
+      "limits": { "ms": 150000, "models": 10, "tools": 24 },
+      "model": "fast",
+      "effort": "medium"
+    },
+    {
+      "id": "parcels",
+      "description": "Keep the delivery tracker: find parcel details in Gmail when asked, record owner updates, and report what parcels are awaited and their last known status.",
+      "instructions": "agents/parcels.md",
+      "contract": "findings/v1",
+      "tools": [
+        "gmail_accounts",
+        "gmail_search",
+        "gmail_thread",
+        "gmail_read",
+        "parcel_list",
+        "parcel_match",
+        "parcel_record"
+      ],
+      "skills": [],
+      "limits": { "ms": 180000, "models": 12, "tools": 30 },
+      "model": "fast",
+      "effort": "medium"
+    },
+    {
+      "id": "calendar",
+      "description": "Read the owner's Google Calendar and save event drafts that the owner approves in Telegram.",
+      "instructions": "agents/calendar.md",
+      "contract": "findings/v1",
+      "tools": ["calendar_list", "calendar_draft"],
+      "skills": [],
+      "limits": { "ms": 90000, "models": 6, "tools": 10 },
+      "model": "fast",
+      "effort": "medium"
+    },
+    {
+      "id": "daily",
+      "description": "Manage saved to-dos and notes, reminders, briefing schedules, the daily Sheet and scheduled agent routines.",
+      "instructions": "agents/daily.md",
+      "contract": "findings/v1",
+      "tools": [
+        "item_save",
+        "item_list",
+        "item_update",
+        "schedule_create",
+        "schedule_list",
+        "schedule_update",
+        "daily_sync",
+        "routine_create",
+        "routine_list",
+        "routine_history",
+        "routine_update"
+      ],
+      "skills": [],
+      "limits": { "ms": 90000, "models": 8, "tools": 16 },
+      "model": "fast",
+      "effort": "medium"
+    },
+    {
+      "id": "jobs",
+      "description": "Save, list, update and delete the owner's saved job roles and read role inputs; returns exact role IDs for job alignment.",
+      "instructions": "agents/jobs.md",
+      "contract": "findings/v1",
+      "tools": [
+        "job_save",
+        "job_list",
+        "job_update",
+        "job_analyze",
+        "job_delete",
+        "web_read",
+        "source_read"
+      ],
+      "skills": [],
+      "limits": { "ms": 120000, "models": 8, "tools": 16 },
+      "model": "fast",
+      "effort": "medium"
+    },
+    {
+      "id": "stocks",
+      "description": "Configure and report the stock watchlist: stocks, drop thresholds, pause/resume and Singapore-time monitoring windows.",
+      "instructions": "agents/stocks.md",
+      "contract": "findings/v1",
+      "tools": [
+        "watchlist_add",
+        "watchlist_update",
+        "watchlist_remove",
+        "watchlist_list",
+        "watchlist_settings"
+      ],
+      "skills": [],
+      "limits": { "ms": 60000, "models": 6, "tools": 10 },
+      "model": "fast",
+      "effort": "low"
+    },
+    {
+      "id": "news",
+      "description": "Manage the daily news bulletin: followed sites, delivery time, topics and extra editions.",
+      "instructions": "agents/news.md",
+      "contract": "findings/v1",
+      "tools": [
+        "news_source_add",
+        "news_source_remove",
+        "news_settings",
+        "news_status",
+        "news_edition_now"
+      ],
+      "skills": [],
+      "limits": { "ms": 60000, "models": 6, "tools": 10 },
+      "model": "fast",
+      "effort": "low"
+    },
+    {
+      "id": "library",
+      "description": "Check NLB ebook availability and read the linked library card's shelf.",
+      "instructions": "agents/library.md",
+      "contract": "findings/v1",
+      "tools": ["library_check", "library_availability", "library_shelf"],
+      "skills": [],
+      "limits": { "ms": 60000, "models": 4, "tools": 6 },
+      "model": "fast",
+      "effort": "low"
+    },
+    {
+      "id": "web",
+      "description": "Answer a quick question from the public web (news, facts, prices, hours) with cited sources.",
+      "instructions": "agents/web.md",
+      "contract": "findings/v1",
+      "tools": ["web_search", "web_read", "source_read"],
+      "skills": [],
+      "limits": { "ms": 90000, "models": 6, "tools": 12 },
+      "model": "fast",
+      "effort": "low"
+    },
+    {
+      "id": "media",
+      "description": "Read attached images (this turn only) and stored documents, returning facts with page or region references. Name the attachmentIds or sourceIds in the brief.",
+      "instructions": "agents/media.md",
+      "contract": "media/v1",
+      "tools": ["source_read"],
+      "skills": [],
+      "limits": { "ms": 120000, "models": 6, "tools": 12 },
+      "model": "fast",
+      "effort": "medium"
+    }
+  ],
+  "skills": []
+}
