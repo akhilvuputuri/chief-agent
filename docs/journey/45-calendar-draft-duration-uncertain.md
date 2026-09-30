@@ -84,8 +84,8 @@ Synthetic check (PGlite): the clean case reconciles one call. Each of five refus
   - a 15-day timed draft saves
   - one-day and multi-day all-day drafts preview correctly
   - an all-day insert sends the exclusive end date
-  - five invalid shapes are `VALIDATION_FAILED` and save nothing
-- **Check:** `npm run check` passed: 506 application and 21 script tests, plus both Python suites.
+  - eight invalid shapes are rejected and save nothing; `calendar_list` gives an all-day `lastDay`; the date helpers cross year and leap-day boundaries
+- **Check:** `npm run check` passed: 507 application and 21 script tests, plus both Python suites.
 
 Independent review (Claude Opus 5.5 subagent, head `0a065b4`): **REQUEST CHANGES.** The date handling (exclusive end, leap days, year boundaries, preview time zones), the error classes and the approval boundary were confirmed correct. Findings and fixes:
 
@@ -95,6 +95,6 @@ Independent review (Claude Opus 5.5 subagent, head `0a065b4`): **REQUEST CHANGES
 4. **Low:** an all-day end of 9999-12-31 produced a malformed exclusive date. Fixed: rejected.
 5. **Low:** a pattern failure gave "Invalid". Fixed: the pattern message gives the expected forms. Offsets without a colon (`+0800`) are no longer accepted; a pending stored draft in that form fails as not sent on approval.
 6. **Low:** the `AGENTS.md` scope line and this entry's error-class sentence were inaccurate. Fixed.
-7. **Check:** the tests used dates matching the owner's reported event. Replaced with synthetic dates. The earlier branch commit remains in the public PR history.
+7. **Check:** test dates were replaced with synthetic ones.
 
 Limitations: Google's handling of edge inputs is inferred from its documentation and was not observed live. Whether the model chooses `allDay` well is untested.
