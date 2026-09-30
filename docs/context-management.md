@@ -108,6 +108,30 @@ These are compaction stages 2 and 3 of the plan in the compaction research. They
 - evidence in the prompt or one read away rose from 72% to 100%;
 - eval cost per run was $1.08 before and $1.21 after.
 
+## Bounded growth within one message
+
+The previous two stages bound earlier exchanges. A single long task could still grow: past 120,000 characters every earlier call of the current turn became an excerpt, but each call still added about 2,600 characters, so a long enough task reached the 400,000 hard limit. This is the shape of the incident that opened issue #77.
+
+**What happens now** (`context()` in `src/context.ts`):
+
+- Once the fixed part, the previous exchange, the latest call group and this turn's excerpted calls reach 120,000 characters, the oldest complete call groups of this turn leave the prompt.
+- The newest groups that fit in what remains (120,000 minus 6,000 kept for the digest) stay. The latest group always stays unchanged, and the owner's message and the previous exchange are never removed.
+- Groups leave in blocks of 8, so the kept part of the prompt stays the same for several calls and the provider cache keeps matching it.
+- `turnDigest` in `src/context-continuity.ts` lists every call that left, one line each, oldest first: step, tool name, the start of its arguments, and its `observationId`, `receiptId`, `sourceId` or `extractionSourceId`. Failed calls are marked. The digest keeps its newest lines within 6,000 characters and goes in the closing system message.
+- The journal and `runtime_calls` keep every original. The model reads a dropped result with `observation_read` instead of calling the tool again.
+- `context.selected` records `trimmed`, and the operational log shows it as `trimmedGroups`.
+
+**Measured on synthetic tasks** (67,736-character fixed part as in the incident, each call returning a projected mailbox result of about 12,000 characters):
+
+| Calls | Before: serialized characters | After: serialized characters | Calls kept in full or as excerpts |
+| ----: | ----------------------------: | ---------------------------: | --------------------------------: |
+|    21 |                       124,445 |                      114,019 |                                13 |
+|    40 |                       173,294 |                      103,089 |                                 8 |
+|    80 |                       276,134 |                      106,290 |                                 8 |
+|   160 |           failed (hard limit) |                      107,508 |                                 8 |
+
+The 400,000 hard limit remains as a backstop. It now leaves more than 280,000 characters of room above the working size for the reply. Limits are still counted in characters, not tokens. In the incident, requests of about 117,000 characters reported about 26,000–31,000 prompt tokens, against a provider window advertised at over 900,000 tokens, so the character threshold is a cost and focus target, not a capacity limit. The provider's actual prompt tokens per call are recorded in `model.completed`.
+
 ## Implementation plan
 
 1. **Baseline and replay.** Create sanitized fixtures shaped like the 21-call mailbox run, a large previous exchange, two-account source selection, a topic switch while a background job runs, and the exact selected job-role scope. Record prompt components, actual provider usage when available, cache reads, latency, cost and stop reason. Never commit private prompt text.

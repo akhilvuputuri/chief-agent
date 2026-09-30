@@ -4,6 +4,7 @@ import { dataUrl } from "./attachments.js";
 import {
   compactToolGroup,
   completeMessageGroups,
+  turnDigest,
   withoutReasoning,
 } from "./context-continuity.js";
 export const instructions = `You are Chief, the user's personal assistant, powered by our own runtime. Help with everyday tasks, research and synthesis, not only job search.
@@ -54,7 +55,11 @@ export function boundHistory(
 export const contextBudget = 48000;
 /** Keep existing compaction pressure even while the temporary ceiling is higher. */
 const contextCompactionThreshold = 120000;
-/** Temporary text-character ceiling, not the provider token window; see issue #77. */
+/** Room kept for the digest of this turn's calls that left the context. */
+const turnDigestChars = 6000;
+/** Groups leave the context in blocks, so the kept prefix stays stable across several calls. */
+const trimBlock = 8;
+/** Text-character ceiling, not the provider token window; see issue #77. */
 export const contextHardLimit = 400000;
 /** Thrown with measured sizes so the failure is traceable instead of a bare execution error. */
 export class ContextLimitError extends Error {
@@ -82,6 +87,8 @@ type ContextSelection = {
   reservedSize: number;
   exchangeSize: number;
   workingSize: number;
+  /** Earlier groups of this turn replaced by the call digest. */
+  trimmed: number;
   compacted: number;
   serializedSize: number;
   protectedMessages: number;
@@ -165,6 +172,40 @@ export function context(
     working = workingGroups.flatMap((group) => compactToolGroup(group));
     workingSize = working.length ? JSON.stringify(working).length : 0;
   }
+  // Bounded growth (issue #77): excerpts alone still grow with every call. Past the threshold
+  // the oldest complete groups of this turn leave the context and a digest lists their calls
+  // with read references. The journal keeps every original, so nothing is lost.
+  let trimmed = 0;
+  let digest = "";
+  if (
+    fixedSize + reservedSize + exchangeSize + workingSize >=
+    contextCompactionThreshold
+  ) {
+    const allowance =
+      contextCompactionThreshold -
+      turnDigestChars -
+      fixedSize -
+      reservedSize -
+      exchangeSize;
+    const sizes = workingGroups.map(
+      (group) => JSON.stringify(compactToolGroup(group)).length,
+    );
+    let kept = 0;
+    let size = 0;
+    while (
+      kept < sizes.length &&
+      size + sizes[sizes.length - 1 - kept]! <= allowance
+    )
+      size += sizes[sizes.length - 1 - kept++]!;
+    trimmed = Math.min(
+      sizes.length,
+      Math.ceil((sizes.length - kept) / trimBlock) * trimBlock,
+    );
+    const keptGroups = workingGroups.slice(trimmed);
+    working = keptGroups.flatMap((group) => compactToolGroup(group));
+    workingSize = working.length ? JSON.stringify(working).length : 0;
+    digest = turnDigest(workingGroups.slice(0, trimmed), turnDigestChars);
+  }
   if (workingSize >= available) {
     if (!compactForWire) return context(request, messages, true);
     throw new ContextLimitError({
@@ -215,6 +256,7 @@ export function context(
         (request.runtime?.context ?? "") +
         "\nSingapore time: " +
         new Date().toLocaleString("en-SG", { timeZone: "Asia/Singapore" }) +
+        (digest ? "\n" + digest : "") +
         `\n${omitted} older messages or tool results omitted${overBudget ? "; protected recent conversation and current tool results exceed the soft allowance and remain included" : ""}. ${compacted} older tool results use source-linked excerpts. Retrieve exact evidence via observation_read or source_read; never infer missing results.`,
     },
   ];
@@ -271,6 +313,7 @@ export function context(
     reservedSize,
     exchangeSize,
     workingSize,
+    trimmed,
     compacted,
     serializedSize,
     wireCompacted: compactForWire,
