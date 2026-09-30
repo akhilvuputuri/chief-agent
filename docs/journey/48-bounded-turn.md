@@ -1,4 +1,4 @@
-# 47 — Stopping one long task from growing without bound
+# 48 — Stopping one long task from growing without bound
 
 Work date(s): 2026-09-30. Written/revised: 2026-09-30.
 Status: in review. Tested on synthetic tasks; the production effect is not measured.
