@@ -6,6 +6,7 @@ const moment = z
   .string()
   .regex(
     /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2}))?$/,
+    "Use a YYYY-MM-DD date (allDay) or a date-time with a UTC offset such as 2026-10-01T09:00:00+08:00",
   );
 const dateTime = z.string().datetime({ offset: true });
 const date = z.string().date();
@@ -31,6 +32,10 @@ export function validateDraft(input: unknown): CalendarDraft {
       throw new ToolValidationError(
         "An all-day event takes start and end as YYYY-MM-DD dates; end is its last day",
       );
+    if (draft.end > "9999-12-30")
+      throw new ToolValidationError(
+        "An all-day event must end before 9999-12-31",
+      );
     if (draft.end < draft.start)
       throw new ToolValidationError(
         "An all-day event's last day must be on or after its first day",
@@ -44,7 +49,8 @@ export function validateDraft(input: unknown): CalendarDraft {
     throw new ToolValidationError(
       "A timed event takes start and end with a UTC offset; set allDay for a date-only event",
     );
-  if (Date.parse(draft.end) <= Date.parse(draft.start))
+  // Negated so an unparseable offset (NaN) is rejected too.
+  if (!(Date.parse(draft.end) > Date.parse(draft.start)))
     throw new ToolValidationError("Event must end after it starts");
   return draft;
 }
@@ -53,6 +59,12 @@ export function dayAfter(day: string) {
   const next = new Date(`${day}T00:00:00Z`);
   next.setUTCDate(next.getUTCDate() + 1);
   return next.toISOString().slice(0, 10);
+}
+/** The inclusive last day of an all-day event from Google's exclusive end date. */
+export function dayBefore(day: string) {
+  const previous = new Date(`${day}T00:00:00Z`);
+  previous.setUTCDate(previous.getUTCDate() - 1);
+  return previous.toISOString().slice(0, 10);
 }
 export function calendarPreview(draft: CalendarDraft) {
   const when = draft.allDay

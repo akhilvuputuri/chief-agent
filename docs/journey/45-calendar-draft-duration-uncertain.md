@@ -79,10 +79,22 @@ Synthetic check (PGlite): the clean case reconciles one call. Each of five refus
 - **Change:** `validateDraft` no longer caps duration. A timed event still has to end after it starts.
 - **Added:** optional `allDay`. It takes `YYYY-MM-DD` dates, and `end` is the event's last day. Google receives `start.date` plus the exclusive next day as `end.date`. The approval preview shows the day range and the number of days.
 - **Kept:** the Telegram approval button remains the only way an event is created. No guests, recurrence, editing or deletion.
-- **Schema:** the tool-schema converter in `runtime.ts` has no union support, so `start`/`end` use one string pattern (date or date-time with an offset). `validateDraft` checks which form each event needs, and every rejection is `ToolValidationError`.
+- **Schema:** the tool-schema converter in `runtime.ts` has no union support, so `start`/`end` use one string pattern (date, or date-time with an offset) with a message that says which. A shape error is a `ZodError` (`INVALID_INPUT`). `validateDraft` rejects the rest as `ToolValidationError`: the wrong form for the event type, an unparseable offset, an end not after the start, or an all-day end on or after 9999-12-31. Neither class can be recorded as an uncertain write.
 - **Tests:**
   - a 15-day timed draft saves
   - one-day and multi-day all-day drafts preview correctly
   - an all-day insert sends the exclusive end date
   - five invalid shapes are `VALIDATION_FAILED` and save nothing
 - **Check:** `npm run check` passed: 506 application and 21 script tests, plus both Python suites.
+
+Independent review (Claude Opus 5.5 subagent, head `0a065b4`): **REQUEST CHANGES.** The date handling (exclusive end, leap days, year boundaries, preview time zones), the error classes and the approval boundary were confirmed correct. Findings and fixes:
+
+1. **Medium:** the `personal-assistance` skill still said drafts are timed. Fixed: the skill text is updated and its repository version bumped to `repo:personal-assistance:5`. An owner-approved private version of that skill, if one exists, is not changed by this; not checked from the cloud session.
+2. **Low–medium:** `calendar_list` returned Google's exclusive all-day end with no hint. Fixed: all-day events also carry `lastDay`, and the skill states the convention.
+3. **Low:** an unparseable offset such as `+99:99` passed as NaN. Fixed: the end must parse strictly after the start.
+4. **Low:** an all-day end of 9999-12-31 produced a malformed exclusive date. Fixed: rejected.
+5. **Low:** a pattern failure gave "Invalid". Fixed: the pattern message gives the expected forms. Offsets without a colon (`+0800`) are no longer accepted; a pending stored draft in that form fails as not sent on approval.
+6. **Low:** the `AGENTS.md` scope line and this entry's error-class sentence were inaccurate. Fixed.
+7. **Check:** the tests used dates matching the owner's reported event. Replaced with synthetic dates. The earlier branch commit remains in the public PR history.
+
+Limitations: Google's handling of edge inputs is inferred from its documentation and was not observed live. Whether the model chooses `allDay` well is untested.

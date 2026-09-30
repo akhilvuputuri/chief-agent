@@ -1,6 +1,7 @@
 import {
   type CalendarDraft,
   dayAfter,
+  dayBefore,
   validateDraft,
 } from "./calendar-draft.js";
 import { boundedBytes } from "./providers.js";
@@ -226,6 +227,8 @@ export class CalendarTools {
         title: e.summary ?? "(Untitled)",
         start: e.start,
         end: e.end,
+        // Google's all-day end date is exclusive; drafts use the inclusive last day.
+        lastDay: e.end?.date ? dayBefore(e.end.date) : undefined,
         location: e.location,
         url: e.htmlLink,
         status: e.status,
