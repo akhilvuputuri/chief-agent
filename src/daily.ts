@@ -11,6 +11,21 @@ export type DailyAction = Extract<
 >;
 export { ScheduleParser } from "./schedule.js";
 import { ScheduleParser } from "./schedule.js";
+import { ToolValidationError } from "./tool-errors.js";
+/** Parsing runs before any write, so a rejected schedule is a validation failure. */
+async function parseSchedule(
+  parser: Pick<ScheduleParser, "next">,
+  schedule: string,
+  saved?: unknown,
+) {
+  try {
+    return await parser.next(schedule, saved);
+  } catch (error) {
+    throw new ToolValidationError(
+      error instanceof Error ? error.message : "Invalid schedule",
+    );
+  }
+}
 export class DailyTools {
   constructor(
     private db: Database,
@@ -65,9 +80,9 @@ export class DailyTools {
         )
       ).rows;
     if (a.operation === "schedule_create") {
-      const n = await this.parser.next(a.schedule);
+      const n = await parseSchedule(this.parser, a.schedule);
       if (!n.next || Date.parse(n.next) <= Date.now())
-        throw new Error("Choose a future time");
+        throw new ToolValidationError("Choose a future time");
       const row = (
         await db.query(
           `INSERT INTO daily_schedules(id,user_id,kind,content,schedule,parsed,next_run,include_email,include_calendar) SELECT $1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9 WHERE (SELECT count(*) FROM daily_schedules WHERE user_id=$2 AND status IN ('scheduled','processing'))<50 RETURNING *`,
@@ -84,7 +99,9 @@ export class DailyTools {
           ],
         )
       ).rows[0];
-      if (!row) throw new Error("Limit of 50 active schedules reached");
+      // The conditional insert saved nothing.
+      if (!row)
+        throw new ToolValidationError("Limit of 50 active schedules reached");
       return {
         ...row,
         timezone: "Asia/Singapore",
@@ -99,12 +116,14 @@ export class DailyTools {
     ).rows[0];
     if (!old) throw new Error("Schedule not found");
     const n = a.schedule
-      ? await this.parser.next(a.schedule)
+      ? await parseSchedule(this.parser, a.schedule)
       : a.status === "scheduled"
-        ? await this.parser.next(old.schedule, old.parsed)
+        ? await parseSchedule(this.parser, old.schedule, old.parsed)
         : null;
     if (n && !n.next)
-      throw new Error("Supply a new future schedule to resume this reminder");
+      throw new ToolValidationError(
+        "Supply a new future schedule to resume this reminder",
+      );
     return (
       await db.query(
         `UPDATE daily_schedules SET schedule=COALESCE($3,schedule),parsed=COALESCE($4::jsonb,parsed),next_run=COALESCE($5::timestamptz,next_run),status=COALESCE($6,status),lease=NULL,last_error=NULL,updated_at=now() WHERE id=$1 AND user_id=$2 RETURNING *`,

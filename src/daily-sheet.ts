@@ -2,6 +2,7 @@ import type { Database } from "./db.js";
 import { googleToken, googleJson, type GoogleConfig } from "./calendar.js";
 import { sheetRequests } from "./sheets.js";
 import { SerialQueue } from "./security.js";
+import { ToolValidationError } from "./tool-errors.js";
 export class DailySheet {
   private queue = new SerialQueue();
   constructor(
@@ -66,7 +67,8 @@ export class DailySheet {
         ],
       ];
       if (tables.some((t) => t.length > 5000))
-        throw new Error("Daily Sheet limit exceeded");
+        // Checked before anything is sent to Google.
+        throw new ToolValidationError("Daily Sheet limit exceeded");
       const token = await googleToken(this.c);
       await googleJson(
         await fetch(
