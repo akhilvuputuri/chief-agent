@@ -101,6 +101,7 @@ A package chooses one of the host's contracts. It cannot add its own validation 
 - A runtime built without a model factory (tests) runs every agent on its one model.
 - Agent runs that do not come from `agent_run` (job-alignment workers) use the default tier.
 - `effort` is sent as the provider's reasoning effort; it was fixed at medium before.
+- `agent_run` offers only the tiers the policy maps.
 
 ## What an agent may do
 
@@ -108,6 +109,7 @@ A package chooses one of the host's contracts. It cannot add its own validation 
 - **Authorization.** Each child call goes through `executeAgent` in `src/agent.ts`. The host checks the call against the tool list it recorded in the child's `agent.child_started` event, not against anything the child sends. Then it runs through the same dispatcher, uncertain-write guard and journal as Chief's own calls.
 - **Writes and approvals.** Domain agents can write where their domain allows it. Approval rules do not change: a Calendar draft still needs the owner's Telegram button, and a role deletion still needs `/approve`. Approvals carry the child's run ID. `runFamily` in `src/run-family.ts` makes the coordinator's approval checks, pending-reply state and record context include its children. So Chief's turn ends `awaiting_approval` and the notice is delivered.
 - **No recursion.** An agent cannot start another agent.
+- **Lane.** A child inherits its parent's foreground or background lane, so a background job's agent cannot make foreground-only writes such as changing routines, the watchlist or news settings.
 - **Budget.** A child's limits are its definition's, bounded by what the parent has left, and its usage is charged to the parent once.
 - **Context.** Empty history and memories, the brief, resolved references, Singapore time, pinned skills, and domain state the host supplies (`agentState`: pending Calendar approvals for `calendar`, pending library requests for `library`).
 
@@ -124,6 +126,6 @@ A package chooses one of the host's contracts. It cannot add its own validation 
 
 ## Observability
 
-- **Traces.** Chief's run records `agent.started`, `agent.completed` and `agent.failed`. The child's run records `agent.child_started`, which holds its type, definition hash, tools, model choice, limits and references. Child model calls are ordinary `model.started` and `model.completed` events under the child run.
-- **Operational log.** `agent.child_started` logs `agentType`, `model`, `tier` and `effort`; `agent.completed` logs `agentType`, `state`, `stopReason` and `approvalCount`. Briefs and reports are never logged.
+- **Traces.** Chief's run records `agent.completed` or `agent.failed` for every `agent_run`, whatever the contract. It also records `agent.started` (findings agents) or `research.started` (research and media) with the child run ID; `runFamily` uses those to find a turn's children. A findings child's run records `agent.child_started`, which holds its type, definition hash, tools, model choice, limits and references; research and media children record `research.child_started`. Child model calls are ordinary `model.started` and `model.completed` events under the child run.
+- **Operational log.** `agent.child_started` logs `agentType`, `model`, `tier` and `effort` for findings agents. `agent.completed` logs `agentType`, `state`, `stopReason` and `approvalCount` for every agent run. Briefs and reports are never logged.
 - **Queries.** Use `npm run logs:cloudwatch -- event --event agent.completed` for outcomes, and `run --run <id>` for a whole delegation.

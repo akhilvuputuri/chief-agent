@@ -50,6 +50,7 @@ The agent catalogue adds 1,963 characters of runtime state.
 - **Chosen:** domain agents may write. The existing approval gates still apply. Approvals carry the child's run ID, so the coordinator's approval checks were widened to the run and its children (`runFamily`).
 - **Kept on Chief:** canvases, work tracking, recall, memory, skills administration, job alignment, preparation saves and the prep Sheet. Job alignment is a multi-step workflow with frozen scopes that already runs its own workers. Preparation saves need alignment links that only Chief reads.
 - **Rejected:** keeping direct tools on Chief as the default and delegating only heavy reads. The owner asked for coordination only.
+- **Decided: every agent run defaults to Flash, including job-alignment workers and research started by host workflows.** The owner chose Flash for subagents. Alignment workers used to run on the main model and do heavy reasoning; if their reports get worse, give them the `standard` tier explicitly rather than moving the work back to Chief. The media agent also uses its tier, so `MEDIA_MODEL` only matters in a runtime without a model factory.
 - **Kept as an option:** direct mode (`availability.delegation: false`) for tests that exercise one domain tool through Chief.
 
 ## Implementation and review
@@ -88,11 +89,22 @@ The agent catalogue adds 1,963 characters of runtime state.
     - a new plugin agent enabled only through registry configuration;
     - a refused `memory_set` grant.
   - The research, media and plugin tests now call `agent_run`. Domain-behaviour tests that drive a tool through Chief run in direct mode.
-- Independent review: pending.
+- **Independent review (Opus 5.5, first revision) requested changes:**
+  - **Blocker:** a child's `work_turns` row was always `background=false`. A background routine's agent could therefore make foreground-only writes (routines, watchlist, news settings). Fixed: the child copies its parent's lane, and a missing parent turn refuses the run.
+  - Cost summaries, the web_search cache and the conversation-search filter linked children only through `research.child_started`. So agent children's spend was missing from `costUsage` and the task view. Fixed: they also match `agent.child_started`.
+  - `runFamily` scanned `events` without an index. Fixed: it reads the parent's own `agent.started` and `research.started` records through the `run_id` index, so no migration is needed.
+  - `agent.completed` was written only for findings agents. It is now written by `runAgentType` for every contract.
+  - Other fixes:
+    - `agent_run` offers only the configured tiers;
+    - refs shorter than 8 characters are refused;
+    - `skill_read` can never be granted;
+    - tier keys are strict;
+    - the model decision above is recorded, and the media and research docs are corrected.
+- Independent review of the fixes: pending.
 
 ## Verification and outcome
 
-`npm test` passes 529 TypeScript tests and 21 Python context-eval tests. This is mocked-model behaviour only. After release, check:
+`npm test` passes 530 TypeScript tests and 21 Python context-eval tests. This is mocked-model behaviour only. After release, check:
 
 - `agent.completed` counts by `agentType` and `state`;
 - `model.completed` tokens and cost for child runs against Chief's;

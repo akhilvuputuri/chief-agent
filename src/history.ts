@@ -14,7 +14,7 @@ const conversational = `e.delivery_state IN ('recorded','sent') AND c.payload->>
   AND length(btrim(c.payload->>'content'))>0
   AND NOT (c.payload ? 'tool_call_id')
   AND NOT (c.payload->>'role'='assistant' AND c.payload->>'content' LIKE '[Saved answer details:%')
-  AND NOT EXISTS(SELECT 1 FROM events x WHERE x.user_id=e.user_id AND x.run_id=e.run_id AND x.type='research.child_started')
+  AND NOT EXISTS(SELECT 1 FROM events x WHERE x.user_id=e.user_id AND x.run_id=e.run_id AND x.type IN ('research.child_started','agent.child_started'))
   AND (NOT EXISTS(SELECT 1 FROM work_turns w WHERE w.user_id=e.user_id AND w.run_id=e.run_id AND w.background)
     OR EXISTS(SELECT 1 FROM events d WHERE d.user_id=e.user_id AND d.run_id=e.run_id AND d.type='conversation.delivery' AND d.data->>'messageId'=e.id::text))`;
 

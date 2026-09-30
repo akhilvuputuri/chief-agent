@@ -137,6 +137,8 @@ export const NEVER_GRANTED = new Set([
   "skill_draft",
   "skill_evaluate",
   "skill_activate",
+  // Agents read only their own pinned skills, through the runner's skill_read.
+  "skill_read",
 ]);
 const OPERATIONS = new Set(
   action.options.map((o) => o.shape.operation.value as string),

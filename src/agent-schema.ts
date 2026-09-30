@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { MODEL_TIERS } from "./model-policy.js";
+import { configuredTiers, type ModelTier } from "./model-policy.js";
 import { REASONING_EFFORTS } from "./model.js";
 
 /**
@@ -12,7 +12,8 @@ export const agentRun = z
     type: z.string().regex(/^([a-z][a-z0-9-]{0,47}\/)?[a-z][a-z0-9-]{0,47}$/),
     objective: z.string().min(1).max(2000),
     context: z.string().max(4000).default(""),
-    model: z.enum(MODEL_TIERS).optional(),
+    // Only tiers the reviewed model policy maps are offered.
+    model: z.enum(configuredTiers() as [ModelTier, ...ModelTier[]]).optional(),
     effort: z.enum(REASONING_EFFORTS).optional(),
   })
   .strict();

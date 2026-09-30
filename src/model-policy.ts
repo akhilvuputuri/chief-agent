@@ -19,7 +19,8 @@ const schema = z
         default: tier,
         tiers: z
           .object({ fast: modelId, standard: modelId, strong: modelId })
-          .partial(),
+          .partial()
+          .strict(),
       })
       .strict()
       .refine((a) => !!a.tiers[a.default], "the default tier needs a model")

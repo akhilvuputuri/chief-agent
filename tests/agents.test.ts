@@ -446,6 +446,10 @@ test("a new plugin agent is usable through agent_run from registry configuration
       runId = randomUUID();
     const execution = new Execution(db, "owner", runId, signal);
     await execution.start();
+    await db.query(
+      "INSERT INTO work_turns(run_id,user_id,request,background) VALUES($1,'owner','x',false)",
+      [runId],
+    );
     const tools = new JobTools(db, { call: async () => ({}) });
     let calls = 0;
     const result: any = await runAgentType(
@@ -509,5 +513,79 @@ test("a new plugin agent is usable through agent_run from registry configuration
   } finally {
     await pg.close();
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an agent inherits its parent's lane, so a background job's agent cannot change routines", async () => {
+  const { pg, db } = await database();
+  try {
+    const tools = new JobTools(db, { call: async () => ({}) });
+    const attempt = async (background: boolean | null) => {
+      const signal = new AbortController().signal,
+        runId = randomUUID();
+      const execution = new Execution(db, "owner", runId, signal);
+      await execution.start();
+      if (background !== null)
+        await db.query(
+          "INSERT INTO work_turns(run_id,user_id,request,background) VALUES($1,'owner','x',$2)",
+          [runId, background],
+        );
+      let refusal = "";
+      let calls = 0;
+      await runAgentType(
+        {
+          runId,
+          capability: "",
+          execution,
+          signal,
+          history: [],
+          memories: [],
+          message: "set up a routine",
+          runtime: runtimeContext(everything, null, undefined, undefined, true),
+          executeAgent: (run, input) =>
+            tools.execute("owner", run, input as any),
+        },
+        {
+          operation: "agent_run",
+          type: "daily",
+          objective: "Create a daily 8am news routine",
+        },
+        (req) =>
+          new CustomAgent({
+            generate: async (input) => {
+              if (++calls === 1)
+                return call("routine_create", {
+                  name: "News",
+                  instruction: "Summarise the news",
+                  schedule: "every day at 8am",
+                });
+              refusal = JSON.stringify(lastTool(input));
+              return call("agent_report", {
+                status: "blocked",
+                summary: "Could not create the routine.",
+                findings: [],
+                refs: [],
+              });
+            },
+          }).run(req),
+        "main/model",
+      );
+      return refusal;
+    };
+    assert.match(
+      await attempt(true),
+      /Only a foreground user request may change routines/,
+    );
+    assert.equal(
+      (
+        await db.query(
+          "SELECT count(*)::int n FROM work_turns WHERE background AND request='Create a daily 8am news routine'",
+        )
+      ).rows[0].n,
+      1,
+    );
+    await assert.rejects(attempt(null), /coordinator's turn is not recorded/);
+  } finally {
+    await pg.close();
   }
 });

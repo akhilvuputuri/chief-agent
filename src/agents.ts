@@ -115,46 +115,70 @@ export async function runAgentType(
     effort: a.effort ?? definition.effort ?? "medium",
   };
   const refs = await resolveReferences(req, `${a.objective}\n${a.context}`);
-  const result: Record<string, unknown> =
-    definition.contract === "public-research/v1"
-      ? await delegateResearch(
-          req,
-          {
-            operation: "research_delegate",
-            objective: a.objective,
-            context: a.context.slice(0, 3000),
-            jobIds: refs.jobs.slice(0, 6),
-            urls: refs.urls.slice(0, Math.max(0, 6 - refs.jobs.length)),
-          },
-          runAgent,
-          definition,
-          choice,
-        )
-      : definition.contract === "media/v1"
-        ? await (() => {
-            if (
-              !refs.attachments.length &&
-              !refs.sources.length &&
-              refs.unresolved.length
-            )
-              throw new Error(
-                "Media validation: attachment unavailable or stored source not found in owner scope. Images can be read only during the turn they arrive, so ask the owner to resend.",
+  let result: Record<string, unknown>;
+  try {
+    result =
+      definition.contract === "public-research/v1"
+        ? await delegateResearch(
+            req,
+            {
+              operation: "research_delegate",
+              objective: a.objective,
+              context: a.context.slice(0, 3000),
+              jobIds: refs.jobs.slice(0, 6),
+              urls: refs.urls.slice(0, Math.max(0, 6 - refs.jobs.length)),
+            },
+            runAgent,
+            definition,
+            choice,
+          )
+        : definition.contract === "media/v1"
+          ? await (() => {
+              if (
+                !refs.attachments.length &&
+                !refs.sources.length &&
+                refs.unresolved.length
+              )
+                throw new Error(
+                  "Media validation: attachment unavailable or stored source not found in owner scope. Images can be read only during the turn they arrive, so ask the owner to resend.",
+                );
+              return delegateMedia(
+                req,
+                {
+                  operation: "media_delegate",
+                  objective: a.objective,
+                  context: a.context.slice(0, 2000),
+                  attachmentIds: refs.attachments,
+                  sourceIds: refs.sources.slice(0, 4 - refs.attachments.length),
+                },
+                runAgent,
+                choice,
+                definition,
               );
-            return delegateMedia(
-              req,
-              {
-                operation: "media_delegate",
-                objective: a.objective,
-                context: a.context.slice(0, 2000),
-                attachmentIds: refs.attachments,
-                sourceIds: refs.sources.slice(0, 4 - refs.attachments.length),
-              },
-              runAgent,
-              choice,
-              definition,
-            );
-          })()
-        : await runFindingsAgent(req, a, definition, refs, choice, runAgent);
+            })()
+          : await runFindingsAgent(req, a, definition, refs, choice, runAgent);
+  } catch (error) {
+    await req.execution.trace("agent.failed", {
+      version: 1,
+      type: a.type,
+      agentId,
+      contract: definition.contract,
+      cancelled: req.signal.aborted,
+    });
+    throw error;
+  }
+  // One outcome record per agent_run, whatever the contract.
+  await req.execution.trace("agent.completed", {
+    version: 1,
+    childRunId: result.childRunId,
+    type: a.type,
+    agentId,
+    contract: definition.contract,
+    status: result.status,
+    stopReason: result.stopReason,
+    model: choice,
+    approvals: Array.isArray(result.approvals) ? result.approvals.length : 0,
+  });
   return {
     type: a.type,
     agentId,
@@ -210,10 +234,16 @@ export async function runFindingsAgent(
   };
   let report: AgentReport | undefined;
   try {
-    await db.query(
-      "INSERT INTO work_turns(run_id,user_id,request,task_id,revision,background) SELECT $1,user_id,$3,task_id,revision,false FROM work_turns WHERE run_id=$2 AND user_id=$4",
+    // The child inherits its parent's lane: a background job's agent is background too, so
+    // foreground-only writes (routines, watchlist, news settings) stay refused.
+    const turn = await db.query(
+      "INSERT INTO work_turns(run_id,user_id,request,task_id,revision,background) SELECT $1,user_id,$3,task_id,revision,background FROM work_turns WHERE run_id=$2 AND user_id=$4 RETURNING run_id",
       [childRun, parent.run, a.objective, user],
     );
+    if (!turn.rows.length)
+      invalid(
+        "the coordinator's turn is not recorded, so this agent cannot run",
+      );
     // The host reads this record to authorize the child's calls; tool arguments never can.
     await child.trace("agent.child_started", {
       version: 1,
@@ -344,14 +374,6 @@ export async function runFindingsAgent(
       )
     ).rows;
     const status = report ? report.status : "incomplete";
-    await parent.trace("agent.completed", {
-      version: 1,
-      childRunId: childRun,
-      type: a.type,
-      status,
-      stopReason: output.stopReason,
-      approvals: approvals.length,
-    });
     return {
       childRunId: childRun,
       status,
@@ -384,12 +406,6 @@ export async function runFindingsAgent(
     };
   } catch (error) {
     await child.finish(signal.aborted ? "cancelled" : "failed");
-    await parent.trace("agent.failed", {
-      version: 1,
-      childRunId: childRun,
-      type: a.type,
-      cancelled: signal.aborted,
-    });
     throw error;
   }
 }
@@ -426,7 +442,10 @@ async function checkReport(
   const seen =
     `${brief.objective}\n${brief.context}\n` +
     results.map((r) => r.result).join("\n");
-  const unseen = report.refs.filter((ref) => !seen.includes(ref));
+  // Short strings would match anything; a ref must be an ID-sized token the agent saw.
+  const unseen = report.refs.filter(
+    (ref) => ref.length < 8 || !seen.includes(ref),
+  );
   if (unseen.length)
     throw new Error(
       `Agent validation: refs must be IDs your tools returned or the brief named; not found: ${unseen.slice(0, 3).join(", ")}`,

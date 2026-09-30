@@ -168,7 +168,7 @@ export class WebTools {
           SELECT r.id,COALESCE(parent.id,r.id) AS root_id,COALESCE(parent.task_id,r.task_id) AS task_id
           FROM runtime_runs r LEFT JOIN LATERAL (
             SELECT p.id,p.task_id FROM events e JOIN runtime_runs p ON p.id::text=e.data->>'parentRunId' AND p.user_id=r.user_id
-            WHERE e.run_id=r.id AND e.user_id=r.user_id AND e.type='research.child_started' ORDER BY e.id LIMIT 1
+            WHERE e.run_id=r.id AND e.user_id=r.user_id AND e.type IN ('research.child_started','agent.child_started') ORDER BY e.id LIMIT 1
           ) parent ON true WHERE r.user_id=$1
         ) SELECT c.result FROM runtime_calls c JOIN identities r ON r.id=c.run_id JOIN identities current ON current.id=$2
         WHERE c.operation='web_search' AND c.state='success' AND c.started_at>now()-interval '1 hour' AND COALESCE((c.result->'result'->>'cacheHit')::boolean,false)=false
