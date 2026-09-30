@@ -171,6 +171,9 @@ export async function runAgentType(
         agentId,
         contract: definition.contract,
         cancelled: req.signal.aborted,
+        ...((error as { childRunId?: string })?.childRunId
+          ? { childRunId: (error as { childRunId: string }).childRunId }
+          : {}),
       })
       .catch((e) => opsLog("agent.trace_failed", "warn", errorFields(e)));
     throw error;
@@ -425,6 +428,9 @@ export async function runFindingsAgent(
     };
   } catch (error) {
     await child.finish(signal.aborted ? "cancelled" : "failed");
+    // Lets the coordinator's agent.failed record point at the failed child run.
+    if (error && typeof error === "object")
+      Object.assign(error, { childRunId: childRun });
     throw error;
   }
 }
