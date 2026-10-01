@@ -6,20 +6,59 @@ import {
 } from "./calendar-draft.js";
 import { boundedBytes } from "./providers.js";
 import { z } from "zod";
+import { CronDate } from "cron-parser";
+const localDateTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
 const calendarTime = z
   .object({
     date: z
       .string()
       .regex(/^\d{4}-\d{2}-\d{2}$/)
       .optional(),
-    dateTime: z.string().datetime({ offset: true }).optional(),
+    dateTime: z
+      .union([
+        z.string().datetime({ offset: true }),
+        z.string().regex(localDateTime),
+      ])
+      .optional(),
     timeZone: z.string().optional(),
   })
   .passthrough()
   .refine(
     (t) => !!(t.date || t.dateTime),
     "Calendar time requires date or dateTime",
-  );
+  )
+  .transform((time, ctx) => {
+    if (!time.dateTime || !localDateTime.test(time.dateTime)) return time;
+    try {
+      if (!time.timeZone) throw new Error("Missing timezone");
+      const instant = new CronDate(time.dateTime, time.timeZone).toDate();
+      const parts = Object.fromEntries(
+        new Intl.DateTimeFormat("en-CA", {
+          timeZone: time.timeZone,
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hourCycle: "h23",
+        })
+          .formatToParts(instant)
+          .map((p) => [p.type, p.value]),
+      );
+      const wall = `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
+      if (wall !== time.dateTime.slice(0, 19))
+        throw new Error("Nonexistent local time");
+      return { ...time, dateTime: instant.toISOString() };
+    } catch {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "Local Calendar timestamps require a valid explicit timezone and wall time",
+      });
+      return z.NEVER;
+    }
+  });
 const monitoringEvent = z
   .object({
     id: z.string().min(1).max(1024),

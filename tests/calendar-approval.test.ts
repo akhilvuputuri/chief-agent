@@ -65,6 +65,60 @@ test("monitoring Calendar reads expand instances and paginate without changing o
   assert.equal(lists[1].searchParams.get("pageToken"), "page-two");
   assert.ok(!lists[0].searchParams.has("syncToken"));
 });
+test("monitoring normalizes timezone-qualified local times and rejects missing or invalid zones", async () => {
+  let timeZone: string | undefined = "Asia/Singapore";
+  const calendar = new CalendarTools(
+    {
+      owner: "a",
+      email: "owner@example.com",
+      clientId: "fixture",
+      clientSecret: "fixture",
+      refreshToken: "fixture",
+    },
+    (async (input: unknown) => {
+      const url = String(input);
+      return Response.json(
+        url.includes("oauth2.googleapis.com")
+          ? { access_token: "fixture" }
+          : url.includes("/userinfo")
+            ? { email: "owner@example.com" }
+            : {
+                items: [
+                  {
+                    id: "local",
+                    start: { dateTime: "2026-10-05T09:00:00", timeZone },
+                    end: { dateTime: "2026-10-05T10:00:00", timeZone },
+                    recurringEventId: "series",
+                    originalStartTime: {
+                      dateTime: "2026-10-05T09:00:00",
+                      timeZone,
+                    },
+                  },
+                ],
+              },
+      );
+    }) as typeof fetch,
+  );
+  const result = await calendar.list(
+    "a",
+    "2026-10-05T00:00:00Z",
+    "2026-10-05T04:00:00Z",
+    true,
+  );
+  assert.equal(result.events[0].start.dateTime, "2026-10-05T01:00:00.000Z");
+  assert.equal(
+    result.events[0].originalStartTime.dateTime,
+    "2026-10-05T01:00:00.000Z",
+  );
+  timeZone = undefined;
+  await assert.rejects(() =>
+    calendar.list("a", "2026-10-05T00:00:00Z", "2026-10-05T04:00:00Z", true),
+  );
+  timeZone = "Invalid/Zone";
+  await assert.rejects(() =>
+    calendar.list("a", "2026-10-05T00:00:00Z", "2026-10-05T04:00:00Z", true),
+  );
+});
 async function fixture() {
   const pg = new PGlite();
   for (const f of [
