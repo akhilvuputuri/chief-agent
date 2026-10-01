@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { readFileSync } from "node:fs";
 import { z } from "zod";
 const schema = z.object({
   MINIAPP_ORIGIN: z
@@ -85,7 +86,78 @@ const schema = z.object({
   TTS_VOICE: z.string().default("alloy"),
   VOICE_REPLIES: z.enum(["true", "false"]).default("false"),
 });
-export function readConfig(env: NodeJS.ProcessEnv = process.env) {
-  return schema.parse(env);
+/**
+ * Behaviour settings that live in reviewed repo config (config/runtime.json, issue #143).
+ * Only these names are accepted there, so a secret or a personal identifier can never be
+ * committed through it; those stay in the private environment.
+ */
+export const RUNTIME_SETTINGS = [
+  "AGENT_MODEL",
+  "AGENT_REASONING_EFFORT",
+  "AGENT_BUDGET_MS",
+  "AGENT_BUDGET_MODEL_CALLS",
+  "AGENT_BUDGET_TOOL_CALLS",
+  "OPENROUTER_MAX_INPUT_PRICE",
+  "OPENROUTER_MAX_OUTPUT_PRICE",
+  "SEARCH_MODEL",
+  "MEDIA_MODEL",
+  "TOOL_PICKER",
+  "TELEGRAM_TOPICS",
+  "VOICE_REPLIES",
+  "MARKET_DATA_PROVIDER",
+  "MARKET_DATA_EXTENDED",
+  "STT_PROVIDER",
+  "TTS_PROVIDER",
+  "STT_MODEL",
+  "TTS_MODEL",
+  "TTS_VOICE",
+  "ELEVENLABS_VOICE_ID",
+  "ELEVENLABS_STT_MODEL",
+  "ELEVENLABS_TTS_MODEL",
+  "GROQ_STT_MODEL",
+  // PORT is deployment wiring (Compose ports, health checks), not behaviour; it stays in the environment.
+] as const satisfies readonly (keyof z.infer<typeof schema>)[];
+type RuntimeSetting = (typeof RUNTIME_SETTINGS)[number];
+
+const runtimeFile = z
+  .object({
+    schemaVersion: z.literal(1),
+    // Unknown names, including any secret or identifier, are rejected.
+    settings: z.record(
+      z.enum(RUNTIME_SETTINGS),
+      z.union([z.string(), z.number()]),
+    ),
+  })
+  .strict();
+
+export function readRuntimeSettings(
+  url: URL = new URL("../config/runtime.json", import.meta.url),
+): Partial<Record<RuntimeSetting, string>> {
+  const file = runtimeFile.parse(JSON.parse(readFileSync(url, "utf8")));
+  return Object.fromEntries(
+    Object.entries(file.settings)
+      .filter(([, v]) => v !== undefined)
+      .map(([k, v]) => [k, String(v)]),
+  );
+}
+
+/**
+ * Reads the configuration. Behaviour settings come from config/runtime.json; during the
+ * move to repo config an environment value still wins, so production keeps its current
+ * behaviour until its Compose file stops passing these names. `overridden` lists, by name
+ * only, the settings whose environment value differs from the file.
+ */
+export function readConfig(
+  env: NodeJS.ProcessEnv = process.env,
+  runtime: Partial<Record<RuntimeSetting, string>> = readRuntimeSettings(),
+) {
+  const merged: Record<string, string | undefined> = { ...runtime };
+  for (const [k, v] of Object.entries(env)) if (v !== undefined) merged[k] = v;
+  const parsed = schema.parse(merged);
+  const fromFile = schema.parse({ ...merged, ...runtime });
+  const overridden = RUNTIME_SETTINGS.filter(
+    (k) => env[k] !== undefined && parsed[k] !== fromFile[k],
+  );
+  return Object.assign(parsed, { overridden });
 }
 export type Config = ReturnType<typeof readConfig>;

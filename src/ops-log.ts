@@ -8,6 +8,7 @@ export const OPS_LOG_SCHEMA = "chief.ops/1";
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$/;
 const NAME = /^[a-z][a-z0-9_.]{0,79}$/;
+const SETTING = /^[A-Z][A-Z0-9_]{0,63}$/;
 const CODE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
 const MODEL = /^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,119}$/;
 // Provider display names contain spaces ("Google AI Studio"): at most three
@@ -169,6 +170,18 @@ export function sanitize(event: string, level: Level, data: OpsFields = {}) {
         : [];
       if (frames.length) entry.frames = frames;
       else dropped++;
+      continue;
+    }
+    if (key === "envSettings") {
+      // Behaviour setting names (config/runtime.json keys) only, never values.
+      const names = Array.isArray(value)
+        ? value
+            .filter((n) => typeof n === "string" && SETTING.test(n))
+            .slice(0, 40)
+        : [];
+      entry.envSettings = names;
+      if (names.length !== (Array.isArray(value) ? value.length : -1))
+        dropped++;
       continue;
     }
     const shape = fields[key];

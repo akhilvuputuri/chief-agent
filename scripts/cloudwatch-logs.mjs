@@ -41,6 +41,13 @@ export const QUERIES = {
     query: (id) =>
       `${common}, ref | filter runId = "${id}" or parentRunId = "${id}" or childRunId = "${id}" or inputId = "${id}" or taskId = "${id}" | sort @timestamp asc`,
   },
+  config: {
+    group: "runtime",
+    help: "config.loaded at each start: names of config/runtime.json settings the environment overrides",
+    // Insights flattens the names array into envSettings.0, envSettings.1, ...
+    query: () =>
+      `fields @timestamp, release, ${Array.from({ length: 23 }, (_, i) => `envSettings.${i}`).join(", ")} | filter event = "config.loaded" | sort @timestamp desc`,
+  },
   event: {
     group: "runtime",
     help: "lines for one --event NAME, newest first",

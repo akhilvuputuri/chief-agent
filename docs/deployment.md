@@ -21,7 +21,7 @@ The release SHA plus the policy file at that SHA identifies the intended model. 
 
 **Agent models.** The same file maps subagent model tiers under `agents`: `default` names the tier an agent uses when neither the call nor its definition picks one, and `tiers` maps `fast`, `standard` and `strong` to OpenRouter model IDs. A tier left out is refused if requested. Change it the same way as `main`: verify the model's tools, reasoning and image support and its prices against the ceilings, edit only this file, and release through a reviewed PR. See [coordinator and agents](agents.md#models-and-effort).
 
-`SEARCH_MODEL` is a separate research helper. The media specialist falls back to the main model when `MEDIA_MODEL` is empty; although `.env.example` offers `MEDIA_MODEL`, the current production Compose file does not pass it into the gateway, so setting it only in the server `.env` has no effect. A separate media model requires a reviewed Compose change and operator rollout.
+`SEARCH_MODEL` is a separate research helper. The media specialist falls back to the main model when `MEDIA_MODEL` is empty. `MEDIA_MODEL` now lives in `config/runtime.json`, and production Compose does not pass it, so a reviewed PR that sets it there takes effect on the next release ([configuration](configuration.md)).
 
 For application releases, verify `/healthz`, Compose health, runtime traces and a small bounded model smoke. Do not drop schemas or delete volumes. The automatic release tags the previous gateway image for application rollback; database rollback is separate and not automatic.
 

@@ -55,6 +55,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 1 October                            | [51 — Shadow decisions](51-shadow-decisions.md): how do we measure Jev on real messages without changing replies?                                     | Released `d434bc7`; live data accumulating                                                                                   |
 | 1 October                            | [52 — Telegram topics](52-telegram-topics.md): can topics in the private chat file output and route Email-topic messages straight to the email agent? | Phases 1/2 released; superseded by the feed design in journal 53                                                             |
 | 1 October                            | [53 — Feed destinations and references](53-feed-destinations.md): how do topics organize output without losing conversational identity?               | Released v0.3.29/v0.3.30; live owner acceptance remains separate                                                             |
+| 2 October                            | [55 — Runtime config](55-runtime-config.md): can behaviour settings move to reviewed repo config without changing production?                         | Implemented and tested; not yet deployed                                                                                     |
 
 ## Connected case studies
 
