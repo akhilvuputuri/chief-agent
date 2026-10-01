@@ -65,7 +65,7 @@
       "domain": "email",
       "chars": 9400
     },
-    "message": "what parcels are pending?",
+    "message": "any deliveries expected today?",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -79,7 +79,7 @@
       "domain": "email",
       "chars": 9400
     },
-    "message": "what's the exchange rate SGD to JPY?",
+    "message": "is it going to rain in Singapore this afternoon?",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -569,7 +569,7 @@
       "domain": "parcels",
       "chars": 2100
     },
-    "message": "anything new from the bank?",
+    "message": "did the condo management email about the lift works?",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -583,7 +583,7 @@
       "domain": "parcels",
       "chars": 2100
     },
-    "message": "find the best budget mechanical keyboards",
+    "message": "compare the top three robot vacuums under $600",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -653,7 +653,7 @@
       "domain": "calendar",
       "chars": 3100
     },
-    "message": "good morning",
+    "message": "hey, you around?",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -667,7 +667,7 @@
       "domain": "calendar",
       "chars": 3100
     },
-    "message": "what am I borrowing right now?",
+    "message": "can I borrow The Three-Body Problem now?",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -737,7 +737,7 @@
       "domain": "calendar",
       "chars": 900
     },
-    "message": "when is Deepavali this year?",
+    "message": "how long is the flight from Singapore to Osaka?",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -751,7 +751,7 @@
       "domain": "calendar",
       "chars": 900
     },
-    "message": "best ramen near Tanjong Pagar?",
+    "message": "what's a good beginner climbing gym in the west?",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -905,7 +905,7 @@
       "domain": "stocks",
       "chars": 2600
     },
-    "message": "anything new from the bank?",
+    "message": "did the condo management email about the lift works?",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -919,7 +919,7 @@
       "domain": "stocks",
       "chars": 2600
     },
-    "message": "when is Deepavali this year?",
+    "message": "how long is the flight from Singapore to Osaka?",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -1157,7 +1157,7 @@
       "domain": "news",
       "chars": 2000
     },
-    "message": "good morning",
+    "message": "hey, you around?",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -1171,7 +1171,7 @@
       "domain": "news",
       "chars": 2000
     },
-    "message": "remind me to water the plants every saturday at 9",
+    "message": "remind me to renew my gym membership on the 30th",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -1325,7 +1325,7 @@
       "domain": "jobs",
       "chars": 5100
     },
-    "message": "when is Deepavali this year?",
+    "message": "how long is the flight from Singapore to Osaka?",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -1339,7 +1339,7 @@
       "domain": "jobs",
       "chars": 5100
     },
-    "message": "remind me to water the plants every saturday at 9",
+    "message": "remind me to renew my gym membership on the 30th",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -1409,7 +1409,7 @@
       "domain": "jobs",
       "chars": 12800
     },
-    "message": "good morning",
+    "message": "hey, you around?",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -1423,7 +1423,7 @@
       "domain": "jobs",
       "chars": 12800
     },
-    "message": "thanks!",
+    "message": "cheers, that's all for now",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -1577,7 +1577,7 @@
       "domain": "library",
       "chars": 1900
     },
-    "message": "thanks!",
+    "message": "cheers, that's all for now",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -1591,7 +1591,7 @@
       "domain": "library",
       "chars": 1900
     },
-    "message": "what's the exchange rate SGD to JPY?",
+    "message": "is it going to rain in Singapore this afternoon?",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -1829,7 +1829,7 @@
       "domain": "daily",
       "chars": 1100
     },
-    "message": "what am I borrowing right now?",
+    "message": "can I borrow The Three-Body Problem now?",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -1843,7 +1843,7 @@
       "domain": "daily",
       "chars": 1100
     },
-    "message": "when's my next free evening?",
+    "message": "do I have anything on saturday morning?",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -1913,7 +1913,7 @@
       "domain": "web",
       "chars": 4300
     },
-    "message": "what parcels are pending?",
+    "message": "any deliveries expected today?",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -1927,7 +1927,7 @@
       "domain": "web",
       "chars": 4300
     },
-    "message": "good morning",
+    "message": "hey, you around?",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -1997,7 +1997,7 @@
       "domain": "web",
       "chars": 4700
     },
-    "message": "what am I borrowing right now?",
+    "message": "can I borrow The Three-Body Problem now?",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -2011,7 +2011,7 @@
       "domain": "web",
       "chars": 4700
     },
-    "message": "send me today's bulletin",
+    "message": "pause my news bulletin for a week",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -2081,7 +2081,7 @@
       "domain": "web",
       "chars": 3900
     },
-    "message": "remind me to water the plants every saturday at 9",
+    "message": "remind me to renew my gym membership on the 30th",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -2095,7 +2095,7 @@
       "domain": "web",
       "chars": 3900
     },
-    "message": "send me today's bulletin",
+    "message": "pause my news bulletin for a week",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -2249,7 +2249,7 @@
       "domain": "media",
       "chars": 6200
     },
-    "message": "how are you today?",
+    "message": "can you explain how compound interest works?",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -2263,7 +2263,7 @@
       "domain": "media",
       "chars": 6200
     },
-    "message": "when is Deepavali this year?",
+    "message": "how long is the flight from Singapore to Osaka?",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -2837,7 +2837,7 @@
       "domain": "parcels",
       "chars": 5600
     },
-    "message": "how are you today?",
+    "message": "can you explain how compound interest works?",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -2851,7 +2851,7 @@
       "domain": "parcels",
       "chars": 5600
     },
-    "message": "how many roles have I saved?",
+    "message": "save the Shopee data platform role from LinkedIn",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -3173,7 +3173,7 @@
       "domain": "library",
       "chars": 2500
     },
-    "message": "send me today's bulletin",
+    "message": "pause my news bulletin for a week",
     "needs_previous": false,
     "kind": "new topic"
   },
@@ -3187,7 +3187,7 @@
       "domain": "library",
       "chars": 2500
     },
-    "message": "how are you today?",
+    "message": "can you explain how compound interest works?",
     "needs_previous": false,
     "kind": "new topic"
   },

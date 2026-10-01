@@ -12,8 +12,7 @@ sys.path.insert(0, str(HERE))
 
 import continuity  # noqa: E402
 import routing  # noqa: E402
-import run  # noqa: E402
-from stats import bootstrap, mcnemar_exact, mean, percentile, wilson  # noqa: E402
+from stats import bootstrap, cluster_bootstrap, mcnemar_exact, mean, percentile, wilson  # noqa: E402
 
 
 class Stats(unittest.TestCase):
@@ -50,30 +49,49 @@ class Stats(unittest.TestCase):
 
 class Scoring(unittest.TestCase):
     cases = [
-        {"id": "a", "needs_previous": True, "previous": {"chars": 1000}},
-        {"id": "b", "needs_previous": False, "previous": {"chars": 4000}},
-        {"id": "c", "needs_previous": False, "previous": {"chars": 2000}},
+        {"id": "a", "needs_previous": True, "previous": {"chars": 1000}, "prior_index": 0},
+        {"id": "b", "needs_previous": False, "previous": {"chars": 4000}, "prior_index": 0},
+        {"id": "c", "needs_previous": False, "previous": {"chars": 2000}, "prior_index": 1},
     ]
 
+    def calls(self, probs):
+        records = [
+            {"id": k, "run": 0, "probability": v, "error": None if v is not None else "x"}
+            for k, v in probs.items()
+        ]
+        return continuity._calls(records, self.cases)
+
     def test_only_correct_drops_count_as_gain(self):
-        prob = {"a": 0.1, "b": 0.2, "c": 0.9}
-        self.assertEqual(run.saved(continuity, self.cases, prob, 0.5), [0.0, 4000.0, 0.0])
-        m = run.confusion(continuity, self.cases, prob, 0.5)
-        self.assertEqual(m, {"tp": 0, "fn": 1, "tn": 1, "fp": 1, "missing": 0})
+        calls = self.calls({"a": 0.1, "b": 0.2, "c": 0.9})
+        self.assertEqual(continuity._saved(calls, 0.5), [0.0, 4000.0, 0.0])
+        self.assertEqual(continuity._recall(calls, 0.5), 0.0)
 
     def test_tuning_never_trades_recall_for_gain(self):
-        prob = {"a": 0.3, "b": 0.2, "c": 0.4}
+        calls = self.calls({"a": 0.3, "b": 0.2, "c": 0.4})
         # Dropping c (0.4) would also drop a (0.3), so full recall allows dropping only b.
-        threshold = run.tune(continuity, self.cases, prob, 1.0)
-        self.assertEqual(run.saved(continuity, self.cases, prob, threshold), [0.0, 4000.0, 0.0])
+        t = continuity._tune(calls, 1.0)
+        self.assertEqual(continuity._saved(calls, t), [0.0, 4000.0, 0.0])
 
-    def test_a_missing_answer_keeps_the_context(self):
-        m = run.confusion(continuity, self.cases, {"b": 0.0}, 0.5)
-        self.assertEqual(m["missing"], 2)
-        self.assertEqual(run.saved(continuity, self.cases, {}, 0.5), [0.0, 0.0, 0.0])
+    def test_a_failed_call_keeps_the_context(self):
+        calls = self.calls({"a": None, "b": None, "c": 0.0})
+        self.assertEqual([c["p"] for c in calls], [1.0, 1.0, 0.0])
+        self.assertEqual(continuity._recall(calls, 0.5), 1.0)
+
+    def test_cluster_bootstrap_resamples_whole_groups(self):
+        items = [{"g": 0, "v": 1.0}, {"g": 0, "v": 1.0}, {"g": 1, "v": 0.0}]
+        low, high = cluster_bootstrap(items, lambda x: x["g"], lambda s: mean([x["v"] for x in s]))
+        # Only three group mixes are possible: all of group 0, all of group 1, or both.
+        self.assertEqual((low, high), (0.0, 1.0))
+        self.assertIsNone(cluster_bootstrap([], lambda x: x, mean))
 
 
 class Fixtures(unittest.TestCase):
+    def test_no_message_appears_in_both_continuity_splits(self):
+        cases = json.loads((HERE / "fixtures" / "continuity.json").read_text(encoding="utf-8"))
+        tuning = {c["message"] for c in cases if c["split"] == "tuning"}
+        held = {c["message"] for c in cases if c["split"] == "held-out"}
+        self.assertEqual(tuning & held, set())
+
     def test_continuity_fixture_is_balanced_and_split_by_conversation(self):
         cases = json.loads((HERE / "fixtures" / "continuity.json").read_text(encoding="utf-8"))
         self.assertEqual(len({c["id"] for c in cases}), len(cases))
@@ -93,23 +111,30 @@ class Fixtures(unittest.TestCase):
 
 
 class Routing(unittest.TestCase):
-    def test_route_needs_agreement_and_confidence(self):
-        self.assertEqual(routing.route([("email", 0.9), ("email", 0.8)], 0.8), "email")
-        self.assertEqual(routing.route([("email", 0.9), ("parcels", 0.9)], 0.5), "chief")
-        self.assertEqual(routing.route([("email", 0.6)], 0.8), "chief")
-        self.assertEqual(routing.route([("chief", 0.99)], 0.1), "chief")
-        self.assertEqual(routing.route(None, 0.0), "chief")
+    def call(self, agent, confidence, gold="email", case="a", run=0):
+        return {"id": case, "run": run, "gold": gold, "agent": agent, "confidence": confidence}
 
-    def test_tuning_keeps_precision(self):
-        cases = [
-            {"id": "a", "gold": "email"},
-            {"id": "b", "gold": "chief"},
-            {"id": "c", "gold": "parcels"},
+    def test_one_call_routes_only_above_the_threshold(self):
+        self.assertEqual(routing.route(self.call("email", 0.9), 0.8), "email")
+        self.assertEqual(routing.route(self.call("email", 0.6), 0.8), "chief")
+        self.assertEqual(routing.route(self.call("chief", 0.99), 0.1), "chief")
+
+    def test_a_failed_call_goes_to_chief(self):
+        calls = routing._calls(
+            [{"id": "a", "run": 0, "agent": None, "confidence": None, "error": "HTTP 500"}],
+            [{"id": "a", "gold": "email"}],
+        )
+        self.assertEqual(routing.route(calls[0], 0.0), "chief")
+
+    def test_tuning_keeps_precision_and_prefers_the_higher_tie(self):
+        calls = [
+            self.call("email", 0.9, "email", "a"),
+            self.call("email", 0.6, "chief", "b"),
+            self.call("parcels", 0.7, "parcels", "c"),
         ]
-        decided = {"a": [("email", 0.9)], "b": [("email", 0.6)], "c": [("parcels", 0.7)]}
-        threshold = routing._tune(cases, decided, 1.0)
-        routed, correct, _ = routing._score(cases, decided, threshold)
-        self.assertEqual((routed, correct), (2, 2))
+        t = routing._tune(calls, 1.0)
+        self.assertEqual(t, 0.7)
+        self.assertEqual(routing._precision(calls, t), 1.0)
 
     def test_options_come_from_the_core_plugin_plus_chief(self):
         self.assertIn("email", routing.OPTIONS)

@@ -142,24 +142,46 @@ PRIORS = [
 ]
 
 # Messages that never need a previous exchange, to pair across domains.
-STANDALONE = [
-    ("chat", "thanks!"),
-    ("chat", "good morning"),
-    ("chat", "how are you today?"),
-    ("web", "what's the exchange rate SGD to JPY?"),
-    ("web", "when is Deepavali this year?"),
-    ("web", "best ramen near Tanjong Pagar?"),
-    ("daily", "remind me to water the plants every saturday at 9"),
-    ("calendar", "when's my next free evening?"),
-    ("email", "anything new from the bank?"),
-    ("parcels", "what parcels are pending?"),
-    ("stocks", "how's the market today?"),
-    ("jobs", "how many roles have I saved?"),
-    ("library", "what am I borrowing right now?"),
-    ("news", "send me today's bulletin"),
-    ("research", "find the best budget mechanical keyboards"),
-    ("chat", "tell me a fun fact"),
-]
+# Messages that never need a previous exchange. Each split has its own pool, so no
+# standalone message appears in both tuning and held-out.
+STANDALONE = {
+    "tuning": [
+        ("chat", "thanks!"),
+        ("chat", "good morning"),
+        ("chat", "how are you today?"),
+        ("web", "what's the exchange rate SGD to JPY?"),
+        ("web", "when is Deepavali this year?"),
+        ("web", "best ramen near Tanjong Pagar?"),
+        ("daily", "remind me to water the plants every saturday at 9"),
+        ("calendar", "when's my next free evening?"),
+        ("email", "anything new from the bank?"),
+        ("parcels", "what parcels are pending?"),
+        ("stocks", "how's the market today?"),
+        ("jobs", "how many roles have I saved?"),
+        ("library", "what am I borrowing right now?"),
+        ("news", "send me today's bulletin"),
+        ("research", "find the best budget mechanical keyboards"),
+        ("chat", "tell me a fun fact"),
+    ],
+    "held-out": [
+        ("chat", "cheers, that's all for now"),
+        ("chat", "hey, you around?"),
+        ("chat", "can you explain how compound interest works?"),
+        ("web", "is it going to rain in Singapore this afternoon?"),
+        ("web", "how long is the flight from Singapore to Osaka?"),
+        ("web", "what's a good beginner climbing gym in the west?"),
+        ("daily", "remind me to renew my gym membership on the 30th"),
+        ("calendar", "do I have anything on saturday morning?"),
+        ("email", "did the condo management email about the lift works?"),
+        ("parcels", "any deliveries expected today?"),
+        ("stocks", "add Sea Ltd to my watchlist at 8%"),
+        ("jobs", "save the Shopee data platform role from LinkedIn"),
+        ("library", "can I borrow The Three-Body Problem now?"),
+        ("news", "pause my news bulletin for a week"),
+        ("research", "compare the top three robot vacuums under $600"),
+        ("chat", "recommend a podcast about history"),
+    ],
+}
 
 
 def build(seed: int = 11) -> list[dict]:
@@ -186,7 +208,7 @@ def build(seed: int = 11) -> list[dict]:
             add(message, True, "follow-up")
         for message in same:
             add(message, False, "same-domain new topic")
-        others = [s for s in STANDALONE if s[0] != domain]
+        others = [s for s in STANDALONE[split] if s[0] != domain]
         for _, message in rng.sample(others, 2):
             add(message, False, "new topic")
     return cases

@@ -16,15 +16,16 @@ from pathlib import Path
 from typing import Any
 
 import backends
-from stats import bootstrap, mcnemar_exact, mean, percentile, wilson
+from scoring import by_run, call_stats, majority
+from stats import cluster_interval, mcnemar_exact, mean
 
 NAME = "routing"
 FIXTURES = "routing.json"
 ROOT = Path(__file__).resolve().parents[2]
 
-# Production coordinator calls, 25–30 Sep 2026 (CloudWatch model.completed, n=203, before
-# #129): mean latency and reported cost per main-model call. Used only to express a saved
-# call in seconds and dollars.
+# Proxy for a saved coordinator call: mean latency and reported cost of all main-model calls,
+# 25–30 Sep 2026 (CloudWatch model.completed, n=203, before #129). A coordinator call whose only
+# job is agent_run is probably shorter, so savings expressed with these are an upper estimate.
 MAIN_CALL_MS = 4200
 MAIN_CALL_USD = 0.0208
 
@@ -152,101 +153,110 @@ BACKENDS = {"chief": chief, "rule": rule, "jev": jev, "flash": flash}
 PAID = {"jev", "flash"}
 
 
-def _decisions(records: list[dict[str, Any]]) -> dict[str, list[tuple[str, float]]]:
-    out: dict[str, list[tuple[str, float]]] = {}
+def _calls(records, cases):
+    """One scored item per call. A failed call routes to chief (the safe fallback)."""
+    index = {c["id"]: c for c in cases}
+    out = []
     for r in records:
-        if r["error"] is None and r["agent"] is not None:
-            out.setdefault(r["id"], []).append((r["agent"], float(r["confidence"])))
+        c = index.get(r["id"])
+        if c is None:
+            continue
+        ok = r["error"] is None and r["agent"] is not None
+        out.append({"id": c["id"], "run": r["run"], "gold": c["gold"],
+                    "agent": r["agent"] if ok else "chief",
+                    "confidence": float(r["confidence"]) if ok else 0.0})
     return out
 
 
-def route(answers: list[tuple[str, float]] | None, threshold: float) -> str:
-    """Fast-path target, or chief. Runs must agree on the agent and average >= threshold."""
-    if not answers:
+def route(call: dict[str, Any], threshold: float) -> str:
+    """Fast-path target for one call, or chief."""
+    if call["agent"] == "chief" or call["confidence"] < threshold:
         return "chief"
-    agents = {a for a, _ in answers}
-    if len(agents) != 1:
-        return "chief"
-    agent = agents.pop()
-    if agent == "chief" or mean([c for _, c in answers]) < threshold:
-        return "chief"
-    return agent
+    return call["agent"]
 
 
-def _score(cases, decided, threshold):
-    routed = correct = 0
-    hits = []
-    for c in cases:
-        target = route(decided.get(c["id"]), threshold)
-        hit = target != "chief" and target == c["gold"]
-        routed += target != "chief"
-        correct += hit
-        hits.append(1.0 if hit else 0.0)
-    return routed, correct, hits
+def _routed(calls, t):
+    return [c for c in calls if route(c, t) != "chief"]
 
 
-def _tune(cases, decided, min_precision):
-    best = (1.01, -1)
-    for t in sorted({0.0} | {c for v in decided.values() for _, c in v}):
-        routed, correct, _ = _score(cases, decided, t)
-        precision = correct / routed if routed else 1.0
-        if precision + 1e-12 >= min_precision and correct > best[1]:
-            best = (t, correct)
-    return best[0]
+def _precision(calls, t):
+    routed = _routed(calls, t)
+    return sum(route(c, t) == c["gold"] for c in routed) / len(routed) if routed else None
+
+
+def _hit(c, t):
+    return route(c, t) != "chief" and route(c, t) == c["gold"]
+
+
+def _tune(calls, min_precision):
+    """Most correct routes with precision >= min_precision on tuning calls; ties take the
+    higher (more conservative) threshold. Candidates come from tuning confidences only."""
+    best_t, best_correct = 1.01, -1
+    for t in sorted({c["confidence"] for c in calls}):
+        p = _precision(calls, t)
+        if p is not None and p + 1e-12 < min_precision:
+            continue
+        correct = sum(_hit(c, t) for c in calls)
+        if correct >= best_correct:
+            best_t, best_correct = t, correct
+    return best_t
 
 
 def evaluate(cases, records_by_backend, args):
     tuning = [c for c in cases if c["split"] == "tuning"]
     held = [c for c in cases if c["split"] == "held-out"]
     held_ids = {c["id"] for c in held}
-    routable = sum(c["gold"] != "chief" for c in held)
     results, hits_by = [], {}
     for name, records in records_by_backend.items():
-        decided = _decisions(records)
-        threshold = _tune(tuning, decided, args.min_precision) if name in PAID else 0.0
-        routed, correct, hits = _score(held, decided, threshold)
-        hits_by[name] = hits
-        calls = [r for r in records if r["id"] in held_ids]
-        latencies = [r["latency_ms"] for r in calls if r["error"] is None]
-        costs = [r["cost"] for r in calls if isinstance(r.get("cost"), (int, float))]
-        # One decision call per message in production; each eval call is one such call.
-        per_message_decision_usd = sum(costs) / len(calls) if calls else 0.0
-        saved_rate = correct / len(held)
-        p50 = percentile(latencies, 0.5) or 0
+        paid = name in PAID
+        tcalls, hcalls = _calls(records, tuning), _calls(records, held)
+        t = _tune(tcalls, args.min_precision) if paid else 0.0
+        routed = _routed(hcalls, t)
+        correct = [c for c in routed if c["gold"] == c["agent"]]
+        routable = [c for c in hcalls if c["gold"] != "chief"]
+        per_case: dict[str, list[bool]] = {}
+        for c in hcalls:
+            per_case.setdefault(c["id"], []).append(_hit(c, t))
+        hits_by[name] = majority(per_case)
+        stats = call_stats(records, held_ids, paid)
+        saved_rate = len(correct) / len(hcalls) if hcalls else 0.0
+        decision_usd = stats["cost_per_decision_usd"] or 0.0
+        cluster = lambda c: c["id"]  # noqa: E731  (a case's runs are one cluster)
         results.append({
             "backend": name,
-            "threshold": threshold,
-            "routed": routed,
-            "correct": correct,
-            "wrong": routed - correct,
-            "precision": correct / routed if routed else None,
-            "precision_ci": wilson(correct, routed),
-            "coverage": correct / routable if routable else None,
-            "coverage_ci": wilson(correct, routable),
+            "threshold": t,
+            "calls_scored": len(hcalls),
+            "routed": len(routed),
+            "correct": len(correct),
+            "wrong": len(routed) - len(correct),
+            "precision": _precision(hcalls, t),
+            # Over routed calls only: each routed case is one cluster.
+            "precision_ci": cluster_interval(
+                routed, cluster, lambda s: sum(c["gold"] == c["agent"] for c in s) / len(s) if s else None),
+            "routed_cases": len({c["id"] for c in routed}),
+            "precision_by_run": by_run(hcalls, lambda s: _precision(s, t)),
+            "coverage": len(correct) / len(routable) if routable else None,
+            "coverage_ci": cluster_interval(
+                routable, cluster, lambda s: sum(_hit(c, t) for c in s) / len(s) if s else None),
             "calls_saved_per_100": saved_rate * 100,
-            "calls_saved_per_100_ci": [v * 100 for v in bootstrap(hits, mean)],
-            # Net wall time per message: saved coordinator calls minus the decision's own latency.
-            "net_ms_per_message": saved_rate * MAIN_CALL_MS - p50,
-            "net_usd_per_1000": saved_rate * MAIN_CALL_USD * 1000 - per_message_decision_usd * 1000,
-            "latency_p50_ms": percentile(latencies, 0.5),
-            "latency_p95_ms": percentile(latencies, 0.95),
-            "errors": sum(r["error"] is not None for r in calls),
-            "calls": len(calls),
-            "cost_per_1000_usd": per_message_decision_usd * 1000,
-            "unstable_cases": sorted(k for k, v in decided.items() if k in held_ids and len({a for a, _ in v}) > 1),
-            "wrong_routes": sorted(
-                c["id"] for c in held
-                if route(decided.get(c["id"]), threshold) not in ("chief", c["gold"])
-            ),
+            "calls_saved_per_100_ci": [v * 100 for v in cluster_interval(
+                hcalls, cluster, lambda s: sum(_hit(c, t) for c in s) / len(s))],
+            # Per message: saved coordinator calls minus this decision's own mean latency and cost.
+            "net_ms_per_message": saved_rate * MAIN_CALL_MS - stats["latency_mean_ms"],
+            "net_usd_per_1000": (saved_rate * MAIN_CALL_USD - decision_usd) * 1000,
+            "wrong_routes": sorted({f"{c['id']} (run {c['run']} → {c['agent']})" for c in routed if c["gold"] != c["agent"]}),
+            "unstable_cases": sorted(k for k, v in per_case.items() if len(set(v)) > 1),
+            **stats,
         })
     names = list(records_by_backend)
     comparisons = []
     for i, a in enumerate(names):
         for b in names[i + 1:]:
-            only_a = sum(x == 1 and y == 0 for x, y in zip(hits_by[a], hits_by[b]))
-            only_b = sum(y == 1 and x == 0 for x, y in zip(hits_by[a], hits_by[b]))
+            ra, rb = hits_by[a], hits_by[b]
+            only_a = sum(ra[k] and not rb[k] for k in ra)
+            only_b = sum(rb[k] and not ra[k] for k in ra)
             comparisons.append({"a": a, "b": b, "only_a": only_a, "only_b": only_b, "p": mcnemar_exact(only_a, only_b)})
-    return results, comparisons, _table(results, comparisons, len(held), routable)
+    return results, comparisons, _table(results, comparisons, len(held), sum(c["gold"] != "chief" for c in held))
 
 
 def _table(results, comparisons, n, routable) -> str:
@@ -256,19 +266,23 @@ def _table(results, comparisons, n, routable) -> str:
         return f"{v * 100:.1f}%" + (f" ({ci[0] * 100:.1f}–{ci[1] * 100:.1f})" if ci else "")
 
     lines = [
-        f"Held-out: {n} messages, {routable} routable to one agent.",
+        f"Held-out: {n} messages, {routable} routable to one agent. One call per message, as in production; each run is scored on its own and intervals resample whole cases.",
         "",
-        "| Backend | Routed | Precision of routes (95% CI) | Coverage of routable (95% CI) | Coordinator calls saved / 100 msgs (95% CI) | Net ms / message (before wrong-route cost) | Net $ / 1k msgs (same) | p50 / p95 ms | Errors | Decision $ / 1k |",
-        "|---|---|---|---|---|---|---|---|---|---|",
+        "| Backend | Threshold | Routed calls (wrong) | Precision (95% CI) | Precision by run | Coverage of routable (95% CI) | Coordinator calls saved / 100 msgs (95% CI) | Net ms / message | Net $ / 1k msgs | Mean / p50 / p95 ms | Errors | Decision $ / 1k |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in results:
         ci = r["calls_saved_per_100_ci"]
+        cost = r["cost_per_decision_usd"]
+        runs = " / ".join(pct(v) for v in r["precision_by_run"])
         lines.append(
-            f"| {r['backend']} | {r['routed']} ({r['wrong']} wrong) | {pct(r['precision'], r['precision_ci'])} | {pct(r['coverage'], r['coverage_ci'])} | "
-            f"{r['calls_saved_per_100']:.1f} ({ci[0]:.1f}–{ci[1]:.1f}) | {r['net_ms_per_message']:,.0f} | {r['net_usd_per_1000']:.2f} | "
-            f"{r['latency_p50_ms']} / {r['latency_p95_ms']} | {r['errors']}/{r['calls']} | {r['cost_per_1000_usd']:.4f} |"
+            f"| {r['backend']} | {r['threshold']:.3f} | {r['routed']} ({r['wrong']}) | {pct(r['precision'], r['precision_ci'])} | {runs} | "
+            f"{pct(r['coverage'], r['coverage_ci'])} | {r['calls_saved_per_100']:.1f} ({ci[0]:.1f}–{ci[1]:.1f}) | "
+            f"{r['net_ms_per_message']:,.0f} | {r['net_usd_per_1000']:.2f} | "
+            f"{r['latency_mean_ms']} / {r['latency_p50_ms']} / {r['latency_p95_ms']} | {r['errors']}/{r['calls']} | "
+            f"{'unknown' if cost is None else f'{cost * 1000:.4f}'} |"
         )
-    lines += ["", "| Pair (correct fast paths) | Only first | Only second | McNemar p |", "|---|---|---|---|"]
+    lines += ["", "| Pair (correct fast paths, per-case majority of runs) | Only first | Only second | McNemar p |", "|---|---|---|---|"]
     for c in comparisons:
         lines.append(f"| {c['a']} vs {c['b']} | {c['only_a']} | {c['only_b']} | {c['p']:.3g} |")
     return "\n".join(lines)

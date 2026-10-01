@@ -63,3 +63,55 @@ def bootstrap(
 
 def mean(values: Sequence[float]) -> float:
     return sum(values) / len(values) if values else float("nan")
+
+
+def cluster_bootstrap(
+    items: Sequence,
+    cluster: Callable,
+    statistic: Callable[[Sequence], float | None],
+    *,
+    resamples: int = 4000,
+    seed: int = 7,
+) -> tuple[float, float] | None:
+    """95% percentile bootstrap that resamples whole clusters.
+
+    Calls of the same case, and cases of the same conversation, are not independent, so
+    resampling clusters (not single items) keeps the interval honest. A resample whose
+    statistic is undefined (for example no positives) is skipped.
+    """
+    groups: dict = {}
+    for item in items:
+        groups.setdefault(cluster(item), []).append(item)
+    keys = list(groups)
+    if not keys:
+        return None
+    rng = random.Random(seed)
+    draws = []
+    for _ in range(resamples):
+        sample = [x for _ in keys for x in groups[keys[rng.randrange(len(keys))]]]
+        value = statistic(sample)
+        if value is not None:
+            draws.append(value)
+    if not draws:
+        return None
+    draws.sort()
+    return (draws[int(0.025 * len(draws))], draws[max(0, int(0.975 * len(draws)) - 1)])
+
+
+def cluster_interval(
+    items: Sequence,
+    cluster: Callable,
+    statistic: Callable[[Sequence], float | None],
+) -> tuple[float, float] | None:
+    """Cluster bootstrap interval, or a Wilson interval over clusters when it is degenerate.
+
+    With no failures (or no successes) every resample gives the same value, so the bootstrap
+    would claim certainty. A Wilson interval with n = number of clusters is used instead,
+    which treats each conversation or case as one independent observation.
+    """
+    ci = cluster_bootstrap(items, cluster, statistic)
+    value = statistic(list(items))
+    if ci is None or value is None or ci[0] != ci[1]:
+        return ci
+    n = len({cluster(x) for x in items})
+    return wilson(round(value * n), n)
