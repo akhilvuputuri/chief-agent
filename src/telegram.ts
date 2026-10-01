@@ -5,6 +5,7 @@ import { WorkTools, renderWork, renderWorkList } from "./work.js";
 import { TelegramViews, viewCallback } from "./telegram-views.js";
 import type { Collection, View } from "./telegram-view-render.js";
 import { formatTelegram } from "./telegram-format.js";
+import { inThread, threadOf } from "./telegram-topics.js";
 import { calendarPreview, validateDraft } from "./calendar-draft.js";
 import { GoogleAuthError } from "./calendar.js";
 import {
@@ -238,6 +239,10 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
   bot.on("message", async (ctx) => {
     if (!allowedChat(ctx.from?.id, ctx.chat.type, ids)) return;
     const user = String(ctx.from.id);
+    // A message typed in a topic is answered in that topic (ctx.reply does this itself).
+    // Phase 1: the topic only decides where replies go; the conversation is shared.
+    const thread = threadOf(ctx.message);
+    const here = { id: String(ctx.chat.id), thread };
     // Controls never wait behind reasoning, transcription, or speech delivery.
     const control =
       /^\/(status|continue|cancel|workcancel)(?: ([0-9a-f-]{36}))?$/i.exec(
@@ -318,7 +323,8 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
             String(ctx.chat.id),
           );
           await ctx.reply(result.text);
-          if (result.cards) await sendLibraryApprovals(bot, db, user);
+          if (result.cards)
+            await sendLibraryApprovals(bot, db, user, undefined, thread);
         }
         await db.query(
           "UPDATE inbound_updates SET status='completed' WHERE update_id=$1",
@@ -398,7 +404,7 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
             : command === "/briefing"
               ? { kind: "briefing" }
               : { kind: "records", collection: command.slice(1) as Collection };
-        await views.open(user, String(ctx.chat.id), view);
+        await views.open(user, here, view);
         await db.query(
           "UPDATE inbound_updates SET status='completed' WHERE update_id=$1",
           [ctx.update.update_id],
@@ -619,6 +625,7 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
         await event(db, user, inputId, "telegram.input_ready", {
           inputId,
           characters: message.length,
+          inTopic: !!thread,
         });
         return { message, images };
       };
@@ -628,7 +635,11 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
         ? await preparation.run(user, prepare)
         : await prepare();
       if (prepared) {
-        await ctx.replyWithChatAction("typing");
+        // Explicit thread: grammY's helper copies message_thread_id even for General
+        // messages, and a typing indicator must never fail the turn.
+        await ctx.api
+          .sendChatAction(ctx.chat.id, "typing", inThread(thread))
+          .catch(() => {});
         const reply = await assistant.respondDetailed(
           user,
           prepared.message,
@@ -640,7 +651,7 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
             if (await guard())
               await views.deliver(
                 user,
-                String(ctx.chat.id),
+                here,
                 { reply: text, runId },
                 "progress",
                 guard,
@@ -652,16 +663,10 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
         deliveryGuard = () => assistant.isCurrentDelivery(user, reply);
         if (reply.reply || reply.notices?.length) deliveryRun = reply.runId;
         if ((reply.reply || reply.notices?.length) && (await deliveryGuard())) {
-          await sendCalendarApprovals(bot, db, user, deliveryGuard);
-          await sendLibraryApprovals(bot, db, user, deliveryGuard);
+          await sendCalendarApprovals(bot, db, user, deliveryGuard, thread);
+          await sendLibraryApprovals(bot, db, user, deliveryGuard, thread);
           if (reply.reply)
-            await views.deliver(
-              user,
-              String(ctx.chat.id),
-              reply,
-              "answer",
-              deliveryGuard,
-            );
+            await views.deliver(user, here, reply, "answer", deliveryGuard);
           if (
             reply.reply &&
             reply.voiceReply &&
@@ -718,6 +723,7 @@ export async function sendCalendarApprovals(
   db: Database,
   user: string,
   guard?: () => Promise<boolean>,
+  thread?: number,
 ) {
   if (guard && !(await guard())) return;
   const rows = (
@@ -732,6 +738,7 @@ export async function sendCalendarApprovals(
       user,
       calendarPreview(validateDraft(row.payload.draft)),
       {
+        ...inThread(thread),
         reply_markup: {
           inline_keyboard: [
             [
@@ -754,6 +761,7 @@ export async function sendLibraryApprovals(
   db: Database,
   user: string,
   guard?: () => Promise<boolean>,
+  thread?: number,
 ) {
   if (guard && !(await guard())) return;
   const rows = (
@@ -772,6 +780,7 @@ export async function sendLibraryApprovals(
         new Date(row.expires_at).toISOString(),
       ),
       {
+        ...inThread(thread),
         reply_markup: {
           inline_keyboard: libraryButtons(row.operation, row.id),
         },

@@ -53,6 +53,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 1 October                            | [49 — Coordinator agents](49-coordinator-agents.md): how can Chief delegate all domain work through one generic, typed agent tool?            | Released `5222e33`; mocked-model tests only, no production measurement yet                                                   |
 | 1 October                            | [50 — Decision evals](50-decision-evals.md): where do small decision models pay off, with statistics that hold up?                            | Measured offline; runtime unchanged                                                                                          |
 | 1 October                            | [51 — Shadow decisions](51-shadow-decisions.md): how do we measure Jev on real messages without changing replies?                             | In review; mocked tests only                                                                                                 |
+| 1 October                            | [52 — Telegram topics](52-telegram-topics.md): can topics in the private chat file scheduled output away from the main conversation?          | Implemented and tested; not yet deployed                                                                                     |
 
 ## Connected case studies
 
