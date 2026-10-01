@@ -1,0 +1,56 @@
+# 54 — Which changes deserve the owner's attention
+
+Work date(s): 1–2 October 2026. Written: 2 October 2026.
+Status: implementation candidate; disabled by default, not deployed or accepted in real use.
+
+## User-visible problem and preceding iteration
+
+[Scheduled routines](24-scheduled-routines.md) isolate recurring work but report each pass. [Parcel tracking](33-delivery-tracker.md) stores on-demand delivery facts. [Stock windows](39-watch-monitoring-window.md), [news](42-news-bulletin.md) and [feed destinations](53-feed-destinations.md) establish deterministic checks and independent delivery paths. [Issue 131](https://github.com/akhilvuputuri/chief-agent/issues/131) adds explicit standing concerns, meaningful-change investigations, attention decisions and lifecycle completion.
+
+## Evidence
+
+Source inspection used freshly fetched main `9b76fc5b6c7a4767d32a1d67f9476d9a0804ae81`; the subsequent documentation-only `78ad212182a34cf18b77a60c9e0d6d5cce8b7c0b` was fetched during implementation. Before review, fresh main advanced to `aacdc2ac9d9c9a92a11f74c19d88b93daa189a35`; its Libby refusal handling and reviewed runtime configuration were incorporated, preserving both documentation paths. Its successful release reported that exact SHA and startup health on 2 October SGT; a later failed attempt is not treated as a new deployment. The migration script now pins that baseline and still rechecks live RELEASE. The main/source baseline is distinct from production acceptance. Before implementation, 124 existing focused mocked tests passed. Synthetic new scenarios cover parcel/email investigation, evening delivery, external meetings, unchanged scheduled research, ownership, confirmation, permissions, restart, budgets, feedback and ambiguous delivery. Final suite/review evidence is pending below; this is not a production measurement.
+
+Gmail remains a small IDs-only adapter. Official [message listing](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/list), [search timestamp semantics](https://developers.google.com/workspace/gmail/api/guides/filtering) and [Calendar occurrence identity](https://developers.google.com/workspace/calendar/api/guides/recurringevents) informed the mocks. Model quality, useful-notification ratio and model cost per useful finding remain unmeasured.
+
+## Diagnosis and alternatives
+
+Reusing routine delivery directly would send progress and final responses before attention filtering. Reusing the generic background context would expose unrelated feeds, memories and approvals. Scope therefore lives at the dispatcher, with a dedicated investigation context and a durable inbox/report/outbox path.
+
+U6 has a disclosed contract clarification: a scheduled research occurrence can use a bounded model investigation even when its eventual result is unchanged. Source checks remain model-free, and unchanged findings remain silent. A guarantee of zero-model discovery on arbitrary topics would require a deterministic source contract; that broader source framework is not part of this change.
+
+## Implementation and review
+
+See [the behaviour and rollout contract](../responsibilities.md). Migration 023 is additive and preserves existing owner data and approval operations. Monitoring is default-off. During development, automatic approval review rejected enabling an unfinished default-on implementation; the safer disabled candidate was accepted for continued implementation. Activation remains a separate reviewed operator step.
+
+The first full application suite found three Telegram mock-startup regressions because legacy mocks omitted `assistant.tools`; guarded optional integration fixed those failures. A subsequent run identified an out-of-date offline Python picker domain list; it was synchronized without running a paid evaluation. The combined local check passed 586 application tests, 21 JavaScript script tests and 30 offline Python tests. Final Calendar-filter, urgency and history-view refinements then passed 21 responsibility tests, typecheck, build and repository formatting. Exact-head CI and independent review remain pending. No paid smoke or eval was run. Existing provider pricing filters and ordinary foreground allocations are unchanged.
+
+## Verification and outcome
+
+### Independent review — 2 October 2026
+
+GPT-6 Astra returned REQUEST CHANGES for head `e2c49613e50124e357775067b18e68729dee4a4b` against `aacdc2ac9d9c9a92a11f74c19d88b93daa189a35`. Independent repros found that one changed meeting suppressed other valid meetings in a batch, ongoing meetings could still receive late preparation, and a confirmation race could make a stale pause falsely report success and suppress newer findings. Fixes give each Calendar occurrence a separate investigation, require future start time at delivery, and serialize/recheck lifecycle updates before revision-scoped suppression. Three focused regressions cover the failures.
+
+GPT-6 Astra re-reviewed and APPROVED exact code head `d4c74dda004aeb8cf79403dc02c39c444a631e51`, independently passing 46 focused application tests, 15 rollout tests and 4 separate rechecks. No actionable finding remains. [Exact-head CI](https://github.com/akhilvuputuri/chief-agent/actions/runs/36899722990) passed. This is code approval, not a claim of migration, activation or production acceptance.
+
+The subsequent documentation-only head `95be141b5a89f26dcc7412962e72d0f04a5ea59a` received exact-head Astra approval and passing CI. Before merging, automatic Devin Review identified additional first-match, deferred-reminder, multi-owner sweep and active-list cases. Independent repros then confirmed string-valued Calendar collections could masquerade as healthy empty scans, and expiry ordering could permit new work after the deadline. Fixes add evidenced first-match completion, terminal reminder suppression, fair closure eligibility, active-first pagination, strict provider structure validation, and expiry gates at checks/launch/dispatch. Background resumption now excludes foreground-bound runs. The operator archive is bound to an independently trusted SHA256 and hashed/extracted from the same bytes. Seven additional application regressions and two archive regressions passed; the full check now passes 606 application, 21 JS and 30 offline Python tests, with build/format and 17 rollout tests passing. These changes require a new exact-head review; prior approvals are historical. No deployment has occurred.
+
+Re-review of `de72ff0ac953446ebf84ffe027cc0b9045499ed5` requested one further timing correction: a later source could expire while an earlier poll waited. Live status, revision and expiry are now rechecked immediately before each source check, and ineligible checks release their lease without degradation. A two-source regression covers the race. Full local validation then passed 607 application, 21 JS and 30 offline Python tests, plus build/format and 17 rollout tests. Astra independently passed 53 focused tests, 17 rollout tests and six rechecks at de72ff0 while reproducing that last failure; approval of the timing correction remains pending.
+
+GPT-6 Astra approved `741660b960c7588ae86c4dcbe4ce19f2ace30f7c` after 54 focused tests, 17 rollout tests and 10 rechecks; its CI passed. The final automatic review identified a documented Calendar timestamp form the strict parser rejected: offset-free dateTime with explicit timeZone. The [Google event-time contract](https://developers.google.com/workspace/calendar/api/v3/reference/events) permits that form. Monitoring now normalizes it with the existing CronDate timezone parser, rejects missing/invalid zones and nonexistent local wall times, and retains strict collection/member validation. A regression covers the qualified-local form and invalid zones. This provider correction requires another exact-head review; no deployment is claimed.
+
+Re-review of `2a68f622ba95d172ef6c3a85439daca67961b50b` requested canonicalization of explicit-offset timestamps too: switching between two valid representations of the same instant could suppress preparation or admit another occurrence key. Every accepted timed value now becomes the same UTC ISO representation. The provider regression checks equivalent start and recurrence identities across forms. Astra independently passed 55 focused tests and additional zone/DST rechecks while identifying that gap. Earlier approvals remain historical until the canonicalization head is reviewed.
+
+Re-review of `36a3cf6a9f536b1768a18e05d9d5912f73b107e4` confirmed representation stability but reproduced a daylight-saving fold: an offset-free repeated wall time could resolve using the current timezone offset. The final parser discovers offsets around the supplied wall date independently of the current clock, accepts only one matching instant, and requires an explicit numeric offset for ambiguous/nonexistent local values. The new regression covers New York's fold, both explicit fold offsets and the spring gap. No new dependency or provider call is introduced. This final boundary fix requires exact-head re-review.
+
+An additional Tavily evidence finding was withdrawn after rechecking the exact commit through JobTools and normal execution journaling: the existing host adapter already supplies sourceUrl. The original repro bypassed that adapter. No provider change was required. The reviewer independently ran 43 focused tests and 15 rollout tests; live providers, paid evaluation and deployment were outside that review.
+
+After incorporating current main, `npm run check` passed 596 application, 21 JavaScript and 30 offline Python tests; build and repository format check passed. After the three review regressions were added, the full check passed 599 application, 21 JavaScript and 30 offline Python tests; build/format and 15 rollout tests passed again. Those operator tests cover exact baseline/archive, preserved environment/data, active-work refusal, validated changes including refusal of implicit default-on activation, build/health failure and rollback. The source baseline's successful [release receipt](https://github.com/akhilvuputuri/chief-agent/actions/runs/36895492925) was observed, but no candidate release or capability activation is claimed.
+
+### Release closure
+
+Candidate [PR 148](https://github.com/akhilvuputuri/chief-agent/pull/148) remains disabled and unmerged. Code review and CI passed at the head above. A read-only operator preflight on 2 October SGT confirmed the pinned baseline, healthy startup, no active runtime/pending inputs, and no migration 023. Private aggregate preservation counters were checked locally and are not copied here. Reviewed migration installation, separate activation, exact release/health verification and owner Telegram acceptance remain pending.
+
+## Follow-up and next iteration
+
+Measure one week of explicitly requested real use: useful/all notifications, duplicates, owner-reported misses, incorrect claims, reported/estimated provider usage per useful finding, and recorded reasons for suppression. Generic semantic duplicate detection and provider indexing delay remain limitations. The migration/activation path is shared and tested, but cloud execution still needs an explicitly authorized operator capability.

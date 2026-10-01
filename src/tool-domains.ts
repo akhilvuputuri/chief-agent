@@ -35,6 +35,7 @@ export const TOOL_DOMAINS = [
   "watchlist",
   "news",
   "routines",
+  "responsibilities",
   "skills",
 ] as const;
 export type ToolDomain = (typeof TOOL_DOMAINS)[number];
@@ -54,6 +55,8 @@ export const DOMAIN_SUMMARIES: Record<ToolDomain, string> = {
   watchlist: "stock price-drop watchlist",
   news: "daily news bulletin from followed sites, topics and 👍/👎 learning",
   routines: "scheduled independent agent routines",
+  responsibilities:
+    "owner-confirmed ongoing concerns, changes, attention and monitoring history",
   skills: "skill version history, drafts, evaluation and activation",
 };
 
@@ -76,6 +79,7 @@ const PREFIXES: [string, ToolDomain][] = [
   ["watchlist_", "watchlist"],
   ["news_", "news"],
   ["routine_", "routines"],
+  ["responsibility_", "responsibilities"],
   ["skill_", "skills"],
 ];
 
@@ -88,6 +92,10 @@ export function domainOf(operation: string): ToolDomain | undefined {
 // Conservative cues: a missed domain costs one tools_load step, an extra one
 // costs only schema characters. Word boundaries avoid matching inside words.
 const CUES: [ToolDomain, RegExp][] = [
+  [
+    "responsibilities",
+    /\b(watch|monitor|keep an eye|keep watching|responsibilit(y|ies)|only (tell|notify)|when .* arrives|until .* (arrive|done|resolved))\b/i,
+  ],
   [
     "gmail",
     /\b(e-?mails?|mails?|inbox|gmail|senders?|newsletters?|unread|messages? from|new messages|repl(y|ies|ied)|threads?)\b/i,

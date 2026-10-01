@@ -19,6 +19,13 @@ import { mediaReport } from "./media-schema.js";
 import { calendarDraft } from "./calendar-draft.js";
 import { parcelRecord, parcelList, parcelMatch } from "./parcel-schema.js";
 import {
+  responsibilityCreate,
+  responsibilityUpdate,
+  responsibilityList,
+  responsibilityHistory,
+  responsibilityReport,
+} from "./responsibility-schema.js";
+import {
   libraryAvailability,
   libraryCheck,
   libraryShelf,
@@ -383,6 +390,11 @@ export const action = z.discriminatedUnion("operation", [
     })
     .strict(),
   parcelRecord,
+  responsibilityCreate,
+  responsibilityUpdate,
+  responsibilityList,
+  responsibilityHistory,
+  responsibilityReport,
   parcelList,
   parcelMatch,
   z.object({ operation: z.literal("sheet_sync") }).strict(),

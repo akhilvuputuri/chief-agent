@@ -71,6 +71,10 @@
       "description": "Recurring automated agent routines that run on a schedule.",
       "examples": "every Monday at 9 summarise my inbox, pause my weekly routine, what automations run"
     },
+    "responsibilities": {
+      "description": "Create or manage an owner-confirmed ongoing concern that watches exact sources and only notifies on meaningful changes.",
+      "examples": "keep an eye on these parcels until they arrive, when my landlord emails tell me that evening, monitor this until resolved, show monitoring history"
+    },
     "skills": {
       "description": "Version history, drafts, evaluation, activation or rollback of the assistant's text skills.",
       "examples": "show the history of the interview skill, roll back the research skill"
