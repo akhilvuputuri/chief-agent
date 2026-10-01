@@ -456,6 +456,12 @@ export class StockMonitor {
     private provider: MarketDataProvider,
     private allowed: (user: string) => boolean,
     private clock = () => new Date(),
+    private captureDestination: (
+      user: string,
+    ) => Promise<import("./delivery-routing.js").Destination> = async () => ({
+      kind: "topic",
+      topic: "markets",
+    }),
   ) {}
   private async observe(
     item: { id: string; user_id: string },
@@ -843,6 +849,7 @@ export class StockMonitor {
                   // trading day and the stock is still down.
                   const alertId: string = existing?.id ?? randomUUID();
                   const payload = {
+                    destination: await this.captureDestination(item.user_id),
                     alertId,
                     itemId: item.id,
                     symbol: item.symbol,

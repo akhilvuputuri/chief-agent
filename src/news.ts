@@ -405,6 +405,12 @@ export class NewsBulletin {
     private allowed: (user: string) => boolean,
     private send: (user: string, payload: any) => Promise<unknown>,
     private clock = () => new Date(),
+    private captureDestination: (
+      user: string,
+    ) => Promise<import("./delivery-routing.js").Destination> = async () => ({
+      kind: "topic",
+      topic: "news",
+    }),
   ) {}
   /** Runs `work` in the owner's build queue. */
   exclusive<T>(user: string, work: () => Promise<T>) {
@@ -579,6 +585,8 @@ export class NewsBulletin {
         score: s.score,
       }));
       const payload = {
+        editionId: id,
+        destination: await this.captureDestination(user),
         text: edition.text,
         items: items.map((i) => ({
           id: i.id,

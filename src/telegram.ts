@@ -5,6 +5,8 @@ import { WorkTools, renderWork, renderWorkList } from "./work.js";
 import { TelegramViews, viewCallback } from "./telegram-views.js";
 import type { Collection, View } from "./telegram-view-render.js";
 import { formatTelegram } from "./telegram-format.js";
+import { slowReply } from "./delivery-routing.js";
+import { runFamily } from "./run-family.js";
 import { inThread, TelegramTopics, threadOf } from "./telegram-topics.js";
 import { calendarPreview, validateDraft } from "./calendar-draft.js";
 import { GoogleAuthError } from "./calendar.js";
@@ -505,19 +507,8 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
         receivedAt: new Date().toISOString(),
         preparing: needsPreparation,
         voiceReply: !!ctx.message.voice,
-        // Typed in one of Chief's topics: a hint for Chief, and in "auto" mode the
-        // topic's agent may take the first step.
         topic: await topics.keyFor(user, thread).catch(() => undefined),
-        // Not for photos or documents (the email agent cannot read them; voice notes become text) or for an explicit
-        // reply to an earlier message, whose target only Chief's context carries. In a
-        // topic, a plain message replies to the topic's creation message, which is fine.
-        topicFirstStep:
-          c.TELEGRAM_TOPICS === "auto" &&
-          !file &&
-          !ctx.message.photo &&
-          !ctx.message.document &&
-          (!ctx.message.reply_to_message ||
-            !!ctx.message.reply_to_message.forum_topic_created),
+        threadId: thread,
       },
     );
     await event(db, user, inputId, "telegram.input_received", {
@@ -666,7 +657,13 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
             if (await guard())
               await views.deliver(
                 user,
-                here,
+                {
+                  id: user,
+                  thread:
+                    runId && assistant.deliveryThread
+                      ? await assistant.deliveryThread(user, runId)
+                      : thread,
+                },
                 { reply: text, runId },
                 "progress",
                 guard,
@@ -678,10 +675,45 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
         deliveryGuard = () => assistant.isCurrentDelivery(user, reply);
         if (reply.reply || reply.notices?.length) deliveryRun = reply.runId;
         if ((reply.reply || reply.notices?.length) && (await deliveryGuard())) {
-          await sendCalendarApprovals(bot, db, user, deliveryGuard, thread);
-          await sendLibraryApprovals(bot, db, user, deliveryGuard, thread);
+          const replyThread = Object.hasOwn(reply, "threadId")
+            ? reply.threadId
+            : thread;
+          await sendCalendarApprovals(
+            bot,
+            db,
+            user,
+            deliveryGuard,
+            replyThread,
+            reply.runId,
+          );
+          await sendLibraryApprovals(
+            bot,
+            db,
+            user,
+            deliveryGuard,
+            replyThread,
+            reply.runId,
+          );
+          let actualThread = replyThread;
           if (reply.reply)
-            await views.deliver(user, here, reply, "answer", deliveryGuard);
+            await topics.deliver(
+              user,
+              replyThread
+                ? { kind: "thread", threadId: replyThread }
+                : { kind: "general" },
+              async (extra) => {
+                actualThread = extra.message_thread_id;
+                await views.deliver(
+                  user,
+                  { id: user, thread: actualThread },
+                  reply,
+                  "answer",
+                  deliveryGuard,
+                );
+              },
+            );
+          if (reply.reply && reply.runId)
+            await sendSlowPointer(bot, db, user, reply.runId, actualThread);
           if (
             reply.reply &&
             reply.voiceReply &&
@@ -696,9 +728,10 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
               );
               // New input can arrive during TTS even after the text was sent.
               if (await deliveryGuard())
-                await ctx.replyWithVoice(
+                await bot.api.sendVoice(
+                  user,
                   new InputFile(audio.bytes, audio.filename),
-                  { caption: "AI-generated voice" },
+                  { ...inThread(actualThread), caption: "AI-generated voice" },
                 );
             } catch {
               if (await deliveryGuard())
@@ -733,27 +766,193 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
   return Object.assign(bot, { topics });
 }
 
-export async function sendCalendarApprovals(
+const approvalSends = new SerialQueue();
+export function sendCalendarApprovals(
   bot: Bot,
   db: Database,
   user: string,
   guard?: () => Promise<boolean>,
   thread?: number,
+  run?: string,
+) {
+  return approvalSends.run(user, () =>
+    sendCalendarApprovalsOnce(bot, db, user, guard, thread, run),
+  );
+}
+export function sendLibraryApprovals(
+  bot: Bot,
+  db: Database,
+  user: string,
+  guard?: () => Promise<boolean>,
+  thread?: number,
+  run?: string,
+) {
+  return approvalSends.run(user, () =>
+    sendLibraryApprovalsOnce(bot, db, user, guard, thread, run),
+  );
+}
+async function sendApprovalMessage(
+  bot: Bot,
+  user: string,
+  text: string,
+  options: Parameters<Bot["api"]["sendMessage"]>[2],
+  guard?: () => Promise<boolean>,
+) {
+  try {
+    return await bot.api.sendMessage(user, text, options);
+  } catch (error) {
+    if (
+      options?.message_thread_id &&
+      (error as { error_code?: number }).error_code === 400 &&
+      /topic|thread/i.test(
+        String((error as { description?: string }).description),
+      )
+    ) {
+      if (guard && !(await guard())) return undefined;
+      const { message_thread_id: _thread, ...rest } = options;
+      return bot.api.sendMessage(user, text, rest);
+    }
+    throw error;
+  }
+}
+async function claimedApprovalMessage(
+  bot: Bot,
+  db: Database,
+  user: string,
+  id: string,
+  text: string,
+  options: Parameters<Bot["api"]["sendMessage"]>[2],
+  guard?: () => Promise<boolean>,
+) {
+  if (guard && !(await guard())) {
+    await db.query(
+      "UPDATE approvals SET payload=payload-'telegramDeliveryState' WHERE id=$1 AND user_id=$2 AND payload->>'telegramDeliveryState'='sending' AND NOT(payload ? 'telegramMessageId')",
+      [id, user],
+    );
+    return undefined;
+  }
+  try {
+    const message = await sendApprovalMessage(bot, user, text, options, guard);
+    if (!message)
+      await db.query(
+        "UPDATE approvals SET payload=payload-'telegramDeliveryState' WHERE id=$1 AND user_id=$2 AND payload->>'telegramDeliveryState'='sending' AND NOT(payload ? 'telegramMessageId')",
+        [id, user],
+      );
+    return message;
+  } catch (error) {
+    const e = error as {
+      error_code?: number;
+      parameters?: { retry_after?: number };
+    };
+    if (
+      typeof e.error_code === "number" &&
+      e.error_code >= 400 &&
+      e.error_code < 500
+    ) {
+      const wait = Math.max(0, Math.min(86400, e.parameters?.retry_after ?? 0));
+      await db.query(
+        "UPDATE approvals SET payload=(payload-'telegramDeliveryState') || jsonb_build_object('telegramRetryAt',$3::text) WHERE id=$1 AND user_id=$2 AND NOT(payload ? 'telegramMessageId')",
+        [id, user, new Date(Date.now() + wait * 1000).toISOString()],
+      );
+    } else {
+      await db.query(
+        "UPDATE approvals SET payload=jsonb_set(payload,'{telegramDeliveryState}','\"uncertain\"') WHERE id=$1 AND user_id=$2 AND NOT(payload ? 'telegramMessageId')",
+        [id, user],
+      );
+    }
+    throw error;
+  }
+}
+export async function sendSlowPointer(
+  bot: Bot,
+  db: Database,
+  user: string,
+  run: string,
+  thread?: number,
+) {
+  const input = (
+    await db.query(
+      "SELECT metadata,received_at FROM conversation_inputs WHERE user_id=$1 AND run_id=$2 ORDER BY ordinal LIMIT 1",
+      [user, run],
+    )
+  ).rows[0];
+  if (
+    !slowReply({
+      threadId: thread,
+      receivedAt: input?.received_at
+        ? new Date(input.received_at).toISOString()
+        : undefined,
+    })
+  )
+    return;
+  const delivered = (
+    await db.query(
+      "SELECT 1 FROM events WHERE user_id=$1 AND run_id=$2 AND type IN ('telegram.message_sent','telegram.view_opened') AND data->>'kind'='answer' AND data->>'messageId' IS NOT NULL LIMIT 1",
+      [user, run],
+    )
+  ).rows.length;
+  if (!delivered) return;
+  const claim = await db.query(
+    "INSERT INTO events(user_id,run_id,type,data) VALUES($1,$2,'telegram.slow_pointer_claimed','{}') ON CONFLICT DO NOTHING RETURNING id",
+    [user, run],
+  );
+  if (!claim.rows.length) return;
+  try {
+    const sent = await bot.api.sendMessage(
+      user,
+      "Your reply is ready in the topic where you asked.",
+    );
+    await event(db, user, run, "telegram.slow_pointer_sent", {
+      messageId: sent.message_id,
+      threadId: thread,
+    });
+  } catch (error) {
+    opsLog("telegram.slow_pointer_failed", "warn", {
+      runId: run,
+      ...errorFields(error),
+    });
+  }
+}
+async function sendCalendarApprovalsOnce(
+  bot: Bot,
+  db: Database,
+  user: string,
+  guard?: () => Promise<boolean>,
+  thread?: number,
+  run?: string,
 ) {
   if (guard && !(await guard())) return;
   const rows = (
     await db.query(
-      "SELECT id,payload FROM approvals WHERE user_id=$1 AND operation='calendar_create' AND status='pending' AND expires_at>now() AND NOT (payload ? 'telegramMessageId') ORDER BY created_at",
+      "SELECT id,run_id,payload FROM approvals WHERE user_id=$1 AND operation='calendar_create' AND status='pending' AND expires_at>now() AND NOT (payload ? 'telegramMessageId') ORDER BY created_at",
       [user],
     )
   ).rows;
+  const family = run
+    ? new Set(
+        (
+          await db.query(
+            `SELECT run_id FROM approvals WHERE user_id=$1 AND run_id IN ${runFamily()}`,
+            [user, run],
+          )
+        ).rows.map((r) => r.run_id),
+      )
+    : new Set();
   for (const row of rows) {
     if (guard && !(await guard())) return;
-    const message = await bot.api.sendMessage(
+    const claimed = await db.query(
+      "UPDATE approvals SET payload=payload || jsonb_build_object('telegramDeliveryState','sending','telegramThreadId',$3::bigint) WHERE id=$1 AND user_id=$2 AND NOT(payload ? 'telegramMessageId') AND NOT(payload ? 'telegramDeliveryState') AND COALESCE((payload->>'telegramRetryAt')::timestamptz,'epoch'::timestamptz)<=now() RETURNING id",
+      [row.id, user, run && family.has(row.run_id) ? (thread ?? null) : null],
+    );
+    if (!claimed.rows.length) continue;
+    const message = await claimedApprovalMessage(
+      bot,
+      db,
       user,
+      row.id,
       calendarPreview(validateDraft(row.payload.draft)),
       {
-        ...inThread(thread),
+        ...inThread(run && family.has(row.run_id) ? thread : undefined),
         reply_markup: {
           inline_keyboard: [
             [
@@ -763,46 +962,69 @@ export async function sendCalendarApprovals(
           ],
         },
       },
+      guard,
     );
+    if (!message) return;
     await db.query(
-      "UPDATE approvals SET payload=jsonb_set(payload,'{telegramMessageId}',$3::jsonb) WHERE id=$1 AND user_id=$2",
+      `UPDATE approvals SET payload=jsonb_set(payload,'{telegramMessageId}',$3::jsonb) || '{"telegramDeliveryState":"sent"}'::jsonb WHERE id=$1 AND user_id=$2`,
       [row.id, user, JSON.stringify(message.message_id)],
     );
   }
 }
 
-export async function sendLibraryApprovals(
+async function sendLibraryApprovalsOnce(
   bot: Bot,
   db: Database,
   user: string,
   guard?: () => Promise<boolean>,
   thread?: number,
+  run?: string,
 ) {
   if (guard && !(await guard())) return;
   const rows = (
     await db.query(
-      "SELECT id,operation,payload,expires_at FROM approvals WHERE user_id=$1 AND operation LIKE 'library\\_%' AND status='pending' AND expires_at>now() AND NOT (payload ? 'telegramMessageId') ORDER BY created_at",
+      "SELECT id,run_id,operation,payload,expires_at FROM approvals WHERE user_id=$1 AND operation LIKE 'library\\_%' AND status='pending' AND expires_at>now() AND NOT (payload ? 'telegramMessageId') ORDER BY created_at",
       [user],
     )
   ).rows;
+  const family = run
+    ? new Set(
+        (
+          await db.query(
+            `SELECT run_id FROM approvals WHERE user_id=$1 AND run_id IN ${runFamily()}`,
+            [user, run],
+          )
+        ).rows.map((r) => r.run_id),
+      )
+    : new Set();
   for (const row of rows) {
     if (guard && !(await guard())) return;
-    const message = await bot.api.sendMessage(
+    const claimed = await db.query(
+      "UPDATE approvals SET payload=payload || jsonb_build_object('telegramDeliveryState','sending','telegramThreadId',$3::bigint) WHERE id=$1 AND user_id=$2 AND NOT(payload ? 'telegramMessageId') AND NOT(payload ? 'telegramDeliveryState') AND COALESCE((payload->>'telegramRetryAt')::timestamptz,'epoch'::timestamptz)<=now() RETURNING id",
+      [row.id, user, run && family.has(row.run_id) ? (thread ?? null) : null],
+    );
+    if (!claimed.rows.length) continue;
+    const message = await claimedApprovalMessage(
+      bot,
+      db,
       user,
+      row.id,
       libraryPreview(
         row.operation,
         row.payload,
         new Date(row.expires_at).toISOString(),
       ),
       {
-        ...inThread(thread),
+        ...inThread(run && family.has(row.run_id) ? thread : undefined),
         reply_markup: {
           inline_keyboard: libraryButtons(row.operation, row.id),
         },
       },
+      guard,
     );
+    if (!message) return;
     await db.query(
-      "UPDATE approvals SET payload=jsonb_set(payload,'{telegramMessageId}',$3::jsonb) WHERE id=$1 AND user_id=$2",
+      `UPDATE approvals SET payload=jsonb_set(payload,'{telegramMessageId}',$3::jsonb) || '{"telegramDeliveryState":"sent"}'::jsonb WHERE id=$1 AND user_id=$2`,
       [row.id, user, JSON.stringify(message.message_id)],
     );
   }

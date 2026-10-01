@@ -58,6 +58,11 @@ export const finishSchema = answerSchema.extend({
 export type Answer = z.infer<typeof answerSchema>;
 export type RecordRef = z.infer<typeof recordRef>;
 export type Delivery = Answer & {
+  /** Host-only outcome and transport metadata; answerSchema rejects these from a model. */
+  reason?: string;
+  threadId?: number;
+  destination?: import("./delivery-routing.js").Destination;
+  sourceLabel?: string;
   runId?: string;
   notices?: string[];
   /** Host-only delivery fence; never accepted from a model answer. */

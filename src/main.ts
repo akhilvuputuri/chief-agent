@@ -1,3 +1,4 @@
+import { destination, taskDelivery } from "./delivery-routing.js";
 import "./process-guard.js";
 import { errorFields, opsLog } from "./ops-log.js";
 import { RoutineScheduler, RoutineDelivery } from "./routines.js";
@@ -28,7 +29,7 @@ import { DailySheet } from "./daily-sheet.js";
 import { SheetsTools } from "./sheets.js";
 import { GmailTools, unreadDigest } from "./gmail.js";
 import { readConfig } from "./config.js";
-import { connect, ensureUser } from "./db.js";
+import { connect, ensureUser, event } from "./db.js";
 import { JobTools } from "./tools.js";
 import { WebTools } from "./providers.js";
 import { Assistant } from "./agent.js";
@@ -205,16 +206,29 @@ const newsBulletin = new NewsBulletin(
   newsFetcher,
   (user) => allowed.has(user),
   async (user, payload) => {
-    await topics.send(user, "news", (thread) =>
-      bot.api.sendMessage(user, payload.text, {
-        ...thread,
-        link_preview_options: { is_disabled: true },
-        ...(payload.items?.length
-          ? { reply_markup: { inline_keyboard: voteKeyboard(payload.items) } }
-          : {}),
-      }),
+    await topics.deliver(
+      user,
+      payload.destination ?? { kind: "topic", topic: "news" },
+      (thread, notice) =>
+        bot.api.sendMessage(
+          user,
+          [notice, payload.text].filter(Boolean).join("\n\n"),
+          {
+            ...thread,
+            link_preview_options: { is_disabled: true },
+            ...(payload.items?.length
+              ? {
+                  reply_markup: {
+                    inline_keyboard: voteKeyboard(payload.items),
+                  },
+                }
+              : {}),
+          },
+        ),
     );
   },
+  undefined,
+  (user) => topics.capture(user, { kind: "topic", topic: "news" }),
 );
 const daily = new DailyTools(db, parser, calendar, mirror);
 const assistant = new Assistant(
@@ -403,22 +417,74 @@ const worker = new DailyWorker<Delivery>(
 );
 async function sendWorkMessage(user: string, text: string | Delivery) {
   if (!allowed.has(user)) throw new Error("Unauthorized delivery");
-  await views.deliver(
+  const delivery: Delivery = typeof text === "string" ? { reply: text } : text;
+  await topics.deliver(
     user,
-    user,
-    text,
-    typeof text === "string" ? "progress" : "answer",
+    delivery.destination ?? { kind: "general" },
+    async (extra, notice) => {
+      await views.deliver(
+        user,
+        { id: user, thread: extra.message_thread_id },
+        {
+          ...delivery,
+          reply: [notice, delivery.sourceLabel, delivery.reply]
+            .filter(Boolean)
+            .join("\n\n"),
+        },
+        typeof text === "string" ? "progress" : "answer",
+      );
+      if (delivery.runId)
+        await event(db, user, delivery.runId, "telegram.delivery_routed", {
+          threadId: extra.message_thread_id ?? null,
+          intendedThreadId:
+            delivery.destination?.kind === "thread"
+              ? delivery.destination.threadId
+              : null,
+          stopReason: delivery.reason,
+          kind: "work",
+        });
+      await sendCalendarApprovals(
+        bot,
+        db,
+        user,
+        undefined,
+        extra.message_thread_id,
+        delivery.runId,
+      );
+      await sendLibraryApprovals(
+        bot,
+        db,
+        user,
+        undefined,
+        extra.message_thread_id,
+        delivery.runId,
+      );
+    },
   );
-  if (typeof text !== "string" && text.runId)
-    await assistant.recordDelivery(user, text.runId, text.reply);
-  await sendCalendarApprovals(bot, db, user);
-  await sendLibraryApprovals(bot, db, user);
+  if (delivery.runId)
+    await assistant.recordDelivery(user, delivery.runId, delivery.reply);
 }
 const routineScheduler = new RoutineScheduler(db, (user) => allowed.has(user));
-const routineDelivery = new RoutineDelivery(db, sendWorkMessage);
+const routineDelivery = new RoutineDelivery(
+  db,
+  sendWorkMessage,
+  async (user, payload) => ({
+    ...payload,
+    destination: await topics.capture(
+      user,
+      payload.destination ?? { kind: "general" },
+    ),
+  }),
+);
 await routineDelivery.recover();
 const stockMonitor = stockProvider
-  ? new StockMonitor(db, stockProvider, (user) => allowed.has(user))
+  ? new StockMonitor(
+      db,
+      stockProvider,
+      (user) => allowed.has(user),
+      undefined,
+      (user) => topics.capture(user, { kind: "topic", topic: "markets" }),
+    )
   : undefined;
 const stockDelivery = new StockDelivery(db, async (user, payload) => {
   if (!allowed.has(user)) throw new Error("Unauthorized delivery");
@@ -441,8 +507,15 @@ const stockDelivery = new StockDelivery(db, async (user, payload) => {
       ],
     },
   };
-  await topics.send(user, "markets", (thread) =>
-    bot.api.sendMessage(user, payload.reply, { ...thread, ...extra }),
+  await topics.deliver(
+    user,
+    payload.destination ?? { kind: "topic", topic: "markets" },
+    (thread, notice) =>
+      bot.api.sendMessage(
+        user,
+        [notice, payload.reply].filter(Boolean).join("\n\n"),
+        { ...thread, ...extra },
+      ),
   );
 });
 await stockDelivery.recover();
@@ -483,7 +556,21 @@ const workWorker = new WorkWorker(
     timer.unref();
     try {
       return await assistant.resumeDetailed(user, id, (text, runId) =>
-        views.deliver(user, user, { reply: text, runId }, "progress"),
+        (async () => {
+          const routed = await taskDelivery(db, user, id, {
+            reply: text,
+            runId,
+            reason: "answer",
+          });
+          await topics.deliver(user, routed.destination!, async (extra) =>
+            views.deliver(
+              user,
+              { id: user, thread: extra.message_thread_id },
+              routed,
+              "progress",
+            ),
+          );
+        })(),
       );
     } finally {
       clearInterval(timer);

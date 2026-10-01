@@ -8,12 +8,12 @@ import type { Database } from "./db.js";
 import { event } from "./db.js";
 import { errorFields, opsLog } from "./ops-log.js";
 
-export type TopicKey = "news" | "markets" | "email";
+export type TopicKey = "news" | "markets" | "updates";
 // icon_color must be one of Telegram's six topic colours.
 const topics = {
   news: { name: "News", icon_color: 0x6fb9f0 },
   markets: { name: "Markets", icon_color: 0x8eee98 },
-  email: { name: "Email", icon_color: 0xffd67e },
+  updates: { name: "Updates", icon_color: 0xffd67e },
 } as const satisfies Record<TopicKey, { name: string; icon_color: number }>;
 
 /**
@@ -22,9 +22,6 @@ const topics = {
  * bulletin and alert settings, while questions typed in News or Markets usually need the
  * web, so those topics only tell Chief where the message came from.
  */
-export const topicAgents: Partial<Record<TopicKey, string>> = {
-  email: "email",
-};
 const keys = Object.keys(topics) as TopicKey[];
 
 /** Send options for a thread. General (id 1) is addressed by leaving the id out. */
@@ -56,12 +53,13 @@ const unusable = (error: unknown) =>
   (error as { error_code?: number })?.error_code === 400 &&
   /topic|thread/i.test(describe(error));
 
-type TopicApi = Pick<Api, "getMe" | "createForumTopic">;
+type TopicApi = Pick<Api, "getMe" | "createForumTopic"> &
+  Partial<Pick<Api, "editForumTopic">>;
 
 // Thread ids live in the existing events table (no migration), one stable run id per
 // owner and topic, so the lookup uses the run index. The newest row wins; a null
 // threadId records that the topic was deleted in Telegram.
-const ledger = (user: string, key: TopicKey) => {
+const ledger = (user: string, key: TopicKey | "email") => {
   const h = createHash("sha256")
     .update(`telegram-topic:${user}:${key}`)
     .digest("hex");
@@ -165,6 +163,31 @@ export class TelegramTopics {
 
   /** Creates any missing topics, so the owner can write in them before Chief posts there. */
   async ensure(user: string) {
+    // Rename the retired Email topic in place. Deleting it would also delete messages;
+    // this preserves any owner input that arrived since the issue was written.
+    if ((await this.available()) && this.api.editForumTopic) {
+      const old = (
+        await this.db.query(
+          "SELECT data->'threadId' AS thread FROM events WHERE user_id=$1 AND run_id=$2 AND type='telegram.topic' ORDER BY id DESC LIMIT 1",
+          [user, ledger(user, "email")],
+        )
+      ).rows[0]?.thread;
+      if (typeof old === "number" && !(await this.stored(user, "updates"))) {
+        try {
+          await this.api.editForumTopic(user, old, { name: "Updates" });
+          await event(
+            this.db,
+            user,
+            ledger(user, "updates"),
+            "telegram.topic",
+            { key: "updates", threadId: old },
+          );
+          this.known.set(`${user}:updates`, old);
+        } catch (error) {
+          opsLog("telegram.topic_retire_failed", "warn", errorFields(error));
+        }
+      }
+    }
     for (const key of keys) await this.thread(user, key).catch(() => undefined);
   }
 
@@ -216,7 +239,10 @@ export class TelegramTopics {
   async send<T>(
     user: string,
     key: TopicKey,
-    send: (extra: { message_thread_id?: number }) => Promise<T>,
+    send: (
+      extra: { message_thread_id?: number },
+      notice?: string,
+    ) => Promise<T>,
   ): Promise<T> {
     // Topics are optional: any failure to find one sends to General instead.
     const thread = await this.thread(user, key).catch(() => undefined);
@@ -226,7 +252,18 @@ export class TelegramTopics {
       if (!thread) throw error;
       if (missing(error)) {
         opsLog("telegram.topic_missing", "warn", { kind: key });
-        return send(inThread(await this.recover(user, key, thread)));
+        const recreated = await this.recover(user, key, thread);
+        try {
+          return await send(
+            inThread(recreated),
+            recreated
+              ? `Topic recreated. Say 'stop the ${key === "news" ? "news bulletin" : key === "markets" ? "stock alerts" : "routine"}' in General to turn it off.`
+              : undefined,
+          );
+        } catch (retryError) {
+          if (!unusable(retryError)) throw retryError;
+          return send({});
+        }
       }
       if (!unusable(error)) throw error;
       opsLog("telegram.topic_unusable", "warn", {
@@ -235,5 +272,47 @@ export class TelegramTopics {
       });
       return send({});
     }
+  }
+
+  /** Captured destinations survive restarts; only an explicit topic failure changes one. */
+  async deliver<T>(
+    user: string,
+    target: import("./delivery-routing.js").Destination,
+    send: (
+      extra: { message_thread_id?: number },
+      notice?: string,
+    ) => Promise<T>,
+  ) {
+    if (target.kind === "topic") return this.send(user, target.topic, send);
+    if (target.kind === "general") return send({});
+    try {
+      return await send(inThread(target.threadId));
+    } catch (error) {
+      if (!missing(error) && !unusable(error)) throw error;
+      const key = await this.keyFor(user, target.threadId);
+      if (key && missing(error)) {
+        const replacement = await this.recover(user, key, target.threadId);
+        try {
+          return await send(
+            inThread(replacement),
+            replacement
+              ? "Topic recreated. Change its schedule in General to stop future updates."
+              : undefined,
+          );
+        } catch (retryError) {
+          if (!unusable(retryError)) throw retryError;
+        }
+      }
+      return send({});
+    }
+  }
+
+  async capture(
+    user: string,
+    target: import("./delivery-routing.js").Destination,
+  ): Promise<import("./delivery-routing.js").Destination> {
+    if (target.kind !== "topic") return target;
+    const thread = await this.thread(user, target.topic).catch(() => undefined);
+    return thread ? { kind: "thread", threadId: thread } : { kind: "general" };
   }
 }

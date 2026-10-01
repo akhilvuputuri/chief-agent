@@ -55,6 +55,9 @@ const fields: Record<string, Shape> = {
   messages: "count",
   characters: "count",
   httpStatus: "count",
+  threadId: "count",
+  intendedThreadId: "count",
+  messageId: "count",
   uptimeS: "count",
   rssMb: "count",
   fixedChars: "count",
@@ -277,6 +280,16 @@ const projections: Record<string, Projection> = {
     { runId: run, stopReason: d.stopReason },
   ],
   "turn.failed": (run) => ["error", { runId: run }],
+  "telegram.delivery_routed": (run, d) => [
+    "info",
+    {
+      runId: run,
+      threadId: d.threadId,
+      intendedThreadId: d.intendedThreadId,
+      stopReason: d.stopReason,
+      kind: d.kind,
+    },
+  ],
   // Telegram topics: the host made the first delegation; reason is a fixed label such as "topic.email".
   "route.first_call": (run, d) => [
     "info",

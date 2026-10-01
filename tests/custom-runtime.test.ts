@@ -35,6 +35,7 @@ async function fixture(
     "012_message_storage",
     "013_conversation_control",
     "014_checkpoint_steering",
+    "022_telegram_delivery",
   ])
     await pg.exec(
       await readFile(new URL("../db/" + f + ".sql", import.meta.url), "utf8"),

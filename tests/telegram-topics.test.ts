@@ -6,7 +6,11 @@ import { GrammyError } from "grammy";
 import { ensureUser, type Database } from "../src/db.js";
 import { TelegramTopics, inThread, threadOf } from "../src/telegram-topics.js";
 import { TelegramViews } from "../src/telegram-views.js";
-import { telegram, sendCalendarApprovals } from "../src/telegram.js";
+import {
+  telegram,
+  sendCalendarApprovals,
+  sendSlowPointer,
+} from "../src/telegram.js";
 import { CalendarActions } from "../src/calendar-actions.js";
 import { randomUUID } from "node:crypto";
 import { readConfig } from "../src/config.js";
@@ -37,7 +41,7 @@ function fakeApi(enabled = true) {
         created.push(name);
         await new Promise((r) => setTimeout(r, 5));
         return {
-          message_thread_id: name === "Email" ? 42 : next++,
+          message_thread_id: name === "Updates" ? 42 : next++,
           name,
         } as any;
       },
@@ -346,14 +350,37 @@ test("approval cards for a message typed in a topic go to that topic", async () 
   });
   await bot.init();
   try {
-    await actions.draft("123", randomUUID(), {
+    const run = randomUUID();
+    await actions.draft("123", run, {
       title: "Interview preparation",
       start: "2026-09-20T15:00:00+08:00",
       end: "2026-09-20T16:00:00+08:00",
     });
-    await sendCalendarApprovals(bot, db, "123", undefined, 55);
-    assert.equal(sent.length, 1);
-    assert.equal(sent[0].message_thread_id, 55);
+    const unrelated = randomUUID();
+    await actions.draft("123", unrelated, {
+      title: "Background decision",
+      start: "2026-09-20T17:00:00+08:00",
+      end: "2026-09-20T18:00:00+08:00",
+    });
+    const child = randomUUID();
+    await db.query(
+      "INSERT INTO events(user_id,run_id,type,data) VALUES('123',$1,'agent.started',$2::jsonb)",
+      [run, JSON.stringify({ childRunId: child })],
+    );
+    await actions.draft("123", child, {
+      title: "Child decision",
+      start: "2026-09-20T19:00:00+08:00",
+      end: "2026-09-20T20:00:00+08:00",
+    });
+    await Promise.all([
+      sendCalendarApprovals(bot, db, "123", undefined, 55, run),
+      sendCalendarApprovals(bot, db, "123", undefined, 55, run),
+    ]);
+    assert.equal(sent.length, 3);
+    assert.deepEqual(
+      sent.map((p) => p.message_thread_id),
+      [55, undefined, 55],
+    );
   } finally {
     await pg.close();
   }
@@ -406,8 +433,8 @@ test("topics are created up front and a thread maps back to its topic", async ()
   try {
     await topics.ensure("123");
     await topics.ensure("123");
-    assert.deepEqual(created, ["News", "Markets", "Email"]);
-    assert.equal(await topics.keyFor("123", 42), "email");
+    assert.deepEqual(created, ["News", "Markets", "Updates"]);
+    assert.equal(await topics.keyFor("123", 42), "updates");
     assert.equal(await topics.keyFor("123", 40), "news");
     assert.equal(await topics.keyFor("123", 99), undefined);
     assert.equal(await topics.keyFor("123", undefined), undefined);
@@ -416,7 +443,7 @@ test("topics are created up front and a thread maps back to its topic", async ()
   }
 });
 
-test("a message typed in Chief's Email topic is recorded with its topic", async () => {
+test("a message typed in Chief's Updates topic is recorded with its topic", async () => {
   const { pg, db } = await database();
   await new TelegramTopics(db, fakeApi().api).ensure("123");
   const assistant = new Assistant(
@@ -476,7 +503,7 @@ test("a message typed in Chief's Email topic is recorded with its topic", async 
       date: 0,
       chat: { id: 123, type: "private" },
       ...(topicRoot
-        ? { forum_topic_created: { name: "Email", icon_color: 0xffd67e } }
+        ? { forum_topic_created: { name: "Updates", icon_color: 0xffd67e } }
         : { text: "an earlier answer" }),
     },
   });
@@ -488,17 +515,177 @@ test("a message typed in Chief's Email topic is recorded with its topic", async 
     await bot.handleUpdate(update(4, 42, replyTo(false)));
     const topics = (
       await db.query(
-        "SELECT metadata->>'topic' AS topic, metadata->>'topicFirstStep' AS first FROM conversation_inputs ORDER BY ordinal",
+        "SELECT metadata->>'topic' AS topic, metadata->>'threadId' AS thread FROM conversation_inputs ORDER BY ordinal",
       )
     ).rows;
     assert.deepEqual(
       topics.map((r) => r.topic),
-      ["email", "news", null, "email"],
+      ["updates", "news", null, "updates"],
     );
     assert.deepEqual(
-      topics.map((r) => r.first),
-      ["true", "true", "true", "false"],
+      topics.map((r) => r.thread),
+      ["42", "40", null, "42"],
     );
+  } finally {
+    await pg.close();
+  }
+});
+
+test("approval claims recheck supersession, retry definite rejections, and preserve unknown sends", async () => {
+  const { pg, db } = await database();
+  const actions = new CalendarActions(db, {} as any, "123");
+  const run = randomUUID();
+  const draft = await actions.draft("123", run, {
+    title: "Decision",
+    start: "2026-09-20T15:00:00+08:00",
+    end: "2026-09-20T16:00:00+08:00",
+  });
+  let guard = true,
+    attempts = 0,
+    mode = "ok";
+  const bot = telegram(
+    readConfig({
+      DATABASE_URL: "postgres://x:x@localhost/x",
+      TELEGRAM_BOT_TOKEN: "123:test-token",
+      TELEGRAM_ALLOWED_USER_IDS: "123",
+    }),
+    {} as any,
+    db,
+  );
+  bot.api.config.use(async (_prev, method, payload) => {
+    if (method !== "sendMessage")
+      return {
+        ok: true,
+        result: { id: 999, is_bot: true, first_name: "T", username: "t_bot" },
+      } as any;
+    attempts++;
+    if (mode === "fallback") {
+      guard = false;
+      throw new GrammyError(
+        "gone",
+        { ok: false, error_code: 400, description: "message thread not found" },
+        method,
+        payload,
+      );
+    }
+    if (mode === "429")
+      throw new GrammyError(
+        "flood",
+        {
+          ok: false,
+          error_code: 429,
+          description: "Too Many Requests",
+          parameters: { retry_after: 0 },
+        },
+        method,
+        payload,
+      );
+    if (mode === "unknown") throw Error("Transport outcome unknown");
+    return { ok: true, result: { message_id: attempts } } as any;
+  });
+  try {
+    const wrapped: Database = {
+      query: async (sql, v) => {
+        const r = await db.query(sql, v);
+        if (sql.includes("'telegramDeliveryState','sending'")) guard = false;
+        return r;
+      },
+    };
+    await sendCalendarApprovals(
+      bot,
+      wrapped,
+      "123",
+      async () => guard,
+      42,
+      run,
+    );
+    assert.equal(attempts, 0);
+    assert.equal(
+      (
+        await db.query("SELECT payload FROM approvals WHERE id=$1", [
+          draft.approvalId,
+        ])
+      ).rows[0].payload.telegramDeliveryState,
+      undefined,
+    );
+    guard = true;
+    mode = "fallback";
+    await sendCalendarApprovals(bot, db, "123", async () => guard, 42, run);
+    assert.equal(attempts, 1);
+    assert.equal(
+      (
+        await db.query("SELECT payload FROM approvals WHERE id=$1", [
+          draft.approvalId,
+        ])
+      ).rows[0].payload.telegramDeliveryState,
+      undefined,
+    );
+    attempts = 0;
+    guard = true;
+    mode = "429";
+    await assert.rejects(() =>
+      sendCalendarApprovals(bot, db, "123", undefined, 42, run),
+    );
+    mode = "ok";
+    await sendCalendarApprovals(bot, db, "123", undefined, 42, run);
+    assert.equal(attempts, 2);
+    await db.query(
+      "UPDATE approvals SET payload=payload-'telegramMessageId'-'telegramDeliveryState'-'telegramRetryAt' WHERE id=$1",
+      [draft.approvalId],
+    );
+    mode = "unknown";
+    await assert.rejects(() =>
+      sendCalendarApprovals(bot, db, "123", undefined, 42, run),
+    );
+    mode = "ok";
+    await sendCalendarApprovals(bot, db, "123", undefined, 42, run);
+    assert.equal(attempts, 3);
+    assert.equal(
+      (
+        await db.query("SELECT payload FROM approvals WHERE id=$1", [
+          draft.approvalId,
+        ])
+      ).rows[0].payload.telegramDeliveryState,
+      "uncertain",
+    );
+  } finally {
+    await pg.close();
+  }
+});
+
+test("slow pointer needs an actually delivered answer, and is deduplicated", async () => {
+  const { pg, db } = await database();
+  const run = randomUUID();
+  let sends = 0;
+  try {
+    await db.query(
+      "INSERT INTO runtime_runs(id,user_id,state) VALUES($1,'123','stopped')",
+      [run],
+    );
+    await db.query(
+      "INSERT INTO conversation_inputs(id,user_id,run_id,message,state,received_at) VALUES($1,'123',$2,'question','completed',now()-interval '2 minutes')",
+      [randomUUID(), run],
+    );
+    const bot = {
+      api: { sendMessage: async () => ({ message_id: ++sends }) },
+    } as any;
+    await sendSlowPointer(bot, db, "123", run, 42);
+    assert.equal(sends, 0);
+    await db.query(
+      "INSERT INTO events(user_id,run_id,type,data) VALUES('123',$1,'telegram.message_sent','{\"kind\":\"progress\",\"messageId\":10}')",
+      [run],
+    );
+    await sendSlowPointer(bot, db, "123", run, 42);
+    assert.equal(sends, 0);
+    await db.query(
+      "INSERT INTO events(user_id,run_id,type,data) VALUES('123',$1,'telegram.message_sent','{\"kind\":\"answer\",\"messageId\":11}')",
+      [run],
+    );
+    await Promise.all([
+      sendSlowPointer(bot, db, "123", run, 42),
+      sendSlowPointer(bot, db, "123", run, 42),
+    ]);
+    assert.equal(sends, 1);
   } finally {
     await pg.close();
   }
