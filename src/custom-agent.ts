@@ -169,7 +169,11 @@ export class CustomAgent implements Agent {
     await execution.checkpoint(messages);
     try {
       turn: while (true) {
-        if (await steer()) continue;
+        if (await steer()) {
+          // Newer owner input arrived first: the host's first step was for an older message.
+          req.firstCall = undefined;
+          continue;
+        }
         let generation;
         let invocationId = "";
         const first = req.firstCall;
@@ -180,7 +184,7 @@ export class CustomAgent implements Agent {
           generation = {
             message: {
               role: "assistant",
-              content: "",
+              content: null,
               tool_calls: [
                 {
                   id: `host_${invocationId.replaceAll("-", "").slice(0, 24)}`,

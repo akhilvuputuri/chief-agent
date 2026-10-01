@@ -71,6 +71,13 @@ The owner asked for the whole feature rather than waiting for shadow data.
     - topics are created up front and threads map back to topics;
     - inbound messages record `topic` in the input metadata.
 
+- **Independent review (Opus 5.5): approved.** Fixed before merge:
+  - if newer input is absorbed before the first step, the step is dropped, so the email agent never works on a superseded message (covered by a test that fails without the fix);
+  - messages under three words take the ordinary path, and the docs now state the trade-off for small talk;
+  - the synthetic message has `content: null`, matching what the model adapter produces;
+  - `file` mode keeps the topic hint;
+  - one topics helper is shared by the inbound handler and scheduled sends.
+
 ## Verification and outcome
 
 Typecheck and the full suite pass.

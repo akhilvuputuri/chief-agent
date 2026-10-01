@@ -58,6 +58,8 @@ export type Incoming = {
   voiceReply?: boolean;
   /** The Chief topic the message was typed in (Telegram topics, phase 2). */
   topic?: string;
+  /** Whether that topic may start the turn with its agent (TELEGRAM_TOPICS=auto). */
+  topicFirstStep?: boolean;
 };
 export class Assistant {
   private queue = new SerialQueue();
@@ -415,6 +417,7 @@ export class Assistant {
     let voiceReply = false;
     let managedDelivery = false;
     let topic: string | undefined;
+    let topicFirstStep = false;
     const capability = randomBytes(32).toString("hex");
     this.capabilities.set(capability, {
       user,
@@ -500,6 +503,7 @@ export class Assistant {
           typeof claimed.rows[0].metadata.topic === "string"
             ? claimed.rows[0].metadata.topic
             : undefined;
+        topicFirstStep = claimed.rows[0].metadata.topicFirstStep === true;
       }
       const initialVersion = this.inbox.version(user);
       active.yield =
@@ -746,7 +750,7 @@ export class Assistant {
           : {}),
       });
       const firstCall = topicFirstCall(
-        topic,
+        topicFirstStep ? topic : undefined,
         message,
         !!images?.length,
         background,
@@ -1241,13 +1245,15 @@ export function topicFirstCall(
   if (!type || background || hasImages) return undefined;
   // agent_run's objective limit (UTF-16 length, as zod counts it).
   if (message.length > 2000) return undefined;
+  // Small talk ("thanks!", "ok") needs no email search; Chief answers it in one call.
+  if (message.trim().split(/\s+/).length < 3) return undefined;
   let catalogue: { type?: string }[] = [];
   try {
     catalogue = JSON.parse(runtimeContext).agentCatalogue ?? [];
   } catch {
     return undefined;
   }
-  // The agent must be offered in this deployment, and Chief must be coordinating.
+  // The agent must be offered in this deployment.
   if (!catalogue.some((a) => a.type === type)) return undefined;
   const context = previous
     ? `The owner wrote this in the ${topic} topic of the chat. Previous exchange, for reference only:\nOwner: ${previous.user.slice(0, 1500)}\nChief: ${previous.assistant.slice(0, 2000)}`

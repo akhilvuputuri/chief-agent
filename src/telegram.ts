@@ -36,8 +36,8 @@ import type { ImageAttachment } from "./protocol.js";
 export function telegram(c: Config, assistant: Assistant, db: Database) {
   const bot = new Bot(c.TELEGRAM_BOT_TOKEN);
   const views = new TelegramViews(db, bot.api, undefined, c.MINIAPP_ORIGIN);
-  // Reads topic ids only; main.ts creates the topics.
-  const topics = new TelegramTopics(db, bot.api, c.TELEGRAM_TOPICS === "auto");
+  // One topics helper for the process: inbound lookups here, sends and creation in main.ts.
+  const topics = new TelegramTopics(db, bot.api, c.TELEGRAM_TOPICS !== "off");
   const voice = new Voice(c);
   const controls = new SerialQueue();
   const preparation = new PreparationQueue(2);
@@ -505,8 +505,10 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
         receivedAt: new Date().toISOString(),
         preparing: needsPreparation,
         voiceReply: !!ctx.message.voice,
-        // Typed in one of Chief's topics: that topic's agent gets the first step.
+        // Typed in one of Chief's topics: a hint for Chief, and in "auto" mode the
+        // topic's agent may take the first step.
         topic: await topics.keyFor(user, thread).catch(() => undefined),
+        topicFirstStep: c.TELEGRAM_TOPICS === "auto",
       },
     );
     await event(db, user, inputId, "telegram.input_received", {
@@ -719,7 +721,7 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
   bot.catch((error) =>
     opsLog("telegram.handler_failed", "error", errorFields(error.error)),
   );
-  return bot;
+  return Object.assign(bot, { topics });
 }
 
 export async function sendCalendarApprovals(

@@ -277,7 +277,7 @@ const projections: Record<string, Projection> = {
     { runId: run, stopReason: d.stopReason },
   ],
   "turn.failed": (run) => ["error", { runId: run }],
-  // Telegram topics: the host made the first delegation; reason is a fixed label such as "topic:email".
+  // Telegram topics: the host made the first delegation; reason is a fixed label such as "topic.email".
   "route.first_call": (run, d) => [
     "info",
     { runId: run, operation: d.operation, kind: d.reason },

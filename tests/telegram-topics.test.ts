@@ -475,10 +475,14 @@ test("a message typed in Chief's Email topic is recorded with its topic", async 
     await bot.handleUpdate(update(3));
     const topics = (
       await db.query(
-        "SELECT metadata->>'topic' AS topic FROM conversation_inputs ORDER BY ordinal",
+        "SELECT metadata->>'topic' AS topic, metadata->>'topicFirstStep' AS first FROM conversation_inputs ORDER BY ordinal",
       )
-    ).rows.map((r) => r.topic);
-    assert.deepEqual(topics, ["email", "news", null]);
+    ).rows;
+    assert.deepEqual(
+      topics.map((r) => r.topic),
+      ["email", "news", null],
+    );
+    assert.equal(topics[0].first, "true");
   } finally {
     await pg.close();
   }

@@ -49,8 +49,16 @@ test("only an ordinary message typed in the Email topic starts with the email ag
     ["email", "x".repeat(2001), false, false, catalogue],
     ["email", "read this screenshot", true, false, catalogue],
     ["email", "continue", false, true, catalogue],
-    ["email", "hi", false, false, JSON.stringify({ agentCatalogue: [] })],
-    ["email", "hi", false, false, "not json"],
+    [
+      "email",
+      "any reply yet?",
+      false,
+      false,
+      JSON.stringify({ agentCatalogue: [] }),
+    ],
+    ["email", "hi there friend", false, false, "not json"],
+    ["email", "thanks!", false, false, catalogue],
+    ["email", "ok cool", false, false, catalogue],
   ] as const)
     assert.equal(
       topicFirstCall(topic, message, images, background, context),
@@ -119,9 +127,7 @@ test("a message in the Email topic skips the coordinator's routing call and keep
     const id = await assistant.recordInput(
       "owner",
       "any reply from the landlord?",
-      {
-        topic: "email",
-      },
+      { topic: "email", topicFirstStep: true },
     );
     const reply = await assistant.respondDetailed(
       "owner",
@@ -150,6 +156,69 @@ test("a message in the Email topic skips the coordinator's routing call and keep
     const general = await assistant.respondDetailed("owner", "thanks");
     assert.equal(general.reply, "You're welcome.");
     assert.deepEqual(seen, ["chief"]);
+  } finally {
+    await pg.close();
+  }
+});
+
+test("no host first step when newer input is waiting, or in file mode", async () => {
+  const { pg, db } = await database();
+  const seen: string[] = [];
+  const generate: ModelAdapter["generate"] = async (input) => {
+    const system = String(input.messages[0]?.content);
+    seen.push(system.includes("You are the email agent") ? "agent" : "chief");
+    if (seen.at(-1) === "chief")
+      assert.match(JSON.stringify(input.messages), /topic/);
+    return { message: { role: "assistant", content: "Okay." } };
+  };
+  const assistant = new Assistant(
+    db,
+    new CustomAgent({ model: "main/model", generate }, {}, (id) => ({
+      model: id,
+      generate,
+    })),
+    new JobTools(db, { call: async () => ({}) }),
+    { gmail: true },
+  );
+  try {
+    // A second message is already queued: the turn absorbs it before any step.
+    const id = await assistant.recordInput(
+      "owner",
+      "any reply from the landlord?",
+      { topic: "email", topicFirstStep: true },
+    );
+    await assistant.recordInput("owner", "never mind, not important", {});
+    await assistant.respondDetailed(
+      "owner",
+      "any reply from the landlord?",
+      undefined,
+      undefined,
+      { id },
+    );
+    assert.equal(seen[0], "chief");
+    // File mode: the topic is a hint only.
+    seen.length = 0;
+    const filed = await assistant.recordInput(
+      "owner",
+      "any reply from the landlord now?",
+      { topic: "email", topicFirstStep: false },
+    );
+    await assistant.respondDetailed(
+      "owner",
+      "any reply from the landlord now?",
+      undefined,
+      undefined,
+      { id: filed },
+    );
+    assert.deepEqual(seen, ["chief"]);
+    assert.equal(
+      (
+        await db.query(
+          "SELECT count(*)::int n FROM events WHERE type='route.first_call'",
+        )
+      ).rows[0].n,
+      0,
+    );
   } finally {
     await pg.close();
   }

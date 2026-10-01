@@ -11,7 +11,6 @@ import { OpenRouter } from "./model.js";
 import { resolveMainModel } from "./model-policy.js";
 import { recoverRuntime } from "./execution.js";
 import { TelegramViews } from "./telegram-views.js";
-import { TelegramTopics } from "./telegram-topics.js";
 import type { Delivery } from "./answer.js";
 import { WorkWorker } from "./work-worker.js";
 import { DailyTools, DailyWorker, ScheduleParser } from "./daily.js";
@@ -303,7 +302,7 @@ const app = server(
 );
 const bot = telegram(c, assistant, db);
 // Scheduled output goes to its own topic when threaded mode is on; otherwise to General.
-const topics = new TelegramTopics(db, bot.api, c.TELEGRAM_TOPICS !== "off");
+const topics = bot.topics;
 // Create Chief's topics up front so the owner can write in them before anything is posted.
 for (const user of c.TELEGRAM_ALLOWED_USER_IDS.split(","))
   void topics

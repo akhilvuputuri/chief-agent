@@ -19,8 +19,8 @@ The `/mybots` text menu does not show these switches. They are only in the Mini 
 
 `TELEGRAM_TOPICS` applies only when `getMe().has_topics_enabled` is true:
 
-- `auto` (the default) files scheduled output into topics, creates the topics at startup and sends Email-topic messages to the email agent first;
-- `file` files output and answers in the topic, without the first step;
+- `auto` (the default) creates the topics at startup, files scheduled output into them, tells Chief which topic a message came from, and sends Email-topic messages to the email agent first;
+- `file` does the same, except for the first step;
 - `off` sends scheduled output to General.
 
 Replies always follow the topic of the incoming message. Production Compose does not pass this variable yet, so production always uses `auto`. There, the switch is BotFather's Threaded Mode.
@@ -46,13 +46,15 @@ Replies always follow the topic of the incoming message. Production Compose does
 
 ## Topic as the first step (phase 2)
 
-Chief is a coordinator: for a domain request, its first model call usually does nothing but call `agent_run`. For a message typed in the Email topic, the host makes that call itself. The run starts with `agent_run({type: "email", objective: <the owner's message>, context: <topic and previous exchange>})`, and Chief's first model call already sees the agent's report. That saves one main-model call per message. The [decision eval](journey/50-decision-evals.md) priced a saved call at about 4.2 s and $0.02, as an upper estimate.
+Chief is a coordinator: for a domain request, its first model call usually does nothing but call `agent_run`. For a message typed in the Email topic, the host makes that call itself. The run starts with `agent_run({type: "email", objective: <the owner's message>, context: <topic and previous exchange>})`, and Chief's first model call already sees the agent's report. That saves one main-model call per message that Chief would have delegated anyway. The [decision eval](journey/50-decision-evals.md) priced a saved call at about 4.2 s and $0.02, as an upper estimate.
 
 - **Same record as a model-made call.** The call is journaled like any other (`runtime_calls`, checkpointed history), so approvals, `conversation_read` and later turns see an ordinary delegation. `route.first_call` records that the host made it.
 - **Chief still answers.** It writes the reply from the report. Runtime context tells it the topic and that the host started the agent. If the message was about something else, Chief handles it as usual: it can delegate again or answer itself.
+- **The trade-off.** A message in the Email topic that needs no email search costs an email-agent run that Chief alone would have skipped. Messages under three words ("thanks!", "ok cool") never take the first step, which removes most of that cost.
 - **When the ordinary path is used instead:**
   - the message is in General, News or Markets;
-  - it has images;
+  - it is shorter than three words or has images;
+  - newer owner input was already waiting when the turn started;
   - it is longer than `agent_run`'s 2,000-character objective;
   - it is background work;
   - the email agent is not available in this deployment;
