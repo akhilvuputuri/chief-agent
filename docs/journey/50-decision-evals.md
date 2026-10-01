@@ -53,7 +53,7 @@ After #129, every domain request costs a coordinator model call whose only job i
   - Jev versus Chief: p = 7.6 × 10⁻⁶.
   - Jev versus Flash: p = 0.023, with 11 against 2 discordant cases.
 - **Net time and cost.** A saved call is valued at the mean of all main-model calls (4.2 s and $0.0208, from the `model.completed` log, 25–30 September, n = 203, before #129). Jev's own mean latency and cost are then subtracted from every message. A coordinator call that only calls `agent_run` is probably shorter, so these savings are upper estimates.
-- **Thin margin.** On tuning, single calls at 0.96 included a wrong route; 0.97 is the lowest threshold with none.
+- **Thin margin.** On tuning, single calls at 0.96 made 3 wrong routes out of 118; 0.97 is the lowest threshold with none (0 of 106).
 
 ## Diagnosis and alternatives
 
