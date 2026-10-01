@@ -112,6 +112,14 @@ test("shadow failures resolve as failed predictions and never throw", async () =
     ],
     [(async () => reply({})) as typeof fetch, "invalid"],
     [
+      (async () =>
+        reply({
+          needs_previous: { noul: 1.7 },
+          agent: { choice: "billing", probabilities: { billing: 0.99 } },
+        })) as typeof fetch,
+      "invalid",
+    ],
+    [
       (async () => {
         throw new Error("network");
       }) as typeof fetch,

@@ -1011,7 +1011,8 @@ export class Assistant {
         void shadowed.then((predictions) =>
           this.shadow!.record(this.db, user, run, predictions, {
             // Predictions saw only the first message; analysis can exclude these turns.
-            interrupted: output.interrupted ?? false,
+            interrupted:
+              output.interrupted ?? output.stopReason === "interrupted",
             stopReason: output.stopReason ?? "answer",
             messages: Math.max(1, consumedIds.length),
           }),

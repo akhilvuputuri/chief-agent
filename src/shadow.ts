@@ -92,7 +92,8 @@ export class ShadowDecisions {
           ledger,
           (answers) => {
             const p = answers?.needs_previous?.noul;
-            if (typeof p !== "number") return null;
+            // A malformed answer is a failure, never a prediction.
+            if (typeof p !== "number" || !(p >= 0 && p <= 1)) return null;
             return {
               decision: p < this.config.continuity.threshold ? "drop" : "keep",
               score: p,
@@ -127,7 +128,15 @@ export class ShadowDecisions {
           (answers) => {
             const agent = answers?.agent?.choice;
             const p = answers?.agent?.probabilities?.[agent];
-            if (typeof agent !== "string" || typeof p !== "number") return null;
+            const offered =
+              agent === "chief" || input.agents.some((a) => a.type === agent);
+            if (
+              typeof agent !== "string" ||
+              !offered ||
+              typeof p !== "number" ||
+              !(p >= 0 && p <= 1)
+            )
+              return null;
             return {
               decision:
                 agent !== "chief" && p >= this.config.routing.threshold
