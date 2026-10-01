@@ -559,6 +559,15 @@ test("approval claims recheck supersession, retry definite rejections, and prese
         result: { id: 999, is_bot: true, first_name: "T", username: "t_bot" },
       } as any;
     attempts++;
+    if (mode === "fallback") {
+      guard = false;
+      throw new GrammyError(
+        "gone",
+        { ok: false, error_code: 400, description: "message thread not found" },
+        method,
+        payload,
+      );
+    }
     if (mode === "429")
       throw new GrammyError(
         "flood",
@@ -599,6 +608,19 @@ test("approval claims recheck supersession, retry definite rejections, and prese
       ).rows[0].payload.telegramDeliveryState,
       undefined,
     );
+    guard = true;
+    mode = "fallback";
+    await sendCalendarApprovals(bot, db, "123", async () => guard, 42, run);
+    assert.equal(attempts, 1);
+    assert.equal(
+      (
+        await db.query("SELECT payload FROM approvals WHERE id=$1", [
+          draft.approvalId,
+        ])
+      ).rows[0].payload.telegramDeliveryState,
+      undefined,
+    );
+    attempts = 0;
     guard = true;
     mode = "429";
     await assert.rejects(() =>

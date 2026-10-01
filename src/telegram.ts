@@ -796,6 +796,7 @@ async function sendApprovalMessage(
   user: string,
   text: string,
   options: Parameters<Bot["api"]["sendMessage"]>[2],
+  guard?: () => Promise<boolean>,
 ) {
   try {
     return await bot.api.sendMessage(user, text, options);
@@ -807,6 +808,7 @@ async function sendApprovalMessage(
         String((error as { description?: string }).description),
       )
     ) {
+      if (guard && !(await guard())) return undefined;
       const { message_thread_id: _thread, ...rest } = options;
       return bot.api.sendMessage(user, text, rest);
     }
@@ -830,7 +832,13 @@ async function claimedApprovalMessage(
     return undefined;
   }
   try {
-    return await sendApprovalMessage(bot, user, text, options);
+    const message = await sendApprovalMessage(bot, user, text, options, guard);
+    if (!message)
+      await db.query(
+        "UPDATE approvals SET payload=payload-'telegramDeliveryState' WHERE id=$1 AND user_id=$2 AND payload->>'telegramDeliveryState'='sending' AND NOT(payload ? 'telegramMessageId')",
+        [id, user],
+      );
+    return message;
   } catch (error) {
     const e = error as {
       error_code?: number;
