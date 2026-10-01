@@ -13,7 +13,7 @@ In the @BotFather Mini App, open My bots → Chief → Bot Settings → Threads 
 
 The `/mybots` text menu does not show these switches. They are only in the Mini App.
 
-`TELEGRAM_TOPICS` defaults to `auto`, which uses topics only when `getMe().has_topics_enabled` is true. `off` sends everything to General without changing BotFather. Production Compose does not pass this variable yet, so production always uses `auto`. There, the switch is BotFather's Threaded Mode.
+`TELEGRAM_TOPICS` defaults to `auto`, which files scheduled output into topics only when `getMe().has_topics_enabled` is true. `off` sends scheduled output to General. Replies still follow the topic of the incoming message. Production Compose does not pass this variable yet, so production always uses `auto`. There, the switch is BotFather's Threaded Mode.
 
 ## Behaviour
 
@@ -27,8 +27,8 @@ The `/mybots` text menu does not show these switches. They are only in the Mini 
 
 - **Topic creation.** Chief creates each topic the first time it sends there, then records the thread id as a `telegram.topic` event. No migration is needed: each owner and topic has a stable run id, so the lookup uses the existing run index, and the newest row wins. Concurrent first sends share one creation.
 - **Deleted topic.** If the owner deletes a topic, the next send fails with "message thread not found". Chief then records the id as gone (a row with a null `threadId`), creates the topic again and retries that send once. Concurrent recoveries share one new topic. Any other 400 rejection about the topic, such as a closed topic, retries that send once in General and keeps the stored topic. All other errors are not retried.
-- **Falling back to General.** Sends go to General in any of these cases: threaded mode is off, `TELEGRAM_TOPICS=off`, the threaded-mode check fails (a failed check is retried on the next send), or creation fails. If creation succeeds but recording the id fails, that send still uses the new topic. A topic problem never blocks a delivery, though errors that are not about the topic (for example, the bot being blocked) still fail as before.
-- **Changing the BotFather switch.** A successful threaded-mode check is kept until the process restarts. Turning Threaded Mode on or off therefore takes effect on the next deploy or restart.
+- **Falling back to General.** Sends go to General in any of these cases: threaded mode is off, `TELEGRAM_TOPICS=off`, the threaded-mode check fails (a failed check is retried on the next send), or creation fails. If creation succeeds but recording the id fails, the process remembers the id, so later sends reuse the topic instead of creating a duplicate. A topic problem never blocks a delivery, though errors that are not about the topic (for example, the bot being blocked) still fail as before.
+- **Changing the BotFather switch.** An "on" answer from the threaded-mode check is kept until restart. An "off" answer is checked again after ten minutes, so turning Threaded Mode on needs no restart, but turning it off takes effect on the next restart. When it is off, Telegram itself stops showing topics.
 - **Follow-ups during a running reply.** If a message joins a run that is already in progress, the answer goes to the topic of the message that started the run.
 - **Addressing General.** Telegram rejects `message_thread_id=1`, so `inThread()` leaves the id out for General.
 

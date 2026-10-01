@@ -57,7 +57,10 @@ const ledger = (user: string, key: TopicKey) => {
 };
 
 export class TelegramTopics {
-  private ready?: Promise<boolean>;
+  private state?: { on: boolean; at: number };
+  private checking?: Promise<boolean>;
+  // Topics created in this process, in case recording one failed.
+  private known = new Map<string, number>();
   private creating = new Map<string, Promise<number | undefined>>();
   private recovering = new Map<string, Promise<number | undefined>>();
   constructor(
@@ -67,29 +70,38 @@ export class TelegramTopics {
   ) {}
 
   /**
-   * Whether the bot has threaded mode on. A successful answer is kept until restart, so
-   * changing the BotFather switch takes effect on the next deploy; a failed check is
-   * retried on the next send.
+   * Whether the bot has threaded mode on. "On" is kept until restart; "off" is checked
+   * again after ten minutes, so turning the BotFather switch on needs no restart. A
+   * failed check is retried on the next send.
    */
-  private available() {
-    if (!this.enabled) return Promise.resolve(false);
-    this.ready ??= this.api.getMe().then(
-      (me) => !!me.has_topics_enabled,
-      (error) => {
-        this.ready = undefined;
-        opsLog("telegram.topics_check_failed", "warn", errorFields(error));
-        return false;
-      },
-    );
-    return this.ready;
+  private async available() {
+    if (!this.enabled) return false;
+    const state = this.state;
+    if (state && (state.on || Date.now() - state.at < 600_000)) return state.on;
+    this.checking ??= this.api
+      .getMe()
+      .then(
+        (me) => {
+          this.state = { on: !!me.has_topics_enabled, at: Date.now() };
+          return this.state.on;
+        },
+        (error) => {
+          opsLog("telegram.topics_check_failed", "warn", errorFields(error));
+          return false;
+        },
+      )
+      .finally(() => (this.checking = undefined));
+    return this.checking;
   }
 
   /** The topic's thread id, creating the topic once. Undefined means "send to General". */
   async thread(user: string, key: TopicKey): Promise<number | undefined> {
     if (!(await this.available())) return undefined;
-    const saved = await this.stored(user, key);
-    if (typeof saved === "number") return saved;
     const id = `${user}:${key}`;
+    const saved = await this.stored(user, key).catch(() => undefined);
+    if (typeof saved === "number") return saved;
+    // Created earlier in this process but never recorded (a null row means deleted).
+    if (saved === undefined && this.known.has(id)) return this.known.get(id);
     let pending = this.creating.get(id);
     if (!pending) {
       pending = this.create(user, key).finally(() => this.creating.delete(id));
@@ -113,6 +125,7 @@ export class TelegramTopics {
         icon_color: topics[key].icon_color,
       });
       opsLog("telegram.topic_created", "info", { kind: key });
+      this.known.set(`${user}:${key}`, topic.message_thread_id);
       // The topic exists now; use it for this send even if recording it fails.
       await event(this.db, user, ledger(user, key), "telegram.topic", {
         key,

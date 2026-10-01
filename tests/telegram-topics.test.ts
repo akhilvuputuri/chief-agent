@@ -272,7 +272,12 @@ test("a closed topic sends to General, and a topic is used even if recording it 
     );
     const used: any[] = [];
     await failing.send("123", "markets", async (extra) => used.push(extra));
-    assert.deepEqual(used, [{ message_thread_id: 40 }]);
+    // The next send reuses it rather than creating a duplicate topic.
+    await failing.send("123", "markets", async (extra) => used.push(extra));
+    assert.deepEqual(used, [
+      { message_thread_id: 40 },
+      { message_thread_id: 40 },
+    ]);
   } finally {
     await pg.close();
   }
@@ -347,6 +352,30 @@ test("approval cards for a message typed in a topic go to that topic", async () 
     assert.equal(sent.length, 1);
     assert.equal(sent[0].message_thread_id, 55);
   } finally {
+    await pg.close();
+  }
+});
+
+test("threaded mode turned on later is picked up without a restart", async (t) => {
+  const { pg, db } = await database();
+  let enabled = false;
+  let checks = 0;
+  const topics = new TelegramTopics(db, {
+    getMe: async () => (checks++, { has_topics_enabled: enabled }) as any,
+    createForumTopic: async () => ({ message_thread_id: 40 }) as any,
+  });
+  try {
+    t.mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+    assert.equal(await topics.thread("123", "news"), undefined);
+    enabled = true;
+    assert.equal(await topics.thread("123", "news"), undefined);
+    t.mock.timers.tick(600_001);
+    assert.equal(await topics.thread("123", "news"), 40);
+    t.mock.timers.tick(600_001);
+    assert.equal(await topics.thread("123", "news"), 40);
+    assert.equal(checks, 2, "an 'on' answer is not checked again");
+  } finally {
+    t.mock.timers.reset();
     await pg.close();
   }
 });

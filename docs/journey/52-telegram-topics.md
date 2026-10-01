@@ -15,7 +15,7 @@ On 1 October the owner turned on Threaded Mode for the production bot. Chief the
   - A send without `message_thread_id` lands in General, with no error.
   - `message_thread_id=1` is rejected, so General must be addressed by leaving the id out.
   - A deleted topic fails sends with "message thread not found".
-- **Tested:** `tests/telegram-topics.test.ts` has 9 tests:
+- **Tested:** `tests/telegram-topics.test.ts` has 10 tests:
   - concurrent first sends create one topic, and the id is reused after a restart;
   - with threaded mode off, `TELEGRAM_TOPICS=off`, or failed creation, sends go to General;
   - a deleted topic is recreated and the send is retried once, while other errors are not retried;
@@ -23,7 +23,8 @@ On 1 October the owner turned on Threaded Mode for the production bot. Chief the
   - an inbound topic message gets its reply and typing indicator in the same topic, while General stays plain;
   - a closed topic sends to General, and a topic is used even if recording its id fails;
   - two sends that find the topic deleted recreate it once;
-  - approval cards follow the topic.
+  - approval cards follow the topic;
+  - turning threaded mode on later is picked up without a restart.
 - **Not yet observed:** behaviour on the live bot. In particular, that `createForumTopic` succeeds in the owner's private chat with user-created topics disallowed.
 
 ## Diagnosis and alternatives
@@ -42,9 +43,13 @@ See [topics in the private chat](../telegram-topics.md): `TelegramTopics`, a thr
 - concurrent recoveries of a deleted topic create one new topic;
 - the typing indicator is sent with an explicit thread and caught, because grammY's helper copies `message_thread_id` even for General messages.
 
+**Devin review** raised the same points, plus two more that were fixed:
+
+- an "off" threaded-mode answer is checked again after ten minutes;
+- a topic whose id failed to record is remembered in the process, so it is not duplicated.
+
 Documented rather than changed:
 
-- the threaded-mode check is cached until restart;
 - a follow-up that joins a running reply is answered in the topic of the message that started the run.
 
 ## Verification and outcome
