@@ -27,11 +27,17 @@ The first full application suite found three Telegram mock-startup regressions b
 
 ## Verification and outcome
 
-After incorporating current main, `npm run check` passed 596 application, 21 JavaScript and 30 offline Python tests; build and repository format check passed. Fifteen offline operator tests cover exact baseline/archive, preserved environment/data, active-work refusal, validated changes including refusal of implicit default-on activation, build/health failure and rollback. The source baseline's successful [release receipt](https://github.com/akhilvuputuri/chief-agent/actions/runs/36895492925) was observed, but no candidate release or capability activation is claimed.
+### Independent review — 2 October 2026
+
+GPT-6 Astra returned REQUEST CHANGES for head `e2c49613e50124e357775067b18e68729dee4a4b` against `aacdc2ac9d9c9a92a11f74c19d88b93daa189a35`. Independent repros found that one changed meeting suppressed other valid meetings in a batch, ongoing meetings could still receive late preparation, and a confirmation race could make a stale pause falsely report success and suppress newer findings. Fixes give each Calendar occurrence a separate investigation, require future start time at delivery, and serialize/recheck lifecycle updates before revision-scoped suppression. Three focused regressions cover the failures. Re-review is pending.
+
+An additional Tavily evidence finding was withdrawn after rechecking the exact commit through JobTools and normal execution journaling: the existing host adapter already supplies sourceUrl. The original repro bypassed that adapter. No provider change was required. The reviewer independently ran 43 focused tests and 15 rollout tests; live providers, paid evaluation and deployment were outside that review.
+
+After incorporating current main, `npm run check` passed 596 application, 21 JavaScript and 30 offline Python tests; build and repository format check passed. After the three review regressions were added, the full check passed 599 application, 21 JavaScript and 30 offline Python tests; build/format and 15 rollout tests passed again. Those operator tests cover exact baseline/archive, preserved environment/data, active-work refusal, validated changes including refusal of implicit default-on activation, build/health failure and rollback. The source baseline's successful [release receipt](https://github.com/akhilvuputuri/chief-agent/actions/runs/36895492925) was observed, but no candidate release or capability activation is claimed.
 
 ### Release closure
 
-Pending exact-head independent approval, final checks, merge, reviewed migration installation, separate activation, exact release/health verification and owner Telegram acceptance. Record actual PR, reviewed SHA, release SHA and version only after those steps happen.
+Candidate [PR 148](https://github.com/akhilvuputuri/chief-agent/pull/148) remains disabled and unmerged. Pending exact-head independent approval, final checks, reviewed migration installation, separate activation, exact release/health verification and owner Telegram acceptance. Record actual approved/released SHA and version only after those steps happen.
 
 ## Follow-up and next iteration
 

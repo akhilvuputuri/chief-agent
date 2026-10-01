@@ -1404,3 +1404,209 @@ test("pausing a concern aborts its in-flight model and never resumes its investi
     await f.pg.close();
   }
 });
+test("each meeting occurrence has independent preparation when another occurrence is cancelled", async () => {
+  const f = await fixture();
+  try {
+    const start = new Date(f.clock().getTime() + 3600000).toISOString();
+    let cancelled = "";
+    const events = ["one", "two"].map((id) => ({
+      id,
+      title: id,
+      start: { dateTime: start },
+      end: { dateTime: new Date(Date.parse(start) + 3600000).toISOString() },
+      status: "confirmed",
+      attendees: [{ email: "guest@external.example" }],
+    }));
+    const calendar = {
+      list: async () => ({
+        truncated: false,
+        events: events.map((e) => ({
+          ...e,
+          status: e.id === cancelled ? "cancelled" : "confirmed",
+        })),
+      }),
+    } as any;
+    const service = new Responsibilities(f.db, { calendar }, f.clock),
+      worker = new ResponsibilityWorker(
+        service,
+        () => true,
+        { calendar },
+        f.clock,
+      );
+    const proposal = await service.call("a", f.run, {
+      operation: "responsibility_create",
+      spec: {
+        ...f.spec,
+        parcelIds: [],
+        gmail: undefined,
+        calendar: { leadHours: 2, internalDomains: ["internal.example"] },
+        end: "until_cancelled",
+      },
+    });
+    await service.confirm("a", proposal.approvalId, true);
+    await worker.tick();
+    const first = (
+        await f.db.query("SELECT id FROM work_tasks WHERE status='queued'")
+      ).rows[0].id,
+      scope = await service.scope("a", first);
+    assert.equal(scope!.candidates.length, 1);
+    cancelled = scope!.candidates[0].payload.event.id;
+    await complete(f, { evidence: [scope!.candidates[0].source_key] });
+    let sends = 0;
+    const delivery = new ResponsibilityDelivery(
+      service,
+      () => true,
+      async () => ({ message_id: ++sends }),
+      f.clock,
+      calendar,
+    );
+    await delivery.tick();
+    assert.equal(sends, 0);
+    await worker.tick();
+    const second = (
+        await f.db.query("SELECT id FROM work_tasks WHERE status='queued'")
+      ).rows[0].id,
+      next = await service.scope("a", second);
+    assert.equal(next!.candidates.length, 1);
+    assert.notEqual(next!.candidates[0].payload.event.id, cancelled);
+    await complete(f, { evidence: [next!.candidates[0].source_key] });
+    await delivery.tick();
+    assert.equal(sends, 1);
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT count(*)::int n FROM responsibility_investigations",
+        )
+      ).rows[0].n,
+      2,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+test("ongoing Calendar events cannot receive preparation after their start", async () => {
+  const f = await fixture();
+  try {
+    const start = new Date(f.clock().getTime() + 3600000).toISOString();
+    const event = {
+      id: "one",
+      title: "Meeting",
+      start: { dateTime: start },
+      end: { dateTime: new Date(Date.parse(start) + 3600000).toISOString() },
+      status: "confirmed",
+      attendees: [{ email: "guest@external.example" }],
+    };
+    const calendar = {
+        list: async () => ({ truncated: false, events: [event] }),
+      } as any,
+      service = new Responsibilities(f.db, { calendar }, f.clock),
+      worker = new ResponsibilityWorker(
+        service,
+        () => true,
+        { calendar },
+        f.clock,
+      );
+    const proposal = await service.call("a", f.run, {
+      operation: "responsibility_create",
+      spec: {
+        ...f.spec,
+        parcelIds: [],
+        gmail: undefined,
+        calendar: { leadHours: 2, internalDomains: [] },
+        end: "until_cancelled",
+      },
+    });
+    await service.confirm("a", proposal.approvalId, true);
+    await worker.tick();
+    const key = (
+      await f.db.query("SELECT source_key FROM responsibility_candidates")
+    ).rows[0].source_key;
+    await complete(f, { evidence: [key] });
+    f.time(new Date(Date.parse(start) + 600000));
+    let sends = 0;
+    await new ResponsibilityDelivery(
+      service,
+      () => true,
+      async () => ({ message_id: ++sends }),
+      f.clock,
+      calendar,
+    ).tick();
+    assert.equal(sends, 0);
+    assert.equal(
+      (await f.db.query("SELECT reason FROM responsibility_findings")).rows[0]
+        .reason,
+      "meeting_elapsed",
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+test("a confirmation racing lifecycle mutation rejects stale pause without suppressing new-revision findings", async () => {
+  const f = await fixture();
+  try {
+    const id = await f.create({
+      parcelIds: [],
+      gmail: undefined,
+      schedule: "every 1h",
+      end: "until_cancelled",
+    });
+    const proposal = await f.service.call("a", f.run, {
+      operation: "responsibility_update",
+      id,
+      baseRevision: 1,
+      spec: {
+        ...f.spec,
+        parcelIds: [],
+        gmail: undefined,
+        schedule: "every 1h",
+        end: "until_cancelled",
+        title: "New revision",
+      },
+    });
+    let intercepted = false;
+    const proxy = {
+      query: async (sql: string, args?: unknown[]) => {
+        const result = await f.db.query(sql, args);
+        if (
+          !intercepted &&
+          sql.startsWith("SELECT * FROM responsibilities WHERE id=")
+        ) {
+          intercepted = true;
+          await f.service.confirm("a", proposal.approvalId, true);
+          await f.db.query(
+            `INSERT INTO responsibility_findings(id,user_id,responsibility_id,revision,payload,decision,reason,fact_key,due_at,state) VALUES($1,'a',$2,2,'{"reply":"New revision update"}','now','notify','new',now(),'pending')`,
+            [randomUUID(), id],
+          );
+        }
+        return result;
+      },
+      transaction: f.pg.transaction.bind(f.pg),
+    } as any;
+    const service = new Responsibilities(proxy, {}, f.clock);
+    let interrupted = false;
+    service.onInactive = async () => {
+      interrupted = true;
+    };
+    await assert.rejects(
+      () =>
+        service.call("a", f.run, {
+          operation: "responsibility_update",
+          id,
+          baseRevision: 1,
+          status: "paused",
+        }),
+      /changed concurrently/,
+    );
+    const row = (await f.service.list("a"))[0];
+    assert.equal(row.revision, 2);
+    assert.equal(row.status, "active");
+    assert.equal(interrupted, false);
+    assert.equal(
+      (await f.db.query("SELECT state FROM responsibility_findings")).rows[0]
+        .state,
+      "pending",
+    );
+  } finally {
+    await f.pg.close();
+  }
+});

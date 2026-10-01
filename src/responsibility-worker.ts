@@ -280,7 +280,7 @@ export class ResponsibilityWorker {
         SELECT $3,$1,'Monitoring: '||(spec->>'title'),'Investigate the saved responsibility and exact candidate changes. Record responsibility_report then finish.','queued',true,300000,10,30,'{"source":"responsibility"}' FROM selected RETURNING id),
       v AS (INSERT INTO work_revisions(task_id,revision,request,objective) SELECT $3,1,'Investigate saved responsibility','Monitoring: '||(spec->>'title') FROM selected,task),
       i AS (INSERT INTO responsibility_investigations(task_id,user_id,responsibility_id,revision) SELECT $3,$1,s.id,s.revision FROM selected s,task RETURNING task_id),
-      batch AS (SELECT c.id FROM responsibility_candidates c,selected s WHERE c.responsibility_id=s.id AND c.revision=s.revision AND c.task_id IS NULL ORDER BY c.created_at,c.id LIMIT 30)
+      batch AS (SELECT c.id FROM responsibility_candidates c,selected s WHERE c.responsibility_id=s.id AND c.revision=s.revision AND c.task_id IS NULL ORDER BY c.created_at,c.id LIMIT (SELECT CASE WHEN spec ? 'calendar' THEN 1 ELSE 30 END FROM selected))
       UPDATE responsibility_candidates SET task_id=$3 WHERE id IN (SELECT id FROM batch) AND EXISTS(SELECT 1 FROM i) RETURNING id`,
         [user, day(now), task],
       ),
@@ -613,13 +613,18 @@ export class ResponsibilityDelivery {
                     (e: any) =>
                       e.id === c.payload.event.id &&
                       e.status !== "cancelled" &&
+                      Date.parse(e.start?.dateTime) > now.getTime() &&
                       e.start?.dateTime === c.payload.event.start.dateTime,
                   ),
               )
             ) {
+              const elapsed = events.some(
+                (c) =>
+                  Date.parse(c.payload.event.start.dateTime) <= now.getTime(),
+              );
               await this.db.query(
-                `UPDATE responsibility_findings SET state='suppressed',reason='meeting_changed' WHERE id=$1 AND state='pending'`,
-                [f.id],
+                `UPDATE responsibility_findings SET state='suppressed',reason=$2 WHERE id=$1 AND state='pending'`,
+                [f.id, elapsed ? "meeting_elapsed" : "meeting_changed"],
               );
               continue;
             }

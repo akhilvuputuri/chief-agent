@@ -207,15 +207,21 @@ export class Responsibilities {
           fail(
             "Finished responsibilities cannot resume; create a new confirmed responsibility",
           );
-        await this.db.query(
-          "UPDATE responsibilities SET status=$4,updated_at=now() WHERE id=$1 AND user_id=$2 AND revision=$3",
-          [a.id, user, a.baseRevision, a.status],
-        );
-        if (a.status !== "active")
-          await this.db.query(
-            `UPDATE responsibility_findings SET state='suppressed',reason='owner_${a.status}' WHERE responsibility_id=$1 AND user_id=$2 AND state='pending'`,
-            [a.id, user],
+        await withResponsibilityOwner(this.db, user, async (tx) => {
+          const changed = await tx.query(
+            "UPDATE responsibilities SET status=$4,updated_at=now() WHERE id=$1 AND user_id=$2 AND revision=$3 AND status IN ('active','paused') RETURNING id",
+            [a.id, user, a.baseRevision, a.status],
           );
+          if (!changed.rows.length)
+            fail(
+              "Responsibility changed concurrently; read its current revision before changing lifecycle",
+            );
+          if (a.status !== "active")
+            await tx.query(
+              `UPDATE responsibility_findings SET state='suppressed',reason='owner_${a.status}' WHERE responsibility_id=$1 AND user_id=$2 AND revision=$3 AND state='pending'`,
+              [a.id, user, a.baseRevision],
+            );
+        });
         if (a.status !== "active") await this.onInactive?.(user, a.id);
         await event(this.db, user, run, "responsibility.lifecycle", {
           id: a.id,
@@ -224,6 +230,7 @@ export class Responsibilities {
         return {
           id: a.id,
           status: a.status,
+          revision: a.baseRevision,
           notice:
             "Existing investigations remain inspectable. No paused work was automatically resumed.",
         };
