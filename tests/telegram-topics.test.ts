@@ -455,7 +455,7 @@ test("a message typed in Chief's Email topic is recorded with its topic", async 
     return { ok: true, result: true } as any;
   });
   await bot.init();
-  const update = (id: number, thread?: number) =>
+  const update = (id: number, thread?: number, extra: object = {}) =>
     ({
       update_id: id,
       message: {
@@ -467,12 +467,25 @@ test("a message typed in Chief's Email topic is recorded with its topic", async 
         ...(thread
           ? { is_topic_message: true, message_thread_id: thread }
           : {}),
+        ...extra,
       },
     }) as any;
+  const replyTo = (topicRoot: boolean) => ({
+    reply_to_message: {
+      message_id: 7,
+      date: 0,
+      chat: { id: 123, type: "private" },
+      ...(topicRoot
+        ? { forum_topic_created: { name: "Email", icon_color: 0xffd67e } }
+        : { text: "an earlier answer" }),
+    },
+  });
   try {
-    await bot.handleUpdate(update(1, 42));
+    await bot.handleUpdate(update(1, 42, replyTo(true)));
     await bot.handleUpdate(update(2, 40));
     await bot.handleUpdate(update(3));
+    // An explicit reply to an earlier message: only Chief's context carries its target.
+    await bot.handleUpdate(update(4, 42, replyTo(false)));
     const topics = (
       await db.query(
         "SELECT metadata->>'topic' AS topic, metadata->>'topicFirstStep' AS first FROM conversation_inputs ORDER BY ordinal",
@@ -480,9 +493,12 @@ test("a message typed in Chief's Email topic is recorded with its topic", async 
     ).rows;
     assert.deepEqual(
       topics.map((r) => r.topic),
-      ["email", "news", null],
+      ["email", "news", null, "email"],
     );
-    assert.equal(topics[0].first, "true");
+    assert.deepEqual(
+      topics.map((r) => r.first),
+      ["true", "true", "true", "false"],
+    );
   } finally {
     await pg.close();
   }

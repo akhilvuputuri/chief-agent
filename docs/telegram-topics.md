@@ -53,7 +53,8 @@ Chief is a coordinator: for a domain request, its first model call usually does 
 - **The trade-off.** A message in the Email topic that needs no email search costs an email-agent run that Chief alone would have skipped. Messages under three words ("thanks!", "ok cool") never take the first step, which removes most of that cost.
 - **When the ordinary path is used instead:**
   - the message is in General, News or Markets;
-  - it is shorter than three words or has images;
+  - it is shorter than three words, or is a photo or document (the email agent cannot read attachments; voice notes become text and qualify);
+  - it is an explicit reply to an earlier message, whose target only Chief's context carries;
   - newer owner input was already waiting when the turn started;
   - it is longer than `agent_run`'s 2,000-character objective;
   - it is background work;

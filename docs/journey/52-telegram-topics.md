@@ -77,6 +77,11 @@ The owner asked for the whole feature rather than waiting for shadow data.
   - the synthetic message has `content: null`, matching what the model adapter produces;
   - `file` mode keeps the topic hint;
   - one topics helper is shared by the inbound handler and scheduled sends.
+- **Devin review** found four more points, all fixed:
+  - startup creates the owner row before recording topics;
+  - photos and documents take the ordinary path;
+  - an explicit reply to an earlier message takes the ordinary path, so Chief sees what it refers to;
+  - the topic note has one wording that stays true if the first step is dropped.
 
 ## Verification and outcome
 

@@ -762,9 +762,9 @@ export class Assistant {
           ...JSON.parse(runtime.context),
           topic: {
             name: topic,
-            note: firstCall
-              ? "The owner wrote in this Telegram topic, so the host started that topic's agent as your first step. Answer from its report. If the message was about something else, handle it as usual."
-              : "The owner wrote in this Telegram topic. Treat it as a hint about the subject, not a limit on what you can do.",
+            // One wording either way: the host's first step can still be dropped if newer
+            // input arrives before it runs.
+            note: "The owner wrote in this Telegram topic. Treat it as a hint about the subject, not a limit on what you can do. If this turn starts with an agent_run you did not make, the host started that topic's agent because of the topic: answer from its report, or handle the message as usual if it was about something else.",
           },
         });
       const request: AgentRequest = {
