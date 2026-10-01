@@ -15,7 +15,7 @@ Production reads one plain `.env` on the Lightsail host (see [the Lightsail runb
 ## Evidence
 
 - **Inventory, from code:**
-  - `src/config.ts` accepts 47 variables; `compose.yaml` passes 44 of them.
+  - `src/config.ts` accepts 48 variables; `compose.yaml` passes 44 of them. Of the 24 behaviour settings, Compose passes 20. `MEDIA_MODEL`, `TOOL_PICKER`, `TELEGRAM_TOPICS` and `PORT` are not passed, so the file is authoritative for them as soon as this deploys. Their file values equal the code defaults, so nothing changes.
   - 24 are behaviour settings, 10 are personal identifiers and 14 are secrets. `DATABASE_URL` counts as a secret because it holds the database password.
   - [Issue #143](https://github.com/akhilvuputuri/chief-agent/issues/143) lists them.
 - **Live values not read.** This Mac has no operator SSH, and the agent did not handle the live `.env`.
@@ -28,7 +28,7 @@ Production reads one plain `.env` on the Lightsail host (see [the Lightsail runb
 
 ## Diagnosis and alternatives
 
-- **File wins over the environment.** Rejected. Compose sets every name, so any production value that differs from the default would change behaviour on deploy, and those values were not visible.
+- **File wins over the environment.** Rejected. Compose sets 20 of the names, each with a default, so any production value that differs from the default would change behaviour on deploy, and those values were not visible.
 - **Environment wins over the file.** Chosen. The gateway logs which names differ (`config.loaded`, `envSettings`). That shows exactly which values the file must take before Compose stops passing them, so the switch changes nothing.
 - **Allow-list of names in the file.** The file accepts only behaviour names, so a secret or identifier cannot be committed through it by mistake.
 - **Secrets.** The recommendation in #143 is AWS SSM Parameter Store, not GitHub secrets:
@@ -50,7 +50,7 @@ Production reads one plain `.env` on the Lightsail host (see [the Lightsail runb
 - **`Dockerfile`:** copies the file into the image.
 - **Docs:** [configuration](../configuration.md).
 
-Independent review: pending.
+**Independent review (Opus 5.5): approved.** It confirmed that every Compose default equals the file value, that the file path resolves from `dist/` in the image, and that the allow-list rejects unknown keys. It flagged documentation that said Compose passes every name. Fixed: four names are file-authoritative now, and `docs/deployment.md` no longer says `MEDIA_MODEL` needs a Compose change.
 
 ## Verification and outcome
 

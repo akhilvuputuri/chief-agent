@@ -26,7 +26,10 @@ Other reviewed policy files already in the repo:
 
 ### Precedence during the move
 
-An environment value still wins over the file. Production's Compose file passes every one of these names, with Compose defaults, so the file cannot change production behaviour until Compose stops passing them. That step is part of the operator rollout in #143.
+An environment value still wins over the file.
+
+- **Passed by Compose (20 names):** production's Compose file passes these with Compose defaults, so the file cannot change them in production until Compose stops passing them. That step is part of the operator rollout in #143.
+- **Not passed (`MEDIA_MODEL`, `TOOL_PICKER`, `TELEGRAM_TOPICS`, `PORT`):** the file is already authoritative in production. Editing them in a PR changes production on the next release, with no operator step.
 
 To make the switch safe:
 
@@ -34,7 +37,9 @@ To make the switch safe:
 - Before Compose stops passing these names, update `config/runtime.json` to production's current values for exactly those names. Then the switch changes nothing.
 - When `envSettings` is empty after the switch, the file is authoritative.
 
-To change a behaviour setting today, edit `config/runtime.json` in a PR. It takes effect in production only once its name is no longer passed by Compose. Until then, the production `.env` value wins.
+To change a behaviour setting today, edit `config/runtime.json` in a PR. It takes effect in production on the next release for the four names above. For the others, it takes effect once Compose stops passing them; until then the production `.env` value wins.
+
+Locally, a `.env` line that sets a behaviour name, even to an empty value, overrides the file. Delete such lines rather than leaving them empty. `config.loaded` lists them.
 
 ```sh
 AWS_PROFILE=chief-logs npm run logs:cloudwatch -- event --event config.loaded --since 2h
