@@ -1,5 +1,9 @@
 # Versions and release notes
 
+## Released v0.3.31 — Libby refusal recovery
+
+[PR #145](https://github.com/akhilvuputuri/chief-agent/pull/145) stops repeat linking after explicit provider refusals, safely settles matched historical failures and corrects borrowing guidance. GPT-6 Astra approved `86c7fea975a50d7cd368a4d2e1818029080d22d2`; full checks passed (569 application, 21 JS, 30 Python tests). [Release](https://github.com/akhilvuputuri/chief-agent/actions/runs/36893817001) and separate server health verified `3382c5d63a6551ea960615332d0fc0cd3643e672`, the immutable [v0.3.31](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.31) target. Both account commands passed live Telegram acceptance with zero extra library calls. No schema/Compose change. Catalogue checks work; account linking remains refused and borrowing unimplemented. See [journal closure](journey/22-library-assistant.md#release-closure--2-october-2026).
+
 ## Released v0.3.30 — exact Telegram feed references
 
 [PR #139](https://github.com/akhilvuputuri/chief-agent/pull/139) adds sent feed identities, bounded General discovery, owner-scoped stored reads, frozen per-input anchors and shared thread-aware continuity. GPT-6 Astra independently approved exact head `cdab8b518bd08ceb00b95365d86c54d61209133e` after reproduced absorption/history/thread defects were fixed. Full checks passed (563 application, 21 JS script, 30 Python tests); the final reviewer passed 79 focused tests. [Release](https://github.com/akhilvuputuri/chief-agent/actions/runs/36875352644) and separate server RELEASE/health verified merge `7cdbda24d7e7145f9482eb47819ec822722dc649`. A rolled-back deployed-module smoke passed without fixtures, Telegram sends or model calls. [v0.3.30](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.30) is immutable. No new schema beyond migration 022; owner live acceptance remains separate. See [journal 53](journey/53-feed-destinations.md).
