@@ -1267,6 +1267,8 @@ test("historical uncertainty settles only from the exact final clone refusal, wi
     "recovered",
     "different-owner",
     "malformed",
+    "different-attempt",
+    "null-member",
   ] as const) {
     const { pg, db } = await database();
     try {
@@ -1279,10 +1281,11 @@ test("historical uncertainty settles only from the exact final clone refusal, wi
         "UPDATE approvals SET status='approved',payload=payload || '{\"execution\":\"uncertain\"}'::jsonb WHERE id=$1",
         [a.approvalId],
       );
+      const attemptId = randomUUID();
       await db.query(
         "INSERT INTO library_link_attempts(id,user_id,approval_id,direction,state,deadline_at,finished_at,last_result) VALUES($1,'123',$2,'display','completing',now(),now(),$3)",
         [
-          randomUUID(),
+          attemptId,
           a.approvalId,
           scenario === "timeout"
             ? "error:transient"
@@ -1295,8 +1298,11 @@ test("historical uncertainty settles only from the exact final clone refusal, wi
           scenario === "different-owner" ? "456" : "123",
           a.approvalId,
           JSON.stringify({
+            attemptId:
+              scenario === "different-attempt" ? randomUUID() : attemptId,
             recovered: scenario === "recovered",
             attempts: [
+              ...(scenario === "null-member" ? [null] : []),
               {
                 route: "/chip/clone",
                 status: 403,
@@ -1310,6 +1316,31 @@ test("historical uncertainty settles only from the exact final clone refusal, wi
         ],
       );
       h.calls.length = 0;
+      const context = await (
+        await import("../src/library-refusal.js")
+      ).libraryAccountContext(db, "123");
+      const shelf = await new (await import("../src/library.js")).LibraryTools(
+        h.client,
+        undefined,
+        h.identity,
+      ).shelf("123");
+      if (scenario === "refused") {
+        assert.match(context.note, /OverDrive refused/);
+        assert.match((shelf as any).note, /OverDrive refused/);
+      } else {
+        assert.equal(context.linkingRestricted, undefined);
+        assert.doesNotMatch((shelf as any).note, /OverDrive refused/);
+      }
+      assert.equal(
+        (
+          await db.query(
+            "SELECT payload->>'execution' e FROM approvals WHERE id=$1",
+            [a.approvalId],
+          )
+        ).rows[0].e,
+        "uncertain",
+        "read-only context does not settle records",
+      );
       const result = await h.actions.command("123", "shelf", undefined, "123");
       assert.equal(h.calls.length, 0);
       if (scenario === "refused") {
@@ -1374,6 +1405,88 @@ test("a restriction after successful clone preserves uncertain state and its ide
     await h.actions.decide("123", a.approvalId!, true);
     assert.equal(await settled(db, a.approvalId!), "uncertain");
     assert.ok(await h.identity.row("123"));
+  } finally {
+    await pg.close();
+  }
+});
+
+test("a private-client refusal in the periodic sync stops polling; accepted fallback entry stays uncertain", async () => {
+  for (const fallback of [false, true]) {
+    const { pg, db } = await database();
+    try {
+      const h = harness(db, {
+        codes: Array.from({ length: 8 }, () => ({
+          result: "retained",
+          code: "12345678",
+        })),
+        enter: () => Response.json({ result: "fulfilled" }),
+      });
+      const call = h.client.call.bind(h.client);
+      h.client.call = (async (key: any, options: any) => {
+        if (key === "chipSync")
+          throw new (await import("../src/library-client.js")).LibraryError(
+            "client_restricted",
+            "refused",
+            403,
+            "client_restricted",
+          );
+        return call(key, options);
+      }) as typeof h.client.call;
+      const a = await h.actions.draft("123", randomUUID(), "library_link", {});
+      if (fallback) {
+        await db.query(
+          "UPDATE approvals SET status='approved',payload=payload || '{\"execution\":\"executing\"}'::jsonb WHERE id=$1",
+          [a.approvalId],
+        );
+        const outcome = await h.link.enterCode(
+          "123",
+          a.approvalId!,
+          "123",
+          "12345678",
+        );
+        assert.equal(outcome.status, "uncertain");
+        assert.ok(await h.identity.row("123"));
+      } else {
+        await h.actions.decide("123", a.approvalId!, true);
+        assert.equal(await settled(db, a.approvalId!), "failed");
+        assert.equal(
+          h.calls.filter((c) => c.url.pathname === "/chip/clone/code").length,
+          4,
+        );
+        assert.match(
+          (await h.actions.command("123", "link", undefined, "123")).text,
+          /OverDrive refused/,
+        );
+      }
+    } finally {
+      await pg.close();
+    }
+  }
+});
+
+test("fulfilled code without blessing retains its identity when confirmation is refused", async () => {
+  const { pg, db } = await database();
+  try {
+    const h = harness(db, { codes: [{ result: "fulfilled" }] });
+    const call = h.client.call.bind(h.client);
+    h.client.call = (async (key: any, options: any) => {
+      if (key === "chipSync")
+        throw new (await import("../src/library-client.js")).LibraryError(
+          "client_restricted",
+          "refused",
+          403,
+          "client_restricted",
+        );
+      return call(key, options);
+    }) as typeof h.client.call;
+    const a = await h.actions.draft("123", randomUUID(), "library_link", {});
+    await h.actions.decide("123", a.approvalId!, true);
+    assert.equal(await settled(db, a.approvalId!), "uncertain");
+    assert.ok(await h.identity.row("123"));
+    assert.equal(
+      h.calls.filter((c) => c.url.pathname === "/chip/clone").length,
+      0,
+    );
   } finally {
     await pg.close();
   }

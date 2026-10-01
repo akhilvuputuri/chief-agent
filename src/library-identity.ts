@@ -8,6 +8,7 @@ import {
   LibraryError,
 } from "./library-client.js";
 import { libraryKey, websiteId } from "./library-routes.js";
+import { libraryLinkRefusal } from "./library-refusal.js";
 import { open, seal } from "./secret-box.js";
 export const identityLimits = {
   tokenLifetimeMs: 7 * 86400000,
@@ -191,13 +192,7 @@ export class LibraryIdentity {
       )
     ).rows[0];
     const restricted =
-      row?.state !== "linked" &&
-      !!(
-        await this.db.query(
-          "SELECT 1 FROM approvals WHERE user_id=$1 AND operation='library_link' AND status='approved' AND payload->'failure'->>'code'='client_restricted' LIMIT 1",
-          [user],
-        )
-      ).rows.length;
+      row?.state !== "linked" && !!(await libraryLinkRefusal(this.db, user));
     return {
       linkingRestricted: restricted,
       state: row?.state ?? ("none" as const),

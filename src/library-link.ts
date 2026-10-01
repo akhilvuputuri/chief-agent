@@ -234,10 +234,24 @@ export class LinkCeremony {
       // periodic sync probe remains only as the fallback signal for unfulfilled polls, where
       // an earlier attempt showed the card can arrive while the code poll still says retained.
       if (result === "fulfilled" || polls % this.limits.syncEveryPolls === 0) {
-        const arrived =
-          result === "fulfilled" && answer.blessing
-            ? null
-            : await this.cardArrived(user, bearer, jar);
+        let arrived: Awaited<ReturnType<LinkCeremony["cardArrived"]>>;
+        try {
+          arrived =
+            result === "fulfilled" && answer.blessing
+              ? null
+              : await this.cardArrived(user, bearer, jar);
+        } catch (error) {
+          // Fulfilment without a blessing may already have transferred the card.
+          if (
+            result === "fulfilled" &&
+            error instanceof LibraryError &&
+            error.kind === "client_restricted"
+          )
+            return this.finish(user, attemptId, approvalId, chat, messageId, {
+              status: "uncertain",
+            });
+          throw error;
+        }
         if (arrived || result === "fulfilled") {
           await this.progress(attemptId, {
             polls,
@@ -282,7 +296,8 @@ export class LinkCeremony {
       const synced = await this.identity.syncRaw(user, bearer, jar);
       return synced.card ? synced : null;
     } catch (error) {
-      if (error instanceof LibraryError) return null;
+      if (error instanceof LibraryError && error.kind !== "client_restricted")
+        return null;
       throw error;
     }
   }
@@ -314,6 +329,7 @@ export class LinkCeremony {
       "INSERT INTO library_link_attempts(id,user_id,approval_id,direction,state,deadline_at) VALUES($1,$2,$3,'enter','fulfilled',$4)",
       [id, user, approvalId, deadline],
     );
+    let enteredSuccessfully = false;
     try {
       const existing = await this.identity.row(user);
       const bearer =
@@ -326,6 +342,7 @@ export class LinkCeremony {
         schema: codeResponse.partial({ result: true }),
         context: "background",
       });
+      enteredSuccessfully = true;
       // Libby's entering side treats an answer without a blessing as "transfer done".
       const already = entered.blessing
         ? null
@@ -362,6 +379,10 @@ export class LinkCeremony {
           ? { reason: "client_restricted" as const }
           : {}),
       };
+      if (enteredSuccessfully && outcome.reason === "client_restricted") {
+        outcome.status = "uncertain";
+        delete outcome.reason;
+      }
       await this.finish(user, id, approvalId, chat, null, outcome);
       return outcome;
     }

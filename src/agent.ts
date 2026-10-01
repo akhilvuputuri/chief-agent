@@ -1,3 +1,4 @@
+import { libraryAccountContext } from "./library-refusal.js";
 import {
   inputAnchor,
   recentFeedIndex,
@@ -794,15 +795,7 @@ export class Assistant {
         ).rows,
         ...(this.availability.libraryAccount
           ? {
-              library: (
-                await this.db.query(
-                  'SELECT i.state,i.token_expires_at AS "tokenRenewsBy",s.synced_at AS "lastSyncAt" FROM library_identities i LEFT JOIN library_shelf s ON s.user_id=i.user_id WHERE i.user_id=$1',
-                  [user],
-                )
-              ).rows[0] ?? {
-                state: "none",
-                note: "Not linked; the user can send /library link.",
-              },
+              library: await libraryAccountContext(this.db, user),
             }
           : {}),
       });
