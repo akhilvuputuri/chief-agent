@@ -16,6 +16,55 @@ const draft = {
   start: "2026-09-20T15:00:00+08:00",
   end: "2026-09-20T16:00:00+08:00",
 };
+test("monitoring Calendar reads expand instances and paginate without changing ordinary result projections", async () => {
+  let calls: URL[] = [];
+  const request = (async (input: unknown) => {
+    const url = new URL(String(input));
+    calls.push(url);
+    if (url.hostname === "oauth2.googleapis.com")
+      return Response.json({ access_token: "test" });
+    if (url.pathname.endsWith("/userinfo"))
+      return Response.json({ email: "owner@example.com" });
+    const second = !!url.searchParams.get("pageToken");
+    return Response.json({
+      items: [
+        {
+          id: second ? "two" : "one",
+          summary: "Meeting",
+          start: { dateTime: draft.start },
+          end: { dateTime: draft.end },
+          attendees: [{ email: "external@example.net" }],
+          recurringEventId: "series",
+          originalStartTime: { dateTime: draft.start },
+        },
+      ],
+      ...(second ? {} : { nextPageToken: "page-two" }),
+    });
+  }) as typeof fetch;
+  const calendar = new CalendarTools(
+    {
+      owner: "a",
+      email: "owner@example.com",
+      clientId: "x",
+      clientSecret: "x",
+      refreshToken: "x",
+    },
+    request,
+  );
+  const normal = await calendar.list("a", draft.start, draft.end);
+  assert.equal(normal.truncated, true);
+  assert.ok(!("attendees" in normal.events[0]));
+  calls = [];
+  const monitor = await calendar.list("a", draft.start, draft.end, true);
+  assert.equal(monitor.events.length, 2);
+  assert.equal(monitor.truncated, false);
+  assert.equal(monitor.events[0].recurringEventId, "series");
+  const lists = calls.filter((u) => u.pathname.endsWith("/events"));
+  assert.equal(lists.length, 2);
+  assert.equal(lists[0].searchParams.get("singleEvents"), "true");
+  assert.equal(lists[1].searchParams.get("pageToken"), "page-two");
+  assert.ok(!lists[0].searchParams.has("syncToken"));
+});
 async function fixture() {
   const pg = new PGlite();
   for (const f of [

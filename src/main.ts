@@ -3,6 +3,11 @@ import { destination, taskDelivery } from "./delivery-routing.js";
 import "./process-guard.js";
 import { errorFields, opsLog } from "./ops-log.js";
 import { RoutineScheduler, RoutineDelivery } from "./routines.js";
+import { Responsibilities } from "./responsibilities.js";
+import {
+  ResponsibilityWorker,
+  ResponsibilityDelivery,
+} from "./responsibility-worker.js";
 import { StockMonitor, StockDelivery, WatchlistTools } from "./stocks.js";
 import { TwelveDataProvider } from "./stock-provider.js";
 import { NewsBulletin, NewsTools, voteKeyboard } from "./news.js";
@@ -41,6 +46,7 @@ import {
   telegram,
   sendCalendarApprovals,
   sendLibraryApprovals,
+  sendResponsibilityApprovals,
 } from "./telegram.js";
 // Startup refusals carry a fixed code so the sanitized crash line identifies them.
 const startupError = (code: string, message: string) =>
@@ -242,6 +248,19 @@ const newsBulletin = new NewsBulletin(
   (user) => topics.capture(user, { kind: "topic", topic: "news" }),
 );
 const daily = new DailyTools(db, parser, calendar, mirror);
+if (
+  c.RESPONSIBILITIES === "on" &&
+  !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=23")).rows
+    .length
+)
+  throw startupError(
+    "STARTUP_MIGRATION_023",
+    "Responsibilities migration 023 must be installed before enabling monitoring",
+  );
+const responsibilities =
+  c.RESPONSIBILITIES === "on"
+    ? new Responsibilities(db, { gmail, calendar })
+    : undefined;
 const assistant = new Assistant(
   db,
   new CustomAgent(
@@ -287,6 +306,7 @@ const assistant = new Assistant(
     libraryActions,
     new WatchlistTools(db, stockProvider),
     new NewsTools(db, newsFetcher, newsBulletin),
+    responsibilities,
   ),
   {
     canvases: !!c.MINIAPP_ORIGIN,
@@ -300,6 +320,7 @@ const assistant = new Assistant(
     dailySheet: !!(c.SHEETS_REFRESH_TOKEN && c.DAILY_SPREADSHEET_ID),
     stocks: !!stockProvider,
     news: true,
+    ...(responsibilities ? { responsibilities: true } : {}),
   },
   {
     ms: c.AGENT_BUDGET_MS,
@@ -315,6 +336,9 @@ const assistant = new Assistant(
     ? new ShadowDecisions(c.OPENROUTER_API_KEY)
     : undefined,
 );
+if (responsibilities)
+  responsibilities.onInactive = (user, id) =>
+    assistant.interruptResponsibility(user, id);
 const app = server(
   db,
   c.MINIAPP_ORIGIN
@@ -322,6 +346,7 @@ const app = server(
         origin: c.MINIAPP_ORIGIN,
         token: c.TELEGRAM_BOT_TOKEN,
         allowed: new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(",")),
+        responsibilities: !!responsibilities,
       }
     : undefined,
 );
@@ -342,6 +367,77 @@ notifyOwner = async (text) => {
 };
 const views = new TelegramViews(db, bot.api, undefined, c.MINIAPP_ORIGIN);
 const allowed = new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(","));
+const responsibilityWorker = responsibilities
+  ? new ResponsibilityWorker(responsibilities, (user) => allowed.has(user), {
+      gmail,
+      calendar,
+    })
+  : undefined;
+const responsibilityDelivery = responsibilities
+  ? new ResponsibilityDelivery(
+      responsibilities,
+      (user) => allowed.has(user),
+      async (user, finding) => {
+        const members = finding.members ?? [finding];
+        const reply = members
+          .map(
+            (f: any) =>
+              `${f.spec.title}\n${members.length > 1 ? f.payload.reply.slice(0, 250) + (f.payload.reply.length > 250 ? "…" : "") : f.payload.reply}${
+                f.payload.evidence?.length
+                  ? "\nSource: " +
+                    f.payload.evidence
+                      .slice(0, 2)
+                      .map((e: string) =>
+                        e.slice(0, members.length > 1 ? 60 : 200),
+                      )
+                      .join(", ")
+                  : ""
+              }`,
+          )
+          .join("\n\n");
+        return topics.deliver(
+          user,
+          { kind: "topic", topic: "updates" },
+          async (extra) =>
+            bot.api.sendMessage(user, reply, {
+              ...extra,
+              link_preview_options: { is_disabled: true },
+              reply_markup: {
+                inline_keyboard: members.flatMap((f: any) => [
+                  ...(c.MINIAPP_ORIGIN
+                    ? [
+                        [
+                          {
+                            text: "Details · " + f.spec.title.slice(0, 40),
+                            web_app: {
+                              url:
+                                c.MINIAPP_ORIGIN +
+                                "/miniapp/?view=responsibilities&responsibility=" +
+                                f.responsibility_id,
+                            },
+                          },
+                        ],
+                      ]
+                    : []),
+                  [
+                    { text: "Useful", callback_data: `rsp:useful:${f.id}` },
+                    { text: "Later", callback_data: `rsp:later:${f.id}` },
+                    { text: "Resolved", callback_data: `rsp:resolved:${f.id}` },
+                    {
+                      text: "Less like this",
+                      callback_data: `rsp:less:${f.id}`,
+                    },
+                  ],
+                ]),
+              },
+            }),
+        );
+      },
+      undefined,
+      calendar,
+    )
+  : undefined;
+await responsibilityDelivery?.recover();
 const worker = new DailyWorker<Delivery>(
   db,
   parser,
@@ -559,6 +655,16 @@ const stockDelivery = new StockDelivery(db, async (user, payload) => {
 await stockDelivery.recover();
 await newsBulletin.recover();
 const routineTimer = setInterval(() => {
+  void responsibilityWorker
+    ?.tick()
+    .catch((error) =>
+      opsLog("responsibility.tick_failed", "error", errorFields(error)),
+    );
+  void responsibilityDelivery
+    ?.tick()
+    .catch((error) =>
+      opsLog("responsibility.delivery_failed", "error", errorFields(error)),
+    );
   void routineScheduler
     .tick()
     .catch((error) =>
@@ -586,6 +692,8 @@ const workWorker = new WorkWorker(
   db,
   async (user, id) => {
     if (!allowed.has(user)) throw new Error("Unauthorized delivery");
+    if (responsibilities && (await responsibilities.scope(user, id)))
+      return assistant.resumeDetailed(user, id);
     const typing = () => {
       void bot.api.sendChatAction(user, "typing").catch(() => {});
     };
@@ -615,7 +723,10 @@ const workWorker = new WorkWorker(
     }
   },
   sendWorkMessage,
-  (user, task, delivery) => routineDelivery.capture(user, task, delivery),
+  async (user, task, delivery) =>
+    (await responsibilityWorker?.capture(user, task, delivery)) ||
+    routineDelivery.capture(user, task, delivery),
+  !responsibilities,
 );
 const workTimer = setInterval(() => {
   void workWorker

@@ -153,6 +153,9 @@ export class Voice implements SpeechToText, TextToSpeech {
   }
 }
 export class WebTools {
+  get usesModelSearch() {
+    return !this.key && !!this.openrouterKey && !!this.model;
+  }
   constructor(
     private key: string,
     private openrouterKey = "",

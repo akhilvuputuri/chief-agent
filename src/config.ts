@@ -34,6 +34,7 @@ const schema = z.object({
   // scheduled output into topics and sends a message typed in a topic to its agent first;
   // "file" only files output and answers in the topic; "off" uses General only.
   TELEGRAM_TOPICS: z.enum(["auto", "file", "off"]).default("auto"),
+  RESPONSIBILITIES: z.enum(["on", "off"]).default("off"),
   AGENT_REASONING_EFFORT: z.literal("medium").default("medium"),
   AGENT_BUDGET_MS: z.coerce.number().int().positive().default(900000),
   AGENT_BUDGET_MODEL_CALLS: z.coerce.number().int().positive().default(40),

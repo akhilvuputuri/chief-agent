@@ -1,4 +1,6 @@
 import { mutePending } from "./stocks.js";
+import { preview as responsibilityPreview } from "./responsibilities.js";
+import { ResponsibilityDelivery } from "./responsibility-worker.js";
 import { recordVote } from "./news.js";
 import { errorFields, opsLog } from "./ops-log.js";
 import { WorkTools, renderWork, renderWorkList } from "./work.js";
@@ -44,6 +46,66 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
   const controls = new SerialQueue();
   const preparation = new PreparationQueue(2);
   const ids = new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(","));
+  if (assistant.tools?.responsibilities) {
+    const responsibilities = assistant.tools.responsibilities;
+    const feedback = new ResponsibilityDelivery(
+      responsibilities,
+      (u) => ids.has(u),
+      async () => {
+        throw new Error("No send from feedback handler");
+      },
+    );
+    bot.callbackQuery(/^rsp:(yes|no):([0-9a-f-]{36})$/, async (ctx) => {
+      if (!allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids)) return;
+      await ctx.answerCallbackQuery();
+      try {
+        const row = (
+          await db.query(
+            "SELECT payload FROM approvals WHERE id=$1 AND user_id=$2 AND operation='responsibility_confirm'",
+            [ctx.match[2], String(ctx.from.id)],
+          )
+        ).rows[0];
+        if (
+          !row ||
+          Number(row.payload.telegramMessageId) !==
+            ctx.callbackQuery.message?.message_id
+        )
+          return;
+        const result = await responsibilities.confirm(
+          String(ctx.from.id),
+          ctx.match[2]!,
+          ctx.match[1] === "yes",
+        );
+        await ctx.reply(
+          result.status === "active"
+            ? "Responsibility confirmed. Monitoring is active."
+            : "Monitoring proposal declined.",
+          inThread(threadOf(ctx.callbackQuery.message)),
+        );
+      } catch {
+        await ctx.reply(
+          "Confirmation unavailable or superseded. Ask Chief for a fresh proposal.",
+        );
+      }
+    });
+    bot.callbackQuery(
+      /^rsp:(useful|later|resolved|less):([0-9a-f-]{36})$/,
+      async (ctx) => {
+        if (
+          !allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids) ||
+          !ctx.callbackQuery.message
+        )
+          return;
+        await ctx.answerCallbackQuery();
+        await feedback.feedback(
+          String(ctx.from.id),
+          ctx.match[2]!,
+          ctx.callbackQuery.message.message_id,
+          ctx.match[1]!,
+        );
+      },
+    );
+  }
   bot.callbackQuery(viewCallback, async (ctx) => {
     if (!allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids)) return;
     // Clear Telegram's spinner before loading data; do not queue behind a long agent turn.
@@ -409,6 +471,20 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
               ? { kind: "briefing" }
               : { kind: "records", collection: command.slice(1) as Collection };
         await views.open(user, here, view);
+        if (command === "/status" && assistant.tools?.responsibilities) {
+          const rows = await assistant.tools.responsibilities.list(user);
+          if (rows.length)
+            await ctx.reply(
+              rows
+                .map(
+                  (r) =>
+                    `${r.spec.title}: ${r.status}${r.degraded ? " (source degraded)" : ""}\nLast check: ${r.last_check ?? "not yet"} · Next: ${r.next_check ?? "none"}\nInvestigations today: ${r.investigations_today}/6\n${r.last_finding ? "Last finding: " + r.last_finding.decision + " (" + r.last_finding.reason + ")" : "No finding yet"}`,
+                )
+                .join("\n\n")
+                .slice(0, 3900),
+              inThread(thread),
+            );
+        }
         await db.query(
           "UPDATE inbound_updates SET status='completed' WHERE update_id=$1",
           [ctx.update.update_id],
@@ -703,6 +779,15 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
             replyThread,
             reply.runId,
           );
+          if (assistant.tools?.responsibilities)
+            await sendResponsibilityApprovals(
+              bot,
+              db,
+              user,
+              deliveryGuard,
+              replyThread,
+              reply.runId,
+            );
           let actualThread = replyThread;
           if (reply.reply)
             await topics.deliver(
@@ -776,6 +861,62 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
 }
 
 const approvalSends = new SerialQueue();
+export function sendResponsibilityApprovals(
+  bot: Bot,
+  db: Database,
+  user: string,
+  guard?: () => Promise<boolean>,
+  thread?: number,
+  run?: string,
+) {
+  return approvalSends.run(user, async () => {
+    const rows = (
+      await db.query(
+        "SELECT * FROM approvals WHERE user_id=$1 AND operation='responsibility_confirm' AND status='pending' AND expires_at>now() AND NOT(payload ? 'telegramDeliveryState') AND ($2::uuid IS NULL OR run_id=$2) ORDER BY created_at",
+        [user, run ?? null],
+      )
+    ).rows;
+    for (const row of rows) {
+      if (guard && !(await guard())) return;
+      const claim = await db.query(
+        "UPDATE approvals SET payload=payload || '{\"telegramDeliveryState\":\"sending\"}'::jsonb WHERE id=$1 AND user_id=$2 AND NOT(payload ? 'telegramDeliveryState') AND status='pending' RETURNING id",
+        [row.id, user],
+      );
+      if (!claim.rows.length) continue;
+      const sent = await claimedApprovalMessage(
+        bot,
+        db,
+        user,
+        row.id,
+        responsibilityPreview(
+          row.payload.spec,
+          row.payload.configs.find((c: any) => c.kind === "gmail")?.config
+            .email,
+        ),
+        {
+          ...inThread(thread),
+          reply_markup: {
+            inline_keyboard: [
+              [
+                {
+                  text: "Confirm monitoring",
+                  callback_data: `rsp:yes:${row.id}`,
+                },
+                { text: "Decline", callback_data: `rsp:no:${row.id}` },
+              ],
+            ],
+          },
+        },
+        guard,
+      );
+      if (sent)
+        await db.query(
+          "UPDATE approvals SET payload=payload || jsonb_build_object('telegramMessageId',$3::bigint,'telegramDeliveryState','sent') WHERE id=$1 AND user_id=$2",
+          [row.id, user, sent.message_id],
+        );
+    }
+  });
+}
 export function sendCalendarApprovals(
   bot: Bot,
   db: Database,

@@ -4,11 +4,13 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { MiniAuth } from "./miniapp-auth.js";
 import { Canvases } from "./canvases.js";
+import { Responsibilities } from "./responsibilities.js";
 import { event, type Database } from "./db.js";
 export interface MiniConfig {
   origin: string;
   token: string;
   allowed: Set<string>;
+  responsibilities?: boolean;
 }
 export async function miniapp(
   app: FastifyInstance,
@@ -108,6 +110,29 @@ export async function miniapp(
           })
           .strict()
           .parse(q);
+      api.get("/capabilities", async () => ({
+        responsibilities: !!config.responsibilities,
+      }));
+      if (config.responsibilities) {
+        const responsibilities = new Responsibilities(db);
+        api.get("/responsibilities", async (req) =>
+          responsibilities.list(owner(req)),
+        );
+        api.get("/responsibilities/:id", async (req, reply) => {
+          const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+          try {
+            return await responsibilities.history(
+              owner(req),
+              id,
+              page(req.query).offset,
+            );
+          } catch {
+            return reply
+              .code(404)
+              .send({ error: "Responsibility unavailable" });
+          }
+        });
+      }
       api.get("/canvases", async (req) =>
         canvases.list(owner(req), page(req.query).offset),
       );

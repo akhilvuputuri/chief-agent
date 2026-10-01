@@ -70,12 +70,15 @@ services:
         "/migrations/021_news.sql",
         "-f",
         "/migrations/022_telegram_delivery.sql",
+        "-f",
+        "/migrations/023_responsibilities.sql",
       ]
     depends_on:
       postgres: { condition: service_healthy }
   gateway:
     build: .
     environment:
+      RESPONSIBILITIES: ${RESPONSIBILITIES:-off}
       MINIAPP_ORIGIN: ${MINIAPP_ORIGIN:-}
       LIBRARY_IDENTITY_KEY: ${LIBRARY_IDENTITY_KEY:-}
       LIBRARY_HOLD_EMAIL: ${LIBRARY_HOLD_EMAIL:-}

@@ -1,3 +1,7 @@
+# Issue 131 — Responsibilities candidate
+
+Implementation on `codex/responsibilities-131` is disabled by default and not deployed. Read [the contract and migration-023 rollout](responsibilities.md) and [journal 54](journey/54-responsibilities.md). Final checks, independent review, operator installation and separate activation remain pending. Gmail is a bounded supporting adapter; responsibility lifecycle, scoped investigations and attention decisions are the core. Scheduled research can spend model budget on unchanged passes, as disclosed on confirmation.
+
 # Libby linking refusal — 2 October 2026 (recovery released v0.3.31)
 
 [PR #145](https://github.com/akhilvuputuri/chief-agent/pull/145) fixes the repeated-linking failure flow, not account access. GPT-6 Astra approved exact head `86c7fea975a50d7cd368a4d2e1818029080d22d2`; full checks passed (569 application, 21 JS, 30 Python tests). [Release](https://github.com/akhilvuputuri/chief-agent/actions/runs/36893817001), server RELEASE and health verified `3382c5d63a6551ea960615332d0fc0cd3643e672`. Live `/library` and `/library link` settled the historical refusal and explained the blocker with zero extra library calls. Catalogue checking works; the owner-approved card transfer is explicitly refused and borrowing remains unimplemented. See [library status](library.md#current-account-linking-blocker--2-october-2026) and [journal closure](journey/22-library-assistant.md#release-closure--2-october-2026). Official API access or a separately verified official-app approach is still needed for account features.

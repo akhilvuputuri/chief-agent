@@ -1,4 +1,5 @@
 import { readFeed } from "./telegram-feeds.js";
+import type { Responsibilities } from "./responsibilities.js";
 import type { NewsTools } from "./news.js";
 import { RoutineTools } from "./routines.js";
 import { HistoryStore } from "./history.js";
@@ -23,7 +24,8 @@ import type { WatchlistTools } from "./stocks.js";
 export class JobTools {
   constructor(
     private db: Database,
-    private web: Pick<WebTools, "call">,
+    private web: Pick<WebTools, "call"> &
+      Partial<Pick<WebTools, "usesModelSearch">>,
     private gmail?: Pick<GmailTools, "call">,
     private sheets?: Pick<SheetsTools, "sync">,
     private daily?: DailyTools,
@@ -32,7 +34,11 @@ export class JobTools {
     private libraryActions?: LibraryActions,
     private stocks?: WatchlistTools,
     private news?: NewsTools,
+    readonly responsibilities?: Responsibilities,
   ) {}
+  get searchUsesModel() {
+    return this.web.usesModelSearch === true;
+  }
   async execute(
     user: string,
     run: string,
@@ -40,6 +46,9 @@ export class JobTools {
     withReceipt = false,
   ) {
     const a = action.parse(input);
+    await this.responsibilities?.authorize(user, run, a);
+    if (a.operation.startsWith("responsibility_") && !this.responsibilities)
+      throw new Error("Responsibilities are not configured");
     await event(this.db, user, run, "tool.started", { operation: a.operation });
     let dispatched = false;
     try {
@@ -95,6 +104,14 @@ export class JobTools {
     a: ReturnType<typeof action.parse>,
   ): Promise<unknown> {
     const db = this.db;
+    if (
+      a.operation === "responsibility_create" ||
+      a.operation === "responsibility_update" ||
+      a.operation === "responsibility_list" ||
+      a.operation === "responsibility_history" ||
+      a.operation === "responsibility_report"
+    )
+      return this.responsibilities!.call(user, run, a);
     if (a.operation === "feed_read")
       return readFeed(db, user, a.kind, a.id, a.offset);
     if (a.operation === "conversation_search")

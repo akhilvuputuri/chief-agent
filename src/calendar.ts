@@ -193,7 +193,7 @@ export class CalendarTools {
       throw new Error("Event identity mismatch");
     return result;
   }
-  async list(user: string, start: string, end: string) {
+  async list(user: string, start: string, end: string, monitoring = false) {
     if (!this.c.owner || user !== this.c.owner)
       throw new Error("Calendar is not connected for this user");
     const duration = Date.parse(end) - Date.parse(start);
@@ -211,18 +211,25 @@ export class CalendarTools {
       maxResults: "100",
       timeZone: "Asia/Singapore",
     }).toString();
-    const r = await googleJson(
-      await this.request(url, {
-        headers,
-        redirect: "error",
-        signal: AbortSignal.timeout(15000),
-      }),
-    );
+    let r: any,
+      items: any[] = [];
+    for (let page = 0; page < (monitoring ? 5 : 1); page++) {
+      r = await googleJson(
+        await this.request(url, {
+          headers,
+          redirect: "error",
+          signal: AbortSignal.timeout(15000),
+        }),
+      );
+      items.push(...(r.items ?? []).slice(0, 100));
+      if (!r.nextPageToken) break;
+      url.searchParams.set("pageToken", String(r.nextPageToken));
+    }
     return {
       untrusted: true,
       calendar: "primary",
       truncated: !!r.nextPageToken,
-      events: (r.items ?? []).map((e: any) => ({
+      events: items.map((e: any) => ({
         id: e.id,
         title: e.summary ?? "(Untitled)",
         start: e.start,
@@ -232,6 +239,21 @@ export class CalendarTools {
         location: e.location,
         url: e.htmlLink,
         status: e.status,
+        ...(monitoring
+          ? {
+              attendees: (e.attendees ?? []).slice(0, 100).map((a: any) => ({
+                email: a.email,
+                self: a.self === true,
+                resource: a.resource === true,
+                responseStatus: a.responseStatus,
+              })),
+              attendeesOmitted:
+                !!e.attendeesOmitted || (e.attendees ?? []).length > 100,
+              recurringEventId: e.recurringEventId,
+              originalStartTime: e.originalStartTime,
+              updated: e.updated,
+            }
+          : {}),
       })),
     };
   }

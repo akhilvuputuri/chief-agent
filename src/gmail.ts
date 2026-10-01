@@ -552,4 +552,48 @@ export class GmailTools {
         : await this.read(token, value, run);
     return { ...result, ...identity };
   }
+
+  /** Internal query-scoped monitoring: one bounded IDs-only page, no model or bodies. */
+  async poll(
+    user: string,
+    account: "primary" | "secondary",
+    email: string,
+    query: string,
+    pageToken: string | undefined,
+    run: string,
+  ) {
+    if (user !== this.config.owner)
+      throw new ToolValidationError("Gmail owner unavailable");
+    const selected = account === "secondary" ? this.secondary : this;
+    if (
+      !selected ||
+      selected.config.email.toLowerCase() !== email.toLowerCase()
+    )
+      throw new ToolValidationError(
+        "Confirmed Gmail account changed; reconfirm the responsibility",
+      );
+    const token = await selected.access(user);
+    this.charge(run);
+    const url = new URL(
+      "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+    );
+    url.searchParams.set("q", query);
+    url.searchParams.set("maxResults", "100");
+    if (pageToken) url.searchParams.set("pageToken", pageToken);
+    const result = z
+      .object({
+        messages: z
+          .array(
+            z.object({
+              id: z.string().regex(ID),
+              threadId: z.string().regex(ID),
+            }),
+          )
+          .max(100)
+          .default([]),
+        nextPageToken: z.string().max(1000).optional(),
+      })
+      .parse(await selected.get(token, url));
+    return result;
+  }
 }
