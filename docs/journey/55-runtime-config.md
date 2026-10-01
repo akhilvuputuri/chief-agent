@@ -15,8 +15,8 @@ Production reads one plain `.env` on the Lightsail host (see [the Lightsail runb
 ## Evidence
 
 - **Inventory, from code:**
-  - `src/config.ts` accepts 48 variables; `compose.yaml` passes 44 of them. Of the 24 behaviour settings, Compose passes 20. `MEDIA_MODEL`, `TOOL_PICKER`, `TELEGRAM_TOPICS` and `PORT` are not passed, so the file is authoritative for them as soon as this deploys. Their file values equal the code defaults, so nothing changes.
-  - 24 are behaviour settings, 10 are personal identifiers and 14 are secrets. `DATABASE_URL` counts as a secret because it holds the database password.
+  - `src/config.ts` accepts 48 variables; `compose.yaml` passes 44 of them. Of the 23 behaviour settings, Compose passes 20. `MEDIA_MODEL`, `TOOL_PICKER` and `TELEGRAM_TOPICS` are not passed, so the file is authoritative for them as soon as this deploys. Their file values equal the code defaults, so nothing changes.
+  - 23 are behaviour settings, `PORT` is deployment wiring, 10 are personal identifiers and 14 are secrets. `DATABASE_URL` counts as a secret because it holds the database password.
   - [Issue #143](https://github.com/akhilvuputuri/chief-agent/issues/143) lists them.
 - **Live values not read.** This Mac has no operator SSH, and the agent did not handle the live `.env`.
 - **Tested:** `tests/runtime-config.test.ts`:
@@ -41,7 +41,7 @@ Production reads one plain `.env` on the Lightsail host (see [the Lightsail runb
 
 ## Implementation and review
 
-- **`config/runtime.json`:** schema version 1, all 24 behaviour settings at their code defaults.
+- **`config/runtime.json`:** schema version 1, all 23 behaviour settings at their code defaults.
 - **`src/config.ts`:**
   - `RUNTIME_SETTINGS` (allow-list) and `readRuntimeSettings()` (strict parse);
   - `readConfig(env, runtime)` merges the two, lets the environment win, and returns `overridden`.
@@ -50,7 +50,12 @@ Production reads one plain `.env` on the Lightsail host (see [the Lightsail runb
 - **`Dockerfile`:** copies the file into the image.
 - **Docs:** [configuration](../configuration.md).
 
-**Independent review (Opus 5.5): approved.** It confirmed that every Compose default equals the file value, that the file path resolves from `dist/` in the image, and that the allow-list rejects unknown keys. It flagged documentation that said Compose passes every name. Fixed: four names are file-authoritative now, and `docs/deployment.md` no longer says `MEDIA_MODEL` needs a Compose change.
+**Independent review (Opus 5.5): approved.** It confirmed that every Compose default equals the file value, that the file path resolves from `dist/` in the image, and that the allow-list rejects unknown keys. It flagged documentation that said Compose passes every name. Fixed: three names are file-authoritative now, and `docs/deployment.md` no longer says `MEDIA_MODEL` needs a Compose change.
+
+**Devin review** found two further problems, both fixed:
+
+- `PORT` was in the file, but Compose, the health check and the release script all fix port 3000, so a reviewed change would have broken the gateway. `PORT` is deployment wiring and stays in the environment.
+- The CloudWatch `event` query lists fixed fields and dropped `envSettings`. A new `config` query selects the flattened name fields (`envSettings.0` and so on), keeping the rule that no saved query reads the raw line.
 
 ## Verification and outcome
 

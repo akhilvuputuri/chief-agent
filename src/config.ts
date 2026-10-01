@@ -115,7 +115,7 @@ export const RUNTIME_SETTINGS = [
   "ELEVENLABS_STT_MODEL",
   "ELEVENLABS_TTS_MODEL",
   "GROQ_STT_MODEL",
-  "PORT",
+  // PORT is deployment wiring (Compose ports, health checks), not behaviour; it stays in the environment.
 ] as const satisfies readonly (keyof z.infer<typeof schema>)[];
 type RuntimeSetting = (typeof RUNTIME_SETTINGS)[number];
 
