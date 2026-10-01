@@ -656,6 +656,10 @@ const runner = runTelegram(bot, {
 });
 const started = Date.now();
 opsLog("gateway.started", "info");
+// Which repo-config settings this environment still overrides (names only, issue #143).
+opsLog("config.loaded", "info", {
+  envSettings: c.overridden,
+});
 // Low-rate liveness record: its absence in CloudWatch means the gateway or the
 // log path stopped, not that nothing happened.
 setInterval(
