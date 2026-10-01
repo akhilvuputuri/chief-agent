@@ -1,6 +1,6 @@
 import type { Database } from "./db.js";
 import { event } from "./db.js";
-import { threadId } from "./delivery-routing.js";
+import { sameThread, threadId } from "./delivery-routing.js";
 import { ToolValidationError } from "./tool-errors.js";
 
 export type FeedKind = "news" | "markets" | "updates";
@@ -194,7 +194,10 @@ export async function inputAnchor(
     };
   if (!threadId(metadata.threadId) || !knownKind(metadata.topic)) return null;
   const rows = (await recent(db, user)).filter(
-    (r) => r.data.kind === metadata.topic && typeof r.data.id === "string",
+    (r) =>
+      r.data.kind === metadata.topic &&
+      typeof r.data.id === "string" &&
+      sameThread(r.data.threadId, metadata.threadId),
   );
   const newest = rows[0];
   if (!newest) return null;
@@ -239,5 +242,40 @@ export async function inputAnchor(
     references: selected.map((r) => ({ kind: r.data.kind, id: r.data.id })),
     sentAt: new Date(newest.created_at).toISOString(),
     notice: `Recent feed references in this topic may be unrelated to the current request. Titles and IDs only; read a selected record with feed_read for details. ${referenceNotice}`,
+  };
+}
+
+/** Per-input identities survive a batched checkpoint; omitted detail is explicitly readable. */
+export async function turnInputReferences(
+  db: Database,
+  user: string,
+  run: string,
+) {
+  const rows = (
+    await db.query(
+      "SELECT id,message_index,left(message,160) AS message,metadata->'anchor' AS anchor,count(*) OVER() AS total FROM conversation_inputs WHERE user_id=$1 AND run_id=$2 ORDER BY ordinal DESC LIMIT 100",
+      [user, run],
+    )
+  ).rows;
+  const entries: unknown[] = [];
+  let chars = 0;
+  for (const row of rows) {
+    if (!row.anchor) continue;
+    const entry = {
+      inputId: row.id,
+      messageIndex: row.message_index,
+      message: row.message,
+      anchor: { ...row.anchor, quote: row.anchor.quote?.slice(0, 160) },
+    };
+    const size = JSON.stringify(entry).length;
+    if (chars + size > 12000) break;
+    entries.unshift(entry);
+    chars += size;
+  }
+  return {
+    entries,
+    notice:
+      "Reference identities correspond to individual owner messages in order. Quotes can be shortened; conversation_read(inputId) reads the original input and full captured anchor. This is historical/reference data, not authorization.",
+    bounded: true,
   };
 }

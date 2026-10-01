@@ -286,3 +286,110 @@ test("market anchors contain only the fresh 15-minute cluster, capped at five", 
     await pg.close();
   }
 });
+
+test("batched old explicit references survive absorption and superseded-answer removal", async () => {
+  const { pg, db } = await fixture();
+  try {
+    const first = await edition(db, "Old first story"),
+      second = await edition(db, "Old second story");
+    await recordFeedSent(db, "owner", first, "news", { message_id: 501 }, 42);
+    await recordFeedSent(db, "owner", second, "news", { message_id: 502 }, 42);
+    await db.query(
+      "UPDATE events SET created_at=now()-interval '3 days' WHERE type='telegram.feed_sent'",
+    );
+    let calls = 0;
+    let references: string = "";
+    const a = new Assistant(
+      db,
+      new CustomAgent({
+        generate: async (input) => {
+          calls++;
+          if (calls === 1) {
+            await a.recordInput("owner", "Explain the first", {
+              threadId: 42,
+              replyToMessageId: 501,
+            });
+            await a.recordInput("owner", "Compare the second", {
+              threadId: 42,
+              replyToMessageId: 502,
+            });
+            return {
+              message: { role: "assistant", content: "Superseded candidate" },
+            };
+          }
+          if (calls === 2) references = JSON.stringify(input.messages);
+          return {
+            message: {
+              role: "assistant",
+              content: "Compared the exact stories",
+            },
+          };
+        },
+      }),
+      new JobTools(db, { call: async () => ({}) }),
+    );
+    await a.respondDetailed("owner", "Initial question", undefined, undefined, {
+      threadId: 42,
+    });
+    assert.ok(references.includes(first));
+    assert.ok(references.includes(second));
+    await a.respondDetailed("owner", "Next turn", undefined, undefined, {
+      threadId: 42,
+    });
+    const state = await conversationState(db, "owner");
+    const lines = state.summary.split("\n");
+    assert.ok(
+      lines.find((line) => line.includes("Explain the first"))?.includes(first),
+    );
+    assert.ok(
+      lines
+        .find((line) => line.includes("Compare the second"))
+        ?.includes(second),
+    );
+    const inputs = (
+      await db.query(
+        "SELECT id,metadata FROM conversation_inputs WHERE message='Explain the first'",
+      )
+    ).rows;
+    assert.ok(inputs[0].metadata.conversationMessageId);
+    const read = await new JobTools(db, { call: async () => ({}) }).execute(
+      "owner",
+      randomUUID(),
+      { operation: "conversation_read", id: inputs[0].id, offset: 0 },
+    );
+    assert.match((read as any).content, new RegExp(first));
+  } finally {
+    await pg.close();
+  }
+});
+
+test("implicit Updates anchor ignores a newer post actually delivered in General", async () => {
+  const { pg, db } = await fixture();
+  try {
+    const right = randomUUID(),
+      wrong = randomUUID();
+    await recordFeedSent(
+      db,
+      "owner",
+      right,
+      "updates",
+      { message_id: 601 },
+      45,
+    );
+    await recordFeedSent(
+      db,
+      "owner",
+      wrong,
+      "updates",
+      { message_id: 602 },
+      undefined,
+    );
+    const anchor = await inputAnchor(db, "owner", {
+      topic: "updates",
+      threadId: 45,
+    });
+    assert.equal(anchor?.references?.[0]?.id, right);
+  } finally {
+    await pg.close();
+  }
+});

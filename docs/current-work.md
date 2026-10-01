@@ -1,6 +1,6 @@
 # Issue 137 — feed reference stage (candidate)
 
-Stage B builds on stage A: successful posts gain exact message/source references, bounded General feed discovery, a paginated owner-scoped `feed_read`, frozen input anchors and thread-tagged shared continuity. Stage A is in PR #138, with review fixes; neither stage is deployed yet. See [telegram topics](telegram-topics.md) and [journal 53](journey/53-feed-destinations.md).
+Stage B builds on stage A: successful posts gain exact message/source references, bounded General feed discovery, a paginated owner-scoped `feed_read`, frozen input anchors and thread-tagged shared continuity. Stage A released as v0.3.29 at `015b8a99d770977ada6035c3feed4b9bbdd7226d`: migration 022, separate health/preserved-record verification and normal release 36872648089 passed after independent final approval. Stage B remains a review candidate in PR #139. See [telegram topics](telegram-topics.md) and [journal 53](journey/53-feed-destinations.md).
 
 # Issue 137 — feed destinations (candidate)
 

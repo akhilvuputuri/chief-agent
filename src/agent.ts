@@ -1,4 +1,8 @@
-import { inputAnchor, recentFeedIndex } from "./telegram-feeds.js";
+import {
+  inputAnchor,
+  recentFeedIndex,
+  turnInputReferences,
+} from "./telegram-feeds.js";
 import { InputInbox } from "./input-inbox.js";
 import { ContextLimitError } from "./context.js";
 import { NotDispatchedError } from "./tool-errors.js";
@@ -765,6 +769,10 @@ export class Assistant {
           pendingReply: conversation.pendingReply,
           lastExchangeHere: background ? null : conversation.lastExchangeHere,
           feedAnchor: background ? null : conversation.feedAnchor,
+          inputReferences: background
+            ? null
+            : await turnInputReferences(this.db, user, run),
+          consumedInputIds: consumedIds,
           recentFeeds: await recentFeedIndex(this.db, user),
           replyTarget: conversation.replyTarget,
           interruptedJob: conversation.interruptedJob,
@@ -995,6 +1003,9 @@ export class Assistant {
             conversation: {
               ...JSON.parse(runtime.context).conversation,
               recentFeeds: await recentFeedIndex(this.db, user),
+              inputReferences: background
+                ? null
+                : await turnInputReferences(this.db, user, run),
             },
           });
         },

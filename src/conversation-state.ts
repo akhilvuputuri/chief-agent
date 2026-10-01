@@ -40,10 +40,7 @@ export async function conversationState(
     await db.query(
       `SELECT e.id,e.run_id AS "runId",e.created_at AS "createdAt",
          COALESCE((SELECT (i.metadata->>'threadId')::bigint FROM conversation_inputs i WHERE i.user_id=e.user_id AND i.run_id=e.run_id ORDER BY i.ordinal LIMIT 1),0) AS "threadId",
-         (SELECT i.metadata->'anchor' FROM conversation_inputs i WHERE i.user_id=e.user_id AND i.run_id=e.run_id
-           AND i.message_index <= e.ordinal - (SELECT min(m.ordinal) FROM conversation_messages m WHERE m.user_id=e.user_id AND m.run_id=e.run_id)
-             + (SELECT min(j.message_index) FROM conversation_inputs j WHERE j.user_id=e.user_id AND j.run_id=e.run_id)
-           ORDER BY i.message_index DESC LIMIT 1) AS anchor,
+         (SELECT i.metadata->'anchor' FROM conversation_inputs i WHERE i.user_id=e.user_id AND i.metadata->>'conversationMessageId'=e.id::text LIMIT 1) AS anchor,
          c.payload->>'role' AS role,left(c.payload->>'content',400) AS content,
          jsonb_path_query_array(c.payload,'$.tool_calls[*].function.name') AS "callNames",
          jsonb_path_query_array(c.payload,'$.tool_calls[*].id') AS "callIds",

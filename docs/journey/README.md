@@ -53,7 +53,8 @@ For the latest verified release and open work, read [current work](../current-wo
 | 1 October                            | [49 — Coordinator agents](49-coordinator-agents.md): how can Chief delegate all domain work through one generic, typed agent tool?                    | Released `5222e33`; mocked-model tests only, no production measurement yet                                                   |
 | 1 October                            | [50 — Decision evals](50-decision-evals.md): where do small decision models pay off, with statistics that hold up?                                    | Measured offline; runtime unchanged                                                                                          |
 | 1 October                            | [51 — Shadow decisions](51-shadow-decisions.md): how do we measure Jev on real messages without changing replies?                                     | Released `d434bc7`; live data accumulating                                                                                   |
-| 1 October                            | [52 — Telegram topics](52-telegram-topics.md): can topics in the private chat file output and route Email-topic messages straight to the email agent? | Phase 1 released `03a1ef4`; phase 2 in review                                                                                |
+| 1 October                            | [52 — Telegram topics](52-telegram-topics.md): can topics in the private chat file output and route Email-topic messages straight to the email agent? | Phases 1/2 released; superseded by the feed design in journal 53                                                             |
+| 1 October                            | [53 — Feed destinations and references](53-feed-destinations.md): how do topics organize output without losing conversational identity?               | Stage A v0.3.29 released; stage B in review                                                                                  |
 
 ## Connected case studies
 
@@ -111,4 +112,4 @@ Equivalent workload, model/configuration, pricing, denominators and missing acco
 
 - 23 September 2026: [32 — Repo-controlled model releases](32-repo-controlled-model.md) — reviewed policy and image-bundling path released in v0.3.23; a future PR can select the main model without a server `.env` edit.
 
-- 1 October 2026: [53 — Feed destinations](53-feed-destinations.md): issue 137 corrects queue boundaries, approval placement and durable delivery; candidate, reference resolution follows.
+- 1 October 2026: [53 — Feed destinations](53-feed-destinations.md): issue 137 corrects queue boundaries, approval placement and durable delivery; stage A released as v0.3.29, reference-resolution stage in review.
