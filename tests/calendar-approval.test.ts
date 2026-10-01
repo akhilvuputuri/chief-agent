@@ -145,6 +145,54 @@ test("monitoring normalizes timezone-qualified local times and rejects missing o
     calendar.list("a", "2026-10-05T00:00:00Z", "2026-10-05T04:00:00Z", true),
   );
 });
+test("ambiguous daylight-saving wall times require an explicit offset and never depend on current time", async () => {
+  let dateTime = "2026-11-01T01:30:00";
+  const calendar = new CalendarTools(
+    {
+      owner: "a",
+      email: "owner@example.com",
+      clientId: "fixture",
+      clientSecret: "fixture",
+      refreshToken: "fixture",
+    },
+    (async (input: unknown) => {
+      const url = String(input);
+      return Response.json(
+        url.includes("oauth2.googleapis.com")
+          ? { access_token: "fixture" }
+          : url.includes("/userinfo")
+            ? { email: "owner@example.com" }
+            : {
+                items: [
+                  {
+                    id: "fold",
+                    start: { dateTime, timeZone: "America/New_York" },
+                    end: {
+                      dateTime: "2026-11-01T02:30:00",
+                      timeZone: "America/New_York",
+                    },
+                  },
+                ],
+              },
+      );
+    }) as typeof fetch,
+  );
+  const read = () =>
+    calendar.list("a", "2026-11-01T00:00:00Z", "2026-11-02T00:00:00Z", true);
+  await assert.rejects(read);
+  dateTime = "2026-11-01T01:30:00-04:00";
+  assert.equal(
+    (await read()).events[0].start.dateTime,
+    "2026-11-01T05:30:00.000Z",
+  );
+  dateTime = "2026-11-01T01:30:00-05:00";
+  assert.equal(
+    (await read()).events[0].start.dateTime,
+    "2026-11-01T06:30:00.000Z",
+  );
+  dateTime = "2026-03-08T02:30:00";
+  await assert.rejects(read);
+});
 async function fixture() {
   const pg = new PGlite();
   for (const f of [

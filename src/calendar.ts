@@ -6,7 +6,6 @@ import {
 } from "./calendar-draft.js";
 import { boundedBytes } from "./providers.js";
 import { z } from "zod";
-import { CronDate } from "cron-parser";
 const localDateTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
 const calendarTime = z
   .object({
@@ -33,30 +32,53 @@ const calendarTime = z
       return { ...time, dateTime: new Date(time.dateTime).toISOString() };
     try {
       if (!time.timeZone) throw new Error("Missing timezone");
-      const instant = new CronDate(time.dateTime, time.timeZone).toDate();
-      const parts = Object.fromEntries(
-        new Intl.DateTimeFormat("en-CA", {
-          timeZone: time.timeZone,
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-          hourCycle: "h23",
-        })
-          .formatToParts(instant)
-          .map((p) => [p.type, p.value]),
-      );
-      const wall = `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
-      if (wall !== time.dateTime.slice(0, 19))
-        throw new Error("Nonexistent local time");
-      return { ...time, dateTime: instant.toISOString() };
+      const formatter = new Intl.DateTimeFormat("en-CA", {
+        timeZone: time.timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hourCycle: "h23",
+      });
+      const wallAt = (ms: number) => {
+        const parts = Object.fromEntries(
+          formatter.formatToParts(new Date(ms)).map((p) => [p.type, p.value]),
+        );
+        return {
+          text: `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`,
+          epoch: Date.UTC(
+            Number(parts.year),
+            Number(parts.month) - 1,
+            Number(parts.day),
+            Number(parts.hour),
+            Number(parts.minute),
+            Number(parts.second),
+          ),
+        };
+      };
+      // Anchor offset discovery to the supplied wall date, never the current offset.
+      // Adjacent days cover both sides of timezone transitions, including half-hour folds.
+      const wallEpoch = Date.parse(time.dateTime + "Z"),
+        offsets = new Set<number>();
+      for (const hours of [-48, -24, 0, 24, 48]) {
+        const sample = Math.floor((wallEpoch + hours * 3600000) / 1000) * 1000;
+        offsets.add(wallAt(sample).epoch - sample);
+      }
+      const instants = [...offsets]
+        .map((offset) => wallEpoch - offset)
+        .filter((ms) => wallAt(ms).text === time.dateTime!.slice(0, 19));
+      if (instants.length !== 1)
+        throw new Error(
+          "Ambiguous or nonexistent wall time; provide an explicit offset",
+        );
+      return { ...time, dateTime: new Date(instants[0]!).toISOString() };
     } catch {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message:
-          "Local Calendar timestamps require a valid explicit timezone and wall time",
+          "Local Calendar timestamps require a valid explicit timezone and unambiguous wall time; otherwise provide a numeric offset",
       });
       return z.NEVER;
     }
