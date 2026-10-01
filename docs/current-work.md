@@ -1,6 +1,6 @@
 # Issue 131 — Responsibilities candidate
 
-Implementation on `codex/responsibilities-131` is disabled by default and not deployed. Read [the contract and migration-023 rollout](responsibilities.md) and [journal 54](journey/54-responsibilities.md). Final checks, independent review, operator installation and separate activation remain pending. Gmail is a bounded supporting adapter; responsibility lifecycle, scoped investigations and attention decisions are the core. Scheduled research can spend model budget on unchanged passes, as disclosed on confirmation.
+Implementation in [PR 148](https://github.com/akhilvuputuri/chief-agent/pull/148) on `codex/responsibilities-131` is disabled by default and not deployed. CI and independent GPT-6 Astra approval passed for code head `d4c74dda004aeb8cf79403dc02c39c444a631e51`; see [the contract and migration-023 rollout](responsibilities.md) and [journal 54](journey/54-responsibilities.md). Reviewed operator installation and separate activation remain pending. Gmail is a bounded supporting adapter; responsibility lifecycle, scoped investigations and attention decisions are the core. Scheduled research can spend model budget on unchanged passes, as disclosed on confirmation.
 
 # Libby linking refusal — 2 October 2026 (recovery released v0.3.31)
 
