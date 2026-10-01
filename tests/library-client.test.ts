@@ -241,3 +241,31 @@ test("oversized and malformed bodies are refused safely", async () => {
     (e: any) => e.kind === "transient",
   );
 });
+
+test("explicit private-client refusals stop without renewal guidance or retries", async () => {
+  const h = harness(() =>
+    Response.json(
+      {
+        result: "missing_chip",
+        notice:
+          "This is a private API for OverDrive's dewey app. Use by any other client is prohibited.",
+      },
+      { status: 403 },
+    ),
+  );
+  await assert.rejects(
+    h.client.call("chipClone", {
+      bearer: new Bearer("fake-secret"),
+      body: { blessing: "fake-blessing" },
+      schema: any,
+      context: "background",
+    }),
+    (e: any) =>
+      e.kind === "client_restricted" &&
+      e.code === "client_restricted" &&
+      !e.message.includes("/library link") &&
+      !e.message.includes("fake-secret"),
+  );
+  assert.equal(h.calls.length, 1);
+  assert.equal(await h.pacing.breaker(), null);
+});

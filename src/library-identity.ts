@@ -8,6 +8,7 @@ import {
   LibraryError,
 } from "./library-client.js";
 import { libraryKey, websiteId } from "./library-routes.js";
+import { libraryLinkRefusal } from "./library-refusal.js";
 import { open, seal } from "./secret-box.js";
 export const identityLimits = {
   tokenLifetimeMs: 7 * 86400000,
@@ -190,7 +191,10 @@ export class LibraryIdentity {
         [user],
       )
     ).rows[0];
+    const restricted =
+      row?.state !== "linked" && !!(await libraryLinkRefusal(this.db, user));
     return {
+      linkingRestricted: restricted,
       state: row?.state ?? ("none" as const),
       linked: row?.state === "linked",
       tokenRenewsBy: row?.token_expires_at

@@ -15,8 +15,10 @@ export const sgDate = (iso: string) =>
     day: "numeric",
     month: "short",
   });
+export const linkRestricted =
+  "OverDrive refused this assistant's Libby connection. The card connection was rejected. Repeating the code will not fix this. You can still ask me to check NLB titles; use Libby to borrow and manage loans or holds. Account linking needs a supported integration before it can resume.";
 export function linkCard(expiresAt: string) {
-  return `Link your NLB Libby card to this assistant?\n\nApprove to get a one-time 8-digit setup code, shown here for up to 5 minutes. You enter it in Libby on this phone: Menu → Copy To Another Device. After that I can see your loans and holds and, only when you tap a card here, borrow or place holds. I never download books, never see your card PIN, and you can disconnect at any time with /library revoke.\n\nThe code changes about every minute; this message updates. Nothing happens until you tap Start.\nApprove by ${sg(expiresAt)} SGT.`;
+  return `Link your NLB Libby card to this assistant?\n\nApprove to get a one-time 8-digit setup code, shown here for up to 5 minutes. You enter it in Libby on this phone: Menu → Copy To Another Device. If the transfer succeeds I can see your loans and holds. Borrowing and placing holds through this assistant are not available yet; use Libby for those actions. I never download books, never see your card PIN, and you can disconnect at any time with /library revoke.\n\nThe code changes about every minute; this message updates. Nothing happens until you tap Start.\nApprove by ${sg(expiresAt)} SGT.`;
 }
 export function linkProgress(code: string, endsAt: string) {
   const spaced = code.replace(/^(\d{4})(\d{4})$/, "$1 $2");

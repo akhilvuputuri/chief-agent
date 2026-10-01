@@ -2,6 +2,14 @@
 
 Product requirement and full implementation plan: [issue #41](https://github.com/akhilvuputuri/chief-agent/issues/41). This document describes shipped behaviour and grows with each phase.
 
+## Current account-linking blocker — 2 October 2026
+
+A live owner-approved linking attempt on deployed `78ad212` accepted the setup code but both clone calls were refused. The private diagnostic explicitly restricted this API to OverDrive's client; no session cookie was issued. The cookie and re-mint hypotheses therefore did not resolve linking. Catalogue search and availability succeeded separately through Telegram. Borrow/hold execution remains unimplemented; no account borrowing is claimed.
+
+The refusal-handling candidate recognises that explicit response, reports the restriction, and avoids another re-mint/code ceremony for the affected owner. `/library`, `/library link` and `/library code` explain the blocker. An older uncertain attempt is settled locally only when its final recorded error and all saved clone refusals prove that specific rejection; recovered clones, timeouts, malformed diagnostics and other owners' events do not qualify. This is failure recovery, not a working account integration. Ordinary authentication failures retain their existing behaviour; uncertain post-clone syncs retain the identity.
+
+OverDrive documents an [approved API access process](https://developer.overdrive.com/getting-started/application-process), including separate Circulation production review. Official-site browser interaction is another possible direction, but no persistent runtime browser or successful browser borrow has been implemented or verified. Use Libby directly for now. See the [measured follow-up](journey/22-library-assistant.md#seventh-real-link--2-october-2026-measured).
+
 ## Phase 1 — catalogue availability (v0.3.11)
 
 Ask "is Project Hail Mary available as an ebook at NLB?" and the assistant answers from the public OverDrive catalogue in one tool call. No library card, identity, credential or schema is involved; the feature is on whenever the application runs. Borrowing, holds and the shelf arrive in later phases; until then the reply says so and the owner borrows in Libby.

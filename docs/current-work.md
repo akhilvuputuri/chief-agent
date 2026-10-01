@@ -1,3 +1,7 @@
+# Libby linking refusal — 2 October 2026 (candidate)
+
+Live Telegram testing on `78ad212` confirmed catalogue availability works, but the owner-approved card transfer still fails with an explicit OverDrive private-client refusal. The cookie/re-mint hypotheses did not resolve it. The candidate stops repeat ceremonies and safely settles the exact rejected historical attempt; it does not enable borrowing. See [library status](library.md#current-account-linking-blocker--2-october-2026) and [journal 22](journey/22-library-assistant.md#seventh-real-link--2-october-2026-measured). Review/release pending; approved API access or a separately verified official-app approach remains necessary for account features.
+
 # Issue 137 — General input, feed destinations and exact references (released)
 
 [v0.3.29](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.29) ships destinations, task origins, scoped approval placement, thread-aware FIFO/fences and durable work delivery through [PR #138](https://github.com/akhilvuputuri/chief-agent/pull/138). The reviewed migration-022 operator rollout installed `015b8a99d770977ada6035c3feed4b9bbdd7226d`; separate health and preserved-record checks plus [automatic release](https://github.com/akhilvuputuri/chief-agent/actions/runs/36872648089) passed.

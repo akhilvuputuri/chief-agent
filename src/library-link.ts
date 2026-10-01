@@ -16,6 +16,7 @@ import {
   linkDone,
   linkFailed,
   linkProgress,
+  linkRestricted,
 } from "./library-cards.js";
 export const linkLimits = {
   pollMs: 5000,
@@ -53,7 +54,10 @@ export interface LinkApi {
 }
 export type LinkOutcome =
   | { status: "done"; loans: number; holds: number }
-  | { status: "expired" | "aborted" | "failed" | "uncertain" };
+  | {
+      status: "expired" | "aborted" | "failed" | "uncertain";
+      reason?: "client_restricted";
+    };
 /**
  * The phone-only linking ceremony. Runs detached from the Telegram callback so the owner's
  * control queue is never held; every poll result is journaled as an enum, never the code.
@@ -107,9 +111,13 @@ export class LinkCeremony {
       [id, user, approvalId, deadline, messageId],
     );
     void this.run(user, id, approvalId, chat, messageId, deadline).catch(
-      async () => {
+      async (error) => {
         await this.finish(user, id, approvalId, chat, messageId, {
           status: "failed",
+          ...(error instanceof LibraryError &&
+          error.kind === "client_restricted"
+            ? { reason: "client_restricted" as const }
+            : {}),
         }).catch(() => {});
       },
     );
@@ -226,10 +234,24 @@ export class LinkCeremony {
       // periodic sync probe remains only as the fallback signal for unfulfilled polls, where
       // an earlier attempt showed the card can arrive while the code poll still says retained.
       if (result === "fulfilled" || polls % this.limits.syncEveryPolls === 0) {
-        const arrived =
-          result === "fulfilled" && answer.blessing
-            ? null
-            : await this.cardArrived(user, bearer, jar);
+        let arrived: Awaited<ReturnType<LinkCeremony["cardArrived"]>>;
+        try {
+          arrived =
+            result === "fulfilled" && answer.blessing
+              ? null
+              : await this.cardArrived(user, bearer, jar);
+        } catch (error) {
+          // Fulfilment without a blessing may already have transferred the card.
+          if (
+            result === "fulfilled" &&
+            error instanceof LibraryError &&
+            error.kind === "client_restricted"
+          )
+            return this.finish(user, attemptId, approvalId, chat, messageId, {
+              status: "uncertain",
+            });
+          throw error;
+        }
         if (arrived || result === "fulfilled") {
           await this.progress(attemptId, {
             polls,
@@ -274,17 +296,23 @@ export class LinkCeremony {
       const synced = await this.identity.syncRaw(user, bearer, jar);
       return synced.card ? synced : null;
     } catch (error) {
-      if (error instanceof LibraryError) return null;
+      if (error instanceof LibraryError && error.kind !== "client_restricted")
+        return null;
       throw error;
     }
   }
   /** Settles a completing attempt from the Check shelf path: linked, or discarded so a fresh attempt is allowed. */
-  async settle(user: string, approvalId: string, linked: boolean) {
+  async settle(
+    user: string,
+    approvalId: string,
+    linked: boolean,
+    revokeRemote = true,
+  ) {
     await this.db.query(
       "UPDATE library_link_attempts SET state=$3,finished_at=now() WHERE user_id=$1 AND approval_id=$2 AND state IN ('fulfilled','completing')",
       [user, approvalId, linked ? "done" : "failed"],
     );
-    if (!linked) await this.identity.discard(user, true);
+    if (!linked) await this.identity.discard(user, revokeRemote);
   }
   /** Fallback direction: the owner read a code in Libby and typed it here. */
   async enterCode(
@@ -301,6 +329,7 @@ export class LinkCeremony {
       "INSERT INTO library_link_attempts(id,user_id,approval_id,direction,state,deadline_at) VALUES($1,$2,$3,'enter','fulfilled',$4)",
       [id, user, approvalId, deadline],
     );
+    let enteredSuccessfully = false;
     try {
       const existing = await this.identity.row(user);
       const bearer =
@@ -313,6 +342,7 @@ export class LinkCeremony {
         schema: codeResponse.partial({ result: true }),
         context: "background",
       });
+      enteredSuccessfully = true;
       // Libby's entering side treats an answer without a blessing as "transfer done".
       const already = entered.blessing
         ? null
@@ -341,10 +371,18 @@ export class LinkCeremony {
       });
       const outcome: LinkOutcome = {
         status:
-          error instanceof LibraryError && error.kind === "rejected"
+          error instanceof LibraryError &&
+          ["rejected", "client_restricted"].includes(error.kind)
             ? "failed"
             : "uncertain",
+        ...(error instanceof LibraryError && error.kind === "client_restricted"
+          ? { reason: "client_restricted" as const }
+          : {}),
       };
+      if (enteredSuccessfully && outcome.reason === "client_restricted") {
+        outcome.status = "uncertain";
+        delete outcome.reason;
+      }
       await this.finish(user, id, approvalId, chat, null, outcome);
       return outcome;
     }
@@ -484,10 +522,18 @@ export class LinkCeremony {
         });
       const outcome: LinkOutcome = {
         status:
-          error instanceof LibraryError && error.kind === "rejected"
+          error instanceof LibraryError &&
+          ["rejected", "client_restricted"].includes(error.kind)
             ? "failed"
             : "uncertain",
+        ...(error instanceof LibraryError && error.kind === "client_restricted"
+          ? { reason: "client_restricted" as const }
+          : {}),
       };
+      if (cloned && outcome.reason === "client_restricted") {
+        outcome.status = "uncertain";
+        delete outcome.reason;
+      }
       await this.finish(
         user,
         attemptId,
@@ -531,9 +577,11 @@ export class LinkCeremony {
       await this.edit(
         chat,
         messageId,
-        outcome.status === "uncertain"
-          ? "Libby accepted the code but I could not confirm the card yet. Send /library to check; nothing will be retried on its own."
-          : linkFailed(outcome.status, rotations),
+        outcome.reason === "client_restricted"
+          ? linkRestricted
+          : outcome.status === "uncertain"
+            ? "Libby accepted the code but I could not confirm the card yet. Send /library to check; nothing will be retried on its own."
+            : linkFailed(outcome.status, rotations),
       );
     await this.onFinished(user, approvalId, outcome);
   }
