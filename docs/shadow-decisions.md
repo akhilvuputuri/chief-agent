@@ -4,11 +4,11 @@ Shadow mode lets Chief try a decision model on real messages without changing an
 
 ## What is shadowed
 
-| Consumer     | Question                                                                                    | Would-be action                                    | What it is compared with                                                                                                                                                                                                  |
-| ------------ | ------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `continuity` | Does the latest message need the previous exchange? (Jev Noul)                              | `drop` below the threshold, else `keep`            | Today Chief always keeps it. The record also counts the turn's recall calls (`conversation_read`, `conversation_search`, `observation_read`), and the message IDs allow private review of whether the reply relied on it. |
-| `routing`    | Can one agent handle all of the message? (Jev Choice over the agent catalogue plus `chief`) | the agent, at or above the threshold, else `chief` | The agent types Chief actually passed to `agent_run` in the turn. `agree` is true when the fast path would have matched Chief's own single delegation, or would have deferred.                                            |
-| `picker`     | No model call                                                                               | –                                                  | The optional domains the turn offered, the ones it used, and any loaded mid-turn. This shows whether the tool picker still earns its latency now that most tools live in agents.                                          |
+| Consumer     | Question                                                                                    | Would-be action                                    | What it is compared with                                                                                                                                                                                                                                                                                      |
+| ------------ | ------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `continuity` | Does the latest message need the previous exchange? (Jev Noul)                              | `drop` below the threshold, else `keep`            | Today Chief always keeps it. The record also counts the turn's recall calls (`conversation_read`, `conversation_search`, `observation_read`). A private review joins on the run ID to see whether the reply relied on the previous exchange.                                                                  |
+| `routing`    | Can one agent handle all of the message? (Jev Choice over the agent catalogue plus `chief`) | the agent, at or above the threshold, else `chief` | The agent types of the `agent_run` calls that actually ran in the turn, normalised to catalogue names (`core/email` counts as `email`). Refused, failed and never-dispatched calls are excluded. `agree` is true when the fast path would have matched Chief's own single delegation, or would have deferred. |
+| `picker`     | No model call                                                                               | –                                                  | The optional domains the turn offered, the ones it used, and any loaded mid-turn. This shows whether the tool picker still earns its latency now that most tools live in agents.                                                                                                                              |
 
 ## Guarantees
 
@@ -16,6 +16,8 @@ Shadow mode lets Chief try a decision model on real messages without changing an
   - The calls start once the turn's tools are chosen and run in parallel with the model.
   - Nothing awaits them, every failure is swallowed, and the record is written after the reply.
   - Background jobs are not shadowed.
+  - One visible side effect: shadow charges are recorded in the run's provider charges, so they appear in the turn's cost usage and the Telegram usage view. A timed-out call stays at its $0.001 estimate.
+- **Turns marked for analysis.** Predictions see only the turn's first message. Each record therefore says whether the turn was interrupted, its stop reason and how many messages it absorbed, so analysis can exclude turns where what happened no longer matches what Jev saw.
 - **Same questions as the eval.** The questions, thresholds and model come from `config/decisions.json`, which the offline eval reads too, so live and offline numbers compare like for like. The thresholds are the ones tuned in journal 50: continuity 0.33 and routing 0.97.
 - **What is sent to TypeSafe** (through OpenRouter, the same path as the tool picker):
   - the latest message (first 2,000 characters);
@@ -29,7 +31,7 @@ Shadow mode lets Chief try a decision model on real messages without changing an
 
 ## Switches
 
-Set `shadow.continuity`, `shadow.routing` or `shadow.picker` to `false` in `config/decisions.json` and release. Shadow mode needs `OPENROUTER_API_KEY` and is otherwise on.
+Shadow mode follows the tool picker's switch. It runs only when `TOOL_PICKER=jev` (the default) and `OPENROUTER_API_KEY` is set, because it sends the same kind of data to the same provider. Setting `TOOL_PICKER=off` in the server environment stops both. Individual consumers are switched with `shadow.continuity`, `shadow.routing` and `shadow.picker` in `config/decisions.json`, which takes a release.
 
 ## Reading the data
 

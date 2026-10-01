@@ -282,7 +282,10 @@ const assistant = new Assistant(
     ? new ToolPicker(c.OPENROUTER_API_KEY)
     : undefined,
   // Shadow decisions (#127) record what Jev would decide; they never change a turn.
-  c.OPENROUTER_API_KEY ? new ShadowDecisions(c.OPENROUTER_API_KEY) : undefined,
+  // It sends the same kind of data as the Jev picker, so it follows the picker's switch.
+  c.TOOL_PICKER === "jev" && c.OPENROUTER_API_KEY
+    ? new ShadowDecisions(c.OPENROUTER_API_KEY)
+    : undefined,
 );
 const app = server(
   db,

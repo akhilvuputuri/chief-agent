@@ -7,7 +7,13 @@ import { Assistant } from "../src/agent.js";
 import { CustomAgent } from "../src/custom-agent.js";
 import { JobTools } from "../src/tools.js";
 import { ensureUser, type Database } from "../src/db.js";
-import { readDecisionConfig, ShadowDecisions } from "../src/shadow.js";
+import {
+  readDecisionConfig,
+  recordPickerCheck,
+  ShadowDecisions,
+} from "../src/shadow.js";
+import { Execution } from "../src/execution.js";
+import { domainOf } from "../src/tool-domains.js";
 import { projectEvent, setOpsSink } from "../src/ops-log.js";
 
 const config = readDecisionConfig();
@@ -239,5 +245,101 @@ test("shadow log lines carry decisions and scores, never message text", () => {
     assert.doesNotMatch(lines[0]!, /landlord/);
   } finally {
     setOpsSink(previous);
+  }
+});
+
+test("the record counts only delegations that ran, by catalogue name, and marks the turn", async () => {
+  const { pg, db } = await database();
+  const shadow = new ShadowDecisions("key", config, (async () =>
+    reply({})) as typeof fetch);
+  const routing = (decision: string) => ({
+    consumer: "routing" as const,
+    ok: true,
+    decision,
+    score: 0.99,
+    latencyMs: 300,
+    costUsd: 0.00003,
+    model: "typesafe/jev-1.13-20260917",
+  });
+  const turn = async (calls: [string, string][]) => {
+    const run = randomUUID();
+    const execution = new Execution(
+      db,
+      "owner",
+      run,
+      new AbortController().signal,
+    );
+    await execution.start();
+    for (const [type, state] of calls) {
+      const id = await execution.beginCall(randomUUID(), "agent_run", {
+        raw: JSON.stringify({ type, objective: "x" }),
+      });
+      await execution.endCall(id, {}, state);
+    }
+    return run;
+  };
+  const recorded = async (run: string) =>
+    (
+      await db.query(
+        "SELECT data FROM events WHERE run_id=$1 AND type='decision.shadow'",
+        [run],
+      )
+    ).rows[0].data;
+  try {
+    // A full agent ID is the same delegation as its alias.
+    const one = await turn([["core/email", "success"]]);
+    await shadow.record(db, "owner", one, [routing("email")]);
+    assert.equal((await recorded(one)).actual, "email");
+    assert.equal((await recorded(one)).agree, true);
+    // A refused type and a never-dispatched call do not count; the retry that ran does.
+    const retried = await turn([
+      ["emial", "failed"],
+      ["calendar", "interrupted"],
+      ["email", "success"],
+    ]);
+    await shadow.record(db, "owner", retried, [routing("calendar")], {
+      interrupted: true,
+      stopReason: "interrupted",
+      messages: 2,
+    });
+    const r = await recorded(retried);
+    assert.deepEqual(r.delegated, ["email"]);
+    assert.equal(r.agree, false);
+    assert.equal(r.interrupted, true);
+    assert.equal(r.messages, 2);
+    // Two delegations that ran are "several"; a chief prediction never disagrees.
+    const two = await turn([
+      ["email", "success"],
+      ["parcels", "success"],
+    ]);
+    await shadow.record(db, "owner", two, [routing("chief")]);
+    assert.equal((await recorded(two)).actual, "several");
+    assert.equal((await recorded(two)).agree, true);
+    // Picker check: offered against used, and domains loaded mid-turn.
+    const picked = await turn([]);
+    await db.query(
+      "INSERT INTO events(run_id,user_id,type,data) VALUES($1,'owner','tools.selected',$2),($1,'owner','tools.loaded',$3)",
+      [
+        picked,
+        JSON.stringify({ domains: ["canvas", "work"] }),
+        JSON.stringify({ domains: ["canvas", "skills", "work"] }),
+      ],
+    );
+    const exec = new Execution(
+      db,
+      "owner",
+      picked,
+      new AbortController().signal,
+    );
+    const call = await exec.beginCall(randomUUID(), "canvas_list", {});
+    await exec.endCall(call, {}, "success");
+    await recordPickerCheck(db, "owner", picked, domainOf);
+    const p = await recorded(picked);
+    assert.deepEqual(p.offered, ["canvas", "work"]);
+    assert.deepEqual(p.used, ["canvas"]);
+    assert.deepEqual(p.unused, ["work"]);
+    assert.deepEqual(p.loadedLater, ["skills"]);
+  } finally {
+    await pg.close();
   }
 });

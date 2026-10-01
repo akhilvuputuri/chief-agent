@@ -70,7 +70,7 @@ export const QUERIES = {
     group: "runtime",
     help: "shadow decisions (#127): predictions against what Chief actually did, by consumer",
     query: () =>
-      `filter event = "decision.shadow" | stats count(*) as lines, avg(score) as avgScore, avg(latencyMs) as avgMs, sum(costUsd) as reportedUsd, avg(unusedCount) as avgUnused, sum(loadedLaterCount) as loadsLater by kind, state, agentType, agree`,
+      `filter event = "decision.shadow" | stats count(*) as lines, avg(score) as avgScore, avg(latencyMs) as avgMs, sum(costUsd) as reportedUsd, avg(unusedCount) as avgUnused, sum(loadedLaterCount) as loadsLater, avg(recalled) as avgRecalled by kind, state, agentType, agree, interrupted`,
   },
   schedules: {
     group: "runtime",

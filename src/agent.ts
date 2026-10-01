@@ -1009,7 +1009,12 @@ export class Assistant {
       });
       if (shadowed)
         void shadowed.then((predictions) =>
-          this.shadow!.record(this.db, user, run, predictions),
+          this.shadow!.record(this.db, user, run, predictions, {
+            // Predictions saw only the first message; analysis can exclude these turns.
+            interrupted: output.interrupted ?? false,
+            stopReason: output.stopReason ?? "answer",
+            messages: Math.max(1, consumedIds.length),
+          }),
         );
       if (!background && this.shadow?.config.shadow.picker)
         void recordPickerCheck(this.db, user, run, domainOf);

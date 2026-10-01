@@ -11,6 +11,7 @@ import type { Database } from "./db.js";
 import { event } from "./db.js";
 import type { Spending } from "./spending.js";
 import type { PickerTurn } from "./tool-picker.js";
+import { plugins } from "./plugin-registry.js";
 
 const config = z
   .object({
@@ -213,19 +214,28 @@ export class ShadowDecisions {
     user: string,
     run: string,
     predictions: Prediction[],
+    turn: { interrupted: boolean; stopReason: string; messages: number } = {
+      interrupted: false,
+      stopReason: "answer",
+      messages: 1,
+    },
+    typeName: (type: string) => string = catalogueType,
   ) {
     try {
       const calls = (
         await db.query(
-          `SELECT c.operation,c.arguments FROM runtime_calls c WHERE c.run_id=$1`,
+          `SELECT c.operation,c.arguments,c.state FROM runtime_calls c WHERE c.run_id=$1`,
           [run],
         )
-      ).rows as { operation: string; arguments: any }[];
+      ).rows as { operation: string; arguments: any; state: string }[];
+      // Only delegations that actually ran: refused, failed and never-dispatched calls are not.
       const delegated = calls
-        .filter((c) => c.operation === "agent_run")
+        .filter((c) => c.operation === "agent_run" && c.state === "success")
         .map((c) => {
           try {
-            return String(JSON.parse(c.arguments?.raw ?? "{}").type ?? "");
+            return typeName(
+              String(JSON.parse(c.arguments?.raw ?? "{}").type ?? ""),
+            );
           } catch {
             return "";
           }
@@ -265,6 +275,9 @@ export class ShadowDecisions {
               : null,
           delegated,
           recalled,
+          interrupted: turn.interrupted,
+          stopReason: turn.stopReason,
+          messages: turn.messages,
           latencyMs: p.latencyMs,
           costUsd: p.costUsd,
           model: p.model,
@@ -274,6 +287,19 @@ export class ShadowDecisions {
     } catch {
       /* Shadow data is optional; a failure here never affects the owner. */
     }
+  }
+}
+
+/** The catalogue name for a type Chief passed: an alias stays, a full ID becomes its alias. */
+export function catalogueType(type: string) {
+  try {
+    const agentId = plugins.resolve(type);
+    return (
+      Object.entries(plugins.aliases).find(([, id]) => id === agentId)?.[0] ??
+      agentId
+    );
+  } catch {
+    return type;
   }
 }
 

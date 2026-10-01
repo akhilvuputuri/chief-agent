@@ -13,9 +13,10 @@ Status: in review. Tested with mocked transports; no production data yet.
   - the exact question, state shape and thresholds sent to Jev;
   - every failure (HTTP error, invalid answer, network, timeout) resolving as a failed prediction;
   - a turn that completes while Jev is still blocked, with the record written only after release;
-  - the record's join with what Chief did;
+  - the record's join with what Chief did: a single delegation, a full agent ID normalised to its alias, several delegations, refused and never-dispatched calls excluded, and an interrupted turn marked;
+  - the picker row's offered, used, unused and loaded-later domains;
   - a log line without message text.
-- `npm test` passes 535 TypeScript tests, 21 context-eval tests and 15 decision-eval tests.
+- `npm test` passes 536 TypeScript tests, 21 context-eval tests and 15 decision-eval tests.
 - No production numbers yet.
 
 ## Diagnosis and alternatives
@@ -39,7 +40,22 @@ Status: in review. Tested with mocked transports; no production data yet.
 - `config/decisions.json` holds the shared questions and thresholds, and is copied into the image by the `Dockerfile`. The eval (`evals/decisions/continuity.py` and `routing.py`) now reads the same file.
 - **Logs.** `src/ops-log.ts` projects `decision.shadow` with consumer, prediction, actual agent, score, agreement, latency, cost and, for the picker, domain counts; no message text. `scripts/cloudwatch-logs.mjs` adds a `decisions` query.
 - **Docs.** [Shadow decisions](../shadow-decisions.md) is the runbook. `docs/operational-logs.md` has a new row.
-- Independent review: pending.
+- **Independent review (Opus 5.5, first revision) requested changes.** It confirmed the turn is unaffected (every path is caught and nothing is awaited) and that the questions, state shapes, thresholds and catalogue match the eval. The data had gaps:
+  - delegations that never ran were counted;
+  - full agent IDs caused false disagreements;
+  - interrupted turns and turns with several messages were not marked;
+  - continuity log lines had no outcome;
+  - there was no runtime switch;
+  - the join was untested;
+  - three doc statements were inaccurate.
+- **Fixes:**
+  - only successful `agent_run` calls count, normalised through the registry aliases;
+  - records carry `interrupted`, `stopReason` and `messages`;
+  - continuity logs `recalled` instead of a meaningless actual;
+  - shadow mode follows the `TOOL_PICKER` switch;
+  - join tests are added;
+  - the docs are corrected, including the cost side effect.
+- Independent review of the fixes: pending.
 
 ## Follow-up and next iteration
 
