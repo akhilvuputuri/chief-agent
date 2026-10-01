@@ -1,4 +1,4 @@
-Libby follow-up (2 October 2026): the live owner-approved code transfer on `78ad212` still receives an explicit private-client refusal; catalogue checks work. The refusal-handling candidate is not a borrowing implementation. See [current status](docs/library.md#current-account-linking-blocker--2-october-2026) and [journal 22](docs/journey/22-library-assistant.md#seventh-real-link--2-october-2026-measured).
+Libby refusal recovery shipped as v0.3.31 through [PR #145](https://github.com/akhilvuputuri/chief-agent/pull/145), independently approved, fully checked, and deployed healthy at `3382c5d63a6551ea960615332d0fc0cd3643e672`. Live `/library` and `/library link` acceptance passed with no extra library calls. Catalogue lookup works, but card linking is refused by the provider and borrowing remains unimplemented. See [current status](docs/library.md#current-account-linking-blocker--2-october-2026) and [journal closure](docs/journey/22-library-assistant.md#release-closure--2-october-2026).
 
 # Personal-agent handover
 
