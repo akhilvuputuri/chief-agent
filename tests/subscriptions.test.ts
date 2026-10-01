@@ -11,7 +11,7 @@ import { ensureUser, type Database } from "../src/db.js";
 import { DailyTools, DailyWorker, ScheduleParser } from "../src/daily.js";
 import { action } from "../src/protocol.js";
 import { runtimeContext } from "../src/runtime.js";
-import { readOperations } from "../src/execution.js";
+import { Execution, readOperations, recoverRuntime } from "../src/execution.js";
 import { server } from "../src/server.js";
 import { projectObservation } from "../src/observations.js";
 
@@ -57,6 +57,7 @@ const annual = {
   amountType: "fixed",
   cadence: "annual",
   nextChargeDate: "2026-11-01",
+  nextChargeEstimated: false,
   cancellationDeadline: "2026-10-15",
 };
 
@@ -226,6 +227,7 @@ test("trial and renewal on the same date produce one reminder; monthly reminders
       cadence: "monthly",
       trialEndDate: "2026-10-20",
       nextChargeDate: "2026-10-20",
+      nextChargeEstimated: false,
       reminderEnabled: true,
     });
     assert.equal(a.reminders.length, 1);
@@ -237,7 +239,12 @@ test("trial and renewal on the same date produce one reminder; monthly reminders
     ).rows[0];
     assert.match(row.content, /renewal \/ trial ends/);
     a = await f.record(
-      { status: "active", trialEndDate: null, nextChargeDate: "2026-11-20" },
+      {
+        status: "active",
+        trialEndDate: null,
+        nextChargeDate: "2026-11-20",
+        nextChargeEstimated: false,
+      },
       { id: a.id, baseRevision: a.revision },
     );
     assert.ok(a.reminders.every((r: any) => r.status === "cancelled"));
@@ -467,7 +474,7 @@ test("moving a date at full capacity withdraws the old slot before reserving its
     });
     await fillSchedules(f.db, 49);
     item = await f.record(
-      { nextChargeDate: "2026-12-01" },
+      { nextChargeDate: "2026-12-01", nextChargeEstimated: false },
       { id: item.id, baseRevision: 1 },
     );
     assert.equal(
@@ -511,11 +518,11 @@ test("restoring a withdrawn attempted date warns without replaying an uncertain 
       [randomUUID(), item.id],
     );
     item = await f.record(
-      { nextChargeDate: "2026-12-01" },
+      { nextChargeDate: "2026-12-01", nextChargeEstimated: false },
       { id: item.id, baseRevision: 1 },
     );
     item = await f.record(
-      { nextChargeDate: "2026-11-01" },
+      { nextChargeDate: "2026-11-01", nextChargeEstimated: false },
       { id: item.id, baseRevision: 2 },
     );
     assert.ok(item.reminders.every((r: any) => r.status === "cancelled"));
@@ -532,6 +539,206 @@ test("restoring a withdrawn attempted date warns without replaying an uncertain 
       ).rows[0].active_count,
       0,
     );
+  } finally {
+    await f.pg.close();
+  }
+});
+test("restored-date warnings do not depend on the bounded reminder display history", async () => {
+  const f = await fixture();
+  try {
+    let item = await f.record({
+      ...annual,
+      cancellationDeadline: null,
+      reminderEnabled: true,
+    });
+    await f.db.query(
+      "UPDATE daily_schedules SET status='processing',started_at=now(),lease=$1 WHERE subscription_id=$2",
+      [randomUUID(), item.id],
+    );
+    for (let day = 2; day <= 22; day++)
+      item = await f.record(
+        {
+          nextChargeDate: `2026-11-${String(day).padStart(2, "0")}`,
+          nextChargeEstimated: false,
+        },
+        { id: item.id, baseRevision: item.revision },
+      );
+    item = await f.record(
+      { nextChargeDate: "2026-11-01", nextChargeEstimated: false },
+      { id: item.id, baseRevision: item.revision },
+    );
+    assert.ok(item.warnings.some((w: string) => w.includes("2026-11-01")));
+    assert.ok(item.deliveryNotice);
+    assert.ok(
+      item.reminders.some(
+        (r: any) => r.date === "2026-11-01" && r.status === "cancelled",
+      ),
+    );
+    assert.equal(
+      Number(
+        (
+          await f.db.query(
+            "SELECT count(*) AS n FROM daily_schedules WHERE subscription_id=$1 AND status='scheduled'",
+            [item.id],
+          )
+        ).rows[0].n,
+      ),
+      0,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+test("a replacement charge date requires its own certainty and clearing the date clears certainty provenance", async () => {
+  const f = await fixture();
+  try {
+    let item = await f.record({ ...annual, nextChargeEstimated: true });
+    await assert.rejects(
+      () =>
+        f.record(
+          { nextChargeDate: "2026-11-07" },
+          { id: item.id, baseRevision: 1 },
+        ),
+      /requires nextChargeEstimated/,
+    );
+    assert.equal((await f.tools.read("a", item.id)).revision, 1);
+    item = await f.record(
+      { nextChargeDate: "2026-11-07", nextChargeEstimated: false },
+      { id: item.id, baseRevision: 1 },
+    );
+    assert.equal(item.nextChargeEstimated, false);
+    assert.equal(
+      item.fieldSources.nextChargeDate.updateId,
+      item.fieldSources.nextChargeEstimated.updateId,
+    );
+    item = await f.record(
+      { nextChargeDate: null },
+      { id: item.id, baseRevision: 2 },
+    );
+    assert.equal(item.nextChargeDate, null);
+    assert.equal(item.nextChargeEstimated, false);
+    assert.equal(item.history[0].changes.nextChargeEstimated, false);
+  } finally {
+    await f.pg.close();
+  }
+});
+test("reminder inspection is a read and settings has no read mode that recovery can mark uncertain", async () => {
+  const f = await fixture();
+  try {
+    const item = await f.record(annual);
+    assert.equal(
+      action.safeParse({ operation: "subscription_settings", id: item.id })
+        .success,
+      false,
+    );
+    await assert.rejects(
+      () =>
+        f.tools.call("a", f.run, {
+          operation: "subscription_settings",
+          id: item.id,
+          requestKey: randomUUID(),
+          baseRevision: 1,
+        }),
+      /subscription_list/,
+    );
+    const execution = new Execution(
+      f.db,
+      "a",
+      f.run,
+      new AbortController().signal,
+    );
+    await execution.start();
+    const call = await execution.beginCall("inspect", "subscription_list", {
+      id: item.id,
+    });
+    await recoverRuntime(f.db);
+    const row = (
+      await f.db.query("SELECT state,is_write FROM runtime_calls WHERE id=$1", [
+        call,
+      ])
+    ).rows[0];
+    assert.equal(row.is_write, false);
+    assert.notEqual(row.state, "uncertain");
+    assert.equal(
+      (await f.tools.list("a", { operation: "subscription_list", id: item.id }))
+        .reminderEnabled,
+      false,
+    );
+    assert.equal(readOperations.has("subscription_settings"), false);
+  } finally {
+    await f.pg.close();
+  }
+});
+test("long steered turns bind the exact original source and reject foreign or unrelated-run source IDs", async () => {
+  const f = await fixture();
+  try {
+    await f.db.query("INSERT INTO runtime_runs(id,user_id) VALUES($1,'a')", [
+      f.run,
+    ]);
+    const original = randomUUID();
+    await f.db.query(
+      "INSERT INTO conversation_inputs(id,user_id,message,run_id) VALUES($1,'a','Add gym: 120 SGD annually',$2)",
+      [original, f.run],
+    );
+    for (let i = 0; i < 10; i++)
+      await f.db.query(
+        "INSERT INTO conversation_inputs(id,user_id,message,run_id) VALUES($1,'a','Unrelated followup',$2)",
+        [randomUUID(), f.run],
+      );
+    await assert.rejects(() => f.record(annual), /exact sourceInputIds/);
+    const page = await f.tools.call("a", f.run, {
+      operation: "subscription_list",
+      sourceInputs: true,
+    });
+    assert.equal(page.sourceInputs[0].id, original);
+    assert.equal(page.nextOffset, 10);
+    assert.equal(
+      (
+        await f.tools.call("a", f.run, {
+          operation: "subscription_list",
+          sourceInputs: true,
+          offset: 10,
+        })
+      ).sourceInputs.length,
+      1,
+    );
+    const item = await f.record(annual, { sourceInputIds: [original] });
+    assert.deepEqual(item.history[0].source_ref.inputIds, [original]);
+    const otherRun = randomUUID(),
+      otherInput = randomUUID();
+    await f.db.query("INSERT INTO runtime_runs(id,user_id) VALUES($1,'a')", [
+      otherRun,
+    ]);
+    await f.db.query(
+      "INSERT INTO conversation_inputs(id,user_id,message,run_id) VALUES($1,'a','Other run',$2)",
+      [otherInput, otherRun],
+    );
+    await assert.rejects(
+      () =>
+        f.record(
+          { amount: "240" },
+          { id: item.id, baseRevision: 1, sourceInputIds: [otherInput] },
+        ),
+      /current turn/,
+    );
+    const foreignRun = randomUUID(),
+      foreignInput = randomUUID();
+    await f.db.query("INSERT INTO runtime_runs(id,user_id) VALUES($1,'b')", [
+      foreignRun,
+    ]);
+    await f.db.query(
+      "INSERT INTO conversation_inputs(id,user_id,message,run_id) VALUES($1,'b','Foreign',$2)",
+      [foreignInput, foreignRun],
+    );
+    await assert.rejects(
+      () =>
+        f.record(
+          { amount: "240" },
+          { id: item.id, baseRevision: 1, sourceInputIds: [foreignInput] },
+        ),
+      /current turn/,
+    );
+    assert.equal((await f.tools.read("a", item.id)).revision, 1);
   } finally {
     await f.pg.close();
   }

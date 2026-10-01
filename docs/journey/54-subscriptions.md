@@ -48,3 +48,9 @@ Release remains pending current-head independent approval, CI and the migration-
 ## Follow-up and next iteration
 
 First owner acceptance: add a manual recurring payment, open Subscriptions, edit its decision date, enable a reminder and confirm its Singapore firing time. Later adapters should emit the same typed observations after content minimization and owner review; responsibilities should supply source scope and attention policy through issue 131 rather than adding a private subscriptions timer.
+
+### Review follow-up and checkpoint — 2 October 2026
+
+Astra requested changes at `e3cc824558011ae32f2d4415734b1eda97a67638` after confirming the original retry/quota fixes, then reproducing a long-history variant of the no-replay warning plus date-certainty, settings-read classification and source-reference defects. The candidate now queries exact planned dates for warnings, requires explicit date certainty, makes settings mutation-only with inspection through the read tool, and binds exact validated source input IDs. Four additional permanent regressions pass; the focused suite is 24 tests and build passes. Full checks and independent re-review of this latest revision remain pending.
+
+The owner requested that previous changes be pushed as a checkpoint before broader harness research/planning. PR142 remains draft, unmerged and undeployed. Fresh main is `3382c5d63a6551ea960615332d0fc0cd3643e672` (Libby refusal handling); its changes and patch version must be incorporated, and the operator baseline reverified/reviewed before release. This checkpoint is not a tested release.

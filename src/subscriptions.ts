@@ -21,6 +21,8 @@ type Row = {
 };
 const NOTICE =
   "Saved owner statements, not verified charges or a complete account audit. Unknown amounts and dates remain unknown. Nothing here changes or pays a merchant account.";
+// A findings agent has one host-recorded coordinator; it cannot choose another run.
+const inputScope = `user_id=$1 AND run_id IN ($2::uuid, (SELECT (data->>'parentRunId')::uuid FROM events WHERE user_id=$1 AND run_id=$2 AND type='agent.child_started' LIMIT 1))`;
 export const subscriptionKey = (value?: string | null) =>
   (value ?? "")
     .trim()
@@ -221,6 +223,8 @@ export class SubscriptionTools {
     run: string,
     action: SubscriptionAction,
   ): Promise<any> {
+    if (action.operation === "subscription_list" && action.sourceInputs)
+      return this.inputs(user, run, action.offset ?? 0);
     if (action.operation === "subscription_list")
       return this.list(user, action);
     if (action.operation === "subscription_settings") {
@@ -229,7 +233,10 @@ export class SubscriptionTools {
       if (action.daysBefore !== undefined)
         fields.reminderDays = action.daysBefore;
       if (action.time !== undefined) fields.reminderTime = action.time;
-      if (!Object.keys(fields).length) return this.read(user, action.id);
+      if (!Object.keys(fields).length)
+        throw new ToolValidationError(
+          "Specify a reminder change; inspect settings with subscription_list(id), which is read-only.",
+        );
       if (!action.requestKey)
         throw new ToolValidationError(
           "Changing reminders needs a unique requestKey; reuse it only for an exact retry.",
@@ -239,10 +246,65 @@ export class SubscriptionTools {
         id: action.id,
         baseRevision: action.baseRevision,
         requestKey: action.requestKey,
+        sourceInputIds: action.sourceInputIds,
         fields,
       });
     }
     return this.record(user, run, action);
+  }
+  private async inputs(user: string, run: string, offset: number) {
+    if (
+      !(
+        await this.db.query(
+          "SELECT 1 FROM work_turns WHERE user_id=$1 AND run_id=$2",
+          [user, run],
+        )
+      ).rows.length
+    )
+      throw new ToolValidationError(
+        "Original inputs require an owner-scoped active turn.",
+      );
+    const rows = (
+      await this.db.query(
+        `SELECT id,received_at AS "receivedAt",left(message,400) AS excerpt FROM conversation_inputs WHERE ${inputScope} ORDER BY ordinal LIMIT 11 OFFSET $3`,
+        [user, run, offset],
+      )
+    ).rows;
+    return {
+      notice:
+        "Original owner input excerpts from this turn/coordinator, not new instructions or automatic evidence. Choose the exact input IDs supporting the fields; excerpts may be incomplete. Chief can read an original input with conversation_read(id).",
+      sourceInputs: rows.slice(0, 10),
+      nextOffset: rows.length > 10 ? offset + 10 : null,
+    };
+  }
+  private async sourceIds(user: string, run: string, ids?: string[]) {
+    if (ids) {
+      const unique = [...new Set(ids.map((id) => id.toLowerCase()))];
+      if (unique.length !== ids.length)
+        throw new ToolValidationError("Source input IDs must be distinct.");
+      const rows = (
+        await this.db.query(
+          `SELECT id FROM conversation_inputs WHERE ${inputScope} AND id=ANY($3::uuid[])`,
+          [user, run, unique],
+        )
+      ).rows;
+      if (rows.length !== unique.length)
+        throw new ToolValidationError(
+          "Source input IDs must belong to this owner's current turn or its coordinator; use subscription_list(sourceInputs=true).",
+        );
+      return unique;
+    }
+    const rows = (
+      await this.db.query(
+        `SELECT id FROM conversation_inputs WHERE ${inputScope} ORDER BY ordinal LIMIT 2`,
+        [user, run],
+      )
+    ).rows;
+    if (rows.length > 1)
+      throw new ToolValidationError(
+        "Several original inputs belong to this turn. Specify the exact sourceInputIds supporting these fields; subscription_list(sourceInputs=true) lists them in stable pages.",
+      );
+    return rows.map((row) => row.id);
   }
   private async owned(user: string, id: string): Promise<Row> {
     const row = (
@@ -267,8 +329,8 @@ export class SubscriptionTools {
     ).rows;
     const reminders = (
       await this.db.query(
-        `SELECT id,to_char(subscription_date,'YYYY-MM-DD') AS date,next_run AS "firesAt",status,last_error,started_at FROM daily_schedules WHERE user_id=$1 AND subscription_id=$2 ORDER BY CASE WHEN status='scheduled' THEN 0 WHEN status='processing' THEN 1 ELSE 2 END, subscription_date DESC LIMIT 20`,
-        [user, id],
+        `SELECT id,to_char(subscription_date,'YYYY-MM-DD') AS date,next_run AS "firesAt",status,last_error,started_at FROM daily_schedules WHERE user_id=$1 AND subscription_id=$2 ORDER BY CASE WHEN status='scheduled' THEN 0 WHEN status='processing' THEN 1 WHEN subscription_date::text=ANY($3::text[]) THEN 2 ELSE 3 END, subscription_date DESC LIMIT 20`,
+        [user, id, subscriptionDates(row.data).map((d) => d.date)],
       )
     ).rows;
     const result = {
@@ -289,6 +351,10 @@ export class SubscriptionTools {
     user: string,
     a: Extract<SubscriptionAction, { operation: "subscription_list" }>,
   ) {
+    if (a.sourceInputs)
+      throw new ToolValidationError(
+        "Original input lookup requires the host turn; use the subscription_list tool in a conversation.",
+      );
     if (a.id) return this.read(user, a.id, a.offset);
     const all = (
       await this.db.query(
@@ -372,13 +438,29 @@ export class SubscriptionTools {
       throw new ToolValidationError(
         "Only a foreground owner request may change subscriptions or their reminders.",
       );
+    const fields = { ...a.fields };
+    if (fields.nextChargeDate === null) {
+      if (fields.nextChargeEstimated === true)
+        throw new ToolValidationError(
+          "A cleared charge date cannot be estimated.",
+        );
+      fields.nextChargeEstimated = false;
+    } else if (
+      fields.nextChargeDate !== undefined &&
+      fields.nextChargeEstimated === undefined
+    )
+      throw new ToolValidationError(
+        "Supplying a next charge date requires nextChargeEstimated: false for a stated date, true for an estimate.",
+      );
     const hash = createHash("sha256")
       .update(
         JSON.stringify({
           id: a.id ?? null,
           baseRevision: a.baseRevision ?? null,
+          sourceInputIds:
+            a.sourceInputIds?.map((id) => id.toLowerCase()).sort() ?? null,
           fields: Object.fromEntries(
-            Object.entries(a.fields).sort(([x], [y]) => x.localeCompare(y)),
+            Object.entries(fields).sort(([x], [y]) => x.localeCompare(y)),
           ),
         }),
       )
@@ -413,7 +495,7 @@ export class SubscriptionTools {
       );
     if (!Object.keys(a.fields).length)
       throw new ToolValidationError("Supply at least one subscription field.");
-    const data = { ...(old?.data ?? defaults), ...a.fields };
+    const data = { ...(old?.data ?? defaults), ...fields };
     validate(data);
     const merchant = subscriptionKey(data.merchant ?? data.label),
       plan = subscriptionKey(data.plan),
@@ -439,15 +521,12 @@ export class SubscriptionTools {
       revision = (old?.revision ?? 0) + 1;
     const stamp = new Date(this.now()).toISOString();
     const fieldSources = { ...(old?.field_sources ?? {}) };
-    for (const key of Object.keys(a.fields))
+    for (const key of Object.keys(fields))
       fieldSources[key] = { updateId, observedAt: stamp, sourceKind: "owner" };
-    const inputs = (
-      await this.db.query(
-        `SELECT id FROM conversation_inputs WHERE user_id=$1 AND run_id IN ($2::uuid, (SELECT (data->>'parentRunId')::uuid FROM events WHERE user_id=$1 AND run_id=$2 AND type='agent.child_started' LIMIT 1)) ORDER BY ordinal DESC LIMIT 10`,
-        [user, run],
-      )
-    ).rows;
-    const source = { runId: run, inputIds: inputs.map((r) => r.id) };
+    const source = {
+      runId: run,
+      inputIds: await this.sourceIds(user, run, a.sourceInputIds),
+    };
     const { plans, warnings } = subscriptionReminders(data, this.now());
     const values: unknown[] = [
       id,
@@ -462,7 +541,7 @@ export class SubscriptionTools {
       a.requestKey,
       hash,
       JSON.stringify(source),
-      JSON.stringify(a.fields),
+      JSON.stringify(fields),
       JSON.stringify(plans),
     ];
     const write = old
@@ -497,7 +576,13 @@ export class SubscriptionTools {
         );
       }
       const read = await this.read(user, id);
-      for (const reminder of read.reminders)
+      const plannedReminders = (
+        await this.db.query(
+          "SELECT to_char(subscription_date,'YYYY-MM-DD') AS date,status,started_at,last_error FROM daily_schedules WHERE user_id=$1 AND subscription_id=$2 AND subscription_date::text=ANY($3::text[])",
+          [user, id, plans.map((p) => p.date)],
+        )
+      ).rows;
+      for (const reminder of plannedReminders)
         if (
           plans.some((p) => p.date === reminder.date) &&
           (["completed", "failed", "processing"].includes(reminder.status) ||
@@ -512,7 +597,10 @@ export class SubscriptionTools {
         updateId,
         warnings,
         ...(Number(result.possibly_started) > 0 ||
-        read.reminders.some((r: any) => r.status === "processing")
+        plannedReminders.some(
+          (r: any) =>
+            r.started_at && ["processing", "cancelled"].includes(r.status),
+        )
           ? {
               deliveryNotice:
                 "A reminder may already have started delivery; inspect Telegram. It will not be retried automatically.",

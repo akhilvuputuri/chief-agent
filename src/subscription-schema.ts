@@ -3,6 +3,7 @@ import { z } from "zod";
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const text = z.string().trim().min(1).max(100);
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+const sourceInputIds = z.array(z.string().uuid()).min(1).max(10).optional();
 export const subscriptionFields = z
   .object({
     label: text.optional(),
@@ -56,6 +57,7 @@ export const subscriptionRecord = z
     requestKey: z.string().uuid(),
     id: z.string().uuid().optional(),
     baseRevision: z.number().int().positive().optional(),
+    sourceInputIds,
     fields: subscriptionFields,
   })
   .strict();
@@ -64,6 +66,7 @@ export const subscriptionList = z
     operation: z.literal("subscription_list"),
     id: z.string().uuid().optional(),
     includeInactive: z.boolean().optional(),
+    sourceInputs: z.boolean().optional(),
     merchant: text.optional(),
     plan: text.optional(),
     accountLabel: text.optional(),
@@ -74,8 +77,9 @@ export const subscriptionSettings = z
   .object({
     operation: z.literal("subscription_settings"),
     id: z.string().uuid(),
-    requestKey: z.string().uuid().optional(),
-    baseRevision: z.number().int().positive().optional(),
+    requestKey: z.string().uuid(),
+    baseRevision: z.number().int().positive(),
+    sourceInputIds,
     enabled: z.boolean().optional(),
     daysBefore: z.number().int().min(0).max(365).nullable().optional(),
     time: time.optional(),
