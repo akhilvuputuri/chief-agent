@@ -1,0 +1,1371 @@
+[
+  {
+    "id": "none-1",
+    "split": "tuning",
+    "message": "hi",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "none-2",
+    "split": "tuning",
+    "message": "thanks, that's perfect!",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "none-3",
+    "split": "tuning",
+    "message": "what's 15% of 240?",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "none-4",
+    "split": "tuning",
+    "message": "tell me a joke about cats",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "none-5",
+    "split": "tuning",
+    "message": "explain quantum tunnelling like I'm 12",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "none-6",
+    "split": "tuning",
+    "message": "who won the F1 race yesterday?",
+    "prior": [],
+    "gold": "web"
+  },
+  {
+    "id": "none-7",
+    "split": "tuning",
+    "message": "what's the weather in Singapore this week?",
+    "prior": [],
+    "gold": "web"
+  },
+  {
+    "id": "none-8",
+    "split": "tuning",
+    "message": "remember that I prefer short answers",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "none-9",
+    "split": "tuning",
+    "message": "translate 'good morning' into Japanese",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "none-10",
+    "split": "tuning",
+    "message": "what did we talk about last week regarding my sleep routine?",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "gmail-1",
+    "split": "tuning",
+    "message": "did Sarah reply to me?",
+    "prior": [],
+    "gold": "email"
+  },
+  {
+    "id": "gmail-2",
+    "split": "tuning",
+    "message": "anything from DBS in the last few days?",
+    "prior": [],
+    "gold": "email"
+  },
+  {
+    "id": "gmail-3",
+    "split": "tuning",
+    "message": "find the invoice Grab sent me",
+    "prior": [],
+    "gold": "email"
+  },
+  {
+    "id": "gmail-4",
+    "split": "tuning",
+    "message": "summarise my unread mail",
+    "prior": [],
+    "gold": "email"
+  },
+  {
+    "id": "gmail-5",
+    "split": "tuning",
+    "message": "what did my landlord say about renewing the lease?",
+    "prior": [],
+    "gold": "email"
+  },
+  {
+    "id": "gmail-6",
+    "split": "tuning",
+    "message": "check my other inbox too",
+    "prior": [],
+    "gold": "email"
+  },
+  {
+    "id": "gmail-7",
+    "split": "tuning",
+    "message": "did the airline send my booking confirmation?",
+    "prior": [],
+    "gold": "email"
+  },
+  {
+    "id": "gmail-8",
+    "split": "tuning",
+    "message": "any messages from HR about the offer letter?",
+    "prior": [],
+    "gold": "email"
+  },
+  {
+    "id": "cal-1",
+    "split": "tuning",
+    "message": "am I free Thursday afternoon?",
+    "prior": [],
+    "gold": "calendar"
+  },
+  {
+    "id": "cal-2",
+    "split": "tuning",
+    "message": "what's on at 3pm?",
+    "prior": [],
+    "gold": "calendar"
+  },
+  {
+    "id": "cal-3",
+    "split": "tuning",
+    "message": "put the dentist on the 12th at 10am",
+    "prior": [],
+    "gold": "calendar"
+  },
+  {
+    "id": "cal-4",
+    "split": "tuning",
+    "message": "what does my week look like?",
+    "prior": [],
+    "gold": "calendar"
+  },
+  {
+    "id": "cal-5",
+    "split": "tuning",
+    "message": "when is my next meeting with Priya?",
+    "prior": [],
+    "gold": "calendar"
+  },
+  {
+    "id": "cal-6",
+    "split": "tuning",
+    "message": "book dinner with Tom next Friday 7:30",
+    "prior": [],
+    "gold": "calendar"
+  },
+  {
+    "id": "cal-7",
+    "split": "tuning",
+    "message": "do I have anything clashing with the conference on 3 Oct?",
+    "prior": [],
+    "gold": "calendar"
+  },
+  {
+    "id": "cal-8",
+    "split": "tuning",
+    "message": "approve that event",
+    "prior": [],
+    "gold": "calendar"
+  },
+  {
+    "id": "daily-1",
+    "split": "tuning",
+    "message": "remind me to call mom at 7pm",
+    "prior": [],
+    "gold": "daily"
+  },
+  {
+    "id": "daily-2",
+    "split": "tuning",
+    "message": "add milk and eggs to my to-do list",
+    "prior": [],
+    "gold": "daily"
+  },
+  {
+    "id": "daily-3",
+    "split": "tuning",
+    "message": "what's still open on my list?",
+    "prior": [],
+    "gold": "daily"
+  },
+  {
+    "id": "daily-4",
+    "split": "tuning",
+    "message": "send me a morning briefing every weekday at 8",
+    "prior": [],
+    "gold": "daily"
+  },
+  {
+    "id": "daily-5",
+    "split": "tuning",
+    "message": "mark the passport renewal note as done",
+    "prior": [],
+    "gold": "daily"
+  },
+  {
+    "id": "daily-6",
+    "split": "tuning",
+    "message": "stop the evening reminder",
+    "prior": [],
+    "gold": "daily"
+  },
+  {
+    "id": "jobs-1",
+    "split": "tuning",
+    "message": "how well does the Stripe backend role fit me?",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "jobs-2",
+    "split": "tuning",
+    "message": "save this posting https://careers.grab.com/job/12345",
+    "prior": [],
+    "gold": "jobs"
+  },
+  {
+    "id": "jobs-3",
+    "split": "tuning",
+    "message": "mark the Shopee application as rejected",
+    "prior": [],
+    "gold": "jobs"
+  },
+  {
+    "id": "jobs-4",
+    "split": "tuning",
+    "message": "which saved roles haven't I applied to yet?",
+    "prior": [],
+    "gold": "jobs"
+  },
+  {
+    "id": "jobs-5",
+    "split": "tuning",
+    "message": "give me practice questions for system design, based on my prep list",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "jobs-6",
+    "split": "tuning",
+    "message": "sync the preparation sheet",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "jobs-7",
+    "split": "tuning",
+    "message": "analyse all my saved roles against my background",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "jobs-8",
+    "split": "tuning",
+    "message": "prep me for Monday's interview with Grab",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "work-1",
+    "split": "tuning",
+    "message": "keep going on that long comparison task",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "work-2",
+    "split": "tuning",
+    "message": "cancel the background job",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "work-3",
+    "split": "tuning",
+    "message": "what's the status of the task you were running?",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "work-4",
+    "split": "tuning",
+    "message": "start a long task to compare 15 laptops under $2000 and keep going until done",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "work-5",
+    "split": "tuning",
+    "message": "pause the research job for now",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "res-1",
+    "split": "tuning",
+    "message": "do a deep dive on solid-state batteries with sources",
+    "prior": [],
+    "gold": "research"
+  },
+  {
+    "id": "res-2",
+    "split": "tuning",
+    "message": "investigate which Singapore banks have the best savings rates and cite sources",
+    "prior": [],
+    "gold": "research"
+  },
+  {
+    "id": "res-3",
+    "split": "tuning",
+    "message": "research the company culture at Canva thoroughly",
+    "prior": [],
+    "gold": "research"
+  },
+  {
+    "id": "res-4",
+    "split": "tuning",
+    "message": "quick question: what year did the iPhone launch?",
+    "prior": [],
+    "gold": "web"
+  },
+  {
+    "id": "media-1",
+    "split": "tuning",
+    "message": "what's in this?\n\n[Attached image: photo.jpg (image/jpeg, 1.2 MB) attachmentId=a1. You do not see the image directly: call media_delegate with the attachmentIds.]",
+    "prior": [],
+    "gold": "media"
+  },
+  {
+    "id": "media-2",
+    "split": "tuning",
+    "message": "can you read this receipt\n\n[Attached image: receipt.png (image/png, 800 KB) attachmentId=a2. You do not see the image directly: call media_delegate with the attachmentIds.]",
+    "prior": [],
+    "gold": "media"
+  },
+  {
+    "id": "media-3",
+    "split": "tuning",
+    "message": "summarise\n\n[Attached PDF: contract.pdf (400 KB), 12 pages, text extracted as sourceId=s1.]",
+    "prior": [],
+    "gold": "media"
+  },
+  {
+    "id": "media-4",
+    "split": "tuning",
+    "message": "what does clause 7 of the contract I sent earlier say about termination?",
+    "prior": [],
+    "gold": "media"
+  },
+  {
+    "id": "media-5",
+    "split": "tuning",
+    "message": "is this mole something to worry about?\n\n[Attached image: skin.jpg (image/jpeg, 900 KB) attachmentId=a3. You do not see the image directly: call media_delegate with the attachmentIds.]",
+    "prior": [],
+    "gold": "media"
+  },
+  {
+    "id": "canvas-1",
+    "split": "tuning",
+    "message": "save this plan as a canvas",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "canvas-2",
+    "split": "tuning",
+    "message": "update my Japan trip canvas with the new dates",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "canvas-3",
+    "split": "tuning",
+    "message": "show my saved docs",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "canvas-4",
+    "split": "tuning",
+    "message": "turn that analysis into something I can open in the app",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "parcel-1",
+    "split": "tuning",
+    "message": "where's my Amazon package?",
+    "prior": [],
+    "gold": "parcels"
+  },
+  {
+    "id": "parcel-2",
+    "split": "tuning",
+    "message": "did the DHL thing arrive?",
+    "prior": [],
+    "gold": "parcels"
+  },
+  {
+    "id": "parcel-3",
+    "split": "tuning",
+    "message": "track my Shopee order",
+    "prior": [],
+    "gold": "parcels"
+  },
+  {
+    "id": "parcel-4",
+    "split": "tuning",
+    "message": "I'm expecting a new keyboard from Keychron, keep an eye on it",
+    "prior": [],
+    "gold": "parcels"
+  },
+  {
+    "id": "parcel-5",
+    "split": "tuning",
+    "message": "what am I still waiting on?",
+    "prior": [],
+    "gold": "parcels"
+  },
+  {
+    "id": "parcel-6",
+    "split": "tuning",
+    "message": "the headphones came today, you can archive that one",
+    "prior": [],
+    "gold": "parcels"
+  },
+  {
+    "id": "lib-1",
+    "split": "tuning",
+    "message": "is Atomic Habits available?",
+    "prior": [],
+    "gold": "library"
+  },
+  {
+    "id": "lib-2",
+    "split": "tuning",
+    "message": "can I borrow Project Hail Mary right now?",
+    "prior": [],
+    "gold": "library"
+  },
+  {
+    "id": "lib-3",
+    "split": "tuning",
+    "message": "what do I have on loan?",
+    "prior": [],
+    "gold": "library"
+  },
+  {
+    "id": "lib-4",
+    "split": "tuning",
+    "message": "when is my ebook due back?",
+    "prior": [],
+    "gold": "library"
+  },
+  {
+    "id": "lib-5",
+    "split": "tuning",
+    "message": "any Lucky Day copies of Tomorrow, and Tomorrow, and Tomorrow?",
+    "prior": [],
+    "gold": "library"
+  },
+  {
+    "id": "lib-6",
+    "split": "tuning",
+    "message": "find me something by Brandon Sanderson I can read tonight",
+    "prior": [],
+    "gold": "library"
+  },
+  {
+    "id": "stock-1",
+    "split": "tuning",
+    "message": "how is AAPL doing?",
+    "prior": [],
+    "gold": "stocks"
+  },
+  {
+    "id": "stock-2",
+    "split": "tuning",
+    "message": "alert me if NVDA drops 5%",
+    "prior": [],
+    "gold": "stocks"
+  },
+  {
+    "id": "stock-3",
+    "split": "tuning",
+    "message": "stop watching Tesla",
+    "prior": [],
+    "gold": "stocks"
+  },
+  {
+    "id": "stock-4",
+    "split": "tuning",
+    "message": "what am I tracking in the market?",
+    "prior": [],
+    "gold": "stocks"
+  },
+  {
+    "id": "stock-5",
+    "split": "tuning",
+    "message": "set my default drop threshold to 3%",
+    "prior": [],
+    "gold": "stocks"
+  },
+  {
+    "id": "stock-6",
+    "split": "tuning",
+    "message": "add D05 on SGX",
+    "prior": [],
+    "gold": "stocks"
+  },
+  {
+    "id": "rout-1",
+    "split": "tuning",
+    "message": "every Monday at 9am summarise my inbox",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "rout-2",
+    "split": "tuning",
+    "message": "pause my weekly job-search routine",
+    "prior": [],
+    "gold": "daily"
+  },
+  {
+    "id": "rout-3",
+    "split": "tuning",
+    "message": "what automations do I have running?",
+    "prior": [],
+    "gold": "daily"
+  },
+  {
+    "id": "rout-4",
+    "split": "tuning",
+    "message": "each night at 11 check the news on AI regulation and send me a digest",
+    "prior": [],
+    "gold": "daily"
+  },
+  {
+    "id": "skill-1",
+    "split": "tuning",
+    "message": "show the version history of the interview skill",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "skill-2",
+    "split": "tuning",
+    "message": "draft a new version of my writing-style skill that's more concise",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "skill-3",
+    "split": "tuning",
+    "message": "roll back the research skill to the previous version",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "multi-1",
+    "split": "tuning",
+    "message": "check my email for the flight details and add it to my calendar",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "multi-2",
+    "split": "tuning",
+    "message": "did the Lazada shipping email come in? update the parcel",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "multi-3",
+    "split": "tuning",
+    "message": "research Canva's interview process and add it to my prep for the role",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "multi-4",
+    "split": "tuning",
+    "message": "read this job description and tell me if I fit\n\n[Attached PDF: jd.pdf (200 KB), 2 pages, text extracted as sourceId=s2.]",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "multi-5",
+    "split": "tuning",
+    "message": "remind me the day before my dentist appointment",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "multi-6",
+    "split": "tuning",
+    "message": "save today's email summary as a canvas",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "fu-1",
+    "split": "tuning",
+    "message": "and the other one?",
+    "prior": [
+      {
+        "user": "any new email from the bank?",
+        "assistant": "Yes, DBS sent a statement on Tuesday and OCBC sent a promo.",
+        "tools": ["gmail_search"]
+      }
+    ],
+    "gold": "email"
+  },
+  {
+    "id": "fu-2",
+    "split": "tuning",
+    "message": "what about the sequel?",
+    "prior": [
+      {
+        "user": "is Atomic Habits available?",
+        "assistant": "Yes, 2 copies are available to borrow now.",
+        "tools": ["library_check"]
+      }
+    ],
+    "gold": "library"
+  },
+  {
+    "id": "fu-3",
+    "split": "tuning",
+    "message": "and MSFT too",
+    "prior": [
+      {
+        "user": "alert me if NVDA drops 5%",
+        "assistant": "Done, watching NVDA with a 5% threshold.",
+        "tools": ["watchlist_add"]
+      }
+    ],
+    "gold": "stocks"
+  },
+  {
+    "id": "fu-4",
+    "split": "tuning",
+    "message": "and the week after?",
+    "prior": [
+      {
+        "user": "what's on Thursday?",
+        "assistant": "You have standup at 10 and lunch with Priya at 1.",
+        "tools": ["calendar_list"]
+      }
+    ],
+    "gold": "calendar"
+  },
+  {
+    "id": "fu-5",
+    "split": "tuning",
+    "message": "ok do the same for the next one",
+    "prior": [
+      {
+        "user": "how well does the Stripe role fit me?",
+        "assistant": "Strong fit on backend, gap on Go experience.",
+        "tools": ["job_analyze"]
+      }
+    ],
+    "gold": "chief"
+  },
+  {
+    "id": "fu-6",
+    "split": "tuning",
+    "message": "and the one from Uniqlo?",
+    "prior": [
+      {
+        "user": "where's my Amazon package?",
+        "assistant": "Last update: out for delivery.",
+        "tools": ["parcel_list"]
+      }
+    ],
+    "gold": "parcels"
+  },
+  {
+    "id": "fu-7",
+    "split": "tuning",
+    "message": "great, put it in for Tuesday 2pm",
+    "prior": [
+      {
+        "user": "did Sarah reply to me?",
+        "assistant": "Yes, she replied yesterday saying she can meet next week.",
+        "tools": ["gmail_search"]
+      }
+    ],
+    "gold": "calendar"
+  },
+  {
+    "id": "fu-8",
+    "split": "tuning",
+    "message": "save that as a canvas",
+    "prior": [
+      {
+        "user": "do a deep dive on solid-state batteries",
+        "assistant": "Here's the report with 8 sources...",
+        "tools": ["research_delegate"]
+      }
+    ],
+    "gold": "chief"
+  },
+  {
+    "id": "fu-9",
+    "split": "tuning",
+    "message": "remind me to claim it on Friday",
+    "prior": [
+      {
+        "user": "what's in this image?",
+        "assistant": "It's a receipt from Din Tai Fung for $84.",
+        "tools": ["media_delegate"]
+      }
+    ],
+    "gold": "daily"
+  },
+  {
+    "id": "fu-10",
+    "split": "tuning",
+    "message": "another one",
+    "prior": [
+      {
+        "user": "tell me a joke about cats",
+        "assistant": "Why did the cat sit on the computer? To keep an eye on the mouse.",
+        "tools": []
+      }
+    ],
+    "gold": "chief"
+  },
+  {
+    "id": "fu-11",
+    "split": "tuning",
+    "message": "remove the second",
+    "prior": [
+      {
+        "user": "what am I tracking in the market?",
+        "assistant": "AAPL, NVDA and D05.",
+        "tools": ["watchlist_list"]
+      }
+    ],
+    "gold": "stocks"
+  },
+  {
+    "id": "fu-12",
+    "split": "tuning",
+    "message": "what's the notice period in it?",
+    "prior": [
+      {
+        "user": "any new email from HR?",
+        "assistant": "HR sent the offer letter PDF.",
+        "tools": ["gmail_search"]
+      }
+    ],
+    "gold": "email"
+  },
+  {
+    "id": "t-none-1",
+    "split": "held-out",
+    "message": "good morning!",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "t-none-2",
+    "split": "held-out",
+    "message": "how do I make a flat white at home?",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "t-none-3",
+    "split": "held-out",
+    "message": "convert 72 fahrenheit to celsius",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "t-none-4",
+    "split": "held-out",
+    "message": "what's the capital of Mongolia?",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "t-none-5",
+    "split": "held-out",
+    "message": "write a haiku about rain",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "t-none-6",
+    "split": "held-out",
+    "message": "is it worth upgrading to the new MacBook?",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "t-none-7",
+    "split": "held-out",
+    "message": "lol ok",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "t-none-8",
+    "split": "held-out",
+    "message": "what's the latest news on the Fed rate decision?",
+    "prior": [],
+    "gold": "web"
+  },
+  {
+    "id": "t-none-9",
+    "split": "held-out",
+    "message": "can you explain what an index fund is?",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "t-none-10",
+    "split": "held-out",
+    "message": "note to self: I like my coffee black",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "t-gmail-1",
+    "split": "held-out",
+    "message": "has the insurance company got back to me?",
+    "prior": [],
+    "gold": "email"
+  },
+  {
+    "id": "t-gmail-2",
+    "split": "held-out",
+    "message": "what did James send yesterday?",
+    "prior": [],
+    "gold": "email"
+  },
+  {
+    "id": "t-gmail-3",
+    "split": "held-out",
+    "message": "any bills due that came in this week?",
+    "prior": [],
+    "gold": "email"
+  },
+  {
+    "id": "t-gmail-4",
+    "split": "held-out",
+    "message": "did Netflix change my plan price? they emailed something",
+    "prior": [],
+    "gold": "email"
+  },
+  {
+    "id": "t-gmail-5",
+    "split": "held-out",
+    "message": "pull up the conversation with the contractor about the kitchen",
+    "prior": [],
+    "gold": "email"
+  },
+  {
+    "id": "t-gmail-6",
+    "split": "held-out",
+    "message": "what's new in my secondary account?",
+    "prior": [],
+    "gold": "email"
+  },
+  {
+    "id": "t-cal-1",
+    "split": "held-out",
+    "message": "what time is my call with the recruiter?",
+    "prior": [],
+    "gold": "calendar"
+  },
+  {
+    "id": "t-cal-2",
+    "split": "held-out",
+    "message": "is Saturday morning open?",
+    "prior": [],
+    "gold": "calendar"
+  },
+  {
+    "id": "t-cal-3",
+    "split": "held-out",
+    "message": "schedule a haircut for the 20th at 11",
+    "prior": [],
+    "gold": "calendar"
+  },
+  {
+    "id": "t-cal-4",
+    "split": "held-out",
+    "message": "how packed is next month?",
+    "prior": [],
+    "gold": "calendar"
+  },
+  {
+    "id": "t-cal-5",
+    "split": "held-out",
+    "message": "when's the team offsite?",
+    "prior": [],
+    "gold": "calendar"
+  },
+  {
+    "id": "t-daily-1",
+    "split": "held-out",
+    "message": "don't let me forget to pay rent on the 1st",
+    "prior": [],
+    "gold": "daily"
+  },
+  {
+    "id": "t-daily-2",
+    "split": "held-out",
+    "message": "jot down: gift ideas for Anna — scarf, novel",
+    "prior": [],
+    "gold": "daily"
+  },
+  {
+    "id": "t-daily-3",
+    "split": "held-out",
+    "message": "what reminders do I have set?",
+    "prior": [],
+    "gold": "daily"
+  },
+  {
+    "id": "t-daily-4",
+    "split": "held-out",
+    "message": "tick off the groceries item",
+    "prior": [],
+    "gold": "daily"
+  },
+  {
+    "id": "t-jobs-1",
+    "split": "held-out",
+    "message": "which of my saved roles pays the most?",
+    "prior": [],
+    "gold": "jobs"
+  },
+  {
+    "id": "t-jobs-2",
+    "split": "held-out",
+    "message": "I got the Atlassian offer! update it",
+    "prior": [],
+    "gold": "jobs"
+  },
+  {
+    "id": "t-jobs-3",
+    "split": "held-out",
+    "message": "what should I brush up on before the Meta loop?",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "t-jobs-4",
+    "split": "held-out",
+    "message": "add this role: Senior Engineer at Wise, remote",
+    "prior": [],
+    "gold": "jobs"
+  },
+  {
+    "id": "t-jobs-5",
+    "split": "held-out",
+    "message": "compare the two fintech roles I saved",
+    "prior": [],
+    "gold": "jobs"
+  },
+  {
+    "id": "t-work-1",
+    "split": "held-out",
+    "message": "go ahead and finish the rest of it in the background",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "t-work-2",
+    "split": "held-out",
+    "message": "kill that job, I don't need it anymore",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "t-work-3",
+    "split": "held-out",
+    "message": "take your time and build me a full 3-month study plan, step by step",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "t-res-1",
+    "split": "held-out",
+    "message": "give me a thorough, sourced comparison of the three main EV charging networks in Singapore",
+    "prior": [],
+    "gold": "research"
+  },
+  {
+    "id": "t-res-2",
+    "split": "held-out",
+    "message": "dig into whether intermittent fasting actually works, with studies",
+    "prior": [],
+    "gold": "research"
+  },
+  {
+    "id": "t-res-3",
+    "split": "held-out",
+    "message": "who is the CEO of Grab?",
+    "prior": [],
+    "gold": "web"
+  },
+  {
+    "id": "t-media-1",
+    "split": "held-out",
+    "message": "translate the text in this\n\n[Attached image: menu.jpg (image/jpeg, 1.1 MB) attachmentId=b1. You do not see the image directly: call media_delegate with the attachmentIds.]",
+    "prior": [],
+    "gold": "media"
+  },
+  {
+    "id": "t-media-2",
+    "split": "held-out",
+    "message": "key points please\n\n[Attached PDF: report.pdf (2 MB), 30 pages, text extracted as sourceId=s9.]",
+    "prior": [],
+    "gold": "media"
+  },
+  {
+    "id": "t-media-3",
+    "split": "held-out",
+    "message": "in that lease PDF, how much is the deposit?",
+    "prior": [],
+    "gold": "media"
+  },
+  {
+    "id": "t-canvas-1",
+    "split": "held-out",
+    "message": "make that into a doc I can keep",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "t-canvas-2",
+    "split": "held-out",
+    "message": "open my budget canvas and add October",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "t-canvas-3",
+    "split": "held-out",
+    "message": "what canvases have I got?",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "t-parcel-1",
+    "split": "held-out",
+    "message": "has my IKEA delivery been scheduled?",
+    "prior": [],
+    "gold": "parcels"
+  },
+  {
+    "id": "t-parcel-2",
+    "split": "held-out",
+    "message": "the Taobao haul, any news?",
+    "prior": [],
+    "gold": "parcels"
+  },
+  {
+    "id": "t-parcel-3",
+    "split": "held-out",
+    "message": "log a new one: running shoes from Nike, arriving Friday",
+    "prior": [],
+    "gold": "parcels"
+  },
+  {
+    "id": "t-lib-1",
+    "split": "held-out",
+    "message": "can I get Dune on Libby?",
+    "prior": [],
+    "gold": "library"
+  },
+  {
+    "id": "t-lib-2",
+    "split": "held-out",
+    "message": "how long is the wait for Fourth Wing?",
+    "prior": [],
+    "gold": "library"
+  },
+  {
+    "id": "t-lib-3",
+    "split": "held-out",
+    "message": "what am I currently reading from the library?",
+    "prior": [],
+    "gold": "library"
+  },
+  {
+    "id": "t-lib-4",
+    "split": "held-out",
+    "message": "is The Thursday Murder Club borrowable?",
+    "prior": [],
+    "gold": "library"
+  },
+  {
+    "id": "t-stock-1",
+    "split": "held-out",
+    "message": "what's MSFT at?",
+    "prior": [],
+    "gold": "stocks"
+  },
+  {
+    "id": "t-stock-2",
+    "split": "held-out",
+    "message": "ping me if Grab stock falls 4% in a day",
+    "prior": [],
+    "gold": "stocks"
+  },
+  {
+    "id": "t-stock-3",
+    "split": "held-out",
+    "message": "which stocks am I watching?",
+    "prior": [],
+    "gold": "stocks"
+  },
+  {
+    "id": "t-stock-4",
+    "split": "held-out",
+    "message": "pause alerts for all my stocks this week",
+    "prior": [],
+    "gold": "stocks"
+  },
+  {
+    "id": "t-rout-1",
+    "split": "held-out",
+    "message": "every Friday at 5 send me a summary of the week's job alerts",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "t-rout-2",
+    "split": "held-out",
+    "message": "delete the daily news routine",
+    "prior": [],
+    "gold": "daily"
+  },
+  {
+    "id": "t-rout-3",
+    "split": "held-out",
+    "message": "what ran automatically this morning?",
+    "prior": [],
+    "gold": "daily"
+  },
+  {
+    "id": "t-skill-1",
+    "split": "held-out",
+    "message": "activate the draft of the email-writing skill",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "t-skill-2",
+    "split": "held-out",
+    "message": "what changed between the last two versions of the planning skill?",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "t-multi-1",
+    "split": "held-out",
+    "message": "find the concert tickets email and put the show in my calendar",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "t-multi-2",
+    "split": "held-out",
+    "message": "check the Book Depository shipping email and log the parcel",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "t-multi-3",
+    "split": "held-out",
+    "message": "remind me an hour before my interview with Wise",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "t-multi-4",
+    "split": "held-out",
+    "message": "here's my CV, which saved roles fit best?\n\n[Attached PDF: cv.pdf (150 KB), 2 pages, text extracted as sourceId=s7.]",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "t-sig-1",
+    "split": "held-out",
+    "message": "yes go ahead",
+    "prior": [],
+    "gold": "calendar"
+  },
+  {
+    "id": "t-sig-2",
+    "split": "held-out",
+    "message": "sure",
+    "prior": [],
+    "gold": "library"
+  },
+  {
+    "id": "t-sig-3",
+    "split": "held-out",
+    "message": "how far along are you?",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "t-sig-4",
+    "split": "held-out",
+    "message": "ok and anything from the other bank?",
+    "prior": [],
+    "gold": "email"
+  },
+  {
+    "id": "t-sig-5",
+    "split": "held-out",
+    "message": "drop the first one",
+    "prior": [],
+    "gold": "stocks"
+  },
+  {
+    "id": "t-sig-6",
+    "split": "held-out",
+    "message": "thanks! what's a good gift for a 5 year old?",
+    "prior": [],
+    "gold": "chief"
+  },
+  {
+    "id": "t-fu-1",
+    "split": "held-out",
+    "message": "and Dune Messiah?",
+    "prior": [
+      {
+        "user": "can I get Dune on Libby?",
+        "assistant": "Yes, available now.",
+        "tools": ["library_check"]
+      }
+    ],
+    "gold": "library"
+  },
+  {
+    "id": "t-fu-2",
+    "split": "held-out",
+    "message": "push a reminder 15 min before",
+    "prior": [
+      {
+        "user": "what time is my call with the recruiter?",
+        "assistant": "Tomorrow at 2pm.",
+        "tools": ["calendar_list"]
+      }
+    ],
+    "gold": "daily"
+  },
+  {
+    "id": "t-fu-3",
+    "split": "held-out",
+    "message": "what's the reference number they quoted?",
+    "prior": [
+      {
+        "user": "has the insurance company got back to me?",
+        "assistant": "Yes, AIA replied asking for your policy number.",
+        "tools": ["gmail_search"]
+      }
+    ],
+    "gold": "email"
+  },
+  {
+    "id": "t-fu-4",
+    "split": "held-out",
+    "message": "set its alert to 2%",
+    "prior": [
+      {
+        "user": "what's MSFT at?",
+        "assistant": "MSFT is on your watchlist; last close $512.",
+        "tools": ["watchlist_list"]
+      }
+    ],
+    "gold": "stocks"
+  },
+  {
+    "id": "t-fu-5",
+    "split": "held-out",
+    "message": "now one about the sea",
+    "prior": [
+      {
+        "user": "write a haiku about rain",
+        "assistant": "Soft rain on tin roofs / ...",
+        "tools": []
+      }
+    ],
+    "gold": "chief"
+  },
+  {
+    "id": "news-1",
+    "split": "tuning",
+    "message": "follow stratechery.com in my news bulletin",
+    "prior": [],
+    "gold": "news"
+  },
+  {
+    "id": "news-2",
+    "split": "tuning",
+    "message": "send my news bulletin at 7:30am instead",
+    "prior": [],
+    "gold": "news"
+  },
+  {
+    "id": "news-3",
+    "split": "tuning",
+    "message": "add AI and Singapore as bulletin topics",
+    "prior": [],
+    "gold": "news"
+  },
+  {
+    "id": "news-4",
+    "split": "tuning",
+    "message": "can you send me the bulletin now?",
+    "prior": [],
+    "gold": "news"
+  },
+  {
+    "id": "news-5",
+    "split": "held-out",
+    "message": "I want to read the Pragmatic Engineer blog every morning",
+    "prior": [],
+    "gold": "news"
+  },
+  {
+    "id": "news-6",
+    "split": "held-out",
+    "message": "has my news been set up?",
+    "prior": [],
+    "gold": "news"
+  },
+  {
+    "id": "news-7",
+    "split": "held-out",
+    "message": "stop sending me articles from that site",
+    "prior": [],
+    "gold": "news"
+  }
+]

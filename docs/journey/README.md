@@ -51,6 +51,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 30 September                         | [47 — Pre-write validation errors](47-pre-write-validation-errors.md): which other rejected writes would have blocked every later write?      | Released `fd05962`; schedules, work and sheets pre-write rejections are validation failures                                  |
 | 30 September                         | [48 — Bounded turn](48-bounded-turn.md): how can one long task stop growing with every tool call?                                             | Released `1c0e480`; synthetic tests only, no production measurement yet                                                      |
 | 1 October                            | [49 — Coordinator agents](49-coordinator-agents.md): how can Chief delegate all domain work through one generic, typed agent tool?            | Released `5222e33`; mocked-model tests only, no production measurement yet                                                   |
+| 1 October                            | [50 — Decision evals](50-decision-evals.md): where do small decision models pay off, with statistics that hold up?                            | Measured offline; runtime unchanged                                                                                          |
 
 ## Connected case studies
 
