@@ -52,6 +52,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 30 September                         | [48 — Bounded turn](48-bounded-turn.md): how can one long task stop growing with every tool call?                                             | Released `1c0e480`; synthetic tests only, no production measurement yet                                                      |
 | 1 October                            | [49 — Coordinator agents](49-coordinator-agents.md): how can Chief delegate all domain work through one generic, typed agent tool?            | Released `5222e33`; mocked-model tests only, no production measurement yet                                                   |
 | 1 October                            | [50 — Decision evals](50-decision-evals.md): where do small decision models pay off, with statistics that hold up?                            | Measured offline; runtime unchanged                                                                                          |
+| 1 October                            | [51 — Shadow decisions](51-shadow-decisions.md): how do we measure Jev on real messages without changing replies?                             | In review; mocked tests only                                                                                                 |
 
 ## Connected case studies
 

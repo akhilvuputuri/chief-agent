@@ -57,6 +57,7 @@ def harness_hash() -> str:
         ROOT / "plugins" / "core" / "plugin.json",
         ROOT / "plugins" / "public-research" / "plugin.json",
         ROOT / "src" / "tool-domains.ts",
+        ROOT / "config" / "decisions.json",
     ]
     for path in sorted(p for p in files if p.is_file()):
         digest.update(str(path.relative_to(ROOT)).encode())

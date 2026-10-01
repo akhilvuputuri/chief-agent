@@ -71,6 +71,11 @@ const fields: Record<string, Shape> = {
   omittedCount: "count",
   trimmedGroups: "count",
   approvalCount: "count",
+  offeredCount: "count",
+  unusedCount: "count",
+  loadedLaterCount: "count",
+  score: "number",
+  agree: "bool",
   uncertainCalls: "count",
   interruptedCalls: "count",
   failedRuns: "count",
@@ -325,6 +330,32 @@ const projections: Record<string, Projection> = {
     { runId: run, kind: d.kind, messages: d.messages },
   ],
   "telegram.view_failed": (run) => ["warn", { ref: run }],
+  // Shadow decisions (#127): prediction, score and agreement only; never message text.
+  "decision.shadow": (run, d) => [
+    d.ok === false ? "warn" : "info",
+    d.consumer === "picker"
+      ? {
+          runId: run,
+          kind: "picker",
+          offeredCount: Array.isArray(d.offered) ? d.offered.length : undefined,
+          unusedCount: Array.isArray(d.unused) ? d.unused.length : undefined,
+          loadedLaterCount: Array.isArray(d.loadedLater)
+            ? d.loadedLater.length
+            : undefined,
+        }
+      : {
+          runId: run,
+          kind: d.consumer,
+          state: d.prediction ?? undefined,
+          agentType: d.actual,
+          score: d.score ?? undefined,
+          agree: d.agree ?? undefined,
+          latencyMs: d.latencyMs,
+          costUsd: d.costUsd,
+          model: d.model ?? undefined,
+          errorCode: d.error,
+        },
+  ],
   // Agents: which type ran on which tier and model, and how it ended. No briefs or reports.
   "agent.child_started": (run, d) => [
     "info",

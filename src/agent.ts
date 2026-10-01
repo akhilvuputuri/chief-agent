@@ -43,6 +43,7 @@ import {
 } from "./protocol.js";
 import type { JobTools } from "./tools.js";
 import { runFamily } from "./run-family.js";
+import { recordPickerCheck, type ShadowDecisions } from "./shadow.js";
 export interface Agent {
   run(request: AgentRequest): Promise<AgentResponse>;
 }
@@ -210,6 +211,7 @@ export class Assistant {
     },
     private budget: Budget = defaultBudget,
     private picker?: ToolPicker,
+    private shadow?: ShadowDecisions,
   ) {
     this.inbox = new InputInbox(db);
   }
@@ -638,6 +640,24 @@ export class Assistant {
         domains: [...loadedDomains].sort(),
         offered: runtime.tools.length,
       });
+      // Shadow decisions (#127): asked in parallel with the turn, recorded after the reply,
+      // never awaited by it. Foreground messages only, like the picker.
+      const shadowed =
+        !background && this.shadow
+          ? this.shadow.start(
+              {
+                message,
+                previous: previousTurns,
+                agents: (
+                  (JSON.parse(runtime.context).agentCatalogue ?? []) as {
+                    type: string;
+                    description: string;
+                  }[]
+                ).map(({ type, description }) => ({ type, description })),
+              },
+              new Spending(this.db, user, run),
+            )
+          : undefined;
       const loadTools = async (domains: string[]) => {
         const unavailable: string[] = [];
         for (const domain of domains)
@@ -987,6 +1007,12 @@ export class Assistant {
       await event(this.db, user, run, "turn.responded", {
         interrupted: output.interrupted ?? false,
       });
+      if (shadowed)
+        void shadowed.then((predictions) =>
+          this.shadow!.record(this.db, user, run, predictions),
+        );
+      if (!background && this.shadow?.config.shadow.picker)
+        void recordPickerCheck(this.db, user, run, domainOf);
       const approvals = (
         await this.db.query(
           `SELECT id,operation,payload FROM approvals WHERE user_id=$1 AND run_id IN ${runFamily()} AND status='pending' AND expires_at>now() ORDER BY created_at`,

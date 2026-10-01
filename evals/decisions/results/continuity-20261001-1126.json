@@ -1,9 +1,9 @@
 {
   "decision": "continuity",
-  "at": "2026-10-01T03:44:17.238461+00:00",
+  "at": "2026-10-01T10:24:17.902809+00:00",
   "rescored_from": "continuity-20261001-1126.json",
-  "revision": "24a4bdbed34000106302ec08fd7559f335d35433",
-  "harness_sha256": "69f7239ea38f1c30",
+  "revision": "ea6b0e4a570de58210cd965553bfbf37a5e77d66",
+  "harness_sha256": "464748f16ecab355",
   "runs": 3,
   "min_recall": 1.0,
   "min_precision": 1.0,
