@@ -1,7 +1,7 @@
 # 52 — Topics in the private chat: filing output and a first step by topic
 
 Work date(s): 2026-10-01. Written/revised: 2026-10-01.
-Status: phase 1 released `03a1ef4` (1 October 2026); live acceptance pending. Phase 2 implemented and tested; not yet deployed.
+Status: phases 1/2 released `03a1ef4`/`a9fd276` on 1 October 2026. The later feed-only topic design supersedes Email first-step routing; see journal 53. Historical implementation notes below retain their original context.
 
 ## User-visible problem and preceding iteration
 
@@ -103,3 +103,7 @@ Live acceptance after deploy:
 - Widen first steps to other topics only if the routing shadow data supports it.
 - Possible further topics: Jobs or background results.
 - After 1–2 weeks, check whether the owner mutes topics and whether General feels cleaner.
+
+### Successive design — 1 October 2026
+
+Issue 137 changed the owner experience to General as the default input and topics as outbound feeds. [Journal 53](53-feed-destinations.md) records the v0.3.29/v0.3.30 destination/reference rework, queue and approval review failures, precise input provenance and exact release evidence. Email was renamed Updates in place; its automatic delegation shortcut is retired. One conversation and memory remain shared.

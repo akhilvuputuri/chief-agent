@@ -1,10 +1,8 @@
-# Issue 137 — feed reference stage (candidate)
+# Issue 137 — General input, feed destinations and exact references (released)
 
-Stage B builds on stage A: successful posts gain exact message/source references, bounded General feed discovery, a paginated owner-scoped `feed_read`, frozen input anchors and thread-tagged shared continuity. Stage A released as v0.3.29 at `015b8a99d770977ada6035c3feed4b9bbdd7226d`: migration 022, separate health/preserved-record verification and normal release 36872648089 passed after independent final approval. Stage B remains a review candidate in PR #139. See [telegram topics](telegram-topics.md) and [journal 53](journey/53-feed-destinations.md).
+[v0.3.29](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.29) ships destinations, task origins, scoped approval placement, thread-aware FIFO/fences and durable work delivery through [PR #138](https://github.com/akhilvuputuri/chief-agent/pull/138). The reviewed migration-022 operator rollout installed `015b8a99d770977ada6035c3feed4b9bbdd7226d`; separate health and preserved-record checks plus [automatic release](https://github.com/akhilvuputuri/chief-agent/actions/runs/36872648089) passed.
 
-# Issue 137 — feed destinations (candidate)
-
-Branch `feat/topic-destinations` implements the first stage: General as default input, News/Markets/Updates feeds, task origins, thread-aware queueing/fences, scoped approvals and durable work delivery. Migration 022 requires the reviewed operator rollout in [telegram topics](telegram-topics.md). Full validation, independent review and release are pending; reference resolution is the next stage. See [journal 53](journey/53-feed-destinations.md).
+[v0.3.30](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.30) ships exact sent feed references, bounded General discovery, owner-scoped feed/original-input reads, frozen per-input anchors and shared thread-aware continuity through [PR #139](https://github.com/akhilvuputuri/chief-agent/pull/139). Independent GPT-6 Astra approved exact head `cdab8b518bd08ceb00b95365d86c54d61209133e`; full 563 application, 21 JS and 30 Python checks passed. [Automatic release](https://github.com/akhilvuputuri/chief-agent/actions/runs/36875352644) verified merge `7cdbda24d7e7145f9482eb47819ec822722dc649`, followed by separate server RELEASE/health and a transaction-rolled-back deployed-module smoke for references, ownership and stable message binding. No fixture was retained; no Telegram message or model request was sent. Owner live Telegram acceptance remains separate. Read [topic contracts](telegram-topics.md) and [journal 53](journey/53-feed-destinations.md).
 
 # Chief as coordinator with typed agents (released `5222e33`) — 1 October 2026
 

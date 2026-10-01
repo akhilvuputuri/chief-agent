@@ -1,6 +1,6 @@
 # 53 — One input surface, deterministic feed destinations
 
-Work date: 1 October 2026. Status: stage A released as v0.3.29; stage B implementation/review candidate.
+Work date: 1 October 2026. Status: stages A/B released as v0.3.29/v0.3.30 on 1 October 2026. Historical candidate and review notes below retain their original boundaries.
 
 ## Problem and preceding iteration
 
@@ -47,3 +47,13 @@ The reviewed migration-022 operator procedure installed exact merge `015b8a99d77
 ## Stage B review follow-up
 
 The first independent review reproduced loss of earlier old-feed anchors in a batched checkpoint, shifted historical anchor assignment after superseded finals were removed, and an implicit topic reference pointing to a newer post actually delivered in General. The fixes carry bounded per-input references with an owner-scoped original-input reading path, atomically bind each stored user message to its input identity rather than guessing offsets, and filter implicit candidates by their actual sent thread. New regressions reproduce each failure. Re-review remains pending at this checkpoint.
+
+## Stage B release closure — 1 October 2026
+
+[PR #139](https://github.com/akhilvuputuri/chief-agent/pull/139) passed independent GPT-6 Astra re-review at exact head `cdab8b518bd08ceb00b95365d86c54d61209133e`. All three reproduced failures above were resolved. The reviewer independently passed typecheck and 79 focused tests, and additional checks for duplicate text with distinct original UUIDs, persistence retries, quote recovery/pagination and cross-owner rejection. Full local and required CI checks passed: 563 application tests, 21 JS script tests and 30 Python tests; formatting passed.
+
+[Main CI](https://github.com/akhilvuputuri/chief-agent/actions/runs/36874803633) and [automatic release](https://github.com/akhilvuputuri/chief-agent/actions/runs/36875352644) passed for exact merge `7cdbda24d7e7145f9482eb47819ec822722dc649`. Separate server RELEASE/health matched. A deployed-module smoke inside a dedicated rollback transaction verified a saved edition read, exact explicit anchor, cross-owner rejection and atomic input-to-message UUID binding. Rollback verified no retained fixture; it sent zero Telegram messages and made zero model calls. [v0.3.30](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.30) labels the verified merge. Stage B adds no new schema beyond migration 022.
+
+**Acceptance limit:** startup, offline regressions and rolled-back module smoke establish different boundaries; none is an owner Telegram interaction. The next real bulletin/alert and owner replies in General/a feed should be observed with private structural traces. Existing posts have no fabricated sent-message backfill; unresolved old replies use the available bounded quote. Cross-topic private-chat exact identity is supported only when the API provides it. General should remain unmuted for questions and approvals.
+
+**Iteration lesson:** topic filing, execution identity and reference identity are separate contracts. Correct destinations alone do not make a delivered post recallable. Numeric message positions also cannot substitute for durable identity when supersession changes the history projection. Shared memory remains useful when each current input carries its own precise provenance.
