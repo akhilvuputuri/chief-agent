@@ -149,3 +149,7 @@ PR #38 shipped [v0.3.6](https://github.com/akhilvuputuri/chief-agent/releases/ta
 ## Authoritative message storage — released v0.3.7
 
 PR #39 shipped [v0.3.7](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.7) at `099e7478ff5d33bb240740406f822e3a01e7a580`. It normalizes repeated message payloads, appends checkpoint deltas and adds bounded history loading plus owner-scoped conversation search/read. See [storage architecture and rollout](authoritative-storage.md). Migration012 and the Compose baseline were installed through the reviewed operator deployment; old-image rollback still requires legacy rehydration. No data reset or automatic trace purge; memory/wiki work remains subsequent. The [journal closure](journey/16-authoritative-storage.md) records exact approval/release evidence and measured storage reduction; it does not infer API savings. Rolling-context retrieval and independent jobs subsequently shipped in v0.3.8, followed by v0.3.9 steering above.
+
+## Telegram topics, phase 1 — 1 October 2026
+
+Threaded mode is on for the production bot, and users cannot create threads. Phase 1 posts the news bulletin to a **News** topic and stock alerts to a **Markets** topic, and answers a message typed in a topic in that same topic. Memory and the conversation stay shared, and everything else stays in General. See [topics in the private chat](telegram-topics.md) and [journal 52](journey/52-telegram-topics.md). Next: live acceptance after deploy, then phase 2 (a message typed in a topic goes straight to that agent).

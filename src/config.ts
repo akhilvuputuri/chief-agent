@@ -29,6 +29,8 @@ const schema = z.object({
   AGENT_MODEL: z.string().default("openai/gpt-5.6-sol"),
   // Jev picks the tool domains per message; "off" uses the deterministic cues.
   TOOL_PICKER: z.enum(["jev", "off"]).default("jev"),
+  // Topics in the bot's private chat: "auto" uses them when threaded mode is on in BotFather.
+  TELEGRAM_TOPICS: z.enum(["auto", "off"]).default("auto"),
   AGENT_REASONING_EFFORT: z.literal("medium").default("medium"),
   AGENT_BUDGET_MS: z.coerce.number().int().positive().default(900000),
   AGENT_BUDGET_MODEL_CALLS: z.coerce.number().int().positive().default(40),

@@ -23,6 +23,7 @@ flowchart LR
 ## What it does
 
 - Read-only interactive Telegram views: `/roles`, `/items`, `/schedules`, `/drafts`, `/briefing` and `/status` job selection; long answers expand within one message. See [views and answer envelopes](docs/telegram-views.md).
+- Topics in the private chat: when threaded mode is on, the news bulletin and stock alerts go to their own topics, and a message typed in a topic is answered there. See [topics](docs/telegram-topics.md).
 - Rolling conversation with a protected recent exchange, source-linked history retrieval, explicit memories and on-demand versioned text skills. Background jobs have independent contexts and can run while chat remains responsive. See [conversation architecture](docs/rolling-conversation.md).
 - General tasks, notes, reminders and source-selectable daily briefings.
 - Public web research and evidence-backed role preparation, including questions about unknown experience.

@@ -7,6 +7,7 @@ import type { Database } from "./db.js";
 import { event } from "./db.js";
 import { answerSchema, type Delivery } from "./answer.js";
 import { formatTelegram } from "./telegram-format.js";
+import { inThread } from "./telegram-topics.js";
 import {
   initialPosition,
   renderView,
@@ -44,6 +45,12 @@ const keyboard = (id: string, state: State) => {
   };
 };
 type ViewApi = Pick<Api, "sendMessage" | "editMessageText">;
+/** A chat, or a chat and the topic (thread) to send into. */
+export type Chat = string | { id: string; thread?: number };
+const target = (chat: Chat) =>
+  typeof chat === "string"
+    ? { id: chat, extra: {} }
+    : { id: chat.id, extra: inThread(chat.thread) };
 
 /** Read-only UI controller. The mutable event is view state, not an approval or tool receipt.
  * SQL leases serialize edits across handlers; callback actions come only from the saved keyboard. */
@@ -56,13 +63,14 @@ export class TelegramViews {
   ) {}
   async open(
     user: string,
-    chat: string,
+    to: Chat,
     view: View,
     run: string = randomUUID(),
     guard?: () => Promise<boolean>,
     onSent?: () => Promise<void>,
   ) {
     const id = randomUUID();
+    const { id: chat, extra } = target(to);
     if (view.kind === "task" && !view.id) {
       view = {
         ...view,
@@ -94,6 +102,7 @@ export class TelegramViews {
     );
     if (guard && !(await guard())) return;
     const sent = await this.api.sendMessage(chat, rendered.text, {
+      ...extra,
       entities: rendered.entities,
       reply_markup: keyboard(id, state),
       link_preview_options: { is_disabled: true },
@@ -195,7 +204,7 @@ export class TelegramViews {
   }
   async deliver(
     user: string,
-    chat: string,
+    chat: Chat,
     input: string | Delivery,
     kind: "answer" | "progress" | "schedule" = "answer",
     guard?: () => Promise<boolean>,
@@ -222,12 +231,13 @@ export class TelegramViews {
   }
   private async deliverOnce(
     user: string,
-    chat: string,
+    to: Chat,
     input: string | Delivery,
     kind: "answer" | "progress" | "schedule",
     guard?: () => Promise<boolean>,
   ) {
     const delivery = typeof input === "string" ? { reply: input } : input;
+    const { id: chat, extra } = target(to);
     const answer = answerSchema.parse({
       reply: delivery.reply,
       canvases: delivery.canvases,
@@ -252,18 +262,12 @@ export class TelegramViews {
         ? () => new HistoryStore(this.db).markDelivered(user, run)
         : undefined;
     if (interactive)
-      await this.open(
-        user,
-        chat,
-        { kind: "answer", answer },
-        run,
-        guard,
-        onSent,
-      );
+      await this.open(user, to, { kind: "answer", answer }, run, guard, onSent);
     else
       for (const part of parts) {
         if (guard && !(await guard())) return;
         const sent = await this.api.sendMessage(chat, part.text, {
+          ...extra,
           entities: part.entities,
           link_preview_options: { is_disabled: true },
         });
@@ -301,6 +305,7 @@ export class TelegramViews {
       if (buttons.length) {
         if (guard && !(await guard())) return;
         await this.api.sendMessage(chat, "Open saved canvases", {
+          ...extra,
           reply_markup: { inline_keyboard: buttons },
         });
         canvasMessages = 1;
@@ -312,6 +317,7 @@ export class TelegramViews {
       for (const part of formatTelegram(notice)) {
         if (guard && !(await guard())) return;
         await this.api.sendMessage(chat, part.text, {
+          ...extra,
           entities: part.entities,
         });
         noticeMessages++;

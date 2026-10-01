@@ -11,6 +11,7 @@ import { OpenRouter } from "./model.js";
 import { resolveMainModel } from "./model-policy.js";
 import { recoverRuntime } from "./execution.js";
 import { TelegramViews } from "./telegram-views.js";
+import { TelegramTopics } from "./telegram-topics.js";
 import type { Delivery } from "./answer.js";
 import { WorkWorker } from "./work-worker.js";
 import { DailyTools, DailyWorker, ScheduleParser } from "./daily.js";
@@ -205,12 +206,15 @@ const newsBulletin = new NewsBulletin(
   newsFetcher,
   (user) => allowed.has(user),
   async (user, payload) => {
-    await bot.api.sendMessage(user, payload.text, {
-      link_preview_options: { is_disabled: true },
-      ...(payload.items?.length
-        ? { reply_markup: { inline_keyboard: voteKeyboard(payload.items) } }
-        : {}),
-    });
+    await topics.send(user, "news", (thread) =>
+      bot.api.sendMessage(user, payload.text, {
+        ...thread,
+        link_preview_options: { is_disabled: true },
+        ...(payload.items?.length
+          ? { reply_markup: { inline_keyboard: voteKeyboard(payload.items) } }
+          : {}),
+      }),
+    );
   },
 );
 const daily = new DailyTools(db, parser, calendar, mirror);
@@ -298,6 +302,8 @@ const app = server(
     : undefined,
 );
 const bot = telegram(c, assistant, db);
+// Scheduled output goes to its own topic when threaded mode is on; otherwise to General.
+const topics = new TelegramTopics(db, bot.api, c.TELEGRAM_TOPICS === "auto");
 notifyOwner = async (text) => {
   for (const user of c.TELEGRAM_ALLOWED_USER_IDS.split(","))
     await bot.api.sendMessage(user, text).catch(() => {});
@@ -409,7 +415,7 @@ const stockMonitor = stockProvider
   : undefined;
 const stockDelivery = new StockDelivery(db, async (user, payload) => {
   if (!allowed.has(user)) throw new Error("Unauthorized delivery");
-  await bot.api.sendMessage(user, payload.reply, {
+  const extra = {
     link_preview_options: { is_disabled: true },
     reply_markup: {
       inline_keyboard: [
@@ -427,7 +433,10 @@ const stockDelivery = new StockDelivery(db, async (user, payload) => {
         ],
       ],
     },
-  });
+  };
+  await topics.send(user, "markets", (thread) =>
+    bot.api.sendMessage(user, payload.reply, { ...thread, ...extra }),
+  );
 });
 await stockDelivery.recover();
 await newsBulletin.recover();

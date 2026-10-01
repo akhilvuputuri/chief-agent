@@ -1,0 +1,234 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFile, readdir } from "node:fs/promises";
+import { PGlite } from "@electric-sql/pglite";
+import { GrammyError } from "grammy";
+import { ensureUser, type Database } from "../src/db.js";
+import { TelegramTopics, inThread, threadOf } from "../src/telegram-topics.js";
+import { TelegramViews } from "../src/telegram-views.js";
+import { telegram } from "../src/telegram.js";
+import { readConfig } from "../src/config.js";
+import { Assistant } from "../src/agent.js";
+import { JobTools } from "../src/tools.js";
+
+async function database() {
+  const pg = new PGlite();
+  for (const f of (await readdir(new URL("../db/", import.meta.url)))
+    .filter((f) => f.endsWith(".sql"))
+    .sort())
+    await pg.exec(
+      await readFile(new URL("../db/" + f, import.meta.url), "utf8"),
+    );
+  const db = pg as unknown as Database;
+  await ensureUser(db, "123");
+  return { pg, db };
+}
+
+function fakeApi(enabled = true) {
+  let next = 40;
+  const created: string[] = [];
+  return {
+    created,
+    api: {
+      getMe: async () => ({ has_topics_enabled: enabled }) as any,
+      createForumTopic: async (_chat: string | number, name: string) => {
+        created.push(name);
+        await new Promise((r) => setTimeout(r, 5));
+        return { message_thread_id: next++, name } as any;
+      },
+    },
+  };
+}
+
+test("thread helpers leave General and plain messages without a thread id", () => {
+  assert.deepEqual(inThread(undefined), {});
+  assert.deepEqual(inThread(1), {});
+  assert.deepEqual(inThread(42), { message_thread_id: 42 });
+  assert.equal(threadOf({ message_thread_id: 42 }), undefined);
+  assert.equal(threadOf({ is_topic_message: true, message_thread_id: 42 }), 42);
+  assert.equal(
+    threadOf({ is_topic_message: true, message_thread_id: 1 }),
+    undefined,
+  );
+});
+
+test("a topic is created once, reused, and sends go into it", async () => {
+  const { pg, db } = await database();
+  const { api, created } = fakeApi();
+  const topics = new TelegramTopics(db, api);
+  try {
+    const sends: any[] = [];
+    const send = (extra: any) => (sends.push(extra), Promise.resolve(true));
+    // Concurrent first sends share one creation.
+    await Promise.all([
+      topics.send("123", "news", send),
+      topics.send("123", "news", send),
+    ]);
+    await topics.send("123", "news", send);
+    await topics.send("123", "markets", send);
+    assert.deepEqual(created, ["News", "Markets"]);
+    assert.deepEqual(
+      sends.slice(0, 3),
+      Array(3).fill({ message_thread_id: 40 }),
+    );
+    assert.deepEqual(sends[3], { message_thread_id: 41 });
+    // A restart reads the stored id instead of creating another topic.
+    const again = new TelegramTopics(db, fakeApi().api);
+    assert.equal(await again.thread("123", "news"), 40);
+  } finally {
+    await pg.close();
+  }
+});
+
+test("without threaded mode, with the switch off, or if creation fails, sends go to General", async () => {
+  const { pg, db } = await database();
+  try {
+    const off = fakeApi(false);
+    const sends: any[] = [];
+    const send = (extra: any) => (sends.push(extra), Promise.resolve(true));
+    await new TelegramTopics(db, off.api).send("123", "news", send);
+    const disabled = fakeApi();
+    await new TelegramTopics(db, disabled.api, false).send("123", "news", send);
+    const failing = new TelegramTopics(db, {
+      getMe: async () => ({ has_topics_enabled: true }) as any,
+      createForumTopic: async () => {
+        throw new Error("Bad Request: the chat is not a forum");
+      },
+    });
+    await failing.send("123", "news", send);
+    assert.deepEqual(sends, [{}, {}, {}]);
+    assert.deepEqual([...off.created, ...disabled.created], []);
+  } finally {
+    await pg.close();
+  }
+});
+
+test("a topic the owner deleted is forgotten and recreated, and the send is retried once", async () => {
+  const { pg, db } = await database();
+  const { api, created } = fakeApi();
+  const topics = new TelegramTopics(db, api);
+  try {
+    assert.equal(await topics.thread("123", "news"), 40);
+    const sends: any[] = [];
+    const result = await topics.send("123", "news", async (extra) => {
+      sends.push(extra);
+      if (extra.message_thread_id === 40)
+        throw new GrammyError(
+          "Call to 'sendMessage' failed!",
+          {
+            ok: false,
+            error_code: 400,
+            description: "Bad Request: message thread not found",
+          },
+          "sendMessage",
+          {},
+        );
+      return "sent";
+    });
+    assert.equal(result, "sent");
+    assert.deepEqual(sends, [
+      { message_thread_id: 40 },
+      { message_thread_id: 41 },
+    ]);
+    assert.deepEqual(created, ["News", "News"]);
+    // Any other failure is not retried.
+    await assert.rejects(
+      topics.send("123", "news", async () => {
+        throw new Error("Forbidden: bot was blocked by the user");
+      }),
+      /blocked/,
+    );
+  } finally {
+    await pg.close();
+  }
+});
+
+test("views deliver every part of an answer into the given topic", async () => {
+  const { pg, db } = await database();
+  const sent: any[] = [];
+  const views = new TelegramViews(db, {
+    sendMessage: async (chat: string, text: string, options: any) => {
+      sent.push({ chat, text, ...options });
+      return { message_id: sent.length } as any;
+    },
+    editMessageText: async () => true as any,
+  });
+  try {
+    await views.deliver("123", { id: "123", thread: 77 }, "Short reply");
+    await views.deliver(
+      "123",
+      { id: "123", thread: 77 },
+      {
+        reply: "Long ".repeat(1200),
+      },
+    );
+    await views.deliver("123", "123", "In General");
+    assert.equal(sent.length, 3);
+    assert.equal(sent[0].message_thread_id, 77);
+    assert.equal(sent[1].message_thread_id, 77);
+    assert.ok(sent[1].reply_markup, "a long answer opens an interactive view");
+    assert.equal(sent[2].message_thread_id, undefined);
+  } finally {
+    await pg.close();
+  }
+});
+
+test("a message typed in a topic is answered in that topic; General stays plain", async () => {
+  const { pg, db } = await database();
+  const assistant = new Assistant(
+    db,
+    {
+      run: async (req) => ({
+        reply: `Understood: ${req.message}`,
+        history: [...req.history, { role: "user", content: req.message }],
+      }),
+    },
+    new JobTools(db, { call: async () => ({}) }),
+  );
+  const bot = telegram(
+    readConfig({
+      DATABASE_URL: "postgres://x:x@localhost/x",
+      TELEGRAM_BOT_TOKEN: "123:long-test-token",
+      TELEGRAM_ALLOWED_USER_IDS: "123",
+    }),
+    assistant,
+    db,
+  );
+  const calls: { method: string; payload: any }[] = [];
+  bot.api.config.use(async (_prev, method, payload) => {
+    calls.push({ method, payload });
+    if (method === "getMe")
+      return {
+        ok: true,
+        result: { id: 999, is_bot: true, first_name: "T", username: "t_bot" },
+      } as any;
+    if (method === "sendMessage")
+      return { ok: true, result: { message_id: calls.length } } as any;
+    return { ok: true, result: true } as any;
+  });
+  await bot.init();
+  const update = (id: number, topic?: number) =>
+    ({
+      update_id: id,
+      message: {
+        message_id: id,
+        date: 0,
+        chat: { id: 123, type: "private" },
+        from: { id: 123, is_bot: false, first_name: "T" },
+        text: `message ${id}`,
+        ...(topic ? { is_topic_message: true, message_thread_id: topic } : {}),
+      },
+    }) as any;
+  try {
+    await bot.handleUpdate(update(1, 55));
+    await bot.handleUpdate(update(2));
+    const replies = calls.filter((c) => c.method === "sendMessage");
+    assert.equal(replies.length, 2);
+    assert.equal(replies[0]!.payload.message_thread_id, 55);
+    assert.equal(replies[1]!.payload.message_thread_id, undefined);
+    const typing = calls.find((c) => c.method === "sendChatAction");
+    assert.equal(typing?.payload.message_thread_id, 55);
+  } finally {
+    await pg.close();
+  }
+});
