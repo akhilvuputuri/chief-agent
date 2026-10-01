@@ -67,6 +67,7 @@ test("monitoring Calendar reads expand instances and paginate without changing o
 });
 test("monitoring normalizes timezone-qualified local times and rejects missing or invalid zones", async () => {
   let timeZone: string | undefined = "Asia/Singapore";
+  let offset = false;
   const calendar = new CalendarTools(
     {
       owner: "a",
@@ -86,11 +87,20 @@ test("monitoring normalizes timezone-qualified local times and rejects missing o
                 items: [
                   {
                     id: "local",
-                    start: { dateTime: "2026-10-05T09:00:00", timeZone },
-                    end: { dateTime: "2026-10-05T10:00:00", timeZone },
+                    start: {
+                      dateTime:
+                        "2026-10-05T09:00:00" + (offset ? "+08:00" : ""),
+                      timeZone,
+                    },
+                    end: {
+                      dateTime:
+                        "2026-10-05T10:00:00" + (offset ? "+08:00" : ""),
+                      timeZone,
+                    },
                     recurringEventId: "series",
                     originalStartTime: {
-                      dateTime: "2026-10-05T09:00:00",
+                      dateTime:
+                        "2026-10-05T09:00:00" + (offset ? "+08:00" : ""),
                       timeZone,
                     },
                   },
@@ -110,6 +120,22 @@ test("monitoring normalizes timezone-qualified local times and rejects missing o
     result.events[0].originalStartTime.dateTime,
     "2026-10-05T01:00:00.000Z",
   );
+  offset = true;
+  const equivalent = await calendar.list(
+    "a",
+    "2026-10-05T00:00:00Z",
+    "2026-10-05T04:00:00Z",
+    true,
+  );
+  assert.equal(
+    equivalent.events[0].start.dateTime,
+    result.events[0].start.dateTime,
+  );
+  assert.equal(
+    equivalent.events[0].originalStartTime.dateTime,
+    result.events[0].originalStartTime.dateTime,
+  );
+  offset = false;
   timeZone = undefined;
   await assert.rejects(() =>
     calendar.list("a", "2026-10-05T00:00:00Z", "2026-10-05T04:00:00Z", true),

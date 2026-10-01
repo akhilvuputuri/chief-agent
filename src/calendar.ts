@@ -28,7 +28,9 @@ const calendarTime = z
     "Calendar time requires date or dateTime",
   )
   .transform((time, ctx) => {
-    if (!time.dateTime || !localDateTime.test(time.dateTime)) return time;
+    if (!time.dateTime) return time;
+    if (!localDateTime.test(time.dateTime))
+      return { ...time, dateTime: new Date(time.dateTime).toISOString() };
     try {
       if (!time.timeZone) throw new Error("Missing timezone");
       const instant = new CronDate(time.dateTime, time.timeZone).toDate();
