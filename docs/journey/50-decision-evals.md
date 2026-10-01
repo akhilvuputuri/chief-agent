@@ -19,7 +19,7 @@ Status: measured offline on synthetic fixtures. Nothing in the runtime has chang
 
 ### Decision 1: does the latest message need the previous exchange?
 
-Chief always sends the previous exchange today. Dropping it for a standalone message saves its characters, but dropping it for a follow-up loses context. Data: 96 held-out cases (48 follow-ups, 48 standalone) from 16 conversations not used for tuning, giving 288 calls per paid backend. Standalone messages come from a separate pool per split, so no message is in both, and 78 of the 96 held-out messages are unique.
+Chief always sends the previous exchange today. Dropping it for a standalone message saves its characters, but dropping it for a follow-up loses context. Data: 96 held-out cases (48 follow-ups, 48 standalone) from 16 conversations not used for tuning, giving 288 calls per paid backend. Standalone messages come from a separate pool per split, so no message is in both, and 78 of the 96 held-out messages are unique. That held-out pool was written after a first run had shown which messages Jev got wrong, which is a possible source of bias. Shadow mode is the blind check.
 
 | Backend          | Recall on follow-ups (95% CI) | Standalone dropped (95% CI) | Characters saved per message (95% CI) | Share of a typical request | Mean / p95       | $ per 1,000 |
 | ---------------- | ----------------------------- | --------------------------- | ------------------------------------- | -------------------------- | ---------------- | ----------- |
@@ -98,7 +98,7 @@ After #129, every domain request costs a coordinator model call whose only job i
 
   Both decisions were rerun, and the earlier reports are replaced.
 
-- Independent review of the revision: pending.
+- **Independent review of the revision:** approved at `ed80554`. All figures were recomputed from the records and match. Four low-severity points were then fixed: reports rescored at the final harness, an unknown cost never treated as free, an empty-set guard, and the note above on when the held-out pool was written.
 
 ## Follow-up and next iteration
 

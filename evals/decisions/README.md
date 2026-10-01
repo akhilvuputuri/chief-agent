@@ -38,6 +38,7 @@ Backends per decision:
 ## Limits
 
 - **Labels.** One annotator, the developer, labelled synthetic messages. The evals test whether a backend can make the distinction, not how often each case occurs in real use. Fixture mixes (for example half follow-ups) are a design choice, not a traffic estimate.
+- **Held-out pool written after a first run.** The held-out continuity standalone messages were written after the first run had shown which messages Jev got wrong. They are new and separate from tuning, but that order is a possible source of bias. Shadow-mode traffic is the blind check.
 - **Debatable routing label.** `t-none-8` ("latest news on the Fed rate decision") is labelled `web`: the news agent manages the bulletin and does not look up news.
 - **Different inputs for the rule.** The routing rule sees only the message, as the production cues do. Jev and Flash also see up to two prior turns.
 - **Proxies for saved calls.** Routing converts saved calls into time and money with the mean of all main-model calls over a few days before #129. A coordinator call whose only job is `agent_run` is probably shorter, so those savings are upper estimates.

@@ -220,7 +220,7 @@ def evaluate(cases, records_by_backend, args):
         hits_by[name] = majority(per_case)
         stats = call_stats(records, held_ids, paid)
         saved_rate = len(correct) / len(hcalls) if hcalls else 0.0
-        decision_usd = stats["cost_per_decision_usd"] or 0.0
+        decision_usd = stats["cost_per_decision_usd"]
         cluster = lambda c: c["id"]  # noqa: E731  (a case's runs are one cluster)
         results.append({
             "backend": name,
@@ -239,11 +239,12 @@ def evaluate(cases, records_by_backend, args):
             "coverage_ci": cluster_interval(
                 routable, cluster, lambda s: sum(_hit(c, t) for c in s) / len(s) if s else None),
             "calls_saved_per_100": saved_rate * 100,
-            "calls_saved_per_100_ci": [v * 100 for v in cluster_interval(
-                hcalls, cluster, lambda s: sum(_hit(c, t) for c in s) / len(s))],
+            "calls_saved_per_100_ci": [v * 100 for v in (cluster_interval(
+                hcalls, cluster, lambda s: sum(_hit(c, t) for c in s) / len(s) if s else None) or (0.0, 0.0))],
             # Per message: saved coordinator calls minus this decision's own mean latency and cost.
             "net_ms_per_message": saved_rate * MAIN_CALL_MS - stats["latency_mean_ms"],
-            "net_usd_per_1000": (saved_rate * MAIN_CALL_USD - decision_usd) * 1000,
+            # Unknown when a paid backend reported no cost; never silently free.
+            "net_usd_per_1000": None if decision_usd is None else (saved_rate * MAIN_CALL_USD - decision_usd) * 1000,
             "wrong_routes": sorted({f"{c['id']} (run {c['run']} → {c['agent']})" for c in routed if c["gold"] != c["agent"]}),
             "unstable_cases": sorted(k for k, v in per_case.items() if len(set(v)) > 1),
             **stats,
@@ -278,7 +279,7 @@ def _table(results, comparisons, n, routable) -> str:
         lines.append(
             f"| {r['backend']} | {r['threshold']:.3f} | {r['routed']} ({r['wrong']}) | {pct(r['precision'], r['precision_ci'])} | {runs} | "
             f"{pct(r['coverage'], r['coverage_ci'])} | {r['calls_saved_per_100']:.1f} ({ci[0]:.1f}–{ci[1]:.1f}) | "
-            f"{r['net_ms_per_message']:,.0f} | {r['net_usd_per_1000']:.2f} | "
+            f"{r['net_ms_per_message']:,.0f} | {'unknown' if r['net_usd_per_1000'] is None else f'{r[\'net_usd_per_1000\']:.2f}'} | "
             f"{r['latency_mean_ms']} / {r['latency_p50_ms']} / {r['latency_p95_ms']} | {r['errors']}/{r['calls']} | "
             f"{'unknown' if cost is None else f'{cost * 1000:.4f}'} |"
         )
