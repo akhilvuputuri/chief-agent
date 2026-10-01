@@ -158,7 +158,7 @@ export class Assistant {
   finishDelivery(user: string, run: string) {
     if (this.outgoing.get(user)?.run === run) this.outgoing.delete(user);
   }
-  async isCurrentDelivery(user: string, delivery: Delivery) {
+  async isCurrentDelivery(user: string, delivery: Delivery): Promise<boolean> {
     if (
       this.outgoing.get(user)?.run === delivery.runId &&
       this.outgoing.get(user)?.cancelled
@@ -169,10 +169,14 @@ export class Assistant {
     const version = this.inputVersions.get(key) ?? 0;
     const current = (
       await this.db.query(
-        "SELECT coalesce(max(ordinal),0) AS revision FROM conversation_inputs WHERE user_id=$1 AND COALESCE((metadata->>'threadId')::bigint,0)=$2",
-        [user, threadId(delivery.threadId) ?? 0],
+        "SELECT coalesce(max(ordinal),0) AS revision FROM conversation_inputs WHERE user_id=$1 AND COALESCE((metadata->>'threadId')::bigint,0)=$2 AND ordinal < COALESCE((SELECT min(ordinal) FROM conversation_inputs WHERE user_id=$1 AND ordinal>$3 AND COALESCE((metadata->>'threadId')::bigint,0)<>$2),9223372036854775807)",
+        [user, threadId(delivery.threadId) ?? 0, delivery.inputRevision],
       )
     ).rows[0];
+    // A later input behind a cross-thread FIFO boundary does not supersede this
+    // turn. If intake raced the snapshot, re-read the bounded segment.
+    if (version !== (this.inputVersions.get(key) ?? 0))
+      return this.isCurrentDelivery(user, delivery);
     const active = this.foreground.get(user);
     const valid =
       Number(current.revision) === delivery.inputRevision &&
@@ -998,8 +1002,14 @@ export class Assistant {
         if (!bound) {
           // Inputs already waiting at stop time must not turn into free fresh allocations.
           const parked = await this.db.query(
-            "UPDATE conversation_inputs SET state='failed',finished_at=now(),metadata=metadata || jsonb_build_object('parkedReason',$2::text,'parkedByRun',$3::text) WHERE user_id=$1 AND state='queued' AND COALESCE((metadata->>'threadId')::bigint,0)=$4 RETURNING id,ordinal",
-            [user, output.stopReason, run, active.threadId ?? 0],
+            "UPDATE conversation_inputs SET state='failed',finished_at=now(),metadata=metadata || jsonb_build_object('parkedReason',$2::text,'parkedByRun',$3::text) WHERE user_id=$1 AND state='queued' AND COALESCE((metadata->>'threadId')::bigint,0)=$4 AND ordinal < COALESCE((SELECT min(ordinal) FROM conversation_inputs WHERE user_id=$1 AND ordinal>$5 AND COALESCE((metadata->>'threadId')::bigint,0)<>$4),9223372036854775807) RETURNING id,ordinal",
+            [
+              user,
+              output.stopReason,
+              run,
+              active.threadId ?? 0,
+              active.revision,
+            ],
           );
           if (parked.rows.length) {
             active.revision = Math.max(

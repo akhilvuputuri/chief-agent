@@ -131,8 +131,8 @@ test("cross-thread input waits, does not suppress original delivery, and preserv
     assert.equal(out[1]!.threadId, 42);
     assert.equal(out[2]!.threadId, undefined);
     assert.equal(await a.isCurrentDelivery("owner", out[1]!), true);
-    // The later General message legitimately supersedes the first General reply.
-    assert.equal(await a.isCurrentDelivery("owner", out[0]!), false);
+    // A later General turn beyond the News boundary is independent.
+    assert.equal(await a.isCurrentDelivery("owner", out[0]!), true);
     const runs = (
       await db.query(
         "SELECT run_id,message FROM conversation_inputs ORDER BY ordinal",
@@ -166,8 +166,11 @@ test("a pending message in another thread alone leaves current output deliverabl
     );
     await a.recordInput("owner", "Separate News question", { threadId: 42 });
     assert.equal(await a.isCurrentDelivery("owner", out), true);
-    await a.recordInput("owner", "Correction in General");
-    assert.equal(await a.isCurrentDelivery("owner", out), false);
+    await a.recordInput(
+      "owner",
+      "A later General request behind the News boundary",
+    );
+    assert.equal(await a.isCurrentDelivery("owner", out), true);
   } finally {
     await pg.close();
   }
