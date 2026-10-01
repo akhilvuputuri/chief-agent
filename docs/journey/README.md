@@ -110,3 +110,5 @@ Equivalent workload, model/configuration, pricing, denominators and missing acco
 ## Model configuration
 
 - 23 September 2026: [32 — Repo-controlled model releases](32-repo-controlled-model.md) — reviewed policy and image-bundling path released in v0.3.23; a future PR can select the main model without a server `.env` edit.
+
+- 1 October 2026: [53 — Feed destinations](53-feed-destinations.md): issue 137 corrects queue boundaries, approval placement and durable delivery; candidate, reference resolution follows.

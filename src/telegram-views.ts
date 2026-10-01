@@ -274,6 +274,7 @@ export class TelegramViews {
         await onSent?.();
         await event(this.db, user, run, "telegram.message_sent", {
           messageId: sent.message_id,
+          threadId: extra.message_thread_id ?? null,
           kind,
         });
       }

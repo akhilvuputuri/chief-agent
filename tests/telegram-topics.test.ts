@@ -37,7 +37,7 @@ function fakeApi(enabled = true) {
         created.push(name);
         await new Promise((r) => setTimeout(r, 5));
         return {
-          message_thread_id: name === "Email" ? 42 : next++,
+          message_thread_id: name === "Updates" ? 42 : next++,
           name,
         } as any;
       },
@@ -346,14 +346,37 @@ test("approval cards for a message typed in a topic go to that topic", async () 
   });
   await bot.init();
   try {
-    await actions.draft("123", randomUUID(), {
+    const run = randomUUID();
+    await actions.draft("123", run, {
       title: "Interview preparation",
       start: "2026-09-20T15:00:00+08:00",
       end: "2026-09-20T16:00:00+08:00",
     });
-    await sendCalendarApprovals(bot, db, "123", undefined, 55);
-    assert.equal(sent.length, 1);
-    assert.equal(sent[0].message_thread_id, 55);
+    const unrelated = randomUUID();
+    await actions.draft("123", unrelated, {
+      title: "Background decision",
+      start: "2026-09-20T17:00:00+08:00",
+      end: "2026-09-20T18:00:00+08:00",
+    });
+    const child = randomUUID();
+    await db.query(
+      "INSERT INTO events(user_id,run_id,type,data) VALUES('123',$1,'agent.started',$2::jsonb)",
+      [run, JSON.stringify({ childRunId: child })],
+    );
+    await actions.draft("123", child, {
+      title: "Child decision",
+      start: "2026-09-20T19:00:00+08:00",
+      end: "2026-09-20T20:00:00+08:00",
+    });
+    await Promise.all([
+      sendCalendarApprovals(bot, db, "123", undefined, 55, run),
+      sendCalendarApprovals(bot, db, "123", undefined, 55, run),
+    ]);
+    assert.equal(sent.length, 3);
+    assert.deepEqual(
+      sent.map((p) => p.message_thread_id),
+      [55, undefined, 55],
+    );
   } finally {
     await pg.close();
   }
@@ -406,8 +429,8 @@ test("topics are created up front and a thread maps back to its topic", async ()
   try {
     await topics.ensure("123");
     await topics.ensure("123");
-    assert.deepEqual(created, ["News", "Markets", "Email"]);
-    assert.equal(await topics.keyFor("123", 42), "email");
+    assert.deepEqual(created, ["News", "Markets", "Updates"]);
+    assert.equal(await topics.keyFor("123", 42), "updates");
     assert.equal(await topics.keyFor("123", 40), "news");
     assert.equal(await topics.keyFor("123", 99), undefined);
     assert.equal(await topics.keyFor("123", undefined), undefined);
@@ -416,7 +439,7 @@ test("topics are created up front and a thread maps back to its topic", async ()
   }
 });
 
-test("a message typed in Chief's Email topic is recorded with its topic", async () => {
+test("a message typed in Chief's Updates topic is recorded with its topic", async () => {
   const { pg, db } = await database();
   await new TelegramTopics(db, fakeApi().api).ensure("123");
   const assistant = new Assistant(
@@ -476,7 +499,7 @@ test("a message typed in Chief's Email topic is recorded with its topic", async 
       date: 0,
       chat: { id: 123, type: "private" },
       ...(topicRoot
-        ? { forum_topic_created: { name: "Email", icon_color: 0xffd67e } }
+        ? { forum_topic_created: { name: "Updates", icon_color: 0xffd67e } }
         : { text: "an earlier answer" }),
     },
   });
@@ -488,16 +511,16 @@ test("a message typed in Chief's Email topic is recorded with its topic", async 
     await bot.handleUpdate(update(4, 42, replyTo(false)));
     const topics = (
       await db.query(
-        "SELECT metadata->>'topic' AS topic, metadata->>'topicFirstStep' AS first FROM conversation_inputs ORDER BY ordinal",
+        "SELECT metadata->>'topic' AS topic, metadata->>'threadId' AS thread FROM conversation_inputs ORDER BY ordinal",
       )
     ).rows;
     assert.deepEqual(
       topics.map((r) => r.topic),
-      ["email", "news", null, "email"],
+      ["updates", "news", null, "updates"],
     );
     assert.deepEqual(
-      topics.map((r) => r.first),
-      ["true", "true", "true", "false"],
+      topics.map((r) => r.thread),
+      ["42", "40", null, "42"],
     );
   } finally {
     await pg.close();

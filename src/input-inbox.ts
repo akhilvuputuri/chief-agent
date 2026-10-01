@@ -1,3 +1,4 @@
+import { sameThread } from "./delivery-routing.js";
 import type { Database } from "./db.js";
 import type { ImageAttachment } from "./protocol.js";
 
@@ -73,7 +74,11 @@ export class InputInbox {
       images: this.images.get(row.id),
     }));
   }
-  async waitReady(user: string, signal?: AbortSignal): Promise<InboxInput[]> {
+  async waitReady(
+    user: string,
+    signal?: AbortSignal,
+    thread?: number,
+  ): Promise<InboxInput[]> {
     while (true) {
       if (signal?.aborted) throw signal.reason;
       // Register before the read so a readiness transition cannot lose its wakeup.
@@ -86,7 +91,13 @@ export class InputInbox {
       set.add(notify);
       signal?.addEventListener("abort", notify, { once: true });
       try {
-        const rows = await this.pending(user);
+        let rows = await this.pending(user);
+        if (arguments.length >= 3) {
+          const boundary = rows.findIndex(
+            (row) => !sameThread(row.metadata.threadId, thread),
+          );
+          if (boundary >= 0) rows = rows.slice(0, boundary);
+        }
         const pending = rows.findIndex((row) => row.preparation === "pending");
         if (pending !== 0) return pending < 0 ? rows : rows.slice(0, pending);
         await changed;

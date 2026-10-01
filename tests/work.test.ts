@@ -49,6 +49,12 @@ async function fixture() {
       "utf8",
     ),
   );
+  await pg.exec(
+    await readFile(
+      new URL("../db/022_telegram_delivery.sql", import.meta.url),
+      "utf8",
+    ),
+  );
   const db = pg as unknown as Database;
   await ensureUser(db, "owner");
   await ensureUser(db, "other");

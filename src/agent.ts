@@ -31,7 +31,7 @@ import {
   type ToolDomain,
 } from "./tool-domains.js";
 import { recentTurns, type ToolPicker } from "./tool-picker.js";
-import { topicAgents, type TopicKey } from "./telegram-topics.js";
+import { sameThread, threadId } from "./delivery-routing.js";
 import { SerialQueue } from "./security.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
@@ -59,7 +59,7 @@ export type Incoming = {
   /** The Chief topic the message was typed in (Telegram topics, phase 2). */
   topic?: string;
   /** Whether that topic may start the turn with its agent (TELEGRAM_TOPICS=auto). */
-  topicFirstStep?: boolean;
+  threadId?: number;
 };
 export class Assistant {
   private queue = new SerialQueue();
@@ -70,19 +70,22 @@ export class Assistant {
       run: string;
       yield: boolean;
       revision: number;
+      threadId?: number;
     }
   >();
   private commits = new SerialQueue();
   private taskRuns = new Map<string, string>();
   private inbox: InputInbox;
+  private inputVersions = new Map<string, number>();
   private outgoing = new Map<string, { run: string; cancelled: boolean }>();
-  interruptForInput(user: string) {
+  interruptForInput(user: string, thread?: number) {
     const active = this.foreground.get(user);
-    if (active) {
+    if (active && sameThread(active.threadId, thread)) {
       active.yield = true;
     }
   }
   async recordInput(user: string, message: string, metadata: Incoming = {}) {
+    metadata = { ...metadata, threadId: threadId(metadata.threadId) };
     await ensureUser(this.db, user);
     const id = metadata.id ?? randomUUID();
     const inserted = await this.db.query(
@@ -97,7 +100,11 @@ export class Assistant {
     );
     if (inserted.rows.length) {
       this.inbox.wake(user);
-      this.interruptForInput(user);
+      const key = `${user}:${threadId(metadata.threadId) ?? 0}`;
+      this.inputVersions.set(key, (this.inputVersions.get(key) ?? 0) + 1);
+      const pending = await this.inbox.pending(user);
+      if (sameThread(pending[0]?.metadata.threadId, metadata.threadId))
+        this.interruptForInput(user, metadata.threadId);
     }
     return id;
   }
@@ -127,6 +134,7 @@ export class Assistant {
           reply: "",
           runId: run,
           inputRevision: active.revision,
+          threadId: active.threadId,
         })
       );
     return (
@@ -157,17 +165,18 @@ export class Assistant {
     )
       return false;
     if (delivery.inputRevision === undefined) return true;
-    const version = this.inbox.version(user);
+    const key = `${user}:${threadId(delivery.threadId) ?? 0}`;
+    const version = this.inputVersions.get(key) ?? 0;
     const current = (
       await this.db.query(
-        "SELECT coalesce(max(ordinal),0) AS revision FROM conversation_inputs WHERE user_id=$1",
-        [user],
+        "SELECT coalesce(max(ordinal),0) AS revision FROM conversation_inputs WHERE user_id=$1 AND COALESCE((metadata->>'threadId')::bigint,0)=$2",
+        [user, threadId(delivery.threadId) ?? 0],
       )
     ).rows[0];
     const active = this.foreground.get(user);
     const valid =
       Number(current.revision) === delivery.inputRevision &&
-      version === this.inbox.version(user) &&
+      version === (this.inputVersions.get(key) ?? 0) &&
       !(
         this.outgoing.get(user)?.run === delivery.runId &&
         this.outgoing.get(user)?.cancelled
@@ -189,6 +198,15 @@ export class Assistant {
         },
       );
     return valid;
+  }
+  async deliveryThread(user: string, run: string) {
+    const row = (
+      await this.db.query(
+        "SELECT metadata FROM conversation_inputs WHERE user_id=$1 AND run_id=$2 ORDER BY ordinal LIMIT 1",
+        [user, run],
+      )
+    ).rows[0];
+    return threadId(row?.metadata?.threadId);
   }
   async recordDelivery(user: string, run: string, reply: string) {
     if (!reply) return;
@@ -404,7 +422,12 @@ export class Assistant {
     const run = randomUUID();
     const controller = new AbortController();
     this.controllers.set(run, controller);
-    const active = {
+    const active: {
+      run: string;
+      yield: boolean;
+      revision: number;
+      threadId?: number;
+    } = {
       run,
       yield: false,
       revision: 0,
@@ -417,7 +440,7 @@ export class Assistant {
     let voiceReply = false;
     let managedDelivery = false;
     let topic: string | undefined;
-    let topicFirstStep = false;
+
     const capability = randomBytes(32).toString("hex");
     this.capabilities.set(capability, {
       user,
@@ -503,13 +526,16 @@ export class Assistant {
           typeof claimed.rows[0].metadata.topic === "string"
             ? claimed.rows[0].metadata.topic
             : undefined;
-        topicFirstStep = claimed.rows[0].metadata.topicFirstStep === true;
+        active.threadId = threadId(claimed.rows[0].metadata.threadId);
       }
-      const initialVersion = this.inbox.version(user);
+      const initialKey = `${user}:${active.threadId ?? 0}`;
+      const initialVersion = this.inputVersions.get(initialKey) ?? 0;
+      const initialPending = await this.inbox.pending(user);
       active.yield =
         !background &&
-        ((await this.inbox.pending(user)).length > 0 ||
-          initialVersion !== this.inbox.version(user));
+        ((initialPending.length > 0 &&
+          sameThread(initialPending[0]?.metadata.threadId, active.threadId)) ||
+          initialVersion !== (this.inputVersions.get(initialKey) ?? 0));
       const conversation = background
         ? {
             summary: "",
@@ -749,26 +775,15 @@ export class Assistant {
             }
           : {}),
       });
-      const firstCall = topicFirstCall(
-        topicFirstStep ? topic : undefined,
-        message,
-        !!images?.length,
-        background,
-        runtime.context,
-        previousTurns.at(-1),
-      );
       if (topic && !background)
         runtime.context = JSON.stringify({
           ...JSON.parse(runtime.context),
           topic: {
             name: topic,
-            // One wording either way: the host's first step can still be dropped if newer
-            // input arrives before it runs.
-            note: "The owner wrote in this Telegram topic. Treat it as a hint about the subject, not a limit on what you can do. If this turn starts with an agent_run you did not make, the host started that topic's agent because of the topic: answer from its report, or handle the message as usual if it was about something else.",
+            note: "This identifies where the owner wrote. Its subject may be unrelated to this request.",
           },
         });
       const request: AgentRequest = {
-        ...(firstCall ? { firstCall } : {}),
         runId: run,
         // One key per owner: a per-run key made every message's first call a cache miss.
         cacheKey: `chief-${createHash("sha256").update(user).digest("hex").slice(0, 16)}`,
@@ -791,13 +806,24 @@ export class Assistant {
                   [user, run],
                 )
               ).rows[0]?.task_id;
-              if (bound && (await this.inbox.pending(user)).length) {
+              if (
+                bound &&
+                (await this.inbox.pending(user)).some(
+                  (i, index) =>
+                    index === 0 &&
+                    sameThread(i.metadata.threadId, active.threadId),
+                )
+              ) {
                 await execution.trace("conversation.task_handoff", {
                   taskId: bound,
                 });
                 throw new Stop("interrupted");
               }
-              const ready = await this.inbox.waitReady(user, controller.signal);
+              const ready = await this.inbox.waitReady(
+                user,
+                controller.signal,
+                active.threadId,
+              );
               const adopted: Array<{ id: string; message: string }> = [];
               for (const input of ready) {
                 const claim = await this.db.query(
@@ -842,10 +868,13 @@ export class Assistant {
               }
               if (followUpDomains.size) await loadTools([...followUpDomains]);
               // Do not overwrite a wakeup that arrives during an awaited state read.
-              const version = this.inbox.version(user);
+              const pendingKey = `${user}:${active.threadId ?? 0}`;
+              const pendingVersion = this.inputVersions.get(pendingKey) ?? 0;
               const pending = await this.inbox.pending(user);
               active.yield =
-                pending.length > 0 || version !== this.inbox.version(user);
+                (pending.length > 0 &&
+                  sameThread(pending[0]?.metadata.threadId, active.threadId)) ||
+                pendingVersion !== (this.inputVersions.get(pendingKey) ?? 0);
               if (adopted.length) {
                 await this.db.query(
                   "UPDATE work_turns SET request=$3 WHERE user_id=$1 AND run_id=$2",
@@ -967,8 +996,8 @@ export class Assistant {
         if (!bound) {
           // Inputs already waiting at stop time must not turn into free fresh allocations.
           const parked = await this.db.query(
-            "UPDATE conversation_inputs SET state='failed',finished_at=now(),metadata=metadata || jsonb_build_object('parkedReason',$2::text,'parkedByRun',$3::text) WHERE user_id=$1 AND state='queued' RETURNING id,ordinal",
-            [user, output.stopReason, run],
+            "UPDATE conversation_inputs SET state='failed',finished_at=now(),metadata=metadata || jsonb_build_object('parkedReason',$2::text,'parkedByRun',$3::text) WHERE user_id=$1 AND state='queued' AND COALESCE((metadata->>'threadId')::bigint,0)=$4 RETURNING id,ordinal",
+            [user, output.stopReason, run, active.threadId ?? 0],
           );
           if (parked.rows.length) {
             active.revision = Math.max(
@@ -1101,7 +1130,16 @@ export class Assistant {
         sections: output.sections,
         sources: output.sources,
         runId: run,
-        ...(!background ? { inputRevision: active.revision, voiceReply } : {}),
+        reason: approvals.length
+          ? "awaiting_approval"
+          : (output.stopReason ?? "answer"),
+        ...(!background
+          ? {
+              inputRevision: active.revision,
+              voiceReply,
+              threadId: active.threadId,
+            }
+          : {}),
         // Approval notices also get their own always-visible delivery; views never authorize them.
         notices,
       };
@@ -1134,6 +1172,8 @@ export class Assistant {
           reply:
             "I could not load the preceding exchange within the context limit, so I stopped before asking the model. Your original messages and saved results are retained; this needs context inspection.",
           runId: run,
+          reason: "failed",
+          threadId: active.threadId,
         };
       }
       throw error;
@@ -1225,42 +1265,4 @@ export class Assistant {
     }
     return result;
   }
-}
-
-/**
- * Telegram topics, phase 2: a message typed in Chief's Email, Markets or News topic starts
- * with that topic's agent instead of a coordinator call that would only choose it. Chief
- * still writes the reply from the agent's report and can delegate elsewhere if the message
- * was not about the topic. Anything unusual takes the ordinary path.
- */
-export function topicFirstCall(
-  topic: string | undefined,
-  message: string,
-  hasImages: boolean,
-  background: boolean,
-  runtimeContext: string,
-  previous?: { user: string; assistant: string },
-): AgentRequest["firstCall"] {
-  const type = topic ? topicAgents[topic as TopicKey] : undefined;
-  if (!type || background || hasImages) return undefined;
-  // agent_run's objective limit (UTF-16 length, as zod counts it).
-  if (message.length > 2000) return undefined;
-  // Small talk ("thanks!", "ok") needs no email search; Chief answers it in one call.
-  if (message.trim().split(/\s+/).length < 3) return undefined;
-  let catalogue: { type?: string }[] = [];
-  try {
-    catalogue = JSON.parse(runtimeContext).agentCatalogue ?? [];
-  } catch {
-    return undefined;
-  }
-  // The agent must be offered in this deployment.
-  if (!catalogue.some((a) => a.type === type)) return undefined;
-  const context = previous
-    ? `The owner wrote this in the ${topic} topic of the chat. Previous exchange, for reference only:\nOwner: ${previous.user.slice(0, 1500)}\nChief: ${previous.assistant.slice(0, 2000)}`
-    : `The owner wrote this in the ${topic} topic of the chat.`;
-  return {
-    name: "agent_run",
-    arguments: JSON.stringify({ type, objective: message, context }),
-    reason: `topic.${topic}`,
-  };
 }

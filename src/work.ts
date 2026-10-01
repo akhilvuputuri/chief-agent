@@ -95,7 +95,11 @@ export class WorkTools {
         `WITH available AS (
           SELECT * FROM work_turns WHERE run_id=$6 AND user_id=$2 AND task_id IS NULL AND NOT background FOR UPDATE
         ), made AS (
-          INSERT INTO work_tasks(id,user_id,objective,request) SELECT $1,$2,$3,$4 FROM available RETURNING id
+          INSERT INTO work_tasks(id,user_id,objective,request,delivery_context)
+          SELECT $1,$2,$3,$4,jsonb_build_object('source','owner','threadId',
+            (SELECT metadata->'threadId' FROM conversation_inputs WHERE user_id=$2 AND run_id=$6 ORDER BY ordinal LIMIT 1),
+            'inputId',(SELECT id FROM conversation_inputs WHERE user_id=$2 AND run_id=$6 ORDER BY ordinal LIMIT 1))
+          FROM available RETURNING id
         ), steps AS (
           INSERT INTO work_steps(task_id,key,title,verification,expected_operation)
           SELECT made.id,x.key,x.title,x.verification,x."expectedOperation" FROM made,jsonb_to_recordset($5::jsonb) x(key text,title text,verification text,"expectedOperation" text)

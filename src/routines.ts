@@ -1,3 +1,4 @@
+import { taskDelivery } from "./delivery-routing.js";
 import { errorFields, opsLog } from "./ops-log.js";
 import { randomUUID } from "node:crypto";
 import { CronExpressionParser } from "cron-parser";
@@ -219,12 +220,16 @@ export class RoutineScheduler {
   }
 }
 
-/** Save completed passes before delivery. Never rerun work to recover Telegram sends. */
+/** Save routine and owner-work passes before delivery. Never rerun work to recover sends. */
 export class RoutineDelivery {
   private busy = false;
   constructor(
     private db: Database,
     private send: (user: string, delivery: Delivery) => Promise<unknown>,
+    private resolve: (
+      user: string,
+      delivery: Delivery,
+    ) => Promise<Delivery> = async (_user, payload) => payload,
   ) {}
   async capture(
     user: string,
@@ -237,7 +242,19 @@ export class RoutineDelivery {
         [task, user],
       )
     ).rows[0];
-    if (!o) return false;
+    payload = await this.resolve(
+      user,
+      await taskDelivery(this.db, user, task, payload),
+    );
+    if (!payload.runId)
+      throw new ToolValidationError("Delivery requires a recorded run");
+    if (!o) {
+      await this.db.query(
+        "INSERT INTO work_deliveries(id,user_id,task_id,run_id,payload) VALUES($1,$2,$3,$4,$5::jsonb) ON CONFLICT(run_id) DO NOTHING",
+        [randomUUID(), user, task, payload.runId, JSON.stringify(payload)],
+      );
+      return true;
+    }
     await this.db.query(
       `WITH saved AS (
       INSERT INTO routine_deliveries(id,occurrence_id,user_id,run_id,payload) VALUES($1,$2,$3,$4,$5::jsonb)
@@ -260,21 +277,30 @@ export class RoutineDelivery {
     await this.db.query(
       "UPDATE routine_deliveries SET state='uncertain' WHERE state='sending'",
     );
+    await this.db.query(
+      "UPDATE work_deliveries SET state='uncertain' WHERE state='sending'",
+    );
   }
   async tick() {
     if (this.busy) return;
     this.busy = true;
     try {
+      const oldest = (
+        await this.db.query(
+          "SELECT kind FROM (SELECT 'routine' AS kind,created_at FROM routine_deliveries WHERE state='pending' UNION ALL SELECT 'work' AS kind,created_at FROM work_deliveries WHERE state='pending') q ORDER BY created_at LIMIT 1",
+        )
+      ).rows[0];
+      const table =
+        oldest?.kind === "work" ? "work_deliveries" : "routine_deliveries";
       const d = (
-        await this.db
-          .query(`UPDATE routine_deliveries SET state='sending' WHERE id=(
-        SELECT id FROM routine_deliveries WHERE state='pending' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *`)
+        await this.db.query(`UPDATE ${table} SET state='sending' WHERE id=(
+        SELECT id FROM ${table} WHERE state='pending' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *`)
       ).rows[0];
       if (!d) return;
       try {
         await this.send(d.user_id, d.payload);
         await this.db.query(
-          "UPDATE routine_deliveries SET state='sent',sent_at=now() WHERE id=$1",
+          `UPDATE ${table} SET state='sent',sent_at=now() WHERE id=$1`,
           [d.id],
         );
         opsLog("routine.delivery", "info", {
@@ -290,7 +316,7 @@ export class RoutineDelivery {
           ...errorFields(error),
         });
         await this.db.query(
-          "UPDATE routine_deliveries SET state='uncertain' WHERE id=$1",
+          `UPDATE ${table} SET state='uncertain' WHERE id=$1`,
           [d.id],
         );
       }
