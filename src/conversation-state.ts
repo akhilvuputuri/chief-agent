@@ -1,3 +1,4 @@
+import { threadId } from "./delivery-routing.js";
 import type { Database } from "./db.js";
 import { exchangeIndex } from "./context-continuity.js";
 import { runFamily } from "./run-family.js";
@@ -8,6 +9,26 @@ export async function conversationState(
   user: string,
   inputId?: string,
 ) {
+  const input = inputId
+    ? (
+        await db.query(
+          "SELECT metadata FROM conversation_inputs WHERE id=$1 AND user_id=$2",
+          [inputId, user],
+        )
+      ).rows[0]
+    : undefined;
+  const here = threadId(input?.metadata?.threadId) ?? 0;
+  const latestHere = (
+    await db.query(
+      `SELECT x.run_id,x.pending_reply,
+    (SELECT left(c.payload->>'content',1500) FROM conversation_messages m JOIN message_contents c USING(user_id,hash) WHERE m.user_id=x.user_id AND m.run_id=x.run_id AND c.payload->>'role'='user' ORDER BY m.ordinal DESC LIMIT 1) AS request,
+    (SELECT left(c.payload->>'content',2000) FROM conversation_messages m JOIN message_contents c USING(user_id,hash) WHERE m.user_id=x.user_id AND m.run_id=x.run_id AND m.delivery_state IN ('sent','recorded') AND c.payload->>'role'='assistant' AND NOT(c.payload ? 'tool_calls') ORDER BY m.ordinal DESC LIMIT 1) AS reply
+    FROM conversation_contexts x WHERE x.user_id=$1 AND
+      COALESCE((SELECT (i.metadata->>'threadId')::bigint FROM conversation_inputs i WHERE i.user_id=x.user_id AND i.run_id=x.run_id ORDER BY i.ordinal LIMIT 1),0)=$2
+      AND NOT EXISTS(SELECT 1 FROM conversation_messages m WHERE m.user_id=x.user_id AND m.run_id=x.run_id AND m.delivery_state='pending') ORDER BY x.id DESC LIMIT 1`,
+      [user, here],
+    )
+  ).rows[0];
   const previous = (
     await db.query(
       "SELECT id,summary,pending_reply,run_id FROM conversation_contexts x WHERE user_id=$1 AND NOT EXISTS(SELECT 1 FROM conversation_messages m WHERE m.user_id=x.user_id AND m.run_id=x.run_id AND m.delivery_state='pending') ORDER BY id DESC LIMIT 1",
@@ -17,7 +38,13 @@ export async function conversationState(
   // Bounded heads of recent messages for the exchange index; never full observation payloads.
   const rows = (
     await db.query(
-      `SELECT e.id,e.run_id AS "runId",e.created_at AS "createdAt",c.payload->>'role' AS role,left(c.payload->>'content',400) AS content,
+      `SELECT e.id,e.run_id AS "runId",e.created_at AS "createdAt",
+         COALESCE((SELECT (i.metadata->>'threadId')::bigint FROM conversation_inputs i WHERE i.user_id=e.user_id AND i.run_id=e.run_id ORDER BY i.ordinal LIMIT 1),0) AS "threadId",
+         (SELECT i.metadata->'anchor' FROM conversation_inputs i WHERE i.user_id=e.user_id AND i.run_id=e.run_id
+           AND i.message_index <= e.ordinal - (SELECT min(m.ordinal) FROM conversation_messages m WHERE m.user_id=e.user_id AND m.run_id=e.run_id)
+             + (SELECT min(j.message_index) FROM conversation_inputs j WHERE j.user_id=e.user_id AND j.run_id=e.run_id)
+           ORDER BY i.message_index DESC LIMIT 1) AS anchor,
+         c.payload->>'role' AS role,left(c.payload->>'content',400) AS content,
          jsonb_path_query_array(c.payload,'$.tool_calls[*].function.name') AS "callNames",
          jsonb_path_query_array(c.payload,'$.tool_calls[*].id') AS "callIds",
          c.payload->>'tool_call_id' AS "toolCallId"
@@ -30,12 +57,6 @@ export async function conversationState(
   const summary = exchangeIndex(rows);
   let replyTarget = null;
   if (inputId) {
-    const input = (
-      await db.query(
-        "SELECT metadata FROM conversation_inputs WHERE id=$1 AND user_id=$2",
-        [inputId, user],
-      )
-    ).rows[0];
     const messageId = input?.metadata?.replyToMessageId;
     if (Number.isSafeInteger(messageId)) {
       const target = (
@@ -75,6 +96,16 @@ export async function conversationState(
     )
   ).rows[0];
   return {
+    feedAnchor: input?.metadata?.anchor ?? null,
+    lastExchangeHere: latestHere
+      ? {
+          runId: latestHere.run_id,
+          askedIn: here,
+          request: latestHere.request,
+          reply: latestHere.reply,
+          pendingReply: latestHere.pending_reply,
+        }
+      : null,
     interruptedJob: interrupted ?? null,
     summary,
     previousId: previous?.id,
@@ -92,6 +123,7 @@ export async function saveConversationState(
   request: string,
   reply: string,
   reason?: string,
+  askedIn?: number,
 ) {
   let pending = null;
   if (reason === "awaiting_user" || reason === "awaiting_approval") {
@@ -130,6 +162,7 @@ export async function saveConversationState(
       )
     ).rows.map((r) => r.id);
     pending = {
+      askedIn: threadId(askedIn) ?? 0,
       runId: run,
       request: request.slice(0, 2000),
       question: reply.slice(0, 3000),

@@ -5,6 +5,7 @@
 
 /** Offered on every coordinator call. */
 export const CORE_OPERATIONS = new Set([
+  "feed_read",
   "conversation_search",
   "conversation_read",
   "observation_read",

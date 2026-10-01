@@ -80,6 +80,7 @@ const fields: Record<string, Shape> = {
   score: "number",
   agree: "bool",
   recalled: "count",
+  referenceCount: "count",
   uncertainCalls: "count",
   interruptedCalls: "count",
   failedRuns: "count",
@@ -280,6 +281,25 @@ const projections: Record<string, Projection> = {
     { runId: run, stopReason: d.stopReason },
   ],
   "turn.failed": (run) => ["error", { runId: run }],
+  "telegram.feed_sent": (run, d) => [
+    "info",
+    {
+      runId: run,
+      ref: d.id,
+      kind: d.kind,
+      threadId: d.threadId,
+      messageId: d.messageId,
+    },
+  ],
+  "telegram.reference_resolved": (run, d) => [
+    "info",
+    {
+      inputId: run,
+      kind: d.kind,
+      threadId: d.threadId,
+      referenceCount: d.referenceCount,
+    },
+  ],
   "telegram.delivery_routed": (run, d) => [
     "info",
     {

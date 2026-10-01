@@ -60,4 +60,14 @@ After installation, verify exact RELEASE, health, migration marker and fresh pri
 
 Tests cover destination policy, cross-thread queue/FIFO behavior and delivery fences, same-thread checkpoint wakeup races, owner isolation, captured work destinations and uncertain-send recovery, topic lifecycle and approval placement. Live acceptance should exercise General and feed-topic input, one own approval plus unrelated leftover, a delayed reply and an actual scheduled feed. No synthetic alert is sent to the owner as routine verification.
 
-Feed reference resolution and a recent-feed index are the second stage of issue 137; this first stage does not yet make an old raw feed post retrievable by Telegram message ID.
+## Feed reference resolution
+
+Successful News, Markets and work/routine posts record `telegram.feed_sent` with actual Telegram message/thread identity and their edition, alert or run ID. Legacy pending editions/alerts obtain their reference from the claimed outbox row, not from an optional payload field. There is no invented historical backfill.
+
+At ingestion, an explicit reply is resolved against owner-scoped sent records at any age, with `sentAt` for age. Unresolved replies use a bounded quoted-text fallback, labelled as incomplete untrusted content. Topic-creation service messages never become explicit references. Telegram documents `reply_to_message` for the same chat/thread and `external_reply` for other topics; original chat/message IDs in `external_reply` are documented only for supergroups/channels. Cross-topic private-chat payloads therefore get exact identity only when actually supplied, otherwise an available quote; the host never invents an original ID.
+
+A General turn receives a recent-feed index of titles, IDs and timestamps, bounded to 24 hours, 15 lines and 3,000 characters. `feed_read(kind,id,offset)` reads the exact owner-scoped saved edition, alert or queued update in 8,000-character pages. Reading stored content does not run another search or authorize an action. Source text stays labelled untrusted.
+
+Only known feed topics receive implicit anchors, labelled potentially unrelated: the newest News/Updates post under 24 hours, or up to five Markets alerts under six hours and within 15 minutes of the newest. Anchor identity and titles are frozen in input metadata before voice/photo preparation and survive checkpoint absorption. The bounded exchange index includes thread identity and input-specific feed references. `pendingReply.askedIn` and `lastExchangeHere` make thread-local follow-ups distinguishable from the shared global history. No separate memory store or routing model call is introduced.
+
+Private CloudWatch records structural feed-send/reference-resolution events, never titles, quoted text or content. Exact content remains in owner-scoped Postgres records. Forwarded external references without verifiable identity remain deferred.

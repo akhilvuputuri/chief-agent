@@ -117,6 +117,7 @@ export class TelegramViews {
       viewId: id,
       kind: view.kind,
       messageId: sent.message_id,
+      threadId: extra.message_thread_id ?? null,
     });
     return id;
   }
