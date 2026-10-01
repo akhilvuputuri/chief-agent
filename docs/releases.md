@@ -1,5 +1,13 @@
 # Versions and release notes
 
+## Released v0.3.30 — exact Telegram feed references
+
+[PR #139](https://github.com/akhilvuputuri/chief-agent/pull/139) adds sent feed identities, bounded General discovery, owner-scoped stored reads, frozen per-input anchors and shared thread-aware continuity. GPT-6 Astra independently approved exact head `cdab8b518bd08ceb00b95365d86c54d61209133e` after reproduced absorption/history/thread defects were fixed. Full checks passed (563 application, 21 JS script, 30 Python tests); the final reviewer passed 79 focused tests. [Release](https://github.com/akhilvuputuri/chief-agent/actions/runs/36875352644) and separate server RELEASE/health verified merge `7cdbda24d7e7145f9482eb47819ec822722dc649`. A rolled-back deployed-module smoke passed without fixtures, Telegram sends or model calls. [v0.3.30](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.30) is immutable. No new schema beyond migration 022; owner live acceptance remains separate. See [journal 53](journey/53-feed-destinations.md).
+
+## Released v0.3.29 — General input and durable destinations
+
+[PR #138](https://github.com/akhilvuputuri/chief-agent/pull/138) adds host-owned destinations, task origins, thread-aware FIFO/fences, scoped approval cards, slow pointers and durable ordinary-work delivery. The final independent GPT-6 Astra review approved head `2724d31cc44b893981ebb8754a48e39739ac18dd` with 62 focused tests after repeated failure-case fixes. The reviewed operator rollout installed additive migration 022 at merge `015b8a99d770977ada6035c3feed4b9bbdd7226d`; separate preserved-record/health checks and [normal release](https://github.com/akhilvuputuri/chief-agent/actions/runs/36872648089) passed. [v0.3.29](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.29) labels that merge. Email was renamed Updates without deleting messages; feed-reference resolution follows in v0.3.30.
+
 ## Deployed after v0.3.28 (untagged)
 
 - `03a1ef4`, [PR #135](https://github.com/akhilvuputuri/chief-agent/pull/135): Telegram topics, phase 1. The news bulletin and stock alerts go to their own topics, and a message typed in a topic is answered there. App-only, with no migration. Release run 36857469977 succeeded, and the gateway logged that commit from 11:48 UTC on 1 October 2026. See [journal 52](journey/52-telegram-topics.md).

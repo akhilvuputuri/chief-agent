@@ -12,6 +12,8 @@ Node 22. `npm ci`, `npm run check`, `npm run build`, `npm run format:check`. Tes
 
 `canvases.ts`/`canvas-schema.ts` own versioned canvas storage and tools. `miniapp.ts`/`miniapp-auth.ts` expose authenticated read-only APIs; `miniapp-ui.ts` is browser code compiled by npm test/build, with static files in web/. Validate owner scope on every read and Telegram initData server-side. Preserve immutable revisions, request-key idempotency and base-revision conflicts. See docs/canvases.md and the reviewed additive deployment procedure in docs/miniapp-deployment.md. Do not add public writes or model-generated executable UI.
 
+Transport routing lives in `delivery-routing.ts` and `telegram-topics.ts`; `telegram-feeds.ts` records sent source identities and supplies bounded reference context. One owner conversation/memory is shared across topics, with thread-aware FIFO boundaries and delivery fences. Task origin and destination are host authority; model answers cannot set them. `feed_read` and `conversation_read(inputId)` are owner-scoped reads. `HistoryStore` atomically binds original input IDs to stored user-message UUIDs; preserve that binding when changing history projection or supersession. Routine and ordinary work outboxes retain uncertain sends for inspection. See [topic contracts and migration 022](docs/telegram-topics.md).
+
 ## Product and safety constraints
 
 - General personal assistant; job preparation is one domain.
