@@ -1,0 +1,3362 @@
+[
+  {
+    "id": "c00-0",
+    "prior_index": 0,
+    "split": "held-out",
+    "previous": {
+      "user": "any reply from the landlord?",
+      "assistant": "Yes — Daniel Chua replied on 27 Sep: the renewal is SGD 3,450/month from 1 Dec and he needs your answer by 15 Oct.",
+      "domain": "email",
+      "chars": 9400
+    },
+    "message": "what was the deadline again?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c00-1",
+    "prior_index": 0,
+    "split": "held-out",
+    "previous": {
+      "user": "any reply from the landlord?",
+      "assistant": "Yes — Daniel Chua replied on 27 Sep: the renewal is SGD 3,450/month from 1 Dec and he needs your answer by 15 Oct.",
+      "domain": "email",
+      "chars": 9400
+    },
+    "message": "can you check if he mentioned aircon servicing",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c00-2",
+    "prior_index": 0,
+    "split": "held-out",
+    "previous": {
+      "user": "any reply from the landlord?",
+      "assistant": "Yes — Daniel Chua replied on 27 Sep: the renewal is SGD 3,450/month from 1 Dec and he needs your answer by 15 Oct.",
+      "domain": "email",
+      "chars": 9400
+    },
+    "message": "reply-wise, what did he say about the deposit?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c00-3",
+    "prior_index": 0,
+    "split": "held-out",
+    "previous": {
+      "user": "any reply from the landlord?",
+      "assistant": "Yes — Daniel Chua replied on 27 Sep: the renewal is SGD 3,450/month from 1 Dec and he needs your answer by 15 Oct.",
+      "domain": "email",
+      "chars": 9400
+    },
+    "message": "did my bank send anything this week?",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c00-4",
+    "prior_index": 0,
+    "split": "held-out",
+    "previous": {
+      "user": "any reply from the landlord?",
+      "assistant": "Yes — Daniel Chua replied on 27 Sep: the renewal is SGD 3,450/month from 1 Dec and he needs your answer by 15 Oct.",
+      "domain": "email",
+      "chars": 9400
+    },
+    "message": "any deliveries expected today?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c00-5",
+    "prior_index": 0,
+    "split": "held-out",
+    "previous": {
+      "user": "any reply from the landlord?",
+      "assistant": "Yes — Daniel Chua replied on 27 Sep: the renewal is SGD 3,450/month from 1 Dec and he needs your answer by 15 Oct.",
+      "domain": "email",
+      "chars": 9400
+    },
+    "message": "is it going to rain in Singapore this afternoon?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c01-0",
+    "prior_index": 1,
+    "split": "tuning",
+    "previous": {
+      "user": "find the email from Grab about my interview",
+      "assistant": "Lina Tan from Grab confirmed your system design round on Fri 9 Oct, 3 pm, with Marcus Webb. Zoom ID 884 213 0071.",
+      "domain": "email",
+      "chars": 8200
+    },
+    "message": "who's the interviewer?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c01-1",
+    "prior_index": 1,
+    "split": "tuning",
+    "previous": {
+      "user": "find the email from Grab about my interview",
+      "assistant": "Lina Tan from Grab confirmed your system design round on Fri 9 Oct, 3 pm, with Marcus Webb. Zoom ID 884 213 0071.",
+      "domain": "email",
+      "chars": 8200
+    },
+    "message": "what's the zoom id",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c01-2",
+    "prior_index": 1,
+    "split": "tuning",
+    "previous": {
+      "user": "find the email from Grab about my interview",
+      "assistant": "Lina Tan from Grab confirmed your system design round on Fri 9 Oct, 3 pm, with Marcus Webb. Zoom ID 884 213 0071.",
+      "domain": "email",
+      "chars": 8200
+    },
+    "message": "is there a dress code mentioned in it?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c01-3",
+    "prior_index": 1,
+    "split": "tuning",
+    "previous": {
+      "user": "find the email from Grab about my interview",
+      "assistant": "Lina Tan from Grab confirmed your system design round on Fri 9 Oct, 3 pm, with Marcus Webb. Zoom ID 884 213 0071.",
+      "domain": "email",
+      "chars": 8200
+    },
+    "message": "any newsletters I haven't read?",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c01-4",
+    "prior_index": 1,
+    "split": "tuning",
+    "previous": {
+      "user": "find the email from Grab about my interview",
+      "assistant": "Lina Tan from Grab confirmed your system design round on Fri 9 Oct, 3 pm, with Marcus Webb. Zoom ID 884 213 0071.",
+      "domain": "email",
+      "chars": 8200
+    },
+    "message": "how many roles have I saved?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c01-5",
+    "prior_index": 1,
+    "split": "tuning",
+    "previous": {
+      "user": "find the email from Grab about my interview",
+      "assistant": "Lina Tan from Grab confirmed your system design round on Fri 9 Oct, 3 pm, with Marcus Webb. Zoom ID 884 213 0071.",
+      "domain": "email",
+      "chars": 8200
+    },
+    "message": "when is Deepavali this year?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c02-0",
+    "prior_index": 2,
+    "split": "tuning",
+    "previous": {
+      "user": "summarise my unread mail",
+      "assistant": "6 unread: 2 bank alerts, a Shopee promo, a DHL delivery notice, a GitHub security alert and a note from your sister about Sunday lunch.",
+      "domain": "email",
+      "chars": 11200
+    },
+    "message": "what did my sister say exactly?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c02-1",
+    "prior_index": 2,
+    "split": "tuning",
+    "previous": {
+      "user": "summarise my unread mail",
+      "assistant": "6 unread: 2 bank alerts, a Shopee promo, a DHL delivery notice, a GitHub security alert and a note from your sister about Sunday lunch.",
+      "domain": "email",
+      "chars": 11200
+    },
+    "message": "open the DHL one",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c02-2",
+    "prior_index": 2,
+    "split": "tuning",
+    "previous": {
+      "user": "summarise my unread mail",
+      "assistant": "6 unread: 2 bank alerts, a Shopee promo, a DHL delivery notice, a GitHub security alert and a note from your sister about Sunday lunch.",
+      "domain": "email",
+      "chars": 11200
+    },
+    "message": "and the GitHub alert — is it urgent?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c02-3",
+    "prior_index": 2,
+    "split": "tuning",
+    "previous": {
+      "user": "summarise my unread mail",
+      "assistant": "6 unread: 2 bank alerts, a Shopee promo, a DHL delivery notice, a GitHub security alert and a note from your sister about Sunday lunch.",
+      "domain": "email",
+      "chars": 11200
+    },
+    "message": "search my mail for the insurance renewal",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c02-4",
+    "prior_index": 2,
+    "split": "tuning",
+    "previous": {
+      "user": "summarise my unread mail",
+      "assistant": "6 unread: 2 bank alerts, a Shopee promo, a DHL delivery notice, a GitHub security alert and a note from your sister about Sunday lunch.",
+      "domain": "email",
+      "chars": 11200
+    },
+    "message": "when's my next free evening?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c02-5",
+    "prior_index": 2,
+    "split": "tuning",
+    "previous": {
+      "user": "summarise my unread mail",
+      "assistant": "6 unread: 2 bank alerts, a Shopee promo, a DHL delivery notice, a GitHub security alert and a note from your sister about Sunday lunch.",
+      "domain": "email",
+      "chars": 11200
+    },
+    "message": "thanks!",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c03-0",
+    "prior_index": 3,
+    "split": "tuning",
+    "previous": {
+      "user": "did Aviva reply about the claim?",
+      "assistant": "Aviva approved claim CLM-30917 for SGD 380, paid within 7 working days.",
+      "domain": "email",
+      "chars": 6100
+    },
+    "message": "when will the money arrive then?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c03-1",
+    "prior_index": 3,
+    "split": "tuning",
+    "previous": {
+      "user": "did Aviva reply about the claim?",
+      "assistant": "Aviva approved claim CLM-30917 for SGD 380, paid within 7 working days.",
+      "domain": "email",
+      "chars": 6100
+    },
+    "message": "what was the claim number",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c03-2",
+    "prior_index": 3,
+    "split": "tuning",
+    "previous": {
+      "user": "did Aviva reply about the claim?",
+      "assistant": "Aviva approved claim CLM-30917 for SGD 380, paid within 7 working days.",
+      "domain": "email",
+      "chars": 6100
+    },
+    "message": "great, can you remind me to check my account next friday",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c03-3",
+    "prior_index": 3,
+    "split": "tuning",
+    "previous": {
+      "user": "did Aviva reply about the claim?",
+      "assistant": "Aviva approved claim CLM-30917 for SGD 380, paid within 7 working days.",
+      "domain": "email",
+      "chars": 6100
+    },
+    "message": "anything from my dentist?",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c03-4",
+    "prior_index": 3,
+    "split": "tuning",
+    "previous": {
+      "user": "did Aviva reply about the claim?",
+      "assistant": "Aviva approved claim CLM-30917 for SGD 380, paid within 7 working days.",
+      "domain": "email",
+      "chars": 6100
+    },
+    "message": "how many roles have I saved?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c03-5",
+    "prior_index": 3,
+    "split": "tuning",
+    "previous": {
+      "user": "did Aviva reply about the claim?",
+      "assistant": "Aviva approved claim CLM-30917 for SGD 380, paid within 7 working days.",
+      "domain": "email",
+      "chars": 6100
+    },
+    "message": "good morning",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c04-0",
+    "prior_index": 4,
+    "split": "tuning",
+    "previous": {
+      "user": "what am I waiting on?",
+      "assistant": "Three parcels: the Aeron chair (Ninja Van, Mon 12 Oct), running shoes (J&T, tomorrow) and a lens cap (Qxpress, delayed).",
+      "domain": "parcels",
+      "chars": 7300
+    },
+    "message": "which one's delayed?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c04-1",
+    "prior_index": 4,
+    "split": "tuning",
+    "previous": {
+      "user": "what am I waiting on?",
+      "assistant": "Three parcels: the Aeron chair (Ninja Van, Mon 12 Oct), running shoes (J&T, tomorrow) and a lens cap (Qxpress, delayed).",
+      "domain": "parcels",
+      "chars": 7300
+    },
+    "message": "track the chair",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c04-2",
+    "prior_index": 4,
+    "split": "tuning",
+    "previous": {
+      "user": "what am I waiting on?",
+      "assistant": "Three parcels: the Aeron chair (Ninja Van, Mon 12 Oct), running shoes (J&T, tomorrow) and a lens cap (Qxpress, delayed).",
+      "domain": "parcels",
+      "chars": 7300
+    },
+    "message": "the shoes arrived today",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c04-3",
+    "prior_index": 4,
+    "split": "tuning",
+    "previous": {
+      "user": "what am I waiting on?",
+      "assistant": "Three parcels: the Aeron chair (Ninja Van, Mon 12 Oct), running shoes (J&T, tomorrow) and a lens cap (Qxpress, delayed).",
+      "domain": "parcels",
+      "chars": 7300
+    },
+    "message": "is my Lazada order shipped yet?",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c04-4",
+    "prior_index": 4,
+    "split": "tuning",
+    "previous": {
+      "user": "what am I waiting on?",
+      "assistant": "Three parcels: the Aeron chair (Ninja Van, Mon 12 Oct), running shoes (J&T, tomorrow) and a lens cap (Qxpress, delayed).",
+      "domain": "parcels",
+      "chars": 7300
+    },
+    "message": "when's my next free evening?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c04-5",
+    "prior_index": 4,
+    "split": "tuning",
+    "previous": {
+      "user": "what am I waiting on?",
+      "assistant": "Three parcels: the Aeron chair (Ninja Van, Mon 12 Oct), running shoes (J&T, tomorrow) and a lens cap (Qxpress, delayed).",
+      "domain": "parcels",
+      "chars": 7300
+    },
+    "message": "how many roles have I saved?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c05-0",
+    "prior_index": 5,
+    "split": "tuning",
+    "previous": {
+      "user": "where's my DHL package?",
+      "assistant": "DHL shows it at the Changi hub; delivery window Thu 8 Oct, 9 am–1 pm.",
+      "domain": "parcels",
+      "chars": 5200
+    },
+    "message": "can they deliver after 6 instead?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c05-1",
+    "prior_index": 5,
+    "split": "tuning",
+    "previous": {
+      "user": "where's my DHL package?",
+      "assistant": "DHL shows it at the Changi hub; delivery window Thu 8 Oct, 9 am–1 pm.",
+      "domain": "parcels",
+      "chars": 5200
+    },
+    "message": "what's the tracking number",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c05-2",
+    "prior_index": 5,
+    "split": "tuning",
+    "previous": {
+      "user": "where's my DHL package?",
+      "assistant": "DHL shows it at the Changi hub; delivery window Thu 8 Oct, 9 am–1 pm.",
+      "domain": "parcels",
+      "chars": 5200
+    },
+    "message": "ok mark it delivered, it came early",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c05-3",
+    "prior_index": 5,
+    "split": "tuning",
+    "previous": {
+      "user": "where's my DHL package?",
+      "assistant": "DHL shows it at the Changi hub; delivery window Thu 8 Oct, 9 am–1 pm.",
+      "domain": "parcels",
+      "chars": 5200
+    },
+    "message": "check my email for the IKEA delivery date",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c05-4",
+    "prior_index": 5,
+    "split": "tuning",
+    "previous": {
+      "user": "where's my DHL package?",
+      "assistant": "DHL shows it at the Changi hub; delivery window Thu 8 Oct, 9 am–1 pm.",
+      "domain": "parcels",
+      "chars": 5200
+    },
+    "message": "when is Deepavali this year?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c05-5",
+    "prior_index": 5,
+    "split": "tuning",
+    "previous": {
+      "user": "where's my DHL package?",
+      "assistant": "DHL shows it at the Changi hub; delivery window Thu 8 Oct, 9 am–1 pm.",
+      "domain": "parcels",
+      "chars": 5200
+    },
+    "message": "remind me to water the plants every saturday at 9",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c06-0",
+    "prior_index": 6,
+    "split": "held-out",
+    "previous": {
+      "user": "record a new parcel: headphones from Shopee, J&T JT889120",
+      "assistant": "Saved: headphones (Shopee, J&T JT889120). No delivery date stated yet.",
+      "domain": "parcels",
+      "chars": 2100
+    },
+    "message": "actually the tracking is JT889121",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c06-1",
+    "prior_index": 6,
+    "split": "held-out",
+    "previous": {
+      "user": "record a new parcel: headphones from Shopee, J&T JT889120",
+      "assistant": "Saved: headphones (Shopee, J&T JT889120). No delivery date stated yet.",
+      "domain": "parcels",
+      "chars": 2100
+    },
+    "message": "add that it's a gift for mum",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c06-2",
+    "prior_index": 6,
+    "split": "held-out",
+    "previous": {
+      "user": "record a new parcel: headphones from Shopee, J&T JT889120",
+      "assistant": "Saved: headphones (Shopee, J&T JT889120). No delivery date stated yet.",
+      "domain": "parcels",
+      "chars": 2100
+    },
+    "message": "when will it come?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c06-3",
+    "prior_index": 6,
+    "split": "held-out",
+    "previous": {
+      "user": "record a new parcel: headphones from Shopee, J&T JT889120",
+      "assistant": "Saved: headphones (Shopee, J&T JT889120). No delivery date stated yet.",
+      "domain": "parcels",
+      "chars": 2100
+    },
+    "message": "list all my parcels",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c06-4",
+    "prior_index": 6,
+    "split": "held-out",
+    "previous": {
+      "user": "record a new parcel: headphones from Shopee, J&T JT889120",
+      "assistant": "Saved: headphones (Shopee, J&T JT889120). No delivery date stated yet.",
+      "domain": "parcels",
+      "chars": 2100
+    },
+    "message": "did the condo management email about the lift works?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c06-5",
+    "prior_index": 6,
+    "split": "held-out",
+    "previous": {
+      "user": "record a new parcel: headphones from Shopee, J&T JT889120",
+      "assistant": "Saved: headphones (Shopee, J&T JT889120). No delivery date stated yet.",
+      "domain": "parcels",
+      "chars": 2100
+    },
+    "message": "compare the top three robot vacuums under $600",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c07-0",
+    "prior_index": 7,
+    "split": "held-out",
+    "previous": {
+      "user": "am I free thursday afternoon?",
+      "assistant": "Thursday 8 Oct: free from 1 pm to 4:30 pm; you have a 4:30 pm call with Priya.",
+      "domain": "calendar",
+      "chars": 3100
+    },
+    "message": "book 2 to 3 for the dentist then",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c07-1",
+    "prior_index": 7,
+    "split": "held-out",
+    "previous": {
+      "user": "am I free thursday afternoon?",
+      "assistant": "Thursday 8 Oct: free from 1 pm to 4:30 pm; you have a 4:30 pm call with Priya.",
+      "domain": "calendar",
+      "chars": 3100
+    },
+    "message": "move the call to 5?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c07-2",
+    "prior_index": 7,
+    "split": "held-out",
+    "previous": {
+      "user": "am I free thursday afternoon?",
+      "assistant": "Thursday 8 Oct: free from 1 pm to 4:30 pm; you have a 4:30 pm call with Priya.",
+      "domain": "calendar",
+      "chars": 3100
+    },
+    "message": "what about friday?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c07-3",
+    "prior_index": 7,
+    "split": "held-out",
+    "previous": {
+      "user": "am I free thursday afternoon?",
+      "assistant": "Thursday 8 Oct: free from 1 pm to 4:30 pm; you have a 4:30 pm call with Priya.",
+      "domain": "calendar",
+      "chars": 3100
+    },
+    "message": "what's on my calendar next week?",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c07-4",
+    "prior_index": 7,
+    "split": "held-out",
+    "previous": {
+      "user": "am I free thursday afternoon?",
+      "assistant": "Thursday 8 Oct: free from 1 pm to 4:30 pm; you have a 4:30 pm call with Priya.",
+      "domain": "calendar",
+      "chars": 3100
+    },
+    "message": "hey, you around?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c07-5",
+    "prior_index": 7,
+    "split": "held-out",
+    "previous": {
+      "user": "am I free thursday afternoon?",
+      "assistant": "Thursday 8 Oct: free from 1 pm to 4:30 pm; you have a 4:30 pm call with Priya.",
+      "domain": "calendar",
+      "chars": 3100
+    },
+    "message": "can I borrow The Three-Body Problem now?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c08-0",
+    "prior_index": 8,
+    "split": "held-out",
+    "previous": {
+      "user": "add lunch with Wei Ling on the 14th",
+      "assistant": "What time should the lunch with Wei Ling on Wed 14 Oct start, and how long?",
+      "domain": "calendar",
+      "chars": 900
+    },
+    "message": "12:30 for an hour",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c08-1",
+    "prior_index": 8,
+    "split": "held-out",
+    "previous": {
+      "user": "add lunch with Wei Ling on the 14th",
+      "assistant": "What time should the lunch with Wei Ling on Wed 14 Oct start, and how long?",
+      "domain": "calendar",
+      "chars": 900
+    },
+    "message": "1pm",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c08-2",
+    "prior_index": 8,
+    "split": "held-out",
+    "previous": {
+      "user": "add lunch with Wei Ling on the 14th",
+      "assistant": "What time should the lunch with Wei Ling on Wed 14 Oct start, and how long?",
+      "domain": "calendar",
+      "chars": 900
+    },
+    "message": "make it the 15th instead, same time is fine",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c08-3",
+    "prior_index": 8,
+    "split": "held-out",
+    "previous": {
+      "user": "add lunch with Wei Ling on the 14th",
+      "assistant": "What time should the lunch with Wei Ling on Wed 14 Oct start, and how long?",
+      "domain": "calendar",
+      "chars": 900
+    },
+    "message": "add a dentist appointment on 20 Oct at 9am",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c08-4",
+    "prior_index": 8,
+    "split": "held-out",
+    "previous": {
+      "user": "add lunch with Wei Ling on the 14th",
+      "assistant": "What time should the lunch with Wei Ling on Wed 14 Oct start, and how long?",
+      "domain": "calendar",
+      "chars": 900
+    },
+    "message": "how long is the flight from Singapore to Osaka?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c08-5",
+    "prior_index": 8,
+    "split": "held-out",
+    "previous": {
+      "user": "add lunch with Wei Ling on the 14th",
+      "assistant": "What time should the lunch with Wei Ling on Wed 14 Oct start, and how long?",
+      "domain": "calendar",
+      "chars": 900
+    },
+    "message": "what's a good beginner climbing gym in the west?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c09-0",
+    "prior_index": 9,
+    "split": "tuning",
+    "previous": {
+      "user": "draft my leave from 2 to 6 Nov",
+      "assistant": "Draft saved: all-day 'Leave' from Mon 2 Nov to Fri 6 Nov. Approve it with the card to create it.",
+      "domain": "calendar",
+      "chars": 1400
+    },
+    "message": "label it Bali trip instead",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c09-1",
+    "prior_index": 9,
+    "split": "tuning",
+    "previous": {
+      "user": "draft my leave from 2 to 6 Nov",
+      "assistant": "Draft saved: all-day 'Leave' from Mon 2 Nov to Fri 6 Nov. Approve it with the card to create it.",
+      "domain": "calendar",
+      "chars": 1400
+    },
+    "message": "oh include the 9th too",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c09-2",
+    "prior_index": 9,
+    "split": "tuning",
+    "previous": {
+      "user": "draft my leave from 2 to 6 Nov",
+      "assistant": "Draft saved: all-day 'Leave' from Mon 2 Nov to Fri 6 Nov. Approve it with the card to create it.",
+      "domain": "calendar",
+      "chars": 1400
+    },
+    "message": "did it go through?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c09-3",
+    "prior_index": 9,
+    "split": "tuning",
+    "previous": {
+      "user": "draft my leave from 2 to 6 Nov",
+      "assistant": "Draft saved: all-day 'Leave' from Mon 2 Nov to Fri 6 Nov. Approve it with the card to create it.",
+      "domain": "calendar",
+      "chars": 1400
+    },
+    "message": "when is my next meeting with Priya?",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c09-4",
+    "prior_index": 9,
+    "split": "tuning",
+    "previous": {
+      "user": "draft my leave from 2 to 6 Nov",
+      "assistant": "Draft saved: all-day 'Leave' from Mon 2 Nov to Fri 6 Nov. Approve it with the card to create it.",
+      "domain": "calendar",
+      "chars": 1400
+    },
+    "message": "send me today's bulletin",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c09-5",
+    "prior_index": 9,
+    "split": "tuning",
+    "previous": {
+      "user": "draft my leave from 2 to 6 Nov",
+      "assistant": "Draft saved: all-day 'Leave' from Mon 2 Nov to Fri 6 Nov. Approve it with the card to create it.",
+      "domain": "calendar",
+      "chars": 1400
+    },
+    "message": "what's the exchange rate SGD to JPY?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c10-0",
+    "prior_index": 10,
+    "split": "held-out",
+    "previous": {
+      "user": "how's my watchlist?",
+      "assistant": "AAPL $231.10 (−0.4%), NVDA $188.40 (+1.2%), D05 $41.02 (+0.3%). Thresholds: AAPL 5%, NVDA 7%.",
+      "domain": "stocks",
+      "chars": 2600
+    },
+    "message": "set NVDA to 5% too",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c10-1",
+    "prior_index": 10,
+    "split": "held-out",
+    "previous": {
+      "user": "how's my watchlist?",
+      "assistant": "AAPL $231.10 (−0.4%), NVDA $188.40 (+1.2%), D05 $41.02 (+0.3%). Thresholds: AAPL 5%, NVDA 7%.",
+      "domain": "stocks",
+      "chars": 2600
+    },
+    "message": "why is D05 up?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c10-2",
+    "prior_index": 10,
+    "split": "held-out",
+    "previous": {
+      "user": "how's my watchlist?",
+      "assistant": "AAPL $231.10 (−0.4%), NVDA $188.40 (+1.2%), D05 $41.02 (+0.3%). Thresholds: AAPL 5%, NVDA 7%.",
+      "domain": "stocks",
+      "chars": 2600
+    },
+    "message": "pause AAPL for this week",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c10-3",
+    "prior_index": 10,
+    "split": "held-out",
+    "previous": {
+      "user": "how's my watchlist?",
+      "assistant": "AAPL $231.10 (−0.4%), NVDA $188.40 (+1.2%), D05 $41.02 (+0.3%). Thresholds: AAPL 5%, NVDA 7%.",
+      "domain": "stocks",
+      "chars": 2600
+    },
+    "message": "add TSLA with a 6% alert",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c10-4",
+    "prior_index": 10,
+    "split": "held-out",
+    "previous": {
+      "user": "how's my watchlist?",
+      "assistant": "AAPL $231.10 (−0.4%), NVDA $188.40 (+1.2%), D05 $41.02 (+0.3%). Thresholds: AAPL 5%, NVDA 7%.",
+      "domain": "stocks",
+      "chars": 2600
+    },
+    "message": "did the condo management email about the lift works?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c10-5",
+    "prior_index": 10,
+    "split": "held-out",
+    "previous": {
+      "user": "how's my watchlist?",
+      "assistant": "AAPL $231.10 (−0.4%), NVDA $188.40 (+1.2%), D05 $41.02 (+0.3%). Thresholds: AAPL 5%, NVDA 7%.",
+      "domain": "stocks",
+      "chars": 2600
+    },
+    "message": "how long is the flight from Singapore to Osaka?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c11-0",
+    "prior_index": 11,
+    "split": "tuning",
+    "previous": {
+      "user": "add MSFT",
+      "assistant": "MSFT matches Nasdaq (MSFT) and a Frankfurt listing (MSF). Which exchange?",
+      "domain": "stocks",
+      "chars": 1200
+    },
+    "message": "nasdaq",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c11-1",
+    "prior_index": 11,
+    "split": "tuning",
+    "previous": {
+      "user": "add MSFT",
+      "assistant": "MSFT matches Nasdaq (MSFT) and a Frankfurt listing (MSF). Which exchange?",
+      "domain": "stocks",
+      "chars": 1200
+    },
+    "message": "the US one",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c11-2",
+    "prior_index": 11,
+    "split": "tuning",
+    "previous": {
+      "user": "add MSFT",
+      "assistant": "MSFT matches Nasdaq (MSFT) and a Frankfurt listing (MSF). Which exchange?",
+      "domain": "stocks",
+      "chars": 1200
+    },
+    "message": "frankfurt please",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c11-3",
+    "prior_index": 11,
+    "split": "tuning",
+    "previous": {
+      "user": "add MSFT",
+      "assistant": "MSFT matches Nasdaq (MSFT) and a Frankfurt listing (MSF). Which exchange?",
+      "domain": "stocks",
+      "chars": 1200
+    },
+    "message": "remove AAPL from my watchlist",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c11-4",
+    "prior_index": 11,
+    "split": "tuning",
+    "previous": {
+      "user": "add MSFT",
+      "assistant": "MSFT matches Nasdaq (MSFT) and a Frankfurt listing (MSF). Which exchange?",
+      "domain": "stocks",
+      "chars": 1200
+    },
+    "message": "thanks!",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c11-5",
+    "prior_index": 11,
+    "split": "tuning",
+    "previous": {
+      "user": "add MSFT",
+      "assistant": "MSFT matches Nasdaq (MSFT) and a Frankfurt listing (MSF). Which exchange?",
+      "domain": "stocks",
+      "chars": 1200
+    },
+    "message": "good morning",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c12-0",
+    "prior_index": 12,
+    "split": "tuning",
+    "previous": {
+      "user": "only monitor AAPL from the US open until midnight",
+      "assistant": "Done: AAPL is checked 21:30–24:00 SGT on trading days. Next checks: Mon 5 Oct 21:30–24:00.",
+      "domain": "stocks",
+      "chars": 2300
+    },
+    "message": "make that 1am instead of midnight",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c12-1",
+    "prior_index": 12,
+    "split": "tuning",
+    "previous": {
+      "user": "only monitor AAPL from the US open until midnight",
+      "assistant": "Done: AAPL is checked 21:30–24:00 SGT on trading days. Next checks: Mon 5 Oct 21:30–24:00.",
+      "domain": "stocks",
+      "chars": 2300
+    },
+    "message": "do the same for NVDA",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c12-2",
+    "prior_index": 12,
+    "split": "tuning",
+    "previous": {
+      "user": "only monitor AAPL from the US open until midnight",
+      "assistant": "Done: AAPL is checked 21:30–24:00 SGT on trading days. Next checks: Mon 5 Oct 21:30–24:00.",
+      "domain": "stocks",
+      "chars": 2300
+    },
+    "message": "and weekends?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c12-3",
+    "prior_index": 12,
+    "split": "tuning",
+    "previous": {
+      "user": "only monitor AAPL from the US open until midnight",
+      "assistant": "Done: AAPL is checked 21:30–24:00 SGT on trading days. Next checks: Mon 5 Oct 21:30–24:00.",
+      "domain": "stocks",
+      "chars": 2300
+    },
+    "message": "what's my default drop threshold?",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c12-4",
+    "prior_index": 12,
+    "split": "tuning",
+    "previous": {
+      "user": "only monitor AAPL from the US open until midnight",
+      "assistant": "Done: AAPL is checked 21:30–24:00 SGT on trading days. Next checks: Mon 5 Oct 21:30–24:00.",
+      "domain": "stocks",
+      "chars": 2300
+    },
+    "message": "what parcels are pending?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c12-5",
+    "prior_index": 12,
+    "split": "tuning",
+    "previous": {
+      "user": "only monitor AAPL from the US open until midnight",
+      "assistant": "Done: AAPL is checked 21:30–24:00 SGT on trading days. Next checks: Mon 5 Oct 21:30–24:00.",
+      "domain": "stocks",
+      "chars": 2300
+    },
+    "message": "send me today's bulletin",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c13-0",
+    "prior_index": 13,
+    "split": "held-out",
+    "previous": {
+      "user": "follow techcrunch.com",
+      "assistant": "Following TechCrunch. Latest: 'Chip startups raise record round', 'EU fines cloud provider', 'New phone teardown'.",
+      "domain": "news",
+      "chars": 2000
+    },
+    "message": "also theverge",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c13-1",
+    "prior_index": 13,
+    "split": "held-out",
+    "previous": {
+      "user": "follow techcrunch.com",
+      "assistant": "Following TechCrunch. Latest: 'Chip startups raise record round', 'EU fines cloud provider', 'New phone teardown'.",
+      "domain": "news",
+      "chars": 2000
+    },
+    "message": "remove it again",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c13-2",
+    "prior_index": 13,
+    "split": "held-out",
+    "previous": {
+      "user": "follow techcrunch.com",
+      "assistant": "Following TechCrunch. Latest: 'Chip startups raise record round', 'EU fines cloud provider', 'New phone teardown'.",
+      "domain": "news",
+      "chars": 2000
+    },
+    "message": "send me an edition now with those",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c13-3",
+    "prior_index": 13,
+    "split": "held-out",
+    "previous": {
+      "user": "follow techcrunch.com",
+      "assistant": "Following TechCrunch. Latest: 'Chip startups raise record round', 'EU fines cloud provider', 'New phone teardown'.",
+      "domain": "news",
+      "chars": 2000
+    },
+    "message": "what time does my bulletin arrive?",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c13-4",
+    "prior_index": 13,
+    "split": "held-out",
+    "previous": {
+      "user": "follow techcrunch.com",
+      "assistant": "Following TechCrunch. Latest: 'Chip startups raise record round', 'EU fines cloud provider', 'New phone teardown'.",
+      "domain": "news",
+      "chars": 2000
+    },
+    "message": "hey, you around?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c13-5",
+    "prior_index": 13,
+    "split": "held-out",
+    "previous": {
+      "user": "follow techcrunch.com",
+      "assistant": "Following TechCrunch. Latest: 'Chip startups raise record round', 'EU fines cloud provider', 'New phone teardown'.",
+      "domain": "news",
+      "chars": 2000
+    },
+    "message": "remind me to renew my gym membership on the 30th",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c14-0",
+    "prior_index": 14,
+    "split": "tuning",
+    "previous": {
+      "user": "set my bulletin to 7am with topics AI and chips",
+      "assistant": "Bulletin set for 07:00 SGT with topics AI and chips; next edition Fri 2 Oct.",
+      "domain": "news",
+      "chars": 1300
+    },
+    "message": "add climate to the topics",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c14-1",
+    "prior_index": 14,
+    "split": "tuning",
+    "previous": {
+      "user": "set my bulletin to 7am with topics AI and chips",
+      "assistant": "Bulletin set for 07:00 SGT with topics AI and chips; next edition Fri 2 Oct.",
+      "domain": "news",
+      "chars": 1300
+    },
+    "message": "make it 6:30",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c14-2",
+    "prior_index": 14,
+    "split": "tuning",
+    "previous": {
+      "user": "set my bulletin to 7am with topics AI and chips",
+      "assistant": "Bulletin set for 07:00 SGT with topics AI and chips; next edition Fri 2 Oct.",
+      "domain": "news",
+      "chars": 1300
+    },
+    "message": "how many items will it have?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c14-3",
+    "prior_index": 14,
+    "split": "tuning",
+    "previous": {
+      "user": "set my bulletin to 7am with topics AI and chips",
+      "assistant": "Bulletin set for 07:00 SGT with topics AI and chips; next edition Fri 2 Oct.",
+      "domain": "news",
+      "chars": 1300
+    },
+    "message": "follow arstechnica.com",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c14-4",
+    "prior_index": 14,
+    "split": "tuning",
+    "previous": {
+      "user": "set my bulletin to 7am with topics AI and chips",
+      "assistant": "Bulletin set for 07:00 SGT with topics AI and chips; next edition Fri 2 Oct.",
+      "domain": "news",
+      "chars": 1300
+    },
+    "message": "good morning",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c14-5",
+    "prior_index": 14,
+    "split": "tuning",
+    "previous": {
+      "user": "set my bulletin to 7am with topics AI and chips",
+      "assistant": "Bulletin set for 07:00 SGT with topics AI and chips; next edition Fri 2 Oct.",
+      "domain": "news",
+      "chars": 1300
+    },
+    "message": "find the best budget mechanical keyboards",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c15-0",
+    "prior_index": 15,
+    "split": "held-out",
+    "previous": {
+      "user": "which roles have I saved?",
+      "assistant": "Four: Stripe backend (applied), Grab platform (interviewing), Wise payments (saved), Canva infra (rejected).",
+      "domain": "jobs",
+      "chars": 5100
+    },
+    "message": "mark Wise as applied",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c15-1",
+    "prior_index": 15,
+    "split": "held-out",
+    "previous": {
+      "user": "which roles have I saved?",
+      "assistant": "Four: Stripe backend (applied), Grab platform (interviewing), Wise payments (saved), Canva infra (rejected).",
+      "domain": "jobs",
+      "chars": 5100
+    },
+    "message": "what's the salary for the Stripe one?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c15-2",
+    "prior_index": 15,
+    "split": "held-out",
+    "previous": {
+      "user": "which roles have I saved?",
+      "assistant": "Four: Stripe backend (applied), Grab platform (interviewing), Wise payments (saved), Canva infra (rejected).",
+      "domain": "jobs",
+      "chars": 5100
+    },
+    "message": "delete the Canva one",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c15-3",
+    "prior_index": 15,
+    "split": "held-out",
+    "previous": {
+      "user": "which roles have I saved?",
+      "assistant": "Four: Stripe backend (applied), Grab platform (interviewing), Wise payments (saved), Canva infra (rejected).",
+      "domain": "jobs",
+      "chars": 5100
+    },
+    "message": "save this role: https://jobs.example.com/acme-sre",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c15-4",
+    "prior_index": 15,
+    "split": "held-out",
+    "previous": {
+      "user": "which roles have I saved?",
+      "assistant": "Four: Stripe backend (applied), Grab platform (interviewing), Wise payments (saved), Canva infra (rejected).",
+      "domain": "jobs",
+      "chars": 5100
+    },
+    "message": "how long is the flight from Singapore to Osaka?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c15-5",
+    "prior_index": 15,
+    "split": "held-out",
+    "previous": {
+      "user": "which roles have I saved?",
+      "assistant": "Four: Stripe backend (applied), Grab platform (interviewing), Wise payments (saved), Canva infra (rejected).",
+      "domain": "jobs",
+      "chars": 5100
+    },
+    "message": "remind me to renew my gym membership on the 30th",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c16-0",
+    "prior_index": 16,
+    "split": "held-out",
+    "previous": {
+      "user": "how well do I fit the Grab platform role?",
+      "assistant": "Strong fit on distributed systems and Go; gaps: Kubernetes operators and on-call leadership. 3 prep topics suggested.",
+      "domain": "jobs",
+      "chars": 12800
+    },
+    "message": "make a prep plan from those gaps",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c16-1",
+    "prior_index": 16,
+    "split": "held-out",
+    "previous": {
+      "user": "how well do I fit the Grab platform role?",
+      "assistant": "Strong fit on distributed systems and Go; gaps: Kubernetes operators and on-call leadership. 3 prep topics suggested.",
+      "domain": "jobs",
+      "chars": 12800
+    },
+    "message": "what were the 3 topics?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c16-2",
+    "prior_index": 16,
+    "split": "held-out",
+    "previous": {
+      "user": "how well do I fit the Grab platform role?",
+      "assistant": "Strong fit on distributed systems and Go; gaps: Kubernetes operators and on-call leadership. 3 prep topics suggested.",
+      "domain": "jobs",
+      "chars": 12800
+    },
+    "message": "save it to my prep sheet",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c16-3",
+    "prior_index": 16,
+    "split": "held-out",
+    "previous": {
+      "user": "how well do I fit the Grab platform role?",
+      "assistant": "Strong fit on distributed systems and Go; gaps: Kubernetes operators and on-call leadership. 3 prep topics suggested.",
+      "domain": "jobs",
+      "chars": 12800
+    },
+    "message": "how many roles have I applied to this month?",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c16-4",
+    "prior_index": 16,
+    "split": "held-out",
+    "previous": {
+      "user": "how well do I fit the Grab platform role?",
+      "assistant": "Strong fit on distributed systems and Go; gaps: Kubernetes operators and on-call leadership. 3 prep topics suggested.",
+      "domain": "jobs",
+      "chars": 12800
+    },
+    "message": "hey, you around?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c16-5",
+    "prior_index": 16,
+    "split": "held-out",
+    "previous": {
+      "user": "how well do I fit the Grab platform role?",
+      "assistant": "Strong fit on distributed systems and Go; gaps: Kubernetes operators and on-call leadership. 3 prep topics suggested.",
+      "domain": "jobs",
+      "chars": 12800
+    },
+    "message": "cheers, that's all for now",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c17-0",
+    "prior_index": 17,
+    "split": "tuning",
+    "previous": {
+      "user": "is Project Hail Mary available at the library?",
+      "assistant": "Yes: 4 Lucky Day copies to borrow now (7 days, no holds). The regular copies have a 129-day wait. Checked 10:02.",
+      "domain": "library",
+      "chars": 2700
+    },
+    "message": "what about the audiobook?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c17-1",
+    "prior_index": 17,
+    "split": "tuning",
+    "previous": {
+      "user": "is Project Hail Mary available at the library?",
+      "assistant": "Yes: 4 Lucky Day copies to borrow now (7 days, no holds). The regular copies have a 129-day wait. Checked 10:02.",
+      "domain": "library",
+      "chars": 2700
+    },
+    "message": "and Klara and the Sun?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c17-2",
+    "prior_index": 17,
+    "split": "tuning",
+    "previous": {
+      "user": "is Project Hail Mary available at the library?",
+      "assistant": "Yes: 4 Lucky Day copies to borrow now (7 days, no holds). The regular copies have a 129-day wait. Checked 10:02.",
+      "domain": "library",
+      "chars": 2700
+    },
+    "message": "how long is the wait again?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c17-3",
+    "prior_index": 17,
+    "split": "tuning",
+    "previous": {
+      "user": "is Project Hail Mary available at the library?",
+      "assistant": "Yes: 4 Lucky Day copies to borrow now (7 days, no holds). The regular copies have a 129-day wait. Checked 10:02.",
+      "domain": "library",
+      "chars": 2700
+    },
+    "message": "what's on my library shelf?",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c17-4",
+    "prior_index": 17,
+    "split": "tuning",
+    "previous": {
+      "user": "is Project Hail Mary available at the library?",
+      "assistant": "Yes: 4 Lucky Day copies to borrow now (7 days, no holds). The regular copies have a 129-day wait. Checked 10:02.",
+      "domain": "library",
+      "chars": 2700
+    },
+    "message": "find the best budget mechanical keyboards",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c17-5",
+    "prior_index": 17,
+    "split": "tuning",
+    "previous": {
+      "user": "is Project Hail Mary available at the library?",
+      "assistant": "Yes: 4 Lucky Day copies to borrow now (7 days, no holds). The regular copies have a 129-day wait. Checked 10:02.",
+      "domain": "library",
+      "chars": 2700
+    },
+    "message": "how's the market today?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c18-0",
+    "prior_index": 18,
+    "split": "held-out",
+    "previous": {
+      "user": "how many days left on my loans?",
+      "assistant": "Two loans: 'The Overstory' (3 days) and 'Piranesi' (11 days).",
+      "domain": "library",
+      "chars": 1900
+    },
+    "message": "which one expires first?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c18-1",
+    "prior_index": 18,
+    "split": "held-out",
+    "previous": {
+      "user": "how many days left on my loans?",
+      "assistant": "Two loans: 'The Overstory' (3 days) and 'Piranesi' (11 days).",
+      "domain": "library",
+      "chars": 1900
+    },
+    "message": "can I renew the first one?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c18-2",
+    "prior_index": 18,
+    "split": "held-out",
+    "previous": {
+      "user": "how many days left on my loans?",
+      "assistant": "Two loans: 'The Overstory' (3 days) and 'Piranesi' (11 days).",
+      "domain": "library",
+      "chars": 1900
+    },
+    "message": "ok and holds?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c18-3",
+    "prior_index": 18,
+    "split": "held-out",
+    "previous": {
+      "user": "how many days left on my loans?",
+      "assistant": "Two loans: 'The Overstory' (3 days) and 'Piranesi' (11 days).",
+      "domain": "library",
+      "chars": 1900
+    },
+    "message": "is Tomorrow, and Tomorrow, and Tomorrow available?",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c18-4",
+    "prior_index": 18,
+    "split": "held-out",
+    "previous": {
+      "user": "how many days left on my loans?",
+      "assistant": "Two loans: 'The Overstory' (3 days) and 'Piranesi' (11 days).",
+      "domain": "library",
+      "chars": 1900
+    },
+    "message": "cheers, that's all for now",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c18-5",
+    "prior_index": 18,
+    "split": "held-out",
+    "previous": {
+      "user": "how many days left on my loans?",
+      "assistant": "Two loans: 'The Overstory' (3 days) and 'Piranesi' (11 days).",
+      "domain": "library",
+      "chars": 1900
+    },
+    "message": "is it going to rain in Singapore this afternoon?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c19-0",
+    "prior_index": 19,
+    "split": "tuning",
+    "previous": {
+      "user": "remind me to call mum at 7pm",
+      "assistant": "Reminder set for today 7:00 pm: call mum.",
+      "domain": "daily",
+      "chars": 900
+    },
+    "message": "make it 8",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c19-1",
+    "prior_index": 19,
+    "split": "tuning",
+    "previous": {
+      "user": "remind me to call mum at 7pm",
+      "assistant": "Reminder set for today 7:00 pm: call mum.",
+      "domain": "daily",
+      "chars": 900
+    },
+    "message": "and every sunday too",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c19-2",
+    "prior_index": 19,
+    "split": "tuning",
+    "previous": {
+      "user": "remind me to call mum at 7pm",
+      "assistant": "Reminder set for today 7:00 pm: call mum.",
+      "domain": "daily",
+      "chars": 900
+    },
+    "message": "cancel that",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c19-3",
+    "prior_index": 19,
+    "split": "tuning",
+    "previous": {
+      "user": "remind me to call mum at 7pm",
+      "assistant": "Reminder set for today 7:00 pm: call mum.",
+      "domain": "daily",
+      "chars": 900
+    },
+    "message": "what's on my to-do list?",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c19-4",
+    "prior_index": 19,
+    "split": "tuning",
+    "previous": {
+      "user": "remind me to call mum at 7pm",
+      "assistant": "Reminder set for today 7:00 pm: call mum.",
+      "domain": "daily",
+      "chars": 900
+    },
+    "message": "what's the exchange rate SGD to JPY?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c19-5",
+    "prior_index": 19,
+    "split": "tuning",
+    "previous": {
+      "user": "remind me to call mum at 7pm",
+      "assistant": "Reminder set for today 7:00 pm: call mum.",
+      "domain": "daily",
+      "chars": 900
+    },
+    "message": "thanks!",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c20-0",
+    "prior_index": 20,
+    "split": "tuning",
+    "previous": {
+      "user": "what's on my to-do list?",
+      "assistant": "Open: pay SP Group electricity SGD 142.60 by 10 Oct; buy birthday gift for Ana; book car servicing.",
+      "domain": "daily",
+      "chars": 1600
+    },
+    "message": "mark the first one done",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c20-1",
+    "prior_index": 20,
+    "split": "tuning",
+    "previous": {
+      "user": "what's on my to-do list?",
+      "assistant": "Open: pay SP Group electricity SGD 142.60 by 10 Oct; buy birthday gift for Ana; book car servicing.",
+      "domain": "daily",
+      "chars": 1600
+    },
+    "message": "when is the gift due?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c20-2",
+    "prior_index": 20,
+    "split": "tuning",
+    "previous": {
+      "user": "what's on my to-do list?",
+      "assistant": "Open: pay SP Group electricity SGD 142.60 by 10 Oct; buy birthday gift for Ana; book car servicing.",
+      "domain": "daily",
+      "chars": 1600
+    },
+    "message": "add renew passport to it",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c20-3",
+    "prior_index": 20,
+    "split": "tuning",
+    "previous": {
+      "user": "what's on my to-do list?",
+      "assistant": "Open: pay SP Group electricity SGD 142.60 by 10 Oct; buy birthday gift for Ana; book car servicing.",
+      "domain": "daily",
+      "chars": 1600
+    },
+    "message": "set a morning briefing at 7:30",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c20-4",
+    "prior_index": 20,
+    "split": "tuning",
+    "previous": {
+      "user": "what's on my to-do list?",
+      "assistant": "Open: pay SP Group electricity SGD 142.60 by 10 Oct; buy birthday gift for Ana; book car servicing.",
+      "domain": "daily",
+      "chars": 1600
+    },
+    "message": "anything new from the bank?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c20-5",
+    "prior_index": 20,
+    "split": "tuning",
+    "previous": {
+      "user": "what's on my to-do list?",
+      "assistant": "Open: pay SP Group electricity SGD 142.60 by 10 Oct; buy birthday gift for Ana; book car servicing.",
+      "domain": "daily",
+      "chars": 1600
+    },
+    "message": "when's my next free evening?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c21-0",
+    "prior_index": 21,
+    "split": "held-out",
+    "previous": {
+      "user": "set a daily briefing at 7:30",
+      "assistant": "Daily briefing scheduled for 07:30 SGT with calendar and unread email.",
+      "domain": "daily",
+      "chars": 1100
+    },
+    "message": "include the weather too",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c21-1",
+    "prior_index": 21,
+    "split": "held-out",
+    "previous": {
+      "user": "set a daily briefing at 7:30",
+      "assistant": "Daily briefing scheduled for 07:30 SGT with calendar and unread email.",
+      "domain": "daily",
+      "chars": 1100
+    },
+    "message": "change it to weekdays only",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c21-2",
+    "prior_index": 21,
+    "split": "held-out",
+    "previous": {
+      "user": "set a daily briefing at 7:30",
+      "assistant": "Daily briefing scheduled for 07:30 SGT with calendar and unread email.",
+      "domain": "daily",
+      "chars": 1100
+    },
+    "message": "what will it include?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c21-3",
+    "prior_index": 21,
+    "split": "held-out",
+    "previous": {
+      "user": "set a daily briefing at 7:30",
+      "assistant": "Daily briefing scheduled for 07:30 SGT with calendar and unread email.",
+      "domain": "daily",
+      "chars": 1100
+    },
+    "message": "remind me tomorrow at 9 to pay rent",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c21-4",
+    "prior_index": 21,
+    "split": "held-out",
+    "previous": {
+      "user": "set a daily briefing at 7:30",
+      "assistant": "Daily briefing scheduled for 07:30 SGT with calendar and unread email.",
+      "domain": "daily",
+      "chars": 1100
+    },
+    "message": "can I borrow The Three-Body Problem now?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c21-5",
+    "prior_index": 21,
+    "split": "held-out",
+    "previous": {
+      "user": "set a daily briefing at 7:30",
+      "assistant": "Daily briefing scheduled for 07:30 SGT with calendar and unread email.",
+      "domain": "daily",
+      "chars": 1100
+    },
+    "message": "do I have anything on saturday morning?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c22-0",
+    "prior_index": 22,
+    "split": "held-out",
+    "previous": {
+      "user": "what time does the MRT stop running tonight?",
+      "assistant": "Most lines close around 11:30 pm–midnight; last trains from city stations are about 11:45 pm.",
+      "domain": "web",
+      "chars": 4300
+    },
+    "message": "what about the circle line specifically?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c22-1",
+    "prior_index": 22,
+    "split": "held-out",
+    "previous": {
+      "user": "what time does the MRT stop running tonight?",
+      "assistant": "Most lines close around 11:30 pm–midnight; last trains from city stations are about 11:45 pm.",
+      "domain": "web",
+      "chars": 4300
+    },
+    "message": "is it different on saturday?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c22-2",
+    "prior_index": 22,
+    "split": "held-out",
+    "previous": {
+      "user": "what time does the MRT stop running tonight?",
+      "assistant": "Most lines close around 11:30 pm–midnight; last trains from city stations are about 11:45 pm.",
+      "domain": "web",
+      "chars": 4300
+    },
+    "message": "source?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c22-3",
+    "prior_index": 22,
+    "split": "held-out",
+    "previous": {
+      "user": "what time does the MRT stop running tonight?",
+      "assistant": "Most lines close around 11:30 pm–midnight; last trains from city stations are about 11:45 pm.",
+      "domain": "web",
+      "chars": 4300
+    },
+    "message": "what's the weather tomorrow?",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c22-4",
+    "prior_index": 22,
+    "split": "held-out",
+    "previous": {
+      "user": "what time does the MRT stop running tonight?",
+      "assistant": "Most lines close around 11:30 pm–midnight; last trains from city stations are about 11:45 pm.",
+      "domain": "web",
+      "chars": 4300
+    },
+    "message": "any deliveries expected today?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c22-5",
+    "prior_index": 22,
+    "split": "held-out",
+    "previous": {
+      "user": "what time does the MRT stop running tonight?",
+      "assistant": "Most lines close around 11:30 pm–midnight; last trains from city stations are about 11:45 pm.",
+      "domain": "web",
+      "chars": 4300
+    },
+    "message": "hey, you around?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c23-0",
+    "prior_index": 23,
+    "split": "held-out",
+    "previous": {
+      "user": "who won the F1 race today?",
+      "assistant": "Lando Norris won the Singapore GP; Leclerc second, Verstappen third.",
+      "domain": "web",
+      "chars": 4700
+    },
+    "message": "how many points does that put him on?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c23-1",
+    "prior_index": 23,
+    "split": "held-out",
+    "previous": {
+      "user": "who won the F1 race today?",
+      "assistant": "Lando Norris won the Singapore GP; Leclerc second, Verstappen third.",
+      "domain": "web",
+      "chars": 4700
+    },
+    "message": "and the constructors?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c23-2",
+    "prior_index": 23,
+    "split": "held-out",
+    "previous": {
+      "user": "who won the F1 race today?",
+      "assistant": "Lando Norris won the Singapore GP; Leclerc second, Verstappen third.",
+      "domain": "web",
+      "chars": 4700
+    },
+    "message": "when's the next race?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c23-3",
+    "prior_index": 23,
+    "split": "held-out",
+    "previous": {
+      "user": "who won the F1 race today?",
+      "assistant": "Lando Norris won the Singapore GP; Leclerc second, Verstappen third.",
+      "domain": "web",
+      "chars": 4700
+    },
+    "message": "any big tech news today?",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c23-4",
+    "prior_index": 23,
+    "split": "held-out",
+    "previous": {
+      "user": "who won the F1 race today?",
+      "assistant": "Lando Norris won the Singapore GP; Leclerc second, Verstappen third.",
+      "domain": "web",
+      "chars": 4700
+    },
+    "message": "can I borrow The Three-Body Problem now?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c23-5",
+    "prior_index": 23,
+    "split": "held-out",
+    "previous": {
+      "user": "who won the F1 race today?",
+      "assistant": "Lando Norris won the Singapore GP; Leclerc second, Verstappen third.",
+      "domain": "web",
+      "chars": 4700
+    },
+    "message": "pause my news bulletin for a week",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c24-0",
+    "prior_index": 24,
+    "split": "held-out",
+    "previous": {
+      "user": "what's a good quick dinner?",
+      "assistant": "A soy-ginger salmon traybake: 25 minutes, one tray, serve with rice.",
+      "domain": "web",
+      "chars": 3900
+    },
+    "message": "what do I need for it?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c24-1",
+    "prior_index": 24,
+    "split": "held-out",
+    "previous": {
+      "user": "what's a good quick dinner?",
+      "assistant": "A soy-ginger salmon traybake: 25 minutes, one tray, serve with rice.",
+      "domain": "web",
+      "chars": 3900
+    },
+    "message": "something vegetarian instead?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c24-2",
+    "prior_index": 24,
+    "split": "held-out",
+    "previous": {
+      "user": "what's a good quick dinner?",
+      "assistant": "A soy-ginger salmon traybake: 25 minutes, one tray, serve with rice.",
+      "domain": "web",
+      "chars": 3900
+    },
+    "message": "for 4 people?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c24-3",
+    "prior_index": 24,
+    "split": "held-out",
+    "previous": {
+      "user": "what's a good quick dinner?",
+      "assistant": "A soy-ginger salmon traybake: 25 minutes, one tray, serve with rice.",
+      "domain": "web",
+      "chars": 3900
+    },
+    "message": "how do index funds work?",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c24-4",
+    "prior_index": 24,
+    "split": "held-out",
+    "previous": {
+      "user": "what's a good quick dinner?",
+      "assistant": "A soy-ginger salmon traybake: 25 minutes, one tray, serve with rice.",
+      "domain": "web",
+      "chars": 3900
+    },
+    "message": "remind me to renew my gym membership on the 30th",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c24-5",
+    "prior_index": 24,
+    "split": "held-out",
+    "previous": {
+      "user": "what's a good quick dinner?",
+      "assistant": "A soy-ginger salmon traybake: 25 minutes, one tray, serve with rice.",
+      "domain": "web",
+      "chars": 3900
+    },
+    "message": "pause my news bulletin for a week",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c25-0",
+    "prior_index": 25,
+    "split": "tuning",
+    "previous": {
+      "user": "[Attached image: receipt.jpg attachmentId=…] how much did I spend?",
+      "assistant": "The receipt from Cold Storage totals SGD 87.45 on 28 Sep, including 9% GST.",
+      "domain": "media",
+      "chars": 4100
+    },
+    "message": "what was the most expensive item?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c25-1",
+    "prior_index": 25,
+    "split": "tuning",
+    "previous": {
+      "user": "[Attached image: receipt.jpg attachmentId=…] how much did I spend?",
+      "assistant": "The receipt from Cold Storage totals SGD 87.45 on 28 Sep, including 9% GST.",
+      "domain": "media",
+      "chars": 4100
+    },
+    "message": "is the GST included?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c25-2",
+    "prior_index": 25,
+    "split": "tuning",
+    "previous": {
+      "user": "[Attached image: receipt.jpg attachmentId=…] how much did I spend?",
+      "assistant": "The receipt from Cold Storage totals SGD 87.45 on 28 Sep, including 9% GST.",
+      "domain": "media",
+      "chars": 4100
+    },
+    "message": "add it to my expenses note",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c25-3",
+    "prior_index": 25,
+    "split": "tuning",
+    "previous": {
+      "user": "[Attached image: receipt.jpg attachmentId=…] how much did I spend?",
+      "assistant": "The receipt from Cold Storage totals SGD 87.45 on 28 Sep, including 9% GST.",
+      "domain": "media",
+      "chars": 4100
+    },
+    "message": "[Attached image: menu.jpg attachmentId=…] translate this",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c25-4",
+    "prior_index": 25,
+    "split": "tuning",
+    "previous": {
+      "user": "[Attached image: receipt.jpg attachmentId=…] how much did I spend?",
+      "assistant": "The receipt from Cold Storage totals SGD 87.45 on 28 Sep, including 9% GST.",
+      "domain": "media",
+      "chars": 4100
+    },
+    "message": "anything new from the bank?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c25-5",
+    "prior_index": 25,
+    "split": "tuning",
+    "previous": {
+      "user": "[Attached image: receipt.jpg attachmentId=…] how much did I spend?",
+      "assistant": "The receipt from Cold Storage totals SGD 87.45 on 28 Sep, including 9% GST.",
+      "domain": "media",
+      "chars": 4100
+    },
+    "message": "best ramen near Tanjong Pagar?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c26-0",
+    "prior_index": 26,
+    "split": "held-out",
+    "previous": {
+      "user": "[Attached PDF: lease.pdf sourceId=…] what's the notice period?",
+      "assistant": "Two months' written notice (clause 7.2, page 3). The diplomatic clause allows early exit after 12 months.",
+      "domain": "media",
+      "chars": 6200
+    },
+    "message": "what does the diplomatic clause need?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c26-1",
+    "prior_index": 26,
+    "split": "held-out",
+    "previous": {
+      "user": "[Attached PDF: lease.pdf sourceId=…] what's the notice period?",
+      "assistant": "Two months' written notice (clause 7.2, page 3). The diplomatic clause allows early exit after 12 months.",
+      "domain": "media",
+      "chars": 6200
+    },
+    "message": "which page was that?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c26-2",
+    "prior_index": 26,
+    "split": "held-out",
+    "previous": {
+      "user": "[Attached PDF: lease.pdf sourceId=…] what's the notice period?",
+      "assistant": "Two months' written notice (clause 7.2, page 3). The diplomatic clause allows early exit after 12 months.",
+      "domain": "media",
+      "chars": 6200
+    },
+    "message": "summarise the rest of it",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c26-3",
+    "prior_index": 26,
+    "split": "held-out",
+    "previous": {
+      "user": "[Attached PDF: lease.pdf sourceId=…] what's the notice period?",
+      "assistant": "Two months' written notice (clause 7.2, page 3). The diplomatic clause allows early exit after 12 months.",
+      "domain": "media",
+      "chars": 6200
+    },
+    "message": "[Attached PDF: payslip.pdf sourceId=…] what's my net pay?",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c26-4",
+    "prior_index": 26,
+    "split": "held-out",
+    "previous": {
+      "user": "[Attached PDF: lease.pdf sourceId=…] what's the notice period?",
+      "assistant": "Two months' written notice (clause 7.2, page 3). The diplomatic clause allows early exit after 12 months.",
+      "domain": "media",
+      "chars": 6200
+    },
+    "message": "can you explain how compound interest works?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c26-5",
+    "prior_index": 26,
+    "split": "held-out",
+    "previous": {
+      "user": "[Attached PDF: lease.pdf sourceId=…] what's the notice period?",
+      "assistant": "Two months' written notice (clause 7.2, page 3). The diplomatic clause allows early exit after 12 months.",
+      "domain": "media",
+      "chars": 6200
+    },
+    "message": "how long is the flight from Singapore to Osaka?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c27-0",
+    "prior_index": 27,
+    "split": "tuning",
+    "previous": {
+      "user": "compare the Aeron and Embody chairs",
+      "assistant": "Both have 12-year warranties; Embody suits slouching postures, Aeron breathes better. Embody costs ~SGD 300 more.",
+      "domain": "research",
+      "chars": 13500
+    },
+    "message": "which would you pick for me?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c27-1",
+    "prior_index": 27,
+    "split": "tuning",
+    "previous": {
+      "user": "compare the Aeron and Embody chairs",
+      "assistant": "Both have 12-year warranties; Embody suits slouching postures, Aeron breathes better. Embody costs ~SGD 300 more.",
+      "domain": "research",
+      "chars": 13500
+    },
+    "message": "any second-hand deals?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c27-2",
+    "prior_index": 27,
+    "split": "tuning",
+    "previous": {
+      "user": "compare the Aeron and Embody chairs",
+      "assistant": "Both have 12-year warranties; Embody suits slouching postures, Aeron breathes better. Embody costs ~SGD 300 more.",
+      "domain": "research",
+      "chars": 13500
+    },
+    "message": "cite your sources",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c27-3",
+    "prior_index": 27,
+    "split": "tuning",
+    "previous": {
+      "user": "compare the Aeron and Embody chairs",
+      "assistant": "Both have 12-year warranties; Embody suits slouching postures, Aeron breathes better. Embody costs ~SGD 300 more.",
+      "domain": "research",
+      "chars": 13500
+    },
+    "message": "research the best running shoes for flat feet",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c27-4",
+    "prior_index": 27,
+    "split": "tuning",
+    "previous": {
+      "user": "compare the Aeron and Embody chairs",
+      "assistant": "Both have 12-year warranties; Embody suits slouching postures, Aeron breathes better. Embody costs ~SGD 300 more.",
+      "domain": "research",
+      "chars": 13500
+    },
+    "message": "best ramen near Tanjong Pagar?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c27-5",
+    "prior_index": 27,
+    "split": "tuning",
+    "previous": {
+      "user": "compare the Aeron and Embody chairs",
+      "assistant": "Both have 12-year warranties; Embody suits slouching postures, Aeron breathes better. Embody costs ~SGD 300 more.",
+      "domain": "research",
+      "chars": 13500
+    },
+    "message": "thanks!",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c28-0",
+    "prior_index": 28,
+    "split": "tuning",
+    "previous": {
+      "user": "tips for sleeping better?",
+      "assistant": "Keep a fixed wake time, cut caffeine after 2pm and dim screens an hour before bed.",
+      "domain": "chat",
+      "chars": 700
+    },
+    "message": "what if I work late shifts?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c28-1",
+    "prior_index": 28,
+    "split": "tuning",
+    "previous": {
+      "user": "tips for sleeping better?",
+      "assistant": "Keep a fixed wake time, cut caffeine after 2pm and dim screens an hour before bed.",
+      "domain": "chat",
+      "chars": 700
+    },
+    "message": "why the caffeine one?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c28-2",
+    "prior_index": 28,
+    "split": "tuning",
+    "previous": {
+      "user": "tips for sleeping better?",
+      "assistant": "Keep a fixed wake time, cut caffeine after 2pm and dim screens an hour before bed.",
+      "domain": "chat",
+      "chars": 700
+    },
+    "message": "thanks, any more?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c28-3",
+    "prior_index": 28,
+    "split": "tuning",
+    "previous": {
+      "user": "tips for sleeping better?",
+      "assistant": "Keep a fixed wake time, cut caffeine after 2pm and dim screens an hour before bed.",
+      "domain": "chat",
+      "chars": 700
+    },
+    "message": "how do I get rid of hiccups?",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c28-4",
+    "prior_index": 28,
+    "split": "tuning",
+    "previous": {
+      "user": "tips for sleeping better?",
+      "assistant": "Keep a fixed wake time, cut caffeine after 2pm and dim screens an hour before bed.",
+      "domain": "chat",
+      "chars": 700
+    },
+    "message": "what parcels are pending?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c28-5",
+    "prior_index": 28,
+    "split": "tuning",
+    "previous": {
+      "user": "tips for sleeping better?",
+      "assistant": "Keep a fixed wake time, cut caffeine after 2pm and dim screens an hour before bed.",
+      "domain": "chat",
+      "chars": 700
+    },
+    "message": "when is Deepavali this year?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c29-0",
+    "prior_index": 29,
+    "split": "tuning",
+    "previous": {
+      "user": "explain what a credit spread is",
+      "assistant": "Buying and selling options of the same type at different strikes; you collect or pay the difference, with capped risk.",
+      "domain": "chat",
+      "chars": 900
+    },
+    "message": "give me an example",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c29-1",
+    "prior_index": 29,
+    "split": "tuning",
+    "previous": {
+      "user": "explain what a credit spread is",
+      "assistant": "Buying and selling options of the same type at different strikes; you collect or pay the difference, with capped risk.",
+      "domain": "chat",
+      "chars": 900
+    },
+    "message": "is it risky?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c29-2",
+    "prior_index": 29,
+    "split": "tuning",
+    "previous": {
+      "user": "explain what a credit spread is",
+      "assistant": "Buying and selling options of the same type at different strikes; you collect or pay the difference, with capped risk.",
+      "domain": "chat",
+      "chars": 900
+    },
+    "message": "simpler please",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c29-3",
+    "prior_index": 29,
+    "split": "tuning",
+    "previous": {
+      "user": "explain what a credit spread is",
+      "assistant": "Buying and selling options of the same type at different strikes; you collect or pay the difference, with capped risk.",
+      "domain": "chat",
+      "chars": 900
+    },
+    "message": "what's the difference between ETFs and unit trusts?",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c29-4",
+    "prior_index": 29,
+    "split": "tuning",
+    "previous": {
+      "user": "explain what a credit spread is",
+      "assistant": "Buying and selling options of the same type at different strikes; you collect or pay the difference, with capped risk.",
+      "domain": "chat",
+      "chars": 900
+    },
+    "message": "best ramen near Tanjong Pagar?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c29-5",
+    "prior_index": 29,
+    "split": "tuning",
+    "previous": {
+      "user": "explain what a credit spread is",
+      "assistant": "Buying and selling options of the same type at different strikes; you collect or pay the difference, with capped risk.",
+      "domain": "chat",
+      "chars": 900
+    },
+    "message": "remind me to water the plants every saturday at 9",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c30-0",
+    "prior_index": 30,
+    "split": "tuning",
+    "previous": {
+      "user": "save the Grab prep plan as a canvas",
+      "assistant": "Saved canvas 'Grab platform prep' with 3 sections; open it from the button.",
+      "domain": "canvas",
+      "chars": 3300
+    },
+    "message": "add a section on behavioural questions",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c30-1",
+    "prior_index": 30,
+    "split": "tuning",
+    "previous": {
+      "user": "save the Grab prep plan as a canvas",
+      "assistant": "Saved canvas 'Grab platform prep' with 3 sections; open it from the button.",
+      "domain": "canvas",
+      "chars": 3300
+    },
+    "message": "rename it",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c30-2",
+    "prior_index": 30,
+    "split": "tuning",
+    "previous": {
+      "user": "save the Grab prep plan as a canvas",
+      "assistant": "Saved canvas 'Grab platform prep' with 3 sections; open it from the button.",
+      "domain": "canvas",
+      "chars": 3300
+    },
+    "message": "can I share it?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c30-3",
+    "prior_index": 30,
+    "split": "tuning",
+    "previous": {
+      "user": "save the Grab prep plan as a canvas",
+      "assistant": "Saved canvas 'Grab platform prep' with 3 sections; open it from the button.",
+      "domain": "canvas",
+      "chars": 3300
+    },
+    "message": "show my canvases",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c30-4",
+    "prior_index": 30,
+    "split": "tuning",
+    "previous": {
+      "user": "save the Grab prep plan as a canvas",
+      "assistant": "Saved canvas 'Grab platform prep' with 3 sections; open it from the button.",
+      "domain": "canvas",
+      "chars": 3300
+    },
+    "message": "what's the exchange rate SGD to JPY?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c30-5",
+    "prior_index": 30,
+    "split": "tuning",
+    "previous": {
+      "user": "save the Grab prep plan as a canvas",
+      "assistant": "Saved canvas 'Grab platform prep' with 3 sections; open it from the button.",
+      "domain": "canvas",
+      "chars": 3300
+    },
+    "message": "thanks!",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c31-0",
+    "prior_index": 31,
+    "split": "tuning",
+    "previous": {
+      "user": "research coffee machines under $500 in the background",
+      "assistant": "Started a background task: shortlist coffee machines under SGD 500 with reviews. I'll report back.",
+      "domain": "work",
+      "chars": 2200
+    },
+    "message": "how's that going?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c31-1",
+    "prior_index": 31,
+    "split": "tuning",
+    "previous": {
+      "user": "research coffee machines under $500 in the background",
+      "assistant": "Started a background task: shortlist coffee machines under SGD 500 with reviews. I'll report back.",
+      "domain": "work",
+      "chars": 2200
+    },
+    "message": "stop it",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c31-2",
+    "prior_index": 31,
+    "split": "tuning",
+    "previous": {
+      "user": "research coffee machines under $500 in the background",
+      "assistant": "Started a background task: shortlist coffee machines under SGD 500 with reviews. I'll report back.",
+      "domain": "work",
+      "chars": 2200
+    },
+    "message": "add grinders too",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c31-3",
+    "prior_index": 31,
+    "split": "tuning",
+    "previous": {
+      "user": "research coffee machines under $500 in the background",
+      "assistant": "Started a background task: shortlist coffee machines under SGD 500 with reviews. I'll report back.",
+      "domain": "work",
+      "chars": 2200
+    },
+    "message": "what tasks are running?",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c31-4",
+    "prior_index": 31,
+    "split": "tuning",
+    "previous": {
+      "user": "research coffee machines under $500 in the background",
+      "assistant": "Started a background task: shortlist coffee machines under SGD 500 with reviews. I'll report back.",
+      "domain": "work",
+      "chars": 2200
+    },
+    "message": "good morning",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c31-5",
+    "prior_index": 31,
+    "split": "tuning",
+    "previous": {
+      "user": "research coffee machines under $500 in the background",
+      "assistant": "Started a background task: shortlist coffee machines under SGD 500 with reviews. I'll report back.",
+      "domain": "work",
+      "chars": 2200
+    },
+    "message": "when's my next free evening?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c32-0",
+    "prior_index": 32,
+    "split": "tuning",
+    "previous": {
+      "user": "check both inboxes for my passport renewal",
+      "assistant": "Primary: ICA confirmed your appointment on 21 Oct, 10:15 am. Secondary: nothing found.",
+      "domain": "email",
+      "chars": 8800
+    },
+    "message": "what do I need to bring?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c32-1",
+    "prior_index": 32,
+    "split": "tuning",
+    "previous": {
+      "user": "check both inboxes for my passport renewal",
+      "assistant": "Primary: ICA confirmed your appointment on 21 Oct, 10:15 am. Secondary: nothing found.",
+      "domain": "email",
+      "chars": 8800
+    },
+    "message": "where is it?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c32-2",
+    "prior_index": 32,
+    "split": "tuning",
+    "previous": {
+      "user": "check both inboxes for my passport renewal",
+      "assistant": "Primary: ICA confirmed your appointment on 21 Oct, 10:15 am. Secondary: nothing found.",
+      "domain": "email",
+      "chars": 8800
+    },
+    "message": "add it to my calendar",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c32-3",
+    "prior_index": 32,
+    "split": "tuning",
+    "previous": {
+      "user": "check both inboxes for my passport renewal",
+      "assistant": "Primary: ICA confirmed your appointment on 21 Oct, 10:15 am. Secondary: nothing found.",
+      "domain": "email",
+      "chars": 8800
+    },
+    "message": "anything from Singtel?",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c32-4",
+    "prior_index": 32,
+    "split": "tuning",
+    "previous": {
+      "user": "check both inboxes for my passport renewal",
+      "assistant": "Primary: ICA confirmed your appointment on 21 Oct, 10:15 am. Secondary: nothing found.",
+      "domain": "email",
+      "chars": 8800
+    },
+    "message": "send me today's bulletin",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c32-5",
+    "prior_index": 32,
+    "split": "tuning",
+    "previous": {
+      "user": "check both inboxes for my passport renewal",
+      "assistant": "Primary: ICA confirmed your appointment on 21 Oct, 10:15 am. Secondary: nothing found.",
+      "domain": "email",
+      "chars": 8800
+    },
+    "message": "when's my next free evening?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c33-0",
+    "prior_index": 33,
+    "split": "held-out",
+    "previous": {
+      "user": "did my IKEA order ship?",
+      "assistant": "IKEA says your bed frame ships on 6 Oct; no carrier or tracking yet.",
+      "domain": "parcels",
+      "chars": 5600
+    },
+    "message": "let me know when it does",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c33-1",
+    "prior_index": 33,
+    "split": "held-out",
+    "previous": {
+      "user": "did my IKEA order ship?",
+      "assistant": "IKEA says your bed frame ships on 6 Oct; no carrier or tracking yet.",
+      "domain": "parcels",
+      "chars": 5600
+    },
+    "message": "what about the mattress in that order?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c33-2",
+    "prior_index": 33,
+    "split": "held-out",
+    "previous": {
+      "user": "did my IKEA order ship?",
+      "assistant": "IKEA says your bed frame ships on 6 Oct; no carrier or tracking yet.",
+      "domain": "parcels",
+      "chars": 5600
+    },
+    "message": "track it",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c33-3",
+    "prior_index": 33,
+    "split": "held-out",
+    "previous": {
+      "user": "did my IKEA order ship?",
+      "assistant": "IKEA says your bed frame ships on 6 Oct; no carrier or tracking yet.",
+      "domain": "parcels",
+      "chars": 5600
+    },
+    "message": "what's arriving this week?",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c33-4",
+    "prior_index": 33,
+    "split": "held-out",
+    "previous": {
+      "user": "did my IKEA order ship?",
+      "assistant": "IKEA says your bed frame ships on 6 Oct; no carrier or tracking yet.",
+      "domain": "parcels",
+      "chars": 5600
+    },
+    "message": "can you explain how compound interest works?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c33-5",
+    "prior_index": 33,
+    "split": "held-out",
+    "previous": {
+      "user": "did my IKEA order ship?",
+      "assistant": "IKEA says your bed frame ships on 6 Oct; no carrier or tracking yet.",
+      "domain": "parcels",
+      "chars": 5600
+    },
+    "message": "save the Shopee data platform role from LinkedIn",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c34-0",
+    "prior_index": 34,
+    "split": "tuning",
+    "previous": {
+      "user": "what's on tomorrow?",
+      "assistant": "Fri 2 Oct: 9:30 standup, 12:00 lunch with Arjun, 4 pm dentist.",
+      "domain": "calendar",
+      "chars": 2800
+    },
+    "message": "cancel the dentist",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c34-1",
+    "prior_index": 34,
+    "split": "tuning",
+    "previous": {
+      "user": "what's on tomorrow?",
+      "assistant": "Fri 2 Oct: 9:30 standup, 12:00 lunch with Arjun, 4 pm dentist.",
+      "domain": "calendar",
+      "chars": 2800
+    },
+    "message": "where's the lunch?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c34-2",
+    "prior_index": 34,
+    "split": "tuning",
+    "previous": {
+      "user": "what's on tomorrow?",
+      "assistant": "Fri 2 Oct: 9:30 standup, 12:00 lunch with Arjun, 4 pm dentist.",
+      "domain": "calendar",
+      "chars": 2800
+    },
+    "message": "anything after 6?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c34-3",
+    "prior_index": 34,
+    "split": "tuning",
+    "previous": {
+      "user": "what's on tomorrow?",
+      "assistant": "Fri 2 Oct: 9:30 standup, 12:00 lunch with Arjun, 4 pm dentist.",
+      "domain": "calendar",
+      "chars": 2800
+    },
+    "message": "schedule a call with Priya next tuesday 3pm",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c34-4",
+    "prior_index": 34,
+    "split": "tuning",
+    "previous": {
+      "user": "what's on tomorrow?",
+      "assistant": "Fri 2 Oct: 9:30 standup, 12:00 lunch with Arjun, 4 pm dentist.",
+      "domain": "calendar",
+      "chars": 2800
+    },
+    "message": "what parcels are pending?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c34-5",
+    "prior_index": 34,
+    "split": "tuning",
+    "previous": {
+      "user": "what's on tomorrow?",
+      "assistant": "Fri 2 Oct: 9:30 standup, 12:00 lunch with Arjun, 4 pm dentist.",
+      "domain": "calendar",
+      "chars": 2800
+    },
+    "message": "what's the exchange rate SGD to JPY?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c35-0",
+    "prior_index": 35,
+    "split": "tuning",
+    "previous": {
+      "user": "why didn't I get an alert for NVDA?",
+      "assistant": "NVDA fell 4.1% yesterday versus your 5% threshold, so no alert fired.",
+      "domain": "stocks",
+      "chars": 2400
+    },
+    "message": "lower it to 4 then",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c35-1",
+    "prior_index": 35,
+    "split": "tuning",
+    "previous": {
+      "user": "why didn't I get an alert for NVDA?",
+      "assistant": "NVDA fell 4.1% yesterday versus your 5% threshold, so no alert fired.",
+      "domain": "stocks",
+      "chars": 2400
+    },
+    "message": "what was the closing price?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c35-2",
+    "prior_index": 35,
+    "split": "tuning",
+    "previous": {
+      "user": "why didn't I get an alert for NVDA?",
+      "assistant": "NVDA fell 4.1% yesterday versus your 5% threshold, so no alert fired.",
+      "domain": "stocks",
+      "chars": 2400
+    },
+    "message": "is 4% too sensitive for it?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c35-3",
+    "prior_index": 35,
+    "split": "tuning",
+    "previous": {
+      "user": "why didn't I get an alert for NVDA?",
+      "assistant": "NVDA fell 4.1% yesterday versus your 5% threshold, so no alert fired.",
+      "domain": "stocks",
+      "chars": 2400
+    },
+    "message": "show me my alert history",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c35-4",
+    "prior_index": 35,
+    "split": "tuning",
+    "previous": {
+      "user": "why didn't I get an alert for NVDA?",
+      "assistant": "NVDA fell 4.1% yesterday versus your 5% threshold, so no alert fired.",
+      "domain": "stocks",
+      "chars": 2400
+    },
+    "message": "when's my next free evening?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c35-5",
+    "prior_index": 35,
+    "split": "tuning",
+    "previous": {
+      "user": "why didn't I get an alert for NVDA?",
+      "assistant": "NVDA fell 4.1% yesterday versus your 5% threshold, so no alert fired.",
+      "domain": "stocks",
+      "chars": 2400
+    },
+    "message": "anything new from the bank?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c36-0",
+    "prior_index": 36,
+    "split": "tuning",
+    "previous": {
+      "user": "save the Wise payments role",
+      "assistant": "Saved: Wise, Payments Engineer (status saved). No salary listed.",
+      "domain": "jobs",
+      "chars": 3000
+    },
+    "message": "actually mark it applied",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c36-1",
+    "prior_index": 36,
+    "split": "tuning",
+    "previous": {
+      "user": "save the Wise payments role",
+      "assistant": "Saved: Wise, Payments Engineer (status saved). No salary listed.",
+      "domain": "jobs",
+      "chars": 3000
+    },
+    "message": "add a note that the recruiter is Tom",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c36-2",
+    "prior_index": 36,
+    "split": "tuning",
+    "previous": {
+      "user": "save the Wise payments role",
+      "assistant": "Saved: Wise, Payments Engineer (status saved). No salary listed.",
+      "domain": "jobs",
+      "chars": 3000
+    },
+    "message": "what's the link?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c36-3",
+    "prior_index": 36,
+    "split": "tuning",
+    "previous": {
+      "user": "save the Wise payments role",
+      "assistant": "Saved: Wise, Payments Engineer (status saved). No salary listed.",
+      "domain": "jobs",
+      "chars": 3000
+    },
+    "message": "list roles I'm interviewing for",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c36-4",
+    "prior_index": 36,
+    "split": "tuning",
+    "previous": {
+      "user": "save the Wise payments role",
+      "assistant": "Saved: Wise, Payments Engineer (status saved). No salary listed.",
+      "domain": "jobs",
+      "chars": 3000
+    },
+    "message": "what's the exchange rate SGD to JPY?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c36-5",
+    "prior_index": 36,
+    "split": "tuning",
+    "previous": {
+      "user": "save the Wise payments role",
+      "assistant": "Saved: Wise, Payments Engineer (status saved). No salary listed.",
+      "domain": "jobs",
+      "chars": 3000
+    },
+    "message": "what am I borrowing right now?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c37-0",
+    "prior_index": 37,
+    "split": "held-out",
+    "previous": {
+      "user": "any new books by Ted Chiang?",
+      "assistant": "No new titles; 'Exhalation' is borrowable now and 'Stories of Your Life' has a 40-day wait.",
+      "domain": "library",
+      "chars": 2500
+    },
+    "message": "borrow the first one",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c37-1",
+    "prior_index": 37,
+    "split": "held-out",
+    "previous": {
+      "user": "any new books by Ted Chiang?",
+      "assistant": "No new titles; 'Exhalation' is borrowable now and 'Stories of Your Life' has a 40-day wait.",
+      "domain": "library",
+      "chars": 2500
+    },
+    "message": "put me on hold for the other",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c37-2",
+    "prior_index": 37,
+    "split": "held-out",
+    "previous": {
+      "user": "any new books by Ted Chiang?",
+      "assistant": "No new titles; 'Exhalation' is borrowable now and 'Stories of Your Life' has a 40-day wait.",
+      "domain": "library",
+      "chars": 2500
+    },
+    "message": "is there an audio version?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c37-3",
+    "prior_index": 37,
+    "split": "held-out",
+    "previous": {
+      "user": "any new books by Ted Chiang?",
+      "assistant": "No new titles; 'Exhalation' is borrowable now and 'Stories of Your Life' has a 40-day wait.",
+      "domain": "library",
+      "chars": 2500
+    },
+    "message": "check if Dune is available",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c37-4",
+    "prior_index": 37,
+    "split": "held-out",
+    "previous": {
+      "user": "any new books by Ted Chiang?",
+      "assistant": "No new titles; 'Exhalation' is borrowable now and 'Stories of Your Life' has a 40-day wait.",
+      "domain": "library",
+      "chars": 2500
+    },
+    "message": "pause my news bulletin for a week",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c37-5",
+    "prior_index": 37,
+    "split": "held-out",
+    "previous": {
+      "user": "any new books by Ted Chiang?",
+      "assistant": "No new titles; 'Exhalation' is borrowable now and 'Stories of Your Life' has a 40-day wait.",
+      "domain": "library",
+      "chars": 2500
+    },
+    "message": "can you explain how compound interest works?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c38-0",
+    "prior_index": 38,
+    "split": "tuning",
+    "previous": {
+      "user": "add buy milk",
+      "assistant": "Added to your list: buy milk.",
+      "domain": "daily",
+      "chars": 500
+    },
+    "message": "and eggs",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c38-1",
+    "prior_index": 38,
+    "split": "tuning",
+    "previous": {
+      "user": "add buy milk",
+      "assistant": "Added to your list: buy milk.",
+      "domain": "daily",
+      "chars": 500
+    },
+    "message": "remove it",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c38-2",
+    "prior_index": 38,
+    "split": "tuning",
+    "previous": {
+      "user": "add buy milk",
+      "assistant": "Added to your list: buy milk.",
+      "domain": "daily",
+      "chars": 500
+    },
+    "message": "make it urgent",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c38-3",
+    "prior_index": 38,
+    "split": "tuning",
+    "previous": {
+      "user": "add buy milk",
+      "assistant": "Added to your list: buy milk.",
+      "domain": "daily",
+      "chars": 500
+    },
+    "message": "what's due this week?",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c38-4",
+    "prior_index": 38,
+    "split": "tuning",
+    "previous": {
+      "user": "add buy milk",
+      "assistant": "Added to your list: buy milk.",
+      "domain": "daily",
+      "chars": 500
+    },
+    "message": "when's my next free evening?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c38-5",
+    "prior_index": 38,
+    "split": "tuning",
+    "previous": {
+      "user": "add buy milk",
+      "assistant": "Added to your list: buy milk.",
+      "domain": "daily",
+      "chars": 500
+    },
+    "message": "how many roles have I saved?",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c39-0",
+    "prior_index": 39,
+    "split": "tuning",
+    "previous": {
+      "user": "why did my bulletin have no AI stories?",
+      "assistant": "None of today's 31 items from your 4 sites matched 'AI' strongly enough; 2 chip stories ranked first.",
+      "domain": "news",
+      "chars": 2100
+    },
+    "message": "can you lower the bar for that topic?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c39-1",
+    "prior_index": 39,
+    "split": "tuning",
+    "previous": {
+      "user": "why did my bulletin have no AI stories?",
+      "assistant": "None of today's 31 items from your 4 sites matched 'AI' strongly enough; 2 chip stories ranked first.",
+      "domain": "news",
+      "chars": 2100
+    },
+    "message": "which sites did it check?",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c39-2",
+    "prior_index": 39,
+    "split": "tuning",
+    "previous": {
+      "user": "why did my bulletin have no AI stories?",
+      "assistant": "None of today's 31 items from your 4 sites matched 'AI' strongly enough; 2 chip stories ranked first.",
+      "domain": "news",
+      "chars": 2100
+    },
+    "message": "ok show me those chip stories",
+    "needs_previous": true,
+    "kind": "follow-up"
+  },
+  {
+    "id": "c39-3",
+    "prior_index": 39,
+    "split": "tuning",
+    "previous": {
+      "user": "why did my bulletin have no AI stories?",
+      "assistant": "None of today's 31 items from your 4 sites matched 'AI' strongly enough; 2 chip stories ranked first.",
+      "domain": "news",
+      "chars": 2100
+    },
+    "message": "unfollow engadget",
+    "needs_previous": false,
+    "kind": "same-domain new topic"
+  },
+  {
+    "id": "c39-4",
+    "prior_index": 39,
+    "split": "tuning",
+    "previous": {
+      "user": "why did my bulletin have no AI stories?",
+      "assistant": "None of today's 31 items from your 4 sites matched 'AI' strongly enough; 2 chip stories ranked first.",
+      "domain": "news",
+      "chars": 2100
+    },
+    "message": "remind me to water the plants every saturday at 9",
+    "needs_previous": false,
+    "kind": "new topic"
+  },
+  {
+    "id": "c39-5",
+    "prior_index": 39,
+    "split": "tuning",
+    "previous": {
+      "user": "why did my bulletin have no AI stories?",
+      "assistant": "None of today's 31 items from your 4 sites matched 'AI' strongly enough; 2 chip stories ranked first.",
+      "domain": "news",
+      "chars": 2100
+    },
+    "message": "good morning",
+    "needs_previous": false,
+    "kind": "new topic"
+  }
+]
