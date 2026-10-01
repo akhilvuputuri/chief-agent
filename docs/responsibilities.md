@@ -1,6 +1,6 @@
 # Owner confirmed responsibilities
 
-Implementation candidate for [issue 131](https://github.com/akhilvuputuri/chief-agent/issues/131). Monitoring is disabled by default. Migration 023 and an explicitly enabled `RESPONSIBILITIES=on` are prerequisites; a branch or passing CI does not establish production availability.
+Released for [issue 131](https://github.com/akhilvuputuri/chief-agent/issues/131) as [v0.3.32](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.32), verified at `9f5031ccb3a45e54cdde7f3f41accaa498faceff` on 2 October 2026 SGT. Migration 023 is installed and production has `RESPONSIBILITIES=on`; the source default remains off. No responsibility was created during rollout. Explicit Telegram confirmation starts monitoring. Live Telegram/provider acceptance remains separate; see [release evidence](journey/54-responsibilities.md#release-closure).
 
 The owner can ask Chief to keep watching an ongoing concern. Chief resolves the exact subjects and sources, proposes a self-contained specification, and sends a Telegram confirmation card. Monitoring begins only after the owner confirms that exact card. A new specification needs another confirmation and creates an immutable revision. Background work and source content cannot activate or widen monitoring.
 
@@ -52,7 +52,7 @@ Messages carry model-written prose, evidence references and Useful / Later / Res
 
 Outbox state is pending → sending → sent/uncertain. A restart or ambiguous send never automatically resends it. Startup health is not notification usefulness. `/status`, tool history and authenticated read-only Mini App views show concerns, checks, findings, reasons and allocation/usage; no Mini App mutation or approval route is added. Lists prioritize active/paused concerns and provide bounded pagination for completed records. Resumption selects only prior isolated background runs, never a later foreground run bound to the same task.
 
-Candidate tables contain source references and bounded domain snapshots, not raw email bodies. Findings stay private in Postgres. Existing runtime tool-result storage still retains private observations; this feature does not claim that no email content is stored anywhere. Operational logging uses existing sanitized projections; private payloads are absent from public CI and journal evidence.
+Responsibility tables contain source references and bounded domain snapshots, not raw email bodies. Findings stay private in Postgres. Existing runtime tool-result storage still retains private observations; this feature does not claim that no email content is stored anywhere. Operational logging uses existing sanitized projections; private payloads are absent from public CI and journal evidence.
 
 ## Reviewed rollout and rollback
 

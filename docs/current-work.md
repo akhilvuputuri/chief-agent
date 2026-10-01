@@ -1,6 +1,6 @@
-# Issue 131 — Responsibilities candidate
+# Issue 131 — Responsibilities released v0.3.32
 
-Implementation in [PR 148](https://github.com/akhilvuputuri/chief-agent/pull/148) on `codex/responsibilities-131` is disabled by default and not deployed. CI and independent GPT-6 Astra approval passed for code head `d4c74dda004aeb8cf79403dc02c39c444a631e51`; see [the contract and migration-023 rollout](responsibilities.md) and [journal 54](journey/54-responsibilities.md). Reviewed operator installation and separate activation remain pending. Gmail is a bounded supporting adapter; responsibility lifecycle, scoped investigations and attention decisions are the core. Scheduled research can spend model budget on unchanged passes, as disclosed on confirmation.
+[PR 148](https://github.com/akhilvuputuri/chief-agent/pull/148) shipped as [v0.3.32](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.32) at `9f5031ccb3a45e54cdde7f3f41accaa498faceff`. Final GPT-6 Astra approval covered exact head `943d71e0c6a1b1caf328f3716488f77a9da034ac`; CI and full checks passed. Reviewed migration-023 installation, normal release, separate health/preservation checks and idle-only activation succeeded on 2 October SGT. No responsibility was created; Telegram confirmation starts monitoring. Gmail is a bounded supporting adapter; lifecycle, scoped investigations and attention decisions are the core. Scheduled research can spend model budget on unchanged passes, as disclosed on confirmation. Live Telegram/provider acceptance and one-week quality/cost measurements remain pending; see [the contract](responsibilities.md) and [journal 54](journey/54-responsibilities.md).
 
 # Libby linking refusal — 2 October 2026 (recovery released v0.3.31)
 
