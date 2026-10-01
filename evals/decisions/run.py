@@ -49,7 +49,8 @@ def collect(decision, backend: str, cases: list[dict[str, Any]], runs: int, key:
 def harness_hash() -> str:
     """Content hash of the harness and fixtures, so a report names the exact code that made it."""
     digest = hashlib.sha256()
-    for path in sorted([*HERE.glob("*.py"), *HERE.glob("*.ts"), *(HERE / "fixtures").glob("*")]):
+    files = [*HERE.glob("*.py"), *HERE.glob("*.ts"), *(HERE / "fixtures").glob("*")]
+    for path in sorted(p for p in files if p.is_file()):
         digest.update(path.name.encode())
         digest.update(path.read_bytes())
     return digest.hexdigest()[:16]

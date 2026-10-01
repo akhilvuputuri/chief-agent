@@ -276,10 +276,11 @@ def _table(results, comparisons, n, routable) -> str:
         ci = r["calls_saved_per_100_ci"]
         cost = r["cost_per_decision_usd"]
         runs = " / ".join(pct(v) for v in r["precision_by_run"])
+        net_usd = "unknown" if r["net_usd_per_1000"] is None else f"{r['net_usd_per_1000']:.2f}"
         lines.append(
             f"| {r['backend']} | {r['threshold']:.3f} | {r['routed']} ({r['wrong']}) | {pct(r['precision'], r['precision_ci'])} | {runs} | "
             f"{pct(r['coverage'], r['coverage_ci'])} | {r['calls_saved_per_100']:.1f} ({ci[0]:.1f}–{ci[1]:.1f}) | "
-            f"{r['net_ms_per_message']:,.0f} | {'unknown' if r['net_usd_per_1000'] is None else f'{r[\'net_usd_per_1000\']:.2f}'} | "
+            f"{r['net_ms_per_message']:,.0f} | {net_usd} | "
             f"{r['latency_mean_ms']} / {r['latency_p50_ms']} / {r['latency_p95_ms']} | {r['errors']}/{r['calls']} | "
             f"{'unknown' if cost is None else f'{cost * 1000:.4f}'} |"
         )
