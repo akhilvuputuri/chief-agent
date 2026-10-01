@@ -26,8 +26,10 @@ The `/mybots` text menu does not show these switches. They are only in the Mini 
 | Daily briefings, routines, background work | General (unchanged)                                      |
 
 - **Topic creation.** Chief creates each topic the first time it sends there, then records the thread id as a `telegram.topic` event. No migration is needed: each owner and topic has a stable run id, so the lookup uses the existing run index, and the newest row wins. Concurrent first sends share one creation.
-- **Deleted topic.** If the owner deletes a topic, the next send fails with "message thread not found". Chief then records the id as gone (a row with a null `threadId`), creates the topic again and retries that send once. No other error is retried.
-- **Falling back to General.** Sends go to General in any of these cases: threaded mode is off, `TELEGRAM_TOPICS=off`, the threaded-mode check fails (it is retried on the next send), or creation fails. A topic never blocks a delivery.
+- **Deleted topic.** If the owner deletes a topic, the next send fails with "message thread not found". Chief then records the id as gone (a row with a null `threadId`), creates the topic again and retries that send once. Concurrent recoveries share one new topic. Any other 400 rejection about the topic, such as a closed topic, retries that send once in General and keeps the stored topic. All other errors are not retried.
+- **Falling back to General.** Sends go to General in any of these cases: threaded mode is off, `TELEGRAM_TOPICS=off`, the threaded-mode check fails (a failed check is retried on the next send), or creation fails. If creation succeeds but recording the id fails, that send still uses the new topic. A topic problem never blocks a delivery, though errors that are not about the topic (for example, the bot being blocked) still fail as before.
+- **Changing the BotFather switch.** A successful threaded-mode check is kept until the process restarts. Turning Threaded Mode on or off therefore takes effect on the next deploy or restart.
+- **Follow-ups during a running reply.** If a message joins a run that is already in progress, the answer goes to the topic of the message that started the run.
 - **Addressing General.** Telegram rejects `message_thread_id=1`, so `inThread()` leaves the id out for General.
 
 ## Code
@@ -37,7 +39,7 @@ The `/mybots` text menu does not show these switches. They are only in the Mini 
   - `inThread` turns a thread id into send options.
   - `threadOf` reads the thread from an inbound message.
 - `src/telegram-views.ts`: `open` and `deliver` take a `Chat`, which is either a chat id or `{ id, thread }`. Every message part, the canvas buttons and the notices go to that thread. A view's callback binding still uses only chat and message id.
-- `src/telegram.ts`: the message handler passes the thread of the inbound message to views and approval cards. grammY's `ctx.reply` and `replyWithChatAction` already add the thread for topic messages. `telegram.input_ready` records `inTopic`.
+- `src/telegram.ts`: the message handler passes the thread of the inbound message to views and approval cards. grammY's `ctx.reply` and `replyWithChatAction` already add the thread for topic messages. `telegram.input_ready` records `inTopic`. The typing indicator is sent with an explicit thread and never fails a turn. grammY's `replyWithChatAction` copies `message_thread_id` even for General messages.
 - `src/main.ts`: the news bulletin and stock alerts send through `topics.send(user, "news" | "markets", …)`.
 - Tests: `tests/telegram-topics.test.ts`.
 
@@ -48,6 +50,8 @@ These ops-log events carry only the topic key (`kind`) and error codes:
 - `telegram.topic_created`
 - `telegram.topic_failed`
 - `telegram.topic_missing`
+- `telegram.topic_unusable`
+- `telegram.topic_record_failed`
 - `telegram.topics_check_failed`
 
 Rollback: turn off Threaded Mode in BotFather (production), or set `TELEGRAM_TOPICS=off` where the variable is passed. Existing topics and their messages stay in Telegram.

@@ -28,13 +28,21 @@ export const threadOf = (message?: {
     ? message.message_thread_id
     : undefined;
 
+const describe = (error: unknown) =>
+  String(
+    (error as { description?: string })?.description ??
+      (error as Error)?.message,
+  );
+// The topic is gone: forget it and create it again.
 const missing = (error: unknown) =>
   /thread not found|topic_deleted|topic not found|TOPIC_ID_INVALID/i.test(
-    String(
-      (error as { description?: string })?.description ??
-        (error as Error)?.message,
-    ),
+    describe(error),
   );
+// Any other rejection about the topic itself (for example a closed topic). A 400 means
+// nothing was sent, so the message can go to General instead of being lost.
+const unusable = (error: unknown) =>
+  (error as { error_code?: number })?.error_code === 400 &&
+  /topic|thread/i.test(describe(error));
 
 type TopicApi = Pick<Api, "getMe" | "createForumTopic">;
 
@@ -51,13 +59,18 @@ const ledger = (user: string, key: TopicKey) => {
 export class TelegramTopics {
   private ready?: Promise<boolean>;
   private creating = new Map<string, Promise<number | undefined>>();
+  private recovering = new Map<string, Promise<number | undefined>>();
   constructor(
     private db: Database,
     private api: TopicApi,
     private enabled = true,
   ) {}
 
-  /** Whether the bot has threaded mode on. A failed check is retried on the next send. */
+  /**
+   * Whether the bot has threaded mode on. A successful answer is kept until restart, so
+   * changing the BotFather switch takes effect on the next deploy; a failed check is
+   * retried on the next send.
+   */
   private available() {
     if (!this.enabled) return Promise.resolve(false);
     this.ready ??= this.api.getMe().then(
@@ -74,12 +87,7 @@ export class TelegramTopics {
   /** The topic's thread id, creating the topic once. Undefined means "send to General". */
   async thread(user: string, key: TopicKey): Promise<number | undefined> {
     if (!(await this.available())) return undefined;
-    const saved = (
-      await this.db.query(
-        "SELECT data->'threadId' AS thread FROM events WHERE run_id=$1 AND user_id=$2 AND type='telegram.topic' ORDER BY id DESC LIMIT 1",
-        [ledger(user, key), user],
-      )
-    ).rows[0]?.thread;
+    const saved = await this.stored(user, key);
     if (typeof saved === "number") return saved;
     const id = `${user}:${key}`;
     let pending = this.creating.get(id);
@@ -90,16 +98,31 @@ export class TelegramTopics {
     return pending;
   }
 
+  private async stored(user: string, key: TopicKey): Promise<unknown> {
+    return (
+      await this.db.query(
+        "SELECT data->'threadId' AS thread FROM events WHERE run_id=$1 AND user_id=$2 AND type='telegram.topic' ORDER BY id DESC LIMIT 1",
+        [ledger(user, key), user],
+      )
+    ).rows[0]?.thread;
+  }
+
   private async create(user: string, key: TopicKey) {
     try {
       const topic = await this.api.createForumTopic(user, topics[key].name, {
         icon_color: topics[key].icon_color,
       });
+      opsLog("telegram.topic_created", "info", { kind: key });
+      // The topic exists now; use it for this send even if recording it fails.
       await event(this.db, user, ledger(user, key), "telegram.topic", {
         key,
         threadId: topic.message_thread_id,
-      });
-      opsLog("telegram.topic_created", "info", { kind: key });
+      }).catch((error) =>
+        opsLog("telegram.topic_record_failed", "warn", {
+          kind: key,
+          ...errorFields(error),
+        }),
+      );
       return topic.message_thread_id;
     } catch (error) {
       opsLog("telegram.topic_failed", "warn", {
@@ -110,9 +133,33 @@ export class TelegramTopics {
     }
   }
 
+  /** Forgets a deleted topic and creates it again. Concurrent recoveries share one. */
+  private recover(user: string, key: TopicKey, stale: number) {
+    const id = `${user}:${key}:${stale}`;
+    let pending = this.recovering.get(id);
+    if (!pending) {
+      pending = (async () => {
+        // Another send may already have replaced this topic.
+        const current = await this.stored(user, key);
+        if (typeof current === "number" && current !== stale) return current;
+        await event(this.db, user, ledger(user, key), "telegram.topic", {
+          key,
+          threadId: null,
+          missing: stale,
+        });
+        return this.thread(user, key);
+      })()
+        .catch(() => undefined)
+        .finally(() => this.recovering.delete(id));
+      this.recovering.set(id, pending);
+    }
+    return pending;
+  }
+
   /**
    * Sends into a topic. If Telegram says the topic is gone (the owner deleted it), the
-   * stored id is forgotten and the send is retried once in a newly created topic.
+   * stored id is forgotten and the send is retried once in a newly created topic. Any
+   * other rejection about the topic retries once in General.
    */
   async send<T>(
     user: string,
@@ -124,18 +171,17 @@ export class TelegramTopics {
     try {
       return await send(inThread(thread));
     } catch (error) {
-      if (!thread || !missing(error)) throw error;
-      opsLog("telegram.topic_missing", "warn", { kind: key });
-      const again = await event(
-        this.db,
-        user,
-        ledger(user, key),
-        "telegram.topic",
-        { key, threadId: null, missing: thread },
-      )
-        .then(() => this.thread(user, key))
-        .catch(() => undefined);
-      return send(inThread(again));
+      if (!thread) throw error;
+      if (missing(error)) {
+        opsLog("telegram.topic_missing", "warn", { kind: key });
+        return send(inThread(await this.recover(user, key, thread)));
+      }
+      if (!unusable(error)) throw error;
+      opsLog("telegram.topic_unusable", "warn", {
+        kind: key,
+        ...errorFields(error),
+      });
+      return send({});
     }
   }
 }

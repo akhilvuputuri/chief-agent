@@ -15,12 +15,15 @@ On 1 October the owner turned on Threaded Mode for the production bot. Chief the
   - A send without `message_thread_id` lands in General, with no error.
   - `message_thread_id=1` is rejected, so General must be addressed by leaving the id out.
   - A deleted topic fails sends with "message thread not found".
-- **Tested:** `tests/telegram-topics.test.ts` has 6 tests:
+- **Tested:** `tests/telegram-topics.test.ts` has 9 tests:
   - concurrent first sends create one topic, and the id is reused after a restart;
   - with threaded mode off, `TELEGRAM_TOPICS=off`, or failed creation, sends go to General;
   - a deleted topic is recreated and the send is retried once, while other errors are not retried;
   - every part of a long answer goes into the topic;
-  - an inbound topic message gets its reply and typing indicator in the same topic, while General stays plain.
+  - an inbound topic message gets its reply and typing indicator in the same topic, while General stays plain;
+  - a closed topic sends to General, and a topic is used even if recording its id fails;
+  - two sends that find the topic deleted recreate it once;
+  - approval cards follow the topic.
 - **Not yet observed:** behaviour on the live bot. In particular, that `createForumTopic` succeeds in the owner's private chat with user-created topics disallowed.
 
 ## Diagnosis and alternatives
@@ -32,7 +35,17 @@ On 1 October the owner turned on Threaded Mode for the production bot. Chief the
 
 ## Implementation and review
 
-See [topics in the private chat](../telegram-topics.md): `TelegramTopics`, a thread-aware `Chat` target in views, and inbound thread pass-through. Thread ids are stored as `telegram.topic` events under a stable run id per topic. A first draft used a new table, but that migration would have needed an operator rollout, and until that ran it would block every other session's automatic release. Avoiding it keeps this app-only. Independent review: pending.
+See [topics in the private chat](../telegram-topics.md): `TelegramTopics`, a thread-aware `Chat` target in views, and inbound thread pass-through. Thread ids are stored as `telegram.topic` events under a stable run id per topic. A first draft used a new table, but that migration would have needed an operator rollout, and until that ran it would block every other session's automatic release. Avoiding it keeps this app-only. **Independent review (Opus 5.5): approved on the first head and again on the fixes**, with six low-severity points. Fixed:
+
+- a newly created topic is used even if recording its id fails, so that send still uses the new topic instead of General;
+- any other 400 rejection about a topic, such as a closed topic, falls back to General instead of losing the message;
+- concurrent recoveries of a deleted topic create one new topic;
+- the typing indicator is sent with an explicit thread and caught, because grammY's helper copies `message_thread_id` even for General messages.
+
+Documented rather than changed:
+
+- the threaded-mode check is cached until restart;
+- a follow-up that joins a running reply is answered in the topic of the message that started the run.
 
 ## Verification and outcome
 

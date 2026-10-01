@@ -635,7 +635,11 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
         ? await preparation.run(user, prepare)
         : await prepare();
       if (prepared) {
-        await ctx.replyWithChatAction("typing");
+        // Explicit thread: grammY's helper copies message_thread_id even for General
+        // messages, and a typing indicator must never fail the turn.
+        await ctx.api
+          .sendChatAction(ctx.chat.id, "typing", inThread(thread))
+          .catch(() => {});
         const reply = await assistant.respondDetailed(
           user,
           prepared.message,

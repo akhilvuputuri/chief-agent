@@ -6,7 +6,9 @@ import { GrammyError } from "grammy";
 import { ensureUser, type Database } from "../src/db.js";
 import { TelegramTopics, inThread, threadOf } from "../src/telegram-topics.js";
 import { TelegramViews } from "../src/telegram-views.js";
-import { telegram } from "../src/telegram.js";
+import { telegram, sendCalendarApprovals } from "../src/telegram.js";
+import { CalendarActions } from "../src/calendar-actions.js";
+import { randomUUID } from "node:crypto";
 import { readConfig } from "../src/config.js";
 import { Assistant } from "../src/agent.js";
 import { JobTools } from "../src/tools.js";
@@ -228,6 +230,122 @@ test("a message typed in a topic is answered in that topic; General stays plain"
     assert.equal(replies[1]!.payload.message_thread_id, undefined);
     const typing = calls.find((c) => c.method === "sendChatAction");
     assert.equal(typing?.payload.message_thread_id, 55);
+  } finally {
+    await pg.close();
+  }
+});
+
+test("a closed topic sends to General, and a topic is used even if recording it fails", async () => {
+  const { pg, db } = await database();
+  try {
+    const { api } = fakeApi();
+    const topics = new TelegramTopics(db, api);
+    assert.equal(await topics.thread("123", "news"), 40);
+    const sends: any[] = [];
+    await topics.send("123", "news", async (extra) => {
+      sends.push(extra);
+      if (extra.message_thread_id)
+        throw new GrammyError(
+          "Call to 'sendMessage' failed!",
+          {
+            ok: false,
+            error_code: 400,
+            description: "Bad Request: TOPIC_CLOSED",
+          },
+          "sendMessage",
+          {},
+        );
+      return true;
+    });
+    assert.deepEqual(sends, [{ message_thread_id: 40 }, {}]);
+    // The stored topic is kept: a closed topic is not a deleted one.
+    assert.equal(await topics.thread("123", "news"), 40);
+    // Recording fails after Telegram created the topic: this send still uses it.
+    const failing = new TelegramTopics(
+      {
+        query: async (sql: string) => {
+          if (sql.startsWith("INSERT")) throw new Error("db down");
+          return { rows: [] };
+        },
+      } as unknown as Database,
+      fakeApi().api,
+    );
+    const used: any[] = [];
+    await failing.send("123", "markets", async (extra) => used.push(extra));
+    assert.deepEqual(used, [{ message_thread_id: 40 }]);
+  } finally {
+    await pg.close();
+  }
+});
+
+test("two sends that find the topic deleted recreate it once", async () => {
+  const { pg, db } = await database();
+  const { api, created } = fakeApi();
+  const topics = new TelegramTopics(db, api);
+  try {
+    await topics.thread("123", "news");
+    const gone = () =>
+      new GrammyError(
+        "Call to 'sendMessage' failed!",
+        {
+          ok: false,
+          error_code: 400,
+          description: "Bad Request: message thread not found",
+        },
+        "sendMessage",
+        {},
+      );
+    const send = async (extra: any) => {
+      if (extra.message_thread_id === 40) throw gone();
+      return extra.message_thread_id;
+    };
+    // Concurrent, and one arriving after the first recovery finished.
+    const [a, b] = await Promise.all([
+      topics.send("123", "news", send),
+      topics.send("123", "news", send),
+    ]);
+    const stale = new TelegramTopics(db, api);
+    (stale as any).thread = async () => 40;
+    const c = await stale.send("123", "news", send);
+    assert.deepEqual([a, b, c], [41, 41, 41]);
+    assert.deepEqual(created, ["News", "News"]);
+  } finally {
+    await pg.close();
+  }
+});
+
+test("approval cards for a message typed in a topic go to that topic", async () => {
+  const { pg, db } = await database();
+  const actions = new CalendarActions(db, {} as any, "123");
+  const bot = telegram(
+    readConfig({
+      DATABASE_URL: "postgres://x:x@localhost/x",
+      TELEGRAM_BOT_TOKEN: "123:test-token",
+      TELEGRAM_ALLOWED_USER_IDS: "123",
+    }),
+    {} as any,
+    db,
+  );
+  const sent: any[] = [];
+  bot.api.config.use(async (_prev, method, payload) => {
+    if (method === "getMe")
+      return {
+        ok: true,
+        result: { id: 999, is_bot: true, first_name: "T", username: "t_bot" },
+      } as any;
+    if (method === "sendMessage") sent.push(payload);
+    return { ok: true, result: { message_id: 11 } } as any;
+  });
+  await bot.init();
+  try {
+    await actions.draft("123", randomUUID(), {
+      title: "Interview preparation",
+      start: "2026-09-20T15:00:00+08:00",
+      end: "2026-09-20T16:00:00+08:00",
+    });
+    await sendCalendarApprovals(bot, db, "123", undefined, 55);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].message_thread_id, 55);
   } finally {
     await pg.close();
   }
