@@ -5,7 +5,7 @@ import { WorkTools, renderWork, renderWorkList } from "./work.js";
 import { TelegramViews, viewCallback } from "./telegram-views.js";
 import type { Collection, View } from "./telegram-view-render.js";
 import { formatTelegram } from "./telegram-format.js";
-import { inThread, threadOf } from "./telegram-topics.js";
+import { inThread, TelegramTopics, threadOf } from "./telegram-topics.js";
 import { calendarPreview, validateDraft } from "./calendar-draft.js";
 import { GoogleAuthError } from "./calendar.js";
 import {
@@ -36,6 +36,8 @@ import type { ImageAttachment } from "./protocol.js";
 export function telegram(c: Config, assistant: Assistant, db: Database) {
   const bot = new Bot(c.TELEGRAM_BOT_TOKEN);
   const views = new TelegramViews(db, bot.api, undefined, c.MINIAPP_ORIGIN);
+  // One topics helper for the process: inbound lookups here, sends and creation in main.ts.
+  const topics = new TelegramTopics(db, bot.api, c.TELEGRAM_TOPICS !== "off");
   const voice = new Voice(c);
   const controls = new SerialQueue();
   const preparation = new PreparationQueue(2);
@@ -503,6 +505,19 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
         receivedAt: new Date().toISOString(),
         preparing: needsPreparation,
         voiceReply: !!ctx.message.voice,
+        // Typed in one of Chief's topics: a hint for Chief, and in "auto" mode the
+        // topic's agent may take the first step.
+        topic: await topics.keyFor(user, thread).catch(() => undefined),
+        // Not for photos or documents (the email agent cannot read them; voice notes become text) or for an explicit
+        // reply to an earlier message, whose target only Chief's context carries. In a
+        // topic, a plain message replies to the topic's creation message, which is fine.
+        topicFirstStep:
+          c.TELEGRAM_TOPICS === "auto" &&
+          !file &&
+          !ctx.message.photo &&
+          !ctx.message.document &&
+          (!ctx.message.reply_to_message ||
+            !!ctx.message.reply_to_message.forum_topic_created),
       },
     );
     await event(db, user, inputId, "telegram.input_received", {
@@ -715,7 +730,7 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
   bot.catch((error) =>
     opsLog("telegram.handler_failed", "error", errorFields(error.error)),
   );
-  return bot;
+  return Object.assign(bot, { topics });
 }
 
 export async function sendCalendarApprovals(

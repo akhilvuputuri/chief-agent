@@ -11,7 +11,6 @@ import { OpenRouter } from "./model.js";
 import { resolveMainModel } from "./model-policy.js";
 import { recoverRuntime } from "./execution.js";
 import { TelegramViews } from "./telegram-views.js";
-import { TelegramTopics } from "./telegram-topics.js";
 import type { Delivery } from "./answer.js";
 import { WorkWorker } from "./work-worker.js";
 import { DailyTools, DailyWorker, ScheduleParser } from "./daily.js";
@@ -29,7 +28,7 @@ import { DailySheet } from "./daily-sheet.js";
 import { SheetsTools } from "./sheets.js";
 import { GmailTools, unreadDigest } from "./gmail.js";
 import { readConfig } from "./config.js";
-import { connect } from "./db.js";
+import { connect, ensureUser } from "./db.js";
 import { JobTools } from "./tools.js";
 import { WebTools } from "./providers.js";
 import { Assistant } from "./agent.js";
@@ -303,7 +302,15 @@ const app = server(
 );
 const bot = telegram(c, assistant, db);
 // Scheduled output goes to its own topic when threaded mode is on; otherwise to General.
-const topics = new TelegramTopics(db, bot.api, c.TELEGRAM_TOPICS === "auto");
+const topics = bot.topics;
+// Create Chief's topics up front so the owner can write in them before anything is posted.
+for (const user of c.TELEGRAM_ALLOWED_USER_IDS.split(","))
+  // Topic ids are recorded as the owner's events, so the owner row must exist first.
+  void ensureUser(db, user)
+    .then(() => topics.ensure(user))
+    .catch((error) =>
+      opsLog("telegram.topic_failed", "warn", errorFields(error)),
+    );
 notifyOwner = async (text) => {
   for (const user of c.TELEGRAM_ALLOWED_USER_IDS.split(","))
     await bot.api.sendMessage(user, text).catch(() => {});

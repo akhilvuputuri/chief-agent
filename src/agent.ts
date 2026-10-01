@@ -31,6 +31,7 @@ import {
   type ToolDomain,
 } from "./tool-domains.js";
 import { recentTurns, type ToolPicker } from "./tool-picker.js";
+import { topicAgents, type TopicKey } from "./telegram-topics.js";
 import { SerialQueue } from "./security.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
@@ -55,6 +56,10 @@ export type Incoming = {
   receivedAt?: string;
   preparing?: boolean;
   voiceReply?: boolean;
+  /** The Chief topic the message was typed in (Telegram topics, phase 2). */
+  topic?: string;
+  /** Whether that topic may start the turn with its agent (TELEGRAM_TOPICS=auto). */
+  topicFirstStep?: boolean;
 };
 export class Assistant {
   private queue = new SerialQueue();
@@ -411,6 +416,8 @@ export class Assistant {
     let requestSnapshot = message;
     let voiceReply = false;
     let managedDelivery = false;
+    let topic: string | undefined;
+    let topicFirstStep = false;
     const capability = randomBytes(32).toString("hex");
     this.capabilities.set(capability, {
       user,
@@ -492,6 +499,11 @@ export class Assistant {
         active.revision = Number(claimed.rows[0].ordinal);
         voiceReply = claimed.rows[0].metadata.voiceReply === true;
         managedDelivery = claimed.rows[0].metadata.updateId !== undefined;
+        topic =
+          typeof claimed.rows[0].metadata.topic === "string"
+            ? claimed.rows[0].metadata.topic
+            : undefined;
+        topicFirstStep = claimed.rows[0].metadata.topicFirstStep === true;
       }
       const initialVersion = this.inbox.version(user);
       active.yield =
@@ -737,7 +749,26 @@ export class Assistant {
             }
           : {}),
       });
+      const firstCall = topicFirstCall(
+        topicFirstStep ? topic : undefined,
+        message,
+        !!images?.length,
+        background,
+        runtime.context,
+        previousTurns.at(-1),
+      );
+      if (topic && !background)
+        runtime.context = JSON.stringify({
+          ...JSON.parse(runtime.context),
+          topic: {
+            name: topic,
+            // One wording either way: the host's first step can still be dropped if newer
+            // input arrives before it runs.
+            note: "The owner wrote in this Telegram topic. Treat it as a hint about the subject, not a limit on what you can do. If this turn starts with an agent_run you did not make, the host started that topic's agent because of the topic: answer from its report, or handle the message as usual if it was about something else.",
+          },
+        });
       const request: AgentRequest = {
+        ...(firstCall ? { firstCall } : {}),
         runId: run,
         // One key per owner: a per-run key made every message's first call a cache miss.
         cacheKey: `chief-${createHash("sha256").update(user).digest("hex").slice(0, 16)}`,
@@ -1194,4 +1225,42 @@ export class Assistant {
     }
     return result;
   }
+}
+
+/**
+ * Telegram topics, phase 2: a message typed in Chief's Email, Markets or News topic starts
+ * with that topic's agent instead of a coordinator call that would only choose it. Chief
+ * still writes the reply from the agent's report and can delegate elsewhere if the message
+ * was not about the topic. Anything unusual takes the ordinary path.
+ */
+export function topicFirstCall(
+  topic: string | undefined,
+  message: string,
+  hasImages: boolean,
+  background: boolean,
+  runtimeContext: string,
+  previous?: { user: string; assistant: string },
+): AgentRequest["firstCall"] {
+  const type = topic ? topicAgents[topic as TopicKey] : undefined;
+  if (!type || background || hasImages) return undefined;
+  // agent_run's objective limit (UTF-16 length, as zod counts it).
+  if (message.length > 2000) return undefined;
+  // Small talk ("thanks!", "ok") needs no email search; Chief answers it in one call.
+  if (message.trim().split(/\s+/).length < 3) return undefined;
+  let catalogue: { type?: string }[] = [];
+  try {
+    catalogue = JSON.parse(runtimeContext).agentCatalogue ?? [];
+  } catch {
+    return undefined;
+  }
+  // The agent must be offered in this deployment.
+  if (!catalogue.some((a) => a.type === type)) return undefined;
+  const context = previous
+    ? `The owner wrote this in the ${topic} topic of the chat. Previous exchange, for reference only:\nOwner: ${previous.user.slice(0, 1500)}\nChief: ${previous.assistant.slice(0, 2000)}`
+    : `The owner wrote this in the ${topic} topic of the chat.`;
+  return {
+    name: "agent_run",
+    arguments: JSON.stringify({ type, objective: message, context }),
+    reason: `topic.${topic}`,
+  };
 }

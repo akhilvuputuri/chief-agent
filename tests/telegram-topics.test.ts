@@ -36,7 +36,10 @@ function fakeApi(enabled = true) {
       createForumTopic: async (_chat: string | number, name: string) => {
         created.push(name);
         await new Promise((r) => setTimeout(r, 5));
-        return { message_thread_id: next++, name } as any;
+        return {
+          message_thread_id: name === "Email" ? 42 : next++,
+          name,
+        } as any;
       },
     },
   };
@@ -394,4 +397,109 @@ test("a failed topic lookup sends to General instead of creating a duplicate", a
   await topics.send("123", "news", async (extra) => sends.push(extra));
   assert.deepEqual(sends, [{}]);
   assert.deepEqual(created, []);
+});
+
+test("topics are created up front and a thread maps back to its topic", async () => {
+  const { pg, db } = await database();
+  const { api, created } = fakeApi();
+  const topics = new TelegramTopics(db, api);
+  try {
+    await topics.ensure("123");
+    await topics.ensure("123");
+    assert.deepEqual(created, ["News", "Markets", "Email"]);
+    assert.equal(await topics.keyFor("123", 42), "email");
+    assert.equal(await topics.keyFor("123", 40), "news");
+    assert.equal(await topics.keyFor("123", 99), undefined);
+    assert.equal(await topics.keyFor("123", undefined), undefined);
+  } finally {
+    await pg.close();
+  }
+});
+
+test("a message typed in Chief's Email topic is recorded with its topic", async () => {
+  const { pg, db } = await database();
+  await new TelegramTopics(db, fakeApi().api).ensure("123");
+  const assistant = new Assistant(
+    db,
+    {
+      run: async (req) => ({
+        reply: "ok",
+        history: [...req.history, { role: "user", content: req.message }],
+      }),
+    },
+    new JobTools(db, { call: async () => ({}) }),
+  );
+  const bot = telegram(
+    readConfig({
+      DATABASE_URL: "postgres://x:x@localhost/x",
+      TELEGRAM_BOT_TOKEN: "123:long-test-token",
+      TELEGRAM_ALLOWED_USER_IDS: "123",
+    }),
+    assistant,
+    db,
+  );
+  bot.api.config.use(async (_prev, method) => {
+    if (method === "getMe")
+      return {
+        ok: true,
+        result: {
+          id: 999,
+          is_bot: true,
+          first_name: "T",
+          username: "t_bot",
+          has_topics_enabled: true,
+        },
+      } as any;
+    if (method === "sendMessage")
+      return { ok: true, result: { message_id: 1 } } as any;
+    return { ok: true, result: true } as any;
+  });
+  await bot.init();
+  const update = (id: number, thread?: number, extra: object = {}) =>
+    ({
+      update_id: id,
+      message: {
+        message_id: id,
+        date: 0,
+        chat: { id: 123, type: "private" },
+        from: { id: 123, is_bot: false, first_name: "T" },
+        text: `message ${id}`,
+        ...(thread
+          ? { is_topic_message: true, message_thread_id: thread }
+          : {}),
+        ...extra,
+      },
+    }) as any;
+  const replyTo = (topicRoot: boolean) => ({
+    reply_to_message: {
+      message_id: 7,
+      date: 0,
+      chat: { id: 123, type: "private" },
+      ...(topicRoot
+        ? { forum_topic_created: { name: "Email", icon_color: 0xffd67e } }
+        : { text: "an earlier answer" }),
+    },
+  });
+  try {
+    await bot.handleUpdate(update(1, 42, replyTo(true)));
+    await bot.handleUpdate(update(2, 40));
+    await bot.handleUpdate(update(3));
+    // An explicit reply to an earlier message: only Chief's context carries its target.
+    await bot.handleUpdate(update(4, 42, replyTo(false)));
+    const topics = (
+      await db.query(
+        "SELECT metadata->>'topic' AS topic, metadata->>'topicFirstStep' AS first FROM conversation_inputs ORDER BY ordinal",
+      )
+    ).rows;
+    assert.deepEqual(
+      topics.map((r) => r.topic),
+      ["email", "news", null, "email"],
+    );
+    assert.deepEqual(
+      topics.map((r) => r.first),
+      ["true", "true", "true", "false"],
+    );
+  } finally {
+    await pg.close();
+  }
 });

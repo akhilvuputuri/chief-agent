@@ -1,7 +1,7 @@
 # 51 — Shadow decisions: Jev on real messages, with no effect on the reply
 
 Work date(s): 2026-10-01. Written/revised: 2026-10-01.
-Status: in review. Tested with mocked transports; no production data yet.
+Status: released `d434bc7` on 1 October 2026. Tested with mocked transports; production data is accumulating.
 
 ## User-visible problem and preceding iteration
 

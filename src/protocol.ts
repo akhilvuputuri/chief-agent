@@ -494,6 +494,12 @@ export interface AgentRequest {
   systemInstructions?: string;
   /** Host-resolved model ID for a child run (from a model tier or a host override), never a raw tool argument. */
   childModel?: string;
+  /**
+   * A host-decided first step (Telegram topics, phase 2): the run starts by dispatching this
+   * call instead of asking the model for it. It is journaled like any model-made call, so
+   * history, approvals and later steps are unchanged; the model takes over from the result.
+   */
+  firstCall?: { name: "agent_run"; arguments: string; reason: string };
   /** Reasoning effort for this run's model calls; medium when unset. */
   effort?: import("./model.js").ReasoningEffort;
   executeResearch?: (run: string, input: unknown) => Promise<unknown>;
