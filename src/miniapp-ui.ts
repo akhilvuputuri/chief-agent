@@ -382,7 +382,7 @@ async function responsibilities(id?: string, offset = 0) {
           "/responsibilities/" + encodeURIComponent(id) + "?offset=" + offset,
         ),
       ]
-    : await api("/responsibilities");
+    : await api("/responsibilities?offset=" + offset);
   root.replaceChildren(
     el("h1", id ? "Monitoring history" : "Responsibilities"),
   );
@@ -468,6 +468,23 @@ async function responsibilities(id?: string, offset = 0) {
         );
     }
     root.append(section);
+  }
+  if (!id) {
+    if (offset > 0)
+      root.append(
+        btn("Newer concerns", () =>
+          go({
+            view: "responsibilities",
+            offset: String(Math.max(0, offset - 50)),
+          }),
+        ),
+      );
+    if (rows.length === 50)
+      root.append(
+        btn("Older concerns", () =>
+          go({ view: "responsibilities", offset: String(offset + 50) }),
+        ),
+      );
   }
 }
 async function route() {

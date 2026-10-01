@@ -115,7 +115,7 @@ export class Responsibilities {
     private sources: Sources = {},
     private clock = () => new Date(),
   ) {}
-  async list(user: string) {
+  async list(user: string, offset = 0) {
     return (
       await this.db.query(
         `SELECT r.*,v.spec,
@@ -125,8 +125,8 @@ export class Responsibilities {
       (SELECT count(*)::int FROM responsibility_investigations i WHERE i.responsibility_id=r.id AND (i.created_at AT TIME ZONE 'Asia/Singapore')::date=$2::date) investigations_today,
       (SELECT jsonb_build_object('decision',f.decision,'reason',f.reason,'createdAt',f.created_at) FROM responsibility_findings f WHERE f.responsibility_id=r.id ORDER BY f.created_at DESC LIMIT 1) last_finding
       FROM responsibilities r JOIN responsibility_revisions v ON v.responsibility_id=r.id AND v.revision=r.revision
-      WHERE r.user_id=$1 ORDER BY r.created_at DESC LIMIT 50`,
-        [user, day(this.clock())],
+      WHERE r.user_id=$1 ORDER BY CASE WHEN r.status IN ('active','paused') THEN 0 ELSE 1 END,r.created_at DESC,r.id DESC OFFSET $3 LIMIT 50`,
+        [user, day(this.clock()), offset],
       )
     ).rows;
   }
@@ -176,7 +176,8 @@ export class Responsibilities {
     };
   }
   async call(user: string, run: string, a: any) {
-    if (a.operation === "responsibility_list") return this.list(user);
+    if (a.operation === "responsibility_list")
+      return this.list(user, a.offset ?? 0);
     if (a.operation === "responsibility_history")
       return this.history(user, a.id, a.offset);
     if (a.operation === "responsibility_report")
@@ -386,6 +387,9 @@ export class Responsibilities {
         [task, user],
       )
     ).rows;
+    row.expired =
+      !!row.spec.expiresAt &&
+      Date.parse(row.spec.expiresAt) <= this.clock().getTime();
     row.priorFindings = (
       await this.db.query(
         `SELECT payload,decision,reason FROM responsibility_findings WHERE responsibility_id=$1 AND user_id=$2 AND revision=$3 AND task_id IS NOT NULL ORDER BY created_at DESC LIMIT 3`,
@@ -420,6 +424,11 @@ export class Responsibilities {
       s.state !== "running"
     )
       fail("Responsibility paused, finished or superseded");
+    if (
+      s.spec.expiresAt &&
+      Date.parse(s.spec.expiresAt) <= this.clock().getTime()
+    )
+      fail("Responsibility monitoring period has expired");
     if (s.finding && a.operation !== "responsibility_report")
       fail(
         "Finding already recorded; finish this investigation before doing more work",

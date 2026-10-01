@@ -5,6 +5,8 @@ import { MiniAuth } from "../src/miniapp-auth.js";
 import { server } from "../src/server.js";
 import { telegram, sendResponsibilityApprovals } from "../src/telegram.js";
 import { readConfig } from "../src/config.js";
+import { HistoryStore } from "../src/history.js";
+import { CalendarTools } from "../src/calendar.js";
 import { readFile, readdir } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
 import { ensureUser, type Database } from "../src/db.js";
@@ -1606,6 +1608,367 @@ test("a confirmation racing lifecycle mutation rejects stale pause without suppr
         .state,
       "pending",
     );
+  } finally {
+    await f.pg.close();
+  }
+});
+test("first-match monitoring survives an irrelevant candidate and closes only on evidenced fulfillment", async () => {
+  const f = await fixture();
+  try {
+    const id = await f.create({ parcelIds: [], end: "first_match" });
+    f.setHits([{ id: "abc", threadId: "def" }]);
+    await f.worker.tick();
+    await complete(f, {
+      changed: "",
+      resolved: false,
+      proposedAttention: "drop",
+    });
+    assert.equal((await f.service.list("a"))[0].status, "active");
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT count(*)::int n FROM responsibility_findings WHERE closing",
+        )
+      ).rows[0].n,
+      0,
+    );
+    f.setHits([{ id: "abd", threadId: "def" }]);
+    await f.due();
+    await f.worker.tick();
+    await complete(f, {
+      changed: "The appointment confirmation arrived",
+      resolved: true,
+      evidence: ["gmail:primary:abd"],
+      factKey: "appointment confirmed",
+    });
+    assert.equal((await f.service.list("a"))[0].status, "resolved");
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT count(*)::int n FROM responsibility_findings WHERE closing",
+        )
+      ).rows[0].n,
+      1,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+test("Resolved suppresses a saved Later reminder and rejects Later feedback after resolution", async () => {
+  const f = await fixture();
+  try {
+    const id = await f.create({ parcelIds: [], end: "until_cancelled" }),
+      finding = randomUUID();
+    await f.db.query(
+      `INSERT INTO responsibility_findings(id,user_id,responsibility_id,revision,payload,decision,reason,fact_key,state,message_id) VALUES($1,'a',$2,1,'{"reply":"Saved update"}','now','notify','saved','sent',99)`,
+      [finding, id],
+    );
+    let sends = 0;
+    const delivery = new ResponsibilityDelivery(
+      f.service,
+      () => true,
+      async () => ({ message_id: ++sends }),
+      f.clock,
+    );
+    await delivery.feedback("a", finding, 99, "later");
+    await delivery.feedback("a", finding, 99, "resolved");
+    f.time(new Date(f.clock().getTime() + 7200000));
+    await delivery.tick();
+    assert.equal(sends, 0);
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT state FROM responsibility_findings WHERE reason='owner_resolved'",
+        )
+      ).rows[0].state,
+      "suppressed",
+    );
+    const another = randomUUID();
+    await f.db.query(
+      `INSERT INTO responsibility_findings(id,user_id,responsibility_id,revision,payload,decision,reason,fact_key,state,message_id) VALUES($1,'a',$2,1,'{"reply":"Earlier update"}','now','notify','earlier','sent',100)`,
+      [another, id],
+    );
+    await delivery.feedback("a", another, 100, "later");
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT count(*)::int n FROM responsibility_findings WHERE reason='owner_later' AND state='pending'",
+        )
+      ).rows[0].n,
+      0,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+test("all allowed owners receive expiry sweeps even beyond fifty unrelated active concerns", async () => {
+  const f = await fixture();
+  try {
+    for (let i = 0; i < 50; i++)
+      await f.create({
+        parcelIds: [],
+        gmail: undefined,
+        schedule: "every 1h",
+        end: "until_cancelled",
+        title: "Long lived " + i,
+      });
+    const run = randomUUID();
+    await f.db.query(
+      "INSERT INTO work_turns(run_id,user_id,request) VALUES($1,'b','watch until tomorrow')",
+      [run],
+    );
+    const proposal = await f.service.call("b", run, {
+      operation: "responsibility_create",
+      spec: {
+        ...f.spec,
+        parcelIds: [],
+        gmail: undefined,
+        schedule: "every 1h",
+        end: "date",
+        expiresAt: new Date(f.clock().getTime() + 60000).toISOString(),
+      },
+    });
+    await f.service.confirm("b", proposal.approvalId, true);
+    f.time(new Date(f.clock().getTime() + 120000));
+    await new ResponsibilityWorker(f.service, () => true, {}, f.clock).tick();
+    assert.equal((await f.service.list("b"))[0].status, "expired");
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT count(*)::int n FROM responsibilities WHERE status='active'",
+        )
+      ).rows[0].n,
+      50,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+test("active concerns stay visible and completed concerns remain accessible through bounded pages", async () => {
+  const f = await fixture();
+  try {
+    const active = await f.create({
+      parcelIds: [],
+      gmail: undefined,
+      schedule: "every 1h",
+      end: "until_cancelled",
+    });
+    for (let i = 0; i < 50; i++) {
+      const id = await f.create({
+        parcelIds: [],
+        gmail: undefined,
+        schedule: "every 1h",
+        end: "until_cancelled",
+        title: "Finished " + i,
+      });
+      await f.service.call("a", f.run, {
+        operation: "responsibility_update",
+        id,
+        baseRevision: 1,
+        status: "cancelled",
+      });
+    }
+    const first = await f.service.list("a");
+    assert.equal(first.length, 50);
+    assert.equal(first[0].id, active);
+    const last = await f.service.list("a", 50);
+    assert.equal(last.length, 1);
+    assert.equal(last[0].status, "cancelled");
+    assert.ok((await f.service.history("a", last[0].id)).responsibility);
+  } finally {
+    await f.pg.close();
+  }
+});
+test("expired scopes admit no new checks, launches or dispatch and stop an already queued investigation", async () => {
+  const f = await fixture();
+  try {
+    const id = await f.create({
+      parcelIds: [],
+      end: "date",
+      expiresAt: new Date(f.clock().getTime() + 60000).toISOString(),
+    });
+    f.setHits([{ id: "abc", threadId: "def" }]);
+    await f.worker.tick();
+    const task = (await f.db.query("SELECT id FROM work_tasks")).rows[0].id,
+      run = randomUUID();
+    await f.db.query(
+      "INSERT INTO work_turns(run_id,user_id,request,task_id,background) VALUES($1,'a','investigate',$2,true)",
+      [run, task],
+    );
+    const assistant = new Assistant(
+      f.db,
+      { run: async () => assert.fail("expired model execution") } as any,
+      new JobTools(
+        f.db,
+        { call: async () => ({}) },
+        f.gmail as any,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        f.service,
+      ),
+      { responsibilities: true, gmail: true },
+    );
+    f.service.onInactive = (user, concern) =>
+      assistant.interruptResponsibility(user, concern);
+    f.time(new Date(f.clock().getTime() + 120000));
+    await assert.rejects(
+      () =>
+        f.service.authorize("a", run, {
+          operation: "gmail_read",
+          messageId: "abc",
+        }),
+      /expired/,
+    );
+    const before = f.polls();
+    f.setHits([{ id: "abd", threadId: "def" }]);
+    await f.due();
+    await f.worker.tick();
+    assert.equal(f.polls(), before);
+    assert.equal((await f.service.list("a"))[0].status, "expired");
+    assert.equal(
+      (await f.db.query("SELECT status FROM work_tasks")).rows[0].status,
+      "paused",
+    );
+    await f.worker.launch("a");
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT count(*)::int n FROM responsibility_investigations",
+        )
+      ).rows[0].n,
+      1,
+    );
+    await assert.rejects(() => assistant.grant("a", task));
+  } finally {
+    await f.pg.close();
+  }
+});
+test("malformed Calendar collections and members cannot become healthy empty monitoring checks", async () => {
+  const f = await fixture();
+  try {
+    let items: unknown = "malformed";
+    const calendar = new CalendarTools(
+      {
+        owner: "a",
+        email: "fixture@example.com",
+        clientId: "fixture",
+        clientSecret: "fixture",
+        refreshToken: "fixture",
+      },
+      (async (input: unknown) => {
+        const url = String(input);
+        return Response.json(
+          url.includes("oauth2.googleapis.com")
+            ? { access_token: "fixture" }
+            : url.includes("/userinfo")
+              ? { email: "fixture@example.com" }
+              : { items },
+        );
+      }) as typeof fetch,
+    );
+    const service = new Responsibilities(f.db, { calendar }, f.clock),
+      worker = new ResponsibilityWorker(
+        service,
+        () => true,
+        { calendar },
+        f.clock,
+      ),
+      p = await service.call("a", f.run, {
+        operation: "responsibility_create",
+        spec: {
+          ...f.spec,
+          parcelIds: [],
+          gmail: undefined,
+          calendar: { leadHours: 2, internalDomains: [] },
+          end: "until_cancelled",
+        },
+      });
+    await service.confirm("a", p.approvalId, true);
+    await worker.tick();
+    let trigger = (await f.db.query("SELECT * FROM responsibility_triggers"))
+      .rows[0];
+    assert.equal(trigger.health, "degraded");
+    assert.equal(trigger.last_success, null);
+    assert.equal(
+      (await f.db.query("SELECT count(*)::int n FROM work_tasks")).rows[0].n,
+      0,
+    );
+    items = [null];
+    await f.due();
+    await worker.tick();
+    trigger = (await f.db.query("SELECT * FROM responsibility_triggers"))
+      .rows[0];
+    assert.equal(trigger.health, "degraded");
+    assert.equal(trigger.last_success, null);
+  } finally {
+    await f.pg.close();
+  }
+});
+test("resumed responsibility context keeps isolated background history but excludes a later foreground-bound run", async () => {
+  const f = await fixture();
+  try {
+    await f.create({ parcelIds: [], end: "until_cancelled" });
+    f.setHits([{ id: "abc", threadId: "def" }]);
+    await f.worker.tick();
+    const task = (await f.db.query("SELECT id FROM work_tasks")).rows[0].id,
+      background = randomUUID(),
+      foreground = randomUUID();
+    for (const [run, bg, minutes, content] of [
+      [background, true, 2, "ISOLATED_BACKGROUND_REFERENCE"],
+      [foreground, false, 1, "UNRELATED_FOREGROUND_SECRET"],
+    ] as const) {
+      await f.db.query(
+        "INSERT INTO runtime_runs(id,user_id,task_id,state,stop_reason,started_at) VALUES($1,'a',$2,'stopped','awaiting_user',now()-$3::int*interval '1 minute')",
+        [run, task, minutes],
+      );
+      await f.db.query(
+        "INSERT INTO work_turns(run_id,user_id,request,task_id,background) VALUES($1,'a','previous run',$2,$3)",
+        [run, task, bg],
+      );
+      await new HistoryStore(f.db).append("a", run, 0, [
+        { role: "user", content },
+      ]);
+    }
+    const assistant = new Assistant(
+      f.db,
+      {
+        run: async (req) => {
+          assert.match(
+            JSON.stringify(req.history),
+            /ISOLATED_BACKGROUND_REFERENCE/,
+          );
+          assert.doesNotMatch(
+            JSON.stringify(req.history),
+            /UNRELATED_FOREGROUND_SECRET/,
+          );
+          return {
+            reply: "Paused safely.",
+            history: req.history,
+            stopReason: "awaiting_user",
+          };
+        },
+      },
+      new JobTools(
+        f.db,
+        { call: async () => ({}) },
+        f.gmail as any,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        f.service,
+      ),
+      { responsibilities: true, gmail: true },
+    );
+    await assistant.resumeDetailed("a", task);
   } finally {
     await f.pg.close();
   }

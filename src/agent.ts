@@ -368,7 +368,8 @@ export class Assistant {
       if (
         !scope ||
         scope.status !== "active" ||
-        scope.current_revision !== scope.revision
+        scope.current_revision !== scope.revision ||
+        (scope as any).expired
       )
         throw new Error(
           "Responsibility disabled, inactive or superseded; resume the concern first, or cancel its old investigation",
@@ -532,7 +533,9 @@ export class Assistant {
       const previousRun = background
         ? (
             await this.db.query(
-              "SELECT id FROM runtime_runs WHERE task_id=$1 AND user_id=$2 ORDER BY started_at DESC,id DESC LIMIT 1",
+              current?.delivery_context?.source === "responsibility"
+                ? "SELECT r.id FROM runtime_runs r JOIN work_turns w ON w.run_id=r.id AND w.user_id=r.user_id WHERE r.task_id=$1 AND r.user_id=$2 AND w.background=true ORDER BY r.started_at DESC,r.id DESC LIMIT 1"
+                : "SELECT id FROM runtime_runs WHERE task_id=$1 AND user_id=$2 ORDER BY started_at DESC,id DESC LIMIT 1",
               [current?.id, user],
             )
           ).rows[0]?.id
@@ -1051,7 +1054,8 @@ export class Assistant {
       if (responsibility) {
         if (
           responsibility.status !== "active" ||
-          responsibility.revision !== responsibility.current_revision
+          responsibility.revision !== responsibility.current_revision ||
+          (responsibility as any).expired
         )
           throw new Error("Responsibility inactive or superseded");
         const allowed =
@@ -1066,7 +1070,7 @@ export class Assistant {
         scopedTools.push({
           name: "responsibility_report",
           description:
-            "Save the structured finding with evidence keys from candidate changes or exact subjects. Empty changed means nothing actionable changed. Save this once after all investigation work, then finish_turn. The host decides attention and completion.",
+            "Save the structured finding with evidence keys from candidate changes or exact subjects. Empty changed means nothing actionable changed. resolved=true is a proposal only when the confirmed first-match outcome is fulfilled by referenced evidence; an irrelevant or unchanged candidate is not resolution. Save this once after all investigation work, then finish_turn. The host decides attention and completion.",
           parameters: jsonSchema(
             responsibilityReport.omit({ operation: true }),
           ),

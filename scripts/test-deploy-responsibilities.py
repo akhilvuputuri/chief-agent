@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Offline operator-rollout tests: subprocesses, database and health are stubbed."""
 import contextlib
+import hashlib
 import importlib.util
 import io
 import pathlib
@@ -35,7 +36,7 @@ class ResponsibilityRolloutTests(unittest.TestCase):
         self.scenario(baseline='b' * 40, expected_error='exact documented baseline')
 
     def scenario(self, *, running=0, pending=0, baseline=None, requested_sha=SHA,
-                 archive_sha=SHA, changes=None, unsafe=None, health=None,
+                 archive_sha=SHA, changes=None, unsafe=None, health=None, artifact_digest=None,
                  build_failure=False, migration_failure=False, publish_failure=False,
                  expected_error=None, expected_migration=False):
         with tempfile.TemporaryDirectory() as directory:
@@ -125,7 +126,7 @@ class ResponsibilityRolloutTests(unittest.TestCase):
             output = io.StringIO()
             with patch.object(release, 'LIVE', live), \
                     patch.object(release, 'LOCK', root / 'release.lock'), \
-                    patch.object(sys, 'argv', ['deploy-responsibilities.py', str(archive_path), requested_sha]), \
+                    patch.object(sys, 'argv', ['deploy-responsibilities.py', str(archive_path), requested_sha, artifact_digest or hashlib.sha256(archive_path.read_bytes()).hexdigest()]), \
                     patch.object(release, 'run', side_effect=run), \
                     patch.object(release, 'compose', side_effect=compose), \
                     patch.object(release, 'sql', side_effect=sql), \
@@ -207,6 +208,26 @@ class ResponsibilityRolloutTests(unittest.TestCase):
 
     def test_default_on_is_not_an_implicit_rollout(self):
         self.scenario(changes={'compose.yaml': expected_compose().replace('RESPONSIBILITIES:-off', 'RESPONSIBILITIES:-on')}, expected_error='Unexpected Compose change')
+
+    def test_forged_label_without_trusted_artifact_digest_refuses_before_build(self):
+        self.scenario(changes={'src/main.ts': '// unreviewed replacement'}, artifact_digest='b'*64, expected_error='Archive checksum')
+
+    def test_extracts_the_same_bytes_even_if_archive_path_changes_after_hashing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            archive_path, stage = root/'source.tar', root/'stage'
+            stage.mkdir()
+            with tarfile.open(archive_path, mode='w', format=tarfile.PAX_FORMAT, pax_headers={'comment':SHA}) as archive:
+                member=tarfile.TarInfo('source.txt');member.size=len(b'reviewed');archive.addfile(member,io.BytesIO(b'reviewed'))
+            trusted=hashlib.sha256(archive_path.read_bytes()).hexdigest()
+            original=hashlib.sha256
+            def mutate_path(payload):
+                result=original(payload)
+                archive_path.write_bytes(b'changed after hashing')
+                return result
+            with patch.object(release.hashlib,'sha256',side_effect=mutate_path):
+                release.unpack(archive_path,SHA,stage,trusted)
+            self.assertEqual((stage/'source.txt').read_text(),'reviewed')
 
     def test_build_and_baseline_health_failures_do_not_stop_gateway(self):
         self.scenario(build_failure=True, expected_error='Candidate build failed')

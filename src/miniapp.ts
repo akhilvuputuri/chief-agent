@@ -116,7 +116,7 @@ export async function miniapp(
       if (config.responsibilities) {
         const responsibilities = new Responsibilities(db);
         api.get("/responsibilities", async (req) =>
-          responsibilities.list(owner(req)),
+          responsibilities.list(owner(req), page(req.query).offset),
         );
         api.get("/responsibilities/:id", async (req, reply) => {
           const { id } = z.object({ id: z.string().uuid() }).parse(req.params);

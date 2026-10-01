@@ -38,6 +38,26 @@ export class ResponsibilityWorker {
     if (this.busy) return;
     this.busy = true;
     try {
+      const activeOwnerRows = (
+        await this.db.query(
+          "SELECT DISTINCT user_id FROM responsibilities WHERE status='active'",
+        )
+      ).rows;
+      const permitted: string[] = [];
+      for (const { user_id } of activeOwnerRows) {
+        if (this.allowed(user_id)) permitted.push(user_id);
+        else {
+          const paused = (
+            await this.db.query(
+              "UPDATE responsibilities SET status='paused' WHERE user_id=$1 AND status='active' RETURNING id",
+              [user_id],
+            )
+          ).rows;
+          for (const row of paused)
+            await this.service.onInactive?.(user_id, row.id);
+        }
+      }
+      await this.sweep(permitted, true);
       await this.completeReady();
       const paused = (
         await this.db.query(
@@ -54,8 +74,8 @@ export class ResponsibilityWorker {
         await this.db.query(
           `SELECT t.*,v.spec FROM responsibility_triggers t JOIN responsibilities r ON r.id=t.responsibility_id AND r.revision=t.revision
         JOIN responsibility_revisions v ON v.responsibility_id=t.responsibility_id AND v.revision=t.revision
-        WHERE r.status='active' AND t.next_check<=$1 AND (t.lease_until IS NULL OR t.lease_until<$1) ORDER BY t.next_check LIMIT 20`,
-          [this.clock()],
+        WHERE r.status='active' AND t.user_id=ANY($2::text[]) AND (v.spec->>'expiresAt' IS NULL OR (v.spec->>'expiresAt')::timestamptz>$1) AND t.next_check<=$1 AND (t.lease_until IS NULL OR t.lease_until<$1) ORDER BY t.next_check LIMIT 20`,
+          [this.clock(), permitted],
         )
       ).rows;
       for (const t of rows) {
@@ -105,7 +125,7 @@ export class ResponsibilityWorker {
       ).rows;
       for (const { user_id } of owners)
         if (this.allowed(user_id)) await this.launch(user_id);
-      await this.sweep();
+      await this.sweep(permitted);
     } finally {
       this.busy = false;
     }
@@ -263,6 +283,7 @@ export class ResponsibilityWorker {
     );
   }
   async launch(user: string) {
+    if (!this.allowed(user)) return { rows: [] };
     const now = this.clock(),
       task = randomUUID();
     // One owner row serializes the two daily caps across every responsibility.
@@ -270,7 +291,7 @@ export class ResponsibilityWorker {
       tx.query(
         `WITH owner_lock AS (SELECT id FROM users WHERE id=$1 FOR UPDATE),
       selected AS (SELECT r.*,v.spec FROM responsibilities r JOIN responsibility_revisions v ON v.responsibility_id=r.id AND v.revision=r.revision,owner_lock
-        WHERE r.user_id=$1 AND r.status='active'
+        WHERE r.user_id=$1 AND r.status='active' AND (v.spec->>'expiresAt' IS NULL OR (v.spec->>'expiresAt')::timestamptz>$4)
         AND EXISTS(SELECT 1 FROM responsibility_candidates c WHERE c.responsibility_id=r.id AND c.revision=r.revision AND c.task_id IS NULL)
         AND NOT EXISTS(SELECT 1 FROM responsibility_investigations i JOIN work_tasks t ON t.id=i.task_id WHERE i.responsibility_id=r.id AND t.status NOT IN ('done','cancelled'))
         AND (SELECT count(*) FROM responsibility_investigations i WHERE i.user_id=$1 AND (i.created_at AT TIME ZONE 'Asia/Singapore')::date=$2::date)<25
@@ -282,7 +303,7 @@ export class ResponsibilityWorker {
       i AS (INSERT INTO responsibility_investigations(task_id,user_id,responsibility_id,revision) SELECT $3,$1,s.id,s.revision FROM selected s,task RETURNING task_id),
       batch AS (SELECT c.id FROM responsibility_candidates c,selected s WHERE c.responsibility_id=s.id AND c.revision=s.revision AND c.task_id IS NULL ORDER BY c.created_at,c.id LIMIT (SELECT CASE WHEN spec ? 'calendar' THEN 1 ELSE 30 END FROM selected))
       UPDATE responsibility_candidates SET task_id=$3 WHERE id IN (SELECT id FROM batch) AND EXISTS(SELECT 1 FROM i) RETURNING id`,
-        [user, day(now), task],
+        [user, day(now), task, now],
       ),
     );
   }
@@ -340,7 +361,15 @@ export class ResponsibilityWorker {
       if (s) await this.finalize(s, r.report_run);
     }
   }
-  private async terminal(s: Scope) {
+  private async terminal(
+    s: Scope,
+    finding?: {
+      resolved: boolean;
+      changed: string;
+      evidence: string[];
+      proposedAttention: string;
+    },
+  ) {
     if (s.spec.end === "all_parcels_terminal") {
       const rows = (
         await this.db.query(
@@ -355,7 +384,13 @@ export class ResponsibilityWorker {
         )
       );
     }
-    return s.spec.end === "first_match" && s.candidates.length > 0;
+    return (
+      s.spec.end === "first_match" &&
+      !!finding?.resolved &&
+      !!finding.changed.trim() &&
+      finding.evidence.length > 0 &&
+      finding.proposedAttention !== "drop"
+    );
   }
   private async finalize(s: Scope, run: string) {
     const finished = (
@@ -374,7 +409,7 @@ export class ResponsibilityWorker {
     if (s.state !== "running") return;
     const f = responsibilityFinding.parse(s.finding),
       now = this.clock();
-    const resolved = await this.terminal(s);
+    const resolved = await this.terminal(s, f);
     const key = hash([
       s.spec.parcelIds.length ? "parcels" : "finding",
       s.spec.parcelIds.length
@@ -452,10 +487,12 @@ export class ResponsibilityWorker {
       );
       f.reply += "\nI’ve stopped watching; the end condition is met.";
     }
-    if (s.status !== "active" || s.current_revision !== s.revision)
+    const expired =
+      s.spec.expiresAt && Date.parse(s.spec.expiresAt) <= now.getTime();
+    if (s.status !== "active" || s.current_revision !== s.revision || expired)
       decision = {
         decision: "drop",
-        reason: "superseded_or_inactive",
+        reason: expired ? "responsibility_expired" : "superseded_or_inactive",
         due: null,
       };
     await this.db.query(
@@ -464,7 +501,7 @@ export class ResponsibilityWorker {
         SELECT gen_random_uuid(),$2,responsibility_id,revision,$1,$3::jsonb,$4,$5,$6,$7,$8,CASE WHEN $7::timestamptz IS NULL THEN 'quiet' ELSE 'pending' END FROM completed ON CONFLICT DO NOTHING),
       task AS (UPDATE work_tasks SET status='done',pause_reason=NULL WHERE id=$1 AND EXISTS(SELECT 1 FROM completed))
       UPDATE responsibilities SET understanding=$9,status=CASE WHEN $8::boolean THEN 'resolved' ELSE status END,updated_at=now()
-      WHERE id=$10 AND user_id=$2 AND revision=$11 AND status='active' AND EXISTS(SELECT 1 FROM completed)`,
+      WHERE id=$10 AND user_id=$2 AND revision=$11 AND status='active' AND $12::boolean AND EXISTS(SELECT 1 FROM completed)`,
       [
         s.task_id,
         s.user_id,
@@ -473,17 +510,28 @@ export class ResponsibilityWorker {
         decision.reason,
         key,
         decision.due,
-        resolved && s.status === "active" && s.current_revision === s.revision,
+        resolved &&
+          s.status === "active" &&
+          s.current_revision === s.revision &&
+          !expired,
         f.understanding,
         s.responsibility_id,
         s.revision,
+        !expired,
       ],
     );
   }
-  private async sweep() {
+  private async sweep(permitted: string[], expiredOnly = false) {
     const rows = (
       await this.db.query(
-        `SELECT r.*,v.spec FROM responsibilities r JOIN responsibility_revisions v ON v.responsibility_id=r.id AND v.revision=r.revision WHERE r.status='active' LIMIT 50`,
+        `SELECT r.*,v.spec FROM responsibilities r JOIN responsibility_revisions v ON v.responsibility_id=r.id AND v.revision=r.revision
+        WHERE r.status='active' AND r.user_id=ANY($2::text[]) AND (
+          (v.spec->>'expiresAt' IS NOT NULL AND (v.spec->>'expiresAt')::timestamptz<=$1)
+          OR (NOT $3::boolean AND v.spec->>'end'='all_parcels_terminal' AND jsonb_array_length(v.spec->'parcelIds')>0
+            AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements_text(v.spec->'parcelIds') watched LEFT JOIN parcels p ON p.id=watched::uuid AND p.user_id=r.user_id WHERE p.id IS NULL OR (p.archived_at IS NULL AND p.status NOT IN ('delivered','cancelled')))
+            AND NOT EXISTS(SELECT 1 FROM responsibility_investigations i JOIN work_tasks t ON t.id=i.task_id WHERE i.responsibility_id=r.id AND i.state='running' AND t.status='running')))
+        ORDER BY r.id LIMIT 50`,
+        [this.clock(), permitted, expiredOnly],
       )
     ).rows;
     for (const r of rows) {
@@ -501,9 +549,10 @@ export class ResponsibilityWorker {
       if (!expired && !terminal) continue;
       // Let a running investigation combine the final finding and closing message.
       if (
+        !expired &&
         (
           await this.db.query(
-            `SELECT 1 FROM responsibility_investigations i JOIN work_tasks t ON t.id=i.task_id WHERE i.responsibility_id=$1 AND i.state='running' AND t.status IN ('queued','running')`,
+            `SELECT 1 FROM responsibility_investigations i JOIN work_tasks t ON t.id=i.task_id WHERE i.responsibility_id=$1 AND i.state='running' AND t.status='running'`,
             [r.id],
           )
         ).rows.length
@@ -514,10 +563,11 @@ export class ResponsibilityWorker {
         r.spec.silentClosing ? "quiet" : "now",
         this.clock(),
       );
-      await this.db.query(
+      const closed = await this.db.query(
         `WITH closed AS (UPDATE responsibilities SET status=$3,updated_at=now() WHERE id=$1 AND user_id=$2 AND revision=$4 AND status='active' RETURNING *)
-        INSERT INTO responsibility_findings(id,user_id,responsibility_id,revision,payload,decision,reason,fact_key,due_at,closing,state)
-        SELECT gen_random_uuid(),user_id,id,revision,jsonb_build_object('reply',$5),$6,'end_condition','closing',$7,true,CASE WHEN $7::timestamptz IS NULL THEN 'quiet' ELSE 'pending' END FROM closed ON CONFLICT DO NOTHING`,
+        , saved AS (INSERT INTO responsibility_findings(id,user_id,responsibility_id,revision,payload,decision,reason,fact_key,due_at,closing,state)
+        SELECT gen_random_uuid(),user_id,id,revision,jsonb_build_object('reply',$5::text),$6,'end_condition','closing',$7,true,CASE WHEN $7::timestamptz IS NULL THEN 'quiet' ELSE 'pending' END FROM closed ON CONFLICT DO NOTHING)
+        SELECT id FROM closed`,
         [
           r.id,
           r.user_id,
@@ -528,6 +578,8 @@ export class ResponsibilityWorker {
           d.due,
         ],
       );
+      for (const row of closed.rows)
+        await this.service.onInactive?.(r.user_id, row.id);
     }
   }
 }
@@ -584,7 +636,10 @@ export class ResponsibilityDelivery {
         if (
           !this.allowed(f.user_id) ||
           f.revision !== f.current_revision ||
-          (!f.closing && f.reason !== "owner_later" && f.status !== "active") ||
+          (!f.closing && f.status !== "active") ||
+          (!f.closing &&
+            f.spec.expiresAt &&
+            Date.parse(f.spec.expiresAt) <= this.clock().getTime()) ||
           ["paused", "cancelled"].includes(f.status)
         ) {
           await this.db.query(
@@ -664,7 +719,8 @@ export class ResponsibilityDelivery {
                 AND EXISTS(SELECT 1 FROM responsibility_findings x WHERE x.user_id=$2 AND x.id<>f.id AND x.fact_key=f.fact_key AND x.state IN ('sending','sent','uncertain') AND x.due_at>$4::timestamptz-interval '24 hours') RETURNING f.id
               ),eligible AS (
           SELECT f.id FROM responsibility_findings f JOIN responsibilities r ON r.id=f.responsibility_id AND r.revision=f.revision,owner_lock
-          WHERE f.id=$1 AND f.user_id=$2 AND f.state='pending' AND (r.status='active' OR ((f.closing OR f.reason='owner_later') AND r.status IN ('resolved','expired')))
+          WHERE f.id=$1 AND f.user_id=$2 AND f.state='pending' AND (r.status='active' OR (f.closing AND r.status IN ('resolved','expired')))
+          AND (f.closing OR NOT EXISTS(SELECT 1 FROM responsibility_revisions v WHERE v.responsibility_id=r.id AND v.revision=r.revision AND (v.spec->>'expiresAt')::timestamptz<=$4))
           AND NOT EXISTS(SELECT 1 FROM duplicate)
           AND (f.decision='briefing' OR ((SELECT count(*) FROM responsibility_findings x WHERE x.user_id=$2 AND x.state IN ('sending','sent','uncertain') AND x.decision='now' AND (x.due_at AT TIME ZONE 'Asia/Singapore')::date=$3::date)<8
           AND (SELECT count(*) FROM responsibility_findings x WHERE x.responsibility_id=f.responsibility_id AND x.state IN ('sending','sent','uncertain') AND x.decision='now' AND (x.due_at AT TIME ZONE 'Asia/Singapore')::date=$3::date)<greatest(1,3+r.attention_weight)))
@@ -731,24 +787,29 @@ export class ResponsibilityDelivery {
       )
     ).rows[0];
     if (!f || f.revision !== f.current_revision) return;
-    await this.db.query(
-      `WITH voted AS (INSERT INTO responsibility_feedback(finding_id,user_id,choice)
+    await withResponsibilityOwner(this.db, user, (tx) =>
+      tx.query(
+        `WITH voted AS (INSERT INTO responsibility_feedback(finding_id,user_id,choice)
       SELECT $1,$2,$4 FROM responsibility_findings f JOIN responsibilities r ON r.id=f.responsibility_id
       WHERE f.id=$1 AND f.user_id=$2 AND f.message_id=$3 AND f.state='sent' AND r.revision=$5 AND f.revision=$5
+      AND ($4<>'later' OR (r.status='active' AND NOT EXISTS(SELECT 1 FROM responsibility_revisions v WHERE v.responsibility_id=r.id AND v.revision=r.revision AND (v.spec->>'expiresAt')::timestamptz<=$7)))
       ON CONFLICT DO NOTHING RETURNING finding_id), feedback AS (UPDATE responsibility_findings SET feedback=$4 WHERE id IN (SELECT finding_id FROM voted) RETURNING *),
       changed AS (UPDATE responsibilities SET status=CASE WHEN $4='resolved' THEN 'resolved' ELSE status END,
         attention_weight=CASE WHEN $4='less' THEN greatest(-3,attention_weight-1) ELSE attention_weight END,updated_at=now()
-      WHERE id=(SELECT responsibility_id FROM feedback) AND user_id=$2 AND revision=$5 RETURNING id)
+      WHERE id=(SELECT responsibility_id FROM feedback) AND user_id=$2 AND revision=$5 RETURNING id),
+      stopped AS (UPDATE responsibility_findings SET state='suppressed',reason='owner_resolved' WHERE responsibility_id IN (SELECT id FROM changed) AND revision=$5 AND user_id=$2 AND state='pending' AND $4='resolved')
       INSERT INTO responsibility_findings(id,user_id,responsibility_id,revision,payload,decision,reason,fact_key,due_at,state)
       SELECT gen_random_uuid(),user_id,responsibility_id,revision,payload,'briefing','owner_later',fact_key,$6,'pending' FROM feedback WHERE $4='later'`,
-      [
-        id,
-        user,
-        message,
-        choice,
-        f.revision,
-        new Date(this.clock().getTime() + 3600000),
-      ],
+        [
+          id,
+          user,
+          message,
+          choice,
+          f.revision,
+          new Date(this.clock().getTime() + 3600000),
+          this.clock(),
+        ],
+      ),
     );
     if (choice === "resolved")
       await this.service.onInactive?.(user, f.responsibility_id);

@@ -83,7 +83,10 @@ export const responsibilityUpdate = z
   })
   .strict();
 export const responsibilityList = z
-  .object({ operation: z.literal("responsibility_list") })
+  .object({
+    operation: z.literal("responsibility_list"),
+    offset: z.number().int().min(0).max(10000).default(0),
+  })
   .strict();
 export const responsibilityHistory = z
   .object({
@@ -103,6 +106,7 @@ export const responsibilityFinding = z
     factKey: z.string().min(1).max(300),
     proposedAttention: z.enum(["now", "briefing", "quiet", "drop"]),
     actionRequired: z.boolean().default(false),
+    resolved: z.boolean().default(false),
   })
   .strict();
 export const responsibilityReport = z

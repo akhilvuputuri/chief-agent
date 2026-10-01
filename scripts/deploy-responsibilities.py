@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """Reviewed one-time operator rollout for responsibilities migration 023."""
 import fcntl
+import hashlib
+import io
 import json
+import os
 import pathlib
 import re
 import shutil
 import subprocess
 import sys
+import stat
 import tarfile
 import tempfile
 import time
@@ -55,11 +59,21 @@ def healthy():
     return False
 
 
-def unpack(archive_path, sha, stage):
+def unpack(archive_path, sha, stage, expected_digest):
     path = pathlib.Path(archive_path)
     if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_ARCHIVE_BYTES:
         raise RuntimeError('Expected a bounded regular git archive')
-    with tarfile.open(path) as archive:
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(descriptor, 'rb') as source:
+        if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+            raise RuntimeError('Expected a regular source archive')
+        payload = source.read(MAX_ARCHIVE_BYTES + 1)
+    if len(payload) > MAX_ARCHIVE_BYTES:
+        raise RuntimeError('Release archive too large')
+    if hashlib.sha256(payload).hexdigest() != expected_digest:
+        raise RuntimeError('Archive checksum does not match the independently trusted artifact digest')
+    # Extract the exact immutable bytes that were hashed, never reopen a mutable path.
+    with tarfile.open(fileobj=io.BytesIO(payload)) as archive:
         if archive.pax_headers.get('comment') != sha:
             raise RuntimeError('Archive commit does not match requested SHA')
         members = archive.getmembers()
@@ -161,9 +175,9 @@ def write_release(content):
 
 
 def main():
-    if len(sys.argv) != 3 or not re.fullmatch('[0-9a-f]{40}', sys.argv[2]):
-        raise RuntimeError('Usage: deploy-responsibilities.py <git-archive.tar> <exact reviewed main SHA>')
-    archive_path, sha = sys.argv[1:]
+    if len(sys.argv) != 4 or not re.fullmatch('[0-9a-f]{40}', sys.argv[2]) or not re.fullmatch('[0-9a-f]{64}', sys.argv[3]):
+        raise RuntimeError('Usage: deploy-responsibilities.py <git-archive.tar> <exact reviewed main SHA> <independently trusted archive SHA256>')
+    archive_path, sha, expected_digest = sys.argv[1:]
     with open(LOCK, 'w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         old_release = (LIVE / 'RELEASE').read_bytes()
@@ -173,7 +187,7 @@ def main():
             stage, backup = pathlib.Path(temporary) / 'stage', pathlib.Path(temporary) / 'backup'
             stage.mkdir()
             backup.mkdir()
-            unpack(archive_path, sha, stage)
+            unpack(archive_path, sha, stage, expected_digest)
             validate_changes(stage)
             original = backup_source(stage, backup)
             candidate = IMAGE + ':' + sha

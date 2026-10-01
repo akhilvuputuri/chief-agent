@@ -5,6 +5,60 @@ import {
   validateDraft,
 } from "./calendar-draft.js";
 import { boundedBytes } from "./providers.js";
+import { z } from "zod";
+const calendarTime = z
+  .object({
+    date: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+    dateTime: z.string().datetime({ offset: true }).optional(),
+    timeZone: z.string().optional(),
+  })
+  .passthrough()
+  .refine(
+    (t) => !!(t.date || t.dateTime),
+    "Calendar time requires date or dateTime",
+  );
+const monitoringEvent = z
+  .object({
+    id: z.string().min(1).max(1024),
+    status: z.enum(["confirmed", "tentative", "cancelled"]).optional(),
+    recurringEventId: z.string().min(1).max(1024).optional(),
+    originalStartTime: calendarTime.optional(),
+    attendeesOmitted: z.boolean().optional(),
+    summary: z.string().optional(),
+    location: z.string().optional(),
+    htmlLink: z.string().url().optional(),
+    start: calendarTime.optional(),
+    end: calendarTime.optional(),
+    attendees: z
+      .array(
+        z
+          .object({
+            email: z.string().optional(),
+            self: z.boolean().optional(),
+            resource: z.boolean().optional(),
+            responseStatus: z.string().optional(),
+          })
+          .passthrough(),
+      )
+      .optional(),
+  })
+  .passthrough()
+  .refine(
+    (e) =>
+      e.status === "cancelled" ||
+      (!!(e.start?.date || e.start?.dateTime) &&
+        !!(e.end?.date || e.end?.dateTime)),
+    "Active Calendar events require start and end",
+  );
+const monitoringPage = z
+  .object({
+    items: z.array(monitoringEvent).max(100).default([]),
+    nextPageToken: z.string().min(1).max(2000).optional(),
+  })
+  .passthrough();
 /** Google answered with a non-success HTTP status. */
 export class GoogleHttpError extends Error {
   constructor(readonly status: number) {
@@ -221,6 +275,9 @@ export class CalendarTools {
           signal: AbortSignal.timeout(15000),
         }),
       );
+      if (r.items !== undefined && !Array.isArray(r.items))
+        throw new Error("Invalid Calendar event collection");
+      if (monitoring) r = monitoringPage.parse(r);
       items.push(...(r.items ?? []).slice(0, 100));
       if (!r.nextPageToken) break;
       url.searchParams.set("pageToken", String(r.nextPageToken));
