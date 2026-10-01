@@ -48,7 +48,7 @@ export async function taskDelivery(
   ).rows[0];
   if (!saved) throw new Error("Unknown delivery task");
   const context = saved.delivery_context ?? {};
-  const owner = context.source === "owner";
+  const owner = context.source === "owner" || (!context.source && !saved.name);
   const target = destination({
     kind: owner ? "owner_work" : "unprompted",
     threadId: context.threadId,

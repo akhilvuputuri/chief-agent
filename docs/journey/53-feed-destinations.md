@@ -25,3 +25,7 @@ Email is retired by renaming its topic Updates, preserving any new messages. Aut
 Focused mocked runtime tests exercise mixed-thread queueing, FIFO boundaries, delivery fences and restart recovery. The unchanged same-thread steering regressions remain part of validation. Full checks, independent exact-head review and operator rollout are pending at this checkpoint; neither package version nor code presence establishes release.
 
 This stage does not yet resolve references to raw feed posts. The second stage records sent feed identities, supplies bounded recent-feed context and an owner-scoped reading path. CloudWatch telemetry describes structural routing outcomes; Postgres remains authoritative for content and actions. No new routing model calls or infrastructure are introduced.
+
+## Independent review follow-up
+
+The first review requested changes after reproducing a slow-attachment/cross-thread queue gap, supersession during an approval claim, definite Telegram rejection leaving a card permanently claimed, a slow pointer announcing a withheld answer, and an operator build missing its release identity. Fixes add draining handler slots, a post-claim freshness check, definite-rejection recovery with flood-control delay while unknown sends remain uncertain, pointer gating on actual answer-send evidence, and `RELEASE_SHA` in the operator build. Dedicated regressions cover the reproduced failures. Re-review and release remain pending.

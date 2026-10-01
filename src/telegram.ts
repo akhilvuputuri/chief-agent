@@ -813,7 +813,49 @@ async function sendApprovalMessage(
     throw error;
   }
 }
-async function sendSlowPointer(
+async function claimedApprovalMessage(
+  bot: Bot,
+  db: Database,
+  user: string,
+  id: string,
+  text: string,
+  options: Parameters<Bot["api"]["sendMessage"]>[2],
+  guard?: () => Promise<boolean>,
+) {
+  if (guard && !(await guard())) {
+    await db.query(
+      "UPDATE approvals SET payload=payload-'telegramDeliveryState' WHERE id=$1 AND user_id=$2 AND payload->>'telegramDeliveryState'='sending' AND NOT(payload ? 'telegramMessageId')",
+      [id, user],
+    );
+    return undefined;
+  }
+  try {
+    return await sendApprovalMessage(bot, user, text, options);
+  } catch (error) {
+    const e = error as {
+      error_code?: number;
+      parameters?: { retry_after?: number };
+    };
+    if (
+      typeof e.error_code === "number" &&
+      e.error_code >= 400 &&
+      e.error_code < 500
+    ) {
+      const wait = Math.max(0, Math.min(86400, e.parameters?.retry_after ?? 0));
+      await db.query(
+        "UPDATE approvals SET payload=(payload-'telegramDeliveryState') || jsonb_build_object('telegramRetryAt',$3::text) WHERE id=$1 AND user_id=$2 AND NOT(payload ? 'telegramMessageId')",
+        [id, user, new Date(Date.now() + wait * 1000).toISOString()],
+      );
+    } else {
+      await db.query(
+        "UPDATE approvals SET payload=jsonb_set(payload,'{telegramDeliveryState}','\"uncertain\"') WHERE id=$1 AND user_id=$2 AND NOT(payload ? 'telegramMessageId')",
+        [id, user],
+      );
+    }
+    throw error;
+  }
+}
+export async function sendSlowPointer(
   bot: Bot,
   db: Database,
   user: string,
@@ -835,6 +877,13 @@ async function sendSlowPointer(
     })
   )
     return;
+  const delivered = (
+    await db.query(
+      "SELECT 1 FROM events WHERE user_id=$1 AND run_id=$2 AND type IN ('telegram.message_sent','telegram.view_opened') AND data->>'kind'='answer' AND data->>'messageId' IS NOT NULL LIMIT 1",
+      [user, run],
+    )
+  ).rows.length;
+  if (!delivered) return;
   const claim = await db.query(
     "INSERT INTO events(user_id,run_id,type,data) VALUES($1,$2,'telegram.slow_pointer_claimed','{}') ON CONFLICT DO NOTHING RETURNING id",
     [user, run],
@@ -884,13 +933,15 @@ async function sendCalendarApprovalsOnce(
   for (const row of rows) {
     if (guard && !(await guard())) return;
     const claimed = await db.query(
-      "UPDATE approvals SET payload=payload || jsonb_build_object('telegramDeliveryState','sending','telegramThreadId',$3::bigint) WHERE id=$1 AND user_id=$2 AND NOT(payload ? 'telegramMessageId') AND NOT(payload ? 'telegramDeliveryState') RETURNING id",
+      "UPDATE approvals SET payload=payload || jsonb_build_object('telegramDeliveryState','sending','telegramThreadId',$3::bigint) WHERE id=$1 AND user_id=$2 AND NOT(payload ? 'telegramMessageId') AND NOT(payload ? 'telegramDeliveryState') AND COALESCE((payload->>'telegramRetryAt')::timestamptz,'epoch'::timestamptz)<=now() RETURNING id",
       [row.id, user, run && family.has(row.run_id) ? (thread ?? null) : null],
     );
     if (!claimed.rows.length) continue;
-    const message = await sendApprovalMessage(
+    const message = await claimedApprovalMessage(
       bot,
+      db,
       user,
+      row.id,
       calendarPreview(validateDraft(row.payload.draft)),
       {
         ...inThread(run && family.has(row.run_id) ? thread : undefined),
@@ -903,7 +954,9 @@ async function sendCalendarApprovalsOnce(
           ],
         },
       },
+      guard,
     );
+    if (!message) return;
     await db.query(
       `UPDATE approvals SET payload=jsonb_set(payload,'{telegramMessageId}',$3::jsonb) || '{"telegramDeliveryState":"sent"}'::jsonb WHERE id=$1 AND user_id=$2`,
       [row.id, user, JSON.stringify(message.message_id)],
@@ -939,13 +992,15 @@ async function sendLibraryApprovalsOnce(
   for (const row of rows) {
     if (guard && !(await guard())) return;
     const claimed = await db.query(
-      "UPDATE approvals SET payload=payload || jsonb_build_object('telegramDeliveryState','sending','telegramThreadId',$3::bigint) WHERE id=$1 AND user_id=$2 AND NOT(payload ? 'telegramMessageId') AND NOT(payload ? 'telegramDeliveryState') RETURNING id",
+      "UPDATE approvals SET payload=payload || jsonb_build_object('telegramDeliveryState','sending','telegramThreadId',$3::bigint) WHERE id=$1 AND user_id=$2 AND NOT(payload ? 'telegramMessageId') AND NOT(payload ? 'telegramDeliveryState') AND COALESCE((payload->>'telegramRetryAt')::timestamptz,'epoch'::timestamptz)<=now() RETURNING id",
       [row.id, user, run && family.has(row.run_id) ? (thread ?? null) : null],
     );
     if (!claimed.rows.length) continue;
-    const message = await sendApprovalMessage(
+    const message = await claimedApprovalMessage(
       bot,
+      db,
       user,
+      row.id,
       libraryPreview(
         row.operation,
         row.payload,
@@ -957,7 +1012,9 @@ async function sendLibraryApprovalsOnce(
           inline_keyboard: libraryButtons(row.operation, row.id),
         },
       },
+      guard,
     );
+    if (!message) return;
     await db.query(
       `UPDATE approvals SET payload=jsonb_set(payload,'{telegramMessageId}',$3::jsonb) || '{"telegramDeliveryState":"sent"}'::jsonb WHERE id=$1 AND user_id=$2`,
       [row.id, user, JSON.stringify(message.message_id)],

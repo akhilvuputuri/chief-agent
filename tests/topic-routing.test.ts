@@ -218,3 +218,60 @@ test("ordinary work captures its destination and restart never replays an uncert
     await pg.close();
   }
 });
+
+test("a slow preparing topic input followed by ready General input drains both handler slots", async () => {
+  const { pg, db } = await database();
+  let calls = 0;
+  const a = new Assistant(
+    db,
+    new CustomAgent({
+      generate: async () => ({
+        message: { role: "assistant", content: `Answer ${++calls}` },
+      }),
+    }),
+    new JobTools(db, { call: async () => ({}) }),
+  );
+  try {
+    const photo = await a.recordInput("owner", "Photo pending", {
+      threadId: 42,
+      preparing: true,
+      updateId: 10,
+    });
+    const general = a.respondDetailed(
+      "owner",
+      "Separate General question",
+      undefined,
+      undefined,
+      { updateId: 11 },
+    );
+    while (
+      (await db.query("SELECT count(*)::int AS n FROM conversation_inputs"))
+        .rows[0].n < 2
+    )
+      await new Promise((r) => setTimeout(r, 5));
+    await a.prepareInput("owner", photo, "Describe this photo");
+    const photoHandler = a.respondDetailed(
+      "owner",
+      "Describe this photo",
+      undefined,
+      undefined,
+      { id: photo },
+    );
+    const outputs = await Promise.all([general, photoHandler]);
+    assert.equal(calls, 2);
+    assert.deepEqual(
+      outputs.map((o) => o.threadId),
+      [42, undefined],
+    );
+    assert.equal(
+      (
+        await db.query(
+          "SELECT count(*)::int AS n FROM conversation_inputs WHERE state='queued'",
+        )
+      ).rows[0].n,
+      0,
+    );
+  } finally {
+    await pg.close();
+  }
+});

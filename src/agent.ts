@@ -358,8 +358,10 @@ export class Assistant {
           [user, inputId],
         )
       ).rows[0];
-      // Another foreground run may already have absorbed this handler's input.
-      if (requested?.state !== "queued") return { reply: "" };
+      // A ready handler may have processed an earlier, slowly prepared input.
+      // Completed/absorbed handlers still drain the remaining FIFO head; otherwise
+      // the handler that owned that head can return empty and strand another thread.
+      if (!requested || requested.state === "failed") return { reply: "" };
       const ready = await this.inbox.waitReady(user);
       if (!ready.length) return { reply: "" };
       const first = ready[0]!;

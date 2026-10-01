@@ -29,7 +29,7 @@ import { DailySheet } from "./daily-sheet.js";
 import { SheetsTools } from "./sheets.js";
 import { GmailTools, unreadDigest } from "./gmail.js";
 import { readConfig } from "./config.js";
-import { connect, ensureUser } from "./db.js";
+import { connect, ensureUser, event } from "./db.js";
 import { JobTools } from "./tools.js";
 import { WebTools } from "./providers.js";
 import { Assistant } from "./agent.js";

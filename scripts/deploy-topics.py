@@ -174,7 +174,7 @@ def main():
             original = backup_source(stage, backup)
             candidate = IMAGE + ':' + sha
             try:
-                run(['docker', 'build', '-t', candidate, str(stage)])
+                run(['docker', 'build', '--build-arg', 'RELEASE_SHA=' + sha, '-t', candidate, str(stage)])
             except Exception:
                 raise RuntimeError('Candidate build failed; live application unchanged') from None
             if not healthy():
