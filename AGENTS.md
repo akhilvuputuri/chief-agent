@@ -2,6 +2,14 @@
 
 Read `docs/current-work.md`, `HANDOVER.md`, `docs/portable-development.md`, `docs/cloud-development.md`, and the relevant source before modifying behavior. For an incident, begin with `docs/troubleshooting.md`. Historical incident reports and deferred candidates describe earlier states; current code, exact release evidence and verified production diagnostics take precedence.
 
+## Freshness before exploration or implementation
+
+Before starting any new feature exploration, feasibility research, planning or implementation, run `git status --short --branch` and `git fetch origin`, then record `git rev-parse origin/main`. Use that freshly fetched `origin/main` as the source of truth for integrated capabilities, architecture and work status, even when no code changes are planned. Read its current instructions, handover, work index and relevant source with `git show origin/main:<path>` or in an isolated worktree based on that ref; the existing local branch, checkout documents and earlier chat summaries may be stale.
+
+Repeat this check when resuming after an idle period or context handoff, switching to a different feature, learning that another task merged changes, or whenever you cannot establish that the last fetch is still current. Reconcile relevant upstream changes before making recommendations or declaring a capability missing. Explicitly distinguish integrated main, intentional branch-only work and the verified deployed release; main alone does not prove production state.
+
+Fetching does not authorize resetting, cleaning, pulling into or overwriting a dirty/shared checkout. Preserve local work and use an isolated branch/worktree for new changes. If fetching fails, report that remote freshness is unverified, identify the last known SHA when available, and qualify conclusions rather than silently treating local files as current. See [portable development](docs/portable-development.md#refresh-before-each-task).
+
 ## Commands
 
 Node 22. `npm ci`, `npm run check`, `npm run build`, `npm run format:check`. Tests use PGlite and mocked integrations; production credentials are unnecessary. Use Prettier on changed files. `npm run smoke:runtime` is paid and must not be run as a routine test. Paid evals remain deferred, except `npm run eval:picker` (about $0.04, run by hand after changing `config/tool-picker.json`; record results in the journal).

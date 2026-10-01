@@ -21,6 +21,27 @@ Read AGENTS.md and docs/current-work.md. The historical local folder may be name
 
 Create a feature branch from current main for new work. For unfinished memory work, use its documented checkpoint branch instead and inspect differences before incorporating main. Avoid multiple agents editing the same checkout; use independent clones/worktrees and bounded PRs. Avoid competing edits to migrations or deploy workflows.
 
+## Refresh before each task
+
+This applies to local and cloud agents, including research, feature exploration and planning that will not edit code. Before assessing current capabilities:
+
+```sh
+git status --short --branch
+git fetch origin
+git rev-parse origin/main
+git show origin/main:AGENTS.md
+git show origin/main:docs/current-work.md
+git show origin/main:HANDOVER.md
+git show origin/main:docs/portable-development.md
+git show origin/main:docs/cloud-development.md
+```
+
+Read relevant source from the same fetched ref (`git show origin/main:src/<file>`) or an isolated worktree based on it. Record the main SHA used for the assessment. An old checkout or conversation summary is not evidence that a feature is absent from integrated main. For deliberately resumed checkpoint work, compare its behavior with current main and label the difference.
+
+Repeat the preflight after an idle period or context handoff, when switching features, after another task merges relevant work, or whenever freshness is uncertain. Reconcile new upstream facts before proposing work. A successful fetch updates remote-tracking refs; it does not update the checked-out files. Never reset, clean or overwrite shared/uncommitted work to synchronize it. Start new edits in an isolated branch/worktree based on current main.
+
+If the fetch fails, disclose the failure and last known SHA; treat the remote state as unverified and qualify any capability assessment. GitHub main is the integrated source of truth, while an exact successful release receipt and production diagnostics establish deployment.
+
 ## Credentials and optional local integration tests
 
 For actually running a separate development bot, copy .env.example to .env and set `chmod 600 .env`. Fill only credentials needed for that test environment. .env and .env.* are ignored except the placeholder .env.example. Keep .env out of artifacts, screenshots, command output, Docker build context and Git. Do not assume ignoring a file removes previously tracked secrets.
