@@ -22,6 +22,8 @@ from stats import cluster_interval, mcnemar_exact, mean
 NAME = "routing"
 FIXTURES = "routing.json"
 ROOT = Path(__file__).resolve().parents[2]
+# The same instructions and chief option the runtime's shadow mode uses.
+DECISIONS = json.loads((ROOT / "config" / "decisions.json").read_text(encoding="utf-8"))
 
 # Proxy for a saved coordinator call: mean latency and reported cost of all main-model calls,
 # 25–30 Sep 2026 (CloudWatch model.completed, n=203, before #129). A coordinator call whose only
@@ -50,11 +52,7 @@ def _options() -> dict[str, str]:
     research = json.loads((ROOT / "plugins" / "public-research" / "plugin.json").read_text(encoding="utf-8"))
     options = {a["id"]: a["description"] for a in core["agents"]}
     options["research"] = research["agents"][0]["description"]
-    options["chief"] = (
-        "None of these alone: small talk, general knowledge the assistant can answer itself, "
-        "remembering a preference, earlier conversations, several of these areas at once, "
-        "canvases, background tasks, skills, or job fit and interview preparation."
-    )
+    options["chief"] = DECISIONS["routing"]["chief"]
     return options
 
 
@@ -110,7 +108,7 @@ def jev(case: dict[str, Any], key: str) -> dict[str, Any]:
         {
             "agent": {
                 "type": "choice",
-                "instructions": "Which single agent can handle all of `latest_user_message` (read with `previous_turns`)? Choose chief when none can on its own.",
+                "instructions": DECISIONS["routing"]["instructions"],
                 "criteria": OPTIONS,
             }
         },

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "model": "typesafe/jev-1.13-20260917",
+  "timeoutMs": 2500,
+  "shadow": {
+    "continuity": true,
+    "routing": true,
+    "picker": true
+  },
+  "continuity": {
+    "threshold": 0.33,
+    "question": {
+      "type": "noul",
+      "instructions": "Does answering `latest_user_message` correctly require the previous exchange (`previous_user_message` and `previous_assistant_reply`)?",
+      "criteria": {
+        "true": "It refers back to the previous exchange: a pronoun or 'the other one', an answer to the assistant's question, a correction or change to what was just done, 'and…' or 'what about…' continuing the same subject, or a question about details just given.",
+        "false": "It stands on its own: a new request or question that names its own subject, small talk, or a request in the same area that does not depend on what was just said."
+      }
+    }
+  },
+  "routing": {
+    "threshold": 0.97,
+    "instructions": "Which single agent can handle all of `latest_user_message` (read with `previous_turns`)? Choose chief when none can on its own.",
+    "chief": "None of these alone: small talk, general knowledge the assistant can answer itself, remembering a preference, earlier conversations, several of these areas at once, canvases, background tasks, skills, or job fit and interview preparation."
+  }
+}

@@ -33,6 +33,7 @@ import { JobTools } from "./tools.js";
 import { WebTools } from "./providers.js";
 import { Assistant } from "./agent.js";
 import { ToolPicker } from "./tool-picker.js";
+import { ShadowDecisions } from "./shadow.js";
 import { server } from "./server.js";
 import {
   telegram,
@@ -279,6 +280,11 @@ const assistant = new Assistant(
   },
   c.TOOL_PICKER === "jev" && c.OPENROUTER_API_KEY
     ? new ToolPicker(c.OPENROUTER_API_KEY)
+    : undefined,
+  // Shadow decisions (#127) record what Jev would decide; they never change a turn.
+  // It sends the same kind of data as the Jev picker, so it follows the picker's switch.
+  c.TOOL_PICKER === "jev" && c.OPENROUTER_API_KEY
+    ? new ShadowDecisions(c.OPENROUTER_API_KEY)
     : undefined,
 );
 const app = server(

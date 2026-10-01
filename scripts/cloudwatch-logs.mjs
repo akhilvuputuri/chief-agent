@@ -66,6 +66,12 @@ export const QUERIES = {
     query: () =>
       `filter event = "tools.picked" or event = "tools.selected" or event = "tools.loaded" | stats count(*) as lines, avg(latencyMs) as avgMs, max(latencyMs) as maxMs, sum(costUsd) as reportedUsd, avg(domainCount) as avgDomains, avg(toolCount) as avgTools by event, state`,
   },
+  decisions: {
+    group: "runtime",
+    help: "shadow decisions (#127): predictions against what Chief actually did, by consumer",
+    query: () =>
+      `filter event = "decision.shadow" | stats count(*) as lines, avg(score) as avgScore, avg(latencyMs) as avgMs, sum(costUsd) as reportedUsd, avg(unusedCount) as avgUnused, sum(loadedLaterCount) as loadsLater, avg(recalled) as avgRecalled by kind, state, agentType, agree, interrupted`,
+  },
   schedules: {
     group: "runtime",
     help: "routine, reminder/briefing and background work passes",

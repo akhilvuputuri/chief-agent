@@ -8,7 +8,9 @@ saved on standalone messages is the gain.
 
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 from typing import Any
 
 import backends
@@ -18,16 +20,9 @@ from stats import cluster_interval, mcnemar_exact, mean
 NAME = "continuity"
 FIXTURES = "continuity.json"
 
-JEV_QUESTION = {
-    "needs_previous": {
-        "type": "noul",
-        "instructions": "Does answering `latest_user_message` correctly require the previous exchange (`previous_user_message` and `previous_assistant_reply`)?",
-        "criteria": {
-            "true": "It refers back to the previous exchange: a pronoun or 'the other one', an answer to the assistant's question, a correction or change to what was just done, 'and…' or 'what about…' continuing the same subject, or a question about details just given.",
-            "false": "It stands on its own: a new request or question that names its own subject, small talk, or a request in the same area that does not depend on what was just said.",
-        },
-    }
-}
+# The same question the runtime's shadow mode asks (config/decisions.json).
+DECISIONS = json.loads((Path(__file__).resolve().parents[2] / "config" / "decisions.json").read_text(encoding="utf-8"))
+JEV_QUESTION = {"needs_previous": DECISIONS["continuity"]["question"]}
 
 LLM_SYSTEM = """You decide whether a personal assistant needs the previous exchange to answer the user's latest message.
 Answer true when the latest message refers back to it: a pronoun or "the other one", an answer to the assistant's question, a correction or change to what was just done, "and..." or "what about..." continuing the same subject, or a question about details just given.

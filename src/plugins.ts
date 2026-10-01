@@ -382,6 +382,11 @@ export class PluginRegistry {
       ...(this.researchAgent ? { research: this.researchAgent } : {}),
       ...(config.aliases ?? {}),
     };
+    const targets = Object.values(this.aliases);
+    if (new Set(targets).size !== targets.length)
+      throw new Error(
+        "Plugin compatibility: each agent can have only one alias",
+      );
     for (const [alias, target] of Object.entries(this.aliases))
       if (!this.agents.has(target) || this.agents.has(alias))
         throw new Error(
