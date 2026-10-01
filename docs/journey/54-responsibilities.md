@@ -9,7 +9,7 @@ Status: implementation candidate; disabled by default, not deployed or accepted 
 
 ## Evidence
 
-Source inspection used freshly fetched main `9b76fc5b6c7a4767d32a1d67f9476d9a0804ae81`; the subsequent documentation-only `78ad212182a34cf18b77a60c9e0d6d5cce8b7c0b` was fetched during implementation. The main/source baseline is distinct from production acceptance. Before implementation, 124 existing focused mocked tests passed. Synthetic new scenarios cover parcel/email investigation, evening delivery, external meetings, unchanged scheduled research, ownership, confirmation, permissions, restart, budgets, feedback and ambiguous delivery. Final suite/review evidence is pending below; this is not a production measurement.
+Source inspection used freshly fetched main `9b76fc5b6c7a4767d32a1d67f9476d9a0804ae81`; the subsequent documentation-only `78ad212182a34cf18b77a60c9e0d6d5cce8b7c0b` was fetched during implementation. Before review, fresh main advanced to `aacdc2ac9d9c9a92a11f74c19d88b93daa189a35`; its Libby refusal handling and reviewed runtime configuration were incorporated, preserving both documentation paths. Its successful release reported that exact SHA and startup health on 2 October SGT; a later failed attempt is not treated as a new deployment. The migration script now pins that baseline and still rechecks live RELEASE. The main/source baseline is distinct from production acceptance. Before implementation, 124 existing focused mocked tests passed. Synthetic new scenarios cover parcel/email investigation, evening delivery, external meetings, unchanged scheduled research, ownership, confirmation, permissions, restart, budgets, feedback and ambiguous delivery. Final suite/review evidence is pending below; this is not a production measurement.
 
 Gmail remains a small IDs-only adapter. Official [message listing](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/list), [search timestamp semantics](https://developers.google.com/workspace/gmail/api/guides/filtering) and [Calendar occurrence identity](https://developers.google.com/workspace/calendar/api/guides/recurringevents) informed the mocks. Model quality, useful-notification ratio and model cost per useful finding remain unmeasured.
 
@@ -27,7 +27,7 @@ The first full application suite found three Telegram mock-startup regressions b
 
 ## Verification and outcome
 
-Fifteen offline operator tests cover exact baseline/archive, preserved environment/data, active-work refusal, validated changes including refusal of implicit default-on activation, build/health failure and rollback. The source baseline's successful [release receipt](https://github.com/akhilvuputuri/chief-agent/actions/runs/36885999446) was observed, but no candidate release or capability activation is claimed.
+After incorporating current main, `npm run check` passed 596 application, 21 JavaScript and 30 offline Python tests; build and repository format check passed. Fifteen offline operator tests cover exact baseline/archive, preserved environment/data, active-work refusal, validated changes including refusal of implicit default-on activation, build/health failure and rollback. The source baseline's successful [release receipt](https://github.com/akhilvuputuri/chief-agent/actions/runs/36895492925) was observed, but no candidate release or capability activation is claimed.
 
 ### Release closure
 
