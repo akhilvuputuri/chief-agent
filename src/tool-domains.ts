@@ -30,6 +30,7 @@ export const TOOL_DOMAINS = [
   "research",
   "media",
   "canvas",
+  "subscriptions",
   "parcels",
   "library",
   "watchlist",
@@ -49,6 +50,8 @@ export const DOMAIN_SUMMARIES: Record<ToolDomain, string> = {
   research: "isolated public-research specialist and plugin agents",
   media: "specialist reading of attached images and stored documents",
   canvas: "saved Mini App canvases: create, update, read, list",
+  subscriptions:
+    "saved recurring payments, trial ends, decision dates and reminders",
   parcels: "awaited parcels from email or the owner",
   library: "NLB ebook availability and the linked card's shelf",
   watchlist: "stock price-drop watchlist",
@@ -71,6 +74,7 @@ const PREFIXES: [string, ToolDomain][] = [
   ["agent_", "research"],
   ["media_", "media"],
   ["canvas_", "canvas"],
+  ["subscription_", "subscriptions"],
   ["parcel_", "parcels"],
   ["library_", "library"],
   ["watchlist_", "watchlist"],
@@ -115,6 +119,10 @@ const CUES: [ToolDomain, RegExp][] = [
   [
     "media",
     /\[Attached (image|PDF)|\b(photo|picture|image|screenshot|pdf|document|scan)s?\b/i,
+  ],
+  [
+    "subscriptions",
+    /\b(subscriptions?|memberships?|renewals?|recurring payments?|bills?|trial ends?|cancel(lation)? deadline|netflix|spotify)\b/i,
   ],
   ["canvas", /\b(canvas(es)?|mini ?app|save (this|it) as)\b/i],
   [

@@ -40,6 +40,7 @@ CUE_AGENT = {
     "jobs": "jobs",
     "research": "research",
     "media": "media",
+    "subscriptions": "subscriptions",
     "parcels": "parcels",
     "library": "library",
     "watchlist": "stocks",

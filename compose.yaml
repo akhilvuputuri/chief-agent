@@ -70,6 +70,8 @@ services:
         "/migrations/021_news.sql",
         "-f",
         "/migrations/022_telegram_delivery.sql",
+        "-f",
+        "/migrations/023_subscriptions.sql",
       ]
     depends_on:
       postgres: { condition: service_healthy }

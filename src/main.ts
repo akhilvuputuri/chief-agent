@@ -95,6 +95,14 @@ if (
     "STARTUP_MIGRATION_021",
     "News bulletin migration 021 must be applied with the gateway stopped",
   );
+if (
+  !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=23")).rows
+    .length
+)
+  throw startupError(
+    "STARTUP_MIGRATION_023",
+    "Subscriptions migration 023 must be applied with the gateway stopped",
+  );
 await recoverRuntime(db);
 // Library account features need migration 016; without the key they stay off even if tables exist.
 const libraryReady = await libraryMigrated(db);
@@ -293,6 +301,7 @@ const assistant = new Assistant(
     web: !!(c.TAVILY_API_KEY || c.OPENROUTER_API_KEY),
     gmail: !!c.GOOGLE_REFRESH_TOKEN,
     calendar: !!c.CALENDAR_REFRESH_TOKEN,
+    subscriptions: true,
     parcels: true,
     library: true,
     libraryAccount: !!libraryIdentity,

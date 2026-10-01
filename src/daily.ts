@@ -115,6 +115,10 @@ export class DailyTools {
       )
     ).rows[0];
     if (!old) throw new Error("Schedule not found");
+    if (old.subscription_id)
+      throw new ToolValidationError(
+        "This reminder belongs to a subscription; use subscription_settings or update the subscription date so the record and reminder stay together.",
+      );
     const n = a.schedule
       ? await parseSchedule(this.parser, a.schedule)
       : a.status === "scheduled"
@@ -176,7 +180,21 @@ export class DailyWorker<T = string> {
               [j.id, lease],
             )
           ).rows[0];
-          if (!valid) continue;
+          const currentSubscription =
+            !j.subscription_id ||
+            (
+              await this.db.query(
+                "SELECT 1 FROM subscriptions WHERE id=$1 AND user_id=$2 AND revision=$3 AND data->>'reminderEnabled'='true' AND data->>'status' IN ('active','trial')",
+                [j.subscription_id, j.user_id, j.subscription_revision],
+              )
+            ).rows.length > 0;
+          if (!valid || !currentSubscription) {
+            await this.db.query(
+              "UPDATE daily_schedules SET status='cancelled',lease=NULL,last_error='Subscription changed before delivery; read its reminder settings' WHERE id=$1 AND lease=$2 AND status='processing'",
+              [j.id, lease],
+            );
+            continue;
+          }
           await this.send(j.user_id, text);
           const n =
             j.parsed.kind === "once"

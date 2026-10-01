@@ -364,6 +364,190 @@ async function role(id: string) {
       root.append(section);
     }
 }
+const subscriptionPrice = (r: any) =>
+  r.amount == null
+    ? `Amount unknown · ${r.cadence} · ${r.amountType}`
+    : `${r.amount} ${r.currency} · ${r.cadence === "days" ? `every ${r.intervalDays} days` : r.cadence} · ${r.amountType}`;
+async function subscriptions(id?: string) {
+  if (id) {
+    const r = await api("/subscriptions/" + encodeURIComponent(id));
+    root.replaceChildren(
+      btn("← Subscriptions", () => go({ view: "subscriptions" })),
+      el("div", "SAVED SUBSCRIPTION", "eyebrow"),
+      el("h1", r.label),
+      el("p", subscriptionPrice(r), "prose"),
+      el("p", `${r.status} · Owner stated · Updated ${date(r.asOf)}`, "muted"),
+      el("p", r.notice, "muted"),
+    );
+    const details = el("section", undefined, "block");
+    details.append(el("h2", "Plan and dates"));
+    for (const [label, value] of [
+      ["Merchant", r.merchant],
+      ["Plan", r.plan],
+      ["Account label", r.accountLabel],
+      [
+        "Next charge",
+        r.nextChargeDate
+          ? r.nextChargeDate +
+            (r.nextChargeEstimated ? " (estimated)" : " (saved date)")
+          : "Unknown",
+      ],
+      ["Trial ends", r.trialEndDate ?? "Unknown"],
+      ["Cancellation deadline", r.cancellationDeadline ?? "Unknown"],
+      ["Paid through", r.paidThroughDate ?? "Unknown"],
+      [
+        "Monthly equivalent",
+        r.monthlyEquivalent == null
+          ? "Excluded from fixed monthly total"
+          : `${r.monthlyEquivalent} ${r.currency} (estimate)`,
+      ],
+    ])
+      if (value) details.append(el("p", `${label}: ${value}`));
+    root.append(details);
+    const reminders = el("section", undefined, "block");
+    reminders.append(
+      el("h2", "Reminders"),
+      el("p", r.reminderEnabled ? "Enabled for saved dates" : "Off"),
+    );
+    for (const reminder of r.reminders)
+      reminders.append(
+        el(
+          "p",
+          `${reminder.date}: ${date(reminder.firesat ?? reminder.firesAt)} · ${reminder.status}${reminder.last_error ? " · " + reminder.last_error : ""}`,
+        ),
+      );
+    root.append(reminders);
+    const history = el("section", undefined, "block");
+    history.append(el("h2", "History"));
+    let offset: number | null = 0;
+    const more = btn("Older updates", () => loadHistory().catch(showError));
+    async function loadHistory() {
+      more.disabled = true;
+      try {
+        const page =
+          offset === 0
+            ? r
+            : await api(
+                "/subscriptions/" +
+                  encodeURIComponent(id!) +
+                  "?offset=" +
+                  offset,
+              );
+        for (const update of page.history) {
+          const entry = el("div", undefined, "card");
+          entry.append(
+            el(
+              "strong",
+              `Revision ${update.revision} · ${date(update.recorded_at)}`,
+            ),
+          );
+          for (const [key, value] of Object.entries(update.changes))
+            entry.append(
+              el(
+                "p",
+                `${key.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase())}: ${value === null ? "cleared" : String(value)}`,
+              ),
+            );
+          entry.append(el("small", "Source: owner statement"));
+          history.append(entry);
+        }
+        offset = page.nextOffset;
+        more.hidden = offset === null;
+      } finally {
+        more.disabled = false;
+      }
+    }
+    root.append(history, more);
+    await loadHistory();
+    return;
+  }
+  const data = await api("/subscriptions");
+  root.replaceChildren(
+    el("div", "YOUR RECURRING PAYMENTS", "eyebrow"),
+    el("h1", "Subscriptions"),
+    el("p", data.notice, "muted"),
+  );
+  const totals = el("section", undefined, "block");
+  totals.append(el("h2", "Fixed monthly equivalents"));
+  for (const total of data.totals)
+    totals.append(
+      el(
+        "p",
+        `${total.monthlyEquivalent} ${total.currency} · ${total.items} active items`,
+      ),
+    );
+  totals.append(
+    el(
+      "p",
+      `${data.excluded} items with trial, variable or unknown costs excluded.`,
+      "muted",
+    ),
+    el("p", data.basis, "muted"),
+  );
+  root.append(totals);
+  const timeline = el("section", undefined, "block");
+  timeline.append(el("h2", "Next 30 days"));
+  for (const due of data.upcoming) {
+    const row = btn(
+      `${due.date} · ${due.label} · ${due.events.join(" / ")}${due.estimated ? " (estimated)" : ""}`,
+      () => go({ subscription: due.id }),
+    );
+    row.className = "card link";
+    timeline.append(row);
+  }
+  if (!data.upcoming.length)
+    timeline.append(el("p", "No upcoming saved dates.", "muted"));
+  if (data.upcomingTotal > data.upcoming.length)
+    timeline.append(
+      el(
+        "p",
+        `Showing ${data.upcoming.length} of ${data.upcomingTotal} dates. Open an item for its dates.`,
+      ),
+    );
+  root.append(timeline);
+  const list = el("section", undefined, "block");
+  list.append(el("h2", "Saved items"));
+  root.append(list);
+  let offset: number | null = 0;
+  const more = btn("Load more", () => load().catch(showError));
+  async function load() {
+    more.disabled = true;
+    try {
+      const page =
+        offset === 0 ? data : await api("/subscriptions?offset=" + offset);
+      for (const item of page.items) {
+        const card = btn("", () => go({ subscription: item.id }));
+        card.className = "card link";
+        card.append(
+          el("strong", item.label),
+          el("small", `${subscriptionPrice(item)} · ${item.status}`),
+        );
+        list.append(card);
+      }
+      offset = page.nextOffset;
+      more.hidden = offset === null;
+      if (!page.total)
+        list.append(
+          el(
+            "p",
+            "No saved subscriptions yet. Tell Chief which recurring payment to track.",
+            "empty",
+          ),
+        );
+    } finally {
+      more.disabled = false;
+    }
+  }
+  root.append(
+    more,
+    el(
+      "p",
+      "Add items and change reminders by talking to Chief in Telegram.",
+      "muted",
+    ),
+  );
+  await load();
+}
 function showError(error: unknown) {
   if (error instanceof DOMException && error.name === "AbortError") return;
   root.replaceChildren(
@@ -381,14 +565,24 @@ async function route() {
   if (poll) clearInterval(poll);
   poll = undefined;
   const p = new URLSearchParams(location.hash.slice(1));
+  const subscriptionsView =
+    p.has("subscription") || p.get("view") === "subscriptions";
+  document
+    .getElementById("subscriptions")!
+    .classList.toggle("selected", subscriptionsView);
   document
     .getElementById("roles")!
     .classList.toggle("selected", p.has("role") || p.get("view") === "roles");
   document
     .getElementById("canvases")!
-    .classList.toggle("selected", !p.has("role") && p.get("view") !== "roles");
+    .classList.toggle(
+      "selected",
+      !subscriptionsView && !p.has("role") && p.get("view") !== "roles",
+    );
   try {
-    if (p.has("canvas"))
+    if (subscriptionsView)
+      await subscriptions(p.get("subscription") ?? undefined);
+    else if (p.has("canvas"))
       await canvas(p.get("canvas")!, p.get("revision") ?? undefined);
     else if (p.has("role")) await role(p.get("role")!);
     else await library(p.get("view") === "roles");
@@ -397,6 +591,9 @@ async function route() {
   }
 }
 async function start() {
+  document
+    .getElementById("subscriptions")!
+    .addEventListener("click", () => go({ view: "subscriptions" }));
   document.getElementById("canvases")!.addEventListener("click", () => go());
   document
     .getElementById("roles")!
@@ -428,7 +625,7 @@ async function start() {
   // Telegram's launch fragment is parsed by the SDK; never retain signed data in our navigation URLs.
   const query = new URLSearchParams(location.search);
   const initial = new URLSearchParams();
-  for (const key of ["canvas", "revision", "view"])
+  for (const key of ["canvas", "revision", "view", "subscription"])
     if (query.has(key)) initial.set(key, query.get(key)!);
   history.replaceState(null, "", "/miniapp/#" + initial.toString());
   addEventListener("hashchange", () => void route());

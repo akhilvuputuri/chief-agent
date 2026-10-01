@@ -20,6 +20,7 @@ DOMAINS = (
     "research",
     "media",
     "canvas",
+    "subscriptions",
     "parcels",
     "library",
     "watchlist",

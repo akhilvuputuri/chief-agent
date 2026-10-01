@@ -4,6 +4,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { MiniAuth } from "./miniapp-auth.js";
 import { Canvases } from "./canvases.js";
+import { SubscriptionTools } from "./subscriptions.js";
 import { event, type Database } from "./db.js";
 export interface MiniConfig {
   origin: string;
@@ -108,6 +109,24 @@ export async function miniapp(
           })
           .strict()
           .parse(q);
+      const subscriptions = new SubscriptionTools(db);
+      api.get("/subscriptions", async (req) => {
+        const { offset } = page(req.query);
+        return subscriptions.list(owner(req), {
+          operation: "subscription_list",
+          includeInactive: true,
+          offset,
+        });
+      });
+      api.get("/subscriptions/:id", async (req, reply) => {
+        const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+        const { offset } = page(req.query);
+        try {
+          return await subscriptions.read(owner(req), id, offset);
+        } catch {
+          return reply.code(404).send({ error: "Subscription not found" });
+        }
+      });
       api.get("/canvases", async (req) =>
         canvases.list(owner(req), page(req.query).offset),
       );

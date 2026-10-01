@@ -17,6 +17,11 @@ import { agentRun, agentReport } from "./agent-schema.js";
 import { researchReport } from "./research-schema.js";
 import { mediaReport } from "./media-schema.js";
 import { calendarDraft } from "./calendar-draft.js";
+import {
+  subscriptionRecord,
+  subscriptionList,
+  subscriptionSettings,
+} from "./subscription-schema.js";
 import { parcelRecord, parcelList, parcelMatch } from "./parcel-schema.js";
 import {
   libraryAvailability,
@@ -382,6 +387,9 @@ export const action = z.discriminatedUnion("operation", [
         .optional(),
     })
     .strict(),
+  subscriptionRecord,
+  subscriptionList,
+  subscriptionSettings,
   parcelRecord,
   parcelList,
   parcelMatch,

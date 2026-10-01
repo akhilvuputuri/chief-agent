@@ -1,3 +1,7 @@
+# Issue 132 — Subscriptions manual milestone (in review)
+
+Branch `codex/subscriptions-ledger` implements explicit owner capture, a persistent read-only Mini App tracker and linked renewal/trial/cancellation-deadline reminders. Email discovery, financial source extraction, price alerts, monthly summaries and automatic responsibility monitoring remain later work; issue 132 stays open. Migration 023 needs the reviewed operator rollout after independent approval and checks. See [contract](subscriptions.md) and [journal 54](journey/54-subscriptions.md). No production feature release is claimed yet.
+
 # Issue 137 — General input, feed destinations and exact references (released)
 
 [v0.3.29](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.29) ships destinations, task origins, scoped approval placement, thread-aware FIFO/fences and durable work delivery through [PR #138](https://github.com/akhilvuputuri/chief-agent/pull/138). The reviewed migration-022 operator rollout installed `015b8a99d770977ada6035c3feed4b9bbdd7226d`; separate health and preserved-record checks plus [automatic release](https://github.com/akhilvuputuri/chief-agent/actions/runs/36872648089) passed.

@@ -4,10 +4,11 @@
   "enabled": [
     {
       "path": "core",
-      "sha256": "c1741ff6604cad107156823179628b3f1aafb97c854c28947d5345d778f78237",
+      "sha256": "7231e912600c37d98d6d20b27b6da9d61d6c48ae91177730f1a714e334014fb4",
       "agents": [
         "email",
         "parcels",
+        "subscriptions",
         "calendar",
         "daily",
         "jobs",
@@ -53,6 +54,9 @@
         "schedule_list",
         "schedule_update",
         "source_read",
+        "subscription_list",
+        "subscription_record",
+        "subscription_settings",
         "watchlist_add",
         "watchlist_list",
         "watchlist_remove",
@@ -79,7 +83,8 @@
     "news": "core/news",
     "library": "core/library",
     "web": "core/web",
-    "media": "core/media"
+    "media": "core/media",
+    "subscriptions": "core/subscriptions"
   },
   "delegated": [
     "calendar_draft",
@@ -115,6 +120,9 @@
     "schedule_create",
     "schedule_list",
     "schedule_update",
+    "subscription_list",
+    "subscription_record",
+    "subscription_settings",
     "watchlist_add",
     "watchlist_list",
     "watchlist_remove",
