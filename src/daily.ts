@@ -26,6 +26,18 @@ async function parseSchedule(
     );
   }
 }
+async function scheduleWrite(db: Database, sql: string, values: unknown[]) {
+  try {
+    return await db.query(sql, values);
+  } catch (error) {
+    if (
+      (error as { constraint?: string }).constraint ===
+      "daily_schedule_capacity_limit"
+    )
+      throw new ToolValidationError("Limit of 50 active schedules reached");
+    throw error;
+  }
+}
 export class DailyTools {
   constructor(
     private db: Database,
@@ -84,7 +96,8 @@ export class DailyTools {
       if (!n.next || Date.parse(n.next) <= Date.now())
         throw new ToolValidationError("Choose a future time");
       const row = (
-        await db.query(
+        await scheduleWrite(
+          db,
           `INSERT INTO daily_schedules(id,user_id,kind,content,schedule,parsed,next_run,include_email,include_calendar) SELECT $1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9 WHERE (SELECT count(*) FROM daily_schedules WHERE user_id=$2 AND status IN ('scheduled','processing'))<50 RETURNING *`,
           [
             randomUUID(),
@@ -129,7 +142,8 @@ export class DailyTools {
         "Supply a new future schedule to resume this reminder",
       );
     return (
-      await db.query(
+      await scheduleWrite(
+        db,
         `UPDATE daily_schedules SET schedule=COALESCE($3,schedule),parsed=COALESCE($4::jsonb,parsed),next_run=COALESCE($5::timestamptz,next_run),status=COALESCE($6,status),lease=NULL,last_error=NULL,updated_at=now() WHERE id=$1 AND user_id=$2 RETURNING *`,
         [
           a.id,

@@ -42,5 +42,48 @@ DO $$ BEGIN
 END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS daily_subscription_occurrence ON daily_schedules(subscription_id,subscription_date)
  WHERE subscription_id IS NOT NULL;
+-- One atomic counter shared by every schedule writer, including generic reminders.
+-- AFTER row triggers count the actual INSERT/UPDATE path of an upsert, never its
+-- attempted INSERT. Existing records are retained, even if a historical race
+-- exceeded capacity; new active occurrences then wait until capacity is available.
+CREATE TABLE IF NOT EXISTS daily_schedule_capacity (
+ user_id text PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+ active_count integer NOT NULL DEFAULT 0 CHECK(active_count>=0)
+);
+INSERT INTO daily_schedule_capacity(user_id,active_count)
+ SELECT user_id,count(*)::integer FROM daily_schedules WHERE status IN ('scheduled','processing') GROUP BY user_id
+ ON CONFLICT(user_id) DO NOTHING;
+CREATE OR REPLACE FUNCTION maintain_daily_schedule_capacity() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE was_active integer := 0; is_active integer := 0; owner_id text;
+BEGIN
+ IF TG_OP<>'INSERT' THEN
+  was_active := CASE WHEN OLD.status IN ('scheduled','processing') THEN 1 ELSE 0 END;
+  owner_id := OLD.user_id;
+ END IF;
+ IF TG_OP<>'DELETE' THEN
+  is_active := CASE WHEN NEW.status IN ('scheduled','processing') THEN 1 ELSE 0 END;
+  owner_id := NEW.user_id;
+ END IF;
+ IF TG_OP='UPDATE' AND NEW.user_id<>OLD.user_id THEN
+  RAISE EXCEPTION 'Schedule ownership cannot change' USING ERRCODE='23514';
+ END IF;
+ IF is_active>was_active THEN
+  INSERT INTO daily_schedule_capacity(user_id) VALUES(owner_id) ON CONFLICT DO NOTHING;
+  UPDATE daily_schedule_capacity SET active_count=active_count+1 WHERE user_id=owner_id AND active_count<50;
+  IF NOT FOUND THEN
+   RAISE EXCEPTION 'Limit of 50 active schedules reached' USING ERRCODE='23514', CONSTRAINT='daily_schedule_capacity_limit';
+  END IF;
+ ELSIF was_active>is_active THEN
+  UPDATE daily_schedule_capacity SET active_count=active_count-1 WHERE user_id=owner_id;
+  -- A missing counter is valid while an owner deletion cascades through both tables.
+ END IF;
+ RETURN NULL;
+END $$;
+DO $$ BEGIN
+ IF NOT EXISTS(SELECT 1 FROM pg_trigger WHERE tgname='daily_schedule_capacity_trigger') THEN
+  CREATE TRIGGER daily_schedule_capacity_trigger AFTER INSERT OR UPDATE OR DELETE ON daily_schedules
+   FOR EACH ROW EXECUTE FUNCTION maintain_daily_schedule_capacity();
+ END IF;
+END $$;
 INSERT INTO runtime_migrations(version) VALUES(23) ON CONFLICT DO NOTHING;
 COMMIT;

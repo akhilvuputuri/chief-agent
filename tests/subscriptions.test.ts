@@ -370,6 +370,202 @@ test("concurrent updates preserve one exact revision and an atomic history/remin
     await f.pg.close();
   }
 });
+test("concurrent exact update retries reconcile the committed request and consume no extra slots", async () => {
+  const f = await fixture();
+  try {
+    const item = await f.record({ ...annual, reminderEnabled: true });
+    const retry = {
+      id: item.id,
+      baseRevision: item.revision,
+      requestKey: randomUUID(),
+    };
+    const results = await Promise.all([
+      f.record({ amount: "240" }, retry),
+      f.record({ amount: "240" }, retry),
+    ]);
+    assert.ok(results.every((r) => r.revision === 2));
+    assert.ok(results.some((r) => r.duplicate));
+    assert.equal((await f.tools.read("a", item.id)).history.length, 2);
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT active_count FROM daily_schedule_capacity WHERE user_id='a'",
+        )
+      ).rows[0].active_count,
+      2,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+async function fillSchedules(db: Database, count: number, user = "a") {
+  for (let i = 0; i < count; i++)
+    await db.query(
+      "INSERT INTO daily_schedules(id,user_id,kind,content,schedule,parsed,next_run) VALUES($1,$2,'reminder','Synthetic other reminder','2026-12-01','{}','2026-12-01')",
+      [randomUUID(), user],
+    );
+}
+test("generic and subscription writers compete for one shared atomic schedule capacity", async () => {
+  const f = await fixture();
+  try {
+    await fillSchedules(f.db, 49);
+    const daily = new DailyTools(
+      f.db,
+      new ScheduleParser(),
+      { list: async () => [] },
+      { sync: async () => ({}) },
+    );
+    const results = await Promise.allSettled([
+      f.record({
+        ...annual,
+        cancellationDeadline: null,
+        reminderEnabled: true,
+      }),
+      daily.call("a", {
+        operation: "schedule_create",
+        kind: "reminder",
+        content: "Other",
+        schedule: "2026-12-01T09:00:00+08:00",
+        includeEmail: false,
+        includeCalendar: false,
+      }),
+    ]);
+    assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
+    const rejected = results.find(
+      (r) => r.status === "rejected",
+    ) as PromiseRejectedResult;
+    assert.match(rejected.reason.message, /50 active schedules/);
+    assert.equal(
+      Number(
+        (
+          await f.db.query(
+            "SELECT count(*) AS n FROM daily_schedules WHERE status IN ('scheduled','processing')",
+          )
+        ).rows[0].n,
+      ),
+      50,
+    );
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT active_count FROM daily_schedule_capacity WHERE user_id='a'",
+        )
+      ).rows[0].active_count,
+      50,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+test("moving a date at full capacity withdraws the old slot before reserving its replacement", async () => {
+  const f = await fixture();
+  try {
+    let item = await f.record({
+      ...annual,
+      cancellationDeadline: null,
+      reminderEnabled: true,
+    });
+    await fillSchedules(f.db, 49);
+    item = await f.record(
+      { nextChargeDate: "2026-12-01" },
+      { id: item.id, baseRevision: 1 },
+    );
+    assert.equal(
+      item.reminders.find((r: any) => r.status === "scheduled").date,
+      "2026-12-01",
+    );
+    item = await f.record({ amount: "240" }, { id: item.id, baseRevision: 2 });
+    assert.equal(item.amount, "240");
+    await f.record({ label: "No reminder", status: "active" });
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT active_count FROM daily_schedule_capacity WHERE user_id='a'",
+        )
+      ).rows[0].active_count,
+      50,
+    );
+    await f.record({ status: "cancelled" }, { id: item.id, baseRevision: 3 });
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT active_count FROM daily_schedule_capacity WHERE user_id='a'",
+        )
+      ).rows[0].active_count,
+      49,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+test("restoring a withdrawn attempted date warns without replaying an uncertain send", async () => {
+  const f = await fixture();
+  try {
+    let item = await f.record({
+      ...annual,
+      cancellationDeadline: null,
+      reminderEnabled: true,
+    });
+    await f.db.query(
+      "UPDATE daily_schedules SET status='processing',started_at=now(),lease=$1 WHERE subscription_id=$2",
+      [randomUUID(), item.id],
+    );
+    item = await f.record(
+      { nextChargeDate: "2026-12-01" },
+      { id: item.id, baseRevision: 1 },
+    );
+    item = await f.record(
+      { nextChargeDate: "2026-11-01" },
+      { id: item.id, baseRevision: 2 },
+    );
+    assert.ok(item.reminders.every((r: any) => r.status === "cancelled"));
+    assert.ok(
+      item.warnings.some((w: string) =>
+        /already attempted|may have started/.test(w),
+      ),
+    );
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT active_count FROM daily_schedule_capacity WHERE user_id='a'",
+        )
+      ).rows[0].active_count,
+      0,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+test("capacity bookkeeping follows owner deletion without preventing cascading cleanup", async () => {
+  const f = await fixture();
+  try {
+    await ensureUser(f.db, "capacity_owner");
+    await fillSchedules(f.db, 2, "capacity_owner");
+    await f.db.query("DELETE FROM users WHERE id='capacity_owner'");
+    assert.equal(
+      Number(
+        (
+          await f.db.query(
+            "SELECT count(*) AS n FROM daily_schedule_capacity WHERE user_id='capacity_owner'",
+          )
+        ).rows[0].n,
+      ),
+      0,
+    );
+    assert.equal(
+      Number(
+        (
+          await f.db.query(
+            "SELECT count(*) AS n FROM daily_schedules WHERE user_id='capacity_owner'",
+          )
+        ).rows[0].n,
+      ),
+      0,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
 test("linked reminders cannot be edited through generic schedules and delivery is model-free", async () => {
   const f = await fixture();
   try {

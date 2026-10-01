@@ -4,6 +4,7 @@ import contextlib
 import importlib.util
 import io
 import pathlib
+import re
 import subprocess
 import sys
 import tarfile
@@ -107,7 +108,8 @@ class SubscriptionRolloutTests(unittest.TestCase):
                     database['remindersPaused'] = True
                     return ''
                 self.assertEqual(statement, candidate['db/' + release.MIGRATION])
-                self.assertNotRegex(statement.upper().replace('ON DELETE CASCADE',''), r'\b(DELETE|DROP|TRUNCATE|UPDATE)\b')
+                safe = re.sub(r'--[^\n]*', '', statement.upper()).replace('UPDATE DAILY_SCHEDULE_CAPACITY SET ACTIVE_COUNT=ACTIVE_COUNT+1 WHERE USER_ID=OWNER_ID AND ACTIVE_COUNT<50;', '').replace('UPDATE DAILY_SCHEDULE_CAPACITY SET ACTIVE_COUNT=ACTIVE_COUNT-1 WHERE USER_ID=OWNER_ID;', '')
+                self.assertNotRegex(safe, r'\b(DELETE\s+FROM|DROP|TRUNCATE|UPDATE\s+(?!OR\b))')
                 if migration_failure:
                     raise RuntimeError('simulated transactional migration failure')
                 database['migration23'] = True

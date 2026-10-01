@@ -267,7 +267,7 @@ export class SubscriptionTools {
     ).rows;
     const reminders = (
       await this.db.query(
-        `SELECT id,to_char(subscription_date,'YYYY-MM-DD') AS date,next_run AS "firesAt",status,last_error FROM daily_schedules WHERE user_id=$1 AND subscription_id=$2 ORDER BY CASE WHEN status='scheduled' THEN 0 WHEN status='processing' THEN 1 ELSE 2 END, subscription_date DESC LIMIT 20`,
+        `SELECT id,to_char(subscription_date,'YYYY-MM-DD') AS date,next_run AS "firesAt",status,last_error,started_at FROM daily_schedules WHERE user_id=$1 AND subscription_id=$2 ORDER BY CASE WHEN status='scheduled' THEN 0 WHEN status='processing' THEN 1 ELSE 2 END, subscription_date DESC LIMIT 20`,
         [user, id],
       )
     ).rows;
@@ -449,18 +449,6 @@ export class SubscriptionTools {
     ).rows;
     const source = { runId: run, inputIds: inputs.map((r) => r.id) };
     const { plans, warnings } = subscriptionReminders(data, this.now());
-    const otherSchedules = Number(
-      (
-        await this.db.query(
-          "SELECT count(*) AS n FROM daily_schedules WHERE user_id=$1 AND status IN ('scheduled','processing') AND (subscription_id IS NULL OR subscription_id<>$2)",
-          [user, id],
-        )
-      ).rows[0].n,
-    );
-    if (otherSchedules + plans.length > 50)
-      throw new ToolValidationError(
-        "Limit of 50 active schedules reached; pause another reminder before enabling these dates.",
-      );
     const values: unknown[] = [
       id,
       user,
@@ -493,7 +481,7 @@ export class SubscriptionTools {
       ), reminders AS (
         INSERT INTO daily_schedules(id,user_id,kind,content,schedule,parsed,next_run,subscription_id,subscription_date,subscription_revision)
         SELECT x.id::uuid,p.user_id,'reminder',x.content,x.fire,jsonb_build_object('kind','once','run_at',x.fire,'display',x.fire),x.fire::timestamptz,p.id,x.date::date,p.revision
-        FROM p CROSS JOIN jsonb_to_recordset($14::jsonb) AS x(id text,date text,content text,fire text) WHERE EXISTS(SELECT 1 FROM u)
+        FROM p CROSS JOIN jsonb_to_recordset($14::jsonb) AS x(id text,date text,content text,fire text) WHERE EXISTS(SELECT 1 FROM u) AND (SELECT count(*) FROM withdrawn)>=0
         ON CONFLICT(subscription_id,subscription_date) WHERE subscription_id IS NOT NULL DO UPDATE
         SET content=EXCLUDED.content,schedule=EXCLUDED.schedule,parsed=EXCLUDED.parsed,next_run=EXCLUDED.next_run,subscription_revision=EXCLUDED.subscription_revision,status='scheduled',lease=NULL,updated_at=now()
         WHERE daily_schedules.started_at IS NULL AND daily_schedules.last_delivered IS NULL AND daily_schedules.status IN ('scheduled','paused','cancelled') RETURNING id
@@ -501,15 +489,19 @@ export class SubscriptionTools {
           values,
         )
       ).rows[0] as Row & { scheduled: number; possibly_started: number };
-      if (!result)
+      if (!result) {
+        const duplicate = await replay();
+        if (duplicate) return duplicate;
         throw new ToolValidationError(
           "Subscription changed while saving; read it again before retrying.",
         );
+      }
       const read = await this.read(user, id);
       for (const reminder of read.reminders)
         if (
           plans.some((p) => p.date === reminder.date) &&
-          ["completed", "failed", "processing"].includes(reminder.status)
+          (["completed", "failed", "processing"].includes(reminder.status) ||
+            (reminder.status === "cancelled" && reminder.started_at))
         )
           warnings.push(
             `Reminder for ${reminder.date} is ${reminder.status}; a delivery was already attempted or may have started. Check Telegram; it will not be replayed automatically.`,
@@ -528,6 +520,13 @@ export class SubscriptionTools {
           : {}),
       };
     } catch (error) {
+      if (
+        (error as { constraint?: string }).constraint ===
+        "daily_schedule_capacity_limit"
+      )
+        throw new ToolValidationError(
+          "Limit of 50 active schedules reached; pause another reminder before enabling these dates.",
+        );
       if ((error as { code?: string }).code === "23505") {
         const duplicate = await replay();
         if (duplicate) return duplicate;

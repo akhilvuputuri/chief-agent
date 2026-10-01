@@ -1,6 +1,6 @@
 # 54 — Keeping recurring payments and decision dates together
 
-Work date: 1 October 2026. Written: 1 October 2026.
+Work dates: 1–2 October 2026. Written: 1 October; revised: 2 October 2026.
 Status: in progress. Manual capture, tracker and linked reminders implemented; independent review and operator release pending.
 
 ## User-visible problem and preceding iteration
@@ -29,7 +29,15 @@ The existing reminder scheduler is reused; consistency is enforced by atomically
 
 See [subscriptions contract and rollout](../subscriptions.md). New domain schemas/tools, core plugin and picker domain use existing grants and model tiers. The current row and immutable patches retain field provenance and host input references. Mini App routes are authenticated reads, with DOM text rendering rather than executable generated markup.
 
-Initial focused checks exposed an untyped unused SQL parameter and PostgreSQL date serialization differences; both were corrected. The full application/JS checks passed, then the Python picker config validator exposed its separately maintained domain inventory; that inventory was updated. A new provenance fixture needed a real runtime row for the existing input/run ownership FK. Rollout tests were adapted to permit additive `ON DELETE CASCADE` declarations while still refusing destructive migration statements, and now verify paused reminders before app rollback. Independent review is pending.
+Initial focused checks exposed an untyped unused SQL parameter and PostgreSQL date serialization differences; both were corrected. The full application/JS checks passed, then the Python picker config validator exposed its separately maintained domain inventory; that inventory was updated. A new provenance fixture needed a real runtime row for the existing input/run ownership FK. Rollout tests were adapted to permit additive `ON DELETE CASCADE` declarations while still refusing destructive migration statements, and now verify paused reminders before app rollback.
+
+### Independent review follow-up — 2 October 2026
+
+GPT-6 Astra independently requested changes at exact head `d0470c0c6899ccd6446fbef716e03fff0cab4da2` in [PR 142](https://github.com/akhilvuputuri/chief-agent/pull/142). Its six adversarial tests reproduced three failures: identical concurrent update retries returned a false revision conflict, two creates at 49 schedules left 51, and restoring a withdrawn started date returned no warning although it stayed unscheduled. It independently passed the original 15 subscription and 14 rollout tests.
+
+Fixes recheck request identity after a lost conditional update; use a shared transactional AFTER-trigger capacity counter across every schedule writer; and warn on cancelled occurrences whose attempt already started. The counter counts actual upsert outcomes, not attempted INSERTs; replacement reminders withdraw old slots first. Original reviewer reproductions now pass all six cases. Five permanent regressions add shared generic/domain races, full-capacity replacements, retry slots, no-replay warnings and owner-cascade cleanup. Updated full checks passed: 583 application, 21 JavaScript and 30 Python tests, plus 14 offline rollout tests; build and formatting passed. Re-review of the updated head is pending.
+
+Additional mocked end-to-end verification passed Chief → subscriptions child → ledger/reminder → agent report → Chief reply with Gmail disconnected (two coordinator and two child calls). The first temporary harness used an incorrect child-prompt detection phrase; correcting the injected factory identification required no app change.
 
 ## Verification and outcome
 
