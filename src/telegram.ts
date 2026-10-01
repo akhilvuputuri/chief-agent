@@ -5,7 +5,7 @@ import { WorkTools, renderWork, renderWorkList } from "./work.js";
 import { TelegramViews, viewCallback } from "./telegram-views.js";
 import type { Collection, View } from "./telegram-view-render.js";
 import { formatTelegram } from "./telegram-format.js";
-import { inThread, threadOf } from "./telegram-topics.js";
+import { inThread, TelegramTopics, threadOf } from "./telegram-topics.js";
 import { calendarPreview, validateDraft } from "./calendar-draft.js";
 import { GoogleAuthError } from "./calendar.js";
 import {
@@ -36,6 +36,8 @@ import type { ImageAttachment } from "./protocol.js";
 export function telegram(c: Config, assistant: Assistant, db: Database) {
   const bot = new Bot(c.TELEGRAM_BOT_TOKEN);
   const views = new TelegramViews(db, bot.api, undefined, c.MINIAPP_ORIGIN);
+  // Reads topic ids only; main.ts creates the topics.
+  const topics = new TelegramTopics(db, bot.api, c.TELEGRAM_TOPICS === "auto");
   const voice = new Voice(c);
   const controls = new SerialQueue();
   const preparation = new PreparationQueue(2);
@@ -503,6 +505,8 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
         receivedAt: new Date().toISOString(),
         preparing: needsPreparation,
         voiceReply: !!ctx.message.voice,
+        // Typed in one of Chief's topics: that topic's agent gets the first step.
+        topic: await topics.keyFor(user, thread).catch(() => undefined),
       },
     );
     await event(db, user, inputId, "telegram.input_received", {

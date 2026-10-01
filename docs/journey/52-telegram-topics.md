@@ -1,7 +1,7 @@
-# 52 — Topics in the private chat: filing scheduled output, phase 1
+# 52 — Topics in the private chat: filing output and a first step by topic
 
 Work date(s): 2026-10-01. Written/revised: 2026-10-01.
-Status: implemented and tested. Not yet deployed.
+Status: phase 1 released `03a1ef4` (1 October 2026); live acceptance pending. Phase 2 implemented and tested; not yet deployed.
 
 ## User-visible problem and preceding iteration
 
@@ -54,9 +54,32 @@ Documented rather than changed:
 
 - a follow-up that joins a running reply is answered in the topic of the message that started the run.
 
+## Phase 2: the Email topic as the first step
+
+The owner asked for the whole feature rather than waiting for shadow data.
+
+- **Mechanism.** After [journal 49](49-coordinator-agents.md), Chief's first model call for a domain request usually only calls `agent_run`. For a message typed in the Email topic, the host makes that call itself, through a new `AgentRequest.firstCall`. It is journaled and dispatched exactly like a model-made call, so history, approvals and memory are unchanged. Chief's first model call sees the agent's report and writes the reply.
+- **Scope narrowed during design.** At first the plan was all three topics. Reading the agent definitions showed that the News and Markets agents manage bulletin and alert _settings_, while questions typed in those topics usually need the web agent. Those topics only add a hint to Chief's context. Shadow routing data can justify widening this later.
+- **Saving, not measured live.** Phase 2 saves one main-model call per eligible message. The offline estimate is about 4.2 s and $0.02 per saved call, as an upper bound ([journal 50](50-decision-evals.md)).
+- **Topics up front.** The owner should be able to write in Email before anything is posted there, so all three topics are now created at startup.
+- **Tested:**
+  - `tests/topic-routing.test.ts`:
+    - which messages are eligible (Email only; no images, long messages, background work or unavailable agent);
+    - an end-to-end turn in which the email agent runs before Chief's single model call, `agent_run` is journaled as a successful call, and `route.first_call` is recorded;
+    - a General message on the next turn takes the ordinary path.
+  - `tests/telegram-topics.test.ts`:
+    - topics are created up front and threads map back to topics;
+    - inbound messages record `topic` in the input metadata.
+
 ## Verification and outcome
 
-Typecheck passes and the new tests pass. Live acceptance after deploy:
+Typecheck and the full suite pass.
+
+### Release closure, phase 1 — 2026-10-01
+
+[PR #135](https://github.com/akhilvuputuri/chief-agent/pull/135) merged as `03a1ef4e09b92a61a2a0a663ea143d03bc28add7`. Release run 36857469977 succeeded. CloudWatch shows the gateway logging that commit from 11:48 UTC, with no warn or error lines in the following minutes. No topic had been created yet, because phase 1 creates each topic on its first send.
+
+Live acceptance after deploy:
 
 1. The next news bulletin creates a **News** topic and appears in it.
 2. A message typed in that topic is answered there.
@@ -64,6 +87,7 @@ Typecheck passes and the new tests pass. Live acceptance after deploy:
 
 ## Follow-up and next iteration
 
-- Phase 2: a message typed in a topic goes straight to that agent, with the general router as fallback.
-- Possible further topics: Jobs or background results, and Email.
+- Phase 2 live acceptance: a question typed in the Email topic is answered there, and its run shows `route.first_call`.
+- Widen first steps to other topics only if the routing shadow data supports it.
+- Possible further topics: Jobs or background results.
 - After 1–2 weeks, check whether the owner mutes topics and whether General feels cleaner.

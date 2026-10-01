@@ -8,12 +8,24 @@ import type { Database } from "./db.js";
 import { event } from "./db.js";
 import { errorFields, opsLog } from "./ops-log.js";
 
-export type TopicKey = "news" | "markets";
+export type TopicKey = "news" | "markets" | "email";
 // icon_color must be one of Telegram's six topic colours.
 const topics = {
   news: { name: "News", icon_color: 0x6fb9f0 },
   markets: { name: "Markets", icon_color: 0x8eee98 },
+  email: { name: "Email", icon_color: 0xffd67e },
 } as const satisfies Record<TopicKey, { name: string; icon_color: number }>;
+
+/**
+ * Phase 2: a message typed in one of these topics goes first to this agent type. Only
+ * topics whose agent matches what people ask there: the news and stocks agents manage
+ * bulletin and alert settings, while questions typed in News or Markets usually need the
+ * web, so those topics only tell Chief where the message came from.
+ */
+export const topicAgents: Partial<Record<TopicKey, string>> = {
+  email: "email",
+};
+const keys = Object.keys(topics) as TopicKey[];
 
 /** Send options for a thread. General (id 1) is addressed by leaving the id out. */
 export const inThread = (thread?: number) =>
@@ -149,6 +161,28 @@ export class TelegramTopics {
       });
       return undefined;
     }
+  }
+
+  /** Creates any missing topics, so the owner can write in them before Chief posts there. */
+  async ensure(user: string) {
+    for (const key of keys) await this.thread(user, key).catch(() => undefined);
+  }
+
+  /** Which of Chief's topics a thread is, if any. A failed lookup means none. */
+  async keyFor(user: string, thread: number | undefined) {
+    if (!thread || !(await this.available())) return undefined;
+    for (const key of keys) {
+      const id = `${user}:${key}`;
+      const saved = await this.stored(user, key).catch(() =>
+        this.known.get(id),
+      );
+      if (
+        saved === thread ||
+        (saved === undefined && this.known.get(id) === thread)
+      )
+        return key;
+    }
+    return undefined;
   }
 
   /** Forgets a deleted topic and creates it again. Concurrent recoveries share one. */

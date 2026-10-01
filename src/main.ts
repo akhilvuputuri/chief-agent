@@ -303,7 +303,14 @@ const app = server(
 );
 const bot = telegram(c, assistant, db);
 // Scheduled output goes to its own topic when threaded mode is on; otherwise to General.
-const topics = new TelegramTopics(db, bot.api, c.TELEGRAM_TOPICS === "auto");
+const topics = new TelegramTopics(db, bot.api, c.TELEGRAM_TOPICS !== "off");
+// Create Chief's topics up front so the owner can write in them before anything is posted.
+for (const user of c.TELEGRAM_ALLOWED_USER_IDS.split(","))
+  void topics
+    .ensure(user)
+    .catch((error) =>
+      opsLog("telegram.topic_failed", "warn", errorFields(error)),
+    );
 notifyOwner = async (text) => {
   for (const user of c.TELEGRAM_ALLOWED_USER_IDS.split(","))
     await bot.api.sendMessage(user, text).catch(() => {});

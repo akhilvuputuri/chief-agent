@@ -1,8 +1,12 @@
 # Topics in the private chat
 
-Telegram's threaded mode (Bot API 9.3 and 9.4) adds topics to a bot's private chat. Chief uses it in two ways. Scheduled output goes to its own topic. A message typed in a topic is answered in that topic. General stays the main conversation, and Chief keeps one shared conversation and memory across all topics.
+Telegram's threaded mode (Bot API 9.3 and 9.4) adds topics to a bot's private chat. Chief uses it in three ways:
 
-This is phase 1. A topic does not yet change which agent handles a message. That is phase 2; see [journal 52](journey/52-telegram-topics.md).
+- scheduled output goes to its own topic;
+- a message typed in a topic is answered in that topic;
+- a message typed in the **Email** topic goes straight to the email agent.
+
+General stays the main conversation, and Chief keeps one shared conversation and memory across all topics. See [journal 52](journey/52-telegram-topics.md).
 
 ## Setup
 
@@ -13,7 +17,13 @@ In the @BotFather Mini App, open My bots → Chief → Bot Settings → Threads 
 
 The `/mybots` text menu does not show these switches. They are only in the Mini App.
 
-`TELEGRAM_TOPICS` defaults to `auto`, which files scheduled output into topics only when `getMe().has_topics_enabled` is true. `off` sends scheduled output to General. Replies still follow the topic of the incoming message. Production Compose does not pass this variable yet, so production always uses `auto`. There, the switch is BotFather's Threaded Mode.
+`TELEGRAM_TOPICS` applies only when `getMe().has_topics_enabled` is true:
+
+- `auto` (the default) files scheduled output into topics, creates the topics at startup and sends Email-topic messages to the email agent first;
+- `file` files output and answers in the topic, without the first step;
+- `off` sends scheduled output to General.
+
+Replies always follow the topic of the incoming message. Production Compose does not pass this variable yet, so production always uses `auto`. There, the switch is BotFather's Threaded Mode.
 
 ## Behaviour
 
@@ -23,6 +33,8 @@ The `/mybots` text menu does not show these switches. They are only in the Mini 
 | Stock price alerts                         | **Markets** topic                                        |
 | Reply to a message typed in a topic        | Same topic, including progress, views and approval cards |
 | Reply to a message typed in General        | General                                                  |
+| Message typed in the **Email** topic       | Email agent first, then Chief's reply (see below)        |
+| Message typed in News or Markets           | Chief, told which topic it came from                     |
 | Daily briefings, routines, background work | General (unchanged)                                      |
 
 - **Topic creation.** Chief creates each topic the first time it sends there, then records the thread id as a `telegram.topic` event. No migration is needed: each owner and topic has a stable run id, so the lookup uses the existing run index, and the newest row wins. Concurrent first sends share one creation.
@@ -32,6 +44,22 @@ The `/mybots` text menu does not show these switches. They are only in the Mini 
 - **Follow-ups during a running reply.** If a message joins a run that is already in progress, the answer goes to the topic of the message that started the run.
 - **Addressing General.** Telegram rejects `message_thread_id=1`, so `inThread()` leaves the id out for General.
 
+## Topic as the first step (phase 2)
+
+Chief is a coordinator: for a domain request, its first model call usually does nothing but call `agent_run`. For a message typed in the Email topic, the host makes that call itself. The run starts with `agent_run({type: "email", objective: <the owner's message>, context: <topic and previous exchange>})`, and Chief's first model call already sees the agent's report. That saves one main-model call per message. The [decision eval](journey/50-decision-evals.md) priced a saved call at about 4.2 s and $0.02, as an upper estimate.
+
+- **Same record as a model-made call.** The call is journaled like any other (`runtime_calls`, checkpointed history), so approvals, `conversation_read` and later turns see an ordinary delegation. `route.first_call` records that the host made it.
+- **Chief still answers.** It writes the reply from the report. Runtime context tells it the topic and that the host started the agent. If the message was about something else, Chief handles it as usual: it can delegate again or answer itself.
+- **When the ordinary path is used instead:**
+  - the message is in General, News or Markets;
+  - it has images;
+  - it is longer than `agent_run`'s 2,000-character objective;
+  - it is background work;
+  - the email agent is not available in this deployment;
+  - `TELEGRAM_TOPICS` is not `auto`.
+- **Why only Email.** The News and Markets agents manage bulletin and alert _settings_. Questions typed in those topics, such as "what's this story about?" or "how is TSLA doing?", usually need web lookup, so a direct first step would often be wrong. Those topics only give Chief a hint. The [routing shadow data](journey/51-shadow-decisions.md) can show whether more topics should get a first step.
+- **Where the topic comes from.** The inbound handler matches the message's thread to a stored topic id and records `topic` in the input's existing `metadata` JSON, so no migration is needed. A follow-up that joins a running reply does not get its own first step.
+
 ## Code
 
 - `src/telegram-topics.ts`:
@@ -40,8 +68,11 @@ The `/mybots` text menu does not show these switches. They are only in the Mini 
   - `threadOf` reads the thread from an inbound message.
 - `src/telegram-views.ts`: `open` and `deliver` take a `Chat`, which is either a chat id or `{ id, thread }`. Every message part, the canvas buttons and the notices go to that thread. A view's callback binding still uses only chat and message id.
 - `src/telegram.ts`: the message handler passes the thread of the inbound message to views and approval cards. grammY's `ctx.reply` and `replyWithChatAction` already add the thread for topic messages. `telegram.input_ready` records `inTopic`. The typing indicator is sent with an explicit thread and never fails a turn. grammY's `replyWithChatAction` copies `message_thread_id` even for General messages.
-- `src/main.ts`: the news bulletin and stock alerts send through `topics.send(user, "news" | "markets", …)`.
-- Tests: `tests/telegram-topics.test.ts`.
+- `src/main.ts`: the news bulletin and stock alerts send through `topics.send(user, "news" | "markets", …)`. At startup, `topics.ensure()` creates News, Markets and Email.
+- `src/agent.ts`: `topicFirstCall()` decides whether a turn starts with a host-made `agent_run`, and adds the topic to runtime context.
+- `src/custom-agent.ts`: `req.firstCall` replaces the first model call with that tool call, journaled and dispatched like a model-made one.
+- `src/telegram-topics.ts`: `topicAgents` maps topics to agent types (only `email` today), and `keyFor()` maps a thread back to its topic.
+- Tests: `tests/telegram-topics.test.ts` and `tests/topic-routing.test.ts`.
 
 ## Operations
 
@@ -53,5 +84,6 @@ These ops-log events carry only the topic key (`kind`) and error codes:
 - `telegram.topic_unusable`
 - `telegram.topic_record_failed`
 - `telegram.topics_check_failed`
+- `route.first_call` (with `kind: topic.email`)
 
 Rollback: turn off Threaded Mode in BotFather (production), or set `TELEGRAM_TOPICS=off` where the variable is passed. Existing topics and their messages stay in Telegram.

@@ -172,7 +172,33 @@ export class CustomAgent implements Agent {
         if (await steer()) continue;
         let generation;
         let invocationId = "";
-        for (let attempt = 0; ; attempt++) {
+        const first = req.firstCall;
+        req.firstCall = undefined;
+        if (first) {
+          // The host already knows the first step; save the model call that would only make it.
+          invocationId = randomUUID();
+          generation = {
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [
+                {
+                  id: `host_${invocationId.replaceAll("-", "").slice(0, 24)}`,
+                  type: "function",
+                  function: { name: first.name, arguments: first.arguments },
+                },
+              ],
+            } as Message,
+          };
+          messages.push(generation.message);
+          await execution.checkpoint(messages);
+          await execution.trace("route.first_call", {
+            invocationId,
+            operation: first.name,
+            reason: first.reason,
+          });
+        }
+        for (let attempt = 0; !first; attempt++) {
           const remaining = await execution.consume("models");
           const start = Date.now();
           invocationId = randomUUID();
@@ -296,6 +322,7 @@ export class CustomAgent implements Agent {
             await execution.elapsed(Date.now() - start);
           }
         }
+        if (!generation) throw new Error("No model response");
         const calls = generation.message.tool_calls ?? [];
         const skipCalls = async (from: number, journal?: string) => {
           const result = {
