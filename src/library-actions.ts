@@ -1,11 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { type Database, event } from "./db.js";
 import { ToolValidationError } from "./tool-errors.js";
-import { LibraryClient, LibraryError } from "./library-client.js";
+import {
+  LibraryClient,
+  LibraryError,
+  isPrivateApiRefusal,
+} from "./library-client.js";
 import { LibraryIdentity } from "./library-identity.js";
 import { LinkCeremony, linkLimits, type LinkOutcome } from "./library-link.js";
 import {
   linkCard,
+  linkRestricted,
   revokeCard,
   revokeDone,
   shelfText,
@@ -178,6 +183,60 @@ export class LibraryActions {
       expires_at: string;
     }[];
   }
+  /** Persisted definite refusals suppress another code ceremony, including the old uncertain outcome. */
+  private async linkingRestricted(user: string): Promise<boolean> {
+    const rows = (
+      await this.db.query(
+        `SELECT a.id,a.payload,t.last_result,t.finished_at FROM approvals a
+       LEFT JOIN library_link_attempts t ON t.approval_id=a.id AND t.user_id=a.user_id
+       WHERE a.user_id=$1 AND a.operation='library_link' AND a.status='approved'
+       AND a.payload->>'execution' IN ('failed','uncertain') ORDER BY a.created_at DESC,t.started_at DESC LIMIT 1`,
+        [user],
+      )
+    ).rows;
+    const previous = rows[0];
+    if (!previous) return false;
+    if (previous.payload.failure?.code === "client_restricted") return true;
+    if (
+      previous.payload.execution !== "uncertain" ||
+      !previous.finished_at ||
+      previous.last_result !== "error:unauthenticated:missing_chip"
+    )
+      return false;
+    const events = (
+      await this.db.query(
+        "SELECT data FROM events WHERE user_id=$1 AND run_id=$2 AND type='library.clone_refused' ORDER BY created_at DESC LIMIT 1",
+        [user, previous.id],
+      )
+    ).rows;
+    const diagnostic = events[0]?.data;
+    if (
+      diagnostic?.recovered ||
+      !Array.isArray(diagnostic?.attempts) ||
+      !diagnostic.attempts.length
+    )
+      return false;
+    const refused = diagnostic.attempts.every((a: any) => {
+      if (
+        a.status !== 403 ||
+        a.route !== "/chip/clone" ||
+        typeof a.body !== "string"
+      )
+        return false;
+      try {
+        return isPrivateApiRefusal(JSON.parse(a.body));
+      } catch {
+        return false;
+      }
+    });
+    if (!refused) return false;
+    await this.deps.link.settle(user, previous.id, false, false);
+    await this.linkFinished(user, previous.id, {
+      status: "failed",
+      reason: "client_restricted",
+    });
+    return true;
+  }
   /** Host commands: no model, an approval row where a write is involved. */
   async command(
     user: string,
@@ -187,6 +246,12 @@ export class LibraryActions {
   ): Promise<{ text: string; cards?: boolean }> {
     this.assertOwner(user);
     const identity = this.deps.identity;
+    if (
+      (kind === "link" || kind === "code" || kind === "shelf") &&
+      !(await identity.status(user)).linked &&
+      (await this.linkingRestricted(user))
+    )
+      return { text: linkRestricted };
     if (kind === "shelf") {
       const status = await identity.status(user);
       const usage = await this.deps.client.usage();
@@ -348,11 +413,13 @@ export class LibraryActions {
     );
     return {
       text:
-        outcome.status === "done"
-          ? `Linked to NLB. Shelf now: ${outcome.loans} loans, ${outcome.holds} holds. Send /library any time.`
-          : outcome.status === "uncertain"
-            ? "Libby accepted the code but I could not confirm the card yet. Send /library to check later."
-            : "Libby did not accept that code. Nothing was changed.",
+        outcome.status !== "done" && outcome.reason === "client_restricted"
+          ? linkRestricted
+          : outcome.status === "done"
+            ? `Linked to NLB. Shelf now: ${outcome.loans} loans, ${outcome.holds} holds. Send /library any time.`
+            : outcome.status === "uncertain"
+              ? "Libby accepted the code but I could not confirm the card yet. Send /library to check later."
+              : "Libby did not accept that code. Nothing was changed.",
     };
   }
   /** Called by the ceremony when an attempt ends; records the outcome on the approval. */
@@ -372,7 +439,7 @@ export class LibraryActions {
           execution,
           ...(outcome.status === "done"
             ? { result: { loans: outcome.loans, holds: outcome.holds } }
-            : { failure: { code: outcome.status } }),
+            : { failure: { code: outcome.reason ?? outcome.status } }),
         }),
       ],
     );
@@ -419,6 +486,17 @@ export class LibraryActions {
     });
     if (!approve) return { status: "denied", operation: claimed.operation };
     if (claimed.operation === "library_link") {
+      if (await this.linkingRestricted(user)) {
+        await this.linkFinished(user, id, {
+          status: "failed",
+          reason: "client_restricted",
+        });
+        return {
+          status: "failed",
+          operation: "library_link",
+          reason: "client_restricted",
+        };
+      }
       await this.deps.link.start(
         user,
         id,
@@ -480,6 +558,12 @@ export class LibraryActions {
         reason: previous.payload.failure?.code ?? "failed",
       };
     if (previous.operation === "library_link") {
+      if (await this.linkingRestricted(user))
+        return {
+          status: "failed",
+          operation: "library_link",
+          reason: "client_restricted",
+        };
       const live = await this.deps.link.liveAttempt(user);
       if (live && live.state !== "completing")
         return { status: "linking", operation: "library_link" };
@@ -552,6 +636,7 @@ export class LibraryActions {
           return `Linked to NLB. Shelf now: ${result.loans ?? 0} loans, ${result.holds ?? 0} holds. Send /library any time.`;
         return "Done.";
       case "failed":
+        if (result.reason === "client_restricted") return linkRestricted;
         return `The library refused this: ${result.reason.replace(/_/g, " ")}. Nothing was changed.`;
       default:
         return "I could not confirm the outcome. I will not try again on my own. Tap Check shelf and I will look at your shelf.";

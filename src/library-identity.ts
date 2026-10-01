@@ -190,7 +190,16 @@ export class LibraryIdentity {
         [user],
       )
     ).rows[0];
+    const restricted =
+      row?.state !== "linked" &&
+      !!(
+        await this.db.query(
+          "SELECT 1 FROM approvals WHERE user_id=$1 AND operation='library_link' AND status='approved' AND payload->'failure'->>'code'='client_restricted' LIMIT 1",
+          [user],
+        )
+      ).rows.length;
     return {
+      linkingRestricted: restricted,
       state: row?.state ?? ("none" as const),
       linked: row?.state === "linked",
       tokenRenewsBy: row?.token_expires_at

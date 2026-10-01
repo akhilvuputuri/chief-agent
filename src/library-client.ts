@@ -26,6 +26,7 @@ export const libraryLimits = {
   failureTrip: 5,
 };
 export type LibraryErrorKind =
+  | "client_restricted"
   | "throttled"
   | "unauthenticated"
   | "rejected"
@@ -334,8 +335,11 @@ export class LibraryClient {
     if (status === 401 || (status === 403 && route.host === "sentry")) {
       await finish("unauthenticated");
       let code: string | undefined;
+      let restricted = false;
       try {
-        code = upstreamCode(JSON.parse(text));
+        const body = JSON.parse(text);
+        code = upstreamCode(body);
+        restricted = status === 403 && isPrivateApiRefusal(body);
       } catch {
         code = undefined;
       }
@@ -348,6 +352,13 @@ export class LibraryClient {
           ...(options.jar?.values() ?? []),
         ]),
       });
+      if (restricted)
+        throw new LibraryError(
+          "client_restricted",
+          "OverDrive refused access for this integration; use Libby directly for your card, loans and holds",
+          status,
+          "client_restricted",
+        );
       throw new LibraryError(
         "unauthenticated",
         "the Libby link needs to be renewed; send /library link",
@@ -411,6 +422,18 @@ export class LibraryClient {
       "the library did not answer after bounded retries; try again in a few minutes",
     );
   }
+}
+/** Recognise the explicit private-client refusal, not every missing/expired chip. */
+export function isPrivateApiRefusal(body: unknown): boolean {
+  if (!body || typeof body !== "object") return false;
+  const value = body as Record<string, unknown>;
+  return (
+    value.result === "missing_chip" &&
+    typeof value.notice === "string" &&
+    value.notice.includes("This is a private API for OverDrive") &&
+    value.notice.includes("Use by any other client") &&
+    value.notice.includes("is prohibited")
+  );
 }
 /** Upstream error identifiers are short tokens; the message text is never kept. */
 function upstreamCode(body: unknown) {

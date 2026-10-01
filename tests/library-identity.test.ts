@@ -1180,3 +1180,201 @@ test("/library link settles an attempt left completing before starting a new one
     await pg.close();
   }
 });
+
+const privateApiRefusal = {
+  result: "missing_chip",
+  notice:
+    "This is a private API for OverDrive's dewey app. Use by any other client is prohibited.",
+};
+
+test("a private-client refusal ends linking once, survives restart, and stops another code ceremony", async () => {
+  const { pg, db } = await database();
+  try {
+    const h = harness(db, {
+      codes: [{ result: "fulfilled", blessing: "fake-blessing" }],
+      clone: () => Response.json(privateApiRefusal, { status: 403 }),
+    });
+    const a = await h.actions.draft("123", randomUUID(), "library_link", {});
+    await db.query(
+      "UPDATE approvals SET payload=payload || '{\"telegramMessageId\":42}'::jsonb WHERE id=$1",
+      [a.approvalId],
+    );
+    await h.actions.decide("123", a.approvalId!, true);
+    assert.equal(await settled(db, a.approvalId!), "failed");
+    assert.deepEqual(
+      h.calls.map((c) => c.url.pathname),
+      ["/chip", "/chip/clone/code", "/chip/clone"],
+    );
+    assert.match(h.edits.at(-1)!.text, /OverDrive refused/);
+    assert.doesNotMatch(h.edits.at(-1)!.text, /try again|Send \/library link/);
+    assert.equal(await h.identity.row("123"), undefined);
+    await recoverLibrary(db);
+    const restarted = harness(db);
+    for (const kind of ["link", "code", "shelf"] as const) {
+      const result = await restarted.actions.command(
+        "123",
+        kind,
+        "12345678",
+        "123",
+      );
+      assert.match(result.text, /OverDrive refused/);
+      assert.equal(result.cards, undefined);
+    }
+    const tools = new (await import("../src/library.js")).LibraryTools(
+      restarted.client,
+      undefined,
+      restarted.identity,
+    );
+    const shelf = await tools.shelf("123");
+    assert.equal(shelf.linked, false);
+    assert.match((shelf as any).note, /OverDrive refused/);
+    // Even a previously sent pending card must not launch a new attempt.
+    const pending = await restarted.actions.draft(
+      "123",
+      randomUUID(),
+      "library_link",
+      {},
+    );
+    assert.deepEqual(
+      await restarted.actions.decide("123", pending.approvalId!, true),
+      {
+        status: "failed",
+        operation: "library_link",
+        reason: "client_restricted",
+      },
+    );
+    assert.equal(restarted.calls.length, 0);
+    const otherActions = new LibraryActions(
+      db,
+      {
+        identity: restarted.identity,
+        link: restarted.link,
+        client: restarted.client,
+      },
+      "456",
+    );
+    const other = await otherActions.command("456", "link", undefined, "456");
+    assert.equal(other.cards, true, "the restriction is owner scoped");
+  } finally {
+    await pg.close();
+  }
+});
+
+test("historical uncertainty settles only from the exact final clone refusal, with no network", async () => {
+  for (const scenario of [
+    "refused",
+    "timeout",
+    "recovered",
+    "different-owner",
+    "malformed",
+  ] as const) {
+    const { pg, db } = await database();
+    try {
+      const h = harness(db, {
+        sync: () => ({ cards: [], loans: [], holds: [] }),
+      });
+      const a = await h.actions.draft("123", randomUUID(), "library_link", {});
+      await h.identity.mint("123");
+      await db.query(
+        "UPDATE approvals SET status='approved',payload=payload || '{\"execution\":\"uncertain\"}'::jsonb WHERE id=$1",
+        [a.approvalId],
+      );
+      await db.query(
+        "INSERT INTO library_link_attempts(id,user_id,approval_id,direction,state,deadline_at,finished_at,last_result) VALUES($1,'123',$2,'display','completing',now(),now(),$3)",
+        [
+          randomUUID(),
+          a.approvalId,
+          scenario === "timeout"
+            ? "error:transient"
+            : "error:unauthenticated:missing_chip",
+        ],
+      );
+      await db.query(
+        "INSERT INTO events(user_id,run_id,type,data) VALUES($1,$2,'library.clone_refused',$3::jsonb)",
+        [
+          scenario === "different-owner" ? "456" : "123",
+          a.approvalId,
+          JSON.stringify({
+            recovered: scenario === "recovered",
+            attempts: [
+              {
+                route: "/chip/clone",
+                status: 403,
+                body:
+                  scenario === "malformed"
+                    ? "{"
+                    : JSON.stringify(privateApiRefusal),
+              },
+            ],
+          }),
+        ],
+      );
+      h.calls.length = 0;
+      const result = await h.actions.command("123", "shelf", undefined, "123");
+      assert.equal(h.calls.length, 0);
+      if (scenario === "refused") {
+        assert.match(result.text, /OverDrive refused/);
+        assert.equal(
+          (
+            await db.query(
+              "SELECT payload->>'execution' e FROM approvals WHERE id=$1",
+              [a.approvalId],
+            )
+          ).rows[0].e,
+          "failed",
+        );
+        assert.equal(
+          (
+            await db.query(
+              "SELECT state FROM library_link_attempts WHERE approval_id=$1",
+              [a.approvalId],
+            )
+          ).rows[0].state,
+          "failed",
+        );
+        assert.equal(await h.identity.row("123"), undefined);
+      } else {
+        assert.doesNotMatch(result.text, /OverDrive refused/);
+        assert.equal(
+          (
+            await db.query(
+              "SELECT payload->>'execution' e FROM approvals WHERE id=$1",
+              [a.approvalId],
+            )
+          ).rows[0].e,
+          "uncertain",
+        );
+        assert.ok(await h.identity.row("123"));
+      }
+    } finally {
+      await pg.close();
+    }
+  }
+});
+
+test("a restriction after successful clone preserves uncertain state and its identity", async () => {
+  const { pg, db } = await database();
+  try {
+    const h = harness(db, {
+      codes: [{ result: "fulfilled", blessing: "fake-blessing" }],
+      clone: () => Response.json({ result: "cloned" }),
+    });
+    const call = h.client.call.bind(h.client);
+    h.client.call = (async (key: any, options: any) => {
+      if (key === "chipSync")
+        throw new (await import("../src/library-client.js")).LibraryError(
+          "client_restricted",
+          "refused",
+          403,
+          "client_restricted",
+        );
+      return call(key, options);
+    }) as typeof h.client.call;
+    const a = await h.actions.draft("123", randomUUID(), "library_link", {});
+    await h.actions.decide("123", a.approvalId!, true);
+    assert.equal(await settled(db, a.approvalId!), "uncertain");
+    assert.ok(await h.identity.row("123"));
+  } finally {
+    await pg.close();
+  }
+});
