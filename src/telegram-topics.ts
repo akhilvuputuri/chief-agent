@@ -98,7 +98,12 @@ export class TelegramTopics {
   async thread(user: string, key: TopicKey): Promise<number | undefined> {
     if (!(await this.available())) return undefined;
     const id = `${user}:${key}`;
-    const saved = await this.stored(user, key).catch(() => undefined);
+    // A failed read is not evidence the topic is gone: use the one this process knows,
+    // or let send() fall back to General rather than create a duplicate.
+    const saved = await this.stored(user, key).catch((error) => {
+      if (this.known.has(id)) return this.known.get(id);
+      throw error;
+    });
     if (typeof saved === "number") return saved;
     // Created earlier in this process but never recorded (a null row means deleted).
     if (saved === undefined && this.known.has(id)) return this.known.get(id);

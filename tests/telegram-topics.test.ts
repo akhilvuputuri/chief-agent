@@ -379,3 +379,19 @@ test("threaded mode turned on later is picked up without a restart", async (t) =
     await pg.close();
   }
 });
+
+test("a failed topic lookup sends to General instead of creating a duplicate", async () => {
+  const { api, created } = fakeApi();
+  const topics = new TelegramTopics(
+    {
+      query: async () => {
+        throw new Error("db down");
+      },
+    } as unknown as Database,
+    api,
+  );
+  const sends: any[] = [];
+  await topics.send("123", "news", async (extra) => sends.push(extra));
+  assert.deepEqual(sends, [{}]);
+  assert.deepEqual(created, []);
+});
