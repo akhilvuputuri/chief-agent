@@ -1,7 +1,7 @@
 # 54 — Which changes deserve the owner's attention
 
 Work date(s): 1–2 October 2026. Written: 2 October 2026.
-Status: implementation candidate; disabled by default, not deployed or accepted in real use.
+Status: released v0.3.32; migration installed and production enabled. Real Telegram/provider acceptance and one-week measurements remain pending.
 
 ## User-visible problem and preceding iteration
 
@@ -9,7 +9,7 @@ Status: implementation candidate; disabled by default, not deployed or accepted 
 
 ## Evidence
 
-Source inspection used freshly fetched main `9b76fc5b6c7a4767d32a1d67f9476d9a0804ae81`; the subsequent documentation-only `78ad212182a34cf18b77a60c9e0d6d5cce8b7c0b` was fetched during implementation. Before review, fresh main advanced to `aacdc2ac9d9c9a92a11f74c19d88b93daa189a35`; its Libby refusal handling and reviewed runtime configuration were incorporated, preserving both documentation paths. Its successful release reported that exact SHA and startup health on 2 October SGT; a later failed attempt is not treated as a new deployment. The migration script now pins that baseline and still rechecks live RELEASE. The main/source baseline is distinct from production acceptance. Before implementation, 124 existing focused mocked tests passed. Synthetic new scenarios cover parcel/email investigation, evening delivery, external meetings, unchanged scheduled research, ownership, confirmation, permissions, restart, budgets, feedback and ambiguous delivery. Final suite/review evidence is pending below; this is not a production measurement.
+Source inspection used freshly fetched main `9b76fc5b6c7a4767d32a1d67f9476d9a0804ae81`; the subsequent documentation-only `78ad212182a34cf18b77a60c9e0d6d5cce8b7c0b` was fetched during implementation. Before review, fresh main advanced to `aacdc2ac9d9c9a92a11f74c19d88b93daa189a35`; its Libby refusal handling and reviewed runtime configuration were incorporated, preserving both documentation paths. Its successful release reported that exact SHA and startup health on 2 October SGT; a later failed attempt is not treated as a new deployment. The migration script now pins that baseline and still rechecks live RELEASE. The main/source baseline is distinct from production acceptance. Before implementation, 124 existing focused mocked tests passed. Synthetic new scenarios cover parcel/email investigation, evening delivery, external meetings, unchanged scheduled research, ownership, confirmation, permissions, restart, budgets, feedback and ambiguous delivery. Final suite/review and deployment evidence is recorded below; synthetic scenarios are not production quality measurements.
 
 Gmail remains a small IDs-only adapter. Official [message listing](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/list), [search timestamp semantics](https://developers.google.com/workspace/gmail/api/guides/filtering) and [Calendar occurrence identity](https://developers.google.com/workspace/calendar/api/guides/recurringevents) informed the mocks. Model quality, useful-notification ratio and model cost per useful finding remain unmeasured.
 
@@ -49,7 +49,13 @@ After incorporating current main, `npm run check` passed 596 application, 21 Jav
 
 ### Release closure
 
-Candidate [PR 148](https://github.com/akhilvuputuri/chief-agent/pull/148) remains disabled and unmerged. Code review and CI passed at the head above. A read-only operator preflight on 2 October SGT confirmed the pinned baseline, healthy startup, no active runtime/pending inputs, and no migration 023. Private aggregate preservation counters were checked locally and are not copied here. Reviewed migration installation, separate activation, exact release/health verification and owner Telegram acceptance remain pending.
+On 2 October 2026 SGT, GPT-6 Astra APPROVED final head `943d71e0c6a1b1caf328f3716488f77a9da034ac`, independently passing 56 focused application tests, 17 offline rollout tests and 15 additional rechecks. No unresolved actionable finding remained. Final local validation passed 609 application, 21 JavaScript script and 30 offline Python tests, build, repository formatting and 17 rollout tests. Exact-head CI passed. No paid smoke or evaluation was run. Prior review requests and approvals above describe successive candidate states.
+
+[PR 148](https://github.com/akhilvuputuri/chief-agent/pull/148) merged at `9f5031ccb3a45e54cdde7f3f41accaa498faceff`; its tree exactly matches the approved head. The reviewed operator rollout installed additive migration 023 at that SHA with the capability off. The independently carried archive SHA256 was `c45a2ef06c83604795f6c27a5a381420a35a5503d9df1b48567bc9157fdf3969`. Separate server RELEASE, migration, startup health and private aggregate preservation checks passed. No records were reset, user work cancelled or paused investigation resumed.
+
+The [normal release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/36916132818) then succeeded for that exact SHA (receipt recorded 1 October at 19:42 UTC). Activation was a separate idle-only operator step. Astra independently reviewed the temporary helper at SHA256 `d24774edf9362f656e68140166006d711d96df8379b0358a2d15fc6669a9ffff` and passed seven offline tests. It changes only the capability setting, preserves other environment bytes and permissions, requires the installed migration and an empty responsibility table, recreates only the gateway, and restores prior configuration on failure. Actual activation returned the exact release, healthy startup, effective capability on and zero concerns. A subsequent independent read-only server check reconfirmed the exact RELEASE, health, migration and preserved record counters. No secret values or private counters are copied here.
+
+[v0.3.32](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.32) was published and its immutable target independently confirmed as `9f5031ccb3a45e54cdde7f3f41accaa498faceff`. The source default remains off; production is enabled. No real responsibility, Gmail/Calendar poll, model investigation or Telegram notification was created for acceptance. Explicit owner confirmation starts monitoring. Live Telegram/provider acceptance and one week of quality/cost observations remain separate from startup health, synthetic checks and code review.
 
 ## Follow-up and next iteration
 
