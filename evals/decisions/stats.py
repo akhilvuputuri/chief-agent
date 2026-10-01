@@ -102,6 +102,8 @@ def cluster_interval(
     items: Sequence,
     cluster: Callable,
     statistic: Callable[[Sequence], float | None],
+    *,
+    proportion: bool = True,
 ) -> tuple[float, float] | None:
     """Cluster bootstrap interval, or a Wilson interval over clusters when it is degenerate.
 
@@ -111,7 +113,8 @@ def cluster_interval(
     """
     ci = cluster_bootstrap(items, cluster, statistic)
     value = statistic(list(items))
-    if ci is None or value is None or ci[0] != ci[1]:
+    # The Wilson fallback only makes sense for a proportion, never for a mean of characters.
+    if not proportion or ci is None or value is None or ci[0] != ci[1]:
         return ci
     n = len({cluster(x) for x in items})
     return wilson(round(value * n), n)

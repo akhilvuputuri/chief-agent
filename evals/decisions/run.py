@@ -49,9 +49,17 @@ def collect(decision, backend: str, cases: list[dict[str, Any]], runs: int, key:
 def harness_hash() -> str:
     """Content hash of the harness and fixtures, so a report names the exact code that made it."""
     digest = hashlib.sha256()
-    files = [*HERE.glob("*.py"), *HERE.glob("*.ts"), *(HERE / "fixtures").glob("*")]
+    # Production inputs a decision reads (agent definitions, word cues) are part of the fingerprint.
+    files = [
+        *HERE.glob("*.py"),
+        *HERE.glob("*.ts"),
+        *(HERE / "fixtures").glob("*"),
+        ROOT / "plugins" / "core" / "plugin.json",
+        ROOT / "plugins" / "public-research" / "plugin.json",
+        ROOT / "src" / "tool-domains.ts",
+    ]
     for path in sorted(p for p in files if p.is_file()):
-        digest.update(path.name.encode())
+        digest.update(str(path.relative_to(ROOT)).encode())
         digest.update(path.read_bytes())
     return digest.hexdigest()[:16]
 

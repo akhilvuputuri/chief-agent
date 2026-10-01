@@ -11,17 +11,19 @@ from stats import mean, percentile
 def call_stats(records: list[dict[str, Any]], held_ids: set[str], paid: bool) -> dict[str, Any]:
     calls = [r for r in records if r["id"] in held_ids]
     ok = [r for r in calls if r["error"] is None]
-    latencies = [r["latency_ms"] for r in ok]
+    # Every call takes wall time, including failures and timeouts that fall back.
+    latencies = [r["latency_ms"] for r in calls if isinstance(r.get("latency_ms"), (int, float))]
     costs = [r["cost"] for r in calls if isinstance(r.get("cost"), (int, float))]
+    unpriced = len(calls) - len(costs)
     return {
         "calls": len(calls),
         "errors": len(calls) - len(ok),
-        "calls_without_cost": len(calls) - len(costs) if paid else 0,
+        "calls_without_cost": unpriced if paid else 0,
         "latency_mean_ms": round(mean(latencies)) if latencies else 0,
         "latency_p50_ms": percentile(latencies, 0.5) or 0,
         "latency_p95_ms": percentile(latencies, 0.95) or 0,
-        # Mean reported cost of one decision; unknown (None) when a paid backend reports none.
-        "cost_per_decision_usd": (sum(costs) / len(costs)) if costs else (None if paid else 0.0),
+        # Mean reported cost of one decision; unknown when any paid call reported none.
+        "cost_per_decision_usd": (sum(costs) / len(costs)) if costs and not (paid and unpriced) else (None if paid else 0.0),
     }
 
 

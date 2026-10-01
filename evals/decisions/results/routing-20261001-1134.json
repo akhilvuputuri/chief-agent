@@ -1,9 +1,9 @@
 {
   "decision": "routing",
-  "at": "2026-10-01T03:40:01.969336+00:00",
+  "at": "2026-10-01T03:44:17.960232+00:00",
   "rescored_from": "routing-20261001-1134.json",
-  "revision": "b6dff34873b4930656d5f3654593cb1dfc710af0",
-  "harness_sha256": "31985265756c21ac",
+  "revision": "24a4bdbed34000106302ec08fd7559f335d35433",
+  "harness_sha256": "69f7239ea38f1c30",
   "runs": 3,
   "min_recall": 1.0,
   "min_precision": 1.0,

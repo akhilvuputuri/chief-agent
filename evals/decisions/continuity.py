@@ -190,7 +190,7 @@ def evaluate(cases, records_by_backend, args):
             "saved_per_message": mean(gains),
             "saved_per_message_ci": cluster_interval(
                 [dict(c, saved=g) for c, g in zip(hcalls, gains)], lambda c: c["cluster"],
-                lambda s: mean([x["saved"] for x in s])),
+                lambda s: mean([x["saved"] for x in s]), proportion=False),
             "saved_share_of_typical_request": mean(gains) / TYPICAL_REQUEST_CHARS,
             "lowest_follow_up_p_tuning": follow_t[0] if follow_t else None,
             "lowest_follow_up_p_held_out": follow_h[0] if follow_h else None,
