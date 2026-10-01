@@ -131,6 +131,21 @@ export class ResponsibilityWorker {
     }
   }
   private async check(t: any, lease: string) {
+    const eligible =
+      this.allowed(t.user_id) &&
+      (
+        await this.db.query(
+          `SELECT t.id FROM responsibility_triggers t JOIN responsibilities r ON r.id=t.responsibility_id AND r.revision=t.revision JOIN responsibility_revisions v ON v.responsibility_id=r.id AND v.revision=r.revision WHERE t.id=$1 AND t.lease=$2 AND r.status='active' AND (v.spec->>'expiresAt' IS NULL OR (v.spec->>'expiresAt')::timestamptz>$3)`,
+          [t.id, lease, this.clock()],
+        )
+      ).rows.length > 0;
+    if (!eligible) {
+      await this.db.query(
+        "UPDATE responsibility_triggers SET lease=NULL,lease_until=NULL WHERE id=$1 AND lease=$2",
+        [t.id, lease],
+      );
+      return;
+    }
     const now = this.clock();
     let changes: Change[] = [],
       cursor = { ...t.cursor },

@@ -1973,3 +1973,58 @@ test("resumed responsibility context keeps isolated background history but exclu
     await f.pg.close();
   }
 });
+test("source checks revalidate expiry after waiting for an earlier source in the same tick", async () => {
+  const f = await fixture();
+  try {
+    let calls = 0;
+    const source = {
+      ...f.gmail,
+      poll: async () => {
+        calls++;
+        if (calls === 1) f.time(new Date(f.clock().getTime() + 120000));
+        return { messages: [] };
+      },
+    } as any;
+    const service = new Responsibilities(f.db, { gmail: source }, f.clock),
+      worker = new ResponsibilityWorker(
+        service,
+        () => true,
+        { gmail: source },
+        f.clock,
+      ),
+      expiry = new Date(f.clock().getTime() + 60000).toISOString();
+    for (let i = 0; i < 2; i++) {
+      const p = await service.call("a", f.run, {
+        operation: "responsibility_create",
+        spec: {
+          ...f.spec,
+          parcelIds: [],
+          end: "date",
+          expiresAt: expiry,
+          title: "Expiry " + i,
+        },
+      });
+      await service.confirm("a", p.approvalId, true);
+    }
+    await worker.tick();
+    assert.equal(calls, 1);
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT count(*)::int n FROM responsibility_triggers WHERE health='degraded'",
+        )
+      ).rows[0].n,
+      0,
+    );
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT count(*)::int n FROM responsibilities WHERE status='expired'",
+        )
+      ).rows[0].n,
+      2,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
