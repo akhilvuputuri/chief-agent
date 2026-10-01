@@ -997,7 +997,7 @@ export class StockDelivery {
         return;
       }
       try {
-        await this.send(d.user_id, d.payload);
+        await this.send(d.user_id, { ...d.payload, alertId: d.id });
         await this.db.query(
           "UPDATE stock_alerts SET state='sent',sent_at=now() WHERE id=$1",
           [d.id],

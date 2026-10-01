@@ -503,7 +503,16 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
       {
         updateId: ctx.update.update_id,
         messageId: ctx.message.message_id,
-        replyToMessageId: ctx.message.reply_to_message?.message_id,
+        replyToMessageId: ctx.message.reply_to_message?.forum_topic_created
+          ? undefined
+          : ctx.message.reply_to_message?.message_id,
+        quotedReplyText: ctx.message.reply_to_message?.forum_topic_created
+          ? undefined
+          : (
+              ctx.message.reply_to_message?.text ??
+              ctx.message.reply_to_message?.caption ??
+              ctx.message.quote?.text
+            )?.slice(0, 2000),
         receivedAt: new Date().toISOString(),
         preparing: needsPreparation,
         voiceReply: !!ctx.message.voice,

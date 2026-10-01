@@ -221,6 +221,8 @@ function failure(content: string | null | undefined) {
 
 export type IndexRow = {
   id: string;
+  threadId?: number;
+  anchor?: { references?: { kind: string; id: string }[] };
   role: string;
   createdAt: Date | string;
   /** Run that appended the row; another run's assistant row is a background delivery. */
@@ -265,6 +267,8 @@ export function exchangeIndex(rows: IndexRow[], maxChars = 8000) {
   type Entry = {
     at: Date | string;
     messageId: string;
+    threadId?: number;
+    anchor?: IndexRow["anchor"];
     runId?: string | null;
     you?: string;
     reply?: string;
@@ -282,6 +286,8 @@ export function exchangeIndex(rows: IndexRow[], maxChars = 8000) {
       entries.push({
         at: row.createdAt,
         messageId: row.id,
+        threadId: row.threadId,
+        anchor: row.anchor,
         runId: row.runId,
         you: row.content ?? "",
         tools: [],
@@ -301,6 +307,7 @@ export function exchangeIndex(rows: IndexRow[], maxChars = 8000) {
       ) {
         entries.push({
           at: row.createdAt,
+          threadId: row.threadId,
           messageId: row.id,
           runId: row.runId,
           reply: row.content ?? "",
@@ -348,13 +355,19 @@ export function exchangeIndex(rows: IndexRow[], maxChars = 8000) {
     if (e.answer) tools.push(`saved answer obs=${e.answer}`);
     // JSON quoting keeps message text from imitating the line structure.
     const line =
-      `[${entries.length - i + 1} back · ${when(e.at)} · messageId=${e.messageId}] ` +
+      `[${entries.length - i + 1} back · ${when(e.at)} · messageId=${e.messageId}${e.threadId === undefined ? "" : ` · thread=${e.threadId || "General"}`}] ` +
       (e.you !== undefined
         ? `you: ${JSON.stringify(head(e.you, 140))}`
         : "background update") +
       (e.reply ? ` → ${JSON.stringify(head(e.reply, 180))}` : "") +
       (e.you !== undefined && e.replyId ? ` · replyId=${e.replyId}` : "") +
-      (tools.length ? ` · tools: ${tools.join(", ")}` : "");
+      (tools.length ? ` · tools: ${tools.join(", ")}` : "") +
+      (e.anchor?.references?.length
+        ? ` · feed=${e.anchor.references
+            .slice(0, 5)
+            .map((r) => `${r.kind}:${r.id}`)
+            .join(",")}`
+        : "");
     if (size + line.length + 1 > maxChars) break;
     lines.unshift(line);
     size += line.length + 1;

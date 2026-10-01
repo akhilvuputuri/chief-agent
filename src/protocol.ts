@@ -268,6 +268,14 @@ export const action = z.discriminatedUnion("operation", [
       enabled: z.boolean().optional(),
     })
     .strict(),
+  z
+    .object({
+      operation: z.literal("feed_read"),
+      kind: z.enum(["news", "markets", "updates"]),
+      id: z.string().uuid(),
+      offset: z.number().int().min(0).default(0),
+    })
+    .strict(),
   z.object({ operation: z.literal("news_status") }).strict(),
   z.object({ operation: z.literal("news_edition_now") }).strict(),
   z.object({ operation: z.literal("watchlist_list") }).strict(),

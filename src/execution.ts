@@ -24,6 +24,7 @@ export class Stop extends Error {
 export const readOperations = new Set([
   "tools_load",
   "finish_turn",
+  "feed_read",
   "conversation_search",
   "conversation_read",
   "canvas_list",

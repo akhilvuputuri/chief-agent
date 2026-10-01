@@ -1,3 +1,4 @@
+import { readFeed } from "./telegram-feeds.js";
 import type { NewsTools } from "./news.js";
 import { RoutineTools } from "./routines.js";
 import { HistoryStore } from "./history.js";
@@ -94,6 +95,8 @@ export class JobTools {
     a: ReturnType<typeof action.parse>,
   ): Promise<unknown> {
     const db = this.db;
+    if (a.operation === "feed_read")
+      return readFeed(db, user, a.kind, a.id, a.offset);
     if (a.operation === "conversation_search")
       return new HistoryStore(db).search(user, a.query);
     if (a.operation === "conversation_read")

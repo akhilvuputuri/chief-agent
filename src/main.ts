@@ -1,3 +1,4 @@
+import { recordFeedSent } from "./telegram-feeds.js";
 import { destination, taskDelivery } from "./delivery-routing.js";
 import "./process-guard.js";
 import { errorFields, opsLog } from "./ops-log.js";
@@ -209,8 +210,8 @@ const newsBulletin = new NewsBulletin(
     await topics.deliver(
       user,
       payload.destination ?? { kind: "topic", topic: "news" },
-      (thread, notice) =>
-        bot.api.sendMessage(
+      async (thread, notice) => {
+        const sent = await bot.api.sendMessage(
           user,
           [notice, payload.text].filter(Boolean).join("\n\n"),
           {
@@ -224,7 +225,17 @@ const newsBulletin = new NewsBulletin(
                 }
               : {}),
           },
-        ),
+        );
+        await recordFeedSent(
+          db,
+          user,
+          payload.editionId,
+          "news",
+          sent,
+          thread.message_thread_id,
+        );
+        return sent;
+      },
     );
   },
   undefined,
@@ -433,6 +444,23 @@ async function sendWorkMessage(user: string, text: string | Delivery) {
         },
         typeof text === "string" ? "progress" : "answer",
       );
+      if (delivery.runId && typeof text !== "string") {
+        const sent = (
+          await db.query(
+            "SELECT data FROM events WHERE user_id=$1 AND run_id=$2 AND type IN ('telegram.message_sent','telegram.view_opened') ORDER BY id DESC LIMIT 1",
+            [user, delivery.runId],
+          )
+        ).rows[0];
+        if (sent)
+          await recordFeedSent(
+            db,
+            user,
+            delivery.runId,
+            "updates",
+            { message_id: sent.data.messageId },
+            extra.message_thread_id,
+          );
+      }
       if (delivery.runId)
         await event(db, user, delivery.runId, "telegram.delivery_routed", {
           threadId: extra.message_thread_id ?? null,
@@ -510,12 +538,22 @@ const stockDelivery = new StockDelivery(db, async (user, payload) => {
   await topics.deliver(
     user,
     payload.destination ?? { kind: "topic", topic: "markets" },
-    (thread, notice) =>
-      bot.api.sendMessage(
+    async (thread, notice) => {
+      const sent = await bot.api.sendMessage(
         user,
         [notice, payload.reply].filter(Boolean).join("\n\n"),
         { ...thread, ...extra },
-      ),
+      );
+      await recordFeedSent(
+        db,
+        user,
+        payload.alertId,
+        "markets",
+        sent,
+        thread.message_thread_id,
+      );
+      return sent;
+    },
   );
 });
 await stockDelivery.recover();

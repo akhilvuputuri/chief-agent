@@ -146,6 +146,8 @@ export function runtimeContext(
               routine_list: "List the owner's routines and next due times.",
               routine_history:
                 "Read the ten latest occurrences, task IDs, counters, saved responses and Telegram delivery states. Does not rerun work.",
+              feed_read:
+                "Read the exact stored news edition, stock alert or background update named in a feed reference. Owner-scoped, paginated and read-only.",
               conversation_search:
                 "Search earlier saved conversation messages using concrete words. Returns up to ten owner-scoped message IDs and excerpts; historical assistant claims are not verified facts.",
               conversation_read:

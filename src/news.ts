@@ -696,7 +696,7 @@ export class NewsBulletin {
     if (!d) return;
     try {
       if (!this.allowed(d.user_id)) throw new Error("Unauthorized delivery");
-      await this.send(d.user_id, d.payload);
+      await this.send(d.user_id, { ...d.payload, editionId: d.id });
       await this.db.query(
         "UPDATE news_editions SET state='sent',sent_at=now() WHERE id=$1",
         [d.id],

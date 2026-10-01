@@ -1,3 +1,8 @@
+import {
+  inputAnchor,
+  recentFeedIndex,
+  turnInputReferences,
+} from "./telegram-feeds.js";
 import { InputInbox } from "./input-inbox.js";
 import { ContextLimitError } from "./context.js";
 import { NotDispatchedError } from "./tool-errors.js";
@@ -53,6 +58,8 @@ export type Incoming = {
   updateId?: number;
   messageId?: number;
   replyToMessageId?: number;
+  quotedReplyText?: string;
+  anchor?: import("./telegram-feeds.js").FeedAnchor | null;
   receivedAt?: string;
   preparing?: boolean;
   voiceReply?: boolean;
@@ -86,6 +93,7 @@ export class Assistant {
   }
   async recordInput(user: string, message: string, metadata: Incoming = {}) {
     metadata = { ...metadata, threadId: threadId(metadata.threadId) };
+    metadata.anchor = await inputAnchor(this.db, user, metadata);
     await ensureUser(this.db, user);
     const id = metadata.id ?? randomUUID();
     const inserted = await this.db.query(
@@ -99,6 +107,11 @@ export class Assistant {
       ],
     );
     if (inserted.rows.length) {
+      await event(this.db, user, id, "telegram.reference_resolved", {
+        kind: metadata.anchor?.kind ?? "none",
+        threadId: metadata.threadId ?? null,
+        referenceCount: metadata.anchor?.references?.length ?? 0,
+      });
       this.inbox.wake(user);
       const key = `${user}:${threadId(metadata.threadId) ?? 0}`;
       this.inputVersions.set(key, (this.inputVersions.get(key) ?? 0) + 1);
@@ -545,6 +558,8 @@ export class Assistant {
       const conversation = background
         ? {
             summary: "",
+            feedAnchor: null,
+            lastExchangeHere: null,
             pendingReply: null,
             previousId: undefined,
             replyTarget: null,
@@ -748,7 +763,17 @@ export class Assistant {
         alignmentScopes: await alignmentContext(this.db, user, run),
         conversation: {
           lane: background ? "job" : "foreground",
+          currentThread: active.threadId ?? 0,
+          referenceNotice:
+            "Thread 0 means General. References and pending questions from other threads may be unrelated. A short acknowledgement does not identify an older task or authorize an action.",
           pendingReply: conversation.pendingReply,
+          lastExchangeHere: background ? null : conversation.lastExchangeHere,
+          feedAnchor: background ? null : conversation.feedAnchor,
+          inputReferences: background
+            ? null
+            : await turnInputReferences(this.db, user, run),
+          consumedInputIds: consumedIds,
+          recentFeeds: await recentFeedIndex(this.db, user),
           replyTarget: conversation.replyTarget,
           interruptedJob: conversation.interruptedJob,
           delivery: background
@@ -896,6 +921,8 @@ export class Assistant {
                   conversation: {
                     ...JSON.parse(runtime.context).conversation,
                     replyTarget: updated.replyTarget,
+                    feedAnchor: updated.feedAnchor,
+                    lastExchangeHere: updated.lastExchangeHere,
                     latestInputId: currentInputId,
                     consumedInputIds: consumedIds,
                   },
@@ -973,6 +1000,13 @@ export class Assistant {
             costUsage: await spending.getStore()!.summary(),
             alignmentScopes: await alignmentContext(this.db, user, run),
             retrievedCollections: await recordContext(this.db, user, run),
+            conversation: {
+              ...JSON.parse(runtime.context).conversation,
+              recentFeeds: await recentFeedIndex(this.db, user),
+              inputReferences: background
+                ? null
+                : await turnInputReferences(this.db, user, run),
+            },
           });
         },
       };
@@ -1060,6 +1094,7 @@ export class Assistant {
             requestSnapshot,
             output.reply,
             output.stopReason,
+            active.threadId,
           );
         if (inputId)
           await this.db.query(

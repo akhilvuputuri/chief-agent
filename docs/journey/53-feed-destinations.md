@@ -1,6 +1,6 @@
 # 53 — One input surface, deterministic feed destinations
 
-Work date: 1 October 2026. Status: first-stage implementation candidate, not released.
+Work date: 1 October 2026. Status: stage A released as v0.3.29; stage B implementation/review candidate.
 
 ## Problem and preceding iteration
 
@@ -29,3 +29,21 @@ This stage does not yet resolve references to raw feed posts. The second stage r
 ## Independent review follow-up
 
 The first review requested changes after reproducing a slow-attachment/cross-thread queue gap, supersession during an approval claim, definite Telegram rejection leaving a card permanently claimed, a slow pointer announcing a withheld answer, and an operator build missing its release identity. Fixes add draining handler slots, a post-claim freshness check, definite-rejection recovery with flood-control delay while unknown sends remain uncertain, pointer gating on actual answer-send evidence, and `RELEASE_SHA` in the operator build. Dedicated regressions cover the reproduced failures. Re-review and release remain pending.
+
+## Stage B — exact references, bounded discovery and shared continuity
+
+The first stage establishes destinations; the second makes delivered feed items discoverable from General and referenceable from explicit replies. Each successful feed post records the Telegram message ID plus exact owner-scoped source ID. Input anchors are frozen at intake and carried through preparation/steering. General receives a titles/IDs-only recent index capped at 15 lines/3,000 characters; `feed_read` pages original saved content. Implicit topic context obeys explicit freshness and clustering limits and is labelled potentially unrelated.
+
+Thread-tagged exchange indexes, pending questions carrying `askedIn`, and `lastExchangeHere` preserve one shared memory while exposing conversational provenance. The host ignores topic-creation notices and labels unresolved quoted replies. Telegram's documented cross-topic private-reply identity limits are recorded instead of promising IDs the API does not supply. Structural send/reference logs are queryable in private CloudWatch without copying source content.
+
+Focused tests cover exact old replies, cross-owner rejection, bounded quotes/indexes, frozen anchors despite later editions, exact saved reads without web lookup, thread-local pending questions, and fresh alert clusters. Full checks, independent stage-B review and release remain pending at this checkpoint.
+
+## Stage A release closure — 1 October 2026
+
+[PR #138](https://github.com/akhilvuputuri/chief-agent/pull/138) passed independent GPT-6 Astra review after the failure/re-review loops above, with final approval on exact head `2724d31cc44b893981ebb8754a48e39739ac18dd`. A further correction bounds delivery fences and budget-failure parking at cross-thread FIFO boundaries, so General → News → General does not suppress the first independent answer. The final reviewer independently passed 62 focused tests, and 14 offline operator tests passed. Full local checks and required CI passed.
+
+The reviewed migration-022 operator procedure installed exact merge `015b8a99d770977ada6035c3feed4b9bbdd7226d` from its pinned baseline. Separate reads verified the migration marker, server RELEASE, gateway health, Updates topic record and unchanged aggregate role/memory/task/approval counts. The [normal release](https://github.com/akhilvuputuri/chief-agent/actions/runs/36872648089) also passed for that exact merge. [v0.3.29](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.29) labels this verified milestone. Owner Telegram acceptance and stage B remain separate.
+
+## Stage B review follow-up
+
+The first independent review reproduced loss of earlier old-feed anchors in a batched checkpoint, shifted historical anchor assignment after superseded finals were removed, and an implicit topic reference pointing to a newer post actually delivered in General. The fixes carry bounded per-input references with an owner-scoped original-input reading path, atomically bind each stored user message to its input identity rather than guessing offsets, and filter implicit candidates by their actual sent thread. New regressions reproduce each failure. Re-review remains pending at this checkpoint.

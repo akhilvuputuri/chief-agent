@@ -1,3 +1,7 @@
+# Issue 137 — feed reference stage (candidate)
+
+Stage B builds on stage A: successful posts gain exact message/source references, bounded General feed discovery, a paginated owner-scoped `feed_read`, frozen input anchors and thread-tagged shared continuity. Stage A released as v0.3.29 at `015b8a99d770977ada6035c3feed4b9bbdd7226d`: migration 022, separate health/preserved-record verification and normal release 36872648089 passed after independent final approval. Stage B remains a review candidate in PR #139. See [telegram topics](telegram-topics.md) and [journal 53](journey/53-feed-destinations.md).
+
 # Issue 137 — feed destinations (candidate)
 
 Branch `feat/topic-destinations` implements the first stage: General as default input, News/Markets/Updates feeds, task origins, thread-aware queueing/fences, scoped approvals and durable work delivery. Migration 022 requires the reviewed operator rollout in [telegram topics](telegram-topics.md). Full validation, independent review and release are pending; reference resolution is the next stage. See [journal 53](journey/53-feed-destinations.md).
