@@ -47,6 +47,8 @@ The subsequent full check caught TypeScript narrowing of the cached home inside 
 
 GPT-6 Astra approved `318c29a685cdc18db4af8b6d1513c103d0f6d607` after independently passing 34 coding tests and rollout validation. Automated comments then prompted three further corrections: saved generated plans/summaries are paginated in coding as well as review so they cannot make revisions impossible; approval requires delivery of all plan pages; Git index lookup is restricted to changed paths. Regressions cover large-plan resumption, attempted approval before full plan delivery and a 2,100-file unchanged index with one small edit. This changed head needs fresh approval/CI; earlier verdicts are historical evidence.
 
+Re-review of `4cb234a1d3ad9fcdcd1cc29e62330aaf3b4e3443` found a same-batch approval bypass: executing plan_read and APPROVE in one generated response updated coverage before the model received the page. Approval now uses coverage frozen at the preceding model request; the next generation must see the final page first. A two-generation regression covers this boundary. The other paging/index changes and 36 coding tests passed the independent review. Final head remains subject to approval and CI.
+
 ### Release closure — pending
 
 No new release or live coding activation is claimed. Record reviewed head, PR, migration installation, exact deployed SHA/health and provider activation separately. Main merge alone will not satisfy the rollout prerequisites.

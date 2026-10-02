@@ -189,6 +189,7 @@ export async function codingLoop(input: {
       if (end >= messages.length) break;
       messages.splice(2, end - 2);
     }
+    const planCoverageDelivered = planReadUntil;
     input.budget.models--;
     const generation = await input.model.generate({
       messages,
@@ -225,7 +226,7 @@ export async function codingLoop(input: {
           if (
             input.mode === "review" &&
             a.kind === "APPROVE" &&
-            planReadUntil < (input.plan?.().length ?? 0)
+            planCoverageDelivered < (input.plan?.().length ?? 0)
           ) {
             throw Object.assign(new Error("Complete plan must be read"), {
               planReadOffset: planReadUntil,

@@ -1555,3 +1555,62 @@ test("a large unchanged index does not prevent capturing one changed file", asyn
   assert.equal(c.files[0]?.path, name);
   assert.equal(c.files[0]?.content, "changed\n");
 });
+
+test("review cannot approve a plan read in the same generated tool batch", async () => {
+  let calls = 0;
+  const plan = "Acceptance criterion at the end.";
+  const model: any = {
+    generate: async (input: any) => {
+      calls++;
+      if (calls === 2)
+        assert(
+          input.messages.some(
+            (m: any) => m.role === "tool" && m.content.includes(plan),
+          ),
+        );
+      const report = {
+        id: `report-${calls}`,
+        type: "function",
+        function: {
+          name: "report",
+          arguments: JSON.stringify({
+            kind: "APPROVE",
+            summary: "Synthetic verdict",
+          }),
+        },
+      };
+      return {
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls:
+            calls === 1
+              ? [
+                  {
+                    id: "read",
+                    type: "function",
+                    function: { name: "plan_read", arguments: '{"offset":0}' },
+                  },
+                  report,
+                ]
+              : [report],
+        },
+      };
+    },
+  };
+  const r = await codingLoop({
+    model,
+    workspace: {} as any,
+    messages: [
+      { role: "system", content: "review" },
+      { role: "user", content: "preview" },
+    ],
+    mode: "review",
+    budget: { models: 3, tools: 4 },
+    signal: new AbortController().signal,
+    checkpoint: async () => {},
+    plan: () => plan,
+  });
+  assert.equal(r.kind, "APPROVE");
+  assert.equal(calls, 2);
+});
