@@ -9,6 +9,8 @@ import {
   symlink,
   writeFile,
   rm,
+  chmod,
+  stat,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,10 +27,17 @@ import {
 import { CodeBuildSandbox } from "../src/coding/provider.js";
 import { Workspace } from "../src/coding/workspace.js";
 import { codingLoop } from "../src/coding/loop.js";
-import { runWorker } from "../src/coding/worker.js";
+import {
+  runWorker,
+  WorkerClient,
+  WorkerRequestError,
+} from "../src/coding/worker.js";
 import { runtimeContext } from "../src/runtime.js";
 import { server } from "../src/server.js";
 import { recoverRuntime } from "../src/execution.js";
+import { Assistant } from "../src/agent.js";
+import { CustomAgent } from "../src/custom-agent.js";
+import { JobTools } from "../src/tools.js";
 
 const settings = codingSettings.parse({
   repository: "akhilvuputuri/chief-agent",
@@ -175,6 +184,9 @@ async function fixture(t: TestContext) {
     },
     revoke: () => {
       permitted = false;
+    },
+    restoreOwner: () => {
+      permitted = true;
     },
     uncertainCreate: () => {
       uncertainCreate = true;
@@ -779,4 +791,259 @@ test("GitHub publication reconciles a lost PR response and rejects an externally
   assert.equal(posts, 1);
   external = true;
   await assert.rejects(publisher.publish(job), /no longer matches/);
+});
+
+test("revoking a queued owner leaves no nonexistent sandbox cleanup and releases the global lane", async (t) => {
+  const f = await fixture(t),
+    job = await f.start();
+  f.revoke();
+  await f.c.tick();
+  await f.c.tick();
+  const j = await f.row(job.id);
+  assert.equal(j.state, "paused");
+  assert.equal(j.cleanup, "none");
+  assert.equal(f.creates(), 0);
+  f.restoreOwner();
+  await f.start("other");
+  await f.c.tick();
+  assert.equal(f.creates(), 1);
+});
+test("revoking a publishing owner pauses the candidate after cleanup and releases the global lane", async (t) => {
+  const f = await fixture(t),
+    job = await f.start();
+  await f.c.tick();
+  const j = await f.row(job.id);
+  await f.c.finish(j, candidate());
+  f.revoke();
+  await f.c.tick();
+  await f.c.tick();
+  await f.c.tick();
+  const stopped = await f.row(job.id);
+  assert.equal(stopped.state, "paused");
+  assert.equal(stopped.cleanup, "complete");
+  assert.equal(f.publishes(), 0);
+  f.restoreOwner();
+  await f.start("other");
+  await f.c.tick();
+  assert.equal(f.creates(), 2);
+});
+test("file modes survive snapshot, restore and artifact identity", async () => {
+  const root = await mkdtemp(join(tmpdir(), "chief-mode-test-")),
+    w = new Workspace(root, new AbortController().signal);
+  await w.command("git", ["init"]);
+  await w.command("git", [
+    "-c",
+    "user.name=Fixture",
+    "-c",
+    "user.email=fixture@example.com",
+    "commit",
+    "--allow-empty",
+    "-m",
+    "fixture",
+  ]);
+  await w.write("script.sh", "#!/bin/sh\nexit 0\n");
+  await chmod(join(root, "script.sh"), 0o755);
+  const c = await w.snapshot("plan", "summary");
+  assert.equal(c.files[0]?.mode, "100755");
+  const dest = await mkdtemp(join(tmpdir(), "chief-mode-restore-")),
+    restored = new Workspace(dest, new AbortController().signal);
+  await restored.restore(c);
+  assert((await stat(join(dest, "script.sh"))).mode & 0o111);
+  const altered = {
+    ...c,
+    files: c.files.map((f) => ({ ...f, mode: "100644" as const })),
+  };
+  assert.notEqual(artifactHash(c), artifactHash(altered));
+});
+test("small histories remain below the worker API message ceiling until the actual allocation is used", async () => {
+  let calls = 0;
+  const model: any = {
+    generate: async (input: any) => {
+      assert(input.messages.length <= 120);
+      calls++;
+      const entries =
+        calls <= 33
+          ? Array.from({ length: 3 }, (_, i) => ({
+              id: `${calls}-${i}`,
+              type: "function",
+              function: {
+                name: "file_read",
+                arguments: JSON.stringify({ path: "tiny.ts" }),
+              },
+            }))
+          : [
+              {
+                id: "finish",
+                type: "function",
+                function: {
+                  name: "report",
+                  arguments: JSON.stringify({
+                    kind: "candidate",
+                    summary: "Synthetic complete",
+                  }),
+                },
+              },
+            ];
+      return {
+        message: { role: "assistant", content: null, tool_calls: entries },
+      };
+    },
+  };
+  const report = await codingLoop({
+    model,
+    workspace: {
+      read: async () => ({ text: "tiny", nextOffset: null }),
+    } as any,
+    messages: [
+      { role: "system", content: "fixture" },
+      { role: "user", content: "assignment" },
+    ],
+    mode: "implement",
+    budget: { models: 40, tools: 100 },
+    signal: new AbortController().signal,
+    checkpoint: async () => {},
+  });
+  assert.equal(calls, 34);
+  assert.equal(report.kind, "candidate");
+});
+test("cancellation while the model claim is acknowledged prevents subsequent paid dispatch", async (t) => {
+  const f = await fixture(t),
+    job = await f.start();
+  await f.c.tick();
+  const j = await f.row(job.id);
+  const query = f.db.query.bind(f.db);
+  let cancelled = false;
+  f.db.query = async (sql, values) => {
+    const result = await query(sql, values);
+    if (sql.includes("INSERT INTO coding_model_calls") && !cancelled) {
+      cancelled = true;
+      await f.c.call("a", f.run, { operation: "coding_cancel", id: j.id });
+    }
+    return result;
+  };
+  await assert.rejects(
+    f.c.generate(j, {
+      callId: randomUUID(),
+      role: "coder",
+      messages: [{ role: "user", content: "fixture" }],
+      tools: [],
+    }),
+    /cancelled/,
+  );
+  assert.equal(f.modelCalls(), 0);
+  assert.equal((await f.row(j.id)).state, "cancelled");
+});
+test("a brief controller outage retries the same safe callback; revoked capabilities fail immediately", async () => {
+  let calls = 0;
+  const client = new WorkerClient(
+    "https://coding.example.com",
+    randomUUID(),
+    "a".repeat(64),
+    new AbortController().signal,
+    (async () => {
+      calls++;
+      return calls === 1
+        ? new Response("unavailable", { status: 503 })
+        : new Response('{"accepted":true}', { status: 200 });
+    }) as any,
+  );
+  assert.deepEqual(await client.request("heartbeat", {}), { accepted: true });
+  assert.equal(calls, 2);
+  const denied = new WorkerClient(
+    "https://coding.example.com",
+    randomUUID(),
+    "a".repeat(64),
+    new AbortController().signal,
+    (async () => new Response("denied", { status: 401 })) as any,
+  );
+  await assert.rejects(
+    denied.request("heartbeat", {}),
+    (e) => e instanceof WorkerRequestError && e.status === 401,
+  );
+});
+
+test("Chief dispatch returns to the conversation and worker delivery preserves the originating thread", async (t) => {
+  const f = await fixture(t);
+  let modelCalls = 0;
+  const assistant = new Assistant(
+    f.db,
+    new CustomAgent({
+      model: "fixture/chief",
+      generate: async (input) => {
+        modelCalls++;
+        if (modelCalls === 1) {
+          assert(input.tools.some((t) => t.name === "coding_start"));
+          return {
+            message: {
+              role: "assistant",
+              content: null,
+              tool_calls: [
+                {
+                  id: "dispatch",
+                  type: "function",
+                  function: {
+                    name: "coding_start",
+                    arguments: JSON.stringify({
+                      requestKey: "chief-dispatch",
+                      objective: "Plan a synthetic bug fix",
+                      mode: "plan",
+                    }),
+                  },
+                },
+              ],
+            },
+          };
+        }
+        return {
+          message: {
+            role: "assistant",
+            content: "The coding job is queued. I will collect its updates.",
+          },
+        };
+      },
+    }),
+    new JobTools(
+      f.db,
+      { call: async () => ({}) },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      f.c,
+    ),
+    { coding: true },
+  );
+  const response = await assistant.respondDetailed(
+    "a",
+    "Use the coding sandbox to plan this bug fix",
+    undefined,
+    undefined,
+    { threadId: 17 },
+  );
+  assert.match(response.reply, /queued/);
+  assert.equal(f.creates(), 0);
+  const job = (
+    await f.db.query(
+      "SELECT * FROM coding_jobs WHERE request_key='chief-dispatch'",
+    )
+  ).rows[0];
+  assert.equal(Number(job.thread_id), 17);
+  await f.c.tick();
+  const j = await f.row(job.id);
+  await f.c.progress(j, {
+    key: "planning",
+    stage: "planning",
+    summary: "Inspecting the fixture",
+  });
+  let thread: number | undefined;
+  await f.c.deliver(async (user, threadId) => {
+    assert.equal(user, "a");
+    thread = threadId;
+  });
+  assert.equal(thread, 17);
 });

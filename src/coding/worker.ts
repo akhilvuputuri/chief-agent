@@ -29,6 +29,11 @@ const assignment = z.object({
   usedModels: z.number().int().nonnegative(),
 });
 
+export class WorkerRequestError extends Error {
+  constructor(readonly status: number) {
+    super(`Coding worker request rejected (${status})`);
+  }
+}
 export class WorkerClient {
   constructor(
     private origin: string,
@@ -38,24 +43,38 @@ export class WorkerClient {
     private transport: typeof fetch = fetch,
   ) {}
   async request(path: string, body?: unknown) {
-    const response = await this.transport(
-      `${this.origin}/coding/worker/${this.id}/${path}`,
-      {
-        method: body === undefined ? "GET" : "POST",
-        headers: {
-          Authorization: `Bearer ${this.token}`,
-          "Content-Type": "application/json",
-        },
-        signal: AbortSignal.any([
-          this.signal,
-          AbortSignal.timeout(path === "model" ? 130000 : 30000),
-        ]),
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      },
-    );
-    if (!response.ok)
-      throw new Error(`Coding worker request rejected (${response.status})`);
-    return response.json() as Promise<any>;
+    const until = Date.now() + 120000;
+    while (true) {
+      try {
+        const response = await this.transport(
+          `${this.origin}/coding/worker/${this.id}/${path}`,
+          {
+            method: body === undefined ? "GET" : "POST",
+            headers: {
+              Authorization: `Bearer ${this.token}`,
+              "Content-Type": "application/json",
+            },
+            signal: AbortSignal.any([
+              this.signal,
+              AbortSignal.timeout(path === "model" ? 130000 : 30000),
+            ]),
+            ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          },
+        );
+        if (!response.ok) throw new WorkerRequestError(response.status);
+        return (await response.json()) as any;
+      } catch (error) {
+        if (
+          this.signal.aborted ||
+          Date.now() >= until ||
+          (error instanceof WorkerRequestError &&
+            ![429, 500, 502, 503, 504].includes(error.status))
+        )
+          throw error;
+        // Safe endpoints are idempotent; model retries retain the same journalled call ID.
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+      }
+    }
   }
   adapter(role: "coder" | "reviewer"): ModelAdapter {
     return {
@@ -286,10 +305,26 @@ async function main() {
     () => stop.abort(),
     Math.max(1, Date.parse(a.deadline) - Date.now()),
   );
-  const heartbeat = setInterval(
-    () => void client.request("heartbeat", {}).catch(() => stop.abort()),
-    15000,
-  );
+  let beating = false,
+    lastHeartbeat = Date.now();
+  const beat = async () => {
+    if (beating) return;
+    beating = true;
+    try {
+      await client.request("heartbeat", {});
+      lastHeartbeat = Date.now();
+    } catch (error) {
+      if (
+        (error instanceof WorkerRequestError &&
+          [401, 409].includes(error.status)) ||
+        Date.now() - lastHeartbeat > 120000
+      )
+        stop.abort();
+    } finally {
+      beating = false;
+    }
+  };
+  const heartbeat = setInterval(() => void beat(), 15000);
   heartbeat.unref();
   for (const s of ["SIGTERM", "SIGINT"]) process.once(s, () => stop.abort());
   try {

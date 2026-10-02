@@ -54,6 +54,7 @@ export const checkpoint = z
           .object({
             path: z.string().min(1).max(240),
             content: z.string().max(128000).nullable(),
+            mode: z.enum(["100644", "100755"]).optional(),
           })
           .strict(),
       )

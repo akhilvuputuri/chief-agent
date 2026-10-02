@@ -6,6 +6,7 @@ import {
   realpath,
   lstat,
   rm,
+  chmod,
 } from "node:fs/promises";
 import { resolve, dirname, relative } from "node:path";
 import { validateFiles } from "./github.js";
@@ -113,13 +114,13 @@ export class Workspace {
     }
     return full;
   }
-  async read(path: string, offset = 0) {
+  async read(path: string, offset = 0, limit = 16000) {
     const text = await readFile(await this.path(path), "utf8");
     if (text.includes("\u0000"))
       throw new Error("Binary files are not supported");
     return {
-      text: text.slice(offset, offset + 16000),
-      nextOffset: offset + 16000 < text.length ? offset + 16000 : null,
+      text: text.slice(offset, offset + limit),
+      nextOffset: offset + limit < text.length ? offset + limit : null,
     };
   }
   async write(path: string, content: string) {
@@ -142,7 +143,14 @@ export class Workspace {
         } catch (e: any) {
           if (e.code !== "ENOENT") throw e;
         }
-      } else await this.write(file.path, file.content);
+      } else {
+        await this.write(file.path, file.content);
+        if (file.mode)
+          await chmod(
+            await this.path(file.path),
+            file.mode === "100755" ? 0o755 : 0o644,
+          );
+      }
     }
   }
   async snapshot(plan: string, summary: string): Promise<Checkpoint> {
@@ -188,7 +196,13 @@ export class Workspace {
         if (e.code !== "ENOENT") throw e;
         content = null;
       }
-      files.push({ path, content });
+      const mode =
+        content === null
+          ? undefined
+          : (await lstat(await this.path(path))).mode & 0o111
+            ? ("100755" as const)
+            : ("100644" as const);
+      files.push({ path, content, ...(mode ? { mode } : {}) });
     }
     validateFiles(files);
     return { plan, summary, patch: diff.output, files };

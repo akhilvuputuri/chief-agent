@@ -27,7 +27,7 @@ New owner-scoped schemas, tools and migration 024 store jobs independently of co
 
 The default is off. Activation needs migration/Compose operator installation, a reviewed public GHCR image digest, dedicated scoped AWS access, GitHub App configuration and authenticated ingress. No unrestricted VM shell capability, production credentials in the sandbox, runtime main-branch merge or self-deployment is added. PR approval still requires exact-head independent review under REVIEW.md; a worker-generated verdict is not host merge authority.
 
-Independent review: pending; record actual model, exact SHA, findings/fixes and final verdict here and on the PR.
+Independent GPT-6 Astra review of [PR #150](https://github.com/akhilvuputuri/chief-agent/pull/150), exact head `39412c0da79f2023920098f010f572d96b6f944f`, returned REQUEST CHANGES. Its independent regressions found owner revocation blocking the global lane, missing executable modes, a message-count ceiling reached before allocation exhaustion, cancellation during a model-call claim and heartbeat errors aborting workers during transient controller outages. The implementation now distinguishes a never-created sandbox from uncertain provisioning, pauses revoked publication, preserves modes through snapshot/hash/restore/publication, bounds history count/observations, registers per-call cancellation before claiming and tolerates bounded transient HTTP failures with stable request IDs. Added regressions cover all findings plus Chief dispatch/thread continuity. Re-review of the updated exact head is pending. The first-head CI, including Docker image build/non-root/tool verification, passed; automated Devin Review also passed and did not replace the independent findings.
 
 ## Verification and outcome
 

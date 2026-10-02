@@ -181,7 +181,7 @@ export class GitHubPublisher implements RepositoryPublisher {
         throw new Error("Cannot delete an absent file");
       tree.push({
         path: file.path,
-        mode: prior?.mode ?? "100644",
+        mode: file.mode ?? prior?.mode ?? "100644",
         type: "blob",
         ...(file.content === null ? { sha: null } : { content: file.content }),
       });

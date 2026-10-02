@@ -51,7 +51,14 @@ export type CodingJob = {
 export class CodingController {
   private ticking = false;
   private delivering = false;
-  private inFlightModels = new Map<string, AbortController>();
+  private inFlightModels = new Map<
+    string,
+    { jobId: string; controller: AbortController }
+  >();
+  private abortModels(jobId: string) {
+    for (const entry of this.inFlightModels.values())
+      if (entry.jobId === jobId) entry.controller.abort();
+  }
   constructor(
     readonly db: Database,
     readonly settings: CodingSettings,
@@ -201,8 +208,7 @@ export class CodingController {
         throw new Error(
           "PR publication is in flight or uncertain; inspect its result before cancelling",
         );
-      if (current?.state === "cancelled")
-        this.inFlightModels.get(a.id)?.abort();
+      if (current?.state === "cancelled") this.abortModels(a.id);
       return this.status(user, a.id);
     }
     const job = (
@@ -291,7 +297,7 @@ export class CodingController {
   }
   async heartbeat(job: CodingJob) {
     const update = await this.db.query(
-      "UPDATE coding_jobs SET heartbeat_at=$3,state='running',updated_at=now() WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') RETURNING id",
+      "UPDATE coding_jobs SET heartbeat_at=$3,attempt_deadline=CASE WHEN state='provisioning' THEN $3::timestamptz + ((settings->'limits'->>'ms')::bigint * interval '1 millisecond') ELSE attempt_deadline END,state='running',updated_at=now() WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') RETURNING id",
       [job.id, job.attempt_id, this.clock()],
     );
     if (!update.rows.length) throw new Error("Worker attempt superseded");
@@ -403,27 +409,48 @@ export class CodingController {
         );
       return prior.result;
     }
-    const claimed = await this.db.query(
-      `WITH claimed AS (UPDATE coding_jobs SET used_models=used_models+1,model_busy=true WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') AND NOT model_busy AND used_models<$3 AND attempt_deadline>$4 RETURNING id)
-      INSERT INTO coding_model_calls(id,job_id,attempt_id,role,request_hash,input) SELECT $5,id,$2,$6,$7,$8::jsonb FROM claimed RETURNING id`,
-      [
-        job.id,
-        job.attempt_id,
-        job.settings.limits.models,
-        this.clock(),
-        input.callId,
-        input.role,
-        hash(input),
-        JSON.stringify(scrubTrace(input)),
-      ],
-    );
-    if (!claimed.rows.length)
-      throw new Error(
-        "Model allocation unavailable or a request is already in flight",
-      );
     const cancellation = new AbortController();
-    this.inFlightModels.set(job.id, cancellation);
+    if (this.inFlightModels.has(input.callId))
+      throw new Error("Model call is already in flight");
+    this.inFlightModels.set(input.callId, {
+      jobId: job.id,
+      controller: cancellation,
+    });
+    let admitted = false;
     try {
+      const claimed = await this.db.query(
+        `WITH claimed AS (UPDATE coding_jobs SET used_models=used_models+1,model_busy=true WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') AND NOT model_busy AND used_models<$3 AND attempt_deadline>$4 RETURNING id)
+      INSERT INTO coding_model_calls(id,job_id,attempt_id,role,request_hash,input) SELECT $5,id,$2,$6,$7,$8::jsonb FROM claimed RETURNING id`,
+        [
+          job.id,
+          job.attempt_id,
+          job.settings.limits.models,
+          this.clock(),
+          input.callId,
+          input.role,
+          hash(input),
+          JSON.stringify(scrubTrace(input)),
+        ],
+      );
+      if (!claimed.rows.length)
+        throw new Error(
+          "Model allocation unavailable or a request is already in flight",
+        );
+      admitted = true;
+      const live = (
+        await this.db.query(
+          "SELECT state,attempt_id FROM coding_jobs WHERE id=$1",
+          [job.id],
+        )
+      ).rows[0];
+      if (
+        cancellation.signal.aborted ||
+        !live ||
+        !active.includes(live.state) ||
+        live.attempt_id !== job.attempt_id ||
+        !this.allowed(job.user_id)
+      )
+        throw new Error("Coding request cancelled before model dispatch");
       const result = await this.models(
         input.role === "reviewer"
           ? job.settings.reviewerModel
@@ -473,19 +500,20 @@ export class CodingController {
       );
       throw error;
     } finally {
-      this.inFlightModels.delete(job.id);
-      await this.db.query(
-        "UPDATE coding_jobs SET model_busy=false WHERE id=$1 AND attempt_id=$2",
-        [job.id, job.attempt_id],
-      );
+      this.inFlightModels.delete(input.callId);
+      if (admitted)
+        await this.db.query(
+          "UPDATE coding_jobs SET model_busy=false WHERE id=$1 AND attempt_id=$2",
+          [job.id, job.attempt_id],
+        );
     }
   }
-  private async stopped(j: CodingJob, summary: string) {
-    this.inFlightModels.get(j.id)?.abort();
+  private async stopped(j: CodingJob, summary: string, attempted = true) {
+    this.abortModels(j.id);
     await this.db.query(
-      `WITH changed AS (UPDATE coding_jobs SET state='paused',summary=$3,cleanup='pending',model_busy=false,updated_at=now() WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') RETURNING id)
+      `WITH changed AS (UPDATE coding_jobs SET state='paused',summary=$3,cleanup=CASE WHEN $5 THEN 'pending' ELSE 'none' END,model_busy=false,updated_at=now() WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') RETURNING id)
       INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$4,jsonb_build_object('summary',$3::text) FROM changed ON CONFLICT DO NOTHING`,
-      [j.id, j.attempt_id, summary, `${j.attempt_id}:paused`],
+      [j.id, j.attempt_id, summary, `${j.attempt_id}:paused`, attempted],
     );
   }
   async tick() {
@@ -515,7 +543,11 @@ export class CodingController {
         ).rows[0];
         if (!j) return;
         if (!this.allowed(j.user_id)) {
-          await this.stopped(j, "Owner access was revoked");
+          await this.stopped(
+            j,
+            "Owner access was revoked before sandbox creation",
+            false,
+          );
           return;
         }
         try {
@@ -600,6 +632,11 @@ export class CodingController {
           `WITH changed AS (UPDATE coding_jobs SET state='pr_ready',stage='pr_ready',pr_url=$2,head_sha=$3,summary='Draft PR prepared; CI and independent review of its head remain required',updated_at=now() WHERE id=$1 AND state='publishing' RETURNING id)
           INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$4,jsonb_build_object('summary','Draft PR prepared; CI and independent review remain required.','url',$2::text) FROM changed ON CONFLICT DO NOTHING`,
           [j.id, published.url, published.head, `${j.attempt_id}:pr`],
+        );
+      } else if (j.state === "publishing") {
+        await this.db.query(
+          "UPDATE coding_jobs SET state='paused',summary='Owner access revoked; inspect any uncertain PR publication before resuming',updated_at=now() WHERE id=$1 AND state='publishing'",
+          [j.id],
         );
       }
     } finally {

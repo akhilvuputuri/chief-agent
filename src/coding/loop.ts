@@ -133,8 +133,18 @@ export async function codingLoop(input: {
     input.budget.tools > 0 &&
     !input.signal.aborted
   ) {
+    for (const previous of messages)
+      for (const call of previous.tool_calls ?? [])
+        if (call.function.arguments.length > 16000)
+          call.function.arguments = JSON.stringify({
+            archived: true,
+            note: "Large arguments are retained in the private model journal; read repository files for their current contents.",
+          });
     // Preserve the assignment and recent observations. Old results remain in private worker artifacts.
-    while (JSON.stringify(messages).length > 100000 && messages.length > 4) {
+    while (
+      (JSON.stringify(messages).length > 100000 || messages.length > 110) &&
+      messages.length > 4
+    ) {
       let end = 2;
       if (messages[end]?.role === "assistant" && messages[end]?.tool_calls) {
         end++;
@@ -165,6 +175,10 @@ export async function codingLoop(input: {
       if (input.signal.aborted || input.budget.tools-- <= 0)
         throw new Error("Coding allocation exhausted");
       let result: unknown;
+      const observationChars = Math.max(
+        1000,
+        Math.floor(48000 / m.tool_calls.length),
+      );
       try {
         const a = tool.parse({
           ...JSON.parse(call.function.arguments),
@@ -199,7 +213,11 @@ export async function codingLoop(input: {
           return a;
         }
         if (a.operation === "file_read")
-          result = await input.workspace.read(a.path, a.offset);
+          result = await input.workspace.read(
+            a.path,
+            a.offset,
+            observationChars,
+          );
         else if (a.operation === "file_write") {
           if (input.mode !== "implement")
             throw new Error("Read-only agent cannot write");
@@ -222,9 +240,21 @@ export async function codingLoop(input: {
                 "Read-only agents may use git status --short, git diff --cached --no-ext-diff, git ls-files or rg --files; use file_read for contents",
               );
             const [cmd, ...args] = a.command.split(" ");
-            result = await input.workspace.command(cmd!, args);
+            result = await input.workspace.command(
+              cmd!,
+              args,
+              false,
+              120000,
+              observationChars,
+            );
           } else {
-            result = await input.workspace.command(a.command, [], true);
+            result = await input.workspace.command(
+              a.command,
+              [],
+              true,
+              120000,
+              observationChars,
+            );
             await input.checkpoint();
           }
         }
