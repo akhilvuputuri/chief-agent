@@ -188,13 +188,19 @@ export class Workspace {
       "--no-renames",
       "-z",
     ]);
-    const index = await this.command(
-      "git",
-      ["ls-files", "--stage", "-z"],
-      false,
-      120000,
-      500000,
-    );
+    const changedPaths = names.output.split("\u0000").filter(Boolean);
+    if (changedPaths.length > 100)
+      throw new Error("Coding artifact exceeds 100 changed files");
+    for (const path of changedPaths) validateFiles([{ path, content: "" }]);
+    const index = changedPaths.length
+      ? await this.command(
+          "git",
+          ["ls-files", "--stage", "-z", "--", ...changedPaths],
+          false,
+          120000,
+          500000,
+        )
+      : { exitCode: 0, output: "", truncated: false };
     if (
       diff.exitCode !== 0 ||
       names.exitCode !== 0 ||
@@ -215,7 +221,7 @@ export class Workspace {
           return [entry.slice(at + 1), { mode: fields[0], blob: fields[1] }];
         }),
     );
-    for (const path of names.output.split("\u0000").filter(Boolean)) {
+    for (const path of changedPaths) {
       validateFiles([{ path, content: "" }]);
       const entry = indexed.get(path);
       const mode = entry?.mode;

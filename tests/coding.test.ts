@@ -1337,7 +1337,7 @@ test("non-UTF-8 indexed content is rejected instead of publishing replacement by
   await writeFile(join(root, "latin.txt"), Buffer.from("636166e90a", "hex"));
   await assert.rejects(w.snapshot("plan", "summary"), /not valid UTF-8/);
 });
-test("oversized protected owner briefs are rejected before provisioning without dropping the saved plan", async (t) => {
+test("oversized owner briefs are rejected and large saved plans remain resumable through paging", async (t) => {
   assert.throws(
     () =>
       assertCodingBrief(
@@ -1376,19 +1376,16 @@ test("oversized protected owner briefs are rejected before provisioning without 
       }),
     ],
   );
-  await assert.rejects(
-    f.c.call("a", f.run, {
-      operation: "coding_reply",
-      id: job.id,
-      baseRevision: 1,
-      requestKey: "implement",
-      message: "Proceed",
-      mode: "implement",
-    }),
-    /brief is too large/,
-  );
+  const resumed: any = await f.c.call("a", f.run, {
+    operation: "coding_reply",
+    id: job.id,
+    baseRevision: 1,
+    requestKey: "implement",
+    message: "Proceed",
+    mode: "implement",
+  });
   assert.equal((await f.row(job.id)).checkpoint.plan.length, 32000);
-  assert.equal((await f.row(job.id)).revision, 1);
+  assert.equal(resumed.revision, 2);
 });
 
 test("required dependency installation keeps npm caches outside the captured checkout", async () => {
@@ -1483,4 +1480,78 @@ test("lease-release failure cannot permanently disable controller ticks", async 
   await f.c.tick();
   assert.equal((await f.row(job.id)).state, "paused");
   assert.equal(f.creates(), 1);
+});
+
+test("review approval requires contiguous delivery of the entire saved plan", async () => {
+  let calls = 0;
+  const plan = "x".repeat(12000),
+    messages: any[] = [
+      { role: "system", content: "review" },
+      { role: "user", content: "preview only" },
+    ];
+  const model: any = {
+    generate: async () => {
+      calls++;
+      const read = calls === 2 || calls === 3;
+      return {
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            {
+              id: String(calls),
+              type: "function",
+              function: {
+                name: read ? "plan_read" : "report",
+                arguments: JSON.stringify(
+                  read
+                    ? { offset: calls === 2 ? 0 : 6000 }
+                    : { kind: "APPROVE", summary: "Synthetic approval" },
+                ),
+              },
+            },
+          ],
+        },
+      };
+    },
+  };
+  const r = await codingLoop({
+    model,
+    workspace: {} as any,
+    messages,
+    mode: "review",
+    budget: { models: 5, tools: 5 },
+    signal: new AbortController().signal,
+    checkpoint: async () => {},
+    plan: () => plan,
+  });
+  assert.equal(r.kind, "APPROVE");
+  assert.equal(calls, 4);
+  assert(JSON.parse(messages[3].content).error.includes("complete saved plan"));
+});
+test("a large unchanged index does not prevent capturing one changed file", async () => {
+  const root = await mkdtemp(join(tmpdir(), "chief-large-index-")),
+    w = new Workspace(root, new AbortController().signal);
+  await w.command("git", ["init"]);
+  const generated = await w.command(process.execPath, [
+    "-e",
+    "const fs=require('fs');for(let i=0;i<2100;i++)fs.writeFileSync('f'.repeat(200)+'-'+i+'.txt','fixture\\n');",
+  ]);
+  assert.equal(generated.exitCode, 0);
+  await w.command("git", ["add", "-A"]);
+  await w.command("git", [
+    "-c",
+    "user.name=Fixture",
+    "-c",
+    "user.email=fixture@example.com",
+    "commit",
+    "-m",
+    "fixture",
+  ]);
+  const name = "f".repeat(200) + "-0.txt";
+  await w.write(name, "changed\n");
+  const c = await w.snapshot("plan", "summary");
+  assert.equal(c.files.length, 1);
+  assert.equal(c.files[0]?.path, name);
+  assert.equal(c.files[0]?.content, "changed\n");
 });

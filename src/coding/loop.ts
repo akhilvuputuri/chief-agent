@@ -22,6 +22,7 @@ const tool = z.discriminatedUnion("operation", [
     .object({
       operation: z.literal("plan_read"),
       offset: z.number().int().nonnegative().default(0),
+      section: z.enum(["plan", "summary"]).default("plan"),
     })
     .strict(),
   z
@@ -51,10 +52,13 @@ const defs: ToolDefinition[] = [
   {
     name: "plan_read",
     description:
-      "Read the current saved implementation plan in bounded pages. Follow nextOffset until null; a plan preview is incomplete.",
+      "Read the current saved plan or progress summary in bounded pages. Follow nextOffset until null; previews are incomplete. Approval requires the complete plan.",
     parameters: {
       type: "object",
-      properties: { offset: { type: "integer", minimum: 0 } },
+      properties: {
+        offset: { type: "integer", minimum: 0 },
+        section: { type: "string", enum: ["plan", "summary"] },
+      },
       additionalProperties: false,
     },
   },
@@ -138,8 +142,10 @@ export async function codingLoop(input: {
   signal: AbortSignal;
   checkpoint: () => Promise<void>;
   plan?: () => string;
+  summary?: () => string;
 }): Promise<LoopReport> {
   const messages = input.messages;
+  let planReadUntil = 0;
   const tools = defs.filter(
     (d) =>
       input.mode === "implement" ||
@@ -217,6 +223,15 @@ export async function codingLoop(input: {
         });
         if (a.operation === "report") {
           if (
+            input.mode === "review" &&
+            a.kind === "APPROVE" &&
+            planReadUntil < (input.plan?.().length ?? 0)
+          ) {
+            throw Object.assign(new Error("Complete plan must be read"), {
+              planReadOffset: planReadUntil,
+            });
+          }
+          if (
             input.mode === "plan" &&
             !["plan_ready", "awaiting_input"].includes(a.kind)
           )
@@ -245,7 +260,13 @@ export async function codingLoop(input: {
         }
         if (a.operation === "plan_read") {
           if (!input.plan) throw new Error("Plan reader unavailable");
-          const text = input.plan();
+          const text =
+            a.section === "summary" ? (input.summary?.() ?? "") : input.plan();
+          if (a.section === "plan" && a.offset <= planReadUntil)
+            planReadUntil = Math.max(
+              planReadUntil,
+              Math.min(text.length, a.offset + observationChars),
+            );
           result = {
             text: text.slice(a.offset, a.offset + observationChars),
             nextOffset:
@@ -299,11 +320,18 @@ export async function codingLoop(input: {
             await input.checkpoint();
           }
         }
-      } catch {
-        result = {
-          error:
-            "Tool rejected or failed; inspect files/status and adjust the call. Paths, modes and allocations are enforced by the host.",
-        };
+      } catch (error) {
+        result =
+          typeof (error as any)?.planReadOffset === "number"
+            ? {
+                error:
+                  "Read the complete saved plan with plan_read before approving.",
+                nextOffset: (error as any).planReadOffset,
+              }
+            : {
+                error:
+                  "Tool rejected or failed; inspect files/status and adjust the call. Paths, modes and allocations are enforced by the host.",
+              };
       }
       messages.push({
         role: "tool",

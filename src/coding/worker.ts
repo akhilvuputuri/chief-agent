@@ -121,12 +121,7 @@ export async function runWorker(
   checkout: typeof prepare = prepare,
 ) {
   const a = assignment.parse(await client.request("assignment"));
-  assertCodingBrief(
-    a.objective,
-    a.context,
-    a.checkpoint.plan,
-    a.checkpoint.summary,
-  );
+  assertCodingBrief(a.objective, a.context);
   const budget: LoopBudget = {
     models: Math.max(0, a.settings.limits.models - a.usedModels),
     tools: a.settings.limits.tools,
@@ -163,8 +158,9 @@ export async function runWorker(
           context: a.context,
           mode: a.mode,
           baseSha: a.baseSha,
-          savedPlan: saved.plan,
-          savedSummary: saved.summary,
+          savedPlanPreview: saved.plan.slice(0, 500),
+          savedSummaryPreview: saved.summary.slice(0, 500),
+          note: "These previews are incomplete. Use plan_read to read the complete saved plan and progress summary before changing code.",
         }),
       },
     ];
@@ -178,6 +174,7 @@ export async function runWorker(
         signal,
         checkpoint: save,
         plan: () => saved.plan,
+        summary: () => saved.summary,
       });
       saved.plan = report.plan || saved.plan;
       saved.summary = report.summary;
@@ -242,6 +239,7 @@ export async function runWorker(
         signal,
         checkpoint: async () => {},
         plan: () => saved.plan,
+        summary: () => saved.summary,
         messages: [
           {
             role: "system",

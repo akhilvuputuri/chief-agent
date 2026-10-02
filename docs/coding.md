@@ -8,7 +8,7 @@ Chief dispatches coding work through owner-scoped tools. A durable controller in
 
 Start and revision request keys are idempotent only for identical requests. Preserve exact IDs and revisions. The original objective, supplied context and follow-up revisions are private. A worker receives only its assignment, configured source repository and saved checkpoint, not Chief's conversation, memory or personal integrations.
 
-The complete protected objective/context/plan/summary must fit a bounded UTF-8 request envelope, with room reserved for tools and observations. Start and resume reject an oversized brief before provisioning and ask for a concise brief; they never silently truncate owner instructions or the saved plan. Large source artifacts are separate from this brief and remain inspectable through the checkout.
+The complete protected owner objective/context must fit a bounded UTF-8 request envelope, with room reserved for tools and observations. Start and resume reject oversized owner instructions before provisioning and ask for a concise brief; they never silently truncate them. Saved plans and progress summaries are separately paginated in both coding and review, so a large generated plan cannot prevent resumption. Review approval is rejected until contiguous page delivery covers the complete plan. Large source artifacts remain inspectable through the checkout.
 
 ## Lifecycle and recovery
 

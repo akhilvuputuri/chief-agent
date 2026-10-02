@@ -254,8 +254,6 @@ export class CodingController {
     assertCodingBrief(
       job.objective,
       job.context + "\nOwner follow-up: " + message,
-      job.checkpoint.plan,
-      job.checkpoint.summary,
     );
     const changed = await this.db.query(
       `WITH changed AS (
