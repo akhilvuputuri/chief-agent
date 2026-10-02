@@ -8,8 +8,10 @@ import {
   lstat,
   rm,
   chmod,
+  mkdtemp,
 } from "node:fs/promises";
-import { resolve, dirname, relative } from "node:path";
+import { resolve, dirname, relative, join } from "node:path";
+import { tmpdir } from "node:os";
 import { validateFiles } from "./github.js";
 import type { Checkpoint } from "./schema.js";
 
@@ -19,6 +21,7 @@ export type CommandResult = {
   truncated: boolean;
 };
 export class Workspace {
+  private home?: string;
   constructor(
     readonly root: string,
     private signal: AbortSignal,
@@ -31,6 +34,7 @@ export class Workspace {
     maxOutput = 32000,
   ): Promise<CommandResult> {
     if (this.signal.aborted) throw new Error("Coding cancelled");
+    this.home ??= await mkdtemp(join(tmpdir(), "chief-tools-"));
     return new Promise((accept, reject) => {
       const child = spawn(command, args, {
         cwd: this.root,
@@ -39,7 +43,9 @@ export class Workspace {
         // Commands never inherit the worker capability or CodeBuild credentials.
         env: {
           PATH: process.env.PATH,
-          HOME: this.root,
+          HOME: this.home,
+          NPM_CONFIG_CACHE: join(this.home, "npm-cache"),
+          XDG_CACHE_HOME: join(this.home, "cache"),
           TMPDIR: "/tmp",
           LANG: "C.UTF-8",
           CI: "true",

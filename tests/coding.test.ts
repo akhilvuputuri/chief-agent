@@ -594,8 +594,8 @@ test("worker implements, verifies and reviews a real disposable fixture before r
         return {
           id: randomUUID(),
           revision: 1,
-          objective: "Fix the fixture value",
-          context: "Synthetic only",
+          objective: "字".repeat(8000),
+          context: "字".repeat(14000),
           mode: "implement",
           baseSha: fixtureBase,
           settings,
@@ -612,9 +612,37 @@ test("worker implements, verifies and reviews a real disposable fixture before r
           reviewerCalls++;
           assert(input.messages[1].content.includes("fixture.js"));
           assert(
-            JSON.stringify(input.messages).length < 100000,
+            Buffer.byteLength(
+              JSON.stringify({
+                callId: randomUUID(),
+                role: "reviewer",
+                messages: input.messages,
+                tools: input.tools,
+              }),
+            ) < 180000,
             "review receives bounded metadata, not a full large patch",
           );
+          const last = input.messages.findLast((m: any) => m.role === "tool");
+          const page = last ? JSON.parse(last.content) : undefined;
+          if (!page || page.nextOffset !== null)
+            return {
+              message: {
+                role: "assistant",
+                content: null,
+                tool_calls: [
+                  {
+                    id: `plan-${reviewerCalls}`,
+                    type: "function",
+                    function: {
+                      name: "plan_read",
+                      arguments: JSON.stringify({
+                        offset: page?.nextOffset ?? 0,
+                      }),
+                    },
+                  },
+                ],
+              },
+            };
           return {
             message: {
               role: "assistant",
@@ -656,7 +684,7 @@ test("worker implements, verifies and reviews a real disposable fixture before r
                       : {
                           kind: "candidate",
                           summary: "Fixed the fixture",
-                          plan: "Change false to true and verify.",
+                          plan: "字".repeat(32000),
                         },
                   ),
                 },
@@ -722,6 +750,11 @@ test("worker implements, verifies and reviews a real disposable fixture before r
       if (!c.files.length) {
         await w.write("large-a.txt", "a".repeat(75000));
         await w.write("large-b.txt", "b".repeat(75000));
+        for (let i = 0; i < 92; i++)
+          await w.write(
+            `src/${"x".repeat(200)}-${i}.ts`,
+            "export const fixture = true;\n",
+          );
       }
       await w.restore(c);
     },
@@ -729,7 +762,7 @@ test("worker implements, verifies and reviews a real disposable fixture before r
   const result = reports.find((r) => r.path === "finish").body;
   assert.equal(result.kind, "candidate");
   assert(result.checkpoint.patch.length > 120000);
-  assert.equal(reviewerCalls, 1);
+  assert.equal(reviewerCalls, 7);
   assert.equal(result.review.patchHash, artifactHash(result.checkpoint));
   assert.equal(result.checks.length, 3);
   assert(result.checks.every((c: any) => c.exitCode === 0));
@@ -1356,4 +1389,75 @@ test("oversized protected owner briefs are rejected before provisioning without 
   );
   assert.equal((await f.row(job.id)).checkpoint.plan.length, 32000);
   assert.equal((await f.row(job.id)).revision, 1);
+});
+
+test("required dependency installation keeps npm caches outside the captured checkout", async () => {
+  const root = await mkdtemp(join(tmpdir(), "chief-npm-home-")),
+    pack = await mkdtemp(join(tmpdir(), "chief-npm-pack-")),
+    dep = await mkdtemp(join(tmpdir(), "chief-npm-dep-"));
+  const signal = new AbortController().signal,
+    w = new Workspace(root, signal),
+    d = new Workspace(dep, signal);
+  await d.write(
+    "package.json",
+    JSON.stringify({
+      name: "chief-fixture-dep",
+      version: "1.0.0",
+      main: "index.js",
+    }),
+  );
+  await d.write("index.js", "module.exports=true;\n");
+  assert.equal(
+    (
+      await d.command("npm", [
+        "pack",
+        "--offline",
+        "--ignore-scripts",
+        "--pack-destination",
+        pack,
+      ])
+    ).exitCode,
+    0,
+  );
+  await w.command("git", ["init"]);
+  await w.write(".gitignore", "node_modules\n");
+  await w.write(
+    "package.json",
+    JSON.stringify({
+      name: "fixture",
+      version: "1.0.0",
+      dependencies: {
+        "chief-fixture-dep": `file:${join(pack, "chief-fixture-dep-1.0.0.tgz")}`,
+      },
+    }),
+  );
+  assert.equal(
+    (
+      await w.command("npm", [
+        "install",
+        "--package-lock-only",
+        "--offline",
+        "--ignore-scripts",
+      ])
+    ).exitCode,
+    0,
+  );
+  await w.command("git", ["add", "-A"]);
+  await w.command("git", [
+    "-c",
+    "user.name=Fixture",
+    "-c",
+    "user.email=fixture@example.com",
+    "commit",
+    "-m",
+    "fixture",
+  ]);
+  const installed = await w.command("npm", [
+    "ci",
+    "--offline",
+    "--ignore-scripts",
+  ]);
+  assert.equal(installed.exitCode, 0, installed.output);
+  assert(!(await readdir(root)).includes(".npm"));
+  assert.equal((await w.snapshot("plan", "summary")).files.length, 0);
 });

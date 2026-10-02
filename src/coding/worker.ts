@@ -177,6 +177,7 @@ export async function runWorker(
         budget,
         signal,
         checkpoint: save,
+        plan: () => saved.plan,
       });
       saved.plan = report.plan || saved.plan;
       saved.summary = report.summary;
@@ -240,11 +241,12 @@ export async function runWorker(
         budget,
         signal,
         checkpoint: async () => {},
+        plan: () => saved.plan,
         messages: [
           {
             role: "system",
             content:
-              "Independently review the actual diff and surrounding files. Read AGENTS.md and REVIEW.md. Inspect plausible failure cases, owner scoping, provider contracts and deployment prerequisites. You must not implement any fix. Return APPROVE or REQUEST_CHANGES with concrete findings and validation limits. You have read-only tools. Passing checks alone are not approval.",
+              "Independently review the actual diff and surrounding files. Read AGENTS.md and REVIEW.md and use plan_read to read the complete saved plan (the preview is incomplete). Inspect plausible failure cases, owner scoping, provider contracts and deployment prerequisites. You must not implement any fix. Return APPROVE or REQUEST_CHANGES with concrete findings and validation limits. You have read-only tools. Passing checks alone are not approval.",
           },
           {
             role: "user",
@@ -252,7 +254,7 @@ export async function runWorker(
               objective: a.objective,
               context: a.context,
               baseSha: a.baseSha,
-              plan: saved.plan,
+              planPreview: saved.plan.slice(0, 500),
               changedFiles: saved.files.map((f) => ({
                 path: f.path,
                 mode: f.mode,

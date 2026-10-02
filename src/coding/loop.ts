@@ -20,6 +20,12 @@ const tool = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("file_delete"), path: z.string() }).strict(),
   z
     .object({
+      operation: z.literal("plan_read"),
+      offset: z.number().int().nonnegative().default(0),
+    })
+    .strict(),
+  z
+    .object({
       operation: z.literal("command"),
       command: z.string().min(1).max(4000),
     })
@@ -42,6 +48,16 @@ const tool = z.discriminatedUnion("operation", [
 ]);
 export type LoopReport = Extract<z.infer<typeof tool>, { operation: "report" }>;
 const defs: ToolDefinition[] = [
+  {
+    name: "plan_read",
+    description:
+      "Read the current saved implementation plan in bounded pages. Follow nextOffset until null; a plan preview is incomplete.",
+    parameters: {
+      type: "object",
+      properties: { offset: { type: "integer", minimum: 0 } },
+      additionalProperties: false,
+    },
+  },
   {
     name: "file_read",
     description: "Read a repository file in bounded pages.",
@@ -121,13 +137,19 @@ export async function codingLoop(input: {
   budget: LoopBudget;
   signal: AbortSignal;
   checkpoint: () => Promise<void>;
+  plan?: () => string;
 }): Promise<LoopReport> {
   const messages = input.messages;
   const tools = defs.filter(
     (d) =>
       input.mode === "implement" ||
-      ["file_read", "report", "command"].includes(d.name),
+      ["file_read", "plan_read", "report", "command"].includes(d.name),
   );
+  if (!input.plan)
+    tools.splice(
+      tools.findIndex((t) => t.name === "plan_read"),
+      1,
+    );
   while (
     input.budget.models > 0 &&
     input.budget.tools > 0 &&
@@ -221,7 +243,17 @@ export async function codingLoop(input: {
             });
           return a;
         }
-        if (a.operation === "file_read")
+        if (a.operation === "plan_read") {
+          if (!input.plan) throw new Error("Plan reader unavailable");
+          const text = input.plan();
+          result = {
+            text: text.slice(a.offset, a.offset + observationChars),
+            nextOffset:
+              a.offset + observationChars < text.length
+                ? a.offset + observationChars
+                : null,
+          };
+        } else if (a.operation === "file_read")
           result = await input.workspace.read(
             a.path,
             a.offset,

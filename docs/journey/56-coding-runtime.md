@@ -41,6 +41,8 @@ Local checks on the hardened candidate pass 638 application tests (29 coding), 2
 
 Independent re-review of `990a403fa2d63ef77743ad13a9f762f126741936` requested three further fixes: renames omitted the old deletion, invalid UTF-8 blobs were decoded with replacement, and a protected assignment could exceed the byte envelope. Capture now disables rename detection consistently and validates re-encoded UTF-8 against each indexed Git blob identity. Start/resume validate the complete protected brief before provisioning and preserve rejected original requests/plans. Added regressions reproduce each boundary. Prior approval remains historical; final re-review is pending.
 
+Re-review of `23e032d1ec36d6474772e1e02c49542f09b7f76a` verified those fixes but found dependency-cache contamination and an evolving plan overflowing reviewer input after initial validation. Required npm installation now uses an external tool home/cache; an actual offline local-package install proves the snapshot stays clean. The reviewer reads generated plan text through bounded plan_read pages. The worker fixture now combines a near-limit multibyte owner brief, a generated 32k-character plan, 95 changed files and a >120k patch while checking each reviewer wire request. The 33 focused coding tests pass; final full checks/re-review remain pending. No paid acceptance or live activation is implied.
+
 ### Release closure — pending
 
 No new release or live coding activation is claimed. Record reviewed head, PR, migration installation, exact deployed SHA/health and provider activation separately. Main merge alone will not satisfy the rollout prerequisites.
