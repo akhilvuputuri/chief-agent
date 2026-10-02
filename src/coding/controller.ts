@@ -11,6 +11,7 @@ import {
   checkpoint,
   outcome,
   workerEvent,
+  assertCodingBrief,
   type CodingAction,
   type CodingSettings,
   type Outcome,
@@ -136,6 +137,7 @@ export class CodingController {
     if (a.operation === "coding_status") return this.status(user, a.id);
     await this.foreground(user, run);
     if (a.operation === "coding_start") {
+      assertCodingBrief(a.objective, a.context);
       if (!this.settings.image)
         throw new Error("Coding runtime image is not configured");
       const fingerprint = hash({
@@ -249,6 +251,12 @@ export class CodingController {
       throw new Error(
         "Coding follow-up exceeds the supported brief size; prepare a new bounded job",
       );
+    assertCodingBrief(
+      job.objective,
+      job.context + "\nOwner follow-up: " + message,
+      job.checkpoint.plan,
+      job.checkpoint.summary,
+    );
     const changed = await this.db.query(
       `WITH changed AS (
       UPDATE coding_jobs SET revision=revision+1,mode=COALESCE($5,mode),context=context || E'\nOwner follow-up: ' || $4,state='queued',stage='queued',question='',result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,used_models=0,model_busy=false,publication_started=false,lease=NULL,lease_until=NULL,updated_at=now()

@@ -17,7 +17,11 @@ import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { ensureUser, type Database } from "../src/db.js";
 import { CodingController } from "../src/coding/controller.js";
-import { codingSettings, outcome } from "../src/coding/schema.js";
+import {
+  codingSettings,
+  outcome,
+  assertCodingBrief,
+} from "../src/coding/schema.js";
 import { codingApi } from "../src/coding/api.js";
 import {
   GitHubPublisher,
@@ -1261,4 +1265,95 @@ test("broker retries preserve exact source text while private diagnostic copies 
   ).rows[0];
   assert(record.result_box);
   assert.notEqual(record.result.message.content, first.message.content);
+});
+
+test("a rename artifact includes both the old deletion and the new indexed file", async () => {
+  const root = await mkdtemp(join(tmpdir(), "chief-rename-test-")),
+    w = new Workspace(root, new AbortController().signal);
+  await w.command("git", ["init"]);
+  await w.write("old.txt", "fixture\n");
+  await w.command("git", ["add", "-A"]);
+  await w.command("git", [
+    "-c",
+    "user.name=Fixture",
+    "-c",
+    "user.email=fixture@example.com",
+    "commit",
+    "-m",
+    "fixture",
+  ]);
+  await w.command("git", ["mv", "old.txt", "new.txt"]);
+  const c = await w.snapshot("plan", "summary");
+  assert.equal(c.files.find((f) => f.path === "old.txt")?.content, null);
+  assert.equal(c.files.find((f) => f.path === "new.txt")?.content, "fixture\n");
+});
+test("non-UTF-8 indexed content is rejected instead of publishing replacement bytes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "chief-encoding-test-")),
+    w = new Workspace(root, new AbortController().signal);
+  await w.command("git", ["init"]);
+  await w.command("git", [
+    "-c",
+    "user.name=Fixture",
+    "-c",
+    "user.email=fixture@example.com",
+    "commit",
+    "--allow-empty",
+    "-m",
+    "fixture",
+  ]);
+  await writeFile(join(root, "latin.txt"), Buffer.from("636166e90a", "hex"));
+  await assert.rejects(w.snapshot("plan", "summary"), /not valid UTF-8/);
+});
+test("oversized protected owner briefs are rejected before provisioning without dropping the saved plan", async (t) => {
+  assert.throws(
+    () =>
+      assertCodingBrief(
+        "字".repeat(8000),
+        "字".repeat(23000),
+        "字".repeat(32000),
+      ),
+    /shorter objective/,
+  );
+  const f = await fixture(t);
+  await assert.rejects(
+    f.c.call("a", f.run, {
+      operation: "coding_start",
+      requestKey: "large",
+      objective: "字".repeat(8000),
+      context: "字".repeat(16000),
+      mode: "plan",
+    }),
+    /brief is too large/,
+  );
+  assert.equal(f.creates(), 0);
+  assert.equal(
+    (await f.db.query("SELECT count(*) AS n FROM coding_jobs")).rows[0].n,
+    0,
+  );
+  const job = await f.start();
+  await f.db.query(
+    "UPDATE coding_jobs SET state='plan_ready',checkpoint=$2::jsonb WHERE id=$1",
+    [
+      job.id,
+      JSON.stringify({
+        plan: "字".repeat(32000),
+        patch: "",
+        summary: "",
+        files: [],
+      }),
+    ],
+  );
+  await assert.rejects(
+    f.c.call("a", f.run, {
+      operation: "coding_reply",
+      id: job.id,
+      baseRevision: 1,
+      requestKey: "implement",
+      message: "Proceed",
+      mode: "implement",
+    }),
+    /brief is too large/,
+  );
+  assert.equal((await f.row(job.id)).checkpoint.plan.length, 32000);
+  assert.equal((await f.row(job.id)).revision, 1);
 });

@@ -8,6 +8,8 @@ Chief dispatches coding work through owner-scoped tools. A durable controller in
 
 Start and revision request keys are idempotent only for identical requests. Preserve exact IDs and revisions. The original objective, supplied context and follow-up revisions are private. A worker receives only its assignment, configured source repository and saved checkpoint, not Chief's conversation, memory or personal integrations.
 
+The complete protected objective/context/plan/summary must fit a bounded UTF-8 request envelope, with room reserved for tools and observations. Start and resume reject an oversized brief before provisioning and ask for a concise brief; they never silently truncate owner instructions or the saved plan. Large source artifacts are separate from this brief and remain inspectable through the checkout.
+
 ## Lifecycle and recovery
 
 The separate tables in migration 024 retain jobs, revisions, ordered progress events and private model-call journals. The host claims a lease before external work; an index allows one active or cleanup-pending sandbox globally. States are `queued`, `provisioning`, `running`, `plan_ready`, `awaiting_input`, `publishing`, `pr_ready`, `paused`, `failed`, `cancelled`. Cleanup is independently `none`, `pending` or `complete`. The coding allocation begins at the first worker heartbeat, with a separate bounded provisioning allowance; the reviewed defaults are 15 active minutes, 40 model calls and 100 model tool calls. Changing this allocation does not change Chief's allocations or provider price ceilings. Model usage and provider metadata are private job events; sandbox billing and measured coding quality remain separate.

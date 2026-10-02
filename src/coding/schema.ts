@@ -128,3 +128,26 @@ export const codingSettings = z
   })
   .strict();
 export type CodingSettings = z.infer<typeof codingSettings>;
+
+/** Reserve room for model/tool schema and a complete current call group. */
+export function assertCodingBrief(
+  objective: string,
+  context: string,
+  plan = "",
+  summary = "",
+) {
+  const content = JSON.stringify({
+    objective,
+    context,
+    savedPlan: plan,
+    savedSummary: summary,
+  });
+  if (
+    Buffer.byteLength(
+      JSON.stringify({ messages: [{ role: "user", content }] }),
+    ) > 70000
+  )
+    throw new Error(
+      "Coding brief is too large for one run; provide a shorter objective/context or a concise implementation brief. The original request and saved plan are retained.",
+    );
+}

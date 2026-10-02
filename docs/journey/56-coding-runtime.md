@@ -39,6 +39,8 @@ GPT-6 Astra approved `251d49ac633f46f1100f1ffcc75dc76a5f9bd805` after independen
 
 Local checks on the hardened candidate pass 638 application tests (29 coding), 22 JavaScript tests and 30 Python tests, build/typecheck and formatting. The new process-boundary smoke must additionally pass under the actual Linux container/setpriv launcher in CI before release.
 
+Independent re-review of `990a403fa2d63ef77743ad13a9f762f126741936` requested three further fixes: renames omitted the old deletion, invalid UTF-8 blobs were decoded with replacement, and a protected assignment could exceed the byte envelope. Capture now disables rename detection consistently and validates re-encoded UTF-8 against each indexed Git blob identity. Start/resume validate the complete protected brief before provisioning and preserve rejected original requests/plans. Added regressions reproduce each boundary. Prior approval remains historical; final re-review is pending.
+
 ### Release closure — pending
 
 No new release or live coding activation is claimed. Record reviewed head, PR, migration installation, exact deployed SHA/health and provider activation separately. Main merge alone will not satisfy the rollout prerequisites.

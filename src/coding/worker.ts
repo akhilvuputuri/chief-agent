@@ -9,6 +9,7 @@ import type { ModelAdapter, Message } from "../model.js";
 import {
   checkpoint,
   codingSettings,
+  assertCodingBrief,
   outcome,
   type Checkpoint,
   type Outcome,
@@ -120,6 +121,12 @@ export async function runWorker(
   checkout: typeof prepare = prepare,
 ) {
   const a = assignment.parse(await client.request("assignment"));
+  assertCodingBrief(
+    a.objective,
+    a.context,
+    a.checkpoint.plan,
+    a.checkpoint.summary,
+  );
   const budget: LoopBudget = {
     models: Math.max(0, a.settings.limits.models - a.usedModels),
     tools: a.settings.limits.tools,

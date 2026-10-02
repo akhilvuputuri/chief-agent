@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   mkdir,
   readFile,
@@ -175,6 +176,7 @@ export class Workspace {
       "diff",
       "--cached",
       "--name-only",
+      "--no-renames",
       "-z",
     ]);
     const index = await this.command(
@@ -200,12 +202,14 @@ export class Workspace {
         .filter(Boolean)
         .map((entry) => {
           const at = entry.indexOf("\t");
-          return [entry.slice(at + 1), entry.slice(0, 6)];
+          const fields = entry.slice(0, at).split(" ");
+          return [entry.slice(at + 1), { mode: fields[0], blob: fields[1] }];
         }),
     );
     for (const path of names.output.split("\u0000").filter(Boolean)) {
       validateFiles([{ path, content: "" }]);
-      const mode = indexed.get(path);
+      const entry = indexed.get(path);
+      const mode = entry?.mode;
       if (mode !== undefined && mode !== "100644" && mode !== "100755")
         throw new Error("Only regular indexed files are supported");
       let content: string | null = null;
@@ -223,6 +227,15 @@ export class Workspace {
           blob.output.includes("\u0000")
         )
           throw new Error("Only bounded UTF-8 indexed files are supported");
+        const bytes = Buffer.from(blob.output, "utf8");
+        const identity = createHash("sha1")
+          .update(`blob ${bytes.length}\0`)
+          .update(bytes)
+          .digest("hex");
+        if (identity !== entry?.blob)
+          throw new Error(
+            "Indexed file is not valid UTF-8; no replacement bytes may be published",
+          );
         content = blob.output;
       }
       files.push({ path, content, ...(mode ? { mode } : {}) });
