@@ -1,7 +1,7 @@
 # 54 — Keeping recurring payments and decision dates together
 
-Work dates: 1–2 October 2026. Written: 1 October; revised: 2 October 2026.
-Status: in progress. Manual capture, tracker and linked reminders implemented; independent review and operator release pending.
+Work dates: 1–3 October 2026. Written: 1 October; revised: 3 October 2026.
+Status: manual milestone released as [v0.3.34](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.34); owner Telegram acceptance and source/monitoring milestones remain separate.
 
 ## User-visible problem and preceding iteration
 
@@ -41,9 +41,9 @@ Additional mocked end-to-end verification passed Chief → subscriptions child �
 
 ## Verification and outcome
 
-No paid provider smoke/eval, production mailbox search, account mutation or Telegram message has been performed. This is the manual milestone only; issue 132 remains open for reviewed source intake, price changes, summary and responsibility monitoring. GitHub access and the operator connection were verified in this session; that does not prove another cloud session inherits either.
+No paid provider smoke/eval, production mailbox search, external account mutation or Telegram message has been performed. A deployed-module database smoke was subsequently executed and rolled back; see release closure. This is the manual milestone only; issue 132 remains open for reviewed source intake, price changes, summary and responsibility monitoring. GitHub access and the operator connection were verified in this session; that does not prove another cloud session inherits either.
 
-Release remains pending current-head independent approval, CI and the migration-023 operator rollout. Exact deployed SHA, preserved-record checks and version will be recorded after verification.
+The review/release was pending at this earlier checkpoint. The dated release closure below records final approval, migration 025, exact deployed SHA, preservation checks and published version.
 
 ## Follow-up and next iteration
 
@@ -64,3 +64,13 @@ This dated documentation follow-up does not claim approval for a future integrat
 ### Shipping integration — 2 October 2026
 
 The owner explicitly requested completing the tracker first. Fresh main and production RELEASE/health matched `ae0237f4337a640937d36ed6e742c5fdef7ae9b7` ([release 37025370056](https://github.com/akhilvuputuri/chief-agent/actions/runs/37025370056)). Main now includes released responsibilities (migration 023) and the default-off coding foundation (024). These are preserved. The unshipped tracker migration is renumbered 025, patch version is 0.3.34, and Mini App navigation/API conflicts are resolved with both views present. Integrated full checks passed: 670 application, 22 JavaScript and 30 Python tests; build/format passed, plus 14 offline operator rollout tests. Exact integrated-head independent review and migration 025 operator release are pending. No coding runtime activation, responsibility creation or paused-task resumption is part of this work.
+
+### Release closure — 3 October 2026
+
+GPT-6 Astra **APPROVED** exact integrated head `142486080c9094bbab151636d48e767dfc7e7d99` against `ae0237f4337a640937d36ed6e742c5fdef7ae9b7`, independently passing 101 focused tests, 18 adversarial checks and all 14 offline rollout tests. It found no remaining blocker. [PR #142](https://github.com/akhilvuputuri/chief-agent/pull/142) merged to `b79fd27f8cdf5ecadb05622217ab61666a63f70b`, whose tree is identical. [Exact PR checks](https://github.com/akhilvuputuri/chief-agent/actions/runs/37028141224) and [main checks](https://github.com/akhilvuputuri/chief-agent/actions/runs/37029456267) passed; local full validation passed 670 application, 22 JavaScript and 30 Python tests, build/format, plus 14 rollout tests. The mocked Chief → domain agent → ledger/reminder → report → Chief reply passed with Gmail disconnected. The integrated synthetic Mini App retained both Responsibilities and Subscriptions navigation; earlier phone-width verification was 390 × 844.
+
+The [first automatic release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37030123032) refused the database/Compose diff as intended. The independently reviewed operator procedure then installed only additive migration 025 from verified baseline `ae0237f`, preserving 023/024, the trusted release handler and production environment. Exact server RELEASE and startup health matched `b79fd27f8cdf5ecadb05622217ab61666a63f70b`. [Normal release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37030523500) subsequently passed for that exact SHA. [v0.3.34](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.34) immutably labels it; a documentation follow-up is not a new feature version.
+
+Separate bounded private before/after checks confirmed unchanged jobs, memories, parcels and reminder rows (counts and hashes), responsibility/coding-job counts, and no active work or pending input at rollout. Only the pass/fail result is recorded here. The reviewed deployed-module smoke passed manual capture/read/update, other-owner isolation, exact retries, linked-date withdrawal/replacement, cancellation and shared capacity accounting inside one rolled-back transaction. Migration 25, empty new ledger/history, no synthetic owner and capacity consistency were independently checked afterward. Zero Telegram sends and zero model calls were made; no fixture remained.
+
+Limits: this is the manual tracker, not completion of issue 132's intake/monitoring scope or the proposed general execution harness. Live owner Telegram/reminder delivery acceptance, semantic input-choice accuracy, pending-price alerts, email/PDF/browser intake, monthly summaries and merchant cancellation handoff remain separate. Local/reviewer concurrency checks use PGlite; the production smoke uses one real PostgreSQL connection and does not claim a multi-connection production race test. Paid provider evals remain deferred. Already-started delivery retains the disclosed final-check/edit race and no-replay behavior. Coding stays off; no responsibility was created or paused task resumed. The migration still needs the reviewed local operator connection; ordinary releases and exact receipts use the shared GitHub path, and cloud migration parity remains an engineering gap.
