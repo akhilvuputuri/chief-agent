@@ -1,6 +1,6 @@
-# Coding runtime — implementation candidate, 2 October 2026
+# Coding runtime — v0.3.33 installed off, 2 October 2026
 
-The coding-runtime branch adds direct durable dispatch from Chief to a separate worker in a provisioned sandbox, repository verification, reviewer context, draft PR publication and Telegram updates. It is default-off and not activated. Migration 024/Compose need the reviewed operator rollout; live execution also needs a public immutable worker image, dedicated scoped CodeBuild identity/project, GitHub App and authenticated ingress. See [coding architecture and setup](coding.md) and [journal 56](journey/56-coding-runtime.md). No paid sandbox or model acceptance job has run. This is separate from deferred runtime evaluations and observable-memory checkpoints.
+[PR #150](https://github.com/akhilvuputuri/chief-agent/pull/150) shipped the owned TypeScript/Node 22 coding-runtime foundation as [v0.3.33](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.33) at `1ee7c4bb4f6ef99ab79d9e648455e00ff4fc66ff`. GPT-6 Astra approved exact head `f05c4b20875e844417b672adb7d038a101ba4a4b`; PR/main CI, reviewed migration 024/Compose install, normal release and separate health/preservation checks passed. Coding is **off**, with zero live jobs. The public immutable worker image is published and anonymously pullable. Live execution still needs a scoped CodeBuild identity/project, repository-only GitHub App and authenticated ingress. See [setup](coding.md) and [journal closure](journey/56-coding-runtime.md). No paid sandbox/model acceptance has run. Deferred evaluation/memory branches remain separate.
 
 # Issue 131 — Responsibilities released v0.3.32
 

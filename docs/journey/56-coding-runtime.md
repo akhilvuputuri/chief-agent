@@ -1,7 +1,7 @@
 # 56 — Coding work outside the live assistant
 
 Work date(s): 2 October 2026. Written/revised: 2 October 2026.
-Status: in progress. Implementation and synthetic verification; independent review and deployment pending. Live provider activation is blocked by missing scoped CodeBuild/GitHub App setup.
+Status: released foundation, installed off. v0.3.33 application/migration verified; live activation remains pending scoped CodeBuild/GitHub App/ingress setup.
 
 ## User-visible problem and preceding iteration
 
@@ -49,9 +49,13 @@ GPT-6 Astra approved `318c29a685cdc18db4af8b6d1513c103d0f6d607` after independen
 
 Re-review of `4cb234a1d3ad9fcdcd1cc29e62330aaf3b4e3443` found a same-batch approval bypass: executing plan_read and APPROVE in one generated response updated coverage before the model received the page. Approval now uses coverage frozen at the preceding model request; the next generation must see the final page first. A two-generation regression covers this boundary. The other paging/index changes and 36 coding tests passed the independent review. Final head remains subject to approval and CI.
 
-### Release closure — pending
+### Release closure — 2 October 2026
 
-No new release or live coding activation is claimed. Record reviewed head, PR, migration installation, exact deployed SHA/health and provider activation separately. Main merge alone will not satisfy the rollout prerequisites.
+Final GPT-6 Astra approval covered exact head `f05c4b20875e844417b672adb7d038a101ba4a4b` in [PR #150](https://github.com/akhilvuputuri/chief-agent/pull/150#issuecomment-5954724757); its tree matches merged `1ee7c4bb4f6ef99ab79d9e648455e00ff4fc66ff`. The reviewer independently passed all 37 coding tests, rollout validation and both tool-batch approval orders, with no unresolved blocking findings. [PR CI](https://github.com/akhilvuputuri/chief-agent/actions/runs/37020391052) and [main CI](https://github.com/akhilvuputuri/chief-agent/actions/runs/37021426617) passed 646 application, 22 JS and 30 Python tests, build/format and the actual Linux worker/setpriv/native process-guard smoke.
+
+The first [normal release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37022132112) refused DB/Compose differences as designed. The reviewed idle-only operator installer verified baseline `618d5ad` and the exact archive digest, installed additive migration 024/Compose and reported the merged SHA healthy. Separate server RELEASE, version 0.3.33, health and preservation-count checks passed. Coding was off and its table empty. The normal release rerun then passed and the exact production receipt reported success. [v0.3.33](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.33) immutably targets that verified merge.
+
+[Worker image publishing](https://github.com/akhilvuputuri/chief-agent/actions/runs/37022776283) succeeded at digest `sha256:7c4232e4d7b8d681eadf4f3861dc684d642c7829dec60342e42de90e740cce15`, separately verified through anonymous registry token/manifest HTTP 200 without printing the token. CLI package metadata access returned 403 for missing read:packages scope; anonymous pull independently verifies public pullability. The digest is pinned in activation configuration. No paid sandbox/model request, live coding activation, real App publication or Telegram acceptance has run. Scoped provider/App/ingress setup remains the explicit next boundary.
 
 ## Follow-up and next iteration
 
