@@ -26,6 +26,7 @@ DOMAINS = (
     "watchlist",
     "news",
     "routines",
+    "responsibilities",
     "skills",
 )
 

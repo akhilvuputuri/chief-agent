@@ -75,6 +75,9 @@ export function runtimeContext(
   const visibleAvailability = { ...availability };
   if (!availability.subscriptions) delete visibleAvailability.subscriptions;
   const disabled = (op: string) =>
+    (op.startsWith("coding_") && !availability.coding) ||
+    (op.startsWith("responsibility_") &&
+      (!availability.responsibilities || op === "responsibility_report")) ||
     (op.startsWith("canvas_") && !availability.canvases) ||
     op === "research_report" ||
     op === "media_report" ||
@@ -147,6 +150,24 @@ export function runtimeContext(
             {
               routine_create:
                 "On explicit user request, schedule an independent agent job with a self-contained instruction. Singapore time: ISO, in 30m, every 2h, daily at 11pm, or five-field cron (hourly minimum). latest catches up one slot; skip ignores slots over 5 minutes late. Use schedule_create for fixed reminders.",
+              responsibility_create:
+                "On an explicit owner request to keep watching a concern, propose an exact self-contained responsibility. Resolve parcel IDs, Gmail account/query, outcome, notifyWhen and end before saving. The owner confirms the exact Telegram card before monitoring starts. Scheduled research can spend model budget on unchanged passes. Read and use the returned confirmation; do not claim active monitoring yet.",
+              coding_start:
+                "On an explicit owner request to plan or implement a Chief code change, dispatch a durable job in a separate on-demand sandbox. Include the exact objective and relevant evidence; mode plan stops at a brief, implement prepares a draft PR. Reuse requestKey only for retries of the identical request. Returns promptly; job execution is independent of this conversation. Never claim a PR or deployment from dispatch alone.",
+              coding_status:
+                "Inspect exact coding job IDs, state, plan, questions, PR and cleanup. Omit id to list recent jobs. Coding jobs use their own lifecycle; work_status and /continue do not control them.",
+              coding_reply:
+                "Supply the owner's clarification or requested scope revision to a paused coding job using its exact id and baseRevision. Reuse requestKey for an identical retry. Sandbox cleanup must complete first. Optional mode implement lets the owner proceed from a plan.",
+              coding_resume:
+                "Explicitly resume a paused coding job on owner request, using exact id, baseRevision and a stable requestKey. Never automatically resume paused coding work.",
+              coding_cancel:
+                "Cancel the exact coding job on owner request. Cleanup is tracked separately; inspect status. A PR already prepared is retained.",
+              responsibility_update:
+                "Edit a responsibility using its exact baseRevision; new spec requires another confirmation. Pause/resume/cancel/resolve only on explicit owner request. No automatic resumption of paused investigation tasks.",
+              responsibility_list:
+                "List the owner's standing concerns, last/next checks, source health, latest finding and daily investigation use.",
+              responsibility_history:
+                "Read bounded checks, investigations, usage, findings, attention reasons and send states; no rerun.",
               routine_update:
                 "Change future routine instructions/times or pause/resume/cancel on user request. Existing tasks are unchanged; use work_cancel on their task ID. Same time syntax as routine_create.",
               routine_list: "List the owner's routines and next due times.",

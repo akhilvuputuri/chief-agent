@@ -38,6 +38,58 @@ function fixture(mismatch = false) {
   }) as typeof fetch;
   return { tools: new GmailTools(config, request), calls };
 }
+test("monitoring polls one IDs-only page in the pinned mailbox, preserves the exact query and uses shared request accounting", async () => {
+  const { tools, calls } = fixture();
+  await assert.rejects(() =>
+    tools.poll("other", "primary", config.email, "from:x", undefined, "poll"),
+  );
+  await assert.rejects(() =>
+    tools.poll(
+      "owner",
+      "secondary",
+      "wrong@example.com",
+      "from:x",
+      undefined,
+      "poll",
+    ),
+  );
+  assert.equal(calls.length, 0);
+  const query =
+    "(from:sender@example.com OR subject:delivery) after:1790000000 before:1790001000";
+  const result = await tools.poll(
+    "owner",
+    "secondary",
+    config.secondary.email,
+    query,
+    "page",
+    "poll",
+  );
+  assert.equal(result.nextPageToken, "second-page");
+  const listed = calls.filter((c) => c.url.pathname.endsWith("/messages"));
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0].token, "second");
+  assert.equal(listed[0].url.searchParams.get("q"), query);
+  assert.equal(listed[0].url.searchParams.get("maxResults"), "100");
+  assert.equal(listed[0].url.searchParams.get("pageToken"), "page");
+  assert.ok(
+    !calls.some((c) => /\/messages\//.test(c.url.pathname)),
+    "no metadata or message-body fetch",
+  );
+  for (let i = 1; i < GMAIL_RUN_BUDGET; i++)
+    await tools.poll(
+      "owner",
+      i % 2 ? "primary" : "secondary",
+      i % 2 ? config.email : config.secondary.email,
+      query,
+      undefined,
+      "poll",
+    );
+  await assert.rejects(
+    () =>
+      tools.poll("owner", "primary", config.email, query, undefined, "poll"),
+    /budget/,
+  );
+});
 test("accounts are owner-scoped, credential-free and require no Google requests", async () => {
   const { tools, calls } = fixture();
   await assert.rejects(() => tools.call("other", "gmail_accounts", ""));

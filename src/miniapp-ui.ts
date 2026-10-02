@@ -559,6 +559,118 @@ function showError(error: unknown) {
     btn("Try again", () => void route()),
   );
 }
+async function responsibilities(id?: string, offset = 0) {
+  const rows = id
+    ? [
+        await api(
+          "/responsibilities/" + encodeURIComponent(id) + "?offset=" + offset,
+        ),
+      ]
+    : await api("/responsibilities?offset=" + offset);
+  root.replaceChildren(
+    el("h1", id ? "Monitoring history" : "Responsibilities"),
+  );
+  if (id)
+    root.append(
+      btn("← Responsibilities", () => go({ view: "responsibilities" })),
+    );
+  if (!rows.length)
+    root.append(
+      el(
+        "p",
+        "No responsibilities yet. Ask Chief in Telegram to watch a concern.",
+        "empty",
+      ),
+    );
+  for (const entry of rows) {
+    const r = id ? entry.responsibility : entry;
+    const section = el("section", undefined, "block");
+    section.append(
+      el("h2", r.spec.title),
+      el("p", r.status + (r.degraded ? " · source degraded" : ""), "muted"),
+      el("p", r.spec.outcome),
+      el("p", r.understanding || "No finding yet."),
+    );
+    section.append(
+      el(
+        "p",
+        `Last check: ${r.last_check ? date(r.last_check) : "not yet"} · Next: ${r.next_check ? date(r.next_check) : "none"} · Investigations today: ${r.investigations_today ?? 0}/6`,
+        "muted",
+      ),
+    );
+    if (!id)
+      section.append(
+        btn("History", () =>
+          go({ view: "responsibilities", responsibility: r.id }),
+        ),
+      );
+    else {
+      for (const f of entry.findings) {
+        const block = el("section", undefined, "block");
+        block.append(
+          el("h3", `${f.decision} · ${f.reason} · revision ${f.revision}`),
+          el("p", f.payload.reply, "prose"),
+          el("p", `Delivery: ${f.state} · ${date(f.created_at)}`, "muted"),
+        );
+        section.append(block);
+      }
+      for (const c of entry.checks)
+        section.append(
+          el(
+            "p",
+            `Check: ${c.outcome} · ${c.candidates} new candidates · ${date(c.created_at)}`,
+            "muted",
+          ),
+        );
+      for (const i of entry.investigations)
+        section.append(
+          el(
+            "p",
+            `Investigation: ${i.status}${i.pause_reason ? " (" + i.pause_reason + ")" : ""} · ${i.used_models} model / ${i.used_tools} tool calls · ${i.used_ms} ms · Reported USD ${i.reported_cost ?? "unavailable"}; estimated unreported USD ${i.estimated_unknown_cost ?? "unavailable"}`,
+            "muted",
+          ),
+        );
+      if (offset > 0)
+        section.append(
+          btn("Newer history", () =>
+            go({
+              view: "responsibilities",
+              responsibility: id,
+              offset: String(Math.max(0, offset - 10)),
+            }),
+          ),
+        );
+      if (entry.nextOffset !== null)
+        section.append(
+          btn("Older history", () =>
+            go({
+              view: "responsibilities",
+              responsibility: id,
+              offset: String(entry.nextOffset),
+            }),
+          ),
+        );
+    }
+    root.append(section);
+  }
+  if (!id) {
+    if (offset > 0)
+      root.append(
+        btn("Newer concerns", () =>
+          go({
+            view: "responsibilities",
+            offset: String(Math.max(0, offset - 50)),
+          }),
+        ),
+      );
+    if (rows.length === 50)
+      root.append(
+        btn("Older concerns", () =>
+          go({ view: "responsibilities", offset: String(offset + 50) }),
+        ),
+      );
+  }
+}
 async function route() {
   controller.abort();
   controller = new AbortController();
@@ -577,11 +689,21 @@ async function route() {
     .getElementById("canvases")!
     .classList.toggle(
       "selected",
-      !subscriptionsView && !p.has("role") && p.get("view") !== "roles",
+      !subscriptionsView &&
+        !p.has("role") &&
+        !["roles", "responsibilities"].includes(p.get("view") ?? ""),
     );
+  document
+    .getElementById("responsibilities")!
+    .classList.toggle("selected", p.get("view") === "responsibilities");
   try {
     if (subscriptionsView)
       await subscriptions(p.get("subscription") ?? undefined);
+    else if (p.get("view") === "responsibilities")
+      await responsibilities(
+        p.get("responsibility") ?? undefined,
+        Number(p.get("offset") ?? 0),
+      );
     else if (p.has("canvas"))
       await canvas(p.get("canvas")!, p.get("revision") ?? undefined);
     else if (p.has("role")) await role(p.get("role")!);
@@ -594,6 +716,9 @@ async function start() {
   document
     .getElementById("subscriptions")!
     .addEventListener("click", () => go({ view: "subscriptions" }));
+  document
+    .getElementById("responsibilities")
+    ?.addEventListener("click", () => go({ view: "responsibilities" }));
   document.getElementById("canvases")!.addEventListener("click", () => go());
   document
     .getElementById("roles")!
@@ -622,10 +747,19 @@ async function start() {
       "This Telegram session could not be verified. Close this window and open it again from the bot.",
     );
   token = (await response.json()).token;
+  const capabilities = await api("/capabilities");
+  document.getElementById("responsibilities")!.hidden =
+    !capabilities.responsibilities;
   // Telegram's launch fragment is parsed by the SDK; never retain signed data in our navigation URLs.
   const query = new URLSearchParams(location.search);
   const initial = new URLSearchParams();
-  for (const key of ["canvas", "revision", "view", "subscription"])
+  for (const key of [
+    "canvas",
+    "revision",
+    "view",
+    "subscription",
+    "responsibility",
+  ])
     if (query.has(key)) initial.set(key, query.get(key)!);
   history.replaceState(null, "", "/miniapp/#" + initial.toString());
   addEventListener("hashchange", () => void route());

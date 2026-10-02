@@ -5,6 +5,123 @@ import {
   validateDraft,
 } from "./calendar-draft.js";
 import { boundedBytes } from "./providers.js";
+import { z } from "zod";
+const localDateTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
+const calendarTime = z
+  .object({
+    date: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+    dateTime: z
+      .union([
+        z.string().datetime({ offset: true }),
+        z.string().regex(localDateTime),
+      ])
+      .optional(),
+    timeZone: z.string().optional(),
+  })
+  .passthrough()
+  .refine(
+    (t) => !!(t.date || t.dateTime),
+    "Calendar time requires date or dateTime",
+  )
+  .transform((time, ctx) => {
+    if (!time.dateTime) return time;
+    if (!localDateTime.test(time.dateTime))
+      return { ...time, dateTime: new Date(time.dateTime).toISOString() };
+    try {
+      if (!time.timeZone) throw new Error("Missing timezone");
+      const formatter = new Intl.DateTimeFormat("en-CA", {
+        timeZone: time.timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hourCycle: "h23",
+      });
+      const wallAt = (ms: number) => {
+        const parts = Object.fromEntries(
+          formatter.formatToParts(new Date(ms)).map((p) => [p.type, p.value]),
+        );
+        return {
+          text: `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`,
+          epoch: Date.UTC(
+            Number(parts.year),
+            Number(parts.month) - 1,
+            Number(parts.day),
+            Number(parts.hour),
+            Number(parts.minute),
+            Number(parts.second),
+          ),
+        };
+      };
+      // Anchor offset discovery to the supplied wall date, never the current offset.
+      // Adjacent days cover both sides of timezone transitions, including half-hour folds.
+      const wallEpoch = Date.parse(time.dateTime + "Z"),
+        offsets = new Set<number>();
+      for (const hours of [-48, -24, 0, 24, 48]) {
+        const sample = Math.floor((wallEpoch + hours * 3600000) / 1000) * 1000;
+        offsets.add(wallAt(sample).epoch - sample);
+      }
+      const instants = [...offsets]
+        .map((offset) => wallEpoch - offset)
+        .filter((ms) => wallAt(ms).text === time.dateTime!.slice(0, 19));
+      if (instants.length !== 1)
+        throw new Error(
+          "Ambiguous or nonexistent wall time; provide an explicit offset",
+        );
+      return { ...time, dateTime: new Date(instants[0]!).toISOString() };
+    } catch {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "Local Calendar timestamps require a valid explicit timezone and unambiguous wall time; otherwise provide a numeric offset",
+      });
+      return z.NEVER;
+    }
+  });
+const monitoringEvent = z
+  .object({
+    id: z.string().min(1).max(1024),
+    status: z.enum(["confirmed", "tentative", "cancelled"]).optional(),
+    recurringEventId: z.string().min(1).max(1024).optional(),
+    originalStartTime: calendarTime.optional(),
+    attendeesOmitted: z.boolean().optional(),
+    summary: z.string().optional(),
+    location: z.string().optional(),
+    htmlLink: z.string().url().optional(),
+    start: calendarTime.optional(),
+    end: calendarTime.optional(),
+    attendees: z
+      .array(
+        z
+          .object({
+            email: z.string().optional(),
+            self: z.boolean().optional(),
+            resource: z.boolean().optional(),
+            responseStatus: z.string().optional(),
+          })
+          .passthrough(),
+      )
+      .optional(),
+  })
+  .passthrough()
+  .refine(
+    (e) =>
+      e.status === "cancelled" ||
+      (!!(e.start?.date || e.start?.dateTime) &&
+        !!(e.end?.date || e.end?.dateTime)),
+    "Active Calendar events require start and end",
+  );
+const monitoringPage = z
+  .object({
+    items: z.array(monitoringEvent).max(100).default([]),
+    nextPageToken: z.string().min(1).max(2000).optional(),
+  })
+  .passthrough();
 /** Google answered with a non-success HTTP status. */
 export class GoogleHttpError extends Error {
   constructor(readonly status: number) {
@@ -193,7 +310,7 @@ export class CalendarTools {
       throw new Error("Event identity mismatch");
     return result;
   }
-  async list(user: string, start: string, end: string) {
+  async list(user: string, start: string, end: string, monitoring = false) {
     if (!this.c.owner || user !== this.c.owner)
       throw new Error("Calendar is not connected for this user");
     const duration = Date.parse(end) - Date.parse(start);
@@ -211,18 +328,28 @@ export class CalendarTools {
       maxResults: "100",
       timeZone: "Asia/Singapore",
     }).toString();
-    const r = await googleJson(
-      await this.request(url, {
-        headers,
-        redirect: "error",
-        signal: AbortSignal.timeout(15000),
-      }),
-    );
+    let r: any,
+      items: any[] = [];
+    for (let page = 0; page < (monitoring ? 5 : 1); page++) {
+      r = await googleJson(
+        await this.request(url, {
+          headers,
+          redirect: "error",
+          signal: AbortSignal.timeout(15000),
+        }),
+      );
+      if (r.items !== undefined && !Array.isArray(r.items))
+        throw new Error("Invalid Calendar event collection");
+      if (monitoring) r = monitoringPage.parse(r);
+      items.push(...(r.items ?? []).slice(0, 100));
+      if (!r.nextPageToken) break;
+      url.searchParams.set("pageToken", String(r.nextPageToken));
+    }
     return {
       untrusted: true,
       calendar: "primary",
       truncated: !!r.nextPageToken,
-      events: (r.items ?? []).map((e: any) => ({
+      events: items.map((e: any) => ({
         id: e.id,
         title: e.summary ?? "(Untitled)",
         start: e.start,
@@ -232,6 +359,21 @@ export class CalendarTools {
         location: e.location,
         url: e.htmlLink,
         status: e.status,
+        ...(monitoring
+          ? {
+              attendees: (e.attendees ?? []).slice(0, 100).map((a: any) => ({
+                email: a.email,
+                self: a.self === true,
+                resource: a.resource === true,
+                responseStatus: a.responseStatus,
+              })),
+              attendeesOmitted:
+                !!e.attendeesOmitted || (e.attendees ?? []).length > 100,
+              recurringEventId: e.recurringEventId,
+              originalStartTime: e.originalStartTime,
+              updated: e.updated,
+            }
+          : {}),
       })),
     };
   }

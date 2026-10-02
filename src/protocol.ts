@@ -24,11 +24,25 @@ import {
 } from "./subscription-schema.js";
 import { parcelRecord, parcelList, parcelMatch } from "./parcel-schema.js";
 import {
+  responsibilityCreate,
+  responsibilityUpdate,
+  responsibilityList,
+  responsibilityHistory,
+  responsibilityReport,
+} from "./responsibility-schema.js";
+import {
   libraryAvailability,
   libraryCheck,
   libraryShelf,
 } from "./library-schema.js";
 import { z } from "zod";
+import {
+  codingStart,
+  codingStatus,
+  codingReply,
+  codingCancel,
+  codingResume,
+} from "./coding/schema.js";
 const id = z.string().uuid();
 // Singapore-time monitoring window; end < start runs past midnight, 24:00 = end of day.
 const monitoringWindow = z
@@ -391,6 +405,16 @@ export const action = z.discriminatedUnion("operation", [
   subscriptionList,
   subscriptionSettings,
   parcelRecord,
+  codingStart,
+  codingStatus,
+  codingReply,
+  codingCancel,
+  codingResume,
+  responsibilityCreate,
+  responsibilityUpdate,
+  responsibilityList,
+  responsibilityHistory,
+  responsibilityReport,
   parcelList,
   parcelMatch,
   z.object({ operation: z.literal("sheet_sync") }).strict(),

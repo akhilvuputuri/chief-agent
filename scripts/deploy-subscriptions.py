@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reviewed one-time operator rollout for subscriptions migration 023."""
+"""Reviewed one-time operator rollout for subscriptions migration 025."""
 import fcntl
 import json
 import pathlib
@@ -13,13 +13,13 @@ import time
 
 LIVE = pathlib.Path('/opt/hermes-companion')
 LOCK = pathlib.Path('/var/lock/companion-release.lock')
-# Baseline verified by operator RELEASE/health and release 36885999446 on 1 October 2026.
-BASE = '78ad212182a34cf18b77a60c9e0d6d5cce8b7c0b'
+# Baseline verified by operator RELEASE/health and release 37025370056 on 2 October 2026.
+BASE = 'ae0237f4337a640937d36ed6e742c5fdef7ae9b7'
 BASES = {BASE}
 IMAGE = 'hermes-companion-gateway'
-MIGRATION = '023_subscriptions.sql'
-COMPOSE_ANCHOR = b'        "/migrations/022_telegram_delivery.sql",\n'
-COMPOSE_ADDITION = b'        "-f",\n        "/migrations/023_subscriptions.sql",\n'
+MIGRATION = '025_subscriptions.sql'
+COMPOSE_ANCHOR = b'        "/migrations/024_coding.sql",\n'
+COMPOSE_ADDITION = b'        "-f",\n        "/migrations/025_subscriptions.sql",\n'
 MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
 
 
@@ -99,13 +99,13 @@ def validate_changes(stage):
     if any(new.get(name) != content for name, content in old.items()):
         raise RuntimeError('Historical migration changed or removed')
     if new.keys() - old.keys() != {MIGRATION}:
-        raise RuntimeError('Unexpected migration set; only 023 is permitted')
+        raise RuntimeError('Unexpected migration set; only 025 is permitted')
     baseline_compose = (LIVE / 'compose.yaml').read_bytes()
     if baseline_compose.count(COMPOSE_ANCHOR) != 1 or MIGRATION.encode() in baseline_compose:
         raise RuntimeError('Compose baseline does not match the reviewed migration list')
     expected = baseline_compose.replace(COMPOSE_ANCHOR, COMPOSE_ANCHOR + COMPOSE_ADDITION)
     if (stage / 'compose.yaml').read_bytes() != expected:
-        raise RuntimeError('Unexpected Compose change; only the migration 023 entry is permitted')
+        raise RuntimeError('Unexpected Compose change; only the migration 025 entry is permitted')
     if (stage / 'scripts/cloud-release.py').read_bytes() != (LIVE / 'scripts/cloud-release.py').read_bytes():
         raise RuntimeError('Trusted release-handler source changed; requires separate review')
 
@@ -194,8 +194,8 @@ def main():
                 compose('stop', 'gateway')
                 sql((stage / 'db' / MIGRATION).read_text())
                 migration_applied = True
-                if sql('SELECT count(*) FROM runtime_migrations WHERE version=23') != '1':
-                    raise RuntimeError('Migration 023 marker unavailable')
+                if sql('SELECT count(*) FROM runtime_migrations WHERE version=25') != '1':
+                    raise RuntimeError('Migration 025 marker unavailable')
                 (LIVE / 'compose.yaml').write_bytes((stage / 'compose.yaml').read_bytes())
                 run(['docker', 'tag', candidate, IMAGE + ':latest'])
                 compose('up', '-d', '--no-deps', '--no-build', 'gateway')
@@ -221,9 +221,9 @@ def main():
                     write_release(old_release)
                 except Exception:
                     raise RuntimeError('Rollback needs operator inspection; no database reversal or task replay was attempted') from None
-                raise RuntimeError('Candidate failed; previous application healthy; any committed additive migration 023 retained') from None
+                raise RuntimeError('Candidate failed; previous application healthy; any committed additive migration 025 retained') from None
             # The trusted /usr/local/sbin release command is unchanged and is not installed here.
-            print(json.dumps({'deployed': sha, 'healthy': True, 'migration': 23}))
+            print(json.dumps({'deployed': sha, 'healthy': True, 'migration': 25}))
 
 
 if __name__ == '__main__':

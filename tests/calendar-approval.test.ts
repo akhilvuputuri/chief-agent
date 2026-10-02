@@ -16,6 +16,183 @@ const draft = {
   start: "2026-09-20T15:00:00+08:00",
   end: "2026-09-20T16:00:00+08:00",
 };
+test("monitoring Calendar reads expand instances and paginate without changing ordinary result projections", async () => {
+  let calls: URL[] = [];
+  const request = (async (input: unknown) => {
+    const url = new URL(String(input));
+    calls.push(url);
+    if (url.hostname === "oauth2.googleapis.com")
+      return Response.json({ access_token: "test" });
+    if (url.pathname.endsWith("/userinfo"))
+      return Response.json({ email: "owner@example.com" });
+    const second = !!url.searchParams.get("pageToken");
+    return Response.json({
+      items: [
+        {
+          id: second ? "two" : "one",
+          summary: "Meeting",
+          start: { dateTime: draft.start },
+          end: { dateTime: draft.end },
+          attendees: [{ email: "external@example.net" }],
+          recurringEventId: "series",
+          originalStartTime: { dateTime: draft.start },
+        },
+      ],
+      ...(second ? {} : { nextPageToken: "page-two" }),
+    });
+  }) as typeof fetch;
+  const calendar = new CalendarTools(
+    {
+      owner: "a",
+      email: "owner@example.com",
+      clientId: "x",
+      clientSecret: "x",
+      refreshToken: "x",
+    },
+    request,
+  );
+  const normal = await calendar.list("a", draft.start, draft.end);
+  assert.equal(normal.truncated, true);
+  assert.ok(!("attendees" in normal.events[0]));
+  calls = [];
+  const monitor = await calendar.list("a", draft.start, draft.end, true);
+  assert.equal(monitor.events.length, 2);
+  assert.equal(monitor.truncated, false);
+  assert.equal(monitor.events[0].recurringEventId, "series");
+  const lists = calls.filter((u) => u.pathname.endsWith("/events"));
+  assert.equal(lists.length, 2);
+  assert.equal(lists[0].searchParams.get("singleEvents"), "true");
+  assert.equal(lists[1].searchParams.get("pageToken"), "page-two");
+  assert.ok(!lists[0].searchParams.has("syncToken"));
+});
+test("monitoring normalizes timezone-qualified local times and rejects missing or invalid zones", async () => {
+  let timeZone: string | undefined = "Asia/Singapore";
+  let offset = false;
+  const calendar = new CalendarTools(
+    {
+      owner: "a",
+      email: "owner@example.com",
+      clientId: "fixture",
+      clientSecret: "fixture",
+      refreshToken: "fixture",
+    },
+    (async (input: unknown) => {
+      const url = String(input);
+      return Response.json(
+        url.includes("oauth2.googleapis.com")
+          ? { access_token: "fixture" }
+          : url.includes("/userinfo")
+            ? { email: "owner@example.com" }
+            : {
+                items: [
+                  {
+                    id: "local",
+                    start: {
+                      dateTime:
+                        "2026-10-05T09:00:00" + (offset ? "+08:00" : ""),
+                      timeZone,
+                    },
+                    end: {
+                      dateTime:
+                        "2026-10-05T10:00:00" + (offset ? "+08:00" : ""),
+                      timeZone,
+                    },
+                    recurringEventId: "series",
+                    originalStartTime: {
+                      dateTime:
+                        "2026-10-05T09:00:00" + (offset ? "+08:00" : ""),
+                      timeZone,
+                    },
+                  },
+                ],
+              },
+      );
+    }) as typeof fetch,
+  );
+  const result = await calendar.list(
+    "a",
+    "2026-10-05T00:00:00Z",
+    "2026-10-05T04:00:00Z",
+    true,
+  );
+  assert.equal(result.events[0].start.dateTime, "2026-10-05T01:00:00.000Z");
+  assert.equal(
+    result.events[0].originalStartTime.dateTime,
+    "2026-10-05T01:00:00.000Z",
+  );
+  offset = true;
+  const equivalent = await calendar.list(
+    "a",
+    "2026-10-05T00:00:00Z",
+    "2026-10-05T04:00:00Z",
+    true,
+  );
+  assert.equal(
+    equivalent.events[0].start.dateTime,
+    result.events[0].start.dateTime,
+  );
+  assert.equal(
+    equivalent.events[0].originalStartTime.dateTime,
+    result.events[0].originalStartTime.dateTime,
+  );
+  offset = false;
+  timeZone = undefined;
+  await assert.rejects(() =>
+    calendar.list("a", "2026-10-05T00:00:00Z", "2026-10-05T04:00:00Z", true),
+  );
+  timeZone = "Invalid/Zone";
+  await assert.rejects(() =>
+    calendar.list("a", "2026-10-05T00:00:00Z", "2026-10-05T04:00:00Z", true),
+  );
+});
+test("ambiguous daylight-saving wall times require an explicit offset and never depend on current time", async () => {
+  let dateTime = "2026-11-01T01:30:00";
+  const calendar = new CalendarTools(
+    {
+      owner: "a",
+      email: "owner@example.com",
+      clientId: "fixture",
+      clientSecret: "fixture",
+      refreshToken: "fixture",
+    },
+    (async (input: unknown) => {
+      const url = String(input);
+      return Response.json(
+        url.includes("oauth2.googleapis.com")
+          ? { access_token: "fixture" }
+          : url.includes("/userinfo")
+            ? { email: "owner@example.com" }
+            : {
+                items: [
+                  {
+                    id: "fold",
+                    start: { dateTime, timeZone: "America/New_York" },
+                    end: {
+                      dateTime: "2026-11-01T02:30:00",
+                      timeZone: "America/New_York",
+                    },
+                  },
+                ],
+              },
+      );
+    }) as typeof fetch,
+  );
+  const read = () =>
+    calendar.list("a", "2026-11-01T00:00:00Z", "2026-11-02T00:00:00Z", true);
+  await assert.rejects(read);
+  dateTime = "2026-11-01T01:30:00-04:00";
+  assert.equal(
+    (await read()).events[0].start.dateTime,
+    "2026-11-01T05:30:00.000Z",
+  );
+  dateTime = "2026-11-01T01:30:00-05:00";
+  assert.equal(
+    (await read()).events[0].start.dateTime,
+    "2026-11-01T06:30:00.000Z",
+  );
+  dateTime = "2026-03-08T02:30:00";
+  await assert.rejects(read);
+});
 async function fixture() {
   const pg = new PGlite();
   for (const f of [

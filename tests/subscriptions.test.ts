@@ -107,7 +107,7 @@ test("manual capture persists provenance, exact price, per-currency totals and d
     );
     await f.pg.exec(
       await readFile(
-        new URL("../db/023_subscriptions.sql", import.meta.url),
+        new URL("../db/025_subscriptions.sql", import.meta.url),
         "utf8",
       ),
     );

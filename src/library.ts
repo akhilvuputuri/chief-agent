@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { LibraryClient, LibraryError } from "./library-client.js";
 import { libraryKey } from "./library-routes.js";
+import { linkRestricted } from "./library-cards.js";
 import {
   ambiguous,
   answerHint,
@@ -102,7 +103,9 @@ export class LibraryTools {
       return {
         linked: false as const,
         state: status.state,
-        note: "No Libby card is linked. The user can send /library link to connect it from the phone; drafting a link is not available to you.",
+        note: status.linkingRestricted
+          ? linkRestricted
+          : "No Libby card is linked. The user can send /library link to connect it from the phone; drafting a link is not available to you.",
       };
     return this.identity.shelf(user);
   }

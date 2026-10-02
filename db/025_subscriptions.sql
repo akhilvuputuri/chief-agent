@@ -85,5 +85,5 @@ DO $$ BEGIN
    FOR EACH ROW EXECUTE FUNCTION maintain_daily_schedule_capacity();
  END IF;
 END $$;
-INSERT INTO runtime_migrations(version) VALUES(23) ON CONFLICT DO NOTHING;
+INSERT INTO runtime_migrations(version) VALUES(25) ON CONFLICT DO NOTHING;
 COMMIT;

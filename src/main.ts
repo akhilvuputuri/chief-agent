@@ -1,8 +1,20 @@
 import { recordFeedSent } from "./telegram-feeds.js";
+import { readFileSync } from "node:fs";
+import { CodeBuildClient } from "@aws-sdk/client-codebuild";
+import { CodingController } from "./coding/controller.js";
+import { CodeBuildSandbox } from "./coding/provider.js";
+import { GitHubPublisher } from "./coding/github.js";
+import { codingSettings } from "./coding/schema.js";
+import { codingApi } from "./coding/api.js";
 import { destination, taskDelivery } from "./delivery-routing.js";
 import "./process-guard.js";
 import { errorFields, opsLog } from "./ops-log.js";
 import { RoutineScheduler, RoutineDelivery } from "./routines.js";
+import { Responsibilities } from "./responsibilities.js";
+import {
+  ResponsibilityWorker,
+  ResponsibilityDelivery,
+} from "./responsibility-worker.js";
 import { StockMonitor, StockDelivery, WatchlistTools } from "./stocks.js";
 import { TwelveDataProvider } from "./stock-provider.js";
 import { NewsBulletin, NewsTools, voteKeyboard } from "./news.js";
@@ -41,6 +53,7 @@ import {
   telegram,
   sendCalendarApprovals,
   sendLibraryApprovals,
+  sendResponsibilityApprovals,
 } from "./telegram.js";
 // Startup refusals carry a fixed code so the sanitized crash line identifies them.
 const startupError = (code: string, message: string) =>
@@ -96,12 +109,12 @@ if (
     "News bulletin migration 021 must be applied with the gateway stopped",
   );
 if (
-  !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=23")).rows
+  !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=25")).rows
     .length
 )
   throw startupError(
-    "STARTUP_MIGRATION_023",
-    "Subscriptions migration 023 must be applied with the gateway stopped",
+    "STARTUP_MIGRATION_025",
+    "Subscriptions migration 025 must be applied with the gateway stopped",
   );
 await recoverRuntime(db);
 // Library account features need migration 016; without the key they stay off even if tables exist.
@@ -250,6 +263,79 @@ const newsBulletin = new NewsBulletin(
   (user) => topics.capture(user, { kind: "topic", topic: "news" }),
 );
 const daily = new DailyTools(db, parser, calendar, mirror);
+if (
+  c.RESPONSIBILITIES === "on" &&
+  !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=23")).rows
+    .length
+)
+  throw startupError(
+    "STARTUP_MIGRATION_023",
+    "Responsibilities migration 023 must be installed before enabling monitoring",
+  );
+const responsibilities =
+  c.RESPONSIBILITIES === "on"
+    ? new Responsibilities(db, { gmail, calendar })
+    : undefined;
+let coding: CodingController | undefined;
+if (c.CODING_RUNTIME === "on") {
+  if (
+    !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=24")).rows
+      .length
+  )
+    throw startupError(
+      "STARTUP_MIGRATION_024",
+      "Coding migration 024 must be installed before enabling the runtime",
+    );
+  if (
+    !c.CODING_CODEBUILD_PROJECT ||
+    !c.CODING_GITHUB_APP_ID ||
+    !c.CODING_GITHUB_INSTALLATION_ID ||
+    !c.CODING_GITHUB_PRIVATE_KEY ||
+    !c.OPENROUTER_API_KEY
+  )
+    throw startupError(
+      "STARTUP_CODING_CONFIG",
+      "Coding provider, GitHub App and model configuration are required",
+    );
+  const settings = codingSettings.parse(
+    JSON.parse(
+      readFileSync(new URL("../config/coding.json", import.meta.url), "utf8"),
+    ),
+  );
+  if (!settings.image)
+    throw startupError(
+      "STARTUP_CODING_IMAGE",
+      "Coding needs a reviewed immutable worker image digest",
+    );
+  const provider = new CodeBuildSandbox(
+    new CodeBuildClient({ region: c.CODING_AWS_REGION, maxAttempts: 1 }),
+    c.CODING_CODEBUILD_PROJECT,
+  );
+  await provider.validate();
+  const owners = new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(","));
+  coding = new CodingController(
+    db,
+    settings,
+    provider,
+    new GitHubPublisher(
+      settings.repository,
+      c.CODING_GITHUB_APP_ID,
+      c.CODING_GITHUB_INSTALLATION_ID,
+      c.CODING_GITHUB_PRIVATE_KEY,
+      { name: c.CODING_COMMIT_NAME, email: c.CODING_COMMIT_EMAIL },
+    ),
+    c.CODING_AUTH_KEY,
+    c.CODING_PUBLIC_ORIGIN,
+    (user) => owners.has(user),
+    (model) =>
+      new OpenRouter(
+        c.OPENROUTER_API_KEY,
+        model,
+        c.OPENROUTER_MAX_INPUT_PRICE,
+        c.OPENROUTER_MAX_OUTPUT_PRICE,
+      ),
+  );
+}
 const assistant = new Assistant(
   db,
   new CustomAgent(
@@ -295,6 +381,8 @@ const assistant = new Assistant(
     libraryActions,
     new WatchlistTools(db, stockProvider),
     new NewsTools(db, newsFetcher, newsBulletin),
+    responsibilities,
+    coding,
   ),
   {
     canvases: !!c.MINIAPP_ORIGIN,
@@ -309,6 +397,8 @@ const assistant = new Assistant(
     dailySheet: !!(c.SHEETS_REFRESH_TOKEN && c.DAILY_SPREADSHEET_ID),
     stocks: !!stockProvider,
     news: true,
+    ...(responsibilities ? { responsibilities: true } : {}),
+    ...(coding ? { coding: true } : {}),
   },
   {
     ms: c.AGENT_BUDGET_MS,
@@ -324,6 +414,9 @@ const assistant = new Assistant(
     ? new ShadowDecisions(c.OPENROUTER_API_KEY)
     : undefined,
 );
+if (responsibilities)
+  responsibilities.onInactive = (user, id) =>
+    assistant.interruptResponsibility(user, id);
 const app = server(
   db,
   c.MINIAPP_ORIGIN
@@ -331,10 +424,12 @@ const app = server(
         origin: c.MINIAPP_ORIGIN,
         token: c.TELEGRAM_BOT_TOKEN,
         allowed: new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(",")),
+        responsibilities: !!responsibilities,
       }
     : undefined,
 );
 const bot = telegram(c, assistant, db);
+if (coding) await codingApi(app, coding);
 // Scheduled output goes to its own topic when threaded mode is on; otherwise to General.
 const topics = bot.topics;
 // Create Chief's topics up front so the owner can write in them before anything is posted.
@@ -351,6 +446,77 @@ notifyOwner = async (text) => {
 };
 const views = new TelegramViews(db, bot.api, undefined, c.MINIAPP_ORIGIN);
 const allowed = new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(","));
+const responsibilityWorker = responsibilities
+  ? new ResponsibilityWorker(responsibilities, (user) => allowed.has(user), {
+      gmail,
+      calendar,
+    })
+  : undefined;
+const responsibilityDelivery = responsibilities
+  ? new ResponsibilityDelivery(
+      responsibilities,
+      (user) => allowed.has(user),
+      async (user, finding) => {
+        const members = finding.members ?? [finding];
+        const reply = members
+          .map(
+            (f: any) =>
+              `${f.spec.title}\n${members.length > 1 ? f.payload.reply.slice(0, 250) + (f.payload.reply.length > 250 ? "…" : "") : f.payload.reply}${
+                f.payload.evidence?.length
+                  ? "\nSource: " +
+                    f.payload.evidence
+                      .slice(0, 2)
+                      .map((e: string) =>
+                        e.slice(0, members.length > 1 ? 60 : 200),
+                      )
+                      .join(", ")
+                  : ""
+              }`,
+          )
+          .join("\n\n");
+        return topics.deliver(
+          user,
+          { kind: "topic", topic: "updates" },
+          async (extra) =>
+            bot.api.sendMessage(user, reply, {
+              ...extra,
+              link_preview_options: { is_disabled: true },
+              reply_markup: {
+                inline_keyboard: members.flatMap((f: any) => [
+                  ...(c.MINIAPP_ORIGIN
+                    ? [
+                        [
+                          {
+                            text: "Details · " + f.spec.title.slice(0, 40),
+                            web_app: {
+                              url:
+                                c.MINIAPP_ORIGIN +
+                                "/miniapp/?view=responsibilities&responsibility=" +
+                                f.responsibility_id,
+                            },
+                          },
+                        ],
+                      ]
+                    : []),
+                  [
+                    { text: "Useful", callback_data: `rsp:useful:${f.id}` },
+                    { text: "Later", callback_data: `rsp:later:${f.id}` },
+                    { text: "Resolved", callback_data: `rsp:resolved:${f.id}` },
+                    {
+                      text: "Less like this",
+                      callback_data: `rsp:less:${f.id}`,
+                    },
+                  ],
+                ]),
+              },
+            }),
+        );
+      },
+      undefined,
+      calendar,
+    )
+  : undefined;
+await responsibilityDelivery?.recover();
 const worker = new DailyWorker<Delivery>(
   db,
   parser,
@@ -567,7 +733,41 @@ const stockDelivery = new StockDelivery(db, async (user, payload) => {
 });
 await stockDelivery.recover();
 await newsBulletin.recover();
+await coding?.recoverDelivery();
 const routineTimer = setInterval(() => {
+  void coding
+    ?.tick()
+    .catch((error) =>
+      opsLog("coding.tick_failed", "error", errorFields(error)),
+    );
+  void coding
+    ?.deliver(async (user, threadId, text) =>
+      topics.deliver(
+        user,
+        {
+          kind: threadId ? "thread" : "general",
+          ...(threadId ? { threadId } : {}),
+        } as import("./delivery-routing.js").Destination,
+        (extra) =>
+          bot.api.sendMessage(user, text, {
+            ...extra,
+            link_preview_options: { is_disabled: true },
+          }),
+      ),
+    )
+    .catch((error) =>
+      opsLog("coding.delivery_failed", "error", errorFields(error)),
+    );
+  void responsibilityWorker
+    ?.tick()
+    .catch((error) =>
+      opsLog("responsibility.tick_failed", "error", errorFields(error)),
+    );
+  void responsibilityDelivery
+    ?.tick()
+    .catch((error) =>
+      opsLog("responsibility.delivery_failed", "error", errorFields(error)),
+    );
   void routineScheduler
     .tick()
     .catch((error) =>
@@ -595,6 +795,8 @@ const workWorker = new WorkWorker(
   db,
   async (user, id) => {
     if (!allowed.has(user)) throw new Error("Unauthorized delivery");
+    if (responsibilities && (await responsibilities.scope(user, id)))
+      return assistant.resumeDetailed(user, id);
     const typing = () => {
       void bot.api.sendChatAction(user, "typing").catch(() => {});
     };
@@ -624,7 +826,10 @@ const workWorker = new WorkWorker(
     }
   },
   sendWorkMessage,
-  (user, task, delivery) => routineDelivery.capture(user, task, delivery),
+  async (user, task, delivery) =>
+    (await responsibilityWorker?.capture(user, task, delivery)) ||
+    routineDelivery.capture(user, task, delivery),
+  !responsibilities,
 );
 const workTimer = setInterval(() => {
   void workWorker
@@ -665,6 +870,10 @@ const runner = runTelegram(bot, {
 });
 const started = Date.now();
 opsLog("gateway.started", "info");
+// Which repo-config settings this environment still overrides (names only, issue #143).
+opsLog("config.loaded", "info", {
+  envSettings: c.overridden,
+});
 // Low-rate liveness record: its absence in CloudWatch means the gateway or the
 // log path stopped, not that nothing happened.
 setInterval(

@@ -19,7 +19,7 @@ spec.loader.exec_module(release)
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SHA = 'a' * 40
 BASE_COMPOSE = ('services:\n  migrate:\n    command:\n      [\n'
-                '        "-f",\n        "/migrations/022_telegram_delivery.sql",\n'
+                '        "-f",\n        "/migrations/024_coding.sql",\n'
                 '      ]\n  gateway:\n    read_only: true\n')
 
 
@@ -83,7 +83,7 @@ class SubscriptionRolloutTests(unittest.TestCase):
                         archive.addfile(member, io.BytesIO(b'x'))
 
             commands, statements = [], []
-            database = {'migration23': False, 'remindersPaused': False, 'tasks': [('existing-task', [])]}
+            database = {'migration25': False, 'remindersPaused': False, 'tasks': [('existing-task', [])]}
 
             def run(args, **kwargs):
                 commands.append(tuple(args))
@@ -101,10 +101,10 @@ class SubscriptionRolloutTests(unittest.TestCase):
                     return str(running)
                 if statement == "SELECT count(*) FROM conversation_inputs WHERE state IN ('queued','running')":
                     return str(pending)
-                if statement == 'SELECT count(*) FROM runtime_migrations WHERE version=23':
-                    return str(int(database['migration23']))
+                if statement == 'SELECT count(*) FROM runtime_migrations WHERE version=25':
+                    return str(int(database['migration25']))
                 if statement == "UPDATE daily_schedules SET status='paused',lease=NULL WHERE subscription_id IS NOT NULL AND status IN ('scheduled','processing')":
-                    self.assertTrue(database['migration23'])
+                    self.assertTrue(database['migration25'])
                     database['remindersPaused'] = True
                     return ''
                 self.assertEqual(statement, candidate['db/' + release.MIGRATION])
@@ -112,7 +112,7 @@ class SubscriptionRolloutTests(unittest.TestCase):
                 self.assertNotRegex(safe, r'\b(DELETE\s+FROM|DROP|TRUNCATE|UPDATE\s+(?!OR\b))')
                 if migration_failure:
                     raise RuntimeError('simulated transactional migration failure')
-                database['migration23'] = True
+                database['migration25'] = True
                 return ''
 
             real_publish = release.publish_source
@@ -142,7 +142,7 @@ class SubscriptionRolloutTests(unittest.TestCase):
                 else:
                     release.main()
 
-            self.assertEqual(database['migration23'], expected_migration)
+            self.assertEqual(database['migration25'], expected_migration)
             if expected_error and expected_migration:
                 self.assertTrue(database['remindersPaused'])
             self.assertEqual(database['tasks'], [('existing-task', [])])
@@ -166,7 +166,7 @@ class SubscriptionRolloutTests(unittest.TestCase):
                 if stop in commands:
                     self.assertIn(('docker', 'tag', 'previous-image', release.IMAGE + ':latest'), commands)
                 else:
-                    self.assertFalse(database['migration23'])
+                    self.assertFalse(database['migration25'])
                     self.assertFalse(any(c[0] == 'compose' and c[1] in ('stop', 'up') for c in commands))
                     self.assertFalse(any('ALTER TABLE' in s for s in statements))
             return commands

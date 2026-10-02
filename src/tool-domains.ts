@@ -17,6 +17,7 @@ export const CORE_OPERATIONS = new Set([
   "skill_list",
   "skill_read",
   "work_status",
+  "coding_status",
   "tools_load",
   "agent_run",
 ]);
@@ -36,6 +37,7 @@ export const TOOL_DOMAINS = [
   "watchlist",
   "news",
   "routines",
+  "responsibilities",
   "skills",
 ] as const;
 export type ToolDomain = (typeof TOOL_DOMAINS)[number];
@@ -46,7 +48,7 @@ export const DOMAIN_SUMMARIES: Record<ToolDomain, string> = {
   calendar: "Calendar lookups and approval-gated event drafts",
   daily: "saved items, reminders, briefings and the daily Sheet",
   jobs: "saved roles, analysis, alignment scopes, preparation and its Sheet",
-  work: "durable background jobs: start, revise, record steps, yield, cancel",
+  work: "durable background tasks and separate coding sandbox jobs: dispatch, status, reply, resume, cancel",
   research: "isolated public-research specialist and plugin agents",
   media: "specialist reading of attached images and stored documents",
   canvas: "saved Mini App canvases: create, update, read, list",
@@ -57,6 +59,8 @@ export const DOMAIN_SUMMARIES: Record<ToolDomain, string> = {
   watchlist: "stock price-drop watchlist",
   news: "daily news bulletin from followed sites, topics and 👍/👎 learning",
   routines: "scheduled independent agent routines",
+  responsibilities:
+    "owner-confirmed ongoing concerns, changes, attention and monitoring history",
   skills: "skill version history, drafts, evaluation and activation",
 };
 
@@ -70,6 +74,7 @@ const PREFIXES: [string, ToolDomain][] = [
   ["prep_", "jobs"],
   ["sheet_", "jobs"],
   ["work_", "work"],
+  ["coding_", "work"],
   ["research_", "research"],
   ["agent_", "research"],
   ["media_", "media"],
@@ -80,6 +85,7 @@ const PREFIXES: [string, ToolDomain][] = [
   ["watchlist_", "watchlist"],
   ["news_", "news"],
   ["routine_", "routines"],
+  ["responsibility_", "responsibilities"],
   ["skill_", "skills"],
 ];
 
@@ -92,6 +98,10 @@ export function domainOf(operation: string): ToolDomain | undefined {
 // Conservative cues: a missed domain costs one tools_load step, an extra one
 // costs only schema characters. Word boundaries avoid matching inside words.
 const CUES: [ToolDomain, RegExp][] = [
+  [
+    "responsibilities",
+    /\b(watch|monitor|keep an eye|keep watching|responsibilit(y|ies)|only (tell|notify)|when .* arrives|until .* (arrive|done|resolved))\b/i,
+  ],
   [
     "gmail",
     /\b(e-?mails?|mails?|inbox|gmail|senders?|newsletters?|unread|messages? from|new messages|repl(y|ies|ied)|threads?)\b/i,
@@ -110,7 +120,7 @@ const CUES: [ToolDomain, RegExp][] = [
   ],
   [
     "work",
-    /\b(background|continue|resume|keep going|keep working|pause|cancel|long task|work on it|step by step)\b/i,
+    /\b(background|continue|resume|keep going|keep working|pause|cancel|long task|work on it|step by step|coding|sandbox|pull request|prd|fix.*bug|implement.*feature)\b/i,
   ],
   [
     "research",
