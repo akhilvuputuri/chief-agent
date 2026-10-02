@@ -1,4 +1,11 @@
 import { recordFeedSent } from "./telegram-feeds.js";
+import { readFileSync } from "node:fs";
+import { CodeBuildClient } from "@aws-sdk/client-codebuild";
+import { CodingController } from "./coding/controller.js";
+import { CodeBuildSandbox } from "./coding/provider.js";
+import { GitHubPublisher } from "./coding/github.js";
+import { codingSettings } from "./coding/schema.js";
+import { codingApi } from "./coding/api.js";
 import { destination, taskDelivery } from "./delivery-routing.js";
 import "./process-guard.js";
 import { errorFields, opsLog } from "./ops-log.js";
@@ -261,6 +268,66 @@ const responsibilities =
   c.RESPONSIBILITIES === "on"
     ? new Responsibilities(db, { gmail, calendar })
     : undefined;
+let coding: CodingController | undefined;
+if (c.CODING_RUNTIME === "on") {
+  if (
+    !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=24")).rows
+      .length
+  )
+    throw startupError(
+      "STARTUP_MIGRATION_024",
+      "Coding migration 024 must be installed before enabling the runtime",
+    );
+  if (
+    !c.CODING_CODEBUILD_PROJECT ||
+    !c.CODING_GITHUB_APP_ID ||
+    !c.CODING_GITHUB_INSTALLATION_ID ||
+    !c.CODING_GITHUB_PRIVATE_KEY ||
+    !c.OPENROUTER_API_KEY
+  )
+    throw startupError(
+      "STARTUP_CODING_CONFIG",
+      "Coding provider, GitHub App and model configuration are required",
+    );
+  const settings = codingSettings.parse(
+    JSON.parse(
+      readFileSync(new URL("../config/coding.json", import.meta.url), "utf8"),
+    ),
+  );
+  if (!settings.image)
+    throw startupError(
+      "STARTUP_CODING_IMAGE",
+      "Coding needs a reviewed immutable worker image digest",
+    );
+  const provider = new CodeBuildSandbox(
+    new CodeBuildClient({ region: c.CODING_AWS_REGION, maxAttempts: 1 }),
+    c.CODING_CODEBUILD_PROJECT,
+  );
+  await provider.validate();
+  const owners = new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(","));
+  coding = new CodingController(
+    db,
+    settings,
+    provider,
+    new GitHubPublisher(
+      settings.repository,
+      c.CODING_GITHUB_APP_ID,
+      c.CODING_GITHUB_INSTALLATION_ID,
+      c.CODING_GITHUB_PRIVATE_KEY,
+      { name: c.CODING_COMMIT_NAME, email: c.CODING_COMMIT_EMAIL },
+    ),
+    c.CODING_AUTH_KEY,
+    c.CODING_PUBLIC_ORIGIN,
+    (user) => owners.has(user),
+    (model) =>
+      new OpenRouter(
+        c.OPENROUTER_API_KEY,
+        model,
+        c.OPENROUTER_MAX_INPUT_PRICE,
+        c.OPENROUTER_MAX_OUTPUT_PRICE,
+      ),
+  );
+}
 const assistant = new Assistant(
   db,
   new CustomAgent(
@@ -307,6 +374,7 @@ const assistant = new Assistant(
     new WatchlistTools(db, stockProvider),
     new NewsTools(db, newsFetcher, newsBulletin),
     responsibilities,
+    coding,
   ),
   {
     canvases: !!c.MINIAPP_ORIGIN,
@@ -321,6 +389,7 @@ const assistant = new Assistant(
     stocks: !!stockProvider,
     news: true,
     ...(responsibilities ? { responsibilities: true } : {}),
+    ...(coding ? { coding: true } : {}),
   },
   {
     ms: c.AGENT_BUDGET_MS,
@@ -351,6 +420,7 @@ const app = server(
     : undefined,
 );
 const bot = telegram(c, assistant, db);
+if (coding) await codingApi(app, coding);
 // Scheduled output goes to its own topic when threaded mode is on; otherwise to General.
 const topics = bot.topics;
 // Create Chief's topics up front so the owner can write in them before anything is posted.
@@ -654,7 +724,31 @@ const stockDelivery = new StockDelivery(db, async (user, payload) => {
 });
 await stockDelivery.recover();
 await newsBulletin.recover();
+await coding?.recoverDelivery();
 const routineTimer = setInterval(() => {
+  void coding
+    ?.tick()
+    .catch((error) =>
+      opsLog("coding.tick_failed", "error", errorFields(error)),
+    );
+  void coding
+    ?.deliver(async (user, threadId, text) =>
+      topics.deliver(
+        user,
+        {
+          kind: threadId ? "thread" : "general",
+          ...(threadId ? { threadId } : {}),
+        } as import("./delivery-routing.js").Destination,
+        (extra) =>
+          bot.api.sendMessage(user, text, {
+            ...extra,
+            link_preview_options: { is_disabled: true },
+          }),
+      ),
+    )
+    .catch((error) =>
+      opsLog("coding.delivery_failed", "error", errorFields(error)),
+    );
   void responsibilityWorker
     ?.tick()
     .catch((error) =>

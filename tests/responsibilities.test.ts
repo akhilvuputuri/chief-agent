@@ -110,7 +110,8 @@ async function fixture() {
   };
   const due = async () =>
     db.query(
-      "UPDATE responsibility_triggers SET next_check=now()-interval '1 minute'",
+      "UPDATE responsibility_triggers SET next_check=$1::timestamptz-interval '1 minute'",
+      [now],
     );
   return {
     pg,

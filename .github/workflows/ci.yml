@@ -18,3 +18,7 @@ jobs:
       - run: npm run format:check
       - run: npm run check
       - run: npm run build
+      - name: Build and inspect the disposable coding worker
+        run: |
+          docker build -f Dockerfile.coding -t chief-coding:test .
+          docker run --rm --entrypoint sh chief-coding:test -c 'test "$(id -u)" != 0 && node --version && git --version && rg --version && python3 --version'

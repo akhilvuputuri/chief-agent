@@ -1,0 +1,9 @@
+{
+  "repository": "akhilvuputuri/chief-agent",
+  "branch": "main",
+  "image": "",
+  "model": "openai/gpt-6.1-sol",
+  "reviewerModel": "openai/gpt-6.1-sol",
+  "effort": "high",
+  "limits": { "ms": 900000, "models": 40, "tools": 100 }
+}

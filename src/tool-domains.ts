@@ -17,6 +17,7 @@ export const CORE_OPERATIONS = new Set([
   "skill_list",
   "skill_read",
   "work_status",
+  "coding_status",
   "tools_load",
   "agent_run",
 ]);
@@ -46,7 +47,7 @@ export const DOMAIN_SUMMARIES: Record<ToolDomain, string> = {
   calendar: "Calendar lookups and approval-gated event drafts",
   daily: "saved items, reminders, briefings and the daily Sheet",
   jobs: "saved roles, analysis, alignment scopes, preparation and its Sheet",
-  work: "durable background jobs: start, revise, record steps, yield, cancel",
+  work: "durable background tasks and separate coding sandbox jobs: dispatch, status, reply, resume, cancel",
   research: "isolated public-research specialist and plugin agents",
   media: "specialist reading of attached images and stored documents",
   canvas: "saved Mini App canvases: create, update, read, list",
@@ -70,6 +71,7 @@ const PREFIXES: [string, ToolDomain][] = [
   ["prep_", "jobs"],
   ["sheet_", "jobs"],
   ["work_", "work"],
+  ["coding_", "work"],
   ["research_", "research"],
   ["agent_", "research"],
   ["media_", "media"],
@@ -114,7 +116,7 @@ const CUES: [ToolDomain, RegExp][] = [
   ],
   [
     "work",
-    /\b(background|continue|resume|keep going|keep working|pause|cancel|long task|work on it|step by step)\b/i,
+    /\b(background|continue|resume|keep going|keep working|pause|cancel|long task|work on it|step by step|coding|sandbox|pull request|prd|fix.*bug|implement.*feature)\b/i,
   ],
   [
     "research",

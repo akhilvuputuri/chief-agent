@@ -1,0 +1,19 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "codebuild:StartBuild",
+        "codebuild:ListBuildsForProject",
+        "codebuild:BatchGetProjects"
+      ],
+      "Resource": "arn:aws:codebuild:ap-southeast-1:ACCOUNT_ID:project/chief-coding"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["codebuild:BatchGetBuilds", "codebuild:StopBuild"],
+      "Resource": "arn:aws:codebuild:ap-southeast-1:ACCOUNT_ID:build/chief-coding:*"
+    }
+  ]
+}

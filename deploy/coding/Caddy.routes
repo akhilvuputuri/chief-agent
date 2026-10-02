@@ -1,0 +1,5 @@
+# Insert in the existing HTTPS site's block after independent review and application activation.
+# Do not enable access logs or expose other gateway paths.
+handle /coding/worker/* {
+	reverse_proxy 127.0.0.1:3000
+}

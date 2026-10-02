@@ -1,0 +1,72 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Dedicated on-demand Chief coding sandbox. No production or GitHub credentials.",
+  "Parameters": {
+    "ProjectName": {
+      "Type": "String",
+      "Default": "chief-coding",
+      "AllowedPattern": "[A-Za-z0-9][A-Za-z0-9_-]{1,100}"
+    },
+    "WorkerImage": {
+      "Type": "String",
+      "AllowedPattern": "ghcr\\.io/[a-z0-9/_.-]+@sha256:[a-f0-9]{64}"
+    }
+  },
+  "Resources": {
+    "WorkerRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": { "Service": "codebuild.amazonaws.com" },
+              "Action": "sts:AssumeRole",
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceAccount": { "Ref": "AWS::AccountId" }
+                },
+                "ArnEquals": {
+                  "aws:SourceArn": {
+                    "Fn::Sub": "arn:${AWS::Partition}:codebuild:${AWS::Region}:${AWS::AccountId}:project/${ProjectName}"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "Project": {
+      "Type": "AWS::CodeBuild::Project",
+      "Properties": {
+        "Name": { "Ref": "ProjectName" },
+        "ServiceRole": { "Fn::GetAtt": ["WorkerRole", "Arn"] },
+        "ConcurrentBuildLimit": 1,
+        "TimeoutInMinutes": 20,
+        "QueuedTimeoutInMinutes": 5,
+        "Artifacts": { "Type": "NO_ARTIFACTS" },
+        "Source": {
+          "Type": "NO_SOURCE",
+          "BuildSpec": "version: 0.2\nrun-as: node\nphases:\n  build:\n    commands:\n      - node /opt/chief-worker/dist/coding/worker.js\n"
+        },
+        "Environment": {
+          "Type": "LINUX_CONTAINER",
+          "ComputeType": "BUILD_GENERAL1_MEDIUM",
+          "Image": { "Ref": "WorkerImage" },
+          "ImagePullCredentialsType": "CODEBUILD",
+          "PrivilegedMode": false
+        },
+        "LogsConfig": {
+          "CloudWatchLogs": { "Status": "DISABLED" },
+          "S3Logs": { "Status": "DISABLED" }
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "ProjectName": { "Value": { "Ref": "Project" } },
+    "ProjectArn": { "Value": { "Fn::GetAtt": ["Project", "Arn"] } }
+  }
+}
