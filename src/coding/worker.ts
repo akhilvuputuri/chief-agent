@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import { z } from "zod";
 import type { ModelAdapter, Message } from "../model.js";
 import {
@@ -293,6 +294,17 @@ export async function runWorker(
 }
 
 async function main() {
+  if (
+    process.platform !== "linux" ||
+    process.getuid?.() !== 1000 ||
+    !process.execArgv.includes("--disable-sigusr1")
+  )
+    throw new Error("Worker must use the trusted isolated launcher");
+  const guard = createRequire(import.meta.url)(
+    new URL("../../secure-process.node", import.meta.url).pathname,
+  );
+  if (guard.lockdown() !== true)
+    throw new Error("Worker process isolation failed");
   const origin = process.env.CODING_ORIGIN ?? "",
     id = process.env.CODING_JOB_ID ?? "",
     token = process.env.CODING_JOB_TOKEN ?? "";

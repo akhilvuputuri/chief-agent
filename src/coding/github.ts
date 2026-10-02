@@ -1,12 +1,29 @@
 import { createHash, createSign } from "node:crypto";
 import type { Checkpoint, Outcome } from "./schema.js";
 
+export function canonicalJson(value: unknown): string {
+  const normalized = JSON.parse(JSON.stringify(value));
+  const order = (v: any): any =>
+    Array.isArray(v)
+      ? v.map(order)
+      : v && typeof v === "object"
+        ? Object.fromEntries(
+            Object.entries(v)
+              .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+              .map(([k, x]) => [k, order(x)]),
+          )
+        : v;
+  return JSON.stringify(order(normalized));
+}
+
 export function artifactHash(c: Checkpoint) {
   return createHash("sha256")
     .update(
-      JSON.stringify({
+      canonicalJson({
         patch: c.patch,
-        files: [...c.files].sort((a, b) => a.path.localeCompare(b.path)),
+        files: [...c.files].sort((a, b) =>
+          a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
+        ),
       }),
     )
     .digest("hex");

@@ -49,7 +49,7 @@
         "Artifacts": { "Type": "NO_ARTIFACTS" },
         "Source": {
           "Type": "NO_SOURCE",
-          "BuildSpec": "version: 0.2\nrun-as: node\nphases:\n  build:\n    commands:\n      - node /opt/chief-worker/dist/coding/worker.js\n"
+          "BuildSpec": "version: 0.2\nrun-as: root\nphases:\n  build:\n    commands:\n      - setpriv --reuid=node --regid=node --clear-groups --no-new-privs --bounding-set=-all node --disable-sigusr1 /opt/chief-worker/dist/coding/worker.js\n"
         },
         "Environment": {
           "Type": "LINUX_CONTAINER",

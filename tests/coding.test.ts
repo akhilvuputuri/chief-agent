@@ -23,6 +23,7 @@ import {
   GitHubPublisher,
   artifactHash,
   validateFiles,
+  canonicalJson,
 } from "../src/coding/github.js";
 import { CodeBuildSandbox } from "../src/coding/provider.js";
 import { Workspace } from "../src/coding/workspace.js";
@@ -124,6 +125,7 @@ async function fixture(t: TestContext) {
     },
   };
   let published = false;
+  let modelReply = "fixture reply";
   const publisher = {
     resolve: async () => base,
     publish: async () => {
@@ -150,7 +152,7 @@ async function fixture(t: TestContext) {
       generate: async () => {
         modelCalls++;
         if (failModel) throw new Error("private model error");
-        return { message: { role: "assistant", content: "fixture reply" } };
+        return { message: { role: "assistant", content: modelReply } };
       },
     }),
     () => now,
@@ -196,6 +198,9 @@ async function fixture(t: TestContext) {
     },
     failModel: () => {
       failModel = true;
+    },
+    setReply: (text: string) => {
+      modelReply = text;
     },
   };
 }
@@ -466,7 +471,7 @@ test("the CodeBuild request uses a trusted worker image and fixed buildspec, no 
   assert.equal(req.privilegedModeOverride, false);
   assert.equal(req.autoRetryLimitOverride, 0);
   assert.equal(req.imageOverride, settings.image);
-  assert(req.buildspecOverride.includes("run-as: node"));
+  assert(req.buildspecOverride.includes("--reuid=node"));
   assert(!req.buildspecOverride.includes("npm"));
   assert.equal(req.logsConfigOverride.cloudWatchLogs.status, "DISABLED");
 });
@@ -1086,4 +1091,174 @@ test("revocation preserves the publication fence until a lost PR acknowledgement
   );
   assert.equal((await f.row(job.id)).revision, 1);
   assert.equal(f.publishes(), 1);
+});
+
+test("JSONB field ordering cannot break progress or finished-result reconciliation", async (t) => {
+  const f = await fixture(t),
+    job = await f.start();
+  await f.c.tick();
+  const j = await f.row(job.id),
+    e = { key: "started", stage: "planning", summary: "Synthetic progress" };
+  await f.c.progress(j, e);
+  await f.db.query(
+    "UPDATE coding_events SET payload=$2::jsonb WHERE job_id=$1",
+    [j.id, JSON.stringify({ summary: e.summary, stage: e.stage, key: e.key })],
+  );
+  assert.equal((await f.c.progress(j, e)).accepted, true);
+  const r = candidate();
+  await f.c.finish(j, r);
+  await f.db.query("UPDATE coding_jobs SET result=$2::jsonb WHERE id=$1", [
+    j.id,
+    canonicalJson(r),
+  ]);
+  assert.equal((await f.c.finish(await f.row(j.id), r)).accepted, true);
+});
+test("a pre-send database failure returns the coding notice to pending without a Telegram attempt", async (t) => {
+  const f = await fixture(t),
+    job = await f.start();
+  await f.c.tick();
+  const j = await f.row(job.id);
+  await f.c.progress(j, {
+    key: "question",
+    stage: "planning",
+    summary: "Synthetic question",
+  });
+  const query = f.db.query.bind(f.db);
+  let fail = true,
+    sends = 0;
+  f.db.query = async (sql, values) => {
+    if (sql.startsWith("SELECT user_id,thread_id") && fail) {
+      fail = false;
+      throw new Error("synthetic lookup failure");
+    }
+    return query(sql, values);
+  };
+  await f.c.deliver(async () => {
+    sends++;
+  });
+  assert.equal(sends, 0);
+  assert.equal(
+    (await query("SELECT delivery FROM coding_events")).rows[0].delivery,
+    "pending",
+  );
+  await f.c.deliver(async () => {
+    sends++;
+  });
+  assert.equal(sends, 1);
+});
+test("sandbox inspection accepts only explicit terminal states", async () => {
+  let status = "QUEUED";
+  const p = new CodeBuildSandbox(
+    { send: async () => ({ builds: [{ buildStatus: status }] }) } as any,
+    "fixture",
+  );
+  assert.equal(await p.inspect("fixture"), "running");
+  status = "IN_PROGRESS";
+  assert.equal(await p.inspect("fixture"), "running");
+  status = "STOPPED";
+  assert.equal(await p.inspect("fixture"), "terminal");
+  status = "UNKNOWN";
+  await assert.rejects(p.inspect("fixture"), /Unknown/);
+});
+test("UTF-8 observations fit the model endpoint byte limit", async () => {
+  const root = await mkdtemp(join(tmpdir(), "chief-utf8-test-")),
+    w = new Workspace(root, new AbortController().signal);
+  await w.write("unicode.txt", "字".repeat(80000));
+  let calls = 0;
+  const model: any = {
+    generate: async (input: any) => {
+      assert(
+        Buffer.byteLength(
+          JSON.stringify({
+            callId: randomUUID(),
+            role: "coder",
+            messages: input.messages,
+            tools: input.tools,
+          }),
+        ) <= 180000,
+      );
+      calls++;
+      return {
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            {
+              id: String(calls),
+              type: "function",
+              function: {
+                name: calls <= 3 ? "file_read" : "report",
+                arguments: JSON.stringify(
+                  calls <= 3
+                    ? { path: "unicode.txt", offset: 0 }
+                    : { kind: "candidate", summary: "Synthetic complete" },
+                ),
+              },
+            },
+          ],
+        },
+      };
+    },
+  };
+  await codingLoop({
+    model,
+    workspace: w,
+    messages: [
+      { role: "system", content: "fixture" },
+      { role: "user", content: "assignment" },
+    ],
+    mode: "implement",
+    budget: { models: 5, tools: 5 },
+    signal: new AbortController().signal,
+    checkpoint: async () => {},
+  });
+  assert.equal(calls, 4);
+});
+test("staged executable modes match the artifact even when disk permissions are unchanged", async () => {
+  const root = await mkdtemp(join(tmpdir(), "chief-index-mode-")),
+    w = new Workspace(root, new AbortController().signal);
+  await w.command("git", ["init"]);
+  await w.write("script.sh", "#!/bin/sh\nexit 0\n");
+  await w.command("git", ["add", "-A"]);
+  await w.command("git", [
+    "-c",
+    "user.name=Fixture",
+    "-c",
+    "user.email=fixture@example.com",
+    "commit",
+    "-m",
+    "fixture",
+  ]);
+  await w.command("git", ["config", "core.filemode", "false"]);
+  await w.command("git", ["update-index", "--chmod=+x", "script.sh"]);
+  assert.equal((await stat(join(root, "script.sh"))).mode & 0o111, 0);
+  const c = await w.snapshot("plan", "summary");
+  assert.equal(c.files[0]?.mode, "100755");
+  assert.match(c.patch, /new mode 100755/);
+});
+
+test("broker retries preserve exact source text while private diagnostic copies remain scrubbed", async (t) => {
+  const f = await fixture(t),
+    job = await f.start();
+  await f.c.tick();
+  const j = await f.row(job.id);
+  f.setReply("Use the literal template: Bearer ${placeholder}");
+  const input = {
+    callId: randomUUID(),
+    role: "coder" as const,
+    messages: [{ role: "user" as const, content: "Synthetic template" }],
+    tools: [],
+  };
+  const first = await f.c.generate(j, input),
+    cached = await f.c.generate(j, input);
+  assert.deepEqual(cached, first);
+  assert.equal(f.modelCalls(), 1);
+  const record = (
+    await f.db.query(
+      "SELECT result,result_box FROM coding_model_calls WHERE id=$1",
+      [input.callId],
+    )
+  ).rows[0];
+  assert(record.result_box);
+  assert.notEqual(record.result.message.content, first.message.content);
 });

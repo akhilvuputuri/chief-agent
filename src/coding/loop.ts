@@ -142,7 +142,15 @@ export async function codingLoop(input: {
           });
     // Preserve the assignment and recent observations. Old results remain in private worker artifacts.
     while (
-      (JSON.stringify(messages).length > 100000 || messages.length > 110) &&
+      (Buffer.byteLength(
+        JSON.stringify({
+          callId: "00000000-0000-4000-8000-000000000000",
+          role: "reviewer",
+          messages,
+          tools,
+        }),
+      ) > 150000 ||
+        messages.length > 110) &&
       messages.length > 4
     ) {
       let end = 2;
@@ -175,9 +183,10 @@ export async function codingLoop(input: {
       if (input.signal.aborted || input.budget.tools-- <= 0)
         throw new Error("Coding allocation exhausted");
       let result: unknown;
+      // JSON escaping and UTF-8 can expand a character up to six bytes.
       const observationChars = Math.max(
-        1000,
-        Math.floor(48000 / m.tool_calls.length),
+        500,
+        Math.floor(36000 / (6 * m.tool_calls.length)),
       );
       try {
         const a = tool.parse({

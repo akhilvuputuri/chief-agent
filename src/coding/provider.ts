@@ -58,7 +58,7 @@ export class CodeBuildSandbox implements SandboxProvider {
         timeoutInMinutesOverride: r.timeoutMinutes,
         queuedTimeoutInMinutesOverride: 5,
         buildspecOverride:
-          "version: 0.2\nrun-as: node\nphases:\n  build:\n    commands:\n      - node /opt/chief-worker/dist/coding/worker.js\n",
+          "version: 0.2\nrun-as: root\nphases:\n  build:\n    commands:\n      - setpriv --reuid=node --regid=node --clear-groups --no-new-privs --bounding-set=-all node --disable-sigusr1 /opt/chief-worker/dist/coding/worker.js\n",
         logsConfigOverride: {
           cloudWatchLogs: { status: "DISABLED" },
           s3Logs: { status: "DISABLED" },
@@ -110,9 +110,13 @@ export class CodeBuildSandbox implements SandboxProvider {
     );
     const build = result.builds?.[0];
     if (!build?.buildStatus) throw new Error("Sandbox status unavailable");
-    return build.buildStatus === "IN_PROGRESS"
-      ? ("running" as const)
-      : ("terminal" as const);
+    const status = String(build.buildStatus);
+    if (["IN_PROGRESS", "QUEUED"].includes(status)) return "running" as const;
+    if (
+      ["SUCCEEDED", "FAILED", "FAULT", "TIMED_OUT", "STOPPED"].includes(status)
+    )
+      return "terminal" as const;
+    throw new Error("Unknown sandbox state; cleanup requires inspection");
   }
   async terminate(id: string) {
     await this.client.send(new StopBuildCommand({ id }));

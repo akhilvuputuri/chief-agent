@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS coding_model_calls (
  id uuid PRIMARY KEY, job_id uuid NOT NULL REFERENCES coding_jobs(id), attempt_id uuid NOT NULL,
  role text NOT NULL CHECK(role IN ('coder','reviewer')), request_hash text NOT NULL,
  state text NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','complete','uncertain')),
- input jsonb NOT NULL, result jsonb, created_at timestamptz NOT NULL DEFAULT now()
+ input jsonb NOT NULL, result jsonb, result_box bytea, created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS coding_one_active_worker ON coding_jobs((true)) WHERE state IN ('provisioning','running','publishing') OR cleanup='pending';
 CREATE INDEX IF NOT EXISTS coding_pending ON coding_jobs(created_at) WHERE state='queued';

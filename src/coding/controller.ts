@@ -17,15 +17,17 @@ import {
 } from "./schema.js";
 import {
   artifactHash,
+  canonicalJson,
   validateFiles,
   type RepositoryPublisher,
 } from "./github.js";
 import type { SandboxProvider } from "./provider.js";
 import { scrubTrace } from "../trace-scrub.js";
+import { seal, open } from "../secret-box.js";
 
 const active = ["provisioning", "running"];
 const hash = (v: unknown) =>
-  createHash("sha256").update(JSON.stringify(v)).digest("hex");
+  createHash("sha256").update(canonicalJson(v)).digest("hex");
 export type CodingJob = {
   id: string;
   user_id: string;
@@ -87,6 +89,14 @@ export class CodingController {
     return createHmac("sha256", Buffer.from(this.authKey, "hex"))
       .update(`${jobId}:${attemptId}`)
       .digest("hex");
+  }
+  private resultKey() {
+    return createHmac("sha256", Buffer.from(this.authKey, "hex"))
+      .update("coding:model-results:v1")
+      .digest();
+  }
+  private resultScope(job: CodingJob, callId: string) {
+    return `${job.user_id}:${job.id}:${job.attempt_id}:${callId}`;
   }
   private async foreground(user: string, run: string) {
     if (!this.allowed(user)) throw new Error("Coding owner unavailable");
@@ -407,7 +417,17 @@ export class CodingController {
         throw new Error(
           "Earlier model request is pending or uncertain; do not replay it",
         );
-      return prior.result;
+      if (!prior.result_box)
+        throw new Error(
+          "Exact model response unavailable; inspect before continuing",
+        );
+      return JSON.parse(
+        open(
+          this.resultKey(),
+          prior.result_box,
+          this.resultScope(job, input.callId),
+        ),
+      );
     }
     const cancellation = new AbortController();
     if (this.inFlightModels.has(input.callId))
@@ -475,8 +495,16 @@ export class CodingController {
         cacheKey: `coding:${job.id}:${job.revision}:${input.role}`,
       });
       await this.db.query(
-        "UPDATE coding_model_calls SET state='complete',result=$2::jsonb WHERE id=$1",
-        [input.callId, JSON.stringify(scrubTrace(result))],
+        "UPDATE coding_model_calls SET state='complete',result=$2::jsonb,result_box=$3 WHERE id=$1",
+        [
+          input.callId,
+          JSON.stringify(scrubTrace(result)),
+          seal(
+            this.resultKey(),
+            JSON.stringify(result),
+            this.resultScope(job, input.callId),
+          ),
+        ],
       );
       await this.db.query(
         "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,$2,$3::jsonb,'suppressed')",
@@ -669,20 +697,22 @@ export class CodingController {
         )
       ).rows[0];
       if (!e) return;
-      const j = (
-        await this.db.query(
-          "SELECT user_id,thread_id FROM coding_jobs WHERE id=$1",
-          [e.job_id],
-        )
-      ).rows[0];
-      if (!this.allowed(j.user_id)) {
-        await this.db.query(
-          "UPDATE coding_events SET delivery='suppressed' WHERE id=$1",
-          [e.id],
-        );
-        return;
-      }
+      let attempted = false;
       try {
+        const j = (
+          await this.db.query(
+            "SELECT user_id,thread_id FROM coding_jobs WHERE id=$1",
+            [e.job_id],
+          )
+        ).rows[0];
+        if (!this.allowed(j.user_id)) {
+          await this.db.query(
+            "UPDATE coding_events SET delivery='suppressed' WHERE id=$1",
+            [e.id],
+          );
+          return;
+        }
+        attempted = true;
         await send(
           j.user_id,
           j.thread_id ? Number(j.thread_id) : undefined,
@@ -705,8 +735,8 @@ export class CodingController {
         );
       } catch {
         await this.db.query(
-          "UPDATE coding_events SET delivery='uncertain' WHERE id=$1",
-          [e.id],
+          "UPDATE coding_events SET delivery=$2 WHERE id=$1",
+          [e.id, attempted ? "uncertain" : "pending"],
         );
       }
     } finally {

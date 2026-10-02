@@ -35,6 +35,10 @@ Focused synthetic tests cover ownership/foreground dispatch, duplicate request/r
 
 Final local candidate verification after both review iterations: 632 application tests (23 coding cases), 22 JavaScript tests and 30 Python tests pass with typecheck/build and formatting. Provider policy was also corrected against AWS's service authorisation reference: BatchGetBuilds and StopBuild use the project ARN; PassRole is restricted to the exact policy-free worker role and CodeBuild service. v0.3.33 is the prepared patch version, not a release claim. Final-head CI, independent approval and operator deployment remain pending.
 
+GPT-6 Astra approved `251d49ac633f46f1100f1ffcc75dc76a5f9bd805` after independently passing 23 coding tests, seven external regressions and rollout validation. Subsequent inspection of automated inline comments found additional boundaries despite its passing check status: JSONB key ordering, pre-send lookup failure, byte-based model limits, index-only mode changes and same-UID access to the worker bearer. These are fixed with canonical hashes, safe pending/uncertain delivery separation, wire-byte bounds, indexed blobs/modes and a trusted non-root launcher with a reviewed Linux process guard/disabled inspector. Exact cached responses are encrypted separately from scrubbed diagnostics to preserve retry identity. Added synthetic regressions and a Linux container security smoke cover the changes. Prior approval is historical evidence; this changed head requires re-review and CI before deployment.
+
+Local checks on the hardened candidate pass 638 application tests (29 coding), 22 JavaScript tests and 30 Python tests, build/typecheck and formatting. The new process-boundary smoke must additionally pass under the actual Linux container/setpriv launcher in CI before release.
+
 ### Release closure — pending
 
 No new release or live coding activation is claimed. Record reviewed head, PR, migration installation, exact deployed SHA/health and provider activation separately. Main merge alone will not satisfy the rollout prerequisites.

@@ -67,8 +67,8 @@ export class Workspace {
           output = output.slice(-maxOutput);
         }
       };
-      child.stdout.on("data", append);
-      child.stderr.on("data", append);
+      child.stdout.setEncoding("utf8").on("data", append);
+      child.stderr.setEncoding("utf8").on("data", append);
       const clean = () => {
         clearTimeout(timer);
         this.signal.removeEventListener("abort", stop);
@@ -177,31 +177,54 @@ export class Workspace {
       "--name-only",
       "-z",
     ]);
+    const index = await this.command(
+      "git",
+      ["ls-files", "--stage", "-z"],
+      false,
+      120000,
+      500000,
+    );
     if (
       diff.exitCode !== 0 ||
       names.exitCode !== 0 ||
       diff.truncated ||
-      names.truncated
+      names.truncated ||
+      index.exitCode !== 0 ||
+      index.truncated
     )
       throw new Error("Coding patch exceeds supported snapshot size");
     const files: Checkpoint["files"] = [];
+    const indexed = new Map(
+      index.output
+        .split("\u0000")
+        .filter(Boolean)
+        .map((entry) => {
+          const at = entry.indexOf("\t");
+          return [entry.slice(at + 1), entry.slice(0, 6)];
+        }),
+    );
     for (const path of names.output.split("\u0000").filter(Boolean)) {
       validateFiles([{ path, content: "" }]);
-      let content: string | null;
-      try {
-        content = await readFile(await this.path(path), "utf8");
-        if (content.includes("\u0000"))
-          throw new Error("Binary changes are not supported");
-      } catch (e: any) {
-        if (e.code !== "ENOENT") throw e;
-        content = null;
+      const mode = indexed.get(path);
+      if (mode !== undefined && mode !== "100644" && mode !== "100755")
+        throw new Error("Only regular indexed files are supported");
+      let content: string | null = null;
+      if (mode) {
+        const blob = await this.command(
+          "git",
+          ["show", `:${path}`],
+          false,
+          120000,
+          128000,
+        );
+        if (
+          blob.exitCode !== 0 ||
+          blob.truncated ||
+          blob.output.includes("\u0000")
+        )
+          throw new Error("Only bounded UTF-8 indexed files are supported");
+        content = blob.output;
       }
-      const mode =
-        content === null
-          ? undefined
-          : (await lstat(await this.path(path))).mode & 0o111
-            ? ("100755" as const)
-            : ("100644" as const);
       files.push({ path, content, ...(mode ? { mode } : {}) });
     }
     validateFiles(files);
