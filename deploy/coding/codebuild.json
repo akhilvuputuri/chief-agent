@@ -66,6 +66,7 @@
     }
   },
   "Outputs": {
+    "WorkerRoleArn": { "Value": { "Fn::GetAtt": ["WorkerRole", "Arn"] } },
     "ProjectName": { "Value": { "Ref": "Project" } },
     "ProjectArn": { "Value": { "Fn::GetAtt": ["Project", "Arn"] } }
   }

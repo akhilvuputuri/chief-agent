@@ -601,7 +601,11 @@ test("worker implements, verifies and reviews a real disposable fixture before r
       generate: async (input: any) => {
         if (role === "reviewer") {
           reviewerCalls++;
-          assert(input.messages[1].content.includes("fixture = true"));
+          assert(input.messages[1].content.includes("fixture.js"));
+          assert(
+            JSON.stringify(input.messages).length < 100000,
+            "review receives bounded metadata, not a full large patch",
+          );
           return {
             message: {
               role: "assistant",
@@ -695,6 +699,9 @@ test("worker implements, verifies and reviews a real disposable fixture before r
   fixtureBase = (
     await seed.command("git", ["rev-parse", "HEAD"])
   ).output.trim();
+  // Exercise an artifact larger than one API message without asking the model to emit it.
+  await seed.write("large-a.txt", "a".repeat(75000));
+  await seed.write("large-b.txt", "b".repeat(75000));
   await runWorker(
     client,
     new AbortController().signal,
@@ -703,11 +710,16 @@ test("worker implements, verifies and reviews a real disposable fixture before r
         (await w.command("git", ["clone", source, "."])).exitCode,
         0,
       );
+      if (!c.files.length) {
+        await w.write("large-a.txt", "a".repeat(75000));
+        await w.write("large-b.txt", "b".repeat(75000));
+      }
       await w.restore(c);
     },
   );
   const result = reports.find((r) => r.path === "finish").body;
   assert.equal(result.kind, "candidate");
+  assert(result.checkpoint.patch.length > 120000);
   assert.equal(reviewerCalls, 1);
   assert.equal(result.review.patchHash, artifactHash(result.checkpoint));
   assert.equal(result.checks.length, 3);
@@ -1046,4 +1058,32 @@ test("Chief dispatch returns to the conversation and worker delivery preserves t
     thread = threadId;
   });
   assert.equal(thread, 17);
+});
+
+test("revocation preserves the publication fence until a lost PR acknowledgement is reconciled", async (t) => {
+  const f = await fixture(t),
+    job = await f.start();
+  await f.c.tick();
+  const j = await f.row(job.id);
+  await f.c.finish(j, candidate());
+  await f.c.tick();
+  f.uncertainPublish();
+  await assert.rejects(f.c.tick());
+  f.revoke();
+  await f.c.tick();
+  f.restoreOwner();
+  const saved = await f.row(job.id);
+  assert.equal(saved.state, "paused");
+  assert.equal(saved.publication_started, true);
+  assert.equal(saved.pr_url, null);
+  await assert.rejects(
+    f.c.call("a", f.run, {
+      operation: "coding_resume",
+      id: j.id,
+      baseRevision: 1,
+      requestKey: "unsafe-resume",
+    }),
+  );
+  assert.equal((await f.row(job.id)).revision, 1);
+  assert.equal(f.publishes(), 1);
 });

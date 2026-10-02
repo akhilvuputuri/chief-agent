@@ -245,8 +245,16 @@ export async function runWorker(
               context: a.context,
               baseSha: a.baseSha,
               plan: saved.plan,
-              patch: saved.patch,
-              checks,
+              changedFiles: saved.files.map((f) => ({
+                path: f.path,
+                mode: f.mode,
+                deleted: f.content === null,
+              })),
+              artifactHash: artifactHash(saved),
+              checks: checks.map((c) => ({
+                command: c.command,
+                exitCode: c.exitCode,
+              })),
             }),
           },
         ],

@@ -106,7 +106,7 @@ export class CodingController {
     if (!this.allowed(user)) throw new Error("Coding owner unavailable");
     const rows = (
       await this.db.query(
-        `SELECT id,revision,objective,mode,state,stage,summary,question,base_sha,pr_url,head_sha,cleanup,used_models,updated_at FROM coding_jobs WHERE user_id=$1 ${id ? "AND id=$2" : ""} ORDER BY created_at DESC LIMIT 20`,
+        `SELECT id,revision,objective,mode,state,stage,summary,question,base_sha,pr_url,head_sha,cleanup,publication_started,used_models,updated_at FROM coding_jobs WHERE user_id=$1 ${id ? "AND id=$2" : ""} ORDER BY created_at DESC LIMIT 20`,
         id ? [user, id] : [user],
       )
     ).rows;
@@ -242,7 +242,7 @@ export class CodingController {
     const changed = await this.db.query(
       `WITH changed AS (
       UPDATE coding_jobs SET revision=revision+1,mode=COALESCE($5,mode),context=context || E'\nOwner follow-up: ' || $4,state='queued',stage='queued',question='',result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,used_models=0,model_busy=false,publication_started=false,lease=NULL,lease_until=NULL,updated_at=now()
-      WHERE id=$1 AND user_id=$2 AND revision=$3 AND state IN ('plan_ready','awaiting_input','paused','failed') AND cleanup IN ('none','complete') AND (lease IS NULL OR lease_until<now()) RETURNING id,revision,mode
+      WHERE id=$1 AND user_id=$2 AND revision=$3 AND state IN ('plan_ready','awaiting_input','paused','failed') AND NOT publication_started AND cleanup IN ('none','complete') AND (lease IS NULL OR lease_until<now()) RETURNING id,revision,mode
     ) INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$6,$4,mode FROM changed RETURNING job_id`,
       [
         a.id,
