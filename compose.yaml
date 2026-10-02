@@ -74,6 +74,8 @@ services:
         "/migrations/023_responsibilities.sql",
         "-f",
         "/migrations/024_coding.sql",
+        "-f",
+        "/migrations/025_subscriptions.sql",
       ]
     depends_on:
       postgres: { condition: service_healthy }

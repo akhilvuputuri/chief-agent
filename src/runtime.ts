@@ -69,6 +69,11 @@ export function runtimeContext(
   /** The coordinator (Chief) delegates domain work, so it is not offered those tools. */
   coordinator = false,
 ) {
+  if (domains && !availability.subscriptions && domains.has("subscriptions")) {
+    domains = new Set([...domains].filter((d) => d !== "subscriptions"));
+  }
+  const visibleAvailability = { ...availability };
+  if (!availability.subscriptions) delete visibleAvailability.subscriptions;
   const disabled = (op: string) =>
     (op.startsWith("coding_") && !availability.coding) ||
     (op.startsWith("responsibility_") &&
@@ -84,6 +89,7 @@ export function runtimeContext(
     (["library_check", "library_availability"].includes(op) &&
       !availability.library) ||
     (op === "library_shelf" && !availability.libraryAccount) ||
+    (op.startsWith("subscription_") && !availability.subscriptions) ||
     (op.startsWith("parcel_") && !availability.parcels) ||
     (op.startsWith("gmail_") && !availability.gmail) ||
     (["calendar_list", "calendar_draft"].includes(op) &&
@@ -239,6 +245,12 @@ export function runtimeContext(
                 "Read one whole conversation oldest first using a threadId from gmail_search. Bounded per message and in total; truncated messages can be read in full with gmail_read. Prefer this over reading messages one by one.",
               gmail_read:
                 "Read one message in full plain text by its messageId. Use only when a thread read is truncated or a single message is enough. HTML and attachments are never fetched.",
+              subscription_record:
+                "Record an explicit foreground owner statement about a subscription or bill. Without id create; with id require current baseRevision. requestKey is a unique UUID, reused only for an exact retry. History and linked reminders commit together. A supplied charge date requires explicit nextChargeEstimated. In turns with multiple original inputs, provide exact sourceInputIds from subscription_list(sourceInputs=true); host validates owner/run. No account action or source discovery.",
+              subscription_list:
+                "List saved subscriptions with per-currency monthly equivalents and the next 30 days, or read one id with paged history and reminder firing times. Optional merchant plus plan/accountLabel provides host matching; merchant alone is ambiguous. Include inactive items to find cancellations. sourceInputs=true lists stable, paged original owner input excerpts for this host turn, so a mutation can bind exact evidence IDs.",
+              subscription_settings:
+                "Change one saved item’s reminder preference on explicit foreground request. Inspect through subscription_list(id). Require current baseRevision and a unique requestKey; specify sourceInputIds when multiple original inputs exist. Defaults when enabled: annual renewals/deadlines 7 days, trial ends 3 days, other renewals none; time 09:00 Singapore. daysBefore overrides all dates. No monthly digest or background monitoring.",
               parcel_record:
                 "Save a parcel the owner awaits, or with id append an observation to one: status, date, correction, delivered or archive. Record only what the source states; an absent delivery date stays absent and unmappable carrier wording goes in rawStatus with status unknown. History is append-only, and an observation describing an earlier moment than the recorded one is kept without changing the status. For an email from a non-primary mailbox pass its account as gmail_search named it.",
               parcel_match:
@@ -255,11 +267,19 @@ export function runtimeContext(
     parameters: jsonSchema((o as z.AnyZodObject).omit({ operation: true })),
   });
   return {
-    tools: offered.map(define),
+    tools: offered.map((o) => {
+      const tool = define(o);
+      if (tool.name === "tools_load" && !availability.subscriptions)
+        tool.parameters.properties.domains.items.enum =
+          tool.parameters.properties.domains.items.enum.filter(
+            (d: string) => d !== "subscriptions",
+          );
+      return tool;
+    }),
     // Every enabled definition, including delegated ones, for the agents that use them.
     ...(domains || coordinator ? { allTools: all.map(define) } : {}),
     context: JSON.stringify({
-      availability,
+      availability: visibleAvailability,
       ...(domains
         ? {
             toolDomains: {

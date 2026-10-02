@@ -26,6 +26,18 @@ async function parseSchedule(
     );
   }
 }
+async function scheduleWrite(db: Database, sql: string, values: unknown[]) {
+  try {
+    return await db.query(sql, values);
+  } catch (error) {
+    if (
+      (error as { constraint?: string }).constraint ===
+      "daily_schedule_capacity_limit"
+    )
+      throw new ToolValidationError("Limit of 50 active schedules reached");
+    throw error;
+  }
+}
 export class DailyTools {
   constructor(
     private db: Database,
@@ -84,7 +96,8 @@ export class DailyTools {
       if (!n.next || Date.parse(n.next) <= Date.now())
         throw new ToolValidationError("Choose a future time");
       const row = (
-        await db.query(
+        await scheduleWrite(
+          db,
           `INSERT INTO daily_schedules(id,user_id,kind,content,schedule,parsed,next_run,include_email,include_calendar) SELECT $1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9 WHERE (SELECT count(*) FROM daily_schedules WHERE user_id=$2 AND status IN ('scheduled','processing'))<50 RETURNING *`,
           [
             randomUUID(),
@@ -115,6 +128,10 @@ export class DailyTools {
       )
     ).rows[0];
     if (!old) throw new Error("Schedule not found");
+    if (old.subscription_id)
+      throw new ToolValidationError(
+        "This reminder belongs to a subscription; use subscription_settings or update the subscription date so the record and reminder stay together.",
+      );
     const n = a.schedule
       ? await parseSchedule(this.parser, a.schedule)
       : a.status === "scheduled"
@@ -125,7 +142,8 @@ export class DailyTools {
         "Supply a new future schedule to resume this reminder",
       );
     return (
-      await db.query(
+      await scheduleWrite(
+        db,
         `UPDATE daily_schedules SET schedule=COALESCE($3,schedule),parsed=COALESCE($4::jsonb,parsed),next_run=COALESCE($5::timestamptz,next_run),status=COALESCE($6,status),lease=NULL,last_error=NULL,updated_at=now() WHERE id=$1 AND user_id=$2 RETURNING *`,
         [
           a.id,
@@ -176,7 +194,21 @@ export class DailyWorker<T = string> {
               [j.id, lease],
             )
           ).rows[0];
-          if (!valid) continue;
+          const currentSubscription =
+            !j.subscription_id ||
+            (
+              await this.db.query(
+                "SELECT 1 FROM subscriptions WHERE id=$1 AND user_id=$2 AND revision=$3 AND data->>'reminderEnabled'='true' AND data->>'status' IN ('active','trial')",
+                [j.subscription_id, j.user_id, j.subscription_revision],
+              )
+            ).rows.length > 0;
+          if (!valid || !currentSubscription) {
+            await this.db.query(
+              "UPDATE daily_schedules SET status='cancelled',lease=NULL,last_error='Subscription changed before delivery; read its reminder settings' WHERE id=$1 AND lease=$2 AND status='processing'",
+              [j.id, lease],
+            );
+            continue;
+          }
           await this.send(j.user_id, text);
           const n =
             j.parsed.kind === "once"

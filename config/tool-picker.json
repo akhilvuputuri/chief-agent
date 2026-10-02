@@ -51,6 +51,10 @@
       "description": "Create, update, read or list saved canvases (documents the user opens in the Mini App).",
       "examples": "save this as a canvas, update my trip canvas, show my saved docs"
     },
+    "subscriptions": {
+      "description": "Saved recurring payments, subscriptions, memberships, bills, trial ends, cancellation deadlines and linked reminders.",
+      "examples": "track Netflix at 22.98 SGD monthly, what am I paying for, remind me before my gym renewal, I cancelled Adobe"
+    },
     "parcels": {
       "description": "Track or update parcels, packages or online orders the user awaits.",
       "examples": "where's my Amazon package, did the DHL thing arrive, what am I still waiting on"

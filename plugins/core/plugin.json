@@ -41,6 +41,21 @@
       "effort": "medium"
     },
     {
+      "id": "subscriptions",
+      "description": "Track subscriptions, memberships and recurring bills from explicit owner statements; report saved costs, decision dates and linked reminders. No email required.",
+      "instructions": "agents/subscriptions.md",
+      "contract": "findings/v1",
+      "tools": [
+        "subscription_record",
+        "subscription_list",
+        "subscription_settings"
+      ],
+      "skills": [],
+      "limits": { "ms": 90000, "models": 8, "tools": 16 },
+      "model": "fast",
+      "effort": "medium"
+    },
+    {
       "id": "calendar",
       "description": "Read the owner's Google Calendar and save event drafts that the owner approves in Telegram.",
       "instructions": "agents/calendar.md",
