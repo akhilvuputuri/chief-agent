@@ -57,7 +57,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 1 October                            | [53 — Feed destinations and references](53-feed-destinations.md): how do topics organize output without losing conversational identity?               | Released v0.3.29/v0.3.30; live owner acceptance remains separate                                                             |
 | 1–2 October                          | [54 — Responsibilities](54-responsibilities.md): which changes deserve the owner's attention?                                                         | Released v0.3.32; migration and activation verified; live acceptance pending                                                 |
 | 2 October                            | [55 — Runtime config](55-runtime-config.md): can behaviour settings move to reviewed repo config without changing production?                         | Implemented and tested; not yet deployed                                                                                     |
-| 2 October                            | [56 — Coding work outside the live assistant](56-coding-runtime.md): can Chief dispatch engineering work to a durable remote runtime?                 | Implementation candidate; provider activation pending scoped access                                                          |
+| 2 October                            | [56 — Coding work outside the live assistant](56-coding-runtime.md): can Chief dispatch engineering work to a durable remote runtime?                 | Released v0.3.33 foundation off; scoped provider/App/ingress activation pending                                              |
 
 ## Connected case studies
 
@@ -92,7 +92,7 @@ Equivalent workload, model/configuration, pricing, denominators and missing acco
 
 ## Scheduled work
 
-- 2 October 2026: [56 — Coding work outside the live assistant](56-coding-runtime.md): durable dispatch, a separate runtime, disposable sandboxes, verification and draft PRs; implementation candidate, live activation pending scoped provider setup. Builds on [49 — Coordinator agents](49-coordinator-agents.md) and [05 — Cloud development](05-cloud-development.md).
+- 2 October 2026: [56 — Coding work outside the live assistant](56-coding-runtime.md): durable dispatch, a separate runtime, disposable sandboxes, verification and draft PRs; released v0.3.33 foundation off; live activation pending scoped provider/App/ingress setup. Builds on [49 — Coordinator agents](49-coordinator-agents.md) and [05 — Cloud development](05-cloud-development.md).
 
 - 1–2 October 2026: [54 — Responsibilities](54-responsibilities.md): owner-confirmed concerns, scoped investigations and explainable attention; released v0.3.32, migration/activation verified; live acceptance pending.
 
