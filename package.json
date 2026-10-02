@@ -1,6 +1,6 @@
 {
   "name": "chief-agent",
-  "version": "0.3.32",
+  "version": "0.3.33",
   "private": true,
   "type": "module",
   "description": "A personal AI assistant with an owned TypeScript runtime, Telegram voice, memory, research and durable tasks",
@@ -34,6 +34,8 @@
     "context:inventory": "tsx scripts/context-inventory.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-codebuild": "3.1141.0",
+    "@aws-sdk/client-sts": "3.1141.0",
     "@grammyjs/runner": "^2.0.3",
     "cron-parser": "^5.10.0",
     "dotenv": "^16.4.7",

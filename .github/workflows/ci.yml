@@ -18,3 +18,8 @@ jobs:
       - run: npm run format:check
       - run: npm run check
       - run: npm run build
+      - name: Build and inspect the disposable coding worker
+        run: |
+          docker build -f Dockerfile.coding -t chief-coding:test .
+          docker run --rm --entrypoint sh chief-coding:test -c 'test "$(id -u)" != 0 && node --version && git --version && rg --version && python3 --version'
+          docker run --rm --user root --env CODING_TEST_SECRET=synthetic --entrypoint setpriv chief-coding:test --reuid=node --regid=node --clear-groups --no-new-privs --bounding-set=-all node --disable-sigusr1 /opt/chief-worker/security-smoke.mjs

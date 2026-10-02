@@ -1,4 +1,6 @@
 import { readFeed } from "./telegram-feeds.js";
+import type { CodingController } from "./coding/controller.js";
+import { codingAction } from "./coding/schema.js";
 import type { Responsibilities } from "./responsibilities.js";
 import type { NewsTools } from "./news.js";
 import { RoutineTools } from "./routines.js";
@@ -35,6 +37,7 @@ export class JobTools {
     private stocks?: WatchlistTools,
     private news?: NewsTools,
     readonly responsibilities?: Responsibilities,
+    readonly coding?: CodingController,
   ) {}
   get searchUsesModel() {
     return this.web.usesModelSearch === true;
@@ -104,6 +107,16 @@ export class JobTools {
     a: ReturnType<typeof action.parse>,
   ): Promise<unknown> {
     const db = this.db;
+    if (
+      a.operation === "coding_start" ||
+      a.operation === "coding_status" ||
+      a.operation === "coding_reply" ||
+      a.operation === "coding_resume" ||
+      a.operation === "coding_cancel"
+    ) {
+      if (!this.coding) throw new Error("Coding runtime is not configured");
+      return this.coding.call(user, run, codingAction.parse(a));
+    }
     if (
       a.operation === "responsibility_create" ||
       a.operation === "responsibility_update" ||
