@@ -58,8 +58,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 1–2 October                          | [54 — Responsibilities](54-responsibilities.md): which changes deserve the owner's attention?                                                         | Released v0.3.32; migration and activation verified; live acceptance pending                                                 |
 | 2 October                            | [55 — Runtime config](55-runtime-config.md): can behaviour settings move to reviewed repo config without changing production?                         | Implemented and tested; not yet deployed                                                                                     |
 | 2 October                            | [56 — Coding work outside the live assistant](56-coding-runtime.md): can Chief dispatch engineering work to a durable remote runtime?                 | Released v0.3.33 foundation off; scoped provider/App/ingress activation pending                                              |
-
-| 1 October | [54 — Subscriptions](54-subscriptions.md): how do owner statements, decision dates and reminders stay consistent? | Manual milestone in review; migration 023/operator release pending |
+| 1–3 October                          | [54 — Subscriptions](54-subscriptions.md): how do owner statements, decision dates and reminders stay consistent?                                     | Released v0.3.34; migration 025, normal release and rolled-back deployed-module smoke verified; owner acceptance pending     |
 
 ## Connected case studies
 
