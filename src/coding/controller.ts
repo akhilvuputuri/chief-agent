@@ -676,12 +676,15 @@ export class CodingController {
         );
       }
     } finally {
-      if (j)
-        await this.db.query(
-          "UPDATE coding_jobs SET lease=NULL,lease_until=NULL WHERE id=$1 AND lease=$2",
-          [j.id, j.lease],
-        );
-      this.ticking = false;
+      try {
+        if (j)
+          await this.db.query(
+            "UPDATE coding_jobs SET lease=NULL,lease_until=NULL WHERE id=$1 AND lease=$2",
+            [j.id, j.lease],
+          );
+      } finally {
+        this.ticking = false;
+      }
     }
   }
   async recoverDelivery() {

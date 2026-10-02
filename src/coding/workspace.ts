@@ -34,7 +34,10 @@ export class Workspace {
     maxOutput = 32000,
   ): Promise<CommandResult> {
     if (this.signal.aborted) throw new Error("Coding cancelled");
-    this.home ??= await mkdtemp(join(tmpdir(), "chief-tools-"));
+    const toolHome = (this.home ??= await mkdtemp(
+      join(tmpdir(), "chief-tools-"),
+    ));
+    if (this.signal.aborted) throw new Error("Coding cancelled");
     return new Promise((accept, reject) => {
       const child = spawn(command, args, {
         cwd: this.root,
@@ -43,9 +46,9 @@ export class Workspace {
         // Commands never inherit the worker capability or CodeBuild credentials.
         env: {
           PATH: process.env.PATH,
-          HOME: this.home,
-          NPM_CONFIG_CACHE: join(this.home, "npm-cache"),
-          XDG_CACHE_HOME: join(this.home, "cache"),
+          HOME: toolHome,
+          NPM_CONFIG_CACHE: join(toolHome, "npm-cache"),
+          XDG_CACHE_HOME: join(toolHome, "cache"),
           TMPDIR: "/tmp",
           LANG: "C.UTF-8",
           CI: "true",

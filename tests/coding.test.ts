@@ -1461,3 +1461,26 @@ test("required dependency installation keeps npm caches outside the captured che
   assert(!(await readdir(root)).includes(".npm"));
   assert.equal((await w.snapshot("plan", "summary")).files.length, 0);
 });
+
+test("lease-release failure cannot permanently disable controller ticks", async (t) => {
+  const f = await fixture(t),
+    job = await f.start(),
+    query = f.db.query.bind(f.db);
+  let fail = true;
+  f.db.query = async (sql, values) => {
+    if (fail && sql.startsWith("UPDATE coding_jobs SET lease=NULL")) {
+      fail = false;
+      throw new Error("synthetic release failure");
+    }
+    return query(sql, values);
+  };
+  await assert.rejects(f.c.tick());
+  await query(
+    "UPDATE coding_jobs SET lease_until=now()-interval '1 minute' WHERE id=$1",
+    [job.id],
+  );
+  f.advance(181000);
+  await f.c.tick();
+  assert.equal((await f.row(job.id)).state, "paused");
+  assert.equal(f.creates(), 1);
+});
