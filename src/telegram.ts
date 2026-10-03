@@ -106,6 +106,40 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
       },
     );
   }
+  if (assistant.tools?.coding) {
+    const coding = assistant.tools.coding;
+    bot.callbackQuery(/^cod:(yes|no):([0-9a-f-]{36})$/, async (ctx) => {
+      if (
+        !allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids) ||
+        !ctx.callbackQuery.message
+      )
+        return;
+      await ctx.answerCallbackQuery();
+      try {
+        const result = await coding.requirements.confirm(
+          String(ctx.from.id),
+          ctx.match[2]!,
+          ctx.match[1] === "yes",
+          String(ctx.callbackQuery.message.chat.id),
+          ctx.callbackQuery.message.message_id,
+        );
+        const current = await coding.status(String(ctx.from.id), result.jobId);
+        await ctx.reply(
+          result.status === "approved"
+            ? result.duplicate
+              ? `These requirements were already approved. The coding job is ${current.state}.`
+              : "Requirements approved. Python implementation is queued in a new sandbox; I will collect updates and return a draft PR."
+            : "Implementation has not started. Tell Chief what to change in these requirements.",
+          inThread(threadOf(ctx.callbackQuery.message)),
+        );
+      } catch {
+        await ctx.reply(
+          "That requirement confirmation is expired, unavailable or superseded. Ask Chief to show the current requirements again.",
+          inThread(threadOf(ctx.callbackQuery.message)),
+        );
+      }
+    });
+  }
   bot.callbackQuery(viewCallback, async (ctx) => {
     if (!allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids)) return;
     // Clear Telegram's spinner before loading data; do not queue behind a long agent turn.
@@ -305,6 +339,66 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
   bot.on("message", async (ctx) => {
     if (!allowedChat(ctx.from?.id, ctx.chat.type, ids)) return;
     const user = String(ctx.from.id);
+    // A plain affirmation is authority only when replying to the exact delivered brief.
+    const requirementReply =
+      /^(yes|approve|approved|go ahead|no|not yet)[.!]?$/i.exec(
+        (ctx.message.text ?? "").trim(),
+      );
+    if (
+      assistant.tools?.coding &&
+      requirementReply &&
+      ctx.message.reply_to_message
+    ) {
+      try {
+        const requirementId = await assistant.tools.coding.requirements.replyId(
+          user,
+          ctx.message.reply_to_message.message_id,
+        );
+        const claimed = requirementId
+          ? await db.query(
+              "INSERT INTO inbound_updates(update_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING update_id",
+              [ctx.update.update_id, user],
+            )
+          : undefined;
+        if (claimed && !claimed.rows.length) return;
+        const result = requirementId
+          ? await assistant.tools.coding.requirements.confirm(
+              user,
+              requirementId,
+              !/^(no|not yet)$/i.test(requirementReply[1]!),
+              String(ctx.chat.id),
+              ctx.message.reply_to_message.message_id,
+            )
+          : undefined;
+        if (result) {
+          const current = await assistant.tools.coding.status(
+            user,
+            result.jobId,
+          );
+          await ctx.reply(
+            result.status === "approved"
+              ? result.duplicate
+                ? `These requirements were already approved. The coding job is ${current.state}.`
+                : "Requirements approved. Python implementation is queued in a new sandbox."
+              : "Implementation has not started. Tell Chief what to change in the requirements.",
+          );
+          await db.query(
+            "UPDATE inbound_updates SET status='completed' WHERE update_id=$1",
+            [ctx.update.update_id],
+          );
+          return;
+        }
+      } catch {
+        await db.query(
+          "UPDATE inbound_updates SET status='failed' WHERE update_id=$1",
+          [ctx.update.update_id],
+        );
+        await ctx.reply(
+          "Those requirements are expired or changed. Ask Chief to show the current brief again; implementation was not started by this reply.",
+        );
+        return;
+      }
+    }
     // A message typed in a topic is answered in that topic (ctx.reply does this itself).
     // Phase 1: the topic only decides where replies go; the conversation is shared.
     const thread = threadOf(ctx.message);

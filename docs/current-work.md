@@ -1,3 +1,7 @@
+# Conversational coding requirements — v0.3.36 candidate
+
+`codex/coding-requirement-approval` adds an enforced plan → owner confirmation → Python implementation flow with buttons or a direct yes reply, no slash commands. Models cannot grant approval. Existing coding-event JSON stores scope/receipt/decision metadata; no DB/Compose change. Review, Python image pin and exact release pending. Coding activation remains blocked by provisioning login and scoped provider/App/ingress setup. See [journal 58](journey/58-coding-requirements.md).
+
 # Python coding runtime — released v0.3.35, off
 
 [PR #154](https://github.com/akhilvuputuri/chief-agent/pull/154) refactored execution into Python; [PR #155](https://github.com/akhilvuputuri/chief-agent/pull/155) pinned the public image with the matching fixed launcher. GPT-6 Astra approved exact heads `e0b0b63cf629544ef41d025fa1eec9efc682f964` and `8b2dac76d1023c0da15a4e9a88816f2dcf8fd111`; PR/main Linux CI passed. The [exact release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37099789621), separate health/deployed-policy/preservation checks and [v0.3.35](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.35) verify `448597a475827c3eb88df5ae3f3697f04a125563`. Chief stays TypeScript; OpenRouter uses DeepSeek V4.1 Flash for coding and the existing reviewer. Coding remains off, zero jobs, no DB/Compose change or paid acceptance. Provider/App/ingress activation remains pending. See [journal closure](journey/57-python-coding-runtime.md#release-closure--3-october-2026).
