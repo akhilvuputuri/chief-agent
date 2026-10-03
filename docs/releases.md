@@ -1,8 +1,6 @@
-## Candidate v0.3.35 — Python coding execution
+## Released v0.3.35 — Python coding execution, off
 
-Disposable execution moves to an independently packageable Python runtime; Chief retains TypeScript dispatch and durable control. OpenRouter remains the credential/policy layer, with DeepSeek V4.1 Flash for coding and the existing reviewer. No DB/Compose changes or paid activation. The refactor passed independent review and Linux CI in PR #154; its public Python image is published and anonymously verified. Pin review and exact release verification remain pending. See [journal 57](journey/57-python-coding-runtime.md).
-
-# Versions and release notes
+[PR #154](https://github.com/akhilvuputuri/chief-agent/pull/154)/[PR #155](https://github.com/akhilvuputuri/chief-agent/pull/155) move disposable execution into an independently packageable Python runtime and pin its public image with the matching launcher. Chief remains TypeScript; OpenRouter uses DeepSeek V4.1 Flash for coding and the existing reviewer, price ceilings and allocations. GPT-6 Astra approved exact heads `e0b0b63`/`8b2dac7`; full PR/main CI passed 672 application, 22 JS script, 30 existing Python and 19 coding-runtime tests plus Linux isolation/descendant cleanup smoke. The [exact release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37099789621), separate health/deployed-policy/preservation checks and immutable [v0.3.35](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.35) verify `448597a475827c3eb88df5ae3f3697f04a125563`. No DB/Compose changes, automatic resumption or paid coding acceptance. Coding remains off with zero jobs; scoped provider/App/ingress activation is pending. See [journal closure](journey/57-python-coding-runtime.md#release-closure--3-october-2026).
 
 ## Released v0.3.34 — manual bills and subscriptions
 
