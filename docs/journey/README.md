@@ -62,7 +62,7 @@ For the latest verified release and open work, read [current work](../current-wo
 
 | 3 October | [57 — Python coding runtime](57-python-coding-runtime.md): can disposable execution change language while preserving Chief’s durable boundary? | Released v0.3.35 off; Python image/policy and exact release verified; live activation pending |
 
-| 3 October | [58 — Conversational coding requirements](58-coding-requirements.md): what makes owner confirmation binding rather than a model assertion? | Implementation merged and image verified; pin review and release pending; coding off |
+| 3 October | [58 — Conversational coding requirements](58-coding-requirements.md): what makes owner confirmation binding rather than a model assertion? | Released v0.3.36 off; confirmation/image/exact release verified; scoped activation and live acceptance pending |
 
 ## Connected case studies
 

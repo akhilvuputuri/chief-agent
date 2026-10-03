@@ -1,6 +1,6 @@
 # 58 — Chief asks for requirements, then waits for the owner
 
-Work date(s): 2026-10-03. Status: confirmation implementation merged and Python image published/verified; image pin review and exact release pending. Coding remains off; no paid/live acceptance.
+Work date(s): 2026-10-03. Status: released v0.3.36 at `67db5e135c99eee85a10416dbe159ce93432eee0`; confirmation flow and Python image verified. Coding remains off; activation is blocked by provisioning authentication and scoped setup. Coding remains off; no paid/live acceptance.
 
 ## User-visible problem and preceding iteration
 
@@ -24,12 +24,18 @@ GPT-6 Astra requested changes at `41fe7c697cd84be56c291aabe60ddb7a334cdd0f`: a p
 
 ## Verification and outcome
 
-Local full checks passed: 679 application tests, 22 JavaScript script tests, 30 existing Python tests and 20 coding-runtime tests, plus typechecks/build/format. After the final brief-boundary change, affected checks reran: 47 coding/controller/Telegram tests and 20 Python tests passed. Exact-head independent review and Linux image validation remain required. Runtime activation and one plan → confirmation → draft PR acceptance run require provisioning/App/ingress setup and remain unperformed. No production keys were copied, no sandbox was provisioned and no paid model call was made.
+Local full checks passed: 679 application tests, 22 JavaScript script tests, 30 existing Python tests and 20 coding-runtime tests, plus typechecks/build/format. After the final brief-boundary change, affected checks reran: 47 coding/controller/Telegram tests and 20 Python tests passed. Exact-head Astra review and Linux image validation passed; the release closure below records deployment. Runtime activation and one plan → confirmation → draft PR acceptance run require provisioning/App/ingress setup and remain unperformed. No production keys were copied, no sandbox was provisioned and no paid model call was made.
 
 ## Follow-up and next iteration
 
-Obtain exact-head review, publish/pin the Python 0.1.1 image, verify the exact release, then complete scoped activation after provisioning authentication is refreshed. Test conversational requirement confirmation first, followed by a bounded harmless candidate, cancellation and checkpoint recovery. Keep live findings separate from synthetic proof.
+Review, Python 0.1.1 publication/pin and exact release are complete. Complete scoped activation after provisioning authentication is refreshed. Test conversational requirement confirmation first, followed by a bounded harmless candidate, cancellation and checkpoint recovery. Keep live findings separate from synthetic proof.
 
 ### Image publication — 3 October 2026
 
-The [trusted main workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/37119192462) published Python 0.1.1 from approved merge `b8ffb21b3509a20b30e0cff3409bfcf9d8d54e2e`. The pin is `ghcr.io/akhilvuputuri/chief-agent-coding@sha256:558589998a2a700b908c41ef380c5be48724da5d4da0708a658f24485344b054`. Anonymous requests verified the index, Linux/amd64 manifest and config SHA-256 identities and the non-root isolated Python entrypoint. Pin review/application release remain pending; this is availability evidence, not a live CodeBuild/model test. Runtime stays off.
+The [trusted main workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/37119192462) published Python 0.1.1 from approved merge `b8ffb21b3509a20b30e0cff3409bfcf9d8d54e2e`. The pin is `ghcr.io/akhilvuputuri/chief-agent-coding@sha256:558589998a2a700b908c41ef380c5be48724da5d4da0708a658f24485344b054`. Anonymous requests verified the index, Linux/amd64 manifest and config SHA-256 identities and the non-root isolated Python entrypoint. At image publication, pin review/application release were pending; this is availability evidence, not a live CodeBuild/model test. Runtime stays off.
+
+### Release closure — 3 October 2026
+
+[PR #157](https://github.com/akhilvuputuri/chief-agent/pull/157) merged the enforced confirmation workflow at `b8ffb21b3509a20b30e0cff3409bfcf9d8d54e2e`; its [exact release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37119470584) succeeded. [PR #158](https://github.com/akhilvuputuri/chief-agent/pull/158) pinned the verified Python 0.1.1 image at `67db5e135c99eee85a10416dbe159ce93432eee0`. GPT-6 Astra approved exact pin head `140c97df77da04cda4c8a9e116b17a02cc1faa07`, independently verifying trusted-main provenance, anonymous image identities and unchanged models/launcher/allocations. Required PR/main Linux checks passed; the [exact pin release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37120011881) and immutable [v0.3.36](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.36) identify that verified code/configuration SHA.
+
+Separate bounded operator reads confirmed server RELEASE at the pin SHA, healthy gateway/Postgres, deployed Python digest and DeepSeek/reviewer/high-effort settings, unchanged 900000ms/40-model/100-tool allocation, migration 25 and matched retained record counts. No active/pending inputs or coding jobs were present. No DB/Compose install, resets, paid sandbox/model call or live Telegram coding acceptance occurred. The provisioning profile still required `aws login`; scoped AWS/project, GitHub App, worker auth/origin and ingress configuration remain the activation boundary. The confirmation flow is implemented and tested, but coding is not enabled and live acceptance is unverified.
