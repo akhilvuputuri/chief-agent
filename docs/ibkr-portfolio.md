@@ -197,11 +197,42 @@ The deliverable is a sanitized findings section in the journal, plus fixtures bu
   - token refresh across one overnight period;
   - revocation.
 
-### Phase 2: holdings and watchlist linkage (application release only)
+### Phase 2: holdings linkage and owner-defined dip conditions (owner request, 3 October 2026)
 
-- The `held` marker in `watchlist_list`, monitorability reasons, and an explicit "watch this holding" path that goes through the existing `watchlist_add` exchange-confirmation rules.
-- No automatic subscription, and no change to capacity or the calendar.
-- A nullable `conid` on `watchlist_items` would need a migration. Avoid it in this phase by matching on the exact symbol/MIC/currency/type identity, and add it only if Phase 3 makes IBKR the quote source.
+The owner asked for alerts when a stock falls below the average price of a holding, or below its 12-week or 52-week average, "to know when to buy the dip". Chief reports only that a condition the owner defined has been met; it gives no buy recommendation (the stocks agent stays "monitoring only: no trades, no advice").
+
+**Conditions.** Each is attached to a watch item in a new `watch_conditions` table, alongside the existing daily-drop threshold:
+
+| Kind            | Parameters                                 | Trigger                                                                                | Reference source                                                                                                 |
+| --------------- | ------------------------------------------ | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `below_cost`    | `marginPct` (default 0)                    | price < average cost × (1 − margin)                                                    | `average_price` from the latest **complete** IBKR holdings snapshot, matched by exact identity and same currency |
+| `below_average` | `weeks` (4–52, e.g. 12 or 52), `marginPct` | price < simple average of the last `weeks × 5` daily closes × (1 − margin)             | daily closes from the same quote provider that supplies the price; there is no mixing of providers               |
+| `below_low`     | `weeks` (4–52)                             | price < lowest daily close of the previous `weeks × 5` sessions, i.e. a new N-week low | the same daily series as `below_average`                                                                         |
+
+**Data rules.**
+
+- **Daily series.** It is fetched at most once per trading day per symbol, from Twelve Data `time_series` with a 1-day interval (one credit). It is cached per symbol and trading date. It needs at least 90% of the requested sessions; otherwise the observation is `insufficient_history`, not an alert.
+- **Below-cost data quality.** The condition becomes `not_held` when the latest complete snapshot no longer contains the position, and `cost_unknown` when the snapshot is stale or the connection is disconnected. It is never evaluated against a partial snapshot, and a sale never deletes the condition or its history.
+- **Shared quote rules.** The same freshness, currency, suspicious-move and session/window gates as daily-drop apply. Conditions run on the existing monitor tick with no model calls.
+
+**Alert semantics.** These are level conditions, so they alert **on crossing**, not every day while below:
+
+- **Firing.** A condition is `armed` → it fires once when a valid observation is below the trigger → it becomes `triggered`.
+- **Re-arming.** It re-arms only after a valid observation at or above the trigger × (1 + 1%) (hysteresis), so prices hovering near the trigger do not repeat alerts.
+- **Starting state.** A new condition that is already below its trigger alerts once on the first valid observation, so the owner learns the current state.
+- **Daily cap.** At most one alert per condition per trading day.
+- **Pauses.** Item and master pauses, monitoring windows and delivery muting work as they do for daily-drop.
+- **Outbox.** Alert rows gain a `condition_id`, so the daily-drop uniqueness of `(item, trading_date)` becomes `(item, condition, trading_date)`. Delivery keeps the uncertain-send outbox.
+
+**Holdings linkage.**
+
+- **Matching.** `watchlist_list` and `portfolio_read` cross-reference by exact listing identity. IBKR `BRK B` maps to the provider's `BRK.B` only through an explicit `watchlist_add` exchange confirmation, never by string munging alone.
+- **"Watch my holdings below cost."** This is an explicit owner request, executed as confirmed `watchlist_add` plus `below_cost` per holding, with a capacity check against the 25-item limit. There is no silent subscription.
+- **Unsupported holdings.** Non-US or unsupported instruments are listed as not monitorable, with the reason.
+
+**Storage.** `watch_conditions` holds `id`, `user_id`, `item_id`, `kind`, `params jsonb`, `state` (`armed` | `triggered`), `last_evaluated_at`, `last_triggered_at` and timestamps. A small `price_history_cache` table holds `symbol`, `mic`, `trading_date`, `closes` (bounded) and `fetched_at`. The `stock_alerts.condition_id` column is nullable, so legacy daily-drop rows stay null. The observation `decision` set is extended with `condition_triggered`, `insufficient_history`, `not_held` and `cost_unknown`. All of this joins **migration 026**, so one operator rollout covers holdings and conditions.
+
+**Release order.** The holdings code (Phase 1) ships with migration 026. The condition evaluation code follows as an ordinary application release on the installed schema. `below_average` and `below_low` do not depend on IBKR, so they work even if the IBKR connection is off.
 
 ### Phase 3: quote-provider evaluation (shadow mode)
 
