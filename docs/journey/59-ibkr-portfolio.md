@@ -1,7 +1,7 @@
 # 59 — Can Chief read IBKR holdings without becoming a trading client?
 
 Work date(s): 2026-10-02 to 2026-10-03. Written/revised: 2026-10-03.
-Status: Phase 0 measured; Phase 1 (read-only holdings in Chief) is implemented and tested on `feat/ibkr-portfolio-146`, pending independent review, the migration-026 operator rollout and activation. Owner-defined dip conditions are designed (migration 027) and not yet implemented.
+Status: released in v0.3.37 and on (3 October 2026); owner connection and acceptance pending.
 
 ## User-visible problem and preceding iteration
 
@@ -65,3 +65,19 @@ Status: Phase 0 measured; Phase 1 (read-only holdings in Chief) is implemented a
 ## Follow-up and next iteration
 
 The remaining Phase 0 measurements are any absolute refresh-token lifetime beyond 12 hours (the loop continues), mobile-session coexistence, and revocation. Gate G0 is decided after those.
+
+### Release closure — 3 October 2026
+
+- **Merged.** [PR #152](https://github.com/akhilvuputuri/chief-agent/pull/152) merged at `c3cea89d0a666ba1b64bb9235648358fce27ce7d`, with independent approval of exact head `b4e0ffb` and CI passing on that head.
+- **Operator rollout (`scripts/deploy-portfolio.py`).**
+  - It started from baseline `a3c428e`, whose live `RELEASE`, health and idle state were checked first. The archive and script hashes matched the merged files.
+  - Result: deployed, healthy, migration 26, IBKR installed off.
+  - Separate checks: `RELEASE`, health, marker 26, the new tables empty, the widened approvals check, and existing watch items and approvals preserved.
+- **Activation.**
+  - Backups of `.env` and the Caddyfile were taken first.
+  - `IBKR_TOKEN_KEY` was generated on the host and never printed or copied off; `IBKR_PORTFOLIO=on` was set, and `.env` stayed at mode 0600.
+  - The reviewed Caddyfile was validated and installed; the live file had matched the previous reviewed version exactly. The gateway was recreated while idle.
+  - Checks: healthy; no startup error; the public callback route answered (HTTP 400 for an invalid state).
+- **Automatic release.** The [release for `c3cea89`](https://github.com/akhilvuputuri/chief-agent/actions/runs/37135022555) then succeeded as a no-op redeploy, and the gateway stayed healthy with IBKR on.
+- **Version.** Released in v0.3.37 together with the stock lookup.
+- **Pending:** the owner's Telegram connect and holdings acceptance; IBKR's acceptance of the hosted HTTPS redirect; the absolute refresh-token lifetime; the revocation test.
