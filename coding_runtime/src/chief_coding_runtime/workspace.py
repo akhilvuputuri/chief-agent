@@ -3,17 +3,22 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import hashlib
 import os
 import shutil
 import signal
+import sys
 import tempfile
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
 
 from .protocol import Checkpoint, File, utf16_length, validate_files, validate_path
+
+_COMMAND_LOCK = asyncio.Lock()
 
 
 @dataclass(frozen=True)
@@ -35,6 +40,10 @@ class CommandResult:
 
 class Workspace:
     def __init__(self, root: Path, stop: asyncio.Event) -> None:
+        # One worker owns its subprocess tree. Reparent detached/double-forked
+        # descendants here so they cannot escape command cleanup on Linux.
+        if sys.platform == "linux" and ctypes.CDLL(None).prctl(36, 1, 0, 0, 0) != 0:
+            raise ValueError("Subprocess ownership isolation failed")
         self.root = root.resolve(strict=True)
         self.stop = stop
         self.home = Path(tempfile.mkdtemp(prefix="chief-tools-"))
@@ -66,53 +75,80 @@ class Workspace:
         timeout_seconds: float = 120,
         max_output: int = 32000,
     ) -> CommandResult:
+        # The runtime intentionally runs one repository command at a time.
+        async with _COMMAND_LOCK:
+            return await self._command(
+                command, args, shell, timeout_seconds, max_output
+            )
+
+    async def _command(
+        self,
+        command: str,
+        args: Sequence[str],
+        shell: bool,
+        timeout_seconds: float,
+        max_output: int,
+    ) -> CommandResult:
         if self.stop.is_set():
             raise asyncio.CancelledError("Coding stopped")
-        kwargs: dict[str, Any] = {
-            "cwd": self.root,
-            "env": self.environment(),
-            "stdin": asyncio.subprocess.DEVNULL,
-            "stdout": asyncio.subprocess.PIPE,
-            "stderr": asyncio.subprocess.STDOUT,
-            "start_new_session": True,
-        }
-        spawn = asyncio.create_task(
-            asyncio.create_subprocess_shell(command, **kwargs)
-            if shell
-            else asyncio.create_subprocess_exec(command, *args, **kwargs)
-        )
+        baseline = self._children(os.getpid())
+        read_fd, write_fd = os.pipe()
+        pipe = os.fdopen(read_fd, "rb", buffering=0)
+        output_reader = asyncio.StreamReader()
+        transport: asyncio.ReadTransport | None = None
         process: asyncio.subprocess.Process | None = None
-        output = bytearray()
-        truncated = False
+        spawn: asyncio.Task[asyncio.subprocess.Process] | None = None
         reader: asyncio.Task[None] | None = None
         stopped: asyncio.Task[bool] | None = None
         waited: asyncio.Task[int] | None = None
+        output = bytearray()
+        truncated = False
 
         async def drain() -> None:
             nonlocal truncated
-            assert process is not None and process.stdout is not None
-            while chunk := await process.stdout.read(8192):
+            while chunk := await output_reader.read(8192):
                 output.extend(chunk)
                 if len(output) > max_output:
                     truncated = True
                     del output[:-max_output]
 
         try:
+            transport, _ = await asyncio.get_running_loop().connect_read_pipe(
+                lambda: asyncio.StreamReaderProtocol(output_reader), pipe
+            )
+            kwargs: dict[str, Any] = {
+                "cwd": self.root,
+                "env": self.environment(),
+                "stdin": asyncio.subprocess.DEVNULL,
+                # Own the read transport separately: process.wait() must never
+                # wait for a detached descendant's inherited output descriptor.
+                "stdout": write_fd,
+                "stderr": write_fd,
+                "start_new_session": True,
+            }
+            spawn = asyncio.create_task(
+                asyncio.create_subprocess_shell(command, **kwargs)
+                if shell
+                else asyncio.create_subprocess_exec(command, *args, **kwargs)
+            )
             process = await asyncio.shield(spawn)
+            os.close(write_fd)
+            write_fd = -1
             reader = asyncio.create_task(drain())
             stopped = asyncio.create_task(self.stop.wait())
             waited = asyncio.create_task(process.wait())
-            done, _ = await asyncio.wait(
+            await asyncio.wait(
                 [waited, stopped],
                 timeout=timeout_seconds,
                 return_when=asyncio.FIRST_COMPLETED,
             )
-            if stopped in done or waited not in done:
-                self._kill(process)
+            await self._cleanup(process, baseline)
             await waited
-            # Background descendants cannot keep pipes or writable review workspaces alive.
-            self._kill(process)
-            await reader
+            try:
+                await asyncio.wait_for(asyncio.shield(reader), 1)
+            except TimeoutError:
+                transport.close()
+                await asyncio.wait_for(reader, 1)
             if self.stop.is_set():
                 raise asyncio.CancelledError("Coding stopped")
             return CommandResult(
@@ -121,16 +157,75 @@ class Workspace:
                 truncated,
             )
         finally:
-            if process is None:
-                process = await asyncio.shield(spawn)
-            self._kill(process)
-            await process.wait()
-            for task in (reader, stopped, waited):
-                if task and not task.done():
-                    task.cancel()
-            await asyncio.gather(
-                *(t for t in (reader, stopped, waited) if t), return_exceptions=True
-            )
+            if process is None and spawn is not None:
+                try:
+                    process = await asyncio.shield(spawn)
+                except Exception:
+                    pass
+            try:
+                if process is not None:
+                    await self._cleanup(process, baseline)
+            finally:
+                if write_fd >= 0:
+                    os.close(write_fd)
+                if transport is not None:
+                    transport.close()
+                else:
+                    pipe.close()
+                for task in (reader, stopped, waited):
+                    if task and not task.done():
+                        task.cancel()
+                await asyncio.gather(
+                    *(t for t in (reader, stopped, waited) if t), return_exceptions=True
+                )
+
+    @staticmethod
+    def _children(pid: int) -> set[int]:
+        if sys.platform != "linux":
+            return set()
+        try:
+            return {
+                int(value)
+                for value in Path(f"/proc/{pid}/task/{pid}/children")
+                .read_text()
+                .split()
+            }
+        except FileNotFoundError:
+            return set()
+
+    async def _cleanup(
+        self, process: asyncio.subprocess.Process, baseline: set[int]
+    ) -> None:
+        self._kill(process)
+        try:
+            await asyncio.wait_for(process.wait(), 2)
+        except TimeoutError:
+            self.stop.set()
+            raise asyncio.CancelledError(
+                "Command termination could not be verified"
+            ) from None
+        if sys.platform != "linux":
+            return
+        deadline = time.monotonic() + 2
+        while True:
+            # Killing each adopted direct child reparents its own descendants
+            # here. Reading our own children needs no access to child memory.
+            descendants = self._children(os.getpid()) - baseline
+            for pid in descendants:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                try:
+                    os.waitpid(pid, os.WNOHANG)  # noqa: ASYNC222 -- WNOHANG never blocks.
+                except ChildProcessError:
+                    pass
+            if not (self._children(os.getpid()) - baseline):
+                break
+            if time.monotonic() >= deadline:
+                self.stop.set()
+                raise asyncio.CancelledError("Subprocess cleanup could not be verified")
+            await asyncio.sleep(0.01)
 
     @staticmethod
     def _kill(process: asyncio.subprocess.Process) -> None:

@@ -3,8 +3,11 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import os
 import shutil
+import signal
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -179,6 +182,58 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.stop.set()
         with self.assertRaises(asyncio.CancelledError):
             await task
+
+    async def test_detached_child_output_cannot_defeat_timeout_or_cancellation(self):
+        for cancel in (False, True):
+            stop = asyncio.Event()
+            workspace = Workspace(Path(tempfile.mkdtemp()), stop)
+            child = None
+            try:
+                code = "import subprocess,sys,time; p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'],start_new_session=True); __import__('pathlib').Path('child.pid').write_text(str(p.pid)); print(p.pid,flush=True); time.sleep(30)"
+                started = time.monotonic()
+                task = asyncio.create_task(
+                    workspace.command(
+                        sys.executable,
+                        ["-c", code],
+                        timeout_seconds=5 if cancel else 0.15,
+                    )
+                )
+                if cancel:
+                    await asyncio.sleep(0.15)
+                    stop.set()
+                    with self.assertRaises(asyncio.CancelledError):
+                        await asyncio.wait_for(task, 4)
+                else:
+                    result = await asyncio.wait_for(task, 4)
+                    child = int(result.text().strip())
+                    if sys.platform == "linux":
+                        with self.assertRaises(ProcessLookupError):
+                            os.kill(child, 0)
+                child = int((workspace.root / "child.pid").read_text())
+                if sys.platform == "linux":
+                    with self.assertRaises(ProcessLookupError):
+                        os.kill(child, 0)
+                self.assertLess(time.monotonic() - started, 4)
+            finally:
+                if child is None and (workspace.root / "child.pid").exists():
+                    child = int((workspace.root / "child.pid").read_text())
+                if child is not None:
+                    try:
+                        os.kill(child, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                workspace.close()
+
+    async def test_large_file_write_preserves_exact_arguments_for_continuation(self):
+        response = generation(
+            ("file_write", {"path": "large.txt", "content": "x" * 32000}),
+            reasoning=[{"type": "reasoning.encrypted", "data": "unchanged"}],
+        )
+        model = ScriptedModel(response, generation(report("candidate")))
+        result = await self.loop(model, mode="implement")
+        self.assertEqual(result.kind, "candidate")
+        self.assertEqual((self.w.root / "large.txt").read_text(), "x" * 32000)
+        self.assertEqual(model.inputs[1][2], response["message"])
 
     async def test_reasoning_survives_tool_continuation(self):
         reasoning = [{"type": "reasoning.encrypted", "data": "opaque", "index": 0}]

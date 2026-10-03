@@ -17,7 +17,7 @@ const message = z
             function: z
               .object({
                 name: z.string().max(100),
-                arguments: z.string().max(32000),
+                arguments: z.string().max(180000),
               })
               .strict(),
           })

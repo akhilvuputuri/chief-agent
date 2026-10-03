@@ -1677,6 +1677,10 @@ test("coding gateway preserves opaque OpenRouter reasoning through validated mod
     ],
     tools: [],
   };
+  input.messages[0].tool_calls![0].function.arguments = JSON.stringify({
+    path: "large.txt",
+    content: "x".repeat(32000),
+  });
   const request = {
     method: "POST" as const,
     url: `/coding/worker/${j.id}/model`,
