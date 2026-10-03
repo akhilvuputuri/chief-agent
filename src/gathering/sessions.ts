@@ -20,9 +20,15 @@ const vendorOrigins: Record<string, string[]> = {
   digitalocean: ["https://cloud.digitalocean.com"],
 };
 export function targetOrigins(t: GatherTarget) {
+  const name = t.label.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const vendor = /^chatgpt(?:plus|pro|business|enterprise)?$/.test(name)
+    ? "chatgpt"
+    : /^claude(?:pro|max|team|enterprise|subscription)?$/.test(name)
+      ? "claude"
+      : name;
   return t.browserOrigins.length
     ? t.browserOrigins
-    : (vendorOrigins[t.label.toLowerCase().replace(/[^a-z0-9]/g, "")] ?? []);
+    : (vendorOrigins[vendor] ?? []);
 }
 const observation = z
   .object({

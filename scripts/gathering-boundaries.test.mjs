@@ -8,7 +8,11 @@ import { FileVault, encryptBytes } from "../dist/gathering/vault.js";
 import { GatheringBrowsers } from "../dist/gathering/sessions.js";
 import { action } from "../dist/gathering/schema.js";
 import { BrowserManager, browserEnvironment } from "../dist/browser/manager.js";
-import { privateInvoiceIntake, invoiceFacts } from "../dist/gathering/facts.js";
+import {
+  privateInvoiceIntake,
+  invoiceFacts,
+  productEvidence,
+} from "../dist/gathering/facts.js";
 import { server } from "../dist/server.js";
 import { MiniAuth } from "../dist/miniapp-auth.js";
 const root = new URL("../", import.meta.url).pathname;
@@ -1472,4 +1476,58 @@ test("closing a read-only browser preserves already checked immutable-file cover
   } finally {
     await f.db.close();
   }
+});
+
+test("specific subscription plans reject conflicting plans while generic provider requests retain scope", async () => {
+  const f = await fixture({
+    text: "Anthropic Claude Pro subscription Invoice number CL-001 Invoice date September 5, 2026 USD 20.00",
+  });
+  try {
+    await f.gather.call(
+      "alice",
+      f.run,
+      action.parse({
+        operation: "gather_revise",
+        id: f.c.id,
+        baseRevision: 1,
+        requestKey: randomUUID(),
+        objective: "Gather Claude Max",
+        targets: [{ key: "one", label: "Claude Max", month: "2026-09" }],
+        sources: ["provided"],
+        providedFiles: [f.file.id],
+      }),
+    );
+    await f.capture();
+    await assert.rejects(f.match, /different product/);
+    await assert.rejects(
+      () => f.gather.verifyTarget("alice", f.c.id, "one", f.file.id, 2),
+      /different product/,
+    );
+    await f.gather.call(
+      "alice",
+      f.run,
+      action.parse({
+        operation: "gather_revise",
+        id: f.c.id,
+        baseRevision: 2,
+        requestKey: randomUUID(),
+        objective: "Gather generic Claude",
+        targets: [{ key: "one", label: "Claude", month: "2026-09" }],
+        sources: ["provided"],
+        providedFiles: [f.file.id],
+      }),
+    );
+    await f.capture();
+    assert.equal((await f.match()).matched, true);
+  } finally {
+    await f.db.close();
+  }
+});
+
+test("named ChatGPT plans require exact or owner-verified ambiguous evidence", () => {
+  const pro = invoiceFacts("OpenAI ChatGPT Pro Invoice", 1, false),
+    unknown = invoiceFacts("OpenAI ChatGPT Invoice", 1, false);
+  assert.equal(productEvidence(pro, "ChatGPT Plus"), "conflict");
+  assert.equal(productEvidence(pro, "ChatGPT Pro"), "exact");
+  assert.equal(productEvidence(unknown, "ChatGPT Plus"), "ambiguous");
 });

@@ -15,6 +15,10 @@ export type InvoiceFacts = {
 };
 const aliases: Record<string, string[]> = {
   chatgpt: ["openai"],
+  chatgptplus: ["openai", "chatgpt"],
+  chatgptpro: ["openai", "chatgpt"],
+  chatgptbusiness: ["openai", "chatgpt"],
+  chatgptenterprise: ["openai", "chatgpt"],
   openaiapi: ["openai"],
   anthropicapi: ["anthropic"],
   claudeapi: ["anthropic", "claude"],
@@ -23,6 +27,7 @@ const aliases: Record<string, string[]> = {
   claudemax: ["anthropic", "claude"],
   claudeteam: ["anthropic", "claude"],
   claudesubscription: ["anthropic", "claude"],
+  claudeenterprise: ["anthropic", "claude"],
   anthropic: ["anthropic"],
   digitalocean: ["digitalocean", "digital ocean"],
 };
@@ -146,6 +151,15 @@ export function invoiceFacts(
     amounts,
     invoiceNumbers,
     productLabels: [
+      ...[
+        ...text.matchAll(
+          /\b(ChatGPT|Claude)\s+(Plus|Pro|Max|Team|Business|Enterprise)\b/gi,
+        ),
+      ].map((m) =>
+        m[1]!.toLowerCase() === "chatgpt"
+          ? "ChatGPT " + m[2]![0]!.toUpperCase() + m[2]!.slice(1).toLowerCase()
+          : "Claude " + m[2]![0]!.toUpperCase() + m[2]!.slice(1).toLowerCase(),
+      ),
       ...(/\bchatgpt\b/i.test(text) ? ["ChatGPT"] : []),
       ...(/\bopenai\b/i.test(text) &&
       /\b(?:openai\s+api|api\s+(?:usage|credits?|charges|billing)|token\s+usage)\b/i.test(
@@ -218,6 +232,32 @@ export function productEvidence(
   label: string,
 ): "exact" | "ambiguous" | "conflict" {
   const normalized = label.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const plan = /^(chatgpt|claude)(plus|pro|max|team|business|enterprise)$/.exec(
+    normalized,
+  );
+  if (plan) {
+    const name =
+      (plan[1] === "chatgpt" ? "ChatGPT" : "Claude") +
+      " " +
+      plan[2]![0]!.toUpperCase() +
+      plan[2]!.slice(1);
+    const base = plan[1] === "chatgpt" ? "ChatGPT" : "Claude";
+    const api = base === "ChatGPT" ? "OpenAI API" : "Claude API";
+    const found = (facts.productLabels ?? []).filter(
+      (p) =>
+        p.startsWith(base + " ") &&
+        p !== "Claude subscription" &&
+        p !== "Claude API",
+    );
+    if ((facts.productLabels ?? []).includes(api) && !found.includes(name))
+      return "conflict";
+    if (found.length && !found.includes(name)) return "conflict";
+    return new Set(found).size === 1 &&
+      found[0] === name &&
+      !(facts.productLabels ?? []).includes(api)
+      ? "exact"
+      : "ambiguous";
+  }
   const expected =
     normalized === "chatgpt"
       ? "ChatGPT"
@@ -230,6 +270,7 @@ export function productEvidence(
                 "claudepro",
                 "claudemax",
                 "claudeteam",
+                "claudeenterprise",
                 "claudesubscription",
               ].includes(normalized)
             ? "Claude subscription"
@@ -246,7 +287,11 @@ export function productEvidence(
 /** Group known shared-vendor labels without treating company aliases as product evidence. */
 export function issuerIdentity(label: string) {
   const value = label.toLowerCase().replace(/[^a-z0-9]/g, "");
-  if (value === "openai" || value === "openaiapi" || value === "chatgpt")
+  if (
+    value === "openai" ||
+    value === "openaiapi" ||
+    /^chatgpt(?:plus|pro|business|enterprise)?$/.test(value)
+  )
     return "openai";
   if (
     [
@@ -257,6 +302,7 @@ export function issuerIdentity(label: string) {
       "claudepro",
       "claudemax",
       "claudeteam",
+      "claudeenterprise",
       "claudesubscription",
     ].includes(value)
   )
