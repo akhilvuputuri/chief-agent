@@ -1,6 +1,6 @@
-# Python coding runtime — tested candidate
+# Python coding runtime — integrated, image pin candidate
 
-The Python package, OpenRouter gateway protocol and DeepSeek V4.1 Flash coder are being refactored on `codex/python-coding-runtime` from main `bc1319f`. Chief remains TypeScript. No DB/Compose changes; coding stays off. Independent review, image publication/pinning and exact release verification are pending. See [journal 57](journey/57-python-coding-runtime.md).
+[PR #154](https://github.com/akhilvuputuri/chief-agent/pull/154) integrated Python execution at `888caea5fecb2d431190233195d7f93a0c78f461` after GPT-6 Astra approved exact head `e0b0b63cf629544ef41d025fa1eec9efc682f964` and Linux CI passed. The independently built public Python image is published and anonymously verified. `codex/python-coding-runtime-pin` switches its immutable digest with the fixed Python launcher; pin review and exact release verification remain pending. Chief stays TypeScript, coding remains off, no DB/Compose change or paid acceptance. See [journal 57](journey/57-python-coding-runtime.md).
 
 # Issue 132 — Bill/subscription manual milestone released v0.3.34
 
