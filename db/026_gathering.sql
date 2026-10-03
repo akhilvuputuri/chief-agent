@@ -58,6 +58,13 @@ CREATE TABLE IF NOT EXISTS gather_candidates (
  FOREIGN KEY(artifact_id,user_id) REFERENCES file_artifacts(id,user_id),
  FOREIGN KEY(attempt_id,user_id) REFERENCES gather_attempts(id,user_id)
 );
+CREATE TABLE IF NOT EXISTS gather_account_verifications (
+ collection_id uuid NOT NULL,target_key text NOT NULL,user_id text NOT NULL,artifact_id uuid NOT NULL,
+ scope_revision integer NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),
+ PRIMARY KEY(collection_id,target_key,artifact_id,scope_revision),
+ FOREIGN KEY(collection_id,target_key,user_id) REFERENCES gather_targets(collection_id,key,user_id),
+ FOREIGN KEY(artifact_id,user_id) REFERENCES file_artifacts(id,user_id)
+);
 CREATE TABLE IF NOT EXISTS gather_items (
  collection_id uuid NOT NULL,target_key text NOT NULL,user_id text NOT NULL,artifact_id uuid NOT NULL,
  scope_revision integer NOT NULL DEFAULT 1,match_date text NOT NULL CHECK(match_date~'^[0-9]{4}-[0-9]{2}(-[0-9]{2})?$'),date_basis text NOT NULL CHECK(date_basis IN ('invoice_date','service_period')),

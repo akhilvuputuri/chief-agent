@@ -45,7 +45,7 @@ export function readUrl(input: string, origins?: string[]) {
     throw new Error("Source origin needs owner handoff");
   const path = decodeURIComponent(u.pathname).toLowerCase();
   if (
-    /(?:^|[/_-])(cancel|delete|remove|logout|signout|unsubscribe|subscribe|checkout|purchase|upgrade|downgrade|pay|confirm-payment|change-plan)(?:$|[/_-])/.test(
+    /cancel|delete|remove|logout|signout|unsubscribe|subscribe|checkout|purchase|upgrade|downgrade|confirm.?payment|change.?plan|(?:^|[/_-])pay(?:$|[/_-])/.test(
       path,
     ) ||
     [...u.searchParams.keys()].some((k) =>
@@ -53,6 +53,23 @@ export function readUrl(input: string, origins?: string[]) {
     )
   )
     throw new Error("Account changes are not allowed");
+  // A small positive document inventory. Unknown routes need live owner control.
+  // The browser additionally blocks every background request while the agent controls it.
+  if (
+    !/^(?:\/|\/(?:settings\/|account\/)?billing(?:\/(?:history|invoices))?\/?|\/(?:account|invoices|receipts|statements|history|documents)\/?|\/(?:billing\/)?(?:invoices?|receipts?|statements?)\/(?:inv_[a-z0-9]+|[0-9a-f-]{8,})(?:\/download|\.pdf)?|\/[^/]+\.pdf)$/i.test(
+      path,
+    )
+  )
+    throw new Error("Unsupported read route; use owner handoff");
+  if (
+    [...u.searchParams.keys()].some(
+      (k) =>
+        !/^(?:page|cursor|before|after|month|year|download|format|token|signature|expires|x-amz-[a-z-]+)$/i.test(
+          k,
+        ),
+    )
+  )
+    throw new Error("Unsupported read query; use owner handoff");
   return u.href;
 }
 export const invoiceLink = (name: string, url: string) =>

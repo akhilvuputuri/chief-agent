@@ -910,6 +910,14 @@ const workTimer = setInterval(() => {
     .catch((error) => opsLog("work.tick_failed", "error", errorFields(error)));
 }, 15000);
 workTimer.unref();
+const gatheringTimer = gathering?.browsers
+  ? setInterval(() => {
+      void gathering?.browsers
+        ?.sweep()
+        .catch(() => opsLog("gathering.cleanup_failed", "error"));
+    }, 10000)
+  : undefined;
+gatheringTimer?.unref();
 const scheduleTimer = setInterval(() => {
   void worker
     .tick()
@@ -924,6 +932,7 @@ for (const signal of ["SIGINT", "SIGTERM"])
     opsLog("gateway.stopping", "info");
     void (async () => {
       clearInterval(scheduleTimer);
+      clearInterval(gatheringTimer);
       clearInterval(workTimer);
       clearInterval(routineTimer);
       shutdown.abort();

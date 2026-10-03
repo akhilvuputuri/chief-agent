@@ -155,3 +155,16 @@ export function fileName(name: string) {
     ).replace(/\.pdf$/i, "") + ".pdf"
   );
 }
+
+/** Financial PDFs and every PDF supplied during active gathering stay out of raw research/history. */
+export function privateInvoiceIntake(
+  caption: string,
+  facts: InvoiceFacts,
+  active: boolean,
+) {
+  return (
+    active ||
+    facts.invoiceHeading ||
+    /\b(invoice|receipt|billing statement|gather|collect)\b/i.test(caption)
+  );
+}

@@ -39,6 +39,7 @@ type Session = {
   blocked: boolean;
   pending: Set<Promise<void>>;
   ownerUntil: number;
+  readNavigation?: string;
 };
 const command = z.object({ kind: z.string().max(30) }).passthrough();
 export class BrowserManager {
@@ -128,24 +129,32 @@ export class BrowserManager {
         blocked: false,
         pending: new Set(),
         ownerUntil: 0,
+        readNavigation: readUrl(normalized, origins),
       };
     this.sessions.set(id, s);
     await context.route("**/*", async (route) => {
       const request = route.request();
       try {
         publicHttps(request.url());
-        readUrl(request.url());
+        // Library routes are excluded even during a human handoff.
+        if (
+          /(^|\.)(nlb\.gov\.sg|overdrive\.com|libbyapp\.com)$/.test(
+            new URL(request.url()).hostname,
+          )
+        )
+          throw new Error("Library route excluded");
         if (s.state === "readonly" || Date.now() > s.ownerUntil) {
-          if (!["GET", "HEAD", "OPTIONS"].includes(request.method())) {
-            if (["document", "xhr", "fetch"].includes(request.resourceType()))
-              s.blocked = true;
+          const isGrantedDocument =
+            request.method() === "GET" &&
+            request.isNavigationRequest() &&
+            request.resourceType() === "document" &&
+            request.url() === s.readNavigation;
+          if (!isGrantedDocument) {
+            s.blocked = true;
             await route.abort();
             return;
           }
-          readUrl(
-            request.url(),
-            request.isNavigationRequest() ? [...s.origins] : undefined,
-          );
+          readUrl(request.url(), [...s.origins]);
         }
         await route.fallback();
       } catch {
@@ -180,6 +189,9 @@ export class BrowserManager {
             if (!data.subarray(0, 1024).includes(Buffer.from("%PDF-"))) return;
             const origin = new URL(publicHttps(download.url())).origin,
               id = randomUUID();
+            if (s.state === "owner" && Date.now() <= s.ownerUntil)
+              s.origins.add(origin);
+            else if (!s.origins.has(origin)) return;
             s.downloads.set(id, {
               id,
               name: fileName(download.suggestedFilename()),
@@ -319,7 +331,7 @@ export class BrowserManager {
     return selected;
   }
   private async fetchPdf(s: Session, url: string) {
-    const normalized = readUrl(url);
+    const normalized = readUrl(url, [...s.origins]);
     const u = new URL(normalized);
     const cookies = await s.context.cookies(normalized);
     const headers: Record<string, string> = {
@@ -441,8 +453,9 @@ export class BrowserManager {
         );
         if (link.url.startsWith("download:"))
           throw new Error("Capture this already-downloaded file instead");
+        s.readNavigation = readUrl(link.url, [...s.origins]);
         await s.page
-          .goto(readUrl(link.url, [...s.origins]), {
+          .goto(s.readNavigation, {
             waitUntil: "domcontentloaded",
             timeout: 20000,
           })
@@ -460,6 +473,8 @@ export class BrowserManager {
         if (link.url.startsWith("download:")) {
           const file = s.downloads.get(link.id);
           if (!file) throw new Error("File unavailable");
+          if (!s.origins.has(file.origin))
+            throw new Error("Source origin needs owner handoff");
           return {
             name: file.name,
             origin: file.origin,

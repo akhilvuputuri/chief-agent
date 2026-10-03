@@ -1,4 +1,4 @@
-import { atomicMutation } from "../db-transaction.js";
+import { atomicMutation, transaction } from "../db-transaction.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Database } from "../db.js";
@@ -223,6 +223,18 @@ export class GatheringBrowsers {
           "Open the browser view to sign in and navigate to invoice history. Passwords and authentication codes are entered by the owner, never by the agent. Click Done, then /continue the collection's task. No task resumes automatically.",
       };
     }
+    if (command.kind === "close") {
+      if (row.state === "owner")
+        throw new ToolValidationError(
+          "Only the owner may close a browser during a handoff",
+        );
+      await this.db.query(
+        "UPDATE gather_browser_sessions SET state='closed',encrypted_state=NULL,generation=generation+1 WHERE id=$1 AND user_id=$2",
+        [row.id, user],
+      );
+      await this.client.call(user, row.id, { kind: "close" });
+      return { sessionId: row.id, origin: row.origin, closed: true };
+    }
     if (row.state === "owner")
       return {
         sessionId: row.id,
@@ -365,7 +377,7 @@ export class GatheringBrowsers {
           this.db,
           `WITH authorized AS (
       SELECT c.id FROM work_tasks t JOIN gather_collections c ON c.task_id=t.id JOIN gather_browser_sessions s ON s.collection_id=c.id AND s.user_id=c.user_id
-      WHERE s.id=$1 AND s.user_id=$2 AND s.state='owner' AND s.expires_at>now() AND c.state='active' AND t.revision=c.task_revision AND t.status NOT IN ('done','cancelled') FOR UPDATE OF t,c,s
+      WHERE s.id=$1 AND s.user_id=$2 AND s.state='owner' AND s.generation=$15 AND s.expires_at>now() AND c.state='active' AND c.task_revision=$14 AND t.revision=c.task_revision AND t.status NOT IN ('done','cancelled') FOR UPDATE OF t,c,s
     ), mutation AS (INSERT INTO gather_mutations(collection_id,user_id,request_key,request_hash,result) SELECT $3,$2,$4,$5,'{}'::jsonb FROM authorized ON CONFLICT DO NOTHING RETURNING collection_id),
     file AS (INSERT INTO file_artifacts(id,user_id,sha256,name,mime_type,bytes,encrypted,facts) SELECT $6::uuid,$2,$5,$7,'application/pdf',$8::integer,$9::bytea,$10::jsonb FROM mutation ON CONFLICT(user_id,sha256) DO UPDATE SET sha256=EXCLUDED.sha256 RETURNING id),
     attempt AS (INSERT INTO gather_attempts(id,user_id,collection_id,target_key,kind,state,metadata,scope_revision) SELECT $11::uuid,$2,$3,$12,'browser','success',jsonb_build_object('sessionId',$1::text,'origin',$13::text,'ownerDownloaded',true,'artifactId',file.id::text),$14 FROM file RETURNING id),
@@ -387,6 +399,7 @@ export class GatheringBrowsers {
             row.target_key,
             file.origin,
             row.task_revision,
+            row.generation,
           ],
           { collectionId: row.collection_id, user, requestKey },
         )
@@ -428,24 +441,6 @@ export class GatheringBrowsers {
         await this.client.call(user, id, { kind: "done" }),
       );
       const capturedFiles = await this.storeOwnerFiles(user, row);
-      if (a.expectedInvoices !== undefined)
-        await this.db.query(
-          "INSERT INTO gather_attempts(id,user_id,collection_id,target_key,kind,state,metadata,scope_revision) VALUES($1,$2,$3,$4,'browser','success',$5::jsonb,$6)",
-          [
-            randomUUID(),
-            user,
-            row.collection_id,
-            row.target_key,
-            JSON.stringify({
-              sessionId: id,
-              ownerConfirmedCount: a.expectedInvoices,
-              month: row.scope.targets.find(
-                (t: GatherTarget) => t.key === row.target_key,
-              )?.month,
-            }),
-            row.task_revision,
-          ],
-        );
       for (const origin of data.origins)
         if (new URL(publicHttps(origin)).origin !== origin)
           throw new Error("Browser state is unavailable");
@@ -454,26 +449,56 @@ export class GatheringBrowsers {
         Buffer.from(data.storageState),
         `browser-session-v1:${user}:${id}`,
       );
-      await this.db.query(
-        "UPDATE gather_browser_sessions SET encrypted_state=$3,state='readonly',allowed_origins=$4::jsonb,generation=generation+1,expires_at=now()+interval '30 minutes' WHERE id=$1 AND user_id=$2 AND state='owner'",
-        [id, user, encrypted, JSON.stringify(data.origins)],
-      );
-      if (a.remember) {
-        const t = (row.scope.targets as GatherTarget[]).find(
-          (t) => t.key === row.target_key,
+      await transaction(this.db, async (db) => {
+        const authorized = await db.query(
+          "SELECT s.id FROM work_tasks t JOIN gather_collections c ON c.task_id=t.id AND c.user_id=t.user_id JOIN gather_browser_sessions s ON s.collection_id=c.id AND s.user_id=c.user_id WHERE s.id=$1 AND s.user_id=$2 AND s.state='owner' AND s.generation=$3 AND s.expires_at>now() AND c.state='active' AND c.task_revision=$4 AND t.revision=$4 AND t.status NOT IN ('done','cancelled') FOR UPDATE OF t,c,s",
+          [id, user, row.generation, row.task_revision],
         );
-        if (!t) throw new Error("Browser state is unavailable");
-        const label = t.accountLabel ?? "default",
-          box = encryptBytes(
-            this.key,
-            Buffer.from(data.storageState),
-            this.profileAad(user, row.origin, label),
+        if (!authorized.rows.length)
+          throw new ToolValidationError(
+            "Browser handoff was cancelled, expired or superseded; login was not saved",
           );
-        await this.db.query(
-          "INSERT INTO gather_browser_profiles(user_id,origin,account_label,encrypted_state) VALUES($1,$2,$3,$4) ON CONFLICT(user_id,origin,account_label) DO UPDATE SET encrypted_state=EXCLUDED.encrypted_state,updated_at=now()",
-          [user, row.origin, label, box],
+        const changed = await db.query(
+          "UPDATE gather_browser_sessions SET encrypted_state=$3,state='readonly',allowed_origins=$4::jsonb,generation=generation+1,expires_at=now()+interval '30 minutes' WHERE id=$1 AND user_id=$2 AND state='owner' AND generation=$5 RETURNING id",
+          [id, user, encrypted, JSON.stringify(data.origins), row.generation],
         );
-      }
+        if (changed.rows.length !== 1)
+          throw new ToolValidationError("Browser handoff was revoked");
+        if (a.remember) {
+          const t = (row.scope.targets as GatherTarget[]).find(
+            (t) => t.key === row.target_key,
+          );
+          if (!t) throw new Error("Browser state is unavailable");
+          const label = t.accountLabel ?? "default",
+            box = encryptBytes(
+              this.key,
+              Buffer.from(data.storageState),
+              this.profileAad(user, row.origin, label),
+            );
+          await db.query(
+            "INSERT INTO gather_browser_profiles(user_id,origin,account_label,encrypted_state) VALUES($1,$2,$3,$4) ON CONFLICT(user_id,origin,account_label) DO UPDATE SET encrypted_state=EXCLUDED.encrypted_state,updated_at=now()",
+            [user, row.origin, label, box],
+          );
+        }
+        if (a.expectedInvoices !== undefined)
+          await db.query(
+            "INSERT INTO gather_attempts(id,user_id,collection_id,target_key,kind,state,metadata,scope_revision) VALUES($1,$2,$3,$4,'browser','success',$5::jsonb,$6)",
+            [
+              randomUUID(),
+              user,
+              row.collection_id,
+              row.target_key,
+              JSON.stringify({
+                sessionId: id,
+                ownerConfirmedCount: a.expectedInvoices,
+                month: row.scope.targets.find(
+                  (t: GatherTarget) => t.key === row.target_key,
+                )?.month,
+              }),
+              row.task_revision,
+            ],
+          );
+      });
       return {
         saved: true,
         capturedFiles,
@@ -506,6 +531,74 @@ export class GatheringBrowsers {
       storageState,
       state: row.state,
     });
+  }
+  async closeTask(user: string, taskId: string) {
+    const rows = (
+      await this.db.query(
+        "SELECT id FROM gather_collections WHERE user_id=$1 AND task_id=$2",
+        [user, taskId],
+      )
+    ).rows;
+    for (const row of rows) await this.closeCollection(user, row.id);
+  }
+  async sweep() {
+    const rows = (
+      await this.db.query(
+        "UPDATE gather_browser_sessions s SET state='closed',encrypted_state=NULL,generation=generation+1 FROM gather_collections c,work_tasks t WHERE s.collection_id=c.id AND c.task_id=t.id AND s.state<>'closed' AND (s.expires_at<=now() OR t.status IN ('cancelled','done') OR t.revision<>c.task_revision OR c.state<>'active') RETURNING s.id,s.user_id",
+      )
+    ).rows;
+    for (const row of rows)
+      await this.client
+        .call(row.user_id, row.id, { kind: "close" })
+        .catch(() => {});
+  }
+  async forgetProfile(user: string, origin: string, label: string) {
+    const revoked: string[] = [];
+    await transaction(this.db, async (db) => {
+      // Serialize against Done using the same task/collection/session lock order.
+      const sessions = (
+        await db.query(
+          "SELECT s.id FROM work_tasks t JOIN gather_collections c ON c.task_id=t.id AND c.user_id=t.user_id JOIN gather_browser_sessions s ON s.collection_id=c.id AND s.user_id=c.user_id WHERE s.user_id=$1 AND s.origin=$2 FOR UPDATE OF t,c,s",
+          [user, origin],
+        )
+      ).rows;
+      await db.query(
+        "DELETE FROM gather_browser_profiles WHERE user_id=$1 AND origin=$2 AND account_label=$3",
+        [user, origin, label],
+      );
+      revoked.push(...sessions.map((row) => row.id));
+      for (const row of sessions)
+        await db.query(
+          "UPDATE gather_browser_sessions SET state='closed',encrypted_state=NULL,generation=generation+1 WHERE id=$1 AND user_id=$2",
+          [row.id, user],
+        );
+    });
+    for (const id of revoked)
+      await this.client.call(user, id, { kind: "close" }).catch(() => {});
+    return { forgotten: true };
+  }
+  async forget(user: string, id: string) {
+    // Owner may revoke stored credentials even after the associated task is closed.
+    const row = (
+      await this.db.query(
+        "SELECT s.origin,c.scope,s.target_key FROM gather_browser_sessions s JOIN gather_collections c ON c.id=s.collection_id AND c.user_id=s.user_id WHERE s.id=$1 AND s.user_id=$2",
+        [id, user],
+      )
+    ).rows[0];
+    if (!row) throw new ToolValidationError("Browser session is unavailable");
+    const target = row.scope.targets.find(
+      (t: GatherTarget) => t.key === row.target_key,
+    );
+    await this.db.query(
+      "DELETE FROM gather_browser_profiles WHERE user_id=$1 AND origin=$2 AND account_label=$3",
+      [user, row.origin, target?.accountLabel ?? "default"],
+    );
+    await this.db.query(
+      "UPDATE gather_browser_sessions SET state='closed',encrypted_state=NULL,generation=generation+1 WHERE id=$1 AND user_id=$2",
+      [id, user],
+    );
+    await this.client.call(user, id, { kind: "close" }).catch(() => {});
+    return { forgotten: true };
   }
   async closeCollection(user: string, id: string) {
     const rows = (

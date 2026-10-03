@@ -32,6 +32,24 @@ export async function gatheringApi(
   api.get("/gathering/:id", async (req) =>
     gather.status(owner(req), idParam(req.params), 0, true),
   );
+  api.post("/gathering/:id/account", async (req) => {
+    const body = z
+      .object({
+        targetKey: z.string().min(1).max(64),
+        artifactId: z.string().uuid(),
+        revision: z.number().int().min(1),
+        confirmed: z.literal(true),
+      })
+      .strict()
+      .parse(req.body);
+    return gather.verifyAccount(
+      owner(req),
+      idParam(req.params),
+      body.targetKey,
+      body.artifactId,
+      body.revision,
+    );
+  });
   api.get("/files/:id", async (req, reply) => {
     const file = await gather.vault.read(owner(req), idParam(req.params));
     return reply
@@ -56,6 +74,31 @@ export async function gatheringApi(
     return reply.send(Readable.from(collectionZip(gather, user, id)));
   });
   if (!gather.browsers) return;
+  api.post("/browser/:id/forget", async (req) =>
+    gather.browsers!.forget(owner(req), idParam(req.params)),
+  );
+  api.get(
+    "/browser-profiles",
+    async (req) =>
+      (
+        await gather.db.query(
+          "SELECT origin,account_label,updated_at FROM gather_browser_profiles WHERE user_id=$1 ORDER BY origin,account_label LIMIT 100",
+          [owner(req)],
+        )
+      ).rows,
+  );
+  api.post("/browser-profiles/forget", async (req) => {
+    const user = owner(req),
+      body = z
+        .object({
+          origin: z.string().url().max(300),
+          accountLabel: z.string().min(1).max(120),
+          confirmed: z.literal(true),
+        })
+        .strict()
+        .parse(req.body);
+    return gather.browsers!.forgetProfile(user, body.origin, body.accountLabel);
+  });
   api.get("/browser/:id", async (req) =>
     gather.browsers!.info(owner(req), idParam(req.params)),
   );

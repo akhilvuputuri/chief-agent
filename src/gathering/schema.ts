@@ -209,6 +209,7 @@ export const browser = z
     command: z.discriminatedUnion("kind", [
       z.object({ kind: z.literal("open"), url: z.string().max(2000) }).strict(),
       z.object({ kind: z.literal("observe"), sessionId: id }).strict(),
+      z.object({ kind: z.literal("close"), sessionId: id }).strict(),
       z
         .object({
           kind: z.literal("follow"),

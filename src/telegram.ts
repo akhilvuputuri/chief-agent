@@ -1,4 +1,4 @@
-import { invoiceFacts } from "./gathering/facts.js";
+import { invoiceFacts, privateInvoiceIntake } from "./gathering/facts.js";
 import { mutePending } from "./stocks.js";
 import { preview as responsibilityPreview } from "./responsibilities.js";
 import { ResponsibilityDelivery } from "./responsibility-worker.js";
@@ -790,15 +790,18 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
             ["ChatGPT", "Anthropic", "DigitalOcean"],
           );
           const caption = ctx.message.caption ?? "";
-          const invoiceIntent =
-            /\b(invoice|receipt|billing statement|gather|collect)\b/i.test(
-              caption,
-            ) ||
-            (!/\b(resume|cv|cover letter|research paper)\b/i.test(caption) &&
-              financial.invoiceHeading &&
-              financial.invoiceNumbers.length > 0 &&
-              financial.issuerLabels.length > 0);
-          if (assistant.tools.gathering && invoiceIntent) {
+          const gatheringActive =
+            assistant.tools.gathering &&
+            (
+              await db.query(
+                "SELECT 1 FROM gather_collections c JOIN work_tasks t ON t.id=c.task_id AND t.user_id=c.user_id WHERE c.user_id=$1 AND c.state='active' AND t.status NOT IN ('done','cancelled') LIMIT 1",
+                [user],
+              )
+            ).rows.length > 0;
+          if (
+            assistant.tools.gathering &&
+            privateInvoiceIntake(caption, financial, Boolean(gatheringActive))
+          ) {
             const artifact = await assistant.tools.gathering.vault.inbound(
               user,
               inputId,

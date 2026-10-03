@@ -45,9 +45,17 @@ const date = (value: string) =>
     dateStyle: "medium",
     timeStyle: "short",
   }) + " SGT";
-async function api(path: string, signal = controller.signal) {
+async function api(
+  path: string,
+  signal = controller.signal,
+  options: RequestInit = {},
+) {
   const r = await fetch("/api/miniapp" + path, {
-    headers: { Authorization: "Bearer " + token },
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: "Bearer " + token,
+    },
     cache: "no-store",
     signal,
   });
@@ -696,6 +704,30 @@ async function gathering(id?: string, offset = 0) {
     id ? "/gathering/" + id : "/gathering?offset=" + offset,
   );
   if (!id) {
+    const profiles = await api("/browser-profiles").catch(() => []);
+    for (const profile of profiles) {
+      const forget = btn(
+        `Forget saved login: ${profile.origin} · ${profile.account_label}`,
+        () => {
+          forget.disabled = true;
+          root.append(
+            btn("Confirm forget login and close its browsers", () => {
+              void api("/browser-profiles/forget", controller.signal, {
+                method: "POST",
+                body: JSON.stringify({
+                  origin: profile.origin,
+                  accountLabel: profile.account_label,
+                  confirmed: true,
+                }),
+              })
+                .then(() => gathering())
+                .catch(showError);
+            }),
+          );
+        },
+      );
+      root.append(forget);
+    }
     for (const c of data.collections) {
       const card = btn("", () => go({ view: "gathering", gather: c.id }));
       card.className = "card link";
@@ -761,7 +793,7 @@ async function gathering(id?: string, offset = 0) {
     for (const candidate of target.candidates.filter(
       (c: any) =>
         !target.files.some((f: any) => f.artifact_id === c.artifact_id),
-    ))
+    )) {
       box.append(
         btn("Download unverified candidate PDF", () =>
           downloadFile("/files/" + candidate.artifact_id, candidate.name).catch(
@@ -769,6 +801,44 @@ async function gathering(id?: string, offset = 0) {
           ),
         ),
       );
+      if (
+        target.accountLabel &&
+        !candidate.account_verified &&
+        !["complete", "cancelled"].includes(data.state)
+      ) {
+        const verify = btn(
+          `Verify account for this PDF: ${target.accountLabel}`,
+          () => {
+            verify.disabled = true;
+            const confirm = btn(
+              `I inspected this PDF: it belongs to ${target.accountLabel}`,
+              () => {
+                confirm.disabled = true;
+                void api("/gathering/" + id + "/account", controller.signal, {
+                  method: "POST",
+                  body: JSON.stringify({
+                    targetKey: target.key,
+                    artifactId: candidate.artifact_id,
+                    revision: data.revision,
+                    confirmed: true,
+                  }),
+                })
+                  .then(() => gathering(id))
+                  .catch(showError);
+              },
+            );
+            box.append(
+              el(
+                "p",
+                `Download and inspect the PDF above. Confirm its provider account is ${target.accountLabel} for ${target.label}, ${target.month}. This does not confirm coverage.`,
+              ),
+              confirm,
+            );
+          },
+        );
+        box.append(verify);
+      }
+    }
     for (const browser of data.browsers.filter(
       (b: any) => b.target_key === target.key && b.state === "owner",
     ))

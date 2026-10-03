@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { atomicMutation } from "../db-transaction.js";
+import { atomicMutation, transaction } from "../db-transaction.js";
 import type { Database } from "../db.js";
 import type { GmailTools } from "../gmail.js";
 import { ToolValidationError } from "../tool-errors.js";
@@ -204,19 +204,6 @@ export class Gathering {
     const { operation, requestKey, ...raw } = a,
       scope = scopeSchema.parse(raw),
       turn = await this.turn(user, run);
-    const prior = (
-      await this.db.query(
-        "SELECT id,request_hash FROM gather_collections WHERE user_id=$1 AND request_key=$2",
-        [user, requestKey],
-      )
-    ).rows[0];
-    if (prior) {
-      if (prior.request_hash !== hash(scope))
-        throw new ToolValidationError(
-          "Request key was already used for a different collection",
-        );
-      return { ...(await this.status(user, prior.id)), duplicate: true };
-    }
     if (
       turn.background ||
       (
@@ -229,6 +216,23 @@ export class Gathering {
       throw new ToolValidationError(
         "Only the owner-facing coordinator can start a collection",
       );
+    const prior = (
+      await this.db.query(
+        "SELECT id,task_id,request_hash FROM gather_collections WHERE user_id=$1 AND request_key=$2",
+        [user, requestKey],
+      )
+    ).rows[0];
+    if (prior) {
+      if (turn.task_id && turn.task_id !== prior.task_id)
+        throw new ToolValidationError(
+          "Collection is outside this turn assignment",
+        );
+      if (prior.request_hash !== hash(scope))
+        throw new ToolValidationError(
+          "Request key was already used for a different collection",
+        );
+      return { ...(await this.status(user, prior.id)), duplicate: true };
+    }
     if (turn.task_id)
       throw new ToolValidationError(
         "This turn is bound to another task; preserve its scope and start gathering in a new owner request",
@@ -362,6 +366,43 @@ export class Gathering {
     if (result) await this.browsers?.closeCollection(user, id);
     return result ?? (await this.lostMutation(user, id, requestKey, a));
   }
+  /** Only the authenticated owner UI can attest account identity; no model tool exposes this method. */
+  async verifyAccount(
+    user: string,
+    id: string,
+    targetKey: string,
+    artifactId: string,
+    revision: number,
+  ) {
+    return transaction(this.db, async (db) => {
+      const c = (
+        await db.query(
+          "SELECT c.* FROM work_tasks t JOIN gather_collections c ON c.task_id=t.id AND c.user_id=t.user_id WHERE c.id=$1 AND c.user_id=$2 AND c.task_revision=$3 AND t.revision=$3 AND c.state='active' AND t.status NOT IN ('cancelled','done') FOR UPDATE OF t,c",
+          [id, user, revision],
+        )
+      ).rows[0];
+      const target = c?.scope.targets.find(
+        (t: GatherTarget) => t.key === targetKey,
+      );
+      if (
+        !target?.accountLabel ||
+        !(
+          await db.query(
+            "SELECT 1 FROM gather_candidates g JOIN gather_attempts a ON a.id=g.attempt_id AND a.user_id=g.user_id WHERE g.collection_id=$1 AND g.user_id=$2 AND g.target_key=$3 AND g.artifact_id=$4 AND a.scope_revision=$5",
+            [id, user, targetKey, artifactId, revision],
+          )
+        ).rows.length
+      )
+        throw new ToolValidationError(
+          "This candidate or account scope changed; reopen the invoice view",
+        );
+      await db.query(
+        "INSERT INTO gather_account_verifications(collection_id,target_key,user_id,artifact_id,scope_revision) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING",
+        [id, targetKey, user, artifactId, revision],
+      );
+      return { verified: true, accountLabel: target.accountLabel };
+    });
+  }
   async status(user: string, id?: string, offset = 0, full = false) {
     if (!id) {
       const rows = (
@@ -390,7 +431,7 @@ export class Gathering {
     ).rows;
     const candidates = (
       await this.db.query(
-        "SELECT c.target_key,c.artifact_id,c.facts,a.name,a.bytes FROM gather_candidates c JOIN gather_attempts p ON p.id=c.attempt_id AND p.user_id=c.user_id JOIN file_artifacts a ON a.id=c.artifact_id AND a.user_id=c.user_id WHERE c.collection_id=$1 AND c.user_id=$2 AND p.scope_revision=$3 ORDER BY c.target_key,a.name,a.id",
+        "SELECT c.target_key,c.artifact_id,c.facts,a.name,a.bytes,EXISTS(SELECT 1 FROM gather_account_verifications v WHERE v.collection_id=c.collection_id AND v.target_key=c.target_key AND v.user_id=c.user_id AND v.artifact_id=c.artifact_id AND v.scope_revision=$3) account_verified FROM gather_candidates c JOIN gather_attempts p ON p.id=c.attempt_id AND p.user_id=c.user_id JOIN file_artifacts a ON a.id=c.artifact_id AND a.user_id=c.user_id WHERE c.collection_id=$1 AND c.user_id=$2 AND p.scope_revision=$3 ORDER BY c.target_key,a.name,a.id",
         [id, user, c.task_revision],
       )
     ).rows;
@@ -519,6 +560,16 @@ export class Gathering {
       await this.readScope(user, run, a.id);
       return this.progress(user, a.id, a.targetKey, a.offset);
     }
+    // Retries may be returned after completion, but never outside the original task/revision.
+    const replayCollection = await this.collection(user, a.id);
+    const replayTurn = await this.turn(user, run);
+    if (
+      replayTurn.task_id !== replayCollection.task_id ||
+      replayTurn.revision !== replayCollection.task_revision
+    )
+      throw new ToolValidationError(
+        "Collection is outside this turn's active assignment",
+      );
     if ("requestKey" in a) {
       const old = await this.prior(user, a.id, a.requestKey, a);
       if (old) return old;
@@ -672,7 +723,16 @@ export class Gathering {
       await this.source(user, run, c, t, "browser");
       if (!this.browsers)
         throw new ToolValidationError("Browser is unavailable");
-      const result = await this.browsers.agent(user, c, t, a.command);
+      let result;
+      try {
+        result = await this.browsers.agent(user, c, t, a.command);
+      } catch (error) {
+        await this.recordAttempt(user, run, c, t.key, "browser", "failed", {
+          command: a.command.kind,
+          reason: "source_unavailable",
+        });
+        throw error;
+      }
       const attemptId = await this.recordAttempt(
         user,
         run,
@@ -772,6 +832,18 @@ export class Gathering {
         )
       ).rows[0];
       const facts = candidate?.facts as InvoiceFacts | undefined;
+      if (
+        t.accountLabel &&
+        !(
+          await this.db.query(
+            "SELECT 1 FROM gather_account_verifications WHERE collection_id=$1 AND user_id=$2 AND target_key=$3 AND artifact_id=$4 AND scope_revision=$5",
+            [c.id, user, t.key, a.artifactId, c.task_revision],
+          )
+        ).rows.length
+      )
+        throw new ToolValidationError(
+          "The requested account has not been verified by the owner. Ask them to inspect this PDF and verify its account in the Invoices view.",
+        );
       if (
         !facts ||
         candidate.scope_revision !== c.task_revision ||
@@ -917,7 +989,7 @@ export class Gathering {
     ).rows;
     const candidates = (
       await this.db.query(
-        "SELECT g.artifact_id,g.facts,a.kind,a.metadata FROM gather_candidates g JOIN gather_attempts a ON a.collection_id=g.collection_id AND a.target_key=g.target_key AND a.user_id=g.user_id AND a.metadata->>'artifactId'=g.artifact_id::text WHERE g.collection_id=$1 AND g.user_id=$2 AND g.target_key=$3 AND a.scope_revision=$4",
+        "SELECT g.artifact_id,g.facts,a.kind,a.metadata FROM gather_candidates g JOIN gather_attempts a ON a.id=g.attempt_id AND a.user_id=g.user_id WHERE g.collection_id=$1 AND g.user_id=$2 AND g.target_key=$3 AND a.scope_revision=$4",
         [c.id, user, t.key, c.task_revision],
       )
     ).rows;
@@ -931,6 +1003,15 @@ export class Gathering {
       f.invoiceHeading && f.issuerLabels.includes(t.label);
     for (const candidate of candidates.filter((x) => x.kind === source)) {
       const f = candidate.facts as InvoiceFacts;
+      if (
+        !f.selectableText ||
+        f.truncated ||
+        !f.invoiceHeading ||
+        !f.issuerLabels.length
+      )
+        throw new ToolValidationError(
+          "A file has unknown relevance or unreadable invoice clues; coverage remains unverified",
+        );
       if (!relevant(f)) continue;
       const dates =
         t.dateBasis === "service_period"

@@ -345,6 +345,7 @@ export class Assistant {
       "UPDATE work_tasks SET status='cancelled',lease=NULL,pause_reason='cancelled' WHERE user_id=$1 AND id=$2 AND status NOT IN ('done','cancelled')",
       [user, id],
     );
+    await this.tools.gathering?.browsers?.closeTask(user, id);
     return { cancelled: true };
   }
   async grant(user: string, id?: string) {
@@ -1419,6 +1420,10 @@ export class Assistant {
       true,
     );
     if (op === "work_cancel") {
+      await this.tools.gathering?.browsers?.closeTask(
+        scope.user,
+        (input as any).id,
+      );
       const run = this.taskRuns.get((input as any).id);
       if (run) this.controllers.get(run)?.abort();
     }
