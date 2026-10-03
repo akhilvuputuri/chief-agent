@@ -252,3 +252,91 @@ test("host rejects planning delegation, skipped verification and forged/stale re
   forged.squadState!.candidateHash = "b".repeat(64);
   assert.throws(() => assertSquadCheckpoint(previous, forged), /stale/);
 });
+
+test("stale squad completion cannot rewind a newer acknowledged checkpoint", async (t) => {
+  const f = await setup(t);
+  const plan = "Approved requirement brief";
+  const cp = checkpoint.parse({
+    plan,
+    patch: "fixture patch",
+    summary: "reviewed",
+    files: [{ path: "fixture.txt", content: "verified" }],
+  });
+  const job = { ...f.j, mode: "implement" as const, checkpoint: cp };
+  const hash = artifactHash(cp),
+    scope = squadScope(job, plan);
+  const checks = ["check", "build", "format:check"].map((name) => ({
+    command: `npm run ${name}`,
+    exitCode: 0,
+    output: "passed",
+  }));
+  const review = {
+    verdict: "APPROVE" as const,
+    findings: "reviewed",
+    model: "fixture/reviewer",
+    patchHash: hash,
+  };
+  cp.squadState = {
+    ...f.state,
+    sequence: 5,
+    scopeHash: scope,
+    phase: "approved",
+    candidateVersion: 1,
+    candidateHash: hash,
+    toolsUsed: 5,
+    checks,
+    review,
+  };
+  await f.db.query(
+    "UPDATE coding_jobs SET mode='implement',checkpoint=$2::jsonb WHERE id=$1",
+    [f.j.id, JSON.stringify(cp)],
+  );
+  const { requirementScope } = await import("../src/coding/requirements.js");
+  await f.db.query(
+    "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'fixture-approved',$2::jsonb,'suppressed')",
+    [
+      f.j.id,
+      JSON.stringify({
+        decision: "approved",
+        approvedScope: requirementScope(await f.row()),
+      }),
+    ],
+  );
+  const stale = await f.c.authenticate(
+    f.j.id,
+    f.c.token(f.j.id, f.j.attempt_id),
+  );
+  const newer = checkpoint.parse({
+    ...cp,
+    squadState: {
+      ...cp.squadState,
+      sequence: 6,
+      phase: "coding",
+      candidateVersion: 2,
+      candidateHash: "",
+      checks: [],
+      review: undefined,
+      handoff: {
+        id: randomUUID(),
+        sender: "leader",
+        recipient: "coder",
+        instructions: "Resolve findings",
+        candidateHash: "",
+      },
+    },
+  });
+  await f.c.save(stale, newer);
+  await assert.rejects(
+    f.c.finish(stale, {
+      kind: "candidate",
+      summary: "stale complete",
+      checkpoint: cp,
+      checks,
+      review,
+    }),
+    /superseded/,
+  );
+  const latest = await f.row();
+  assert.equal(latest.checkpoint.squadState.sequence, 6);
+  assert.equal(latest.state, "provisioning");
+});

@@ -480,7 +480,7 @@ export class CodingController {
       );
     const state = r.kind === "candidate" ? "publishing" : r.kind;
     const update = await this.db.query(
-      `WITH changed AS (UPDATE coding_jobs SET state=$3,stage=$3,summary=$4,question=$5,checkpoint=$6::jsonb,result=$7::jsonb,cleanup='pending',model_busy=false,updated_at=now() WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') RETURNING id)
+      `WITH changed AS (UPDATE coding_jobs SET state=$3,stage=$3,summary=$4,question=$5,checkpoint=$6::jsonb,result=$7::jsonb,cleanup='pending',model_busy=false,updated_at=now() WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') AND checkpoint=$10::jsonb RETURNING id)
       INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$8,jsonb_build_object('summary',$4::text,'question',$5::text) || $9::jsonb FROM changed ON CONFLICT DO NOTHING RETURNING id`,
       [
         job.id,
@@ -503,6 +503,7 @@ export class CodingController {
               }
             : {},
         ),
+        JSON.stringify(job.checkpoint),
       ],
     );
     if (!update.rows.length) throw new Error("Worker attempt superseded");

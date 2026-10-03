@@ -261,6 +261,15 @@ async def coding_loop(
     ]
     if mode == "lead":
         tools += copy.deepcopy(LEADER_TOOLS)
+
+    async def durable_checkpoint() -> None:
+        try:
+            await checkpoint()
+        except Exception as error:
+            raise SquadExecutionError(
+                "Post-action checkpoint outcome is uncertain; inspect acknowledged state"
+            ) from error
+
     plan_read_until = 0
     while budget.models > 0 and budget.tools > 0 and not stop.is_set():
         compact(messages, tools)
@@ -395,7 +404,7 @@ async def coding_loop(
                         result = await workspace.write(action.path, action.content)
                     else:
                         result = await workspace.remove(action.path)
-                    await checkpoint()
+                    await durable_checkpoint()
                 elif isinstance(action, Command):
                     if mode != "implement":
                         parts = READ_COMMANDS.get(action.command)
@@ -412,7 +421,7 @@ async def coding_loop(
                                 action.command, shell=True, max_output=observation_chars
                             )
                         ).wire()
-                        await checkpoint()
+                        await durable_checkpoint()
             except Exception as error:
                 if isinstance(error, SquadExecutionError):
                     raise

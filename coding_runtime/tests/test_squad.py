@@ -450,3 +450,46 @@ class SquadTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.inputs["coder"])
         self.assertEqual(result["checkpoint"]["squadState"]["candidateVersion"], 0)
         self.assertNotIn("handoff", result["checkpoint"]["squadState"])
+
+    async def test_failed_post_write_checkpoint_stops_remaining_batch_and_preserves_ack(
+        self,
+    ):
+        checkpoints = 0
+
+        def checkpoint(body):
+            nonlocal checkpoints
+            checkpoints += 1
+            return httpx.Response(
+                409 if checkpoints == 3 else 200, json={"accepted": True}
+            )
+
+        def model(body):
+            if body["role"] == "leader":
+                return httpx.Response(
+                    200,
+                    json=response(
+                        ("assign_coder", {"instructions": "Implement the exact scope"})
+                    ),
+                )
+            return httpx.Response(
+                200,
+                json=response(
+                    ("file_write", {"path": "first.txt", "content": "first"}),
+                    ("command", {"command": "echo forbidden > second.txt"}),
+                    report("candidate"),
+                ),
+            )
+
+        result = await self.run_case(model, checkpoint)
+        self.assertEqual(result["kind"], "paused")
+        self.assertEqual(checkpoints, 3)
+        self.assertEqual(result["checkpoint"]["files"], [])
+        self.assertEqual(result["checkpoint"]["squadState"]["sequence"], 2)
+        self.assertEqual(len(self.inputs["coder"]), 1)
+        self.assertEqual(len(self.inputs["leader"]), 1)
+        failed = next(
+            body
+            for path, body in self.requests
+            if path == "checkpoint" and body["files"]
+        )
+        self.assertEqual([file["path"] for file in failed["files"]], ["first.txt"])
