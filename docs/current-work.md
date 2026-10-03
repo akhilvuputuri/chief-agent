@@ -1,6 +1,6 @@
 # Conversational coding requirements — v0.3.36 candidate
 
-`codex/coding-requirement-approval` adds an enforced plan → owner confirmation → Python implementation flow with buttons or a direct yes reply, no slash commands. Models cannot grant approval. Existing coding-event JSON stores scope/receipt/decision metadata; no DB/Compose change. Review, Python image pin and exact release pending. Coding activation remains blocked by provisioning login and scoped provider/App/ingress setup. See [journal 58](journey/58-coding-requirements.md).
+[PR #157](https://github.com/akhilvuputuri/chief-agent/pull/157) integrated an enforced plan → owner confirmation → Python implementation flow with buttons or a direct yes reply, no slash commands. Models cannot grant approval. Existing coding-event JSON stores scope/receipt/decision metadata; no DB/Compose change. GPT-6 Astra approved `aafecf3`; Linux CI passed and merge `b8ffb21` is integrated. Python 0.1.1 is published/anonymously verified; pin review and exact release pending. Coding activation remains blocked by provisioning login and scoped provider/App/ingress setup. See [journal 58](journey/58-coding-requirements.md).
 
 # Python coding runtime — released v0.3.35, off
 
