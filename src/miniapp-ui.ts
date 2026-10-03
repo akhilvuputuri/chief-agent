@@ -795,6 +795,17 @@ async function gathering(id?: string, offset = 0) {
         !target.files.some((f: any) => f.artifact_id === c.artifact_id),
     )) {
       box.append(
+        el(
+          "p",
+          `${candidate.facts.invoiceNumbers?.[0] ?? candidate.name} · ${candidate.facts.invoiceDates?.join(", ") || "Date unverified"}`,
+          "muted",
+        ),
+      );
+      if (target.accountLabel && candidate.account_verified)
+        box.append(
+          el("p", `Account verified by you: ${target.accountLabel}`, "muted"),
+        );
+      box.append(
         btn("Download unverified candidate PDF", () =>
           downloadFile("/files/" + candidate.artifact_id, candidate.name).catch(
             showError,
@@ -867,6 +878,11 @@ async function route() {
   const p = new URLSearchParams(location.hash.slice(1));
   const gatheringView =
     p.has("gather") || p.has("browser") || p.get("view") === "gathering";
+  const privacyFooter = document.querySelector("footer");
+  if (privacyFooter)
+    privacyFooter.textContent = gatheringView
+      ? "Private workspace · Only you verify accounts and control sign-in."
+      : "Private workspace · Changes and approvals stay in Telegram";
   document
     .getElementById("gathering")
     ?.classList.toggle("selected", gatheringView);
