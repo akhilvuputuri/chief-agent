@@ -45,6 +45,10 @@ Status: Phase 0 measured; Phase 1 (read-only holdings in Chief) is implemented a
   - The design follows the Phase 0 measurements: a check for exactly `mcp.read`; rotating refresh tokens stored before use under single-flight, a lease and compare-and-set; a static three-tool read allowlist; and immutable snapshots that a failed or malformed read cannot replace.
   - `get_account_summary` is read only for the base currency, because its margin and leverage fields looked non-standard.
 - **Two integration constraints shaped the tool wiring.** An agent disappears from the catalogue unless all of its tools are available, so a separate `core/portfolio` agent keeps the stocks agent visible when IBKR is off. Mapping `portfolio_` to the existing `watchlist` domain left the Jev picker configuration, and its paid eval, unchanged.
+- **Independent review.** Opus 5.5 reviewed `4db3a33` on 3 October 2026 and returned **REQUEST CHANGES**, with two blocking findings:
+  - An empty positions read would have become current holdings, which looks like a sale of everything.
+  - The scope check accepted non-`mcp.` scopes besides `mcp.read`.
+    Non-blocking findings covered a reproduced stale-refresh race that could wipe a reconnect, unrevoked rotated tokens, a sync left `running` after a store error, no backoff on read-triggered syncs, SSE id matching, contract multipliers and documentation slips. All were fixed with regression tests; see the [plan's review-fix notes](../ibkr-portfolio.md#phase-1-holdings-foundation-migration-026-and-an-operator-rollout). The reviewer's "Jev picker" typo note was not a defect, because Jev is the picker's name.
 - **One defect was found while testing.** The refresh compare-and-set used `rowCount`, which PGlite does not report. It now uses `RETURNING`, which behaves the same on `pg` and PGlite.
 
 - **Plan:** [docs/ibkr-portfolio.md](../ibkr-portfolio.md).

@@ -48,12 +48,10 @@ interface TokenResponse extends Tokens {
 const sha256 = (value: string) =>
   createHash("sha256").update(value).digest("hex");
 
-/** Exactly mcp.read; any other mcp.* scope means IBKR granted more than read access. */
+/** Exactly mcp.read and nothing else: any other or unknown scope is refused (fail closed). */
 export function readOnly(scopes: string[]) {
-  return (
-    scopes.includes(IBKR.scope) &&
-    !scopes.some((s) => s.startsWith("mcp.") && s !== IBKR.scope)
-  );
+  const granted = new Set(scopes);
+  return granted.size === 1 && granted.has(IBKR.scope);
 }
 
 function scopesOf(body: any): string[] {
@@ -241,6 +239,12 @@ export class IbkrAuth {
       await this.revokeRemote(tokens.refresh);
       return fail("scope_rejected");
     }
+    const previous = (
+      await this.db.query(
+        "SELECT token_box FROM brokerage_connections WHERE user_id=$1 AND provider=$2 AND token_box IS NOT NULL",
+        [claimed.user_id, PROVIDER],
+      )
+    ).rows[0];
     await this.db.query(
       `INSERT INTO brokerage_connections(id,user_id,provider,state,scopes,token_box,access_expires_at,last_refresh_at,created_at,updated_at)
        VALUES($1,$2,$3,'connected',$4,$5,$6,$7,$7,$7)
@@ -258,6 +262,16 @@ export class IbkrAuth {
         new Date(this.now()),
       ],
     );
+    // A reconnect replaces a live grant; the superseded refresh token is revoked once.
+    if (previous?.token_box) {
+      try {
+        await this.revokeRemote(
+          this.unbox(claimed.user_id, previous.token_box).refresh,
+        );
+      } catch {
+        /* best effort */
+      }
+    }
     return { user: claimed.user_id, ok: true };
   }
 
@@ -293,12 +307,18 @@ export class IbkrAuth {
    * Local tokens are wiped first so nothing can use them afterwards; the remote revoke is
    * a single best-effort call. Holdings snapshots are kept.
    */
-  async disconnect(user: string, reason: "owner" | string) {
+  async disconnect(
+    user: string,
+    reason: "owner" | string,
+    /** Only this token generation: a stale refresh must not wipe a newer reconnect. */
+    version?: number,
+  ) {
     const row = (
       await this.db.query(
         `WITH old AS (
            SELECT id,token_box FROM brokerage_connections
-           WHERE user_id=$1 AND provider=$2 AND token_box IS NOT NULL FOR UPDATE)
+           WHERE user_id=$1 AND provider=$2 AND token_box IS NOT NULL
+             AND ($6::int IS NULL OR token_version=$6) FOR UPDATE)
          UPDATE brokerage_connections c SET state=$3,token_box=NULL,refresh_lease_until=NULL,
            last_error_code=$4,updated_at=$5
          FROM old WHERE c.id=old.id
@@ -309,6 +329,7 @@ export class IbkrAuth {
           reason === "owner" ? "revoked" : "disconnected",
           reason === "owner" ? null : reason.slice(0, 80),
           new Date(this.now()),
+          version ?? null,
         ],
       )
     ).rows[0];
@@ -399,7 +420,7 @@ export class IbkrAuth {
           ? e
           : new IbkrAuthError("IBKR refresh failed", "refresh_failed", true);
       if (error.code === "invalid_grant") {
-        await this.disconnect(user, "invalid_grant");
+        await this.disconnect(user, "invalid_grant", version);
         throw new IbkrAuthError(
           "IBKR authorization expired or was revoked",
           "not_connected",
@@ -415,7 +436,7 @@ export class IbkrAuth {
     }
     if (!readOnly(next.scopes)) {
       await this.revokeRemote(next.refresh);
-      await this.disconnect(user, "scope_rejected");
+      await this.disconnect(user, "scope_rejected", version);
       throw new IbkrAuthError(
         "IBKR granted more than read access",
         "scope_rejected",
@@ -436,11 +457,14 @@ export class IbkrAuth {
         new Date(this.now()),
       ],
     );
-    if (!stored.rows.length)
+    if (!stored.rows.length) {
+      // Disconnected or reconnected meanwhile: the rotated token is never stored, so revoke it.
+      await this.revokeRemote(next.refresh);
       throw new IbkrAuthError(
         "IBKR connection changed during refresh",
         "not_connected",
       );
+    }
     return next.access;
   }
 

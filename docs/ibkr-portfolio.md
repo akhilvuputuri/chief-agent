@@ -57,6 +57,15 @@ Not established: whether IBKR accepts a client registered by an arbitrary third 
 
 ## 4. Proposed architecture
 
+> **Superseded in parts by the Phase 1 implementation (3 October 2026).** This section is the 2 October proposal. Where they differ, the [Phase 1 description](#phase-1-holdings-foundation-migration-026-and-an-operator-rollout) is authoritative:
+>
+> - Refresh uses an in-process single-flight plus a Postgres lease and a `token_version` compare-and-set, not an advisory lock.
+> - The client and allowlist are both in `src/ibkr/mcp.ts`, not in `mcp-client.ts` and `tools.ts`.
+> - There is no `brokerage_accounts` table or `userinfo` call. IBKR's consent selects the account, and its responses carry no account dimension.
+> - Sync statuses are `running`, `complete`, `empty` and `failed`.
+> - `/portfolio connect` sends a direct IBKR link button rather than an approval card.
+> - The scope check accepts exactly `{mcp.read}`.
+
 ```text
 Telegram /portfolio ─┐                           ┌─ portfolio_read / portfolio_status (read tools, core/portfolio agent)
                      ▼                           │
@@ -119,7 +128,7 @@ Telegram /portfolio ─┐                           ┌─ portfolio_read / por
   - `IBKR_PORTFOLIO=on|off` is a runtime setting.
   - `IBKR_TOKEN_KEY` is a 64-hex secret in the host `.env`.
   - The redirect origin reuses `MINIAPP_ORIGIN`.
-  - When the feature is `on`, startup requires migration 25, the key and the origin.
+  - When the feature is `on`, startup requires migration 26, the key and the origin.
   - All of these go in `compose.yaml`, `.env.example` and `check-env.mjs`.
 - **Observability.** Sanitized `ibkr.refresh`, `ibkr.tool_call` and `portfolio.sync` events record only outcome, duration, counts and age. They never contain tokens, account IDs, quantities or values. `/portfolio` shows health on the phone, and CloudWatch shows the events to both local and cloud agents.
 
@@ -226,6 +235,19 @@ The deliverable is a sanitized findings section in the journal, plus fixtures bu
   - the allowlist boundary;
   - runtime gating and delegation.
 - `scripts/test-deploy-portfolio.py` covers the rollout (15 offline cases).
+
+**Review fixes (3 October 2026).** An independent review of `4db3a33` requested changes, which have been applied:
+
+- An empty positions list is accepted only when every balance reports no stock value (`empty_unconfirmed`). Stock-only currencies must reconcile with the balance's stock value within the larger of 1 unit or 1% (`positions_incomplete`). This also catches truncation.
+- The scope check requires exactly `{mcp.read}`.
+- `invalid_grant` and `scope_rejected` disconnect only the token generation that failed, so a stale refresh cannot wipe a newer reconnect.
+- A rotated token that cannot be stored is revoked, and so is the superseded token on a reconnect.
+- Storage errors are recorded as `store_failed` with no partial rows left behind.
+- On-read syncs back off for 15 minutes after a failure.
+- SSE matching requires a JSON-RPC response.
+- The cost basis of non-`STK` positions is left unknown, because of contract multipliers.
+
+The registration URL matches the `registration_endpoint` advertised in IBKR's authorization-server metadata, fetched on 2 October (§2).
 
 **Not yet tested.** Pagination; IBKR does not report any. Multiple accounts, because the measured responses carry no account dimension and the consent selects the account. Whether IBKR accepts a **non-loopback HTTPS redirect** at registration; that is checked first on activation.
 

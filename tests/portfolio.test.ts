@@ -53,7 +53,12 @@ const BALANCES = {
       realized_pnl: 0,
       exchange_rate: 1,
     },
-    { currency: "USD", cash_balance: 10, exchange_rate: 1.3 },
+    {
+      currency: "USD",
+      cash_balance: 10,
+      stock_market_value: 1600,
+      exchange_rate: 1.3,
+    },
   ],
 };
 
@@ -67,6 +72,8 @@ function fakeIbkr() {
     validRefresh: new Set<string>(),
     validAccess: new Set<string>(),
     positions: POSITIONS as unknown,
+    balances: BALANCES as unknown,
+    gate: null as null | Promise<void>,
     toolCalls: [] as string[],
     failToken: false,
     rejectAccess: false,
@@ -119,6 +126,7 @@ function fakeIbkr() {
       }
       state.refreshes++;
       const old = form.get("refresh_token")!;
+      if (state.gate) await state.gate;
       if (!state.validRefresh.has(old))
         return json({ error: "invalid_grant" }, 400);
       state.validRefresh.delete(old); // rotation: a refresh token works once
@@ -152,7 +160,7 @@ function fakeIbkr() {
           body.params.name === "get_account_positions"
             ? state.positions
             : body.params.name === "get_account_balances"
-              ? BALANCES
+              ? state.balances
               : { currency: "SGD", leverage: "0.78" };
         // IBKR answers as SSE with JSON text content and structuredContent.
         return new Response(
@@ -181,7 +189,14 @@ async function fixture() {
     await pg.exec(
       await readFile(new URL("../db/" + name, import.meta.url), "utf8"),
     );
-  const db = pg as unknown as Database;
+  const faults = { positions: false };
+  const db = {
+    query: (text: string, values?: unknown[]) => {
+      if (faults.positions && text.includes("INSERT INTO portfolio_positions"))
+        return Promise.reject(new Error("disk full"));
+      return (pg as unknown as Database).query(text, values);
+    },
+  } as Database;
   await ensureUser(db, "owner");
   await ensureUser(db, "other");
   const ibkr = fakeIbkr();
@@ -215,6 +230,7 @@ async function fixture() {
     auth,
     portfolio,
     notices,
+    faults,
     connect,
     advance: (ms: number) => {
       now += ms;
@@ -289,6 +305,10 @@ test("an expired, denied or broader-than-read consent never connects", async () 
   assert.equal(readOnly(["mcp.read"]), true);
   assert.equal(readOnly(["mcp.read", "mcp.orders.submit"]), false);
   assert.equal(readOnly([]), false);
+  // Exactly mcp.read: identity or unknown scopes are refused too (fail closed).
+  assert.equal(readOnly(["mcp.read", "openid"]), false);
+  assert.equal(readOnly(["mcp.read", "trade"]), false);
+  assert.equal(readOnly(["mcp.read", "mcp.read"]), true);
 });
 
 test("refresh rotates the stored token, is single-flight, and invalid_grant disconnects", async () => {
@@ -375,8 +395,47 @@ test("sync stores validated holdings; failures and malformed reads never replace
     (await f.portfolio.sync("owner", "owner")).errorCode,
     "duplicate_contract",
   );
-  // A genuinely empty account is a valid snapshot, distinct from a failure.
+  // An empty list the balances contradict is not a sale: it fails and holdings stay.
   f.ibkr.state.positions = { positions: [] };
+  assert.equal(
+    (await f.portfolio.sync("owner", "owner")).errorCode,
+    "empty_unconfirmed",
+  );
+  // A truncated list fails reconciliation against the balance's stock value.
+  f.ibkr.state.positions = { positions: [POSITIONS.positions[0]] };
+  assert.equal(
+    (await f.portfolio.sync("owner", "owner")).errorCode,
+    "positions_incomplete",
+  );
+  assert.equal(
+    (
+      (await f.portfolio.call("owner", {
+        operation: "portfolio_status",
+      })) as any
+    ).positionCount,
+    2,
+  );
+  // A store failure is recorded, leaves no partial rows and keeps holdings.
+  f.ibkr.state.positions = POSITIONS;
+  f.faults.positions = true;
+  assert.equal(
+    (await f.portfolio.sync("owner", "owner")).errorCode,
+    "store_failed",
+  );
+  f.faults.positions = false;
+  assert.equal(
+    (
+      await f.db.query(
+        "SELECT count(*)::int n FROM portfolio_syncs WHERE status='running'",
+      )
+    ).rows[0].n,
+    0,
+  );
+  // A genuinely empty account (no stock value anywhere) is a valid snapshot.
+  f.ibkr.state.positions = { positions: [] };
+  f.ibkr.state.balances = {
+    balances: [{ currency: "BASE", cash_balance: 50, stock_market_value: 0 }],
+  };
   assert.equal((await f.portfolio.sync("owner", "owner")).status, "empty");
   assert.equal(
     ((await f.portfolio.call("owner", { operation: "portfolio_read" })) as any)
@@ -556,4 +615,42 @@ test("portfolio tools are read operations, gated, and owned by a separate agent"
   // Delegated to the agent: the coordinator itself is not offered the tools.
   assert(!on.tools.some((t) => t.name.startsWith("portfolio_")));
   assert(on.allTools!.some((t) => t.name === "portfolio_read"));
+});
+
+test("a stale refresh's invalid_grant cannot wipe a newer reconnect, and an orphaned rotation is revoked", async () => {
+  const f = await fixture();
+  await f.connect();
+  f.advance(10 * 60 * 1000);
+  let open!: () => void;
+  f.ibkr.state.gate = new Promise((r) => (open = r));
+  const stale = f.auth.accessToken("owner").catch((e) => e);
+  await new Promise((r) => setTimeout(r, 50));
+  // The owner revokes in IBKR and reconnects while the old refresh is in flight.
+  f.ibkr.state.validRefresh.delete("r1");
+  f.ibkr.state.gate = null;
+  assert.equal((await f.connect()).result.ok, true);
+  open();
+  assert.equal((await stale).code, "not_connected");
+  const row = (
+    await f.db.query("SELECT state,token_box FROM brokerage_connections")
+  ).rows[0];
+  assert.equal(row.state, "connected");
+  assert.notEqual(row.token_box, null);
+  assert.equal(await f.auth.accessToken("owner"), "a2");
+  // The reconnect revoked the superseded grant's refresh token.
+  assert(f.ibkr.state.revoked.includes("r1"));
+});
+
+test("a failed sync suppresses read-triggered re-syncs for the backoff window", async () => {
+  const f = await fixture();
+  await f.connect();
+  f.ibkr.state.positions = { bad: true };
+  await f.portfolio.read("owner");
+  const calls = f.ibkr.state.toolCalls.length;
+  await f.portfolio.read("owner");
+  assert.equal(f.ibkr.state.toolCalls.length, calls);
+  f.advance(16 * 60 * 1000);
+  f.ibkr.state.positions = POSITIONS;
+  const view: any = await f.portfolio.read("owner");
+  assert.equal(view.positions.length, 2);
 });

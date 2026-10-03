@@ -86,6 +86,42 @@ const sgt = (date: Date) =>
     hour12: false,
   });
 
+/**
+ * Cross-checks positions against the same read's balances, so an empty or truncated
+ * positions list cannot pass as the owner having sold. An empty list is accepted only
+ * when every balance reports no stock value; for currencies holding only stocks, the
+ * positions' market values must sum to the balance's stock value (they matched exactly
+ * when measured on 3 October 2026). Returns an error code, or null when consistent.
+ */
+export function reconcile(
+  rows: z.infer<typeof position>[],
+  balances: z.infer<typeof balance>[],
+): string | null {
+  const stockValue = (b: z.infer<typeof balance>) =>
+    Math.abs(b.stock_market_value ?? 0);
+  if (!rows.length)
+    return balances.some((b) => stockValue(b) > 0.005)
+      ? "empty_unconfirmed"
+      : null;
+  for (const b of balances) {
+    if (b.currency === "BASE" || b.stock_market_value == null) continue;
+    const held = rows.filter((p) => p.currency === b.currency);
+    if (!held.length) {
+      if (stockValue(b) > 0.005) return "positions_incomplete";
+      continue;
+    }
+    // Other asset classes may be valued outside stock_market_value; check stocks only.
+    if (held.some((p) => p.asset_class !== "STK" || p.market_value == null))
+      continue;
+    const sum = held.reduce((t, p) => t + (p.market_value ?? 0), 0);
+    if (
+      Math.abs(sum - b.stock_market_value) > Math.max(1, 0.01 * stockValue(b))
+    )
+      return "positions_incomplete";
+  }
+  return null;
+}
+
 export class Portfolio {
   private inflight = new Map<string, Promise<SyncResult>>();
   private ticking = false;
@@ -125,6 +161,11 @@ export class Portfolio {
       [id, user, reason, new Date(started)],
     );
     const fail = async (code: string) => {
+      // A failed sync never leaves partial positions behind.
+      await this.db.query(
+        "DELETE FROM portfolio_positions WHERE sync_id=$1 AND user_id=$2",
+        [id, user],
+      );
       await this.db.query(
         "UPDATE portfolio_syncs SET status='failed',error_code=$2,finished_at=$3 WHERE id=$1",
         [id, code.slice(0, 80), new Date(this.now())],
@@ -162,6 +203,36 @@ export class Portfolio {
     const rows = positions.data.positions;
     if (new Set(rows.map((p) => p.contract_id)).size !== rows.length)
       return fail("duplicate_contract");
+    const unreconciled = reconcile(rows, balances.data.balances);
+    if (unreconciled) return fail(unreconciled);
+    try {
+      await this.store(
+        id,
+        user,
+        rows,
+        balances.data.balances,
+        summary.data.currency,
+      );
+    } catch (error) {
+      opsLog("portfolio.store_failed", "error", errorFields(error));
+      return fail("store_failed");
+    }
+    const status = rows.length ? "complete" : "empty";
+    opsLog("portfolio.sync", "info", {
+      state: status,
+      positionCount: rows.length,
+      latencyMs: this.now() - started,
+    });
+    return { id, status };
+  }
+
+  private async store(
+    id: string,
+    user: string,
+    rows: z.infer<typeof position>[],
+    balances: z.infer<typeof balance>[],
+    baseCurrency: string,
+  ) {
     for (const p of rows)
       await this.db.query(
         `INSERT INTO portfolio_positions(sync_id,user_id,contract_id,symbol,asset_class,currency,quantity,
@@ -182,7 +253,7 @@ export class Portfolio {
           p.daily_pnl ?? null,
         ],
       );
-    const kept = balances.data.balances.map((b) => ({
+    const kept = balances.map((b) => ({
       currency: b.currency,
       cash: b.cash_balance,
       settledCash: b.settled_cash ?? null,
@@ -200,7 +271,7 @@ export class Portfolio {
         id,
         status,
         rows.length,
-        summary.data.currency,
+        baseCurrency,
         JSON.stringify(kept),
         new Date(this.now()),
       ],
@@ -211,12 +282,6 @@ export class Portfolio {
          ORDER BY started_at DESC OFFSET $2)`,
       [user, KEEP_SYNCS],
     );
-    opsLog("portfolio.sync", "info", {
-      state: status,
-      positionCount: rows.length,
-      latencyMs: this.now() - started,
-    });
-    return { id, status };
   }
 
   /** Tell the owner once that access ended; reconnecting clears the marker. */
@@ -302,9 +367,14 @@ export class Portfolio {
       ? this.now() - new Date(snap.current.finished_at).getTime()
       : Infinity;
     let refreshed: SyncResult | undefined;
+    const lastFailedRecently =
+      snap.last?.status === "failed" &&
+      this.now() - new Date(snap.last.started_at).getTime() < READ_FRESH_MS;
     if (
       ["connected", "refresh_uncertain"].includes(status.state) &&
-      age > READ_FRESH_MS
+      age > READ_FRESH_MS &&
+      !lastFailedRecently &&
+      snap.last?.status !== "running"
     ) {
       refreshed = await this.sync(user, "read");
       snap = await this.snapshot(user);
@@ -340,7 +410,10 @@ export class Portfolio {
     const positions = snap.positions.map((p: any) => {
       const quantity = Number(p.quantity);
       const avg = p.average_price == null ? null : Number(p.average_price);
-      const cost = avg == null ? null : avg * quantity;
+      // Options/futures carry contract multipliers IBKR does not report here, so their
+      // cost basis (and the totals that include them) is left unknown rather than wrong.
+      const cost =
+        avg == null || p.asset_class !== "STK" ? null : avg * quantity;
       const pnl = p.unrealized_pnl == null ? null : Number(p.unrealized_pnl);
       return {
         symbol: p.symbol,

@@ -184,7 +184,10 @@ export class IbkrMcp {
             return [];
           }
         })();
-    const message = messages.find((m: any) => m?.id === id);
+    // A response, not a server-initiated request that happens to reuse the id.
+    const message = messages.find(
+      (m: any) => m?.id === id && ("result" in m || "error" in m),
+    );
     if (!message)
       throw new IbkrMcpError(`${method}: no response`, "malformed", true);
     if (message.error)
