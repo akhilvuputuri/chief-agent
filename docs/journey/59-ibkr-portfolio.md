@@ -1,4 +1,4 @@
-# 58 — Can Chief read IBKR holdings without becoming a trading client?
+# 59 — Can Chief read IBKR holdings without becoming a trading client?
 
 Work date(s): 2026-10-02 to 2026-10-03. Written/revised: 2026-10-03.
 Status: Phase 0 measured; Phase 1 (read-only holdings in Chief) is implemented and tested on `feat/ibkr-portfolio-146`, pending independent review, the migration-026 operator rollout and activation. Owner-defined dip conditions are designed (migration 027) and not yet implemented.
