@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from pydantic import Field, TypeAdapter
+from pydantic import Field, TypeAdapter, field_validator
 
 from .model import ModelAdapter, validate_generation
 from .protocol import Json, Record, text_bound, wire_json, wire_size
@@ -60,6 +60,53 @@ class Report(Record):
         text_bound(self.plan, 32000)
         text_bound(self.question, 2000)
 
+
+class DispatchRejected(ValueError):
+    """Rejected before any member execution; leader may correct its request."""
+
+
+class SquadExecutionError(RuntimeError):
+    """A started/uncertain dispatch must pause rather than be replayed."""
+
+
+class Assign(Record):
+    operation: Literal["assign_coder", "assign_reviewer"]
+    instructions: str = Field(min_length=1, max_length=4000)
+    candidateHash: str = ""
+
+    @field_validator("instructions")
+    @classmethod
+    def bounded_instructions(cls, value: str) -> str:
+        return text_bound(value, 4000)
+
+
+LEADER_TOOLS: list[Json] = [
+    {
+        "name": name,
+        "description": description,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "instructions": {"type": "string", "maxLength": 4000},
+                "candidateHash": {"type": "string"},
+            },
+            "required": required,
+            "additionalProperties": False,
+        },
+    }
+    for name, description, required in (
+        (
+            "assign_coder",
+            "Delegate implementation or review findings to the coder. Cannot change the approved scope.",
+            ["instructions"],
+        ),
+        (
+            "assign_reviewer",
+            "Delegate the exact verified candidate hash to a fresh read-only reviewer. Passing checks are required.",
+            ["instructions", "candidateHash"],
+        ),
+    )
+]
 
 TOOLS: list[Json] = [
     {
@@ -148,8 +195,8 @@ READ_COMMANDS: dict[str, tuple[str, ...]] = {
     "git ls-files": ("git", "ls-files"),
     "rg --files": ("rg", "--files"),
 }
-ACTION: TypeAdapter[Read | Write | Delete | PlanRead | Command | Report] = TypeAdapter(
-    Read | Write | Delete | PlanRead | Command | Report
+ACTION: TypeAdapter[Read | Write | Delete | PlanRead | Command | Report | Assign] = (
+    TypeAdapter(Read | Write | Delete | PlanRead | Command | Report | Assign)
 )
 
 
@@ -194,12 +241,14 @@ async def coding_loop(
     model: ModelAdapter,
     workspace: Workspace,
     messages: list[Json],
-    mode: Literal["plan", "implement", "review"],
+    mode: Literal["plan", "implement", "review", "lead"],
     budget: Budget,
     stop: asyncio.Event,
     checkpoint: Callable[[], Awaitable[None]],
     plan: Callable[[], str] | None = None,
     summary: Callable[[], str] | None = None,
+    dispatch: Callable[[Assign], Awaitable[Json]] | None = None,
+    can_finish: Callable[[], bool] | None = None,
 ) -> Report:
     tools = [
         copy.deepcopy(t)
@@ -210,6 +259,17 @@ async def coding_loop(
         )
         and (t["name"] != "plan_read" or plan is not None)
     ]
+    if mode == "lead":
+        tools += copy.deepcopy(LEADER_TOOLS)
+
+    async def durable_checkpoint() -> None:
+        try:
+            await checkpoint()
+        except Exception as error:
+            raise SquadExecutionError(
+                "Post-action checkpoint outcome is uncertain; inspect acknowledged state"
+            ) from error
+
     plan_read_until = 0
     while budget.models > 0 and budget.tools > 0 and not stop.is_set():
         compact(messages, tools)
@@ -263,7 +323,16 @@ async def coding_loop(
                         "plan": ("plan_ready", "awaiting_input"),
                         "implement": ("candidate", "awaiting_input"),
                         "review": ("APPROVE", "REQUEST_CHANGES"),
+                        "lead": ("candidate", "awaiting_input"),
                     }[mode]
+                    if (
+                        mode == "lead"
+                        and action.kind == "candidate"
+                        and (can_finish is None or not can_finish())
+                    ):
+                        raise ValueError(
+                            "The latest candidate needs passing checks and reviewer approval"
+                        )
                     if action.kind not in allowed:
                         raise ValueError("Report does not match runtime mode")
                     if (
@@ -291,6 +360,19 @@ async def coding_loop(
                                 }
                             )
                         return action
+                elif isinstance(action, Assign):
+                    if mode != "lead" or dispatch is None:
+                        raise ValueError(
+                            "Only the leader can delegate to fixed squad members"
+                        )
+                    try:
+                        result = await dispatch(action)
+                    except DispatchRejected:
+                        raise
+                    except Exception as error:
+                        raise SquadExecutionError(
+                            "Member execution stopped; inspect acknowledged state"
+                        ) from error
                 elif isinstance(action, PlanRead):
                     if plan is None:
                         raise ValueError("Plan reader unavailable")
@@ -322,7 +404,7 @@ async def coding_loop(
                         result = await workspace.write(action.path, action.content)
                     else:
                         result = await workspace.remove(action.path)
-                    await checkpoint()
+                    await durable_checkpoint()
                 elif isinstance(action, Command):
                     if mode != "implement":
                         parts = READ_COMMANDS.get(action.command)
@@ -339,8 +421,10 @@ async def coding_loop(
                                 action.command, shell=True, max_output=observation_chars
                             )
                         ).wire()
-                        await checkpoint()
-            except Exception:
+                        await durable_checkpoint()
+            except Exception as error:
+                if isinstance(error, SquadExecutionError):
+                    raise
                 result = {
                     "error": "Tool rejected or failed; inspect files and adjust the call. Paths, modes and limits are enforced by the host."
                 }

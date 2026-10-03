@@ -1,6 +1,6 @@
 {
   "name": "chief-agent",
-  "version": "0.3.37",
+  "version": "0.3.38",
   "private": true,
   "type": "module",
   "description": "A personal AI assistant with an owned TypeScript runtime, Telegram voice, memory, research and durable tasks",
