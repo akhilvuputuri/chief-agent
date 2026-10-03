@@ -1,7 +1,7 @@
 # 58 — Can Chief read IBKR holdings without becoming a trading client?
 
 Work date(s): 2026-10-02 to 2026-10-03. Written/revised: 2026-10-03.
-Status: proposed; Phase 0 feasibility spike in progress. Registration, read-only consent, rotating refresh, the tool catalogue, holdings structure and one real-time quote were measured; the refresh token survived a 12-hour idle gap. The absolute session lifetime is untested. No production code exists and nothing is deployed.
+Status: Phase 0 measured; Phase 1 (read-only holdings in Chief) is implemented and tested on `feat/ibkr-portfolio-146`, pending independent review, the migration-026 operator rollout and activation. Owner-defined dip conditions are designed (migration 027) and not yet implemented.
 
 ## User-visible problem and preceding iteration
 
@@ -40,6 +40,12 @@ Status: proposed; Phase 0 feasibility spike in progress. Registration, read-only
   See [§6/§6b](../ibkr-portfolio.md#6-fallback-flex-web-service).
 
 ## Implementation and review
+
+- **Phase 1** (3 October 2026) is described in [the plan](../ibkr-portfolio.md#phase-1-holdings-foundation-migration-026-and-an-operator-rollout).
+  - The design follows the Phase 0 measurements: a check for exactly `mcp.read`; rotating refresh tokens stored before use under single-flight, a lease and compare-and-set; a static three-tool read allowlist; and immutable snapshots that a failed or malformed read cannot replace.
+  - `get_account_summary` is read only for the base currency, because its margin and leverage fields looked non-standard.
+- **Two integration constraints shaped the tool wiring.** An agent disappears from the catalogue unless all of its tools are available, so a separate `core/portfolio` agent keeps the stocks agent visible when IBKR is off. Mapping `portfolio_` to the existing `watchlist` domain left the Jev picker configuration, and its paid eval, unchanged.
+- **One defect was found while testing.** The refresh compare-and-set used `rowCount`, which PGlite does not report. It now uses `RETURNING`, which behaves the same on `pg` and PGlite.
 
 - **Plan:** [docs/ibkr-portfolio.md](../ibkr-portfolio.md).
 - **Phase 0 probe:** [scripts/ibkr-probe.mjs](../../scripts/ibkr-probe.mjs). It runs on the owner's machine, stores tokens with 0600 permissions outside the repository and prints only structure. It refuses order and instruction tools.

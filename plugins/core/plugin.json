@@ -126,6 +126,17 @@
       "effort": "low"
     },
     {
+      "id": "portfolio",
+      "description": "Report the owner's IBKR holdings (read-only): positions, average cost, unrealized P&L, totals, cash and how fresh the data is.",
+      "instructions": "agents/portfolio.md",
+      "contract": "findings/v1",
+      "tools": ["portfolio_read", "portfolio_status"],
+      "skills": [],
+      "limits": { "ms": 60000, "models": 4, "tools": 4 },
+      "model": "fast",
+      "effort": "low"
+    },
+    {
       "id": "news",
       "description": "Manage the daily news bulletin: followed sites, delivery time, topics and extra editions.",
       "instructions": "agents/news.md",

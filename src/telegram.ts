@@ -407,6 +407,51 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
       }
       return;
     }
+    const portfolioCommand =
+      /^\/portfolio(?: (connect|refresh|disconnect))?$/i.exec(command ?? "");
+    if (portfolioCommand) {
+      await ensureUser(db, user);
+      const claimed = await db.query(
+        "INSERT INTO inbound_updates(update_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING update_id",
+        [ctx.update.update_id, user],
+      );
+      if (!claimed.rows.length) return;
+      try {
+        const portfolio = assistant.tools.portfolio;
+        if (!portfolio) {
+          await ctx.reply("IBKR holdings are not enabled on this server yet.");
+        } else {
+          const kind = (portfolioCommand[1]?.toLowerCase() ?? "show") as
+            "show" | "connect" | "refresh" | "disconnect";
+          const result = await portfolio.command(user, kind);
+          await ctx.reply(result.text, {
+            link_preview_options: { is_disabled: true },
+            ...(result.url
+              ? {
+                  reply_markup: {
+                    inline_keyboard: [
+                      [{ text: "Connect IBKR (read-only)", url: result.url }],
+                    ],
+                  },
+                }
+              : {}),
+          });
+        }
+        await db.query(
+          "UPDATE inbound_updates SET status='completed' WHERE update_id=$1",
+          [ctx.update.update_id],
+        );
+      } catch {
+        await db.query(
+          "UPDATE inbound_updates SET status='failed' WHERE update_id=$1",
+          [ctx.update.update_id],
+        );
+        await ctx.reply(
+          "Could not apply that portfolio command. Send /portfolio to inspect the saved state.",
+        );
+      }
+      return;
+    }
     if (command === "/canvases" || command === "/app") {
       await ensureUser(db, user);
       const claimed = await db.query(

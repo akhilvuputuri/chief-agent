@@ -37,6 +37,10 @@ import { LinkCeremony } from "./library-link.js";
 import { LibraryActions } from "./library-actions.js";
 import { libraryMigrated, recoverLibrary } from "./library-recovery.js";
 import { secretKey } from "./secret-box.js";
+import { IbkrAuth } from "./ibkr/oauth.js";
+import { IbkrMcp } from "./ibkr/mcp.js";
+import { IBKR_CALLBACK_PATH, ibkrRoutes } from "./ibkr/routes.js";
+import { Portfolio } from "./portfolio.js";
 import { CalendarTools } from "./calendar.js";
 import { DailySheet } from "./daily-sheet.js";
 import { SheetsTools } from "./sheets.js";
@@ -336,6 +340,38 @@ if (c.CODING_RUNTIME === "on") {
       ),
   );
 }
+// Read-only IBKR holdings (issue #146): off unless explicitly enabled with its migration.
+let notifyUser: (user: string, text: string) => Promise<void> = async () => {};
+let portfolio: Portfolio | undefined;
+if (c.IBKR_PORTFOLIO === "on") {
+  if (
+    !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=26")).rows
+      .length
+  )
+    throw startupError(
+      "STARTUP_MIGRATION_026",
+      "IBKR portfolio migration 026 must be installed before enabling holdings",
+    );
+  if (!c.IBKR_TOKEN_KEY || !c.MINIAPP_ORIGIN)
+    throw startupError(
+      "STARTUP_IBKR_CONFIG",
+      "IBKR_PORTFOLIO=on requires IBKR_TOKEN_KEY and MINIAPP_ORIGIN",
+    );
+  const owners = new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(","));
+  const auth = new IbkrAuth(
+    db,
+    secretKey(c.IBKR_TOKEN_KEY),
+    c.MINIAPP_ORIGIN + IBKR_CALLBACK_PATH,
+  );
+  portfolio = new Portfolio(
+    db,
+    auth,
+    new IbkrMcp((user, force) => auth.accessToken(user, force)),
+    (user) => owners.has(user),
+    (user, text) => notifyUser(user, text),
+  );
+  await portfolio.recover();
+}
 const assistant = new Assistant(
   db,
   new CustomAgent(
@@ -383,6 +419,7 @@ const assistant = new Assistant(
     new NewsTools(db, newsFetcher, newsBulletin),
     responsibilities,
     coding,
+    portfolio,
   ),
   {
     canvases: !!c.MINIAPP_ORIGIN,
@@ -399,6 +436,7 @@ const assistant = new Assistant(
     news: true,
     ...(responsibilities ? { responsibilities: true } : {}),
     ...(coding ? { coding: true } : {}),
+    ...(portfolio ? { portfolio: true } : {}),
   },
   {
     ms: c.AGENT_BUDGET_MS,
@@ -430,6 +468,14 @@ const app = server(
 );
 const bot = telegram(c, assistant, db);
 if (coding) await codingApi(app, coding);
+if (portfolio) {
+  notifyUser = async (user, text) => {
+    await bot.api.sendMessage(user, text, {
+      link_preview_options: { is_disabled: true },
+    });
+  };
+  ibkrRoutes(app, portfolio, (user, text) => notifyUser(user, text));
+}
 // Scheduled output goes to its own topic when threaded mode is on; otherwise to General.
 const topics = bot.topics;
 // Create Chief's topics up front so the owner can write in them before anything is posted.
@@ -777,6 +823,11 @@ const routineTimer = setInterval(() => {
     .tick()
     .catch((error) =>
       opsLog("routine.delivery_failed", "error", errorFields(error)),
+    );
+  void portfolio
+    ?.tick()
+    .catch((error) =>
+      opsLog("portfolio.tick_failed", "error", errorFields(error)),
     );
   void stockMonitor
     ?.tick()

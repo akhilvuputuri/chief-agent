@@ -62,6 +62,8 @@ export const readOperations = new Set([
   "prep_task_read",
   "gmail_accounts",
   "subscription_list",
+  "portfolio_read",
+  "portfolio_status",
   "parcel_list",
   "parcel_match",
   "gmail_search",

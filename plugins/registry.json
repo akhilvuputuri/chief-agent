@@ -4,7 +4,7 @@
   "enabled": [
     {
       "path": "core",
-      "sha256": "58d305996022ace7ec0a42c3393c503d8ddbd24991816f48ab9e0103ea601883",
+      "sha256": "69226e4b0de722c5351d4bcba689d4c028e3909111271abe6a0f133cc4813446",
       "agents": [
         "email",
         "parcels",
@@ -13,6 +13,7 @@
         "daily",
         "jobs",
         "stocks",
+        "portfolio",
         "news",
         "library",
         "web",
@@ -46,6 +47,8 @@
         "parcel_list",
         "parcel_match",
         "parcel_record",
+        "portfolio_read",
+        "portfolio_status",
         "routine_create",
         "routine_history",
         "routine_list",
@@ -84,7 +87,8 @@
     "library": "core/library",
     "web": "core/web",
     "media": "core/media",
-    "subscriptions": "core/subscriptions"
+    "subscriptions": "core/subscriptions",
+    "portfolio": "core/portfolio"
   },
   "delegated": [
     "calendar_draft",
@@ -113,6 +117,8 @@
     "parcel_list",
     "parcel_match",
     "parcel_record",
+    "portfolio_read",
+    "portfolio_status",
     "routine_create",
     "routine_history",
     "routine_list",

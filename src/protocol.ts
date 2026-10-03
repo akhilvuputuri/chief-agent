@@ -298,6 +298,8 @@ export const action = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("news_status") }).strict(),
   z.object({ operation: z.literal("news_edition_now") }).strict(),
   z.object({ operation: z.literal("watchlist_list") }).strict(),
+  z.object({ operation: z.literal("portfolio_read") }).strict(),
+  z.object({ operation: z.literal("portfolio_status") }).strict(),
   z
     .object({
       operation: z.literal("watchlist_settings"),

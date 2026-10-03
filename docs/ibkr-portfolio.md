@@ -1,6 +1,6 @@
 # IBKR portfolio access and quote-provider evaluation (issue #146)
 
-Status: **Phase 0 in progress.** The owner authorized Phase 0 on 2 October 2026. Registration, read-only consent for the owner's account (through the local probe only), rotating refresh, the tool catalogue and one real-time quote are measured; see Phase 0 progress below. No production code is written and nothing is deployed. Written 2 October 2026 SGT against freshly fetched `origin/main` `ae0237f4337a640937d36ed6e742c5fdef7ae9b7`. The issue's research baseline (`78ad212`) is superseded by PRs #148, #150 and #151, none of which touch the stock subsystem. Refetch main before implementing.
+Status: **Phase 0 measured; Phase 1 implemented, not yet reviewed or deployed (3 October 2026).** Phase 0: registration, read-only consent through the local probe, rotating refresh, a 12-hour idle refresh, the tool catalogue, owner-reconciled holdings and one real-time quote. Phase 1: holdings in Chief, through `/portfolio` and the `core/portfolio` agent, behind `IBKR_PORTFOLIO=off`. Written 2 October 2026 SGT against freshly fetched `origin/main` `ae0237f4337a640937d36ed6e742c5fdef7ae9b7`. The issue's research baseline (`78ad212`) is superseded by PRs #148, #150 and #151, none of which touch the stock subsystem. Refetch main before implementing.
 
 Product requirement: [issue #146](https://github.com/akhilvuputuri/chief-agent/issues/146). Related design: [stock watchlist](stock-watchlist.md), [plugins](plugins.md), [Library identity](library.md), [Google authorization](google-authorization.md), [coding runtime ingress](coding.md).
 
@@ -176,26 +176,74 @@ The deliverable is a sanitized findings section in the journal, plus fixtures bu
 
 ### Phase 1: holdings foundation (migration 026 and an operator rollout)
 
-- Code: `ibkr/oauth.ts`, `ibkr/mcp-client.ts`, the `ibkr/tools.ts` allowlist, `portfolio.ts`, the `/portfolio` commands, the callback route, the `core/portfolio` agent, the domain and the configuration. Everything defaults to off.
-- Tests, using PGlite and a mocked IBKR server:
-  - state replay, expiry and mismatch;
-  - extra scopes granted leading to revoke and fail-closed;
-  - refresh races (two concurrent refreshes produce one token rotation);
-  - a lost refresh response;
-  - `invalid_grant` producing a disconnect prompt;
-  - pagination and partial results, empty versus failed, malformed and missing fields, 429 and 5xx backoff;
-  - multi-account without double counting, and fractional quantities;
+**Implemented on branch `feat/ibkr-portfolio-146` (3 October 2026); not yet reviewed or deployed.** The feature defaults to off.
+
+**Modules.**
+
+- `src/ibkr/oauth.ts`:
+  - one dynamic public-client registration per redirect URI (`brokerage_clients`);
+  - consent attempts with a hashed single-use state, a sealed PKCE verifier, a 10-minute expiry and at most 5 attempts per day;
+  - code exchange that accepts **exactly `mcp.read`** and otherwise revokes and fails;
+  - tokens sealed with `IBKR_TOKEN_KEY` (AAD bound to the owner);
+  - refresh that is single-flight in process plus a Postgres lease and a compare-and-set on `token_version`, storing the rotated refresh token before use;
+  - a lost refresh response moves the connection to `refresh_uncertain` and keeps the stored token; `invalid_grant` wipes local tokens and marks it `disconnected`;
+  - owner disconnect wipes local tokens first, then sends one remote revoke.
+- `src/ibkr/mcp.ts`:
+  - a minimal Streamable HTTP JSON-RPC client (JSON or SSE, 2 MB bound, 20 s timeout);
+  - a refresh-and-retry on an early 401;
+  - **`IBKR_READ_TOOLS`** (`get_account_positions`, `get_account_balances`, `get_account_summary`), the only tools that can be called.
+- `src/portfolio.ts`:
+  - Zod-validated syncs into immutable `portfolio_syncs` and `portfolio_positions`. Only `complete` or `empty` syncs are current; malformed responses, duplicate contracts and auth failures are recorded as `failed` and never replace the current holdings.
+  - Scheduled syncs every 4 hours, which also keep the rotating token in use, with exponential backoff after failures.
+  - A one-time Telegram notice when access ends.
+  - `portfolio_read` re-syncs holdings older than 15 minutes before answering.
+  - `get_account_summary` is used only for the base currency; its margin and leverage fields are not shown.
+- `src/ibkr/routes.ts`: `GET /oauth/ibkr/callback` (`no-store`, no session). Results are sent to the owner in Telegram, followed by the first sync.
+- **Tools.**
+  - `portfolio_read` and `portfolio_status` are read operations owned by a separate `core/portfolio` agent. They are gated on `availability.portfolio`, so the stocks agent never disappears when IBKR is off.
+  - The `portfolio_` prefix maps to the existing `watchlist` domain. These tools are delegated, never offered to the coordinator, so `config/tool-picker.json` and its paid eval are unchanged.
+- **Telegram.** `/portfolio`, `/portfolio connect` (an IBKR link button), `/portfolio refresh` and `/portfolio disconnect`. These are host commands, not model tools.
+- **Configuration.**
+  - `IBKR_PORTFOLIO=on|off` and `IBKR_TOKEN_KEY` (64 hex characters).
+  - The redirect is `MINIAPP_ORIGIN + /oauth/ibkr/callback`.
+  - Startup refuses `on` without migration 26 (`STARTUP_MIGRATION_026`), or without the key and origin (`STARTUP_IBKR_CONFIG`).
+- **Logs.** `portfolio.sync` records state, `positionCount` and latency. `ibkr.callback` records state and `errorCode`. Neither ever contains values, tokens or account identifiers.
+
+**Tests.**
+
+- `tests/portfolio.test.ts` runs PGlite against a fake IBKR server with rotating refresh tokens and SSE MCP responses. It covers:
+  - PKCE and the scope parameters;
+  - single-use, expired, denied and broader-than-read consent;
+  - sealed tokens;
+  - single-flight refresh, a lost response, recovery and `invalid_grant`;
+  - an early 401 retry;
+  - complete, malformed, duplicate and empty syncs, with earlier holdings retained;
   - owner isolation;
-  - the allowlist boundary (an order tool listed by the server is never callable);
-  - sync never touching `watchlist_items`;
-  - log redaction.
-- Rollout: `scripts/deploy-portfolio.py`, following the deploy-coding/responsibilities template (BASES, a trusted archive digest, exactly one migration, an exact Compose environment block), with `scripts/test-deploy-portfolio.py`. The reviewed Caddy route `/oauth/ibkr/callback` is installed separately by the operator. The deployment is classified as needing the operator; an ordinary release cannot do it.
-- Activation is separate and idle-only. The owner sets the key and `IBKR_PORTFOLIO=on`, then connects from the phone.
-- Acceptance:
-  - reconcile holdings against the IBKR app privately and record only match counts;
-  - restart recovery;
-  - token refresh across one overnight period;
-  - revocation.
+  - no watch-item writes;
+  - scheduled cadence and backoff;
+  - owner disconnect and revoke;
+  - the callback route, including replay and HTML injection;
+  - the allowlist boundary;
+  - runtime gating and delegation.
+- `scripts/test-deploy-portfolio.py` covers the rollout (15 offline cases).
+
+**Not yet tested.** Pagination; IBKR does not report any. Multiple accounts, because the measured responses carry no account dimension and the consent selects the account. Whether IBKR accepts a **non-loopback HTTPS redirect** at registration; that is checked first on activation.
+
+**Rollout.** Run `scripts/deploy-portfolio.py ARCHIVE SHA` on the host, the same procedure as the other additive migrations ([stock watchlist rollout](stock-watchlist.md#deployment-operator-reviewed-migration-018)).
+
+- The live `RELEASE` must equal `BASE`. It applies only 026 and only the default-off IBKR Compose environment lines, and checks the marker and health.
+- Rollback keeps the additive tables; the previous image never reads them.
+
+**Activation** happens separately, while idle, by the operator on the host:
+
+1. Add `IBKR_TOKEN_KEY` (from `openssl rand -hex 32`, generated on the host and never printed or copied off it) and `IBKR_PORTFOLIO=on` to `/opt/hermes-companion/.env`. Keep the file at mode 0600.
+2. Install the reviewed `ops/oauth-site/Caddyfile`, which adds only `/oauth/ibkr/callback`, with the `install-host.sh` steps: `install`, `caddy validate`, `mv`, then reload Caddy.
+3. Recreate the gateway with `docker compose up -d --no-deps --no-build gateway` and check its health.
+4. The owner sends `/portfolio connect` from the phone, approves read-only access on IBKR's site, and gets the holdings in Telegram.
+
+To turn it off, set `IBKR_PORTFOLIO=off` and recreate the gateway. `/portfolio disconnect` beforehand revokes the token. Snapshots are retained.
+
+**Acceptance.** Reconcile holdings privately and record only "matched" or "not matched"; check restart recovery, one overnight scheduled refresh, revocation, and a Chief answer to "how are my holdings doing?".
 
 ### Phase 2: holdings linkage and owner-defined dip conditions (owner request, 3 October 2026)
 
@@ -230,9 +278,9 @@ The owner asked for alerts when a stock falls below the average price of a holdi
 - **"Watch my holdings below cost."** This is an explicit owner request, executed as confirmed `watchlist_add` plus `below_cost` per holding, with a capacity check against the 25-item limit. There is no silent subscription.
 - **Unsupported holdings.** Non-US or unsupported instruments are listed as not monitorable, with the reason.
 
-**Storage.** `watch_conditions` holds `id`, `user_id`, `item_id`, `kind`, `params jsonb`, `state` (`armed` | `triggered`), `last_evaluated_at`, `last_triggered_at` and timestamps. A small `price_history_cache` table holds `symbol`, `mic`, `trading_date`, `closes` (bounded) and `fetched_at`. The `stock_alerts.condition_id` column is nullable, so legacy daily-drop rows stay null. The observation `decision` set is extended with `condition_triggered`, `insufficient_history`, `not_held` and `cost_unknown`. All of this joins **migration 026**, so one operator rollout covers holdings and conditions.
+**Storage.** `watch_conditions` holds `id`, `user_id`, `item_id`, `kind`, `params jsonb`, `state` (`armed` | `triggered`), `last_evaluated_at`, `last_triggered_at` and timestamps. A small `price_history_cache` table holds `symbol`, `mic`, `trading_date`, `closes` (bounded) and `fetched_at`. The `stock_alerts.condition_id` column is nullable, so legacy daily-drop rows stay null. The observation `decision` set is extended with `condition_triggered`, `insufficient_history`, `not_held` and `cost_unknown`. These go in **migration 027**, with its own reviewed rollout. Migration 026 was kept to holdings, so Phase 1 could be reviewed and shipped first.
 
-**Release order.** The holdings code (Phase 1) ships with migration 026. The condition evaluation code follows as an ordinary application release on the installed schema. `below_average` and `below_low` do not depend on IBKR, so they work even if the IBKR connection is off.
+**Release order.** Holdings (Phase 1) ship with migration 026. Conditions follow with migration 027. `below_average` and `below_low` do not depend on IBKR, so they work even if the IBKR connection is off.
 
 ### Phase 3: quote-provider evaluation (shadow mode)
 
