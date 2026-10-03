@@ -26,3 +26,7 @@ jobs:
           docker build -f Dockerfile.coding -t chief-coding:test .
           docker run --rm --entrypoint sh chief-coding:test -c 'test "$(id -u)" != 0 && node --version && git --version && rg --version && python3 --version'
           docker run --rm --user root --env CODING_TEST_SECRET=synthetic --entrypoint setpriv chief-coding:test --reuid=1000 --regid=1000 --clear-groups --no-new-privs --bounding-set=-all python -I -m chief_coding_runtime.security_smoke
+      - name: Verify isolated browser sandbox with synthetic pages
+        run: |
+          docker build -f Dockerfile.browser --target browser -t chief-browser:test .
+          docker run --rm --init --read-only --tmpfs /tmp:size=192m,mode=1777 --shm-size=192m --cap-drop=ALL --security-opt=no-new-privileges --security-opt=seccomp=deploy/browser/seccomp.json --memory=640m --pids-limit=192 --entrypoint node chief-browser:test /app/browser-smoke.mjs

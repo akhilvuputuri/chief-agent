@@ -147,7 +147,7 @@ export class BrowserManager {
             request.isNavigationRequest() ? [...s.origins] : undefined,
           );
         }
-        await route.continue();
+        await route.fallback();
       } catch {
         s.blocked = true;
         await route.abort();
