@@ -65,7 +65,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 2–3 October | [59 — IBKR portfolio access](59-ibkr-portfolio.md): can Chief read IBKR holdings without becoming a trading client? | Released v0.3.37 and on; owner connection and acceptance pending |
 | 3–4 October | [61 — Stock questions, rules and digests](60-stock-rules.md): how can one stock agent answer, watch and report on the owner's own stock questions? | Phase 2a released v0.3.37; rules (2b) and digest (2c) planned |
 
-| 4 October | [61 — Fixed coding squad](61-coding-squad.md): who coordinates coder/reviewer handoffs while code enforces approval? | Migration 027/implementation verified and image published; pin review/final release pending, coding off |
+| 4 October | [61 — Fixed coding squad](61-coding-squad.md): who coordinates coder/reviewer handoffs while code enforces approval? | v0.3.38 reviewed/released with migration 027 and image/policy/health/preservation verified; coding off, live acceptance pending |
 
 ## Connected case studies
 
