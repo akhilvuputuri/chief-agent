@@ -964,3 +964,38 @@ test("portfolio proposals are writes, not reads", () => {
   assert(!readOperations.has("portfolio_disconnect"));
   assert.equal(domainOf("portfolio_connect"), "watchlist");
 });
+
+test("a connect card whose link cannot be built is released for retry, not stranded", async () => {
+  const f = await fixture();
+  const run = await turn(f);
+  await f.portfolio.call("owner", { operation: "portfolio_connect" }, run);
+  const { bot, sent } = fakeBot();
+  const broken = {
+    command: async () => {
+      throw new Error("database unavailable");
+    },
+  } as any;
+  await sendPortfolioApprovals(
+    bot,
+    f.db,
+    broken,
+    "owner",
+    undefined,
+    undefined,
+    run,
+  );
+  assert.equal(sent.length, 0);
+  const row = (await f.db.query("SELECT payload FROM approvals")).rows[0];
+  assert.equal(row.payload.telegramDeliveryState, undefined);
+  // The next delivery sends it.
+  await sendPortfolioApprovals(
+    bot,
+    f.db,
+    f.portfolio,
+    "owner",
+    undefined,
+    undefined,
+    run,
+  );
+  assert.equal(sent.length, 1);
+});

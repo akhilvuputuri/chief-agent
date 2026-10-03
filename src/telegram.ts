@@ -1187,7 +1187,19 @@ async function sendPortfolioApprovalsOnce(
     let text: string;
     let keyboard: InlineKeyboardButton[][];
     if (row.operation === "portfolio_connect") {
-      const link = await portfolio.command(user, "connect");
+      let link: { text: string; url?: string };
+      try {
+        // Each send starts one consent attempt (bounded at 5 per day by IbkrAuth.begin).
+        link = await portfolio.command(user, "connect");
+      } catch (error) {
+        // Release the claim so a later delivery can retry; never strand a card in 'sending'.
+        await db.query(
+          "UPDATE approvals SET payload=payload-'telegramDeliveryState' WHERE id=$1 AND user_id=$2 AND payload->>'telegramDeliveryState'='sending' AND NOT(payload ? 'telegramMessageId')",
+          [row.id, user],
+        );
+        opsLog("portfolio.card_failed", "warn", errorFields(error));
+        continue;
+      }
       text = link.url
         ? "Connect IBKR to Chief (read-only)?\n\n" + link.text
         : link.text;
@@ -1213,7 +1225,9 @@ async function sendPortfolioApprovalsOnce(
       {
         ...inThread(run && family.has(row.run_id) ? thread : undefined),
         link_preview_options: { is_disabled: true },
-        reply_markup: { inline_keyboard: keyboard },
+        ...(keyboard.length
+          ? { reply_markup: { inline_keyboard: keyboard } }
+          : {}),
       },
       guard,
     );

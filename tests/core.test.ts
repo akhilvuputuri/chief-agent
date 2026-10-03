@@ -327,6 +327,41 @@ test("approval preview comes from stored action even if model omits it", async (
   );
 });
 
+test("card-based approvals such as portfolio cards never produce the generic /approve notice", async () => {
+  // This suite applies a subset of migrations; take 026's exact approvals statements.
+  for (const statement of (
+    await readFile(new URL("../db/026_portfolio.sql", import.meta.url), "utf8")
+  )
+    .split("\n")
+    .filter((line) => line.includes("approvals_operation_check")))
+    await pg.exec(statement);
+  let assistant: Assistant;
+  assistant = new Assistant(
+    db,
+    {
+      run: async (req) => {
+        const run = (
+          await db.query(
+            "SELECT run_id FROM work_turns WHERE user_id='alice' ORDER BY created_at DESC LIMIT 1",
+          )
+        ).rows[0].run_id;
+        for (const operation of ["portfolio_connect", "portfolio_disconnect"])
+          await db.query(
+            "INSERT INTO approvals(id,user_id,run_id,operation,payload) VALUES($1,'alice',$2,$3,'{}'::jsonb)",
+            [randomUUID(), run, operation],
+          );
+        return {
+          reply: "A card is waiting for your tap.",
+          history: req.history,
+        };
+      },
+    },
+    tools,
+  );
+  const reply = await assistant.respond("alice", "Connect my IBKR");
+  assert.doesNotMatch(reply, /Approval required|Delete role|\/approve/);
+});
+
 test("concurrent approval consumption deletes only once", async () => {
   const role = await save();
   const approval = (await tools.execute("alice", run(), {

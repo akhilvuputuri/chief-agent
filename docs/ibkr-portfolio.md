@@ -217,6 +217,8 @@ The deliverable is a sanitized findings section in the journal, plus fixtures bu
   - **Connect card.** The IBKR authorize link is created at send time (`sendPortfolioApprovals`) and placed only in the Telegram button. The model's tool result carries no link or state, and nothing readable is stored. The owner's own IBKR login and consent are the approval.
   - **Disconnect card.** Disconnect and Keep connected buttons, which act only on the exact sent message while pending and unexpired, and only once.
   - Migration 026 widens `approvals_operation_check` to include the two operations and keeps every existing one.
+  - Review of `7e2bf89` (REQUEST CHANGES) found that the coordinator's generic "/approve" notice would also have fired for portfolio cards, rendering them as "Delete role …". The generic notice is now limited to the operations `/approve` actually decides (`job_delete` and `skill_activate`). A connect card whose link cannot be built releases its claim for a later retry. Each send of a connect card starts one consent attempt, bounded at 5 per day.
+  - Known existing limitation, not introduced here: a bare `docker compose up` re-runs historical migrations whose narrower approvals checks reject newer operations. This already applies to `responsibility_confirm`. Production uses `--no-deps` and the reviewed scripts.
 - **Telegram shortcuts.** `/portfolio`, `/portfolio connect`, `/portfolio refresh` and `/portfolio disconnect` remain as host commands.
 - **Configuration.**
   - `IBKR_PORTFOLIO=on|off` and `IBKR_TOKEN_KEY` (64 hex characters).
