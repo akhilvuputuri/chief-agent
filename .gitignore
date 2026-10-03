@@ -18,3 +18,9 @@ compose.local.yaml
 
 # Local evaluation traces and outputs
 eval-results/
+
+# Python coding package build and checker outputs
+*.egg-info/
+.ruff_cache/
+.mypy_cache/
+build/

@@ -14,6 +14,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: python -m pip install --require-hashes -r coding_runtime/requirements-dev.txt
       - run: npm ci
       - run: npm run format:check
       - run: npm run check
@@ -22,4 +25,4 @@ jobs:
         run: |
           docker build -f Dockerfile.coding -t chief-coding:test .
           docker run --rm --entrypoint sh chief-coding:test -c 'test "$(id -u)" != 0 && node --version && git --version && rg --version && python3 --version'
-          docker run --rm --user root --env CODING_TEST_SECRET=synthetic --entrypoint setpriv chief-coding:test --reuid=node --regid=node --clear-groups --no-new-privs --bounding-set=-all node --disable-sigusr1 /opt/chief-worker/security-smoke.mjs
+          docker run --rm --user root --env CODING_TEST_SECRET=synthetic --entrypoint setpriv chief-coding:test --reuid=1000 --regid=1000 --clear-groups --no-new-privs --bounding-set=-all python -I -m chief_coding_runtime.security_smoke

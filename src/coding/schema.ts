@@ -117,6 +117,7 @@ export const codingSettings = z
       .or(z.literal("")),
     model: z.string().min(1).max(120),
     reviewerModel: z.string().min(1).max(120),
+    runtime: z.enum(["node", "python"]).optional(),
     effort: z.enum(["low", "medium", "high"]),
     limits: z
       .object({

@@ -299,6 +299,7 @@ export class CodingController {
   }
   async assignment(job: CodingJob) {
     return {
+      protocolVersion: 1,
       id: job.id,
       revision: job.revision,
       objective: job.objective,
@@ -591,6 +592,7 @@ export class CodingController {
             token: this.token(j.id, j.attempt_id),
             origin: this.origin,
             image: j.settings.image,
+            runtime: j.settings.runtime ?? "node",
             timeoutMinutes: Math.max(
               5,
               Math.ceil(j.settings.limits.ms / 60000) + 5,

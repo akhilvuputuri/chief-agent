@@ -1,3 +1,4 @@
+// Legacy Node image compatibility; new execution lives in coding_runtime/.
 import { mkdir, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

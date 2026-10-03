@@ -1,23 +1,16 @@
-FROM node:22-bookworm-slim AS build
-RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev \
-    && rm -rf /var/lib/apt/lists/*
-WORKDIR /build
-COPY package*.json ./
-RUN npm ci
-COPY tsconfig.json ./
-COPY src ./src
-COPY deploy/coding/secure-process.c ./secure-process.c
-RUN gcc -shared -fPIC -I/usr/local/include/node secure-process.c -o secure-process.node
-RUN npm run build && npm prune --omit=dev
-
-FROM node:22-bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends git ripgrep python3 ca-certificates util-linux \
-    && rm -rf /var/lib/apt/lists/*
+FROM node:22-bookworm-slim AS node
+FROM python:3.12-slim-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends git ripgrep ca-certificates util-linux \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -g 1000 worker && useradd -m -u 1000 -g 1000 worker
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 WORKDIR /opt/chief-worker
-COPY --from=build /build/node_modules ./node_modules
-COPY --from=build /build/dist ./dist
-COPY package.json ./
-COPY --from=build /build/secure-process.node ./secure-process.node
-COPY deploy/coding/security-smoke.mjs ./security-smoke.mjs
-USER node
-CMD ["node", "--disable-sigusr1", "/opt/chief-worker/dist/coding/worker.js"]
+COPY coding_runtime/requirements-dev.txt ./requirements-dev.txt
+RUN pip install --no-cache-dir --require-hashes -r requirements-dev.txt
+COPY coding_runtime ./package
+RUN pip install --no-cache-dir --no-deps --no-build-isolation ./package && rm -rf ./package
+USER worker
+CMD ["python", "-I", "-m", "chief_coding_runtime.worker"]
