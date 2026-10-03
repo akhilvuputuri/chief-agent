@@ -171,37 +171,45 @@ export class GatheringBrowsers {
         );
       const id = randomUUID(),
         account = t.accountLabel ?? "default";
-      const profile = (
-        await this.db.query(
-          "SELECT encrypted_state FROM gather_browser_profiles WHERE user_id=$1 AND origin=$2 AND account_label=$3",
-          [user, u.origin, account],
-        )
-      ).rows[0];
-      const state = profile
-        ? decryptBytes(
-            this.key,
-            profile.encrypted_state,
-            this.profileAad(user, u.origin, account),
-          ).toString("utf8")
-        : undefined;
-      await this.db.query(
-        "INSERT INTO gather_browser_sessions(id,user_id,collection_id,target_key,origin,allowed_origins) VALUES($1,$2,$3,$4,$5,$6::jsonb)",
-        [id, user, c.id, t.key, u.origin, JSON.stringify(origins)],
-      );
       try {
-        return observation.parse(
-          await this.client.call(user, id, {
-            kind: "open",
-            url,
-            origins,
-            storageState: state,
-          }),
-        );
+        return await transaction(this.db, async (db) => {
+          // Hold this owner lock through credential consumption and context creation, so forgetting
+          // cannot finish before an in-flight open is registered and can be revoked.
+          await db.query("SELECT id FROM users WHERE id=$1 FOR UPDATE", [user]);
+          const authorized = await db.query(
+            "SELECT c.id FROM work_tasks t JOIN gather_collections c ON c.task_id=t.id AND c.user_id=t.user_id WHERE c.id=$1 AND c.user_id=$2 AND c.task_revision=$3 AND t.revision=$3 AND c.state='active' AND t.status IN ('active','queued','running') FOR UPDATE OF t,c",
+            [c.id, user, c.task_revision],
+          );
+          if (!authorized.rows.length)
+            throw new ToolValidationError("Browser collection changed");
+          const profile = (
+            await db.query(
+              "SELECT encrypted_state FROM gather_browser_profiles WHERE user_id=$1 AND origin=$2 AND account_label=$3",
+              [user, u.origin, account],
+            )
+          ).rows[0];
+          const state = profile
+            ? decryptBytes(
+                this.key,
+                profile.encrypted_state,
+                this.profileAad(user, u.origin, account),
+              ).toString("utf8")
+            : undefined;
+          await db.query(
+            "INSERT INTO gather_browser_sessions(id,user_id,collection_id,target_key,origin,allowed_origins) VALUES($1,$2,$3,$4,$5,$6::jsonb)",
+            [id, user, c.id, t.key, u.origin, JSON.stringify(origins)],
+          );
+          return observation.parse(
+            await this.client.call(user, id, {
+              kind: "open",
+              url,
+              origins,
+              storageState: state,
+            }),
+          );
+        });
       } catch (error) {
-        await this.db.query(
-          "UPDATE gather_browser_sessions SET state='closed' WHERE id=$1 AND user_id=$2",
-          [id, user],
-        );
+        await this.client.call(user, id, { kind: "close" }).catch(() => {});
         throw error;
       }
     }
@@ -555,6 +563,7 @@ export class GatheringBrowsers {
   async forgetProfile(user: string, origin: string, label: string) {
     const revoked: string[] = [];
     await transaction(this.db, async (db) => {
+      await db.query("SELECT id FROM users WHERE id=$1 FOR UPDATE", [user]);
       // Serialize against Done using the same task/collection/session lock order.
       const sessions = (
         await db.query(
@@ -578,7 +587,6 @@ export class GatheringBrowsers {
     return { forgotten: true };
   }
   async forget(user: string, id: string) {
-    // Owner may revoke stored credentials even after the associated task is closed.
     const row = (
       await this.db.query(
         "SELECT s.origin,c.scope,s.target_key FROM gather_browser_sessions s JOIN gather_collections c ON c.id=s.collection_id AND c.user_id=s.user_id WHERE s.id=$1 AND s.user_id=$2",
@@ -589,16 +597,11 @@ export class GatheringBrowsers {
     const target = row.scope.targets.find(
       (t: GatherTarget) => t.key === row.target_key,
     );
-    await this.db.query(
-      "DELETE FROM gather_browser_profiles WHERE user_id=$1 AND origin=$2 AND account_label=$3",
-      [user, row.origin, target?.accountLabel ?? "default"],
+    return this.forgetProfile(
+      user,
+      row.origin,
+      target?.accountLabel ?? "default",
     );
-    await this.db.query(
-      "UPDATE gather_browser_sessions SET state='closed',encrypted_state=NULL,generation=generation+1 WHERE id=$1 AND user_id=$2",
-      [id, user],
-    );
-    await this.client.call(user, id, { kind: "close" }).catch(() => {});
-    return { forgotten: true };
   }
   async closeCollection(user: string, id: string) {
     const rows = (

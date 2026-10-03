@@ -46,6 +46,7 @@ export class BrowserManager {
   private sessions = new Map<string, Session>();
   private browser?: Browser;
   private queue = new SerialQueue();
+  private lifecycle = new SerialQueue();
   constructor(
     private proxy: string,
     private launch = () =>
@@ -62,6 +63,9 @@ export class BrowserManager {
       }),
   ) {}
   async expire() {
+    return this.lifecycle.run("open", () => this.expireSessions());
+  }
+  private async expireSessions() {
     for (const s of this.sessions.values())
       if (Date.now() - s.lastActive > 15 * 60 * 1000) await this.close(s);
     if (!this.sessions.size && this.browser) {
@@ -88,7 +92,7 @@ export class BrowserManager {
       const s = this.get(user, id);
       return this.observe(s);
     }
-    await this.expire();
+    await this.expireSessions();
     if (this.sessions.size >= 2)
       throw new Error("Finish or close a browser before opening another");
     const { url, origins, storageState, state } = z
@@ -387,7 +391,7 @@ export class BrowserManager {
     return this.queue.run(id, async () => {
       const a = command.parse(input) as Record<string, any>;
       if (a.kind === "open" || a.kind === "restore")
-        return this.newSession(user, id, a);
+        return this.lifecycle.run("open", () => this.newSession(user, id, a));
       const s = this.get(user, id);
       if (a.kind === "close") {
         await this.close(s);

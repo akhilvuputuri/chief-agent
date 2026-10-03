@@ -700,6 +700,14 @@
         "caps": ["CAP_SYSLOG"]
       },
       "excludes": {}
+    },
+    {
+      "names": ["chroot"],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [],
+      "includes": {},
+      "excludes": {},
+      "comment": "Chromium sandbox chroot in its own user namespace; host capabilities remain dropped and kernel permission checks remain effective."
     }
   ]
 }

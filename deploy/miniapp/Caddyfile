@@ -1,4 +1,4 @@
-# Only the reviewed static Mini App and authenticated read-only API are public.
+# Only the reviewed static Mini App and authenticated owner API are public.
 companion.188-166-246-143.sslip.io {
 	header {
 		-Server
@@ -6,7 +6,7 @@ companion.188-166-246-143.sslip.io {
 		X-Content-Type-Options nosniff
 		Cache-Control no-store
 	}
-	@mini path /miniapp/ /miniapp/app.js /miniapp/app.css /api/miniapp/*
+	@mini path /miniapp/ /miniapp/app.js /miniapp/app.css /miniapp/browser-ui.js /api/miniapp/*
 	handle @mini {
 		reverse_proxy 127.0.0.1:3000
 	}

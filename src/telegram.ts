@@ -790,12 +790,22 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
             ["ChatGPT", "Anthropic", "DigitalOcean"],
           );
           const caption = ctx.message.caption ?? "";
+          // Only a reply to a gathering delivery, or an explicit collection/task reference,
+          // supplies gathering context. An unrelated paused collection is not upload intent.
+          const contextText =
+            caption + " " + (ctx.message.reply_to_message?.text ?? "");
+          const contextIds = [
+            ...contextText.matchAll(
+              /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
+            ),
+          ].map((m) => m[0]);
           const gatheringActive =
             assistant.tools.gathering &&
+            contextIds.length > 0 &&
             (
               await db.query(
-                "SELECT 1 FROM gather_collections c JOIN work_tasks t ON t.id=c.task_id AND t.user_id=c.user_id WHERE c.user_id=$1 AND c.state='active' AND t.status NOT IN ('done','cancelled') LIMIT 1",
-                [user],
+                "SELECT 1 FROM gather_collections c JOIN work_tasks t ON t.id=c.task_id AND t.user_id=c.user_id WHERE c.user_id=$1 AND (c.id=ANY($2::uuid[]) OR c.task_id=ANY($2::uuid[])) AND c.state='active' AND t.status NOT IN ('done','cancelled') LIMIT 1",
+                [user, contextIds.slice(0, 10)],
               )
             ).rows.length > 0;
           if (

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { chromium } from "playwright-core";
 import { BrowserManager } from "./dist/browser/manager.js";
 const browser = await chromium.launch({
@@ -11,7 +12,16 @@ try {
   const sandbox = await browser.newPage();
   await sandbox.goto("chrome://sandbox");
   const text = await sandbox.locator("body").innerText();
-  assert.match(text, /Namespace Sandbox\s+Yes/);
+  assert.ok(
+    /Namespace Sandbox\s+Yes/.test(text) ||
+      /Layer 1 Sandbox\s+Namespace/.test(text),
+  );
+  assert.match(text, /PID namespaces\s+Yes/);
+  assert.match(text, /Network namespaces\s+Yes/);
+  assert.notEqual(
+    spawnSync("/usr/sbin/chroot", ["/", "/usr/bin/true"]).status,
+    0,
+  );
   assert.match(text, /Seccomp-BPF sandbox\s+Yes/);
   await sandbox.close();
   const manager = new BrowserManager("http://127.0.0.1:9", async () => browser);
@@ -34,7 +44,7 @@ try {
             "content-type": "application/pdf",
             "content-disposition": "attachment; filename=invoice.pdf",
           },
-          body: Buffer.from("%PDF-1.4\nSynthetic invoice\n"),
+          body: pdf,
         });
       return route.fulfill({
         contentType: "text/html",
@@ -43,6 +53,7 @@ try {
     });
     return context;
   };
+  const pdf = Buffer.from("%PDF-1.4\nSynthetic owner-only invoice download\n");
   const user = "synthetic",
     id = "00000000-0000-4000-8000-000000000001";
   const opened = await manager.call(user, id, {
@@ -62,7 +73,21 @@ try {
   await manager.call(user, id, { kind: "owner" });
   const frame = await manager.call(user, id, { kind: "frame" });
   assert.equal(frame.width, 1280);
+  const downloaded = context.pages()[0].waitForEvent("download");
+  await context
+    .pages()[0]
+    .getByRole("link", { name: "Download invoice PDF" })
+    .click();
+  await downloaded;
   const saved = await manager.call(user, id, { kind: "done" });
+  const files = await manager.call(user, id, { kind: "downloads" });
+  assert.equal(files.files.length, 1);
+  const originalPdf = await manager.call(user, id, {
+    kind: "owner_file",
+    id: files.files[0].id,
+  });
+  assert.deepEqual(Buffer.from(originalPdf.data, "base64"), pdf);
+  await manager.call(user, id, { kind: "ack_file", id: files.files[0].id });
   assert.equal(typeof saved.storageState, "string");
   await assert.rejects(() =>
     manager.call(user, id, { kind: "text", text: "after handoff" }),
@@ -80,6 +105,8 @@ try {
     JSON.stringify({
       nonRoot: true,
       namespaceSandbox: true,
+      hostChrootDenied: true,
+      originalOwnerDownload: true,
       seccompSandbox: true,
       ownerIsolation: true,
       ownerOnlyInput: true,

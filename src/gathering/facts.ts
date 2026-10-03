@@ -162,9 +162,26 @@ export function privateInvoiceIntake(
   facts: InvoiceFacts,
   active: boolean,
 ) {
+  const explicitFinancial =
+    /\b(invoice|receipt|billing statement|gather|collect)\b/i.test(caption);
+  const strongFinancial =
+    facts.invoiceHeading &&
+    facts.invoiceNumbers.length > 0 &&
+    facts.invoiceDates.length > 0;
+  if (
+    /\b(resume|cv|cover letter|research paper|review (?:my |this )?(?:report|document))\b/i.test(
+      caption,
+    ) &&
+    !strongFinancial &&
+    !explicitFinancial
+  )
+    return false;
   return (
-    active ||
-    facts.invoiceHeading ||
-    /\b(invoice|receipt|billing statement|gather|collect)\b/i.test(caption)
+    explicitFinancial ||
+    strongFinancial ||
+    (facts.invoiceHeading &&
+      facts.amounts.length > 0 &&
+      facts.dates.length > 0) ||
+    active
   );
 }

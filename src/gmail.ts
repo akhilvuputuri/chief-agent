@@ -578,6 +578,7 @@ export class GmailTools {
         "This PDF attachment is unavailable or larger than 20 MB",
       );
     let encoded = file.body.data;
+    let responseSize: number | undefined;
     if (!encoded) {
       const attachment = file.body.attachmentId;
       if (!attachment || !/^[A-Za-z0-9_-]{1,512}$/.test(attachment))
@@ -592,6 +593,7 @@ export class GmailTools {
       if (response.size > 20 * 1024 * 1024)
         throw new ToolValidationError("Attachment is larger than 20 MB");
       encoded = response.data;
+      responseSize = response.size;
     }
     if (encoded.length > 28_000_000 || !/^[A-Za-z0-9_=-]*$/.test(encoded))
       throw new ToolValidationError(
@@ -601,7 +603,8 @@ export class GmailTools {
     if (
       !data.length ||
       data.length > 20 * 1024 * 1024 ||
-      (file.bytes && data.length !== file.bytes)
+      (file.bytes && data.length !== file.bytes) ||
+      (responseSize !== undefined && data.length !== responseSize)
     )
       throw new ToolValidationError("Attachment size did not match");
     return { name: file.name, data };

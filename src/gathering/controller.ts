@@ -291,8 +291,6 @@ export class Gathering {
     run: string,
     a: Extract<GatherAction, { operation: "gather_revise" }>,
   ) {
-    const old = await this.prior(user, a.id, a.requestKey, a);
-    if (old) return old;
     const c = await this.collection(user, a.id),
       turn = await this.turn(user, run);
     if (
@@ -307,6 +305,12 @@ export class Gathering {
       throw new ToolValidationError(
         "Only an owner follow-up can revise gathering",
       );
+    if (turn.task_id && turn.task_id !== c.task_id)
+      throw new ToolValidationError(
+        "Collection is outside this turn assignment",
+      );
+    const old = await this.prior(user, a.id, a.requestKey, a);
+    if (old) return old;
     if (
       c.task_revision !== a.baseRevision ||
       ["done", "cancelled", "running"].includes(c.task_status) ||
@@ -450,7 +454,7 @@ export class Gathering {
       fileCount: items.filter((i) => i.target_key === t.key).length,
       candidates: candidates
         .filter((i) => i.target_key === t.key)
-        .slice(0, 5)
+        .slice(0, full ? 100 : 5)
         .map((i) => ({
           ...i,
           facts: full
@@ -989,7 +993,7 @@ export class Gathering {
     ).rows;
     const candidates = (
       await this.db.query(
-        "SELECT g.artifact_id,g.facts,a.kind,a.metadata FROM gather_candidates g JOIN gather_attempts a ON a.id=g.attempt_id AND a.user_id=g.user_id WHERE g.collection_id=$1 AND g.user_id=$2 AND g.target_key=$3 AND a.scope_revision=$4",
+        "SELECT DISTINCT g.artifact_id,g.facts,a.kind,a.metadata FROM gather_candidates g JOIN gather_attempts a ON a.collection_id=g.collection_id AND a.target_key=g.target_key AND a.user_id=g.user_id AND a.metadata->>'artifactId'=g.artifact_id::text WHERE g.collection_id=$1 AND g.user_id=$2 AND g.target_key=$3 AND a.scope_revision=$4",
         [c.id, user, t.key, c.task_revision],
       )
     ).rows;
@@ -1066,7 +1070,8 @@ export class Gathering {
       );
       if (
         !confirmed ||
-        browserFiles.length !== confirmed.metadata.ownerConfirmedCount
+        new Set(browserFiles.map((x) => x.artifact_id)).size !==
+          confirmed.metadata.ownerConfirmedCount
       )
         throw new ToolValidationError(
           "Browser coverage needs the owner's expected invoice count for this account/month, and that many distinct matched PDFs. Use the handoff view to confirm the count.",

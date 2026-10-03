@@ -23,5 +23,6 @@ COPY --from=build /app/dist/browser ./dist/browser
 COPY --from=build /app/dist/security.js ./dist/security.js
 COPY --from=build /app/dist/gathering/facts.js ./dist/gathering/facts.js
 COPY scripts/browser-smoke.mjs ./browser-smoke.mjs
+ENV XDG_CONFIG_HOME=/tmp/chromium-config XDG_CACHE_HOME=/tmp/chromium-cache
 USER node
 CMD ["node", "dist/browser/service.js"]
