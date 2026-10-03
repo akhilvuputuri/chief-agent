@@ -1,3 +1,7 @@
+## Candidate v0.3.38 — fixed Python coding squad
+
+Chief dispatches to a dedicated leader, which assigns the fixed coder/reviewer members with separate histories, typed handoffs and restricted permissions. Exact checks/review gates and owner requirement confirmation remain authoritative. Shared limits/price filters unchanged. Migration 027/Compose list require a reviewed idle operator install; new Python image/squad pin, review and release pending. Coding off, no paid/live acceptance. See [journal 61](journey/61-coding-squad.md).
+
 ## Released v0.3.37 — read-only IBKR holdings and stock lookup
 
 - **Read-only IBKR holdings ([PR #152](https://github.com/akhilvuputuri/chief-agent/pull/152), issue #146).**

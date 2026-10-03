@@ -31,3 +31,5 @@ Fresh main `c3cea89d0a666ba1b64bb9235648358fce27ce7d` incorporates the IBKR port
 Browser-service code/image or seccomp changes require the reviewed sidecar rebuild/proof/install path. The ordinary release handler rebuilds the gateway; its success alone does not verify or upgrade the separate browser/proxy images. Record their exact image IDs during operator rollout. Extending the shared release path to version and upgrade these services with owner-session guards remains a cloud/local operations follow-up.
 
 Main `baa5a72f024cb1200a20a24627e4b418b3c58472` ships the v0.3.37 stock lookup, with stock rules reserving migration 027 and journal 60. Gathering therefore uses **028** and journal **61** on that incorporated baseline; its package version advances to v0.3.38. Prior numbering above is historical.
+
+Main `3b3bf8ca2a482e067a924b3b20e81adcab49b37e` incorporates coding migration 027/journal 61 and v0.3.38. Gathering retains migration **028**, uses journal **62**, and advances its candidate package to **0.3.39**. Existing coding remains off and unchanged.

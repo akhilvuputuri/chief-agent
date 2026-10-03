@@ -79,6 +79,8 @@ services:
         "-f",
         "/migrations/026_portfolio.sql",
         "-f",
+        "/migrations/027_coding_squad.sql",
+        "-f",
         "/migrations/028_gathering.sql",
       ]
     depends_on:

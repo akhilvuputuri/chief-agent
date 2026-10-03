@@ -62,3 +62,7 @@ The refactor changes execution only; Chief dispatch, persistence and publication
 ## Conversational requirement confirmation — v0.3.36
 
 The host confirmation change merged in PR #157 after exact-head Astra approval and Linux CI for v0.3.36. Existing coding event JSON stores immutable proposal/decision metadata; no DB/Compose change is required. Python package 0.1.1 requires a non-empty planning brief and preserves the approved plan during implementation. Its new image passed independent anonymous verification and exact-head pin review in PR #158; the exact application release at `67db5e135c99eee85a10416dbe159ce93432eee0`, separate health/policy checks and immutable v0.3.36 tag passed. Coding remains off: the provisioning login and scoped provider/App/ingress setup still need completion. See [journal 58](journey/58-coding-requirements.md).
+
+## Three-member squad candidate
+
+The [squad contract](coding-squad.md) adds a dedicated model leader with fixed coder/reviewer members. Migration 027, exact review/operator installation and a new image/squad pin are pending. Existing source settings still use the legacy two-role worker until that reviewed transition. Coding remains off.

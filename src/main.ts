@@ -327,6 +327,15 @@ if (c.CODING_RUNTIME === "on") {
       "STARTUP_CODING_IMAGE",
       "Coding needs a reviewed immutable worker image digest",
     );
+  if (
+    settings.squad &&
+    !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=27")).rows
+      .length
+  )
+    throw startupError(
+      "STARTUP_MIGRATION_027",
+      "Coding squad migration 027 must be installed before activation",
+    );
   const provider = new CodeBuildSandbox(
     new CodeBuildClient({ region: c.CODING_AWS_REGION, maxAttempts: 1 }),
     c.CODING_CODEBUILD_PROJECT,

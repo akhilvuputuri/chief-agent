@@ -1,4 +1,4 @@
-# 61 — Gathering files without losing scope or coverage
+# 62 — Gathering files without losing scope or coverage
 
 Work dates: 3–4 October 2026. Status: implementation candidate; not deployed.
 
@@ -55,3 +55,5 @@ A root regression also checks byte-different regenerated PDFs carrying the same 
 Fresh main advanced again to `baa5a72f024cb1200a20a24627e4b418b3c58472` with the v0.3.37 stock lookup and portfolio activation closure. That baseline is incorporated. Stock rules reserve 027/journal 60; gathering uses **028/journal 61** and prepares v0.3.38. The claim is recorded on PR160. Existing IBKR on-state, stock capabilities and release notes remain intact; no stock rule schema is installed by gathering. Final combined-head checks/review and exact-image proofs remain required before release.
 
 Astra's `0f9b298` review reproduced a specific Claude Max target accepting Claude Pro. Named subscription plans now require plan-specific evidence; explicit conflicting plans are refused, while generic provider requests remain broad and unknown plan clues require owner target verification. The same rule applies to named ChatGPT plans. Whole-workflow and parser regressions cover the distinction.
+
+Main `3b3bf8ca2a482e067a924b3b20e81adcab49b37e` then integrated the coding squad with migration 027 and journal 61. Its source/deployed release was refreshed and incorporated. Gathering retains **028**, moves its candidate journal to **62**, and prepares v0.3.39 after the coding v0.3.38 milestone. The gathering code and one-time operator artifact were Astra-approved at `57b0452` / `bf66f4bf7368194f42909373e71579ec278485db916d6d586d1821ba994438e9`; review/checks must be repeated on this integrated head. No coding activation or allocation/filter change is part of gathering.

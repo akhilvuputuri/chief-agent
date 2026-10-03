@@ -100,7 +100,7 @@ class WorkerClient:
                     raise
                 await cancellable(asyncio.sleep(self.retry_delay), self.stop)
 
-    def adapter(self, role: Literal["coder", "reviewer"]) -> ChiefOpenRouter:
+    def adapter(self, role: Literal["leader", "coder", "reviewer"]) -> ChiefOpenRouter:
         return ChiefOpenRouter(self, role)
 
 
@@ -108,7 +108,7 @@ class ChiefOpenRouter:
     """Production adapter uses Chief's journalled OpenRouter proxy and price policy."""
 
     def __init__(
-        self, client: WorkerClient, role: Literal["coder", "reviewer"]
+        self, client: WorkerClient, role: Literal["leader", "coder", "reviewer"]
     ) -> None:
         self.client, self.role = client, role
 

@@ -1,3 +1,4 @@
+import { squadState } from "./squad-schema.js";
 import { z } from "zod";
 
 const id = z.string().uuid();
@@ -48,6 +49,7 @@ export const checkpoint = z
     plan: z.string().max(32000).default(""),
     patch: z.string().max(500000).default(""),
     summary: z.string().max(4000).default(""),
+    squadState: squadState.optional(),
     files: z
       .array(
         z
@@ -117,6 +119,8 @@ export const codingSettings = z
       .or(z.literal("")),
     model: z.string().min(1).max(120),
     reviewerModel: z.string().min(1).max(120),
+    leaderModel: z.string().min(1).max(120).optional(),
+    squad: z.boolean().optional(),
     runtime: z.enum(["node", "python"]).optional(),
     effort: z.enum(["low", "medium", "high"]),
     limits: z

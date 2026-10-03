@@ -1,0 +1,23 @@
+# Three-member Python coding squad
+
+Chief is the TypeScript conversation and durable control service. The independent Python executor contains exactly three model roles: leader, coder and reviewer. All use the job-scoped OpenRouter gateway; provider, GitHub and production credentials remain on Chief. The leader is Chief’s only task-facing squad member. Role histories are independent and the members run sequentially in one disposable CodeBuild environment.
+
+## Roles and flow
+
+The leader reads the repository, prepares the requirement brief and requests necessary clarification through Chief. Planning cannot delegate implementation. The owner confirms the complete brief through the existing bound Telegram card/direct reply. A fresh implementation attempt starts the leader, which can read context and assign only the fixed coder/reviewer members. It cannot write files, run arbitrary shell, create members, choose models, publish or bypass approval.
+
+The coder edits the approved scope with bounded file/command tools and returns a candidate. The deterministic runtime saves the artifact, verifies the pinned base and runs `npm ci`, `check`, `build`, `format:check`. Failures return typed evidence to the leader for another coder assignment. The leader can assign the reviewer only with the latest candidate hash and passing checks. Review uses a separate restored checkout and empty conversation, read-only tools and the complete approved plan. Requested changes return to the leader, then coder, verification and fresh review. The leader may report completion only after exact current-artifact review approval. Chief’s trusted host creates a draft PR; it still requires CI and independent published-head review before any merge/deployment.
+
+The shared allocation remains 900000ms, 40 model calls and 100 tool calls across all members. Dispatch tools also consume the shared tool allocation. No dollar cap or automatic budget increase is introduced. `config/coding.json` controls `squad`, `leaderModel`, coder `model` and `reviewerModel`; the planned pin uses DeepSeek V4.1 Flash for leader/coder and GPT-6.1 Sol for reviewer. Members cannot alter this mapping.
+
+## Handoff and recovery contract
+
+Strict typed handoffs contain an ID, leader sender, fixed recipient, bounded instructions and exact candidate hash for review. Private `checkpoint.squadState` records the fenced attempt/revision/scope, monotonically increasing sequence, candidate version/hash, current phase, handoff, tools used, check results, reviewer report and unresolved findings. Checkpoint writes compare the previous checkpoint atomically; identical retries do not duplicate handoff events. Host validation rejects stale scope/attempt/sequence, illegal phases, review without passing checks, stale artifact approval and completion without the latest acknowledged approved state. Private suppressed events retain the transition history; Chief status exposes bounded phase/member/check metadata.
+
+Only acknowledged snapshots are recovery authority. A started/uncertain dispatch pauses rather than being automatically repeated. Explicit owner resume restores saved files and findings into fresh contexts; it clears old review authority and begins at the leader. Scope changes invalidate recovery metadata. Paused tasks do not resume automatically, and members share cancellation/deadline handling. These guarantees are tested with synthetic transports; live provider quality and first CodeBuild execution remain separate acceptance work.
+
+## Reviewed rollout
+
+The migration 027 widens only the private model-call role constraint to include leader. Historical migrations/data remain intact. The Compose delta adds only that migration to the list. `scripts/deploy-coding-squad.py` accepts a bounded exact-commit archive plus independently verified SHA-256, checks the recorded production baseline, rejects unrelated DB/Compose/release-handler changes, builds before stopping, refuses active main/coding work and retains migration 027 on an app rollback. Run its offline regression via the normal JS script tests. Never bypass the normal release guard for DB/Compose differences.
+
+After exact-head independent review and passing CI, use the reviewed idle operator installation, verify marker/health/preservation and the normal exact release receipt. Publish the Python 0.1.2 image from trusted main, verify anonymous immutable identity and pin it together with `squad: true`/leader model in a reviewed follow-up. Existing settings without squad retain their legacy worker/image path. Default-off installation does not activate paid execution; scoped provider/App/auth/ingress setup and a separately requested live acceptance job are still required.
