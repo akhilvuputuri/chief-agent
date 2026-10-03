@@ -171,7 +171,7 @@ export function runtimeContext(
               gather_capture:
                 "Capture a provided artifact, an inspected email PDF part or an observed browser download into the encrypted private collection. requestKey is unique and reused only for an exact retry. Original bytes do not enter model/history context. Candidate capture is not a match or a coverage check.",
               gather_match:
-                "Match a captured PDF to its exact target using recorded issuer and invoice-date/service-period clues. No inferred dates or unknown prices. requestKey is unique per mutation. Unreadable, truncated or ambiguous files stay unverified; match alone does not establish complete source coverage.",
+                "Match a captured PDF to its exact target using recorded issuer/product and invoice-date/service-period clues. Conflicting products are refused; ambiguous shared-vendor PDFs and selected accounts require owner target verification. No inferred dates or unknown prices. requestKey is unique per mutation. Unreadable, truncated or ambiguous files stay unverified; match alone does not establish complete source coverage.",
               gather_check:
                 "Check coverage independently of finding files: provided inputs must all be inspected; scoped email pages and PDF parts must be exhausted in every selected mailbox; browser coverage uses an explicit owner-confirmed invoice count for that account/month. Do not claim an account census. Every potentially relevant file must be matched or resolved first.",
               gather_block:

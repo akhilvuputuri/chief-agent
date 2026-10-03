@@ -32,7 +32,7 @@ export async function gatheringApi(
   api.get("/gathering/:id", async (req) =>
     gather.status(owner(req), idParam(req.params), 0, true),
   );
-  api.post("/gathering/:id/account", async (req) => {
+  api.post("/gathering/:id/verify-target", async (req) => {
     const body = z
       .object({
         targetKey: z.string().min(1).max(64),
@@ -42,7 +42,7 @@ export async function gatheringApi(
       })
       .strict()
       .parse(req.body);
-    return gather.verifyAccount(
+    return gather.verifyTarget(
       owner(req),
       idParam(req.params),
       body.targetKey,

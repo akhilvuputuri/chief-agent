@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS gather_candidates (
  FOREIGN KEY(artifact_id,user_id) REFERENCES file_artifacts(id,user_id),
  FOREIGN KEY(attempt_id,user_id) REFERENCES gather_attempts(id,user_id)
 );
-CREATE TABLE IF NOT EXISTS gather_account_verifications (
+CREATE TABLE IF NOT EXISTS gather_target_verifications (
  collection_id uuid NOT NULL,target_key text NOT NULL,user_id text NOT NULL,artifact_id uuid NOT NULL,
  scope_revision integer NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),
  PRIMARY KEY(collection_id,target_key,artifact_id,scope_revision),
@@ -73,10 +73,17 @@ CREATE TABLE IF NOT EXISTS gather_items (
  FOREIGN KEY(artifact_id,user_id) REFERENCES file_artifacts(id,user_id)
 );
 CREATE TABLE IF NOT EXISTS gather_mutations (
- collection_id uuid NOT NULL,user_id text NOT NULL,request_key text NOT NULL,request_hash text NOT NULL,
+ collection_id uuid NOT NULL,user_id text NOT NULL,request_key text NOT NULL,request_hash text NOT NULL,scope_revision integer NOT NULL DEFAULT 1,
  result jsonb NOT NULL,PRIMARY KEY(collection_id,request_key),
  FOREIGN KEY(collection_id,user_id) REFERENCES gather_collections(id,user_id) ON DELETE CASCADE
 );
+CREATE OR REPLACE FUNCTION gather_mutation_scope() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ SELECT task_revision INTO NEW.scope_revision FROM gather_collections WHERE id=NEW.collection_id AND user_id=NEW.user_id;
+ RETURN NEW;
+END; $$;
+DROP TRIGGER IF EXISTS gather_mutation_scope_trigger ON gather_mutations;
+CREATE TRIGGER gather_mutation_scope_trigger BEFORE INSERT ON gather_mutations FOR EACH ROW EXECUTE FUNCTION gather_mutation_scope();
 CREATE TABLE IF NOT EXISTS gather_browser_sessions (
  id uuid PRIMARY KEY,user_id text NOT NULL,collection_id uuid NOT NULL,target_key text NOT NULL,
  origin text NOT NULL,encrypted_state bytea,state text NOT NULL DEFAULT 'readonly' CHECK(state IN ('readonly','owner','closed')),

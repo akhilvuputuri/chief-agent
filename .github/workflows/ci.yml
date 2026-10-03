@@ -29,7 +29,7 @@ jobs:
       - name: Verify isolated browser sandbox with synthetic pages
         run: |
           docker build -f Dockerfile.browser --target browser -t chief-browser:test .
-          docker run --rm --init --read-only --tmpfs /tmp:size=192m,mode=1777 --shm-size=192m --cap-drop=ALL --security-opt=no-new-privileges --security-opt=seccomp=deploy/browser/seccomp.json --memory=640m --pids-limit=192 --entrypoint node chief-browser:test /app/browser-smoke.mjs
+          docker run --rm --init --network=none --read-only --tmpfs /tmp:size=192m,mode=1777 --shm-size=192m --cap-drop=ALL --security-opt=no-new-privileges --security-opt=seccomp=deploy/browser/seccomp.json --memory=640m --pids-limit=192 --entrypoint node chief-browser:test /app/browser-smoke.mjs
 
       - name: Verify PostgreSQL gathering revocation interleaving
         run: |

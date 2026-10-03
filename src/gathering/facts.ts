@@ -11,9 +11,13 @@ export type InvoiceFacts = {
   amounts: { currency: string; amount: string }[];
   invoiceNumbers: string[];
   issuerLabels: string[];
+  productLabels: string[];
 };
 const aliases: Record<string, string[]> = {
   chatgpt: ["openai"],
+  openaiapi: ["openai"],
+  anthropicapi: ["anthropic"],
+  claudeapi: ["anthropic", "claude"],
   claude: ["anthropic"],
   anthropic: ["anthropic"],
   digitalocean: ["digitalocean", "digital ocean"],
@@ -137,6 +141,24 @@ export function invoiceFacts(
     serviceMonths: [...new Set(serviceBlocks.flatMap(monthsIn))].slice(0, 36),
     amounts,
     invoiceNumbers,
+    productLabels: [
+      ...(/\bchatgpt\b/i.test(text) ? ["ChatGPT"] : []),
+      ...(/\bopenai\b/i.test(text) &&
+      /\b(?:openai\s+api|api\s+(?:usage|credits?|charges|billing)|token\s+usage)\b/i.test(
+        text,
+      )
+        ? ["OpenAI API"]
+        : []),
+      ...(/\b(?:anthropic|claude)\b/i.test(text) &&
+      /\b(?:(?:anthropic|claude)\s+api|api\s+(?:usage|credits?|charges|billing)|token\s+usage)\b/i.test(
+        text,
+      )
+        ? ["Claude API"]
+        : []),
+      ...(/\bclaude\s+(?:pro|max|team|enterprise|subscription)\b/i.test(text)
+        ? ["Claude subscription"]
+        : []),
+    ],
     issuerLabels: [...new Set(labels)]
       .filter((label) =>
         issuerTerms(label).some((term) => lower.includes(term)),
@@ -184,4 +206,35 @@ export function privateInvoiceIntake(
       facts.dates.length > 0) ||
     active
   );
+}
+
+/** Vendor search aliases do not establish the requested product. */
+export function productEvidence(
+  facts: InvoiceFacts,
+  label: string,
+): "exact" | "ambiguous" | "conflict" {
+  const normalized = label.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const expected =
+    normalized === "chatgpt"
+      ? "ChatGPT"
+      : normalized === "openaiapi"
+        ? "OpenAI API"
+        : ["anthropicapi", "claudeapi"].includes(normalized)
+          ? "Claude API"
+          : [
+                "claude",
+                "claudepro",
+                "claudemax",
+                "claudeteam",
+                "claudesubscription",
+              ].includes(normalized)
+            ? "Claude subscription"
+            : undefined;
+  if (!expected) return "exact";
+  const family = expected.startsWith("Claude")
+    ? ["Claude API", "Claude subscription"]
+    : ["ChatGPT", "OpenAI API"];
+  const found = (facts.productLabels ?? []).filter((p) => family.includes(p));
+  if (found.length && !found.includes(expected)) return "conflict";
+  return found.length === 1 && found[0] === expected ? "exact" : "ambiguous";
 }

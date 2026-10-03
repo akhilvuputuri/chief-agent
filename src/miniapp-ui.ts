@@ -801,9 +801,21 @@ async function gathering(id?: string, offset = 0) {
           "muted",
         ),
       );
-      if (target.accountLabel && candidate.account_verified)
+      if (candidate.targetConflict)
         box.append(
-          el("p", `Account verified by you: ${target.accountLabel}`, "muted"),
+          el(
+            "p",
+            "This PDF identifies a different product. It cannot match this target.",
+            "muted",
+          ),
+        );
+      if (candidate.target_verified)
+        box.append(
+          el(
+            "p",
+            `Target verified by you: ${target.label}${target.accountLabel ? " · " + target.accountLabel : ""}`,
+            "muted",
+          ),
         );
       box.append(
         btn("Download unverified candidate PDF", () =>
@@ -813,27 +825,32 @@ async function gathering(id?: string, offset = 0) {
         ),
       );
       if (
-        target.accountLabel &&
-        !candidate.account_verified &&
+        candidate.needsTargetVerification &&
+        !candidate.targetConflict &&
+        !candidate.target_verified &&
         !["complete", "cancelled"].includes(data.state)
       ) {
         const verify = btn(
-          `Verify account for this PDF: ${target.accountLabel}`,
+          `Verify this PDF belongs to ${target.label}${target.accountLabel ? " · " + target.accountLabel : ""}`,
           () => {
             verify.disabled = true;
             const confirm = btn(
-              `I inspected this PDF: it belongs to ${target.accountLabel}`,
+              `I inspected this PDF: ${target.label}${target.accountLabel ? " · " + target.accountLabel : ""}`,
               () => {
                 confirm.disabled = true;
-                void api("/gathering/" + id + "/account", controller.signal, {
-                  method: "POST",
-                  body: JSON.stringify({
-                    targetKey: target.key,
-                    artifactId: candidate.artifact_id,
-                    revision: data.revision,
-                    confirmed: true,
-                  }),
-                })
+                void api(
+                  "/gathering/" + id + "/verify-target",
+                  controller.signal,
+                  {
+                    method: "POST",
+                    body: JSON.stringify({
+                      targetKey: target.key,
+                      artifactId: candidate.artifact_id,
+                      revision: data.revision,
+                      confirmed: true,
+                    }),
+                  },
+                )
                   .then(() => gathering(id))
                   .catch(showError);
               },
@@ -841,7 +858,7 @@ async function gathering(id?: string, offset = 0) {
             box.append(
               el(
                 "p",
-                `Download and inspect the PDF above. Confirm its provider account is ${target.accountLabel} for ${target.label}, ${target.month}. This does not confirm coverage.`,
+                `Download and inspect this PDF. Confirm the product is ${target.label}${target.accountLabel ? " and the account is " + target.accountLabel : ""}, ${target.month}. Dates and coverage are checked separately.`,
               ),
               confirm,
             );

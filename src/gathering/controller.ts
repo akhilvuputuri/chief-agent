@@ -9,6 +9,7 @@ import {
   datesIn,
   issuerTerms,
   invoiceFacts,
+  productEvidence,
   type InvoiceFacts,
 } from "./facts.js";
 import {
@@ -109,7 +110,7 @@ export class Gathering {
   private async prior(user: string, id: string, key: string, value: unknown) {
     const old = (
       await this.db.query(
-        "SELECT request_hash,result FROM gather_mutations WHERE collection_id=$1 AND user_id=$2 AND request_key=$3",
+        "SELECT m.request_hash,m.result,m.scope_revision,c.task_revision FROM gather_mutations m JOIN gather_collections c ON c.id=m.collection_id AND c.user_id=m.user_id WHERE m.collection_id=$1 AND m.user_id=$2 AND m.request_key=$3",
         [id, user, key],
       )
     ).rows[0];
@@ -117,6 +118,12 @@ export class Gathering {
     if (old.request_hash !== hash(value))
       throw new ToolValidationError(
         "Request key was already used for different gathering data",
+      );
+    const revisionResult =
+      (value as { operation?: string }).operation === "gather_revise";
+    if (old.task_revision !== old.scope_revision + (revisionResult ? 1 : 0))
+      throw new ToolValidationError(
+        "This mutation belongs to a superseded scope; inspect the current collection and use a new request key",
       );
     return { ...old.result, duplicate: true };
   }
@@ -371,7 +378,7 @@ export class Gathering {
     return result ?? (await this.lostMutation(user, id, requestKey, a));
   }
   /** Only the authenticated owner UI can attest account identity; no model tool exposes this method. */
-  async verifyAccount(
+  async verifyTarget(
     user: string,
     id: string,
     targetKey: string,
@@ -389,10 +396,10 @@ export class Gathering {
         (t: GatherTarget) => t.key === targetKey,
       );
       if (
-        !target?.accountLabel ||
+        !target ||
         !(
           await db.query(
-            "SELECT 1 FROM gather_candidates g JOIN gather_attempts a ON a.id=g.attempt_id AND a.user_id=g.user_id WHERE g.collection_id=$1 AND g.user_id=$2 AND g.target_key=$3 AND g.artifact_id=$4 AND a.scope_revision=$5",
+            "SELECT g.facts FROM gather_candidates g JOIN gather_attempts a ON a.id=g.attempt_id AND a.user_id=g.user_id WHERE g.collection_id=$1 AND g.user_id=$2 AND g.target_key=$3 AND g.artifact_id=$4 AND a.scope_revision=$5",
             [id, user, targetKey, artifactId, revision],
           )
         ).rows.length
@@ -400,11 +407,25 @@ export class Gathering {
         throw new ToolValidationError(
           "This candidate or account scope changed; reopen the invoice view",
         );
+      const candidate = (
+        await db.query(
+          "SELECT facts FROM gather_candidates WHERE collection_id=$1 AND user_id=$2 AND target_key=$3 AND artifact_id=$4",
+          [id, user, targetKey, artifactId],
+        )
+      ).rows[0];
+      if (productEvidence(candidate.facts, target.label) === "conflict")
+        throw new ToolValidationError(
+          "This PDF explicitly identifies a different product; revise the target or supply the correct invoice",
+        );
       await db.query(
-        "INSERT INTO gather_account_verifications(collection_id,target_key,user_id,artifact_id,scope_revision) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING",
+        "INSERT INTO gather_target_verifications(collection_id,target_key,user_id,artifact_id,scope_revision) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING",
         [id, targetKey, user, artifactId, revision],
       );
-      return { verified: true, accountLabel: target.accountLabel };
+      return {
+        verified: true,
+        product: target.label,
+        accountLabel: target.accountLabel,
+      };
     });
   }
   async status(user: string, id?: string, offset = 0, full = false) {
@@ -435,7 +456,7 @@ export class Gathering {
     ).rows;
     const candidates = (
       await this.db.query(
-        "SELECT c.target_key,c.artifact_id,c.facts,a.name,a.bytes,EXISTS(SELECT 1 FROM gather_account_verifications v WHERE v.collection_id=c.collection_id AND v.target_key=c.target_key AND v.user_id=c.user_id AND v.artifact_id=c.artifact_id AND v.scope_revision=$3) account_verified FROM gather_candidates c JOIN gather_attempts p ON p.id=c.attempt_id AND p.user_id=c.user_id JOIN file_artifacts a ON a.id=c.artifact_id AND a.user_id=c.user_id WHERE c.collection_id=$1 AND c.user_id=$2 AND p.scope_revision=$3 ORDER BY c.target_key,a.name,a.id",
+        "SELECT c.target_key,c.artifact_id,c.facts,a.name,a.bytes,EXISTS(SELECT 1 FROM gather_target_verifications v WHERE v.collection_id=c.collection_id AND v.target_key=c.target_key AND v.user_id=c.user_id AND v.artifact_id=c.artifact_id AND v.scope_revision=$3) target_verified FROM gather_candidates c JOIN gather_attempts p ON p.id=c.attempt_id AND p.user_id=c.user_id JOIN file_artifacts a ON a.id=c.artifact_id AND a.user_id=c.user_id WHERE c.collection_id=$1 AND c.user_id=$2 AND p.scope_revision=$3 ORDER BY c.target_key,a.name,a.id",
         [id, user, c.task_revision],
       )
     ).rows;
@@ -457,9 +478,14 @@ export class Gathering {
         .slice(0, full ? 100 : 5)
         .map((i) => ({
           ...i,
+          targetConflict: productEvidence(i.facts, t.label) === "conflict",
+          needsTargetVerification:
+            !!t.accountLabel ||
+            productEvidence(i.facts, t.label) === "ambiguous",
           facts: full
             ? i.facts
             : {
+                productLabels: i.facts.productLabels,
                 invoiceDates: i.facts.invoiceDates,
                 serviceMonths: i.facts.serviceMonths,
                 issuerLabels: i.facts.issuerLabels,
@@ -836,17 +862,22 @@ export class Gathering {
         )
       ).rows[0];
       const facts = candidate?.facts as InvoiceFacts | undefined;
+      if (facts && productEvidence(facts, t.label) === "conflict")
+        throw new ToolValidationError(
+          "This file explicitly identifies a different product from the requested target",
+        );
       if (
-        t.accountLabel &&
+        facts &&
+        (t.accountLabel || productEvidence(facts, t.label) === "ambiguous") &&
         !(
           await this.db.query(
-            "SELECT 1 FROM gather_account_verifications WHERE collection_id=$1 AND user_id=$2 AND target_key=$3 AND artifact_id=$4 AND scope_revision=$5",
+            "SELECT 1 FROM gather_target_verifications WHERE collection_id=$1 AND user_id=$2 AND target_key=$3 AND artifact_id=$4 AND scope_revision=$5",
             [c.id, user, t.key, a.artifactId, c.task_revision],
           )
         ).rows.length
       )
         throw new ToolValidationError(
-          "The requested account has not been verified by the owner. Ask them to inspect this PDF and verify its account in the Invoices view.",
+          "The requested product/account has not been verified by the owner. Ask them to inspect this PDF and verify the target in the Invoices view.",
         );
       if (
         !facts ||
@@ -1004,7 +1035,9 @@ export class Gathering {
       )
     ).rows.map((r) => r.artifact_id);
     const relevant = (f: InvoiceFacts) =>
-      f.invoiceHeading && f.issuerLabels.includes(t.label);
+      f.invoiceHeading &&
+      f.issuerLabels.includes(t.label) &&
+      productEvidence(f, t.label) !== "conflict";
     for (const candidate of candidates.filter((x) => x.kind === source)) {
       const f = candidate.facts as InvoiceFacts;
       if (

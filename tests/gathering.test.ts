@@ -63,7 +63,7 @@ async function turn(user = "alice", request = "Gather invoices") {
 async function fixture(
   label = "ChatGPT",
   month = "2026-09",
-  text = "OpenAI Invoice number INV-001 Invoice date September 5, 2026 USD 20.00",
+  text = "OpenAI ChatGPT Invoice number INV-001 Invoice date September 5, 2026 USD 20.00",
 ) {
   const f = await vault.put(
     "alice",
@@ -86,7 +86,7 @@ async function fixture(
 }
 test("PDF clues keep dates and amounts without payer/card/address content", () => {
   const f = invoiceFacts(
-    "OpenAI Invoice number INV-7 September 5, 2026 USD 20.00 Bill to Alex Private 123 Main Street Account 1234567890 Card 4111 1111 1111 1111",
+    "OpenAI ChatGPT Invoice number INV-7 September 5, 2026 USD 20.00 Bill to Alex Private 123 Main Street Account 1234567890 Card 4111 1111 1111 1111",
     1,
     false,
     ["ChatGPT"],
@@ -108,7 +108,7 @@ test("vault stores encrypted bytes, enforces owner binding and deduplicates exac
     "alice",
     "123 Main Street.pdf",
     pdf(
-      "OpenAI Invoice number INV-99 September 5, 2026 USD 20.00 4111111111111111",
+      "OpenAI ChatGPT Invoice number INV-99 September 5, 2026 USD 20.00 4111111111111111",
     ),
   );
   const a = await vault.put("alice", f),

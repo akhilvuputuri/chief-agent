@@ -1,14 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHmac } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
 import { Gathering } from "../dist/gathering/controller.js";
 import { FileVault, encryptBytes } from "../dist/gathering/vault.js";
 import { GatheringBrowsers } from "../dist/gathering/sessions.js";
 import { action } from "../dist/gathering/schema.js";
-import { BrowserManager } from "../dist/browser/manager.js";
+import { BrowserManager, browserEnvironment } from "../dist/browser/manager.js";
 import { privateInvoiceIntake, invoiceFacts } from "../dist/gathering/facts.js";
+import { server } from "../dist/server.js";
+import { MiniAuth } from "../dist/miniapp-auth.js";
 const root = new URL("../", import.meta.url).pathname;
 function pdf(text) {
   const body = `BT /F1 12 Tf 40 720 Td (${text.replace(/[\\()]/g, (c) => "\\" + c)}) Tj ET`;
@@ -39,7 +41,7 @@ function pdf(text) {
 async function fixture({
   accountLabel,
   browser = false,
-  text = "OpenAI Invoice number INV-001 Invoice date September 5, 2026 USD 20.00 Bill to Personal account",
+  text = "OpenAI ChatGPT Invoice number INV-001 Invoice date September 5, 2026 USD 20.00 Bill to Personal account",
 } = {}) {
   const db = new PGlite();
   for (const f of (await readdir(root + "/db"))
@@ -128,12 +130,12 @@ test("account-constrained target cannot match a different account invoice", asyn
   const f = await fixture({ accountLabel: "Business" });
   try {
     await f.capture();
-    await assert.rejects(f.match, /account has not been verified/);
+    await assert.rejects(f.match, /product\/account has not been verified/);
     await assert.rejects(
-      () => f.gather.verifyAccount("bob", f.c.id, "one", f.file.id, 1),
+      () => f.gather.verifyTarget("bob", f.c.id, "one", f.file.id, 1),
       /changed/,
     );
-    await f.gather.verifyAccount("alice", f.c.id, "one", f.file.id, 1);
+    await f.gather.verifyTarget("alice", f.c.id, "one", f.file.id, 1);
     assert.equal((await f.match()).matched, true);
   } finally {
     await f.db.close();
@@ -624,7 +626,7 @@ test("owner can verify the sixth invoice after the first five are matched", asyn
             "alice",
             "invoice.pdf",
             pdf(
-              `OpenAI Invoice number INV-00${i} Invoice date September 5, 2026 USD 20.00`,
+              `OpenAI ChatGPT Invoice number INV-00${i} Invoice date September 5, 2026 USD 20.00`,
             ),
           ),
         ),
@@ -662,7 +664,7 @@ test("owner can verify the sixth invoice after the first five are matched", asyn
     const first = await f.gather.status("alice", f.c.id, 0, true);
     assert.equal(first.targets[0].candidates.length, 6);
     for (const candidate of first.targets[0].candidates.slice(0, 5)) {
-      await f.gather.verifyAccount(
+      await f.gather.verifyTarget(
         "alice",
         f.c.id,
         "one",
@@ -855,4 +857,397 @@ test("concurrent browser opens retain one process and the two-session cap", asyn
   );
   assert.equal(results.filter((x) => x.status === "fulfilled").length, 2);
   assert.equal(launches, 1);
+});
+
+test("authenticated target-verification and file APIs enforce owner, origin and revision", async () => {
+  const f = await fixture();
+  let app;
+  try {
+    await f.db.query("INSERT INTO users(id) VALUES('123'),('456')");
+    const user = "123",
+      run = randomUUID(),
+      file = await f.vault.put(
+        user,
+        await f.vault.prepare(
+          user,
+          "private-address.pdf",
+          pdf(
+            "OpenAI ChatGPT Invoice number API-SAFE Invoice date September 5, 2026 USD 20.00",
+          ),
+        ),
+      );
+    await f.db.query(
+      "INSERT INTO work_turns(run_id,user_id,request) VALUES($1,$2,$3)",
+      [run, user, "Gather " + file.id],
+    );
+    const c = await f.gather.call(
+      user,
+      run,
+      action.parse({
+        operation: "gather_start",
+        requestKey: randomUUID(),
+        objective: "Verify selected account",
+        targets: [
+          {
+            key: "one",
+            label: "ChatGPT",
+            month: "2026-09",
+            accountLabel: "Business",
+          },
+        ],
+        sources: ["provided"],
+        providedFiles: [file.id],
+      }),
+    );
+    await f.gather.call(
+      user,
+      run,
+      action.parse({
+        operation: "gather_capture",
+        id: c.id,
+        targetKey: "one",
+        requestKey: randomUUID(),
+        source: { kind: "provided", artifactId: file.id },
+      }),
+    );
+    const token = "synthetic-miniapp-api-test-only",
+      origin = "https://example.test",
+      auth = new MiniAuth(token, new Set(["123", "456"]));
+    const bearer = (id) => {
+      const params = new URLSearchParams({
+        auth_date: String(Math.floor(Date.now() / 1000)),
+        user: JSON.stringify({ id }),
+      });
+      const data = [...params]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([k, v]) => k + "=" + v)
+        .join("\n");
+      const secret = createHmac("sha256", "WebAppData").update(token).digest();
+      params.set(
+        "hash",
+        createHmac("sha256", secret).update(data).digest("hex"),
+      );
+      return "Bearer " + auth.authenticate(params.toString()).token;
+    };
+    app = server(f.db, {
+      origin,
+      token,
+      allowed: new Set(["123", "456"]),
+      gathering: f.gather,
+    });
+    const path = "/api/miniapp/gathering/" + c.id + "/verify-target",
+      payload = {
+        targetKey: "one",
+        artifactId: file.id,
+        revision: 1,
+        confirmed: true,
+      };
+    assert.equal(
+      (await app.inject({ method: "POST", url: path, payload })).statusCode,
+      401,
+    );
+    assert.equal(
+      (
+        await app.inject({
+          method: "POST",
+          url: path,
+          payload,
+          headers: { authorization: bearer(456), origin },
+        })
+      ).statusCode,
+      400,
+    );
+    assert.equal(
+      (
+        await app.inject({
+          method: "POST",
+          url: path,
+          payload,
+          headers: { authorization: bearer(123), origin: "https://other.test" },
+        })
+      ).statusCode,
+      403,
+    );
+    assert.equal(
+      (
+        await app.inject({
+          method: "POST",
+          url: path,
+          payload: { ...payload, revision: 2 },
+          headers: { authorization: bearer(123), origin },
+        })
+      ).statusCode,
+      400,
+    );
+    assert.equal(
+      (
+        await app.inject({
+          method: "POST",
+          url: path,
+          payload,
+          headers: { authorization: bearer(123), origin },
+        })
+      ).statusCode,
+      200,
+    );
+    const pdfResult = await app.inject({
+      url: "/api/miniapp/files/" + file.id,
+      headers: { authorization: bearer(123), origin },
+    });
+    assert.equal(pdfResult.statusCode, 200);
+    assert.deepEqual(
+      pdfResult.rawPayload,
+      (await f.vault.read(user, file.id)).data,
+    );
+    assert.match(pdfResult.headers["content-security-policy"], /sandbox/);
+    assert.equal(
+      (
+        await app.inject({
+          url: "/api/miniapp/files/" + file.id,
+          headers: { authorization: bearer(456), origin },
+        })
+      ).statusCode,
+      400,
+    );
+  } finally {
+    await app?.close();
+    await f.db.close();
+  }
+});
+
+test("ChatGPT cannot be matched or owner-attested from a conflicting API invoice", async () => {
+  const f = await fixture({
+    text: "OpenAI API Invoice number API-001 Invoice date September 5, 2026 API usage charges USD 20.00",
+  });
+  try {
+    await f.capture();
+    await assert.rejects(f.match, /different product/);
+    await assert.rejects(
+      () => f.gather.verifyTarget("alice", f.c.id, "one", f.file.id, 1),
+      /different product/,
+    );
+    assert.equal(
+      (await f.call({ operation: "gather_check", source: "provided" })).state,
+      "blocked",
+    );
+    assert.equal(
+      (
+        await f.gather.call(
+          "alice",
+          f.run,
+          action.parse({
+            operation: "gather_finish",
+            id: f.c.id,
+            requestKey: randomUUID(),
+          }),
+        )
+      ).complete,
+      false,
+    );
+  } finally {
+    await f.db.close();
+  }
+});
+
+test("shared-vendor invoice with unknown product requires explicit owner target verification", async () => {
+  const f = await fixture({
+    text: "OpenAI Invoice number INV-AMB Invoice date September 5, 2026 USD 20.00",
+  });
+  try {
+    await f.capture();
+    await assert.rejects(f.match, /product\/account has not been verified/);
+    await f.gather.verifyTarget("alice", f.c.id, "one", f.file.id, 1);
+    assert.equal((await f.match()).matched, true);
+  } finally {
+    await f.db.close();
+  }
+});
+
+test("browser control requires an owner-bound one-use ticket before any RPC", async () => {
+  const f = await fixture();
+  let app;
+  try {
+    await f.db.query("INSERT INTO users(id) VALUES('123'),('456')");
+    const calls = [];
+    const client = {
+      call: async (user, id, command) => {
+        calls.push({ user, id, kind: command.kind });
+        if (command.kind === "open")
+          return {
+            sessionId: id,
+            snapshotId: randomUUID(),
+            origin: "https://chatgpt.com",
+            path: "/",
+            needsOwner: false,
+            links: [],
+            invoiceDates: [],
+            notice: "synthetic",
+          };
+        return {};
+      },
+    };
+    const b = new GatheringBrowsers(f.db, Buffer.alloc(32, 7), client),
+      g = new Gathering(f.db, f.vault, undefined, b),
+      run = randomUUID();
+    await f.db.query(
+      "INSERT INTO work_turns(run_id,user_id,request) VALUES($1,'123','Gather browser invoice')",
+      [run],
+    );
+    const c = await g.call(
+      "123",
+      run,
+      action.parse({
+        operation: "gather_start",
+        requestKey: randomUUID(),
+        objective: "Gather browser invoice",
+        targets: [{ key: "one", label: "ChatGPT", month: "2026-09" }],
+        sources: ["browser"],
+      }),
+    );
+    const opened = await g.call(
+      "123",
+      run,
+      action.parse({
+        operation: "gather_browser",
+        id: c.id,
+        targetKey: "one",
+        command: { kind: "open", url: "https://chatgpt.com/" },
+      }),
+    );
+    await g.call(
+      "123",
+      run,
+      action.parse({
+        operation: "gather_browser",
+        id: c.id,
+        targetKey: "one",
+        command: { kind: "handoff", sessionId: opened.sessionId },
+      }),
+    );
+    const token = "synthetic-websocket-test-only",
+      origin = "https://example.test",
+      auth = new MiniAuth(token, new Set(["123", "456"]));
+    const bearer = (id) => {
+      const params = new URLSearchParams({
+        auth_date: String(Math.floor(Date.now() / 1000)),
+        user: JSON.stringify({ id }),
+      });
+      const data = [...params]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([k, v]) => k + "=" + v)
+        .join("\n");
+      const secret = createHmac("sha256", "WebAppData").update(token).digest();
+      params.set(
+        "hash",
+        createHmac("sha256", secret).update(data).digest("hex"),
+      );
+      return "Bearer " + auth.authenticate(params.toString()).token;
+    };
+    app = server(f.db, {
+      origin,
+      token,
+      allowed: new Set(["123", "456"]),
+      gathering: g,
+    });
+    let websocketApp;
+    app.addHook("onRoute", function (route) {
+      if (route.url.includes("/browser-control/")) websocketApp = this;
+    });
+    await app.ready();
+    const ticketPath = "/api/miniapp/browser-ticket/" + opened.sessionId,
+      path = "/api/miniapp/browser-control/" + opened.sessionId;
+    assert.equal(
+      (
+        await app.inject({
+          url: ticketPath,
+          headers: { authorization: bearer(456), origin },
+        })
+      ).statusCode,
+      400,
+    );
+    const ticket = (
+      await app.inject({
+        url: ticketPath,
+        headers: { authorization: bearer(123), origin },
+      })
+    ).json().ticket;
+    const { once } = await import("node:events");
+    const connect = () =>
+      websocketApp.injectWS(path, {
+        headers: { origin, "sec-websocket-protocol": "chief-browser" },
+      });
+    const ws = await connect(),
+      before = calls.length;
+    const ready = once(ws, "message", { signal: AbortSignal.timeout(3000) });
+    ws.send(JSON.stringify({ kind: "auth", ticket }));
+    assert.equal(JSON.parse((await ready)[0].toString()).type, "ready");
+    assert.equal(calls.length, before + 1);
+    assert.equal(calls.at(-1).user, "123");
+    const replay = await connect(),
+      rejected = once(replay, "message", { signal: AbortSignal.timeout(3000) }),
+      count = calls.length;
+    replay.send(JSON.stringify({ kind: "auth", ticket }));
+    assert.equal(JSON.parse((await rejected)[0].toString()).type, "error");
+    assert.equal(calls.length, count);
+    const closed = once(ws, "close", { signal: AbortSignal.timeout(3000) });
+    ws.close();
+    await closed;
+    replay.terminate();
+  } finally {
+    await app?.close();
+    await f.db.close();
+  }
+});
+
+test("idempotent mutation responses cannot be replayed into a changed scope", async () => {
+  const f = await fixture();
+  try {
+    await f.capture();
+    await f.match();
+    const check = action.parse({
+      operation: "gather_check",
+      id: f.c.id,
+      targetKey: "one",
+      requestKey: randomUUID(),
+      source: "provided",
+    });
+    assert.equal((await f.gather.call("alice", f.run, check)).state, "covered");
+    await f.gather.call(
+      "alice",
+      f.run,
+      action.parse({
+        operation: "gather_revise",
+        id: f.c.id,
+        baseRevision: 1,
+        requestKey: randomUUID(),
+        objective: "October instead",
+        targets: [{ key: "one", label: "ChatGPT", month: "2026-10" }],
+        sources: ["provided"],
+        providedFiles: [f.file.id],
+      }),
+    );
+    await assert.rejects(
+      () => f.gather.call("alice", f.run, check),
+      /superseded scope/,
+    );
+    assert.equal((await f.gather.status("alice", f.c.id)).counts.covered, 0);
+  } finally {
+    await f.db.close();
+  }
+});
+
+test("Chromium does not inherit the control secret or gateway credentials", () => {
+  const env = browserEnvironment({
+    PATH: "/usr/bin",
+    BROWSER_CONTROL_KEY: "synthetic-control",
+    GOOGLE_REFRESH_TOKEN: "synthetic-google",
+    DATABASE_URL: "synthetic-database",
+  });
+  assert.deepEqual(Object.keys(env).sort(), [
+    "LANG",
+    "PATH",
+    "XDG_CACHE_HOME",
+    "XDG_CONFIG_HOME",
+  ]);
+  assert.equal(JSON.stringify(env).includes("synthetic"), false);
 });

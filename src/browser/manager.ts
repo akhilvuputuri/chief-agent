@@ -11,6 +11,16 @@ import { datesIn, invoiceFacts, fileName } from "../gathering/facts.js";
 import { invoiceLink, readUrl, safeLabel } from "./policy.js";
 import { request as httpsRequest } from "node:https";
 import { HttpsProxyAgent } from "https-proxy-agent";
+export function browserEnvironment(
+  env: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  return {
+    PATH: env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
+    LANG: "C.UTF-8",
+    XDG_CONFIG_HOME: "/tmp/chromium-config",
+    XDG_CACHE_HOME: "/tmp/chromium-cache",
+  };
+}
 export class MissingBrowser extends Error {
   constructor() {
     super("Browser session is unavailable");
@@ -52,6 +62,7 @@ export class BrowserManager {
     private launch = () =>
       chromium.launch({
         headless: true,
+        env: browserEnvironment(),
         chromiumSandbox: true,
         executablePath:
           process.env.BROWSER_CHROMIUM_PATH ?? "/usr/bin/chromium",
@@ -103,7 +114,7 @@ export class BrowserManager {
         state: z.enum(["owner", "readonly"]).optional(),
       })
       .parse(a);
-    const normalized = publicHttps(url);
+    const normalized = readUrl(url, origins);
     if (!origins.includes(new URL(normalized).origin))
       throw new Error("Origin not granted");
     for (const origin of origins)
