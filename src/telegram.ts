@@ -115,28 +115,32 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
       )
         return;
       await ctx.answerCallbackQuery();
+      let result: { status: string; duplicate: boolean; jobId: string };
       try {
-        const result = await coding.requirements.confirm(
+        result = await coding.requirements.confirm(
           String(ctx.from.id),
           ctx.match[2]!,
           ctx.match[1] === "yes",
           String(ctx.callbackQuery.message.chat.id),
           ctx.callbackQuery.message.message_id,
         );
-        const current = await coding.status(String(ctx.from.id), result.jobId);
-        await ctx.reply(
-          result.status === "approved"
-            ? result.duplicate
-              ? `These requirements were already approved. The coding job is ${current.state}.`
-              : "Requirements approved. Python implementation is queued in a new sandbox; I will collect updates and return a draft PR."
-            : "Implementation has not started. Tell Chief what to change in these requirements.",
-          inThread(threadOf(ctx.callbackQuery.message)),
-        );
       } catch {
         await ctx.reply(
-          "That requirement confirmation is expired, unavailable or superseded. Ask Chief to show the current requirements again.",
+          "I could not verify that confirmation. Ask Chief for the current coding status before retrying.",
           inThread(threadOf(ctx.callbackQuery.message)),
         );
+        return;
+      }
+      try {
+        await ctx.reply(
+          codingDecisionNotice(result),
+          inThread(threadOf(ctx.callbackQuery.message)),
+        );
+      } catch (error) {
+        opsLog("coding.confirmation_ack_failed", "warn", {
+          jobId: result.jobId,
+          errorType: error instanceof Error ? error.name : "unknown",
+        });
       }
     });
   }
@@ -349,6 +353,8 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
       requirementReply &&
       ctx.message.reply_to_message
     ) {
+      let result:
+        { status: string; duplicate: boolean; jobId: string } | undefined;
       try {
         const requirementId = await assistant.tools.coding.requirements.replyId(
           user,
@@ -361,7 +367,7 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
             )
           : undefined;
         if (claimed && !claimed.rows.length) return;
-        const result = requirementId
+        result = requirementId
           ? await assistant.tools.coding.requirements.confirm(
               user,
               requirementId,
@@ -370,32 +376,38 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
               ctx.message.reply_to_message.message_id,
             )
           : undefined;
-        if (result) {
-          const current = await assistant.tools.coding.status(
-            user,
-            result.jobId,
-          );
-          await ctx.reply(
-            result.status === "approved"
-              ? result.duplicate
-                ? `These requirements were already approved. The coding job is ${current.state}.`
-                : "Requirements approved. Python implementation is queued in a new sandbox."
-              : "Implementation has not started. Tell Chief what to change in the requirements.",
-          );
-          await db.query(
+      } catch {
+        await db
+          .query(
+            "UPDATE inbound_updates SET status='failed' WHERE update_id=$1",
+            [ctx.update.update_id],
+          )
+          .catch(() => {});
+        await ctx.reply(
+          "I could not verify that confirmation. Ask Chief for the current coding status before retrying.",
+        );
+        return;
+      }
+      if (result) {
+        await db
+          .query(
             "UPDATE inbound_updates SET status='completed' WHERE update_id=$1",
             [ctx.update.update_id],
+          )
+          .catch((error) =>
+            opsLog("coding.confirmation_receipt_failed", "warn", {
+              jobId: result!.jobId,
+              errorType: error instanceof Error ? error.name : "unknown",
+            }),
           );
-          return;
+        try {
+          await ctx.reply(codingDecisionNotice(result));
+        } catch (error) {
+          opsLog("coding.confirmation_ack_failed", "warn", {
+            jobId: result.jobId,
+            errorType: error instanceof Error ? error.name : "unknown",
+          });
         }
-      } catch {
-        await db.query(
-          "UPDATE inbound_updates SET status='failed' WHERE update_id=$1",
-          [ctx.update.update_id],
-        );
-        await ctx.reply(
-          "Those requirements are expired or changed. Ask Chief to show the current brief again; implementation was not started by this reply.",
-        );
         return;
       }
     }
@@ -1300,4 +1312,12 @@ class PreparationQueue {
       if (!state.active) this.users.delete(user);
     }
   }
+}
+
+function codingDecisionNotice(result: { status: string; duplicate: boolean }) {
+  if (result.duplicate)
+    return "That requirement message was already decided. Ask Chief for the current coding status.";
+  return result.status === "approved"
+    ? "Requirements approved. Python implementation is queued in a new sandbox; I will collect updates and return a draft PR."
+    : "Requirement proposal declined. Tell Chief what to change.";
 }

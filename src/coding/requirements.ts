@@ -135,7 +135,7 @@ export class CodingRequirements {
     const result = await this.db.query(
       `WITH changed AS (
       UPDATE coding_jobs SET mode=CASE WHEN $3 THEN 'implement' ELSE mode END,
-        revision=revision+CASE WHEN $3 THEN 1 ELSE 0 END,
+        revision=revision+1,
         state=CASE WHEN $3 THEN 'queued' ELSE state END,stage=CASE WHEN $3 THEN 'queued' ELSE stage END,
         summary=CASE WHEN $3 THEN 'Requirements approved; implementation queued' ELSE 'Requirements need revision; tell Chief what to change' END,
         result=CASE WHEN $3 THEN NULL ELSE result END,
@@ -151,7 +151,7 @@ export class CodingRequirements {
       WHERE id=$6 AND job_id IN (SELECT id FROM changed) RETURNING job_id
     ), recorded AS (
       INSERT INTO coding_revisions(job_id,revision,request_key,message,mode)
-      SELECT id,revision,$6::text,'Owner approved the exact delivered requirements','implement' FROM changed WHERE $3
+      SELECT id,revision,$6::text,CASE WHEN $3 THEN 'Owner approved the exact delivered requirements' ELSE 'Owner requested requirement changes' END,CASE WHEN $3 THEN 'implement' ELSE 'plan' END FROM changed
       RETURNING job_id
     ) SELECT job_id FROM decided`,
       [

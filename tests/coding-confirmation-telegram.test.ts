@@ -11,7 +11,12 @@ import { readConfig } from "../src/config.js";
 import type { Assistant } from "../src/agent.js";
 
 test("Telegram buttons and direct yes replies confirm the displayed coding brief without slash commands", async (t) => {
-  for (const transport of ["button", "reply"]) {
+  for (const transport of [
+    "button",
+    "reply",
+    "button-ack-fails",
+    "reply-ack-fails",
+  ]) {
     const pg = new PGlite();
     t.after(() => pg.close());
     for (const file of (await readdir(new URL("../db/", import.meta.url)))
@@ -107,6 +112,7 @@ test("Telegram buttons and direct yes replies confirm the displayed coding brief
       db,
     );
     const replies: string[] = [];
+    let failedAck = false;
     bot.api.config.use(async (_prev, method, payload) => {
       if (method === "getMe")
         return {
@@ -118,7 +124,13 @@ test("Telegram buttons and direct yes replies confirm the displayed coding brief
             username: "fixture_bot",
           },
         };
-      if (method === "sendMessage") replies.push((payload as any).text);
+      if (method === "sendMessage") {
+        if (transport.includes("ack-fails") && !failedAck) {
+          failedAck = true;
+          throw new Error("Synthetic acknowledgement failure");
+        }
+        replies.push((payload as any).text);
+      }
       return { ok: true, result: true } as any;
     });
     await bot.init();
@@ -130,34 +142,37 @@ test("Telegram buttons and direct yes replies confirm the displayed coding brief
       from: { id: 999, is_bot: true, first_name: "Fixture" },
       text: "Requirements",
     };
-    const update: any =
-      transport === "button"
-        ? {
-            update_id: 1,
-            callback_query: {
-              id: "callback",
-              from,
-              chat_instance: "private",
-              data: `cod:yes:${approval}`,
-              message: card,
-            },
-          }
-        : {
-            update_id: 1,
-            message: {
-              message_id: 101,
-              date: 0,
-              chat: card.chat,
-              from,
-              text: "Yes!",
-              reply_to_message: card,
-            },
-          };
+    const update: any = transport.startsWith("button")
+      ? {
+          update_id: 1,
+          callback_query: {
+            id: "callback",
+            from,
+            chat_instance: "private",
+            data: `cod:yes:${approval}`,
+            message: card,
+          },
+        }
+      : {
+          update_id: 1,
+          message: {
+            message_id: 101,
+            date: 0,
+            chat: card.chat,
+            from,
+            text: "Yes!",
+            reply_to_message: card,
+          },
+        };
     await bot.handleUpdate(update);
-    assert(
-      replies[0]?.includes("Requirements approved"),
-      JSON.stringify(replies),
-    );
+    if (transport.includes("ack-fails")) {
+      assert(failedAck);
+      assert.equal(replies.length, 0);
+    } else
+      assert(
+        replies[0]?.includes("Requirements approved"),
+        JSON.stringify(replies),
+      );
     assert.equal(
       (
         await db.query("SELECT mode,revision FROM coding_jobs WHERE id=$1", [
@@ -172,7 +187,8 @@ test("Telegram buttons and direct yes replies confirm the displayed coding brief
         .rows[0].revision,
       2,
     );
-    if (transport === "reply") assert.equal(replies.length, 1);
+    if (transport.startsWith("reply"))
+      assert.equal(replies.length, transport.includes("ack-fails") ? 0 : 1);
     assert.equal(starts, 1);
     await coding.tick();
     assert.equal(starts, 2);

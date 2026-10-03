@@ -1896,7 +1896,7 @@ test("declining requirements never starts implementation and unknown delivery ca
   await f.c.call("a", f.run, {
     operation: "coding_resume",
     id: r.jobId,
-    baseRevision: 1,
+    baseRevision: 2,
     requestKey: "uncertain",
   });
   let uncertainId = "";
@@ -1987,4 +1987,30 @@ test("missing approval pauses a legacy implementation before provisioning and co
   assert.equal((await f.row(r.jobId)).revision, 2);
   await f.c.tick();
   assert.equal(f.creates(), 2);
+});
+
+test("decline advances the locked revision and a concurrent approve cannot overwrite it", async (t) => {
+  const f = await fixture(t),
+    r = await requirementBrief(f);
+  const results = await Promise.allSettled([
+    f.c.requirements.confirm("a", r.approvalId, false, "a", r.messageId),
+    f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId),
+  ]);
+  assert.equal(results[0].status, "fulfilled");
+  assert.equal(results[1].status, "rejected");
+  const current = await f.row(r.jobId);
+  assert.equal(current.revision, 2);
+  assert.equal(current.mode, "plan");
+  assert.equal(current.state, "plan_ready");
+  assert.equal(
+    (
+      await f.db.query(
+        "SELECT payload->>'decision' AS decision FROM coding_events WHERE id=$1",
+        [r.approvalId],
+      )
+    ).rows[0].decision,
+    "revise",
+  );
+  await f.c.tick();
+  assert.equal(f.creates(), 1);
 });
