@@ -568,7 +568,7 @@ export class Gathering {
       replayTurn.revision !== replayCollection.task_revision
     )
       throw new ToolValidationError(
-        "Collection is outside this turn's active assignment",
+        "Collection is not active in this turn's assignment",
       );
     if ("requestKey" in a) {
       const old = await this.prior(user, a.id, a.requestKey, a);
