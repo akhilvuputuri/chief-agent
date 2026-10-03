@@ -1,6 +1,25 @@
-## Candidate v0.3.37 — fixed Python coding squad
+## Candidate v0.3.38 — fixed Python coding squad
 
-Chief dispatches to a dedicated leader, which assigns the fixed coder/reviewer members with separate histories, typed handoffs and restricted permissions. Exact checks/review gates and owner requirement confirmation remain authoritative. Shared limits/price filters unchanged. Migration 027/Compose list require a reviewed idle operator install; new Python image/squad pin, review and release pending. Coding off, no paid/live acceptance. See [journal 60](journey/60-coding-squad.md).
+Chief dispatches to a dedicated leader, which assigns the fixed coder/reviewer members with separate histories, typed handoffs and restricted permissions. Exact checks/review gates and owner requirement confirmation remain authoritative. Shared limits/price filters unchanged. Migration 027/Compose list require a reviewed idle operator install; new Python image/squad pin, review and release pending. Coding off, no paid/live acceptance. See [journal 61](journey/61-coding-squad.md).
+
+## Released v0.3.37 — read-only IBKR holdings and stock lookup
+
+- **Read-only IBKR holdings ([PR #152](https://github.com/akhilvuputuri/chief-agent/pull/152), issue #146).**
+  - The owner asks Chief, or sends `/portfolio connect`, to connect; Chief only queues a Telegram card, and the owner's own IBKR login and consent approve it.
+  - Host-side OAuth accepts exactly `mcp.read`, stores rotating refresh tokens sealed, and calls only a three-tool read allowlist (IBKR lists write tools even under a read token).
+  - Holdings are immutable, reconciled snapshots that a failed, empty-but-contradicted or truncated read cannot replace. They sync every 4 hours, and `portfolio_read` and `/portfolio` show them.
+  - Phase 0 measured: read-only consent, rotation, a 12-hour idle refresh and owner-reconciled holdings.
+  - Claude Opus 5.5 reviewed seven rounds, approving final head `b4e0ffb`; PR and main CI passed.
+  - Additive migration 026 was installed through the reviewed operator rollout at `c3cea89d0a666ba1b64bb9235648358fce27ce7d`, then activated: a host-generated key, `IBKR_PORTFOLIO=on` and the Caddy callback route. The [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37135022555), health and separate migration and preservation checks passed.
+  - **Pending:** owner Telegram acceptance (connect, holdings, disconnect); whether IBKR accepts the hosted HTTPS redirect; the absolute token lifetime.
+- **Stock statistics and lookup ([PR #161](https://github.com/akhilvuputuri/chief-agent/pull/161), Phase 2a of the [stock rules plan](stock-rules.md)).**
+  - The stocks agent answers questions now: day change, 12/26/52-week averages, lows and highs, and all-time low and high with their since-date, from split-adjusted Twelve Data history.
+  - One credit bucket is shared with the monitor, and lookups never use the daily monitoring reserve.
+  - Claude Opus 5.5 approved final head `b80ca55` after three rounds.
+  - The [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37137918493) and health checks verified `7e8198517c141b0e64b93cf1d87f16001b9f2876`. No schema change.
+  - **Pending:** owner acceptance of a live question.
+- **Version.** v0.3.37 tags this record's own verified release, which carries both features unchanged.
+- See journals [59](journey/59-ibkr-portfolio.md) and [60](journey/60-stock-rules.md).
 
 ## Released v0.3.36 — confirm requirements before Python implementation, off
 

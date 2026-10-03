@@ -18,7 +18,7 @@ import time
 LIVE = pathlib.Path('/opt/hermes-companion')
 LOCK = pathlib.Path('/var/lock/companion-release.lock')
 # Baseline RELEASE and health verified on 4 October 2026; live RELEASE is rechecked.
-BASE = 'c3cea89d0a666ba1b64bb9235648358fce27ce7d'
+BASE = '7e8198517c141b0e64b93cf1d87f16001b9f2876'
 BASES = {BASE}
 IMAGE = 'hermes-companion-gateway'
 MIGRATION = '027_coding_squad.sql'

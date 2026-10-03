@@ -62,9 +62,10 @@ For the latest verified release and open work, read [current work](../current-wo
 
 | 3 October | [57 — Python coding runtime](57-python-coding-runtime.md): can disposable execution change language while preserving Chief’s durable boundary? | Released v0.3.35 off; Python image/policy and exact release verified; live activation pending |
 | 3 October | [58 — Conversational coding requirements](58-coding-requirements.md): what makes owner confirmation binding rather than a model assertion? | Released v0.3.36 off; confirmation/image/exact release verified; scoped activation and live acceptance pending |
-| 2–3 October | [59 — IBKR portfolio access](59-ibkr-portfolio.md): can Chief read IBKR holdings without becoming a trading client? | Phase 0 measured; Phase 1 holdings with owner-tapped connect/disconnect cards implemented, independently reviewed in rounds; operator rollout pending |
+| 2–3 October | [59 — IBKR portfolio access](59-ibkr-portfolio.md): can Chief read IBKR holdings without becoming a trading client? | Released v0.3.37 and on; owner connection and acceptance pending |
+| 3–4 October | [61 — Stock questions, rules and digests](60-stock-rules.md): how can one stock agent answer, watch and report on the owner's own stock questions? | Phase 2a released v0.3.37; rules (2b) and digest (2c) planned |
 
-| 4 October | [60 — Fixed coding squad](60-coding-squad.md): who coordinates coder/reviewer handoffs while code enforces approval? | Candidate; migration 027/review/image/release pending, coding off |
+| 4 October | [61 — Fixed coding squad](61-coding-squad.md): who coordinates coder/reviewer handoffs while code enforces approval? | Candidate; migration 027/review/image/release pending, coding off |
 
 ## Connected case studies
 
@@ -99,7 +100,7 @@ Use **reported** for user/operator accounts not independently reproduced; **test
 
 Equivalent workload, model/configuration, pricing, denominators and missing accounting matter for comparisons. A health check is not a semantic evaluation, and a supplied memory is not proof that the model used it. Do not claim benchmark wins, production scale or savings without measurements. Keep private conversations, credentials, raw traces, user records and personal motivations out of this journal.
 
-Python execution: [56 — Coding work](56-coding-runtime.md) → [57 — Python runtime](57-python-coding-runtime.md) → [58 — Requirement confirmation](58-coding-requirements.md) → [60 — Fixed squad](60-coding-squad.md).
+Python execution: [56 — Coding work](56-coding-runtime.md) → [57 — Python runtime](57-python-coding-runtime.md) → [58 — Requirement confirmation](58-coding-requirements.md) → [61 — Fixed squad](61-coding-squad.md).
 
 ## Scheduled work
 

@@ -1,6 +1,10 @@
-# Three-member coding squad — v0.3.37 candidate
+# Three-member coding squad — v0.3.38 candidate
 
-`codex/coding-squad` adds a Python model leader around fixed coder/reviewer members with independent contexts, restricted tools, typed handoffs and exact-artifact review gates. Existing allocations/price filters and owner confirmation are preserved. Migration 027 widens the model-role constraint; an idle reviewed operator rollout and new Python image/squad pin are required. Tests/review/release pending; coding remains off. See [contract](coding-squad.md) and [journal 60](journey/60-coding-squad.md).
+`codex/coding-squad` adds a Python model leader around fixed coder/reviewer members with independent contexts, restricted tools, typed handoffs and exact-artifact review gates. Existing allocations/price filters and owner confirmation are preserved. Migration 027 widens the model-role constraint; an idle reviewed operator rollout and new Python image/squad pin are required. Tests/review/release pending; coding remains off. See [contract](coding-squad.md) and [journal 61](journey/61-coding-squad.md).
+
+# Read-only IBKR holdings and stock lookup — released v0.3.37
+
+IBKR holdings ([PR #152](https://github.com/akhilvuputuri/chief-agent/pull/152)) are installed and **on** at `c3cea89` through reviewed migration 026, with owner-tapped connect and disconnect cards and read-only scope. Owner connection and acceptance are pending. Stock lookup ([PR #161](https://github.com/akhilvuputuri/chief-agent/pull/161)) is deployed at `7e81985`. Next is Phase 2b: general "tell me when…" rules, which need migration 027. See [IBKR portfolio](ibkr-portfolio.md), [stock rules](stock-rules.md) and journals [59](journey/59-ibkr-portfolio.md) and [60](journey/60-stock-rules.md).
 
 # Conversational coding requirements — released v0.3.36, off
 
