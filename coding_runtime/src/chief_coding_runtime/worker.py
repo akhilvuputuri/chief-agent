@@ -60,6 +60,11 @@ async def run_worker(
 ) -> None:
     a = assignment or Assignment.model_validate(await client.request("assignment"))
     assert_brief(a.objective, a.context)
+    if a.settings.squad:
+        from .squad import run_squad
+
+        await run_squad(client, a, stop, checkout, INSTRUCTIONS, REVIEW_INSTRUCTIONS)
+        return
     budget = Budget(
         max(0, a.settings.limits.models - a.usedModels), a.settings.limits.tools
     )

@@ -27,3 +27,7 @@ Assignments use `protocolVersion: 1` and the typed models in `protocol.py`. Work
 The image includes Node/npm because Chief's target repository checks require them, plus the locked Python check dependencies so those scripts can validate Python changes. Target tests run in child processes; the worker's isolated interpreter does not import checkout code. Source commands cannot choose provisioning settings or publish remotely through host credentials.
 
 See [the host lifecycle and activation runbook](../docs/coding.md). The default remains off. Existing Node-pinned jobs retain their launcher; switch the host runtime and image digest together after the Python image is published and independently verified. There is no migration, automatic task resumption or paid sandbox activation in this refactor.
+
+## Fixed squad
+
+Python 0.1.2 includes an opt-in leader/coder/reviewer supervisor with separate histories, fixed dispatch tools, shared budgets and typed acknowledged handoff checkpoints. Legacy jobs retain their old image/settings path. See [squad contract](../docs/coding-squad.md) for exact-artifact review gates, recovery and reviewed migration/image activation.

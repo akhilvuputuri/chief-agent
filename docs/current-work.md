@@ -1,3 +1,7 @@
+# Three-member coding squad — v0.3.37 candidate
+
+`codex/coding-squad` adds a Python model leader around fixed coder/reviewer members with independent contexts, restricted tools, typed handoffs and exact-artifact review gates. Existing allocations/price filters and owner confirmation are preserved. Migration 027 widens the model-role constraint; an idle reviewed operator rollout and new Python image/squad pin are required. Tests/review/release pending; coding remains off. See [contract](coding-squad.md) and [journal 60](journey/60-coding-squad.md).
+
 # Conversational coding requirements — released v0.3.36, off
 
 [PR #157](https://github.com/akhilvuputuri/chief-agent/pull/157)/[PR #158](https://github.com/akhilvuputuri/chief-agent/pull/158) enforce plan → owner confirmation → Python implementation without slash commands. Astra approved exact heads `aafecf3` and `140c97d`; PR/main Linux CI passed. The [exact release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37120011881), separate health/policy/preservation checks and immutable [v0.3.36](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.36) verify `67db5e135c99eee85a10416dbe159ce93432eee0`. No DB/Compose change. Coding remains off with zero jobs; provisioning authentication and scoped provider/App/ingress setup are incomplete. No paid/live coding acceptance. See [journal closure](journey/58-coding-requirements.md#release-closure--3-october-2026).

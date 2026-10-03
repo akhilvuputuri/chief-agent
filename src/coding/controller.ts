@@ -1,3 +1,4 @@
+import { assertSquadCheckpoint } from "./squad-state.js";
 import { CodingRequirements, requirementScope } from "./requirements.js";
 import {
   createHash,
@@ -133,7 +134,29 @@ export class CodingController {
         [user, id],
       )
     ).rows[0];
-    return { ...job, plan: stored.checkpoint.plan };
+    const state = stored.checkpoint.squadState;
+    return {
+      ...job,
+      plan: stored.checkpoint.plan,
+      ...(state
+        ? {
+            squad: {
+              phase: state.phase,
+              candidateVersion: state.candidateVersion,
+              candidateHash: state.candidateHash,
+              toolsUsed: state.toolsUsed,
+              member: state.handoff?.recipient,
+              findings: state.findings,
+              checks: state.checks.map(
+                (c: { command: string; exitCode: number }) => ({
+                  command: c.command,
+                  exitCode: c.exitCode,
+                }),
+              ),
+            },
+          }
+        : {}),
+    };
   }
   async call(user: string, run: string, raw: CodingAction) {
     const a = codingAction.parse(raw);
@@ -324,6 +347,7 @@ export class CodingController {
   async assignment(job: CodingJob) {
     return {
       protocolVersion: 1,
+      ...(job.settings.squad ? { attemptId: job.attempt_id } : {}),
       id: job.id,
       revision: job.revision,
       objective: job.objective,
@@ -382,9 +406,26 @@ export class CodingController {
         "Approved requirements are immutable; revise and confirm a new plan first",
       );
     validateFiles(c.files);
+    assertSquadCheckpoint(job, c);
+    if (canonicalJson(c) === canonicalJson(job.checkpoint))
+      return { saved: true };
     const update = await this.db.query(
-      "UPDATE coding_jobs SET checkpoint=$3::jsonb,updated_at=now() WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') RETURNING id",
-      [job.id, job.attempt_id, JSON.stringify(c)],
+      `WITH changed AS (UPDATE coding_jobs SET checkpoint=$3::jsonb,updated_at=now() WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') AND checkpoint=$4::jsonb RETURNING id)
+      INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,$5,$6::jsonb,'suppressed' FROM changed ON CONFLICT DO NOTHING RETURNING id`,
+      [
+        job.id,
+        job.attempt_id,
+        JSON.stringify(c),
+        JSON.stringify(job.checkpoint),
+        c.squadState
+          ? `squad:${job.attempt_id}:${c.squadState.sequence}`
+          : `checkpoint:${randomUUID()}`,
+        JSON.stringify(
+          c.squadState
+            ? { kind: "squad_handoff", state: c.squadState }
+            : { kind: "checkpoint" },
+        ),
+      ],
     );
     if (!update.rows.length) throw new Error("Worker attempt superseded");
     return { saved: true };
@@ -392,6 +433,19 @@ export class CodingController {
   async finish(job: CodingJob, raw: unknown) {
     const r = outcome.parse(raw);
     validateFiles(r.checkpoint.files);
+    if (job.settings.squad && r.kind === "candidate") {
+      const state = r.checkpoint.squadState;
+      if (
+        !state ||
+        state.phase !== "approved" ||
+        canonicalJson(r.checkpoint) !== canonicalJson(job.checkpoint) ||
+        canonicalJson(r.checks) !== canonicalJson(state.checks) ||
+        canonicalJson(r.review) !== canonicalJson(state.review)
+      )
+        throw new Error(
+          "Squad completion needs its latest acknowledged approved artifact",
+        );
+    }
     if (
       job.mode === "implement" &&
       (r.checkpoint.plan !== job.checkpoint.plan ||
@@ -458,11 +512,13 @@ export class CodingController {
     job: CodingJob,
     input: {
       callId: string;
-      role: "coder" | "reviewer";
+      role: "leader" | "coder" | "reviewer";
       messages: ModelMessage[];
       tools: ToolDefinition[];
     },
   ) {
+    if (input.role === "leader" && !job.settings.squad)
+      throw new Error("Leader role requires the reviewed squad runtime");
     const prior = (
       await this.db.query("SELECT * FROM coding_model_calls WHERE id=$1", [
         input.callId,
@@ -536,7 +592,9 @@ export class CodingController {
       const result = await this.models(
         input.role === "reviewer"
           ? job.settings.reviewerModel
-          : job.settings.model,
+          : input.role === "leader"
+            ? (job.settings.leaderModel ?? job.settings.model)
+            : job.settings.model,
       ).generate({
         messages: input.messages,
         tools: input.tools,

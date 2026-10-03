@@ -82,11 +82,77 @@ def validate_files(files: list[File]) -> None:
         raise ValueError("Artifact exceeds supported size")
 
 
+class Check(Record):
+    command: str
+    exitCode: int
+    output: str
+
+
+class Review(Record):
+    verdict: Literal["APPROVE", "REQUEST_CHANGES"]
+    findings: str
+    model: str
+    patchHash: str
+
+
+class Handoff(Record):
+    id: str
+    sender: Literal["leader"] = "leader"
+    recipient: Literal["coder", "reviewer"]
+    instructions: str
+    candidateHash: str = ""
+
+    @field_validator("id")
+    @classmethod
+    def handoff_id(cls, value: str) -> str:
+        UUID(value)
+        return value
+
+    @field_validator("instructions")
+    @classmethod
+    def bounded_instructions(cls, value: str) -> str:
+        return text_bound(value, 4000)
+
+
+Phase = Literal[
+    "planning",
+    "planned",
+    "idle",
+    "coding",
+    "verifying",
+    "reviewing",
+    "rework",
+    "approved",
+    "awaiting_input",
+]
+
+
+class SquadState(Record):
+    sequence: Annotated[int, Field(gt=0)]
+    revision: Annotated[int, Field(gt=0)]
+    attemptId: str
+    scopeHash: str
+    phase: Phase
+    candidateVersion: Annotated[int, Field(ge=0)] = 0
+    candidateHash: str = ""
+    toolsUsed: Annotated[int, Field(ge=0, le=500)] = 0
+    handoff: Handoff | None = None
+    checks: list[Check] = Field(default_factory=list, max_length=4)
+    review: Review | None = None
+    findings: str = ""
+
+    @field_validator("findings")
+    @classmethod
+    def bounded_findings(cls, value: str) -> str:
+        return text_bound(value, 8000)
+
+
 class Checkpoint(Record):
     plan: str = ""
     patch: str = ""
     summary: str = ""
     files: list[File] = Field(default_factory=list, max_length=100)
+    squadState: SquadState | None = None
 
     @field_validator("plan", "patch", "summary")
     @classmethod
@@ -107,6 +173,11 @@ class Checkpoint(Record):
             "patch": self.patch,
             "summary": self.summary,
             "files": [f.wire() for f in self.files],
+            **(
+                {"squadState": self.squadState.model_dump(exclude_none=True)}
+                if self.squadState
+                else {}
+            ),
         }
 
 
@@ -133,6 +204,8 @@ class Settings(Record):
     image: str
     model: str
     reviewerModel: str
+    leaderModel: str | None = None
+    squad: bool = False
     effort: Literal["low", "medium", "high"]
     limits: Limits
     runtime: Literal["node", "python"] = "node"
@@ -147,6 +220,7 @@ class Settings(Record):
 
 class Assignment(Record):
     protocolVersion: Literal[1]
+    attemptId: str | None = None
     id: str
     revision: Annotated[int, Field(gt=0)]
     objective: str
@@ -185,19 +259,6 @@ def assert_brief(objective: str, context: str) -> None:
         raise ValueError(
             "Owner brief exceeds supported envelope; original instructions must remain intact"
         )
-
-
-class Check(Record):
-    command: str
-    exitCode: int
-    output: str
-
-
-class Review(Record):
-    verdict: Literal["APPROVE", "REQUEST_CHANGES"]
-    findings: str
-    model: str
-    patchHash: str
 
 
 class Outcome(Record):

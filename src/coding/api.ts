@@ -30,7 +30,7 @@ const message = z
 const generation = z
   .object({
     callId: z.string().uuid(),
-    role: z.enum(["coder", "reviewer"]),
+    role: z.enum(["leader", "coder", "reviewer"]),
     messages: z.array(message).max(120),
     tools: z
       .array(
