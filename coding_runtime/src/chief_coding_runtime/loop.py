@@ -54,6 +54,8 @@ class Report(Record):
     question: str = ""
 
     def validate_text(self) -> None:
+        if self.kind == "plan_ready" and not self.plan.strip():
+            raise ValueError("A complete requirement brief is required in plan")
         text_bound(self.summary, 4000)
         text_bound(self.plan, 32000)
         text_bound(self.question, 2000)
@@ -117,7 +119,7 @@ TOOLS: list[Json] = [
     },
     {
         "name": "report",
-        "description": "Return a plan, question, candidate or independent review verdict.",
+        "description": "Return a plan, question, candidate or independent review verdict. For plan_ready, put the complete requirement brief in the non-empty plan field; summary alone is insufficient.",
         "parameters": {
             "type": "object",
             "properties": {

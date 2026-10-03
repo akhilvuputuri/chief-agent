@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { ensureUser, type Database } from "../src/db.js";
+import { requirementScope } from "../src/coding/requirements.js";
 import { CodingController } from "../src/coding/controller.js";
 import {
   codingSettings,
@@ -161,17 +162,48 @@ async function fixture(t: TestContext) {
     }),
     () => now,
   );
+  // Most controller tests seed an already-approved implementation phase;
+  // separate lifecycle tests below exercise real planning/delivery/confirmation.
   const start = async (
     key = "request",
     mode: "plan" | "implement" = "implement",
-  ) =>
-    c.call("a", run, {
+  ) => {
+    const result = (await c.call("a", run, {
       operation: "coding_start",
       requestKey: key,
       objective: "Fix a synthetic bug",
       context: "Synthetic evidence",
       mode,
-    }) as Promise<any>;
+    })) as any;
+    if (mode === "implement" && result.mode === "plan") {
+      await db.query(
+        "UPDATE coding_jobs SET mode='implement',checkpoint=$2::jsonb WHERE id=$1",
+        [
+          result.id,
+          JSON.stringify({
+            plan: "Fix the fixture",
+            patch: "",
+            summary: "",
+            files: [],
+          }),
+        ],
+      );
+      const job = (
+        await db.query("SELECT * FROM coding_jobs WHERE id=$1", [result.id])
+      ).rows[0];
+      await db.query(
+        "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'fixture-approved',$2::jsonb,'suppressed') ON CONFLICT DO NOTHING",
+        [
+          job.id,
+          JSON.stringify({
+            decision: "approved",
+            approvedScope: requirementScope(job),
+          }),
+        ],
+      );
+    }
+    return c.status("a", result.id);
+  };
   const row = async (id: string) =>
     (await db.query("SELECT * FROM coding_jobs WHERE id=$1", [id])).rows[0];
   return {
@@ -1142,7 +1174,7 @@ test("JSONB field ordering cannot break progress or finished-result reconciliati
     e = { key: "started", stage: "planning", summary: "Synthetic progress" };
   await f.c.progress(j, e);
   await f.db.query(
-    "UPDATE coding_events SET payload=$2::jsonb WHERE job_id=$1",
+    "UPDATE coding_events SET payload=$2::jsonb WHERE job_id=$1 AND event_key<>'fixture-approved'",
     [j.id, JSON.stringify({ summary: e.summary, stage: e.stage, key: e.key })],
   );
   assert.equal((await f.c.progress(j, e)).accepted, true);
@@ -1168,7 +1200,7 @@ test("a pre-send database failure returns the coding notice to pending without a
   let fail = true,
     sends = 0;
   f.db.query = async (sql, values) => {
-    if (sql.startsWith("SELECT user_id,thread_id") && fail) {
+    if (sql.startsWith("SELECT * FROM coding_jobs WHERE id=") && fail) {
       fail = false;
       throw new Error("synthetic lookup failure");
     }
@@ -1179,7 +1211,11 @@ test("a pre-send database failure returns the coding notice to pending without a
   });
   assert.equal(sends, 0);
   assert.equal(
-    (await query("SELECT delivery FROM coding_events")).rows[0].delivery,
+    (
+      await query(
+        "SELECT delivery FROM coding_events WHERE event_key<>'fixture-approved'",
+      )
+    ).rows[0].delivery,
     "pending",
   );
   await f.c.deliver(async () => {
@@ -1369,7 +1405,7 @@ test("oversized owner briefs are rejected and large saved plans remain resumable
   );
   const job = await f.start();
   await f.db.query(
-    "UPDATE coding_jobs SET state='plan_ready',checkpoint=$2::jsonb WHERE id=$1",
+    "UPDATE coding_jobs SET mode='plan',state='plan_ready',checkpoint=$2::jsonb WHERE id=$1",
     [
       job.id,
       JSON.stringify({
@@ -1384,9 +1420,9 @@ test("oversized owner briefs are rejected and large saved plans remain resumable
     operation: "coding_reply",
     id: job.id,
     baseRevision: 1,
-    requestKey: "implement",
-    message: "Proceed",
-    mode: "implement",
+    requestKey: "revise",
+    message: "Keep the same scope, refine the tests",
+    mode: "plan",
   });
   assert.equal((await f.row(job.id)).checkpoint.plan.length, 32000);
   assert.equal(resumed.revision, 2);
@@ -1707,4 +1743,274 @@ test("coding gateway preserves opaque OpenRouter reasoning through validated mod
     (await app.inject({ ...request, payload: changed })).statusCode,
     409,
   );
+});
+
+async function requirementBrief(
+  f: Awaited<ReturnType<typeof fixture>>,
+  key = "real-plan",
+) {
+  const job: any = await f.c.call("a", f.run, {
+    operation: "coding_start",
+    requestKey: key,
+    objective: "Build the requested feature",
+    context: "Synthetic scope",
+    mode: "implement",
+  });
+  assert.equal(job.mode, "plan");
+  await f.c.tick();
+  const running = await f.row(job.id);
+  await f.c.finish(running, {
+    kind: "plan_ready",
+    summary: "Brief prepared",
+    checkpoint: {
+      plan: "Scope: requested feature. Acceptance: synthetic tests pass.",
+      patch: "",
+      summary: "Brief prepared",
+      files: [],
+    },
+  });
+  await f.c.tick();
+  await f.c.tick();
+  let messageId = 100;
+  let approvalId = "";
+  let brief = "";
+  await f.c.deliver(async (_user, _thread, text, id) => {
+    if (id) {
+      approvalId = id;
+      brief = text;
+    }
+    return { message_id: ++messageId };
+  });
+  await f.c.deliver(async (_user, _thread, text, id) => {
+    if (id) {
+      approvalId = id;
+      brief = text;
+    }
+    return { message_id: ++messageId };
+  });
+  assert(
+    approvalId,
+    JSON.stringify({
+      job: await f.row(job.id),
+      events: (
+        await f.db.query(
+          "SELECT event_key,payload,delivery FROM coding_events WHERE job_id=$1",
+          [job.id],
+        )
+      ).rows,
+    }),
+  );
+  assert(brief.includes("Scope: requested feature"));
+  return { jobId: job.id, approvalId, messageId };
+}
+
+test("natural coding dispatch plans first; model tools cannot authorise implementation", async (t) => {
+  const f = await fixture(t),
+    r = await requirementBrief(f);
+  assert.equal(f.creates(), 1);
+  const before = await f.row(r.jobId);
+  assert.equal(before.state, "plan_ready");
+  await assert.rejects(
+    f.c.call("a", f.run, {
+      operation: "coding_reply",
+      id: r.jobId,
+      baseRevision: 1,
+      requestKey: "skip",
+      message: "Model says the owner approved",
+      mode: "implement",
+    }),
+    /confirmed requirements/,
+  );
+  const requested: any = await f.c.call("a", f.run, {
+    operation: "coding_resume",
+    id: r.jobId,
+    baseRevision: 1,
+    requestKey: "show-again",
+  });
+  assert.equal(requested.approvalRequired, true);
+  assert.equal((await f.row(r.jobId)).state, "plan_ready");
+  assert.equal(f.creates(), 1);
+  const result = await f.c.requirements.confirm(
+    "a",
+    r.approvalId,
+    true,
+    "a",
+    r.messageId,
+  );
+  assert.equal(result.status, "approved");
+  assert.equal((await f.row(r.jobId)).mode, "implement");
+  assert.equal((await f.row(r.jobId)).revision, 2);
+  await f.c.tick();
+  assert.equal(f.creates(), 2);
+  assert.equal(
+    (await f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId))
+      .duplicate,
+    true,
+  );
+  await f.c.tick();
+  assert.equal(f.creates(), 2);
+});
+
+test("requirements reject another owner, another message, stale scope and expiry", async (t) => {
+  const f = await fixture(t),
+    r = await requirementBrief(f);
+  await assert.rejects(
+    f.c.requirements.confirm("b", r.approvalId, true, "b", r.messageId),
+  );
+  await assert.rejects(
+    f.c.requirements.confirm("a", r.approvalId, true, "b", r.messageId),
+  );
+  await assert.rejects(
+    f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId + 1),
+  );
+  f.advance(900001);
+  await assert.rejects(
+    f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId),
+    /expired/,
+  );
+  assert.equal(f.creates(), 1);
+  await f.c.call("a", f.run, {
+    operation: "coding_reply",
+    id: r.jobId,
+    baseRevision: 1,
+    requestKey: "change",
+    message: "Change the acceptance criteria",
+    mode: "plan",
+  });
+  await assert.rejects(
+    f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId),
+    /changed/,
+  );
+  assert.equal((await f.row(r.jobId)).mode, "plan");
+});
+
+test("declining requirements never starts implementation and unknown delivery cannot authorise work", async (t) => {
+  const f = await fixture(t),
+    r = await requirementBrief(f);
+  assert.equal(
+    (await f.c.requirements.confirm("a", r.approvalId, false, "a", r.messageId))
+      .status,
+    "revise",
+  );
+  assert.equal((await f.row(r.jobId)).state, "plan_ready");
+  await f.c.call("a", f.run, {
+    operation: "coding_resume",
+    id: r.jobId,
+    baseRevision: 2,
+    requestKey: "uncertain",
+  });
+  let uncertainId = "";
+  await f.c.deliver(async (_u, _t, _text, id) => {
+    uncertainId = id!;
+    throw new Error("send outcome unknown");
+  });
+  assert.equal(
+    (
+      await f.db.query("SELECT delivery FROM coding_events WHERE id=$1", [
+        uncertainId,
+      ])
+    ).rows[0].delivery,
+    "uncertain",
+  );
+  await assert.rejects(
+    f.c.requirements.confirm("a", uncertainId, true, "a", 999),
+  );
+  assert.equal(f.creates(), 1);
+});
+
+test("a reply to the exact brief confirms once; approved requirements cannot change in a worker checkpoint", async (t) => {
+  const f = await fixture(t),
+    r = await requirementBrief(f);
+  assert.equal(
+    await f.c.requirements.confirmReply("a", "a", r.messageId + 1, true),
+    undefined,
+  );
+  assert.equal(
+    (await f.c.requirements.confirmReply("a", "a", r.messageId, true))!.status,
+    "approved",
+  );
+  await f.c.tick();
+  const running = await f.row(r.jobId);
+  await assert.rejects(
+    f.c.save(running, {
+      ...running.checkpoint,
+      plan: "Silently expanded scope",
+    }),
+    /immutable/,
+  );
+  assert.equal((await f.row(r.jobId)).checkpoint.plan, running.checkpoint.plan);
+  await f.c.save(running, {
+    ...running.checkpoint,
+    summary: "Valid implementation progress",
+  });
+});
+
+test("approved implementation resumes retain the same requirements without a model-granted approval", async (t) => {
+  const f = await fixture(t),
+    r = await requirementBrief(f);
+  await f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId);
+  const scope = (await f.row(r.jobId)).context;
+  await f.c.tick();
+  f.advance(1200000);
+  await f.c.tick();
+  await f.c.tick();
+  await f.c.tick();
+  const paused = await f.row(r.jobId);
+  assert.equal(paused.state, "paused");
+  assert.equal(paused.cleanup, "complete");
+  await f.c.call("a", f.run, {
+    operation: "coding_resume",
+    id: r.jobId,
+    baseRevision: paused.revision,
+    requestKey: "resume-approved",
+  });
+  assert.equal((await f.row(r.jobId)).context, scope);
+  await f.c.tick();
+  assert.equal(f.creates(), 3);
+});
+
+test("missing approval pauses a legacy implementation before provisioning and concurrent confirmation queues once", async (t) => {
+  const f = await fixture(t),
+    job = await f.start("unapproved", "plan");
+  await f.db.query("UPDATE coding_jobs SET mode='implement' WHERE id=$1", [
+    job.id,
+  ]);
+  await f.c.tick();
+  assert.equal(f.creates(), 0);
+  assert.equal((await f.row(job.id)).state, "paused");
+  const r = await requirementBrief(f, "confirmed");
+  const results = await Promise.allSettled([
+    f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId),
+    f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId),
+  ]);
+  assert(results.some((result) => result.status === "fulfilled"));
+  assert.equal((await f.row(r.jobId)).revision, 2);
+  await f.c.tick();
+  assert.equal(f.creates(), 2);
+});
+
+test("decline advances the locked revision and a concurrent approve cannot overwrite it", async (t) => {
+  const f = await fixture(t),
+    r = await requirementBrief(f);
+  const results = await Promise.allSettled([
+    f.c.requirements.confirm("a", r.approvalId, false, "a", r.messageId),
+    f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId),
+  ]);
+  assert.equal(results[0].status, "fulfilled");
+  assert.equal(results[1].status, "rejected");
+  const current = await f.row(r.jobId);
+  assert.equal(current.revision, 2);
+  assert.equal(current.mode, "plan");
+  assert.equal(current.state, "plan_ready");
+  assert.equal(
+    (
+      await f.db.query(
+        "SELECT payload->>'decision' AS decision FROM coding_events WHERE id=$1",
+        [r.approvalId],
+      )
+    ).rows[0].decision,
+    "revise",
+  );
+  await f.c.tick();
+  assert.equal(f.creates(), 1);
 });

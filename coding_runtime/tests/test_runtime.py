@@ -224,6 +224,15 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
                         pass
                 workspace.close()
 
+    async def test_planning_requires_a_non_empty_requirement_brief(self):
+        model = ScriptedModel(
+            generation(report("plan_ready")),
+            generation(report("plan_ready", plan="Scope and acceptance tests")),
+        )
+        result = await self.loop(model, mode="plan")
+        self.assertEqual(result.plan, "Scope and acceptance tests")
+        self.assertEqual(len(model.inputs), 2)
+
     async def test_large_file_write_preserves_exact_arguments_for_continuation(self):
         response = generation(
             ("file_write", {"path": "large.txt", "content": "x" * 32000}),
@@ -442,7 +451,9 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
                 generation(
                     ("file_write", {"path": "fixture.txt", "content": "correct 😀\n"})
                 ),
-                generation(report("candidate")),
+                generation(
+                    report("candidate", plan="Unapproved requirement expansion")
+                ),
             ),
             "reviewer": ScriptedModel(
                 generation(("plan_read", {}), ("file_read", {"path": "fixture.txt"})),
@@ -483,6 +494,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
             )
         result = next(body for path, body in requests if path == "finish")
         self.assertEqual(result["kind"], "candidate", result)
+        self.assertEqual(result["checkpoint"]["plan"], assignment.checkpoint.plan)
         self.assertEqual([c["exitCode"] for c in result["checks"]], [0, 0, 0])
         self.assertEqual(
             result["review"]["patchHash"],

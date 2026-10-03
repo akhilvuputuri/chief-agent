@@ -62,6 +62,8 @@ For the latest verified release and open work, read [current work](../current-wo
 
 | 3 October | [57 — Python coding runtime](57-python-coding-runtime.md): can disposable execution change language while preserving Chief’s durable boundary? | Released v0.3.35 off; Python image/policy and exact release verified; live activation pending |
 
+| 3 October | [58 — Conversational coding requirements](58-coding-requirements.md): what makes owner confirmation binding rather than a model assertion? | Candidate; exact-head review, image pin and release pending; coding off |
+
 ## Connected case studies
 
 **Context, cost and continuity.** The [lost-target incident](02-context-and-targets.md) and [cost investigation](03-token-cost.md) led to more selective context, compact observations and search reuse. As attachments and tool definitions grew, the [PDF failure and context-budget follow-up](07-attachments.md) exposed pressure from fixed instructions, schemas and state; the exact production size was not captured, so that diagnosis remains qualified. The v0.3.4 fix kept the current input and newest tool group viable, but the later [rolling-conversation incident](17-rolling-conversation.md) showed that bounds alone could still omit the immediately preceding exchange. That iteration protected recent conversation and source links, improved original-message retrieval, and separated foreground chat from explicitly selected jobs. [Checkpoint steering](18-checkpoint-steering.md) then changed when new input is adopted, preserving completed reasoning/tool results while fencing stale delivery. These are connected, evidence-backed iterations; the record does not establish one sole cause for every conversational failure or a measured cost reduction from the whole sequence.
@@ -95,7 +97,7 @@ Use **reported** for user/operator accounts not independently reproduced; **test
 
 Equivalent workload, model/configuration, pricing, denominators and missing accounting matter for comparisons. A health check is not a semantic evaluation, and a supplied memory is not proof that the model used it. Do not claim benchmark wins, production scale or savings without measurements. Keep private conversations, credentials, raw traces, user records and personal motivations out of this journal.
 
-Python execution: [56 — Coding work](56-coding-runtime.md) → [57 — Python runtime](57-python-coding-runtime.md).
+Python execution: [56 — Coding work](56-coding-runtime.md) → [57 — Python runtime](57-python-coding-runtime.md) → [58 — Requirement confirmation](58-coding-requirements.md).
 
 ## Scheduled work
 
