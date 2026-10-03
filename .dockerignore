@@ -5,3 +5,8 @@ dist
 .env.*
 __pycache__
 .telegram-pairing.json
+
+.venv
+.mypy_cache
+.ruff_cache
+**/*.egg-info

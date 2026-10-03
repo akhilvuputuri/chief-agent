@@ -1,3 +1,7 @@
+# Python coding runtime — tested candidate
+
+The Python package, OpenRouter gateway protocol and DeepSeek V4.1 Flash coder are being refactored on `codex/python-coding-runtime` from main `bc1319f`. Chief remains TypeScript. No DB/Compose changes; coding stays off. Independent review, image publication/pinning and exact release verification are pending. See [journal 57](journey/57-python-coding-runtime.md).
+
 # Issue 132 — Bill/subscription manual milestone released v0.3.34
 
 [PR #142](https://github.com/akhilvuputuri/chief-agent/pull/142) shipped explicit owner capture, the read-only Mini App tracker and opt-in renewal/trial/cancellation-deadline reminders as [v0.3.34](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.34) at `b79fd27f8cdf5ecadb05622217ab61666a63f70b`. GPT-6 Astra approved exact head `142486080c9094bbab151636d48e767dfc7e7d99`; its tree matches the merged release. PR/main checks, reviewed migration 025/operator installation, [normal release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37030523500), separate health/preservation checks and a transaction-rolled-back deployed-module smoke passed. No fixture remained, and the smoke made no Telegram send or model call. Actual owner Telegram acceptance remains separate. Email/browser/document intake, price alerts, monthly summaries and automatic responsibility monitoring remain later work; issue 132 stays open. See [contract](subscriptions.md) and [journal closure](journey/54-subscriptions.md#release-closure--3-october-2026).

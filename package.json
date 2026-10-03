@@ -1,6 +1,6 @@
 {
   "name": "chief-agent",
-  "version": "0.3.34",
+  "version": "0.3.35",
   "private": true,
   "type": "module",
   "description": "A personal AI assistant with an owned TypeScript runtime, Telegram voice, memory, research and durable tasks",
@@ -14,7 +14,7 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.evals.json",
     "test": "npm run build && tsx --test tests/*.test.ts && node --test scripts/*.test.mjs && python3 -m unittest discover -s evals/picker -p 'test_*.py' && python3 -m unittest discover -s evals/context -p 'test_*.py' && python3 -m unittest discover -s evals/decisions -p 'test_*.py'",
     "migrate": "tsx src/migrate.ts",
-    "check": "npm run typecheck && npm test",
+    "check": "npm run typecheck && npm test && npm run check:coding",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "setup": "node scripts/setup.mjs",
@@ -31,7 +31,8 @@
     "plugins": "node --import tsx src/plugin-cli.ts",
     "release:status": "node scripts/release-status.mjs",
     "logs:cloudwatch": "node scripts/cloudwatch-logs.mjs",
-    "context:inventory": "tsx scripts/context-inventory.ts"
+    "context:inventory": "tsx scripts/context-inventory.ts",
+    "check:coding": "python3 -m ruff check coding_runtime && python3 -m ruff format --check coding_runtime && python3 -m mypy coding_runtime/src --strict && PYTHONPATH=coding_runtime/src python3 -m unittest discover -s coding_runtime/tests -v"
   },
   "dependencies": {
     "@aws-sdk/client-codebuild": "3.1141.0",

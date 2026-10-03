@@ -6,6 +6,7 @@ const message = z
   .object({
     role: z.enum(["system", "user", "assistant", "tool"]),
     content: z.string().max(120000).nullable(),
+    reasoning_details: z.array(z.record(z.unknown())).optional(),
     tool_call_id: z.string().max(200).optional(),
     tool_calls: z
       .array(
@@ -16,7 +17,7 @@ const message = z
             function: z
               .object({
                 name: z.string().max(100),
-                arguments: z.string().max(32000),
+                arguments: z.string().max(180000),
               })
               .strict(),
           })

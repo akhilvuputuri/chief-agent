@@ -2,7 +2,7 @@
   "repository": "akhilvuputuri/chief-agent",
   "branch": "main",
   "image": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:7c4232e4d7b8d681eadf4f3861dc684d642c7829dec60342e42de90e740cce15",
-  "model": "openai/gpt-6.1-sol",
+  "model": "deepseek/deepseek-v4.1-flash",
   "reviewerModel": "openai/gpt-6.1-sol",
   "effort": "high",
   "limits": { "ms": 900000, "models": 40, "tools": 100 }

@@ -64,3 +64,7 @@ Any machine or cloud task with the private log-reader identity can read sanitize
 ## Remaining operator-only work
 
 Database/Compose migration, account consent, production secret rotation, server repair and installing a changed root-owned release command are not automated by ordinary merge. Consult cloud-development.md. Extending remote operations requires an explicit, reviewed capability; do not give all coding tasks unrestricted SSH just to remove those limits.
+
+## Python coding-worker checks
+
+Chief's control service remains Node 22/TypeScript. Coding execution is a Python 3.12+ package in `coding_runtime/`; combined `npm run check` also verifies it. Create/activate a development virtual environment and install `coding_runtime/requirements-dev.txt` with `python -m pip install --require-hashes -r coding_runtime/requirements-dev.txt` before running those checks. Do not install production credentials. See [package development](../coding_runtime/README.md). CI and manual releases install the same locked dependencies; automatic releases use the passing exact-main CI result.

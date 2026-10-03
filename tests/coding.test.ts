@@ -375,6 +375,10 @@ test("worker HTTP routes validate capabilities and reject malformed calls withou
     headers = { authorization: `Bearer ${f.c.token(j.id, j.attempt_id)}` };
   assert.equal((await app.inject({ url: path })).statusCode, 401);
   assert.equal((await app.inject({ url: path, headers })).json().baseSha, base);
+  assert.equal(
+    (await app.inject({ url: path, headers })).json().protocolVersion,
+    1,
+  );
   const bad = await app.inject({
     method: "POST",
     url: `/coding/worker/${j.id}/checkpoint`,
@@ -475,7 +479,7 @@ test("the CodeBuild request uses a trusted worker image and fixed buildspec, no 
   assert.equal(req.privilegedModeOverride, false);
   assert.equal(req.autoRetryLimitOverride, 0);
   assert.equal(req.imageOverride, settings.image);
-  assert(req.buildspecOverride.includes("--reuid=node"));
+  assert(req.buildspecOverride.includes("--reuid=1000"));
   assert(!req.buildspecOverride.includes("npm"));
   assert.equal(req.logsConfigOverride.cloudWatchLogs.status, "DISABLED");
 });
@@ -1613,4 +1617,94 @@ test("review cannot approve a plan read in the same generated tool batch", async
   });
   assert.equal(r.kind, "APPROVE");
   assert.equal(calls, 2);
+});
+
+test("Python launcher is host-selected and drops capabilities before executing the package", async () => {
+  const commands: any[] = [];
+  const provider = new CodeBuildSandbox(
+    {
+      send: async (command: any) => {
+        commands.push(command);
+        return { build: { id: "fixture:python" } };
+      },
+    } as any,
+    "fixture-project",
+  );
+  await provider.create({
+    jobId: randomUUID(),
+    attemptId: randomUUID(),
+    token: "a".repeat(64),
+    origin: "https://fixture.example",
+    image: settings.image,
+    runtime: "python",
+    timeoutMinutes: 20,
+  });
+  assert(
+    commands[0].input.buildspecOverride.includes(
+      "--no-new-privs --bounding-set=-all python -I -m chief_coding_runtime.worker",
+    ),
+  );
+  assert(!commands[0].input.buildspecOverride.includes("worker.js"));
+});
+
+test("coding gateway preserves opaque OpenRouter reasoning through validated model requests", async (t) => {
+  const f = await fixture(t),
+    job = await f.start();
+  await f.c.tick();
+  const j = await f.row(job.id),
+    app = server();
+  t.after(() => app.close());
+  await codingApi(app, f.c);
+  const input = {
+    callId: randomUUID(),
+    role: "coder",
+    messages: [
+      {
+        role: "assistant",
+        content: null,
+        reasoning_details: [
+          { type: "reasoning.encrypted", data: "synthetic-opaque", index: 0 },
+        ],
+        tool_calls: [
+          {
+            id: "one",
+            type: "function",
+            function: { name: "file_read", arguments: '{"path":"README.md"}' },
+          },
+        ],
+      },
+      { role: "tool", content: "Synthetic fixture", tool_call_id: "one" },
+    ],
+    tools: [],
+  };
+  input.messages[0].tool_calls![0].function.arguments = JSON.stringify({
+    path: "large.txt",
+    content: "x".repeat(32000),
+  });
+  const request = {
+    method: "POST" as const,
+    url: `/coding/worker/${j.id}/model`,
+    headers: { authorization: `Bearer ${f.c.token(j.id, j.attempt_id)}` },
+    payload: input,
+  };
+  assert.equal((await app.inject(request)).statusCode, 200);
+  assert.equal((await app.inject(request)).statusCode, 200);
+  assert.equal(f.modelCalls(), 1);
+  const changed = {
+    ...input,
+    messages: input.messages.map((m) =>
+      m.role === "assistant"
+        ? {
+            ...m,
+            reasoning_details: [
+              { type: "reasoning.encrypted", data: "changed", index: 0 },
+            ],
+          }
+        : m,
+    ),
+  };
+  assert.equal(
+    (await app.inject({ ...request, payload: changed })).statusCode,
+    409,
+  );
 });

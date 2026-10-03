@@ -1,3 +1,7 @@
+## Candidate v0.3.35 — Python coding execution
+
+Disposable execution moves to an independently packageable Python runtime; Chief retains TypeScript dispatch and durable control. OpenRouter remains the credential/policy layer, with DeepSeek V4.1 Flash for coding and the existing reviewer. No DB/Compose changes or paid activation. Review, Python image publication/pinning and exact release verification remain pending. See [journal 57](journey/57-python-coding-runtime.md).
+
 # Versions and release notes
 
 ## Released v0.3.34 — manual bills and subscriptions

@@ -1,3 +1,5 @@
+Python coding refactor candidate: disposable execution moves to `coding_runtime/`; Chief retains TypeScript dispatch, persistence, OpenRouter policy and publication. New assignments carry protocol v1. DeepSeek V4.1 Flash is the coder; reviewer/price ceilings/allocations stay unchanged. The Node image/launcher remains until reviewed Python publication/pinning; coding is off. No DB/Compose change. See [journal 57](docs/journey/57-python-coding-runtime.md).
+
 Libby refusal recovery shipped as v0.3.31 through [PR #145](https://github.com/akhilvuputuri/chief-agent/pull/145), independently approved, fully checked, and deployed healthy at `3382c5d63a6551ea960615332d0fc0cd3643e672`. Live `/library` and `/library link` acceptance passed with no extra library calls. Catalogue lookup works, but card linking is refused by the provider and borrowing remains unimplemented. See [current status](docs/library.md#current-account-linking-blocker--2-october-2026) and [journal closure](docs/journey/22-library-assistant.md#release-closure--2-october-2026).
 
 # Personal-agent handover

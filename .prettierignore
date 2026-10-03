@@ -2,3 +2,6 @@ node_modules
 dist
 package-lock.json
 services/hermes
+
+coding_runtime/requirements*.txt
+coding_runtime/*.egg-info

@@ -60,6 +60,8 @@ For the latest verified release and open work, read [current work](../current-wo
 | 2 October                            | [56 — Coding work outside the live assistant](56-coding-runtime.md): can Chief dispatch engineering work to a durable remote runtime?                 | Released v0.3.33 foundation off; scoped provider/App/ingress activation pending                                              |
 | 1–3 October                          | [54 — Subscriptions](54-subscriptions.md): how do owner statements, decision dates and reminders stay consistent?                                     | Released v0.3.34; migration 025, normal release and rolled-back deployed-module smoke verified; owner acceptance pending     |
 
+| 3 October | [57 — Python coding runtime](57-python-coding-runtime.md): can disposable execution change language while preserving Chief’s durable boundary? | Tested candidate; independent review, image pin and release pending |
+
 ## Connected case studies
 
 **Context, cost and continuity.** The [lost-target incident](02-context-and-targets.md) and [cost investigation](03-token-cost.md) led to more selective context, compact observations and search reuse. As attachments and tool definitions grew, the [PDF failure and context-budget follow-up](07-attachments.md) exposed pressure from fixed instructions, schemas and state; the exact production size was not captured, so that diagnosis remains qualified. The v0.3.4 fix kept the current input and newest tool group viable, but the later [rolling-conversation incident](17-rolling-conversation.md) showed that bounds alone could still omit the immediately preceding exchange. That iteration protected recent conversation and source links, improved original-message retrieval, and separated foreground chat from explicitly selected jobs. [Checkpoint steering](18-checkpoint-steering.md) then changed when new input is adopted, preserving completed reasoning/tool results while fencing stale delivery. These are connected, evidence-backed iterations; the record does not establish one sole cause for every conversational failure or a measured cost reduction from the whole sequence.
@@ -92,6 +94,8 @@ Use [the template](TEMPLATE.md) for every meaningful change, incident, architect
 Use **reported** for user/operator accounts not independently reproduced; **tested** for a named synthetic or automated check; **measured** for recorded observations with units, dates, sample sizes and collection method; **hypothesis** for a possible explanation; and **deferred** for deliberately unfinished work. **Released** requires the exact deployed SHA, successful release/health evidence and the corresponding PR/review record, with version/tag when published. Append a dated release closure after verification; retain earlier failures with the revision or stage at which they occurred. A merge, passing test or package version alone is not deployment evidence.
 
 Equivalent workload, model/configuration, pricing, denominators and missing accounting matter for comparisons. A health check is not a semantic evaluation, and a supplied memory is not proof that the model used it. Do not claim benchmark wins, production scale or savings without measurements. Keep private conversations, credentials, raw traces, user records and personal motivations out of this journal.
+
+Python execution: [56 — Coding work](56-coding-runtime.md) → [57 — Python runtime](57-python-coding-runtime.md).
 
 ## Scheduled work
 
