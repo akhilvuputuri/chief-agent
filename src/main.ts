@@ -427,7 +427,7 @@ const assistant = new Assistant(
     new CalendarActions(db, calendar, c.GMAIL_OWNER_USER_ID),
     library,
     libraryActions,
-    new WatchlistTools(db, stockProvider),
+    new WatchlistTools(db, stockProvider, undefined, marketCredits),
     new NewsTools(db, newsFetcher, newsBulletin),
     responsibilities,
     coding,

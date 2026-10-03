@@ -14,6 +14,8 @@ export type WindowKey = keyof typeof WINDOWS;
 /** Sessions fetched so the 52-week window is complete with margin for holidays. */
 export const DAILY_BARS = 300;
 const MIN_COVERAGE = 0.9;
+/** Daily history ending longer ago than this before the quote's date is treated as stale. */
+const STALE_DAYS = 7;
 
 const round = (value: number, digits: number) =>
   Math.round(value * 10 ** digits) / 10 ** digits;
@@ -73,8 +75,16 @@ export function computeStats(input: {
   const price = q.price;
   const today = q.tradingDate || q.quoteTime.toISOString().slice(0, 10);
   const daily = input.daily ?? [];
-  // Averages use completed sessions only; today's bar is still moving.
-  const completed = daily.filter((b) => b.date < today);
+  // Averages use completed sessions only. During a session today's bar is still moving;
+  // once the market is closed (after the close, weekends) the quote date's bar is final.
+  const completed = daily.filter(
+    (b) => b.date < today || (b.date === today && !q.marketOpen),
+  );
+  const last = completed.at(-1)?.date;
+  const stale =
+    input.daily && last
+      ? (Date.parse(today) - Date.parse(last)) / 86400000 > STALE_DAYS
+      : false;
   const averages = {} as StockStats["averages"];
   const ranges = {} as StockStats["ranges"];
   for (const [key, sessions] of Object.entries(WINDOWS) as [
@@ -82,10 +92,12 @@ export function computeStats(input: {
     number,
   ][]) {
     const closes = completed.slice(-sessions);
-    if (closes.length < sessions * MIN_COVERAGE) {
-      const reason = input.daily
-        ? `only ${closes.length} of ${sessions} sessions of history`
-        : "daily history unavailable";
+    if (stale || closes.length < sessions * MIN_COVERAGE) {
+      const reason = !input.daily
+        ? "daily history unavailable"
+        : stale
+          ? `daily history ends ${last}, too long before ${today}`
+          : `only ${closes.length} of ${sessions} sessions of history`;
       averages[key] = { value: null, reason };
       ranges[key] = { value: null, reason };
       continue;
@@ -121,7 +133,8 @@ export function computeStats(input: {
         : "monthly history unavailable",
     };
   else {
-    const { low, high } = extremes([...monthly, ...daily], price, today);
+    // Daily bars first: on a tie the daily bar's exact date wins over the month's first day.
+    const { low, high } = extremes([...daily, ...monthly], price, today);
     allTime = {
       low: round(low.value, 4),
       lowDate: low.date,
@@ -146,6 +159,6 @@ export function computeStats(input: {
     ranges,
     allTime,
     basis:
-      "Split-adjusted history from the same provider as the price. Averages are simple averages of completed daily closes (12w=60, 26w=130, 52w=260 sessions); lows/highs use daily bar lows/highs plus the current price. All-time figures start at the provider's first monthly bar ('since'). Bar dates for monthly extremes are the month's first day.",
+      "Split-adjusted history from the same provider as the price. Averages are simple averages of completed daily closes (12w=60, 26w=130, 52w=260 sessions; today's bar counts once the market is closed); lows/highs use daily bar lows/highs plus the current price. All-time figures start at the provider's first monthly bar ('since'); an extreme older than the daily history is dated by its month (YYYY-MM-01). History is fetched once per trading day, so today's intraday range is as of that fetch plus the current price.",
   };
 }

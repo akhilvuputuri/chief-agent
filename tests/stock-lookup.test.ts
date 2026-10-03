@@ -337,3 +337,87 @@ test("stock_lookup is a read operation available only with market data", () => {
   const off = runtimeContext({ stocks: false }, null);
   assert(!off.tools.some((t) => t.name === "stock_lookup"));
 });
+
+test("the bucket never reopens a past minute when a stale monitor timestamp interleaves with a lookup", () => {
+  const b = new CreditBucket(8, 800);
+  const stale = new Date("2026-10-02T14:00:59.900Z"); // the monitor's tick-start clock
+  b.spend(8, stale);
+  assert.equal(b.tryTake(3, new Date("2026-10-02T14:01:00.500Z"), 300), true);
+  // The monitor's next chunk still carries the old timestamp: it must not refill 14:00.
+  assert.equal(b.available(stale), 5);
+  b.spend(5, stale);
+  assert.equal(b.tryTake(1, new Date("2026-10-02T14:01:01Z"), 300), false);
+  assert.equal(b.available(new Date("2026-10-02T14:02:00Z")), 8);
+});
+
+test("statistics: a recent extreme carries its daily date, stale history is refused, closed sessions count", () => {
+  const days = sessions(300);
+  const daily = days.map((d) => bar(d, 100, 90, 110));
+  daily[daily.length - 10] = bar(daily[daily.length - 10]!.date, 150, 90, 200);
+  const peakDay = daily[daily.length - 10]!.date;
+  const month = peakDay.slice(0, 7) + "-01";
+  const monthly = [bar("1980-12-01", 1, 0.5, 2), bar(month, 150, 90, 200)];
+  const s = computeStats({ quote: quote(100), daily, monthly });
+  assert.equal((s.allTime as any).high, 200);
+  assert.equal((s.allTime as any).highDate, peakDay);
+  assert.equal((s.ranges["52w"] as any).highDate, peakDay);
+  // History that stopped weeks ago is not presented as current.
+  const old = sessions(300, "2026-09-01").map((d) => bar(d, 100));
+  assert.match(
+    (
+      computeStats({ quote: quote(100), daily: old, monthly }).averages[
+        "12w"
+      ] as any
+    ).reason,
+    /daily history ends/,
+  );
+  // On a closed day (weekend, after the close) the quote date's bar is complete.
+  const friday = [
+    ...sessions(59, "2026-10-02").map((d) => bar(d, 10)),
+    bar("2026-10-02", 1000),
+  ];
+  const open = computeStats({ quote: quote(10), daily: friday, monthly: [] });
+  const closed = computeStats({
+    quote: quote(10, { marketOpen: false }),
+    daily: friday,
+    monthly: [],
+  });
+  // While the session is open, the quote date's bar is excluded (59 completed closes of 10).
+  assert.equal((open.averages["12w"] as any).value, 10);
+  assert.equal((closed.averages["12w"] as any).value, 26.5); // (59*10 + 1000) / 60
+});
+
+test("a failed history series degrades to null figures and is not re-billed the same day", async () => {
+  const f = await fixture();
+  const original = f.provider.history.bind(f.provider);
+  f.provider.history = (async (ref: SymbolRef, interval: "1day" | "1month") => {
+    if (interval === "1month") {
+      f.provider.calls.history++;
+      throw new Error("bad bar");
+    }
+    return original(ref, interval);
+  }) as any;
+  const r: any = await f.lookup.call("owner", {
+    operation: "stock_lookup",
+    query: "AAPL",
+  });
+  assert.equal(r.stats.allTime.value, null);
+  assert.notEqual(r.stats.averages["12w"].value, null);
+  f.at(new Date("2026-10-02T15:05:00Z"));
+  await f.lookup.call("owner", { operation: "stock_lookup", query: "AAPL" });
+  assert.equal(f.provider.calls.history, 2);
+});
+
+test("when the daily reserve is the reason, busy asks to retry after the UTC reset", async () => {
+  const f = await fixture(new Date("2026-10-02T15:00:00Z"));
+  // 504 credits used: past the 800 - 300 reserve line.
+  for (let m = 0; m < 72; m++)
+    f.credits.spend(7, new Date(Date.UTC(2026, 9, 2, 12, m)));
+  const busy: any = await f.lookup.call("owner", {
+    operation: "stock_lookup",
+    query: "AAPL",
+  });
+  assert.equal(busy.status, "busy");
+  assert.equal(busy.retryAfterSeconds, 9 * 3600);
+  assert.match(busy.note, /08:00 Singapore/);
+});

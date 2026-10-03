@@ -34,7 +34,8 @@ export interface LookupAction {
  * No model calls; no writes.
  */
 export class StockLookup {
-  private history = new Map<string, PriceBar[]>();
+  /** null records a failed fetch for the day, so a broken series is not re-billed on retry. */
+  private history = new Map<string, PriceBar[] | null>();
   private quotes = new Map<string, { at: number; quote: Quote }>();
   /** Resolved searches for the UTC day, so a repeated question costs no search credit. */
   private resolved = new Map<string, { day: string; hit: SymbolHit }>();
@@ -48,14 +49,22 @@ export class StockLookup {
   private take(credits: number, now: Date) {
     if (!credits) return null;
     if (this.credits.tryTake(credits, now, DAILY_RESERVE)) return null;
+    const reserved =
+      this.credits.usedToday(now) + credits >
+      this.credits.perDay - DAILY_RESERVE;
+    const midnight = Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate() + 1,
+    );
     return {
       status: "busy",
-      retryAfterSeconds: 60 - now.getUTCSeconds(),
-      note:
-        this.credits.usedToday(now) + credits >
-        this.credits.perDay - DAILY_RESERVE
-          ? "Today's market-data allowance is reserved for monitoring; try again after 08:00 Singapore time."
-          : "Market data is rate-limited this minute; try again shortly.",
+      retryAfterSeconds: reserved
+        ? Math.ceil((midnight - now.getTime()) / 1000)
+        : 60 - now.getUTCSeconds(),
+      note: reserved
+        ? "Today's market-data allowance is reserved for monitoring; try again after 08:00 Singapore time."
+        : "Market data is rate-limited this minute; try again shortly.",
     };
   }
 
@@ -199,24 +208,27 @@ export class StockLookup {
         const fetched = (await this.provider.quotes([instrument.ref])).get(key);
         if (!fetched)
           throw new ProviderError("provider returned no quote", true);
+        if (this.quotes.size > 200) this.quotes.clear();
         this.quotes.set(key, { at: now.getTime(), quote: fetched });
       }
       quote = this.quotes.get(key)!.quote;
-      if (!this.history.has(dailyKey))
-        this.remember(
-          dailyKey,
-          await this.provider.history(instrument.ref, "1day", DAILY_BARS),
-        );
-      if (!this.history.has(monthlyKey))
-        this.remember(
-          monthlyKey,
-          await this.provider.history(instrument.ref, "1month", 5000),
-        );
     } catch (error) {
       throw new Error(
         `Market data unavailable: ${error instanceof Error ? error.message : "provider error"}`,
       );
     }
+    // A failed history series degrades to null figures with reasons, not a failed answer.
+    for (const [cacheKey, interval, size] of [
+      [dailyKey, "1day", DAILY_BARS],
+      [monthlyKey, "1month", 5000],
+    ] as const)
+      if (!this.history.has(cacheKey))
+        this.remember(
+          cacheKey,
+          await this.provider
+            .history(instrument.ref, interval, size)
+            .catch(() => null),
+        );
     if (quote.currency && quote.currency !== instrument.currency)
       throw new Error(
         `Quote currency ${quote.currency} differs from the listing's ${instrument.currency}`,
@@ -230,8 +242,8 @@ export class StockLookup {
       },
       stats: computeStats({
         quote,
-        daily: this.history.get(dailyKey)!,
-        monthly: this.history.get(monthlyKey)!,
+        daily: this.history.get(dailyKey) ?? null,
+        monthly: this.history.get(monthlyKey) ?? null,
       }),
       source: {
         provider: this.provider.name,
@@ -244,7 +256,7 @@ export class StockLookup {
   }
 
   /** Keeps only the current trading day's history per instrument and interval. */
-  private remember(key: string, bars: PriceBar[]) {
+  private remember(key: string, bars: PriceBar[] | null) {
     const prefix = key.slice(0, key.lastIndexOf(":"));
     for (const existing of this.history.keys())
       if (existing.startsWith(prefix + ":") && existing !== key)

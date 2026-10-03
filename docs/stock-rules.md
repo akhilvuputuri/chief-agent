@@ -30,7 +30,7 @@ The agent converts the owner's words into this shape. The host validates it, and
 One module, `src/stock-stats.ts`, computes every reference. Questions, rules and digests all use it, so answers and alerts agree.
 
 - **Inputs.** The quote the monitor already fetches, plus history from the same provider, so one provider's price is never compared with another's reference.
-  - Daily bars: the latest 300 sessions, `1day`, split-adjusted.
+  - Daily bars: the latest 300 sessions, `1day`, split-adjusted. A live check on 4 October 2026 (demo key, AAPL, `outputsize=300&order=asc`) returned the latest 300 sessions, 2025-07-25 to 2026-10-02. Daily history ending more than 7 days before the quote date is treated as stale (`null` with the reason).
   - Monthly bars: full history, `1month`, split-adjusted. Twelve Data returns 551 bars for AAPL, back to December 1980, measured on 4 October 2026 with the public demo key.
 - **Outputs.** Each has its source and as-of date:
   - day change;
@@ -59,6 +59,17 @@ One module, `src/stock-stats.ts`, computes every reference. Questions, rules and
   - **Resolution.** A watched stock (by ID or ticker) resolves without a search. Other symbols go through the same exchange picker as `watchlist_add` and are cached for the UTC day.
   - **Data.** Non-US listings are refused. The quote is cached for 60 seconds, and history for the exchange trading day.
   - **Results.** A `busy` result is returned rather than waiting for credits.
+- **Independent review of `e2569bd` (REQUEST CHANGES), all fixed:**
+  - **Blocking.** The shared bucket could reopen a past minute when the monitor's tick-start timestamp interleaved with a later lookup, letting both exceed the per-minute allowance. Windows now only move forward.
+  - **Blocking.** All-time extremes inside the daily range were dated by their month's first day. Daily bars now take precedence, so an exact date wins a tie.
+  - **Weekends and after the close.** The quote date's bar now counts as completed once the market is closed.
+  - **Reserve.** A busy result caused by the daily reserve gives the seconds until the 00:00 UTC reset.
+  - **Failed series.** A failed history series yields `null` figures with reasons and is not fetched again that day.
+  - **Searches.** `watchlist_add` searches are counted in the shared bucket.
+  - **Cache bounds.** The quote cache is bounded.
+- **Known limits.**
+  - History is fetched once per exchange trading day, so today's intraday range is as of that fetch, plus the current price.
+  - The 300-credit daily reserve is fixed. At the default 15-minute cadence a full US session uses about 26 credits per watched stock, so the reserve covers about 11 stocks; it should be revisited if the watchlist grows beyond that.
 - **Tool and agent.** `stock_lookup` is a read operation in the `watchlist` domain, gated on market data and granted to `core/stocks`, whose instructions now cover "ask now" questions, provenance, null figures and busy results.
 
 ## Phases

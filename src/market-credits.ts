@@ -15,14 +15,19 @@ export class CreditBucket {
     readonly perMinute: number,
     readonly perDay = 800,
   ) {}
+  /**
+   * Windows only move forward. The monitor fixes `now` at the start of a tick while a
+   * lookup reads a later clock; an older timestamp is counted in the current window, never
+   * used to reopen a past minute (which would refill an allowance already spent).
+   */
   private roll(now: Date) {
     const minute = Math.floor(now.getTime() / 60000);
-    if (minute !== this.minute) {
+    if (minute > this.minute) {
       this.minute = minute;
       this.left = this.perMinute;
     }
     const day = now.toISOString().slice(0, 10);
-    if (day !== this.day) {
+    if (day > this.day) {
       this.day = day;
       this.used = 0;
     }

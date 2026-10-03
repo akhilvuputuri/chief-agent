@@ -22,9 +22,16 @@ A fixed menu of alert types would grow with every new phrasing. Instead, request
 - **Shared credits.** The monitor's private per-minute bucket became a `CreditBucket` shared with lookups, so the two cannot exceed the provider's allowance together. Existing monitor tests pass unchanged.
 - **Shared resolution.** The watchlist's exchange picker was extracted as `pickInstrument`, so lookups resolve listings exactly as `watchlist_add` does.
 
+- **Independent review.** Opus 5.5 reviewed `e2569bd` and returned **REQUEST CHANGES**, with two blocking findings:
+  - the shared credit bucket could refill a past minute when a stale monitor timestamp interleaved with a lookup;
+  - all-time extremes within the daily range were reported with the month's first day.
+
+  Non-blocking findings covered stale daily history, a weekend average dropping Friday, the busy retry time under the reserve, a failed history series failing the whole answer, an uncounted `watchlist_add` search, the frozen intraday range, and the unbounded quote cache. All were fixed or documented, with regression tests.
+
 ## Verification and outcome
 
-Pending.
+- **Live check, 4 October 2026, with the public demo key.** Daily `outputsize=300&order=asc` for AAPL returned the latest 300 sessions (2025-07-25 to 2026-10-02).
+- **Tests.** Synthetic tests cover the statistics, the monotonic credit windows, the tie dates, stale and short history, weekend completion, resolution and caching, and busy and degraded results. Nothing is deployed yet.
 
 ## Follow-up and next iteration
 

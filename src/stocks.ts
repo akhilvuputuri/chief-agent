@@ -54,6 +54,8 @@ export class WatchlistTools {
     private db: Database,
     private provider?: MarketDataProvider,
     private clock = () => new Date(),
+    /** Shared allowance: an owner-requested search is always made, but it is counted. */
+    private credits?: CreditBucket,
   ) {}
   private async requireForeground(user: string, run: string) {
     const turn = (
@@ -159,6 +161,7 @@ export class WatchlistTools {
       );
     let hits: SymbolHit[];
     try {
+      this.credits?.spend(1, this.clock());
       hits = await this.provider.search(a.query);
     } catch (error) {
       throw new ToolValidationError(
