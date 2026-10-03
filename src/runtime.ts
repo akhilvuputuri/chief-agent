@@ -97,6 +97,7 @@ export function runtimeContext(
     (op === "sheet_sync" && !availability.preparationSheet) ||
     (op === "daily_sync" && !availability.dailySheet) ||
     (op.startsWith("watchlist_") && !availability.stocks) ||
+    (op.startsWith("stock_") && !availability.stocks) ||
     (op.startsWith("portfolio_") && !availability.portfolio) ||
     (op.startsWith("news_") && !availability.news) ||
     (op.startsWith("web_") && !availability.web);
@@ -234,6 +235,8 @@ export function runtimeContext(
                 "Only when the owner explicitly asks to stop Chief reading IBKR: queue a Telegram confirmation card. Nothing is disconnected until the owner taps Disconnect; never say it is done.",
               portfolio_status:
                 "IBKR connection state, last successful sync, position count and last attempt. The owner connects or disconnects with /portfolio connect or /portfolio disconnect in Telegram.",
+              stock_lookup:
+                "Answer a stock question now: price, day change, 12/26/52-week simple averages, 12/26/52-week lows and highs, and all-time low and high (split-adjusted, with 'since' date), each with distance in percent. query is a ticker or company name (or pass a watched stock id); when candidates span exchanges ask the owner which, then repeat with exchange. Returns status busy with retryAfterSeconds when market-data credits are exhausted for now. US listings only. Facts, not advice.",
               watchlist_settings:
                 "Set watchlist defaults: defaultDropPct, paused master switch, pollMinutes cadence, includeExtended opt-in for pre/post-market quotes, and window: the default Singapore-time hours to monitor ({start:'HH:MM', end:'HH:MM' or '24:00', days?:['mon',...]}; end before start runs past midnight; null removes it). The window applies on top of exchange hours, so 'from market open until midnight' is start at or before the open (e.g. 20:00) and end 24:00. No quotes are fetched and no alerts are sent outside it; report the returned nextChecks to the owner as the confirmation.",
               news_source_add:

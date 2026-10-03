@@ -4,7 +4,7 @@
   "enabled": [
     {
       "path": "core",
-      "sha256": "40ac651c7113757d68fd1fb52dd11305d31c5efeed8beeaae13e91b5e8731f03",
+      "sha256": "b9782c32e54fcc99a08bba3ec96ee223993ea92da624d2069f079c1b6f4df2b0",
       "agents": [
         "email",
         "parcels",
@@ -59,6 +59,7 @@
         "schedule_list",
         "schedule_update",
         "source_read",
+        "stock_lookup",
         "subscription_list",
         "subscription_record",
         "subscription_settings",
@@ -130,6 +131,7 @@
     "schedule_create",
     "schedule_list",
     "schedule_update",
+    "stock_lookup",
     "subscription_list",
     "subscription_record",
     "subscription_settings",
