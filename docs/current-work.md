@@ -1,3 +1,7 @@
+# Read-only IBKR holdings and stock lookup — released v0.3.37
+
+IBKR holdings ([PR #152](https://github.com/akhilvuputuri/chief-agent/pull/152)) are installed and **on** at `c3cea89` through reviewed migration 026, with owner-tapped connect and disconnect cards and read-only scope. Owner connection and acceptance are pending. Stock lookup ([PR #161](https://github.com/akhilvuputuri/chief-agent/pull/161)) is deployed at `7e81985`. Next is Phase 2b: general "tell me when…" rules, which need migration 027. See [IBKR portfolio](ibkr-portfolio.md), [stock rules](stock-rules.md) and journals [59](journey/59-ibkr-portfolio.md) and [60](journey/60-stock-rules.md).
+
 # Conversational coding requirements — released v0.3.36, off
 
 [PR #157](https://github.com/akhilvuputuri/chief-agent/pull/157)/[PR #158](https://github.com/akhilvuputuri/chief-agent/pull/158) enforce plan → owner confirmation → Python implementation without slash commands. Astra approved exact heads `aafecf3` and `140c97d`; PR/main Linux CI passed. The [exact release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37120011881), separate health/policy/preservation checks and immutable [v0.3.36](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.36) verify `67db5e135c99eee85a10416dbe159ce93432eee0`. No DB/Compose change. Coding remains off with zero jobs; provisioning authentication and scoped provider/App/ingress setup are incomplete. No paid/live coding acceptance. See [journal closure](journey/58-coding-requirements.md#release-closure--3-october-2026).

@@ -1,7 +1,7 @@
 # 60 — How can one stock agent answer, watch and report on the owner's own stock questions?
 
 Work date(s): 2026-10-03 to 2026-10-04. Written/revised: 2026-10-04.
-Status: plan agreed; Phase 2a (statistics layer, shared credits, `stock_lookup`) implemented and tested, pending review. Nothing deployed.
+Status: Phase 2a released in v0.3.37 (3 October 2026); Phase 2b and Phase 2c planned.
 
 ## User-visible problem and preceding iteration
 
@@ -36,3 +36,7 @@ A fixed menu of alert types would grow with every new phrasing. Instead, request
 ## Follow-up and next iteration
 
 Phase 2b (rules and migration 027) and Phase 2c (digest).
+
+### Release closure — 3 October 2026
+
+[PR #161](https://github.com/akhilvuputuri/chief-agent/pull/161) merged at `7e8198517c141b0e64b93cf1d87f16001b9f2876`, with independent approval of exact head `b80ca55` and CI passing on that head. The [automatic release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37137918493) and server checks verified that exact `RELEASE`, a healthy gateway and Twelve Data configured. No schema change. Released in v0.3.37. Pending: owner acceptance of a live question; Phase 2b and Phase 2c.

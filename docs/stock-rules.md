@@ -1,6 +1,6 @@
 # Stock questions, rules and digests (issue #146, Phase 2)
 
-Status: **plan agreed with the owner on 3–4 October 2026. Phase 2a is implemented on `feat/stock-rules-2a`, pending review and release.** Builds on the deterministic [stock watchlist](stock-watchlist.md) and read-only [IBKR holdings](ibkr-portfolio.md). Journal: [60](journey/60-stock-rules.md).
+Status: **plan agreed with the owner on 3–4 October 2026. Phase 2a is released in v0.3.37; Phase 2b and Phase 2c are next.** Builds on the deterministic [stock watchlist](stock-watchlist.md) and read-only [IBKR holdings](ibkr-portfolio.md). Journal: [60](journey/60-stock-rules.md).
 
 ## Goal
 
