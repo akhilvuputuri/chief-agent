@@ -1,6 +1,6 @@
 # Three-member coding squad — v0.3.38 candidate
 
-`codex/coding-squad` adds a Python model leader around fixed coder/reviewer members with independent contexts, restricted tools, typed handoffs and exact-artifact review gates. Existing allocations/price filters and owner confirmation are preserved. Migration 027 widens the model-role constraint; an idle reviewed operator rollout and new Python image/squad pin are required. Tests/review/release pending; coding remains off. See [contract](coding-squad.md) and [journal 61](journey/61-coding-squad.md).
+`codex/coding-squad` adds a Python model leader around fixed coder/reviewer members with independent contexts, restricted tools, typed handoffs and exact-artifact review gates. Existing allocations/price filters and owner confirmation are preserved. Migration 027 widens the model-role constraint; an idle reviewed operator rollout and new Python image/squad pin are required. PR #163 passed Astra review/Linux CI and migration 027/operator/normal-release verification at `3b3bf8c`. Python image is published/anonymously verified; pin review/final release pending; coding remains off. See [contract](coding-squad.md) and [journal 61](journey/61-coding-squad.md).
 
 # Read-only IBKR holdings and stock lookup — released v0.3.37
 

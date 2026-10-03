@@ -65,4 +65,4 @@ The host confirmation change merged in PR #157 after exact-head Astra approval a
 
 ## Three-member squad candidate
 
-The [squad contract](coding-squad.md) adds a dedicated model leader with fixed coder/reviewer members. Migration 027, exact review/operator installation and a new image/squad pin are pending. Existing source settings still use the legacy two-role worker until that reviewed transition. Coding remains off.
+The [squad contract](coding-squad.md) adds a dedicated model leader with fixed coder/reviewer members. PR #163 passed exact review and migration 027/operator installation with verified release/health. The Python squad image is published/anonymously verified; source now pins it with the squad selector/leader model. Pin review and final exact release are pending. Coding remains off.
