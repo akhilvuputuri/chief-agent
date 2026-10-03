@@ -1,6 +1,6 @@
 # 58 — Chief asks for requirements, then waits for the owner
 
-Work date(s): 2026-10-03. Status: implementation candidate; checks, independent review, new Python image pin and release pending. Coding remains off; no paid/live acceptance.
+Work date(s): 2026-10-03. Status: confirmation implementation merged and Python image published/verified; image pin review and exact release pending. Coding remains off; no paid/live acceptance.
 
 ## User-visible problem and preceding iteration
 
@@ -20,7 +20,7 @@ Prompt-only instructions could request consent but could not prevent a model fro
 
 Every new job plans first. The plan-ready transition atomically creates its requirement event. Full brief delivery precedes its confirmation button; only a recorded complete send grants a usable message binding. The host queues implementation once after cleanup, with a frozen scope and revision. Models cannot confirm requirements. Changes replan and invalidate previous approvals; explicit unchanged resume preserves the context/approval. Host checkpoint/completion/provisioning guards enforce the approved plan, and the Python worker preserves it. Empty planning reports must be corrected before finishing.
 
-GPT-6 Astra requested changes at `41fe7c697cd84be56c291aabe60ddb7a334cdd0f`: a post-commit acknowledgement failure could falsely claim implementation had not started, and decline did not advance the locked revision used to fence a concurrent approval. The fixes separate confirmation from acknowledgement/receipt delivery, retain uncertainty without false non-start claims, and advance/audit every decision through the job revision. Regressions cover both button/text acknowledgement failure and decline/approve concurrency. Corrected-head re-review is pending. Passing checks alone are not approval. Existing paid allocations, provider filters, owner scoping, cancelled/uncertain writes and private journals are preserved; no automatic merge, deployment or paused-task resumption is added.
+GPT-6 Astra requested changes at `41fe7c697cd84be56c291aabe60ddb7a334cdd0f`: a post-commit acknowledgement failure could falsely claim implementation had not started, and decline did not advance the locked revision used to fence a concurrent approval. The fixes separate confirmation from acknowledgement/receipt delivery, retain uncertainty without false non-start claims, and advance/audit every decision through the job revision. Regressions cover both button/text acknowledgement failure and decline/approve concurrency. GPT-6 Astra APPROVED corrected head `aafecf304b5f49fafbc49248b0011ee04e3e4cb9`, independently passing all 47 controller/Telegram and 20 Python tests. [Exact-head Linux CI](https://github.com/akhilvuputuri/chief-agent/actions/runs/37118814233) passed; [PR #157](https://github.com/akhilvuputuri/chief-agent/pull/157) merged at `b8ffb21b3509a20b30e0cff3409bfcf9d8d54e2e`. Passing checks alone are not approval. Existing paid allocations, provider filters, owner scoping, cancelled/uncertain writes and private journals are preserved; no automatic merge, deployment or paused-task resumption is added.
 
 ## Verification and outcome
 
@@ -29,3 +29,7 @@ Local full checks passed: 679 application tests, 22 JavaScript script tests, 30 
 ## Follow-up and next iteration
 
 Obtain exact-head review, publish/pin the Python 0.1.1 image, verify the exact release, then complete scoped activation after provisioning authentication is refreshed. Test conversational requirement confirmation first, followed by a bounded harmless candidate, cancellation and checkpoint recovery. Keep live findings separate from synthetic proof.
+
+### Image publication — 3 October 2026
+
+The [trusted main workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/37119192462) published Python 0.1.1 from approved merge `b8ffb21b3509a20b30e0cff3409bfcf9d8d54e2e`. The pin is `ghcr.io/akhilvuputuri/chief-agent-coding@sha256:558589998a2a700b908c41ef380c5be48724da5d4da0708a658f24485344b054`. Anonymous requests verified the index, Linux/amd64 manifest and config SHA-256 identities and the non-root isolated Python entrypoint. Pin review/application release remain pending; this is availability evidence, not a live CodeBuild/model test. Runtime stays off.

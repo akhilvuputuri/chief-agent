@@ -1,6 +1,6 @@
 ## Candidate v0.3.36 — conversational coding requirement confirmation
 
-New coding jobs plan first. Owner confirmation of the complete delivered brief is required before Python implementation; buttons and direct yes replies need no slash commands. Scope changes replan, approvals are bound to owner/message/revision, and resumed approved work retains its brief. No DB/Compose or allocation changes; coding stays off. Review, Python image pin/release and activation remain pending. See [journal 58](journey/58-coding-requirements.md).
+New coding jobs plan first. Owner confirmation of the complete delivered brief is required before Python implementation; buttons and direct yes replies need no slash commands. Scope changes replan, approvals are bound to owner/message/revision, and resumed approved work retains its brief. No DB/Compose or allocation changes; coding stays off. PR #157 passed Astra review and Linux CI; Python 0.1.1 is published/anonymously verified. Pin review, exact release and activation remain pending. See [journal 58](journey/58-coding-requirements.md).
 
 ## Released v0.3.35 — Python coding execution, off
 
