@@ -1368,3 +1368,108 @@ test("unrelated issuer ambiguity remains refused even with owner target attestat
     await f.db.close();
   }
 });
+
+test("byte-different versions of one invoice do not inflate browser invoice-history coverage", async () => {
+  const f = await fixture({ browser: true });
+  try {
+    await f.capture();
+    await f.match();
+    const data = pdf(
+      "OpenAI ChatGPT Invoice number INV-001 Invoice date September 5, 2026 USD 20.00 Regenerated PDF version two",
+    );
+    const browser = {
+      download: async () => ({
+        name: "invoice.pdf",
+        data,
+        origin: "https://billing.example.com",
+      }),
+      closeCollection: async () => {},
+    };
+    const g = new Gathering(f.db, f.vault, undefined, browser);
+    const file = await g.call(
+      "alice",
+      f.run,
+      action.parse({
+        operation: "gather_capture",
+        id: f.c.id,
+        targetKey: "one",
+        requestKey: randomUUID(),
+        source: {
+          kind: "browser",
+          sessionId: randomUUID(),
+          snapshotId: randomUUID(),
+          linkId: randomUUID(),
+        },
+      }),
+    );
+    await g.call(
+      "alice",
+      f.run,
+      action.parse({
+        operation: "gather_match",
+        id: f.c.id,
+        targetKey: "one",
+        requestKey: randomUUID(),
+        artifactId: file.artifactId,
+        date: "2026-09-05",
+        dateBasis: "invoice_date",
+      }),
+    );
+    await f.db.query(
+      "INSERT INTO gather_attempts(id,user_id,collection_id,target_key,kind,state,metadata,scope_revision) VALUES($1,'alice',$2,'one','browser','success',$3::jsonb,1)",
+      [
+        randomUUID(),
+        f.c.id,
+        JSON.stringify({ ownerConfirmedCount: 2, month: "2026-09" }),
+      ],
+    );
+    await assert.rejects(
+      () => f.call({ operation: "gather_check", source: "browser" }),
+      /invoice count|count/i,
+    );
+    assert.equal((await f.gather.status("alice", f.c.id)).counts.files, 2);
+  } finally {
+    await f.db.close();
+  }
+});
+
+test("closing a read-only browser preserves already checked immutable-file coverage", async () => {
+  const f = await fixture({ browser: true });
+  try {
+    await f.capture();
+    await f.match();
+    await f.db.query(
+      "INSERT INTO gather_attempts(id,user_id,collection_id,target_key,kind,state,metadata,scope_revision) VALUES($1,'alice',$2,'one','browser','success',$3::jsonb,1)",
+      [
+        randomUUID(),
+        f.c.id,
+        JSON.stringify({ ownerConfirmedCount: 1, month: "2026-09" }),
+      ],
+    );
+    assert.equal(
+      (await f.call({ operation: "gather_check", source: "browser" })).state,
+      "covered",
+    );
+    const g = new Gathering(f.db, f.vault, undefined, {
+      agent: async () => ({
+        sessionId: randomUUID(),
+        origin: "https://billing.example.com",
+        closed: true,
+      }),
+      closeCollection: async () => {},
+    });
+    await g.call(
+      "alice",
+      f.run,
+      action.parse({
+        operation: "gather_browser",
+        id: f.c.id,
+        targetKey: "one",
+        command: { kind: "close", sessionId: randomUUID() },
+      }),
+    );
+    assert.equal((await g.status("alice", f.c.id)).counts.covered, 1);
+  } finally {
+    await f.db.close();
+  }
+});

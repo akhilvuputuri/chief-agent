@@ -764,6 +764,8 @@ export class Gathering {
         });
         throw error;
       }
+      // Closing a finished context is lifecycle cleanup, not new source evidence.
+      if (a.command.kind === "close") return result;
       const attemptId = await this.recordAttempt(
         user,
         run,
@@ -1102,15 +1104,33 @@ export class Gathering {
       const browserFiles = candidates.filter(
         (x) => x.kind === "browser" && matched.includes(x.artifact_id),
       );
+      const uniqueFiles = [
+        ...new Map(browserFiles.map((x) => [x.artifact_id, x])).values(),
+      ];
       if (
-        !confirmed ||
-        new Set(browserFiles.map((x) => x.artifact_id)).size !==
-          confirmed.metadata.ownerConfirmedCount
+        uniqueFiles.length > 1 &&
+        uniqueFiles.some(
+          (x) => (x.facts as InvoiceFacts).invoiceNumbers.length !== 1,
+        )
       )
         throw new ToolValidationError(
-          "Browser coverage needs the owner's expected invoice count for this account/month, and that many distinct matched PDFs. Use the handoff view to confirm the count.",
+          "Multiple browser PDFs need distinct recorded invoice identifiers before invoice-history coverage can be verified",
         );
-      return "Matched PDF count equals the owner's explicit invoice-history count for this account/month; this is owner-confirmed coverage, not an independent account census.";
+      const invoiceIds = new Set(
+        uniqueFiles.map(
+          (x) =>
+            (x.facts as InvoiceFacts).invoiceNumbers[0]?.toUpperCase() ??
+            x.artifact_id,
+        ),
+      );
+      if (
+        !confirmed ||
+        invoiceIds.size !== confirmed.metadata.ownerConfirmedCount
+      )
+        throw new ToolValidationError(
+          "Browser coverage needs the owner's expected invoice count for this account/month, and that many distinct recorded invoice identifiers (or one sole matched PDF). PDF variants do not increase the count. Use the handoff view to confirm the count.",
+        );
+      return "Distinct recorded invoice count equals the owner's explicit invoice-history count for this account/month. PDF variants sharing an invoice identifier count once; this is owner-confirmed coverage, not an independent account census.";
     }
     for (const account of c.scope.mailboxes) {
       const roots = attempts.filter(
