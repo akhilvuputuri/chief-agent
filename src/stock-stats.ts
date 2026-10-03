@@ -74,7 +74,18 @@ export function computeStats(input: {
     throw new Error("Quote has no usable price");
   const price = q.price;
   const today = q.tradingDate || q.quoteTime.toISOString().slice(0, 10);
-  const daily = input.daily ?? [];
+  // History is fetched once per trading day, so a cached bar for today may be a mid-session
+  // snapshot. Once the market is closed the quote price is today's close: fold it in.
+  const daily = (input.daily ?? []).map((b) =>
+    b.date === today && !q.marketOpen
+      ? {
+          ...b,
+          close: price,
+          low: Math.min(b.low, price),
+          high: Math.max(b.high, price),
+        }
+      : b,
+  );
   // Averages use completed sessions only. During a session today's bar is still moving;
   // once the market is closed (after the close, weekends) the quote date's bar is final.
   const completed = daily.filter(
@@ -109,8 +120,9 @@ export function computeStats(input: {
       fromPct: fromPct(price, mean),
     };
     // Lows/highs include today's bar and price: a new low today counts.
+    // The window is `sessions` completed bars, plus today's bar while it is still open.
     const window = daily.slice(
-      -sessions - (daily.at(-1)?.date === today ? 1 : 0),
+      -sessions - (daily.at(-1)?.date === today && q.marketOpen ? 1 : 0),
     );
     const { low, high } = extremes(window, price, today);
     ranges[key] = {

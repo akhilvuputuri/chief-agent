@@ -218,17 +218,31 @@ export class StockLookup {
       );
     }
     // A failed history series degrades to null figures with reasons, not a failed answer.
+    // Only a permanent failure is remembered for the day; a transient one (429, 5xx,
+    // timeout) is fetched again on the next question.
+    const series = new Map<string, PriceBar[] | null>();
     for (const [cacheKey, interval, size] of [
       [dailyKey, "1day", DAILY_BARS],
       [monthlyKey, "1month", 5000],
-    ] as const)
-      if (!this.history.has(cacheKey))
-        this.remember(
-          cacheKey,
-          await this.provider
-            .history(instrument.ref, interval, size)
-            .catch(() => null),
+    ] as const) {
+      if (this.history.has(cacheKey)) {
+        series.set(cacheKey, this.history.get(cacheKey)!);
+        continue;
+      }
+      try {
+        const bars = await this.provider.history(
+          instrument.ref,
+          interval,
+          size,
         );
+        this.remember(cacheKey, bars);
+        series.set(cacheKey, bars);
+      } catch (error) {
+        if (error instanceof ProviderError && !error.retryable)
+          this.remember(cacheKey, null);
+        series.set(cacheKey, null);
+      }
+    }
     if (quote.currency && quote.currency !== instrument.currency)
       throw new Error(
         `Quote currency ${quote.currency} differs from the listing's ${instrument.currency}`,
@@ -242,8 +256,8 @@ export class StockLookup {
       },
       stats: computeStats({
         quote,
-        daily: this.history.get(dailyKey) ?? null,
-        monthly: this.history.get(monthlyKey) ?? null,
+        daily: series.get(dailyKey) ?? null,
+        monthly: series.get(monthlyKey) ?? null,
       }),
       source: {
         provider: this.provider.name,

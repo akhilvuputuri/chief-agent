@@ -6,6 +6,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { ensureUser, type Database } from "../src/db.js";
 import { CreditBucket } from "../src/market-credits.js";
 import {
+  ProviderError,
   parseBars,
   quoteKey,
   TwelveDataProvider,
@@ -378,7 +379,7 @@ test("statistics: a recent extreme carries its daily date, stale history is refu
   ];
   const open = computeStats({ quote: quote(10), daily: friday, monthly: [] });
   const closed = computeStats({
-    quote: quote(10, { marketOpen: false }),
+    quote: quote(1000, { marketOpen: false }),
     daily: friday,
     monthly: [],
   });
@@ -393,7 +394,7 @@ test("a failed history series degrades to null figures and is not re-billed the 
   f.provider.history = (async (ref: SymbolRef, interval: "1day" | "1month") => {
     if (interval === "1month") {
       f.provider.calls.history++;
-      throw new Error("bad bar");
+      throw new ProviderError("history returned a malformed bar", false);
     }
     return original(ref, interval);
   }) as any;
@@ -420,4 +421,45 @@ test("when the daily reserve is the reason, busy asks to retry after the UTC res
   assert.equal(busy.status, "busy");
   assert.equal(busy.retryAfterSeconds, 9 * 3600);
   assert.match(busy.note, /08:00 Singapore/);
+});
+
+test("a transient history failure is retried on the next question, not cached as unavailable", async () => {
+  const f = await fixture();
+  const original = f.provider.history.bind(f.provider);
+  let fail = true;
+  f.provider.history = (async (ref: SymbolRef, interval: "1day" | "1month") => {
+    if (interval === "1day" && fail) {
+      f.provider.calls.history++;
+      throw new ProviderError("Twelve Data HTTP 429", true);
+    }
+    return original(ref, interval);
+  }) as any;
+  const first: any = await f.lookup.call("owner", {
+    operation: "stock_lookup",
+    query: "AAPL",
+  });
+  assert.equal(first.stats.averages["12w"].value, null);
+  fail = false;
+  f.at(new Date("2026-10-02T15:05:00Z"));
+  const second: any = await f.lookup.call("owner", {
+    operation: "stock_lookup",
+    query: "AAPL",
+  });
+  assert.notEqual(second.stats.averages["12w"].value, null);
+});
+
+test("after the close, today's cached mid-session bar takes the quote price as its close", () => {
+  const daily = [
+    ...sessions(59, "2026-10-02").map((d) => bar(d, 10)),
+    bar("2026-10-02", 100, 95, 101), // fetched mid-session
+  ];
+  const s = computeStats({
+    quote: quote(130, { marketOpen: false }),
+    daily,
+    monthly: [],
+  });
+  // (59 * 10 + 130) / 60 = 12
+  assert.equal((s.averages["12w"] as any).value, 12);
+  assert.equal((s.ranges["12w"] as any).high, 130);
+  assert.equal((s.ranges["12w"] as any).sessions, 60);
 });

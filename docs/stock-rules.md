@@ -67,6 +67,10 @@ One module, `src/stock-stats.ts`, computes every reference. Questions, rules and
   - **Failed series.** A failed history series yields `null` figures with reasons and is not fetched again that day.
   - **Searches.** `watchlist_add` searches are counted in the shared bucket.
   - **Cache bounds.** The quote cache is bounded.
+- **Re-review of `9b2339e`: approved.** Its non-blocking follow-ups were also applied:
+  - after the close, the quote price replaces the close of today's cached mid-session bar, and widens its range;
+  - a transient history failure (429, 5xx or timeout) is fetched again, and only a permanent one is cached for the day;
+  - the ranges window no longer reaches one extra bar back once the market is closed.
 - **Known limits.**
   - History is fetched once per exchange trading day, so today's intraday range is as of that fetch, plus the current price.
   - The 300-credit daily reserve is fixed. At the default 15-minute cadence a full US session uses about 26 credits per watched stock, so the reserve covers about 11 stocks; it should be revisited if the watchlist grows beyond that.
