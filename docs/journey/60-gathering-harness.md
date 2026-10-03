@@ -1,6 +1,6 @@
-# 59 — Gathering files without losing scope or coverage
+# 60 — Gathering files without losing scope or coverage
 
-Work date: 3 October 2026. Status: implementation candidate; not deployed.
+Work dates: 3–4 October 2026. Status: implementation candidate; not deployed.
 
 ## Preceding iteration and problem
 
@@ -45,3 +45,7 @@ Astra then reproduced a false ChatGPT completion from an explicitly OpenAI API i
 Additional root regressions bind every idempotent mutation to its recorded scope revision, refusing an old covered/matched response after a scope change. Owner target verification is product/account scoped, not a source-completeness assertion. Chromium receives a minimal process environment without the browser-control secret; unsupported entry URLs are validated before creating a context. No production data or provider acceptance claim is inferred from these synthetic results.
 
 Astra's `f8d44b7` review found same-vendor sibling targets unmatchable because broad issuer labels were still counted separately. Known issuer labels now group by vendor while product evidence remains target-specific: a requested ChatGPT + OpenAI API collection can match both unambiguous products, and conflicting products or genuinely unrelated issuers remain refused. A whole-collection regression finishes the two products with exactly two original PDFs; a separate regression retains unrelated-issuer refusal after owner attestation. Final review and release remain pending.
+
+## Fresh main integration — 4 October 2026
+
+Fresh main advanced to `c3cea89d0a666ba1b64bb9235648358fce27ce7d` with the read-only IBKR portfolio foundation. The server RELEASE and marker 26 also matched that integrated baseline. Gathering incorporates it and uses migration **027**; its earlier planned number 026 is superseded. The upstream portfolio schema/approval cards, feature flags and journal 59 remain intact. This candidate is journal 60. Exact-head review and all affected checks must be repeated on the combined code; gathering remains not deployed. Patch numbering will follow the latest verified release, not an earlier branch assumption.

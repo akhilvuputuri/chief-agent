@@ -18,6 +18,11 @@ companion.52-77-47-24.sslip.io {
   handle @mini {
     reverse_proxy 127.0.0.1:3000
   }
+  # Read-only IBKR OAuth redirect (issue #146); the gateway validates single-use state.
+  @ibkr path /oauth/ibkr/callback
+  handle @ibkr {
+    reverse_proxy 127.0.0.1:3000
+  }
   handle / {
     redir /miniapp/ 302
   }

@@ -109,5 +109,5 @@ DROP TRIGGER IF EXISTS gather_attempt_changed ON gather_attempts;
 CREATE TRIGGER gather_attempt_changed AFTER INSERT ON gather_attempts FOR EACH ROW EXECUTE FUNCTION gather_observation_changed();
 DROP TRIGGER IF EXISTS gather_item_changed ON gather_items;
 CREATE TRIGGER gather_item_changed AFTER INSERT OR UPDATE ON gather_items FOR EACH ROW EXECUTE FUNCTION gather_observation_changed();
-INSERT INTO runtime_migrations(version) VALUES(26) ON CONFLICT DO NOTHING;
+INSERT INTO runtime_migrations(version) VALUES(27) ON CONFLICT DO NOTHING;
 COMMIT;

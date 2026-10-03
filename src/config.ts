@@ -53,6 +53,13 @@ const schema = z.object({
   // "file" only files output and answers in the topic; "off" uses General only.
   TELEGRAM_TOPICS: z.enum(["auto", "file", "off"]).default("auto"),
   RESPONSIBILITIES: z.enum(["on", "off"]).default("off"),
+  // Read-only IBKR holdings (issue #146). Needs migration 026, IBKR_TOKEN_KEY and
+  // MINIAPP_ORIGIN (the OAuth redirect is served on that origin).
+  IBKR_PORTFOLIO: z.enum(["on", "off"]).default("off"),
+  // Encrypts runtime-obtained IBKR tokens at rest.
+  IBKR_TOKEN_KEY: z
+    .union([z.literal(""), z.string().regex(/^[0-9a-f]{64}$/i)])
+    .default(""),
   AGENT_REASONING_EFFORT: z.literal("medium").default("medium"),
   AGENT_BUDGET_MS: z.coerce.number().int().positive().default(900000),
   AGENT_BUDGET_MODEL_CALLS: z.coerce.number().int().positive().default(40),

@@ -77,7 +77,9 @@ services:
         "-f",
         "/migrations/025_subscriptions.sql",
         "-f",
-        "/migrations/026_gathering.sql",
+        "/migrations/026_portfolio.sql",
+        "-f",
+        "/migrations/027_gathering.sql",
       ]
     depends_on:
       postgres: { condition: service_healthy }
@@ -102,6 +104,8 @@ services:
       AWS_SECRET_ACCESS_KEY: ${CODING_AWS_SECRET_ACCESS_KEY:-}
       AWS_SESSION_TOKEN: ${CODING_AWS_SESSION_TOKEN:-}
       RESPONSIBILITIES: ${RESPONSIBILITIES:-off}
+      IBKR_PORTFOLIO: ${IBKR_PORTFOLIO:-off}
+      IBKR_TOKEN_KEY: ${IBKR_TOKEN_KEY:-}
       MINIAPP_ORIGIN: ${MINIAPP_ORIGIN:-}
       LIBRARY_IDENTITY_KEY: ${LIBRARY_IDENTITY_KEY:-}
       LIBRARY_HOLD_EMAIL: ${LIBRARY_HOLD_EMAIL:-}

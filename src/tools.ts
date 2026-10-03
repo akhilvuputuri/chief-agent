@@ -26,6 +26,7 @@ import { SubscriptionTools } from "./subscriptions.js";
 import { ParcelTools } from "./parcels.js";
 import type { LibraryActions } from "./library-actions.js";
 import type { WatchlistTools } from "./stocks.js";
+import type { Portfolio } from "./portfolio.js";
 export class JobTools {
   constructor(
     private db: Database,
@@ -41,6 +42,7 @@ export class JobTools {
     private news?: NewsTools,
     readonly responsibilities?: Responsibilities,
     readonly coding?: CodingController,
+    readonly portfolio?: Portfolio,
     readonly gathering?: Gathering,
   ) {}
   get searchUsesModel() {
@@ -257,6 +259,15 @@ export class JobTools {
     ) {
       if (!this.stocks) throw new Error("Stock watchlist is not configured");
       return this.stocks.call(user, run, a);
+    }
+    if (
+      a.operation === "portfolio_read" ||
+      a.operation === "portfolio_status" ||
+      a.operation === "portfolio_connect" ||
+      a.operation === "portfolio_disconnect"
+    ) {
+      if (!this.portfolio) throw new Error("IBKR portfolio is not configured");
+      return this.portfolio.call(user, a, run);
     }
     if (
       a.operation === "item_save" ||

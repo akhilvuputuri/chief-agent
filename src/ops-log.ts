@@ -82,6 +82,7 @@ const fields: Record<string, Shape> = {
   agree: "bool",
   recalled: "count",
   referenceCount: "count",
+  positionCount: "count",
   uncertainCalls: "count",
   interruptedCalls: "count",
   failedRuns: "count",

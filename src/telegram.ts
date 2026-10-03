@@ -8,6 +8,7 @@ import { WorkTools, renderWork, renderWorkList } from "./work.js";
 import { TelegramViews, viewCallback } from "./telegram-views.js";
 import type { Collection, View } from "./telegram-view-render.js";
 import { formatTelegram } from "./telegram-format.js";
+import { telegramChunks, type Portfolio } from "./portfolio.js";
 import { slowReply } from "./delivery-routing.js";
 import { runFamily } from "./run-family.js";
 import { inThread, TelegramTopics, threadOf } from "./telegram-topics.js";
@@ -19,6 +20,7 @@ import {
   libraryPreview,
 } from "./library-actions.js";
 import { Bot, InputFile } from "grammy";
+import type { InlineKeyboardButton } from "grammy/types";
 import { randomUUID } from "node:crypto";
 import type { Config } from "./config.js";
 import type { Assistant } from "./agent.js";
@@ -270,6 +272,33 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
       } catch {
         await ctx.reply(
           "This library card is unavailable, expired or already used. Ask me again for a fresh one.",
+        );
+      }
+    });
+  });
+  // IBKR disconnect card: only the owner's tap on the exact sent card disconnects.
+  bot.callbackQuery(/^pfo:(yes|no):([0-9a-f-]{36})$/, async (ctx) => {
+    if (!allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids)) return;
+    const user = String(ctx.from.id);
+    await ctx.answerCallbackQuery();
+    const portfolio = assistant.tools.portfolio;
+    if (!portfolio) return;
+    await controls.run(user, async () => {
+      try {
+        const result = await portfolio.decideDisconnect(
+          user,
+          ctx.match[2]!,
+          ctx.callbackQuery.message?.message_id,
+          ctx.match[1] === "yes",
+        );
+        await ctx.reply(result.text);
+        if (result.status !== "unavailable")
+          await ctx
+            .editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } })
+            .catch(() => {});
+      } catch {
+        await ctx.reply(
+          "This card is unavailable. Ask Chief again if you still want to disconnect IBKR.",
         );
       }
     });
@@ -535,6 +564,53 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
         );
         await ctx.reply(
           "Could not apply that library command. Send /library to inspect the saved state.",
+        );
+      }
+      return;
+    }
+    const portfolioCommand =
+      /^\/portfolio(?: (connect|refresh|disconnect))?$/i.exec(command ?? "");
+    if (portfolioCommand) {
+      await ensureUser(db, user);
+      const claimed = await db.query(
+        "INSERT INTO inbound_updates(update_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING update_id",
+        [ctx.update.update_id, user],
+      );
+      if (!claimed.rows.length) return;
+      try {
+        const portfolio = assistant.tools.portfolio;
+        if (!portfolio) {
+          await ctx.reply("IBKR holdings are not enabled on this server yet.");
+        } else {
+          const kind = (portfolioCommand[1]?.toLowerCase() ?? "show") as
+            "show" | "connect" | "refresh" | "disconnect";
+          const result = await portfolio.command(user, kind);
+          const parts = telegramChunks(result.text);
+          for (const [i, part] of parts.entries())
+            await ctx.reply(part, {
+              link_preview_options: { is_disabled: true },
+              ...(result.url && i === parts.length - 1
+                ? {
+                    reply_markup: {
+                      inline_keyboard: [
+                        [{ text: "Connect IBKR (read-only)", url: result.url }],
+                      ],
+                    },
+                  }
+                : {}),
+            });
+        }
+        await db.query(
+          "UPDATE inbound_updates SET status='completed' WHERE update_id=$1",
+          [ctx.update.update_id],
+        );
+      } catch {
+        await db.query(
+          "UPDATE inbound_updates SET status='failed' WHERE update_id=$1",
+          [ctx.update.update_id],
+        );
+        await ctx.reply(
+          "Could not apply that portfolio command. Send /portfolio to inspect the saved state.",
         );
       }
       return;
@@ -949,6 +1025,15 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
             replyThread,
             reply.runId,
           );
+          await sendPortfolioApprovals(
+            bot,
+            db,
+            assistant.tools?.portfolio,
+            user,
+            deliveryGuard,
+            replyThread,
+            reply.runId,
+          );
           if (assistant.tools?.responsibilities)
             await sendResponsibilityApprovals(
               bot,
@@ -1142,6 +1227,112 @@ export function sendLibraryApprovals(
   return approvalSends.run(user, () =>
     sendLibraryApprovalsOnce(bot, db, user, guard, thread, run),
   );
+}
+/**
+ * Portfolio cards Chief proposed. A connect card's IBKR link is created here, at send time,
+ * and goes only into the Telegram message: the model never sees it and no readable state
+ * is stored. A disconnect card carries confirm/keep buttons.
+ */
+export function sendPortfolioApprovals(
+  bot: Bot,
+  db: Database,
+  portfolio: Portfolio | undefined,
+  user: string,
+  guard?: () => Promise<boolean>,
+  thread?: number,
+  run?: string,
+) {
+  if (!portfolio) return Promise.resolve();
+  return approvalSends.run(user, () =>
+    sendPortfolioApprovalsOnce(bot, db, portfolio, user, guard, thread, run),
+  );
+}
+async function sendPortfolioApprovalsOnce(
+  bot: Bot,
+  db: Database,
+  portfolio: Portfolio,
+  user: string,
+  guard?: () => Promise<boolean>,
+  thread?: number,
+  run?: string,
+) {
+  if (guard && !(await guard())) return;
+  const rows = (
+    await db.query(
+      "SELECT id,run_id,operation FROM approvals WHERE user_id=$1 AND operation IN ('portfolio_connect','portfolio_disconnect') AND status='pending' AND expires_at>now() AND NOT (payload ? 'telegramMessageId') ORDER BY created_at",
+      [user],
+    )
+  ).rows;
+  const family = run
+    ? new Set(
+        (
+          await db.query(
+            `SELECT run_id FROM approvals WHERE user_id=$1 AND run_id IN ${runFamily()}`,
+            [user, run],
+          )
+        ).rows.map((r) => r.run_id),
+      )
+    : new Set();
+  for (const row of rows) {
+    if (guard && !(await guard())) return;
+    const claimed = await db.query(
+      "UPDATE approvals SET payload=payload || '{\"telegramDeliveryState\":\"sending\"}'::jsonb WHERE id=$1 AND user_id=$2 AND status='pending' AND NOT(payload ? 'telegramMessageId') AND NOT(payload ? 'telegramDeliveryState') AND COALESCE((payload->>'telegramRetryAt')::timestamptz,'epoch'::timestamptz)<=now() RETURNING id",
+      [row.id, user],
+    );
+    if (!claimed.rows.length) continue;
+    let text: string;
+    let keyboard: InlineKeyboardButton[][];
+    if (row.operation === "portfolio_connect") {
+      let link: { text: string; url?: string };
+      try {
+        // Each send starts one consent attempt (bounded at 5 per day by IbkrAuth.begin).
+        link = await portfolio.command(user, "connect");
+      } catch (error) {
+        // Release the claim so a later delivery can retry; never strand a card in 'sending'.
+        await db.query(
+          "UPDATE approvals SET payload=payload-'telegramDeliveryState' WHERE id=$1 AND user_id=$2 AND payload->>'telegramDeliveryState'='sending' AND NOT(payload ? 'telegramMessageId')",
+          [row.id, user],
+        );
+        opsLog("portfolio.card_failed", "warn", errorFields(error));
+        continue;
+      }
+      text = link.url
+        ? "Connect IBKR to Chief (read-only)?\n\n" + link.text
+        : link.text;
+      keyboard = link.url
+        ? [[{ text: "Open IBKR (read-only)", url: link.url }]]
+        : [];
+    } else {
+      text =
+        "Disconnect IBKR from Chief? Chief stops reading your holdings, removes its access and sends a revoke to IBKR. Synced holdings are kept.";
+      keyboard = [
+        [
+          { text: "Disconnect IBKR", callback_data: `pfo:yes:${row.id}` },
+          { text: "Keep connected", callback_data: `pfo:no:${row.id}` },
+        ],
+      ];
+    }
+    const message = await claimedApprovalMessage(
+      bot,
+      db,
+      user,
+      row.id,
+      text,
+      {
+        ...inThread(run && family.has(row.run_id) ? thread : undefined),
+        link_preview_options: { is_disabled: true },
+        ...(keyboard.length
+          ? { reply_markup: { inline_keyboard: keyboard } }
+          : {}),
+      },
+      guard,
+    );
+    if (!message) return;
+    await db.query(
+      `UPDATE approvals SET payload=jsonb_set(payload,'{telegramMessageId}',$3::jsonb) || '{"telegramDeliveryState":"sent"}'::jsonb WHERE id=$1 AND user_id=$2`,
+      [row.id, user, JSON.stringify(message.message_id)],
+    );
+  }
 }
 async function sendApprovalMessage(
   bot: Bot,

@@ -101,6 +101,7 @@ export function runtimeContext(
     (op === "sheet_sync" && !availability.preparationSheet) ||
     (op === "daily_sync" && !availability.dailySheet) ||
     (op.startsWith("watchlist_") && !availability.stocks) ||
+    (op.startsWith("portfolio_") && !availability.portfolio) ||
     (op.startsWith("news_") && !availability.news) ||
     (op.startsWith("web_") && !availability.web);
   const enabled = action.options.filter(
@@ -253,6 +254,14 @@ export function runtimeContext(
                 "Stop watching a stock by exact id from watchlist_list. Removes its alert and observation history.",
               watchlist_list:
                 "List watched stocks, effective thresholds and monitoring windows, the next periods each stock is actually checked (nextChecks, Singapore time), latest alerts and the most recent observation decision.",
+              portfolio_read:
+                "Read the owner's IBKR holdings (read-only): each position's quantity, IBKR mark price, market value, average cost, cost basis and unrealized P&L, per-currency totals, account net liquidation and cash, with asOf, ageMinutes and freshness. Holdings older than 15 minutes are re-synced first; if that fails the last successful snapshot is returned with lastAttempt. Prices are IBKR marks at sync time, not live quotes. Never trading advice; Chief cannot place or change trades.",
+              portfolio_connect:
+                "Only when the owner explicitly asks to connect IBKR: queue a Telegram card with an 'Open IBKR (read-only)' button. Nothing is connected until the owner opens it, logs in on IBKR's site and approves read-only access; never say it is connected. Refused while already connected.",
+              portfolio_disconnect:
+                "Only when the owner explicitly asks to stop Chief reading IBKR: queue a Telegram confirmation card. Nothing is disconnected until the owner taps Disconnect; never say it is done.",
+              portfolio_status:
+                "IBKR connection state, last successful sync, position count and last attempt. The owner connects or disconnects with /portfolio connect or /portfolio disconnect in Telegram.",
               watchlist_settings:
                 "Set watchlist defaults: defaultDropPct, paused master switch, pollMinutes cadence, includeExtended opt-in for pre/post-market quotes, and window: the default Singapore-time hours to monitor ({start:'HH:MM', end:'HH:MM' or '24:00', days?:['mon',...]}; end before start runs past midnight; null removes it). The window applies on top of exchange hours, so 'from market open until midnight' is start at or before the open (e.g. 20:00) and end 24:00. No quotes are fetched and no alerts are sent outside it; report the returned nextChecks to the owner as the confirmation.",
               news_source_add:

@@ -29,6 +29,8 @@ for (const key of [
   "MARKET_DATA_PROVIDER",
   "MARKET_DATA_EXTENDED",
   "TWELVE_DATA_API_KEY",
+  "IBKR_PORTFOLIO",
+  "IBKR_TOKEN_KEY",
 ]) {
   console.log(`${key}: ${env[key]?.trim() ? "configured" : "not configured"}`);
 }
