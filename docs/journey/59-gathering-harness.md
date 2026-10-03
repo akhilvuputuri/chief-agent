@@ -1,4 +1,4 @@
-# 58 — Gathering files without losing scope or coverage
+# 59 — Gathering files without losing scope or coverage
 
 Work date: 3 October 2026. Status: implementation candidate; not deployed.
 
