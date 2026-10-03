@@ -72,9 +72,13 @@ export function runtimeContext(
   if (domains && !availability.subscriptions && domains.has("subscriptions")) {
     domains = new Set([...domains].filter((d) => d !== "subscriptions"));
   }
+  if (domains && !availability.gathering && domains.has("gathering"))
+    domains = new Set([...domains].filter((d) => d !== "gathering"));
   const visibleAvailability = { ...availability };
+  if (!availability.gathering) delete visibleAvailability.gathering;
   if (!availability.subscriptions) delete visibleAvailability.subscriptions;
   const disabled = (op: string) =>
+    (op.startsWith("gather_") && !availability.gathering) ||
     (op.startsWith("coding_") && !availability.coding) ||
     (op.startsWith("responsibility_") &&
       (!availability.responsibilities || op === "responsibility_report")) ||
@@ -152,6 +156,30 @@ export function runtimeContext(
                 "On explicit user request, schedule an independent agent job with a self-contained instruction. Singapore time: ISO, in 30m, every 2h, daily at 11pm, or five-field cron (hourly minimum). latest catches up one slot; skip ignores slots over 5 minutes late. Use schedule_create for fixed reminders.",
               responsibility_create:
                 "On an explicit owner request to keep watching a concern, propose an exact self-contained responsibility. Resolve parcel IDs, Gmail account/query, outcome, notifyWhen and end before saving. The owner confirms the exact Telegram card before monitoring starts. Scheduled research can spend model budget on unchanged passes. Read and use the returned confirmation; do not claim active monitoring yet.",
+              gather_start:
+                "Start an explicit owner-requested invoice collection instead of work_start. Preserve exact provider/account/month targets, clarify issue month versus service period, and save source order, exact mailboxes and provided artifact IDs. Reuse requestKey only for an exact retry. Delegate the returned collection ID to the gathering agent; it does the source work. Dispatch alone is not collection completion.",
+              gather_revise:
+                "Apply the owner’s explicit follow-up to a non-running gathering collection using its id and current revision. Preserve requested target records. Prior files and receipts remain; previous coverage and browser sessions are invalidated. Never revise scope to hide a blocker or expand sources on your own.",
+              gather_status:
+                "Read exact collection IDs, current targets, matched/candidate file references, source coverage and missing or blocked work. Omit id to list owner collections. Completion requires checked source coverage as well as matched files. Files and login views open in the Mini App; a browser login never resumes a paused task automatically.",
+              gather_progress:
+                "Read bounded current-scope attempt history for one target, including actual search IDs, inspected part keys and next-page tokens. Reuse it after a paused/resumed pass instead of repeating completed source reads.",
+              gather_search:
+                "Run a host-scoped PDF-attachment search for one collection target in an explicitly selected mailbox. Optional query is plain keywords only; use the empty query for the full source coverage check. Follow returned pagination and preserve search IDs. No email body or raw PDF is returned.",
+              gather_email_files:
+                "Inspect the PDF parts of an exact message returned by the target’s scoped search; returns part keys for capture. It records inspection but does not prove invoice coverage.",
+              gather_capture:
+                "Capture a provided artifact, an inspected email PDF part or an observed browser download into the encrypted private collection. requestKey is unique and reused only for an exact retry. Original bytes do not enter model/history context. Candidate capture is not a match or a coverage check.",
+              gather_match:
+                "Match a captured PDF to its exact target using recorded issuer and invoice-date/service-period clues. No inferred dates or unknown prices. requestKey is unique per mutation. Unreadable, truncated or ambiguous files stay unverified; match alone does not establish complete source coverage.",
+              gather_check:
+                "Check coverage independently of finding files: provided inputs must all be inspected; scoped email pages and PDF parts must be exhausted in every selected mailbox; browser coverage uses an explicit owner-confirmed invoice count for that account/month. Do not claim an account census. Every potentially relevant file must be matched or resolved first.",
+              gather_block:
+                "Record a real target blocker using its fixed reason and actual attempt ID when available. Keep independent targets runnable. Never mark missing or blocked targets covered.",
+              gather_finish:
+                "Finalize only after every requested target has matched files and checked coverage; the host refuses incomplete collections. Returns actual completion and the collection view. A file count or an agent report alone is insufficient.",
+              gather_browser:
+                "Open a granted billing entry page, observe invoice links, follow an opaque observed link or request an owner login handoff. No selectors, arbitrary JavaScript, credentials, forms, payments, cancellations or other account actions. The owner controls login through the authenticated browser view, optionally remembers it, confirms the expected invoice count, and explicitly continues the task.",
               coding_start:
                 "On an explicit owner request to plan or implement a Chief code change, dispatch a durable job in a separate on-demand sandbox. Include the exact objective and relevant evidence; mode plan stops at a brief, implement prepares a draft PR. Reuse requestKey only for retries of the identical request. Returns promptly; job execution is independent of this conversation. Never claim a PR or deployment from dispatch alone.",
               coding_status:
@@ -274,6 +302,11 @@ export function runtimeContext(
           tool.parameters.properties.domains.items.enum.filter(
             (d: string) => d !== "subscriptions",
           );
+      if (tool.name === "tools_load" && !availability.gathering)
+        tool.parameters.properties.domains.items.enum =
+          tool.parameters.properties.domains.items.enum.filter(
+            (d: string) => d !== "gathering",
+          );
       return tool;
     }),
     // Every enabled definition, including delegated ones, for the agents that use them.
@@ -290,6 +323,12 @@ export function runtimeContext(
           }
         : { operations: options.map((o) => o.shape.operation.value) }),
       work,
+      ...(availability.gathering
+        ? {
+            gatheringWorkflow:
+              "Chief starts the exact owner-requested collection and delegates source work to gathering. The agent gathers files, matches recorded clues and checks coverage inside the saved scope. Follow the host collection state; dispatch or file count alone never means complete. Browser login is owner-controlled, and saving it does not resume a paused task. No invoice automatically changes subscriptions.",
+          }
+        : {}),
       ...(options.some((o) => o.shape.operation.value === "agent_run")
         ? {
             // Tool lists stay host-side; the coordinator chooses by description.

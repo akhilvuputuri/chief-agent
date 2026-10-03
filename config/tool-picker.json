@@ -82,6 +82,10 @@
     "skills": {
       "description": "Version history, drafts, evaluation, activation or rollback of the assistant's text skills.",
       "examples": "show the history of the interview skill, roll back the research skill"
+    },
+    "gathering": {
+      "description": "Gather invoice PDF files across exact providers/accounts/months, using selected email, supplied documents or authenticated browser portals; inspect collection progress and login handoffs.",
+      "examples": "gather my September invoices, collect OpenAI Anthropic and DigitalOcean invoices, use the billing portal only, did that collection finish"
     }
   }
 }

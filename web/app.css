@@ -235,3 +235,35 @@ input[type="search"] {
     --accent: var(--tg-theme-button-color, #368a91);
   }
 }
+
+.browser-screen {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--border, #ddd);
+  border-radius: 8px;
+  cursor: crosshair;
+}
+.browser-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+.browser-controls button {
+  min-height: 40px;
+}
+#app label {
+  display: block;
+  margin: 12px 0;
+}
+#app input[type="password"],
+#app input[type="text"],
+#app input[type="number"] {
+  display: block;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #aaa;
+  border-radius: 8px;
+  font: inherit;
+}

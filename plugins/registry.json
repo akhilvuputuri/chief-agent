@@ -4,7 +4,7 @@
   "enabled": [
     {
       "path": "core",
-      "sha256": "58d305996022ace7ec0a42c3393c503d8ddbd24991816f48ab9e0103ea601883",
+      "sha256": "9665f78a67d483dd1d9eb5f80cc213cf3c846c5739db2c4d31952e50644144d8",
       "agents": [
         "email",
         "parcels",
@@ -16,12 +16,23 @@
         "news",
         "library",
         "web",
-        "media"
+        "media",
+        "gathering"
       ],
       "allowTools": [
         "calendar_draft",
         "calendar_list",
         "daily_sync",
+        "gather_block",
+        "gather_browser",
+        "gather_capture",
+        "gather_check",
+        "gather_email_files",
+        "gather_finish",
+        "gather_match",
+        "gather_progress",
+        "gather_search",
+        "gather_status",
         "gmail_accounts",
         "gmail_read",
         "gmail_search",
@@ -69,8 +80,14 @@
     {
       "path": "public-research",
       "sha256": "d11e1cc6df488bb6014dcd95cbfd44f1773a91c74e6507ee16af6f8d8267c872",
-      "agents": ["researcher"],
-      "allowTools": ["web_search", "web_read", "source_read"]
+      "agents": [
+        "researcher"
+      ],
+      "allowTools": [
+        "web_search",
+        "web_read",
+        "source_read"
+      ]
     }
   ],
   "aliases": {
@@ -84,12 +101,22 @@
     "library": "core/library",
     "web": "core/web",
     "media": "core/media",
-    "subscriptions": "core/subscriptions"
+    "subscriptions": "core/subscriptions",
+    "gathering": "core/gathering"
   },
   "delegated": [
     "calendar_draft",
     "calendar_list",
     "daily_sync",
+    "gather_block",
+    "gather_browser",
+    "gather_capture",
+    "gather_check",
+    "gather_email_files",
+    "gather_finish",
+    "gather_match",
+    "gather_progress",
+    "gather_search",
     "gmail_accounts",
     "gmail_read",
     "gmail_search",

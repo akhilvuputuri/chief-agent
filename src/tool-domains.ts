@@ -18,6 +18,7 @@ export const CORE_OPERATIONS = new Set([
   "skill_read",
   "work_status",
   "coding_status",
+  "gather_status",
   "tools_load",
   "agent_run",
 ]);
@@ -32,6 +33,7 @@ export const TOOL_DOMAINS = [
   "media",
   "canvas",
   "subscriptions",
+  "gathering",
   "parcels",
   "library",
   "watchlist",
@@ -54,6 +56,8 @@ export const DOMAIN_SUMMARIES: Record<ToolDomain, string> = {
   canvas: "saved Mini App canvases: create, update, read, list",
   subscriptions:
     "saved recurring payments, trial ends, decision dates and reminders",
+  gathering:
+    "durable invoice collections, scoped source gathering, private PDF files and browser login handoff",
   parcels: "awaited parcels from email or the owner",
   library: "NLB ebook availability and the linked card's shelf",
   watchlist: "stock price-drop watchlist",
@@ -80,6 +84,7 @@ const PREFIXES: [string, ToolDomain][] = [
   ["media_", "media"],
   ["canvas_", "canvas"],
   ["subscription_", "subscriptions"],
+  ["gather_", "gathering"],
   ["parcel_", "parcels"],
   ["library_", "library"],
   ["watchlist_", "watchlist"],
@@ -98,6 +103,10 @@ export function domainOf(operation: string): ToolDomain | undefined {
 // Conservative cues: a missed domain costs one tools_load step, an extra one
 // costs only schema characters. Word boundaries avoid matching inside words.
 const CUES: [ToolDomain, RegExp][] = [
+  [
+    "gathering",
+    /\b(gather|collect|download|retrieve|find).{0,70}\b(invoices?|receipts?|billing documents?)\b|\b(invoice collection|billing portal|browser login|gathering task)\b|\[Attached invoice PDF/i,
+  ],
   [
     "responsibilities",
     /\b(watch|monitor|keep an eye|keep watching|responsibilit(y|ies)|only (tell|notify)|when .* arrives|until .* (arrive|done|resolved))\b/i,

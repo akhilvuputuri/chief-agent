@@ -21,6 +21,7 @@ DOMAINS = (
     "media",
     "canvas",
     "subscriptions",
+    "gathering",
     "parcels",
     "library",
     "watchlist",

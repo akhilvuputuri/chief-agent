@@ -1,3 +1,5 @@
+import type { Gathering } from "./gathering/controller.js";
+import { action as gatheringAction } from "./gathering/schema.js";
 import { readFeed } from "./telegram-feeds.js";
 import type { CodingController } from "./coding/controller.js";
 import { codingAction } from "./coding/schema.js";
@@ -39,6 +41,7 @@ export class JobTools {
     private news?: NewsTools,
     readonly responsibilities?: Responsibilities,
     readonly coding?: CodingController,
+    readonly gathering?: Gathering,
   ) {}
   get searchUsesModel() {
     return this.web.usesModelSearch === true;
@@ -108,6 +111,23 @@ export class JobTools {
     a: ReturnType<typeof action.parse>,
   ): Promise<unknown> {
     const db = this.db;
+    if (
+      a.operation === "gather_start" ||
+      a.operation === "gather_revise" ||
+      a.operation === "gather_status" ||
+      a.operation === "gather_progress" ||
+      a.operation === "gather_search" ||
+      a.operation === "gather_email_files" ||
+      a.operation === "gather_capture" ||
+      a.operation === "gather_match" ||
+      a.operation === "gather_check" ||
+      a.operation === "gather_block" ||
+      a.operation === "gather_finish" ||
+      a.operation === "gather_browser"
+    ) {
+      if (!this.gathering) throw new Error("Gathering is not configured");
+      return this.gathering.call(user, run, gatheringAction.parse(a));
+    }
     if (
       a.operation === "coding_start" ||
       a.operation === "coding_status" ||
