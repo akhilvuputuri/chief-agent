@@ -49,6 +49,7 @@ Status: Phase 0 measured; Phase 1 (read-only holdings in Chief) is implemented a
   - An empty positions read would have become current holdings, which looks like a sale of everything.
   - The scope check accepted non-`mcp.` scopes besides `mcp.read`.
     Non-blocking findings covered a reproduced stale-refresh race that could wipe a reconnect, unrevoked rotated tokens, a sync left `running` after a store error, no backoff on read-triggered syncs, SSE id matching, contract multipliers and documentation slips. All were fixed with regression tests; see the [plan's review-fix notes](../ibkr-portfolio.md#phase-1-holdings-foundation-migration-026-and-an-operator-rollout). The reviewer's "Jev picker" typo note was not a defect, because Jev is the picker's name.
+- **Second round.** The re-review of `7129786` **approved**, with non-blocking follow-ups: refuse connect while a grant is live, require a positive zero for an empty account, mark failed before deleting, and a test for revoking a rotated token. The automated Devin review raised further findings: account switching on reconnect, stale consent links after a disconnect, truncation in mixed-asset currencies, partial totals, pruning, and Telegram message length. These were fixed with regression tests; see the plan.
 - **One defect was found while testing.** The refresh compare-and-set used `rowCount`, which PGlite does not report. It now uses `RETURNING`, which behaves the same on `pg` and PGlite.
 
 - **Plan:** [docs/ibkr-portfolio.md](../ibkr-portfolio.md).

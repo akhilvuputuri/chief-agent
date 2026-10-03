@@ -249,6 +249,26 @@ The deliverable is a sanitized findings section in the journal, plus fixtures bu
 
 The registration URL matches the `registration_endpoint` advertised in IBKR's authorization-server metadata, fetched on 2 October (§2).
 
+**Re-review of `7129786`: approved.** Its non-blocking follow-ups were also applied:
+
+- `/portfolio connect` refuses while a grant is live, because IBKR's revocation scope is untested.
+- An empty list counts only when the balances positively report zero stock value.
+- `fail()` marks the sync failed before deleting its partial rows.
+- A committed test covers revoking the rotated token during a disconnect.
+
+The balances aggregate row is labelled `BASE`, as measured in the owner's 3 October read.
+
+**Devin review findings (automated, on `4db3a33` and `7129786`), triaged and fixed:**
+
+- **Account switching.** Holdings synced under an earlier grant are never shown as current while connected. The `connected_at` column marks the start of the current grant, and a sync that overlaps a disconnect or reconnect is discarded (`disconnected_during_sync`).
+- **Stale consent links.** An owner disconnect expires pending consent attempts, so an earlier link cannot restore access.
+- **Mixed currencies.** A currency holding non-stock positions reconciles if either the stock-only sum or the full sum matches the balance, so truncation is still caught.
+- **Totals.** A per-currency total with any unknown figure is reported as unknown rather than as a partial sum.
+- **Retention.** Pruning old syncs is best-effort and never removes the latest successful sync, so a pruning error cannot discard a stored snapshot.
+- **Long replies.** `/portfolio` replies are split at line boundaries to fit Telegram's message limit.
+
+Two findings were already resolved: "empty balances erase holdings" (empty must now be positively confirmed), and "60 failures prune the last good sync" (retention runs only after a success, and now explicitly keeps the latest one).
+
 **Not yet tested.** Pagination; IBKR does not report any. Multiple accounts, because the measured responses carry no account dimension and the consent selects the account. Whether IBKR accepts a **non-loopback HTTPS redirect** at registration; that is checked first on activation.
 
 **Rollout.** Run `scripts/deploy-portfolio.py ARCHIVE SHA` on the host, the same procedure as the other additive migrations ([stock watchlist rollout](stock-watchlist.md#deployment-operator-reviewed-migration-018)).

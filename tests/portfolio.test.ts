@@ -8,7 +8,7 @@ import { ensureUser, type Database } from "../src/db.js";
 import { IBKR, IbkrAuth, readOnly } from "../src/ibkr/oauth.js";
 import { IBKR_READ_TOOLS, IbkrMcp } from "../src/ibkr/mcp.js";
 import { IBKR_CALLBACK_PATH, ibkrRoutes } from "../src/ibkr/routes.js";
-import { Portfolio } from "../src/portfolio.js";
+import { Portfolio, reconcile, telegramChunks } from "../src/portfolio.js";
 import { readOperations } from "../src/execution.js";
 import { runtimeContext } from "../src/runtime.js";
 import { action } from "../src/protocol.js";
@@ -437,6 +437,14 @@ test("sync stores validated holdings; failures and malformed reads never replace
     balances: [{ currency: "BASE", cash_balance: 50, stock_market_value: 0 }],
   };
   assert.equal((await f.portfolio.sync("owner", "owner")).status, "empty");
+  // No stock value reported anywhere is not confirmation of an empty account.
+  f.ibkr.state.balances = {
+    balances: [{ currency: "BASE", cash_balance: 50 }],
+  };
+  assert.equal(
+    (await f.portfolio.sync("owner", "owner")).errorCode,
+    "empty_unconfirmed",
+  );
   assert.equal(
     ((await f.portfolio.call("owner", { operation: "portfolio_read" })) as any)
       .positions.length,
@@ -653,4 +661,101 @@ test("a failed sync suppresses read-triggered re-syncs for the backoff window", 
   f.ibkr.state.positions = POSITIONS;
   const view: any = await f.portfolio.read("owner");
   assert.equal(view.positions.length, 2);
+});
+
+test("an owner disconnect during a refresh revokes the rotated token, and connect refuses a live grant", async () => {
+  const f = await fixture();
+  await f.connect();
+  assert.match(
+    (await f.portfolio.command("owner", "connect")).text,
+    /already connected/,
+  );
+  f.advance(10 * 60 * 1000);
+  let open!: () => void;
+  f.ibkr.state.gate = new Promise((r) => (open = r));
+  const inflight = f.auth.accessToken("owner").catch((e) => e);
+  await new Promise((r) => setTimeout(r, 50));
+  await f.portfolio.command("owner", "disconnect");
+  open();
+  assert.equal((await inflight).code, "not_connected");
+  // Both the stored token and the rotation IBKR issued meanwhile are revoked.
+  assert.deepEqual(f.ibkr.state.revoked.sort(), ["r1", "r2"]);
+  const row = (
+    await f.db.query("SELECT state,token_box FROM brokerage_connections")
+  ).rows[0];
+  assert.equal(row.state, "revoked");
+  assert.equal(row.token_box, null);
+});
+
+test("a reconnect never presents the previous grant's holdings as current", async () => {
+  const f = await fixture();
+  await f.connect();
+  await f.portfolio.sync("owner", "connect");
+  await f.portfolio.command("owner", "disconnect");
+  // Holdings stay visible, labelled disconnected, after an owner disconnect.
+  assert.equal(
+    ((await f.portfolio.read("owner")) as any).freshness,
+    "disconnected",
+  );
+  f.advance(60 * 1000);
+  // A consent link opened before the disconnect cannot restore access.
+  const early = await f.auth.begin("owner");
+  await f.portfolio.command("owner", "disconnect");
+  assert.equal(
+    (
+      await f.auth.complete(
+        new URL(early.url).searchParams.get("state")!,
+        "good-code",
+        undefined,
+      )
+    ).reason,
+    "expired_or_unknown",
+  );
+  // Reconnect (possibly to another account) whose first sync fails: no old holdings shown.
+  await f.connect();
+  f.ibkr.state.positions = { bad: true };
+  const view: any = await f.portfolio.read("owner");
+  assert.equal(view.holdings, null);
+  assert.equal(view.lastAttempt.errorCode, "malformed");
+});
+
+test("reconcile accepts stock-only or full sums and refuses truncated mixed currencies", () => {
+  const stk = { ...POSITIONS.positions[0], market_value: 1000 };
+  const opt = {
+    ...POSITIONS.positions[1],
+    contract_id: 9,
+    asset_class: "OPT",
+    market_value: 200,
+  };
+  const usd = (value: number) => [
+    { currency: "BASE", cash_balance: 0, stock_market_value: value },
+    { currency: "USD", cash_balance: 0, stock_market_value: value },
+  ];
+  assert.equal(reconcile([stk, opt] as any, usd(1000)), null); // stock-only sum
+  assert.equal(reconcile([stk, opt] as any, usd(1200)), null); // full sum
+  assert.equal(reconcile([opt] as any, usd(1000)), "positions_incomplete");
+  assert.equal(reconcile([], usd(0)), null);
+  assert.equal(
+    reconcile([], [{ currency: "BASE", cash_balance: 1 }] as any),
+    "empty_unconfirmed",
+  );
+});
+
+test("totals with an unknown cost are reported unknown, and long text is chunked", async () => {
+  const f = await fixture();
+  await f.connect();
+  const option = { ...POSITIONS.positions[1], asset_class: "OPT" };
+  f.ibkr.state.positions = { positions: [POSITIONS.positions[0], option] };
+  assert.equal((await f.portfolio.sync("owner", "owner")).status, "complete");
+  const view: any = await f.portfolio.read("owner");
+  assert.equal(view.totalsByCurrency.USD.costBasis, null);
+  assert.equal(view.totalsByCurrency.USD.unrealizedPct, null);
+  assert.equal(view.totalsByCurrency.USD.marketValue, 1600);
+  const long = Array.from(
+    { length: 400 },
+    (_, i) => `line ${i} ${"x".repeat(40)}`,
+  ).join("\n");
+  const parts = telegramChunks(long);
+  assert(parts.length > 1 && parts.every((p) => p.length <= 3500));
+  assert.equal(parts.join("\n"), long);
 });

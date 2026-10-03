@@ -7,6 +7,7 @@ import { WorkTools, renderWork, renderWorkList } from "./work.js";
 import { TelegramViews, viewCallback } from "./telegram-views.js";
 import type { Collection, View } from "./telegram-view-render.js";
 import { formatTelegram } from "./telegram-format.js";
+import { telegramChunks } from "./portfolio.js";
 import { slowReply } from "./delivery-routing.js";
 import { runFamily } from "./run-family.js";
 import { inThread, TelegramTopics, threadOf } from "./telegram-topics.js";
@@ -424,18 +425,20 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
           const kind = (portfolioCommand[1]?.toLowerCase() ?? "show") as
             "show" | "connect" | "refresh" | "disconnect";
           const result = await portfolio.command(user, kind);
-          await ctx.reply(result.text, {
-            link_preview_options: { is_disabled: true },
-            ...(result.url
-              ? {
-                  reply_markup: {
-                    inline_keyboard: [
-                      [{ text: "Connect IBKR (read-only)", url: result.url }],
-                    ],
-                  },
-                }
-              : {}),
-          });
+          const parts = telegramChunks(result.text);
+          for (const [i, part] of parts.entries())
+            await ctx.reply(part, {
+              link_preview_options: { is_disabled: true },
+              ...(result.url && i === parts.length - 1
+                ? {
+                    reply_markup: {
+                      inline_keyboard: [
+                        [{ text: "Connect IBKR (read-only)", url: result.url }],
+                      ],
+                    },
+                  }
+                : {}),
+            });
         }
         await db.query(
           "UPDATE inbound_updates SET status='completed' WHERE update_id=$1",

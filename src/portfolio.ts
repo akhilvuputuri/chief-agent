@@ -99,10 +99,12 @@ export function reconcile(
 ): string | null {
   const stockValue = (b: z.infer<typeof balance>) =>
     Math.abs(b.stock_market_value ?? 0);
+  // Empty is believed only when balances positively report zero stock value.
   if (!rows.length)
-    return balances.some((b) => stockValue(b) > 0.005)
-      ? "empty_unconfirmed"
-      : null;
+    return balances.some((b) => b.stock_market_value != null) &&
+      !balances.some((b) => stockValue(b) > 0.005)
+      ? null
+      : "empty_unconfirmed";
   for (const b of balances) {
     if (b.currency === "BASE" || b.stock_market_value == null) continue;
     const held = rows.filter((p) => p.currency === b.currency);
@@ -110,16 +112,34 @@ export function reconcile(
       if (stockValue(b) > 0.005) return "positions_incomplete";
       continue;
     }
-    // Other asset classes may be valued outside stock_market_value; check stocks only.
-    if (held.some((p) => p.asset_class !== "STK" || p.market_value == null))
-      continue;
-    const sum = held.reduce((t, p) => t + (p.market_value ?? 0), 0);
-    if (
-      Math.abs(sum - b.stock_market_value) > Math.max(1, 0.01 * stockValue(b))
-    )
-      return "positions_incomplete";
+    if (held.some((p) => p.market_value == null)) continue;
+    // Whether IBKR's stock value includes other asset classes is unmeasured, so a
+    // currency reconciles if either the stock-only or the full sum matches.
+    const near = (sum: number) =>
+      Math.abs(sum - b.stock_market_value!) <=
+      Math.max(1, 0.01 * stockValue(b));
+    const all = held.reduce((t, p) => t + p.market_value!, 0);
+    const stocks = held
+      .filter((p) => p.asset_class === "STK")
+      .reduce((t, p) => t + p.market_value!, 0);
+    if (!near(all) && !near(stocks)) return "positions_incomplete";
   }
   return null;
+}
+
+/** Splits at line boundaries into Telegram-sized messages (limit 4096). */
+export function telegramChunks(text: string, limit = 3500) {
+  const out: string[] = [];
+  let current = "";
+  for (const line of text.split("\n")) {
+    const piece = line.length > limit ? line.slice(0, limit - 1) + "…" : line;
+    if (current && current.length + 1 + piece.length > limit) {
+      out.push(current);
+      current = piece;
+    } else current = current ? current + "\n" + piece : piece;
+  }
+  if (current) out.push(current);
+  return out;
 }
 
 export class Portfolio {
@@ -161,14 +181,15 @@ export class Portfolio {
       [id, user, reason, new Date(started)],
     );
     const fail = async (code: string) => {
-      // A failed sync never leaves partial positions behind.
-      await this.db.query(
-        "DELETE FROM portfolio_positions WHERE sync_id=$1 AND user_id=$2",
-        [id, user],
-      );
+      // Mark failed first so no reader sees a current sync without its positions,
+      // then remove any partial rows.
       await this.db.query(
         "UPDATE portfolio_syncs SET status='failed',error_code=$2,finished_at=$3 WHERE id=$1",
         [id, code.slice(0, 80), new Date(this.now())],
+      );
+      await this.db.query(
+        "DELETE FROM portfolio_positions WHERE sync_id=$1 AND user_id=$2",
+        [id, user],
       );
       opsLog("portfolio.sync", "warn", {
         state: "failed",
@@ -205,6 +226,14 @@ export class Portfolio {
       return fail("duplicate_contract");
     const unreconciled = reconcile(rows, balances.data.balances);
     if (unreconciled) return fail(unreconciled);
+    // The owner may have disconnected (or reconnected) while the read was in flight:
+    // keep nothing from it.
+    const live = await this.auth.status(user);
+    if (
+      !["connected", "refresh_uncertain"].includes(live.state) ||
+      (live.connectedAt && new Date(live.connectedAt).getTime() > started)
+    )
+      return fail("disconnected_during_sync");
     try {
       await this.store(
         id,
@@ -217,6 +246,10 @@ export class Portfolio {
       opsLog("portfolio.store_failed", "error", errorFields(error));
       return fail("store_failed");
     }
+    // Retention is housekeeping: its failure never invalidates the stored snapshot.
+    await this.prune(user).catch((error) =>
+      opsLog("portfolio.prune_failed", "warn", errorFields(error)),
+    );
     const status = rows.length ? "complete" : "empty";
     opsLog("portfolio.sync", "info", {
       state: status,
@@ -276,10 +309,16 @@ export class Portfolio {
         new Date(this.now()),
       ],
     );
+  }
+
+  /** Keeps the newest syncs, and never the latest successful one. */
+  private async prune(user: string) {
     await this.db.query(
-      `DELETE FROM portfolio_syncs WHERE user_id=$1 AND provider='ibkr' AND id IN (
-         SELECT id FROM portfolio_syncs WHERE user_id=$1 AND provider='ibkr'
-         ORDER BY started_at DESC OFFSET $2)`,
+      `DELETE FROM portfolio_syncs WHERE user_id=$1 AND provider='ibkr' AND status<>'running'
+         AND id IN (SELECT id FROM portfolio_syncs WHERE user_id=$1 AND provider='ibkr'
+                    ORDER BY started_at DESC OFFSET $2)
+         AND id NOT IN (SELECT id FROM portfolio_syncs WHERE user_id=$1 AND provider='ibkr'
+                        AND status IN ('complete','empty') ORDER BY started_at DESC LIMIT 1)`,
       [user, KEEP_SYNCS],
     );
   }
@@ -334,11 +373,20 @@ export class Portfolio {
 
   /** Latest holdings (complete or empty sync) plus the most recent attempt. */
   async snapshot(user: string) {
+    const connection = await this.auth.status(user);
+    // While connected, only syncs under the current grant count: a reconnect may have
+    // selected a different IBKR account. After a disconnect the last holdings remain.
+    const since =
+      connection.connectedAt &&
+      ["connected", "refresh_uncertain"].includes(connection.state)
+        ? new Date(connection.connectedAt)
+        : new Date(0);
     const current = (
       await this.db.query(
         `SELECT * FROM portfolio_syncs WHERE user_id=$1 AND provider='ibkr' AND status IN ('complete','empty')
+           AND started_at>=$2
          ORDER BY started_at DESC LIMIT 1`,
-        [user],
+        [user, since],
       )
     ).rows[0];
     const last = (
@@ -348,7 +396,6 @@ export class Portfolio {
         [user],
       )
     ).rows[0];
-    const connection = await this.auth.status(user);
     if (!current) return { connection, current: null, last, positions: [] };
     const positions = (
       await this.db.query(
@@ -445,17 +492,23 @@ export class Portfolio {
         p.unrealizedPnl == null
       )
         t.complete = false;
+      if (p.marketValue == null) t.missingValue = true;
+      if (p.unrealizedPnl == null) t.missingPnl = true;
       t.marketValue += p.marketValue ?? 0;
       t.costBasis += p.costBasis ?? 0;
       t.unrealizedPnl += p.unrealizedPnl ?? 0;
     }
     for (const t of Object.values(totals)) {
-      t.marketValue = round(t.marketValue);
-      t.costBasis = round(t.costBasis);
-      t.unrealizedPnl = round(t.unrealizedPnl);
-      t.unrealizedPct = t.costBasis
-        ? round((t.unrealizedPnl / Math.abs(t.costBasis)) * 100, 1)
-        : null;
+      // A partial sum is not a total: any unknown figure makes that total unknown.
+      t.marketValue = t.missingValue ? null : round(t.marketValue);
+      t.costBasis = t.complete ? round(t.costBasis) : null;
+      t.unrealizedPnl = t.missingPnl ? null : round(t.unrealizedPnl);
+      t.unrealizedPct =
+        t.costBasis && t.unrealizedPnl != null
+          ? round((t.unrealizedPnl / Math.abs(t.costBasis)) * 100, 1)
+          : null;
+      delete t.missingValue;
+      delete t.missingPnl;
     }
     const balances: any[] = snap.current.balances ?? [];
     const base = balances.find((b) => b.currency === "BASE");
@@ -528,6 +581,16 @@ export class Portfolio {
   ): Promise<{ text: string; url?: string }> {
     if (!this.allowed(user)) throw new Error("Unauthorized portfolio command");
     if (kind === "connect") {
+      // One live grant at a time: reconnecting would revoke the old refresh token, which
+      // some servers treat as revoking the whole grant (unverified for IBKR).
+      if (
+        ["connected", "refresh_uncertain"].includes(
+          (await this.auth.status(user)).state,
+        )
+      )
+        return {
+          text: "IBKR is already connected. Send /portfolio disconnect first if you want to reconnect.",
+        };
       try {
         const { url } = await this.auth.begin(user);
         return {

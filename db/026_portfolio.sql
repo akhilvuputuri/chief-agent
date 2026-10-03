@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS brokerage_connections (
  last_refresh_at timestamptz,
  last_error_code text CHECK(last_error_code IS NULL OR length(last_error_code)<=80),
  disconnect_notified_at timestamptz,
+ -- Start of the current grant; holdings synced under an earlier grant are never current.
+ connected_at timestamptz NOT NULL DEFAULT now(),
  created_at timestamptz NOT NULL DEFAULT now(),
  updated_at timestamptz NOT NULL DEFAULT now(),
  UNIQUE(user_id,provider),

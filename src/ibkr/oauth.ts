@@ -246,12 +246,13 @@ export class IbkrAuth {
       )
     ).rows[0];
     await this.db.query(
-      `INSERT INTO brokerage_connections(id,user_id,provider,state,scopes,token_box,access_expires_at,last_refresh_at,created_at,updated_at)
-       VALUES($1,$2,$3,'connected',$4,$5,$6,$7,$7,$7)
+      `INSERT INTO brokerage_connections(id,user_id,provider,state,scopes,token_box,access_expires_at,last_refresh_at,created_at,updated_at,connected_at)
+       VALUES($1,$2,$3,'connected',$4,$5,$6,$7,$7,$7,$7)
        ON CONFLICT(user_id,provider) DO UPDATE SET state='connected',scopes=EXCLUDED.scopes,
          token_box=EXCLUDED.token_box,token_version=brokerage_connections.token_version+1,
          access_expires_at=EXCLUDED.access_expires_at,last_refresh_at=EXCLUDED.last_refresh_at,
-         refresh_lease_until=NULL,last_error_code=NULL,disconnect_notified_at=NULL,updated_at=EXCLUDED.updated_at`,
+         refresh_lease_until=NULL,last_error_code=NULL,disconnect_notified_at=NULL,updated_at=EXCLUDED.updated_at,
+         connected_at=EXCLUDED.connected_at`,
       [
         randomUUID(),
         claimed.user_id,
@@ -289,18 +290,19 @@ export class IbkrAuth {
   async status(user: string) {
     const row = (
       await this.db.query(
-        "SELECT state,scopes,last_refresh_at,last_error_code,created_at,updated_at FROM brokerage_connections WHERE user_id=$1 AND provider=$2",
+        "SELECT state,scopes,last_refresh_at,last_error_code,connected_at,created_at,updated_at FROM brokerage_connections WHERE user_id=$1 AND provider=$2",
         [user, PROVIDER],
       )
     ).rows[0];
     return row
       ? {
           state: row.state as string,
+          connectedAt: row.connected_at as Date | null,
           scopes: row.scopes as string[],
           lastRefreshAt: row.last_refresh_at as Date | null,
           lastErrorCode: row.last_error_code as string | null,
         }
-      : { state: "never_connected" };
+      : { state: "never_connected", connectedAt: null };
   }
 
   /**
@@ -313,6 +315,13 @@ export class IbkrAuth {
     /** Only this token generation: a stale refresh must not wipe a newer reconnect. */
     version?: number,
   ) {
+    // An owner disconnect also cancels any consent link still open, so an earlier
+    // attempt cannot restore access afterwards.
+    if (reason === "owner")
+      await this.db.query(
+        "UPDATE brokerage_oauth_attempts SET status='expired' WHERE user_id=$1 AND provider=$2 AND status='pending'",
+        [user, PROVIDER],
+      );
     const row = (
       await this.db.query(
         `WITH old AS (
