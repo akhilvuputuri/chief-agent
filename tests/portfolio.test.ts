@@ -759,3 +759,15 @@ test("totals with an unknown cost are reported unknown, and long text is chunked
   assert(parts.length > 1 && parts.every((p) => p.length <= 3500));
   assert.equal(parts.join("\n"), long);
 });
+
+test("the scheduler does not count a previous grant's sync as recent", async () => {
+  const f = await fixture();
+  await f.connect();
+  await f.portfolio.sync("owner", "connect");
+  await f.portfolio.command("owner", "disconnect");
+  f.advance(60 * 1000);
+  await f.connect();
+  const before = f.ibkr.state.toolCalls.length;
+  await f.portfolio.tick();
+  assert.equal(f.ibkr.state.toolCalls.length, before + 3);
+});

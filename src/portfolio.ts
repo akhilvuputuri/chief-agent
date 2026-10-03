@@ -345,9 +345,11 @@ export class Portfolio {
     try {
       const due = await this.db.query(
         `SELECT c.user_id,
-           (SELECT max(finished_at) FROM portfolio_syncs s WHERE s.user_id=c.user_id AND s.provider='ibkr' AND s.status IN ('complete','empty')) AS last_ok,
+           (SELECT max(finished_at) FROM portfolio_syncs s WHERE s.user_id=c.user_id AND s.provider='ibkr' AND s.status IN ('complete','empty')
+              AND s.started_at>=c.connected_at) AS last_ok,
            (SELECT max(started_at) FROM portfolio_syncs s WHERE s.user_id=c.user_id AND s.provider='ibkr') AS last_attempt,
            (SELECT count(*)::int FROM portfolio_syncs s WHERE s.user_id=c.user_id AND s.provider='ibkr' AND s.status='failed'
+              AND s.started_at>=c.connected_at
               AND s.started_at > COALESCE((SELECT max(started_at) FROM portfolio_syncs t WHERE t.user_id=c.user_id AND t.provider='ibkr' AND t.status IN ('complete','empty')),'-infinity')) AS failures
          FROM brokerage_connections c WHERE c.provider='ibkr' AND c.state IN ('connected','refresh_uncertain')`,
       );
