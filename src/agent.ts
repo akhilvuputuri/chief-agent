@@ -1232,12 +1232,12 @@ export class Assistant {
         )
       ).rows;
       // Render the authoritative preview ourselves; never rely on model wording.
+      // Only operations /approve can decide get this generic notice; every other approval
+      // (calendar, library, responsibility, portfolio) is delivered as its own card.
       const notices = approvals
         .filter(
           (a) =>
-            a.operation !== "calendar_create" &&
-            a.operation !== "responsibility_confirm" &&
-            !a.operation.startsWith("library_"),
+            a.operation === "job_delete" || a.operation === "skill_activate",
         )
         .map(
           (a) =>

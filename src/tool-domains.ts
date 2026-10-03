@@ -56,7 +56,7 @@ export const DOMAIN_SUMMARIES: Record<ToolDomain, string> = {
     "saved recurring payments, trial ends, decision dates and reminders",
   parcels: "awaited parcels from email or the owner",
   library: "NLB ebook availability and the linked card's shelf",
-  watchlist: "stock price-drop watchlist",
+  watchlist: "stock price-drop watchlist and read-only IBKR holdings",
   news: "daily news bulletin from followed sites, topics and 👍/👎 learning",
   routines: "scheduled independent agent routines",
   responsibilities:
@@ -83,6 +83,7 @@ const PREFIXES: [string, ToolDomain][] = [
   ["parcel_", "parcels"],
   ["library_", "library"],
   ["watchlist_", "watchlist"],
+  ["portfolio_", "watchlist"],
   ["news_", "news"],
   ["routine_", "routines"],
   ["responsibility_", "responsibilities"],
@@ -142,7 +143,7 @@ const CUES: [ToolDomain, RegExp][] = [
   ["library", /\b(library|libby|nlb|e-?books?|books?|borrow|holds?|loans?)\b/i],
   [
     "watchlist",
-    /\b(stocks?|shares?|ticker|watchlist|nasdaq|nyse|sgx|price drop|market)\b/i,
+    /\b(stocks?|shares?|ticker|watchlist|nasdaq|nyse|sgx|price drop|market|portfolio|holdings?|positions?|ibkr|interactive brokers|brokerage)\b/i,
   ],
   [
     "news",
