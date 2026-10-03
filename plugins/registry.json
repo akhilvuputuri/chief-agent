@@ -4,7 +4,7 @@
   "enabled": [
     {
       "path": "core",
-      "sha256": "69226e4b0de722c5351d4bcba689d4c028e3909111271abe6a0f133cc4813446",
+      "sha256": "40ac651c7113757d68fd1fb52dd11305d31c5efeed8beeaae13e91b5e8731f03",
       "agents": [
         "email",
         "parcels",
@@ -47,6 +47,8 @@
         "parcel_list",
         "parcel_match",
         "parcel_record",
+        "portfolio_connect",
+        "portfolio_disconnect",
         "portfolio_read",
         "portfolio_status",
         "routine_create",
@@ -117,6 +119,8 @@
     "parcel_list",
     "parcel_match",
     "parcel_record",
+    "portfolio_connect",
+    "portfolio_disconnect",
     "portfolio_read",
     "portfolio_status",
     "routine_create",

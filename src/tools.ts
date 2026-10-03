@@ -242,10 +242,12 @@ export class JobTools {
     }
     if (
       a.operation === "portfolio_read" ||
-      a.operation === "portfolio_status"
+      a.operation === "portfolio_status" ||
+      a.operation === "portfolio_connect" ||
+      a.operation === "portfolio_disconnect"
     ) {
       if (!this.portfolio) throw new Error("IBKR portfolio is not configured");
-      return this.portfolio.call(user, a);
+      return this.portfolio.call(user, a, run);
     }
     if (
       a.operation === "item_save" ||

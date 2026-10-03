@@ -75,5 +75,8 @@ CREATE TABLE IF NOT EXISTS portfolio_positions (
  PRIMARY KEY(sync_id,contract_id),
  FOREIGN KEY(sync_id,user_id) REFERENCES portfolio_syncs(id,user_id) ON DELETE CASCADE
 );
+-- Owner-tapped portfolio cards: Chief may only propose them; a Telegram tap decides.
+ALTER TABLE approvals DROP CONSTRAINT IF EXISTS approvals_operation_check;
+ALTER TABLE approvals ADD CONSTRAINT approvals_operation_check CHECK(operation IN ('job_delete','skill_activate','calendar_create','library_borrow','library_hold','library_hold_cancel','library_link','library_revoke','responsibility_confirm','portfolio_connect','portfolio_disconnect'));
 INSERT INTO runtime_migrations(version) VALUES(26) ON CONFLICT DO NOTHING;
 COMMIT;

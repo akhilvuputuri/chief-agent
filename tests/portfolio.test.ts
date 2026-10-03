@@ -13,6 +13,8 @@ import { readOperations } from "../src/execution.js";
 import { runtimeContext } from "../src/runtime.js";
 import { action } from "../src/protocol.js";
 import { domainOf } from "../src/tool-domains.js";
+import { sendPortfolioApprovals } from "../src/telegram.js";
+import { randomUUID } from "node:crypto";
 
 const REDIRECT = "https://chief.example" + IBKR_CALLBACK_PATH;
 // Synthetic holdings in IBKR's measured response shapes; no real account data.
@@ -770,4 +772,195 @@ test("the scheduler does not count a previous grant's sync as recent", async () 
   const before = f.ibkr.state.toolCalls.length;
   await f.portfolio.tick();
   assert.equal(f.ibkr.state.toolCalls.length, before + 3);
+});
+
+async function turn(
+  f: Awaited<ReturnType<typeof fixture>>,
+  background = false,
+) {
+  const run = randomUUID();
+  await f.db.query(
+    "INSERT INTO work_turns(run_id,user_id,request,background) VALUES($1,'owner','x',$2)",
+    [run, background],
+  );
+  return run;
+}
+function fakeBot() {
+  const sent: { text: string; options: any }[] = [];
+  let id = 100;
+  return {
+    sent,
+    bot: {
+      api: {
+        sendMessage: async (_chat: string, text: string, options: any) => {
+          sent.push({ text, options });
+          return { message_id: ++id };
+        },
+      },
+    } as any,
+  };
+}
+
+test("Chief can only propose connecting: the IBKR link goes straight to the owner's card", async () => {
+  const f = await fixture();
+  // Background work cannot propose.
+  await assert.rejects(
+    f.portfolio.call(
+      "owner",
+      { operation: "portfolio_connect" },
+      await turn(f, true),
+    ),
+    /foreground/,
+  );
+  const run = await turn(f);
+  const proposed: any = await f.portfolio.call(
+    "owner",
+    { operation: "portfolio_connect" },
+    run,
+  );
+  assert.equal(proposed.status, "awaiting_owner_tap");
+  // The model-visible result carries no link or state.
+  assert.doesNotMatch(JSON.stringify(proposed), /https?:|state=|client_id/);
+  assert.equal(
+    (await f.db.query("SELECT count(*)::int n FROM brokerage_connections"))
+      .rows[0].n,
+    0,
+  );
+  const { bot, sent } = fakeBot();
+  await sendPortfolioApprovals(
+    bot,
+    f.db,
+    f.portfolio,
+    "owner",
+    undefined,
+    undefined,
+    run,
+  );
+  assert.equal(sent.length, 1);
+  const button = sent[0]!.options.reply_markup.inline_keyboard[0][0];
+  assert.equal(button.text, "Open IBKR (read-only)");
+  assert.equal(new URL(button.url).searchParams.get("scope"), "mcp.read");
+  // Sent once; the link is not stored in readable form.
+  await sendPortfolioApprovals(bot, f.db, f.portfolio, "owner");
+  assert.equal(sent.length, 1);
+  const stored = JSON.stringify(
+    (await f.db.query("SELECT payload FROM approvals")).rows,
+  );
+  assert.doesNotMatch(stored, /state=|https?:/);
+  // The owner's own consent on IBKR completes the connection.
+  const state = new URL(button.url).searchParams.get("state")!;
+  assert.equal((await f.auth.complete(state, "good-code", undefined)).ok, true);
+  // Once connected, a new connect proposal makes no card.
+  assert.equal(
+    (
+      (await f.portfolio.call(
+        "owner",
+        { operation: "portfolio_connect" },
+        run,
+      )) as any
+    ).status,
+    "already_connected",
+  );
+});
+
+test("a disconnect card acts only on the owner's tap on that exact card, once", async () => {
+  const f = await fixture();
+  assert.equal(
+    (
+      (await f.portfolio.call(
+        "owner",
+        { operation: "portfolio_disconnect" },
+        await turn(f),
+      )) as any
+    ).status,
+    "not_connected",
+  );
+  await f.connect();
+  const run = await turn(f);
+  await f.portfolio.call("owner", { operation: "portfolio_disconnect" }, run);
+  // Nothing happens until the tap.
+  assert.equal((await f.auth.status("owner")).state, "connected");
+  const { bot, sent } = fakeBot();
+  await sendPortfolioApprovals(
+    bot,
+    f.db,
+    f.portfolio,
+    "owner",
+    undefined,
+    undefined,
+    run,
+  );
+  const [yes, no] = sent[0]!.options.reply_markup.inline_keyboard[0];
+  assert.equal(yes.text, "Disconnect IBKR");
+  assert.equal(no.text, "Keep connected");
+  const id = yes.callback_data.split(":")[2];
+  // A tap on a different message, or by another user, does nothing.
+  assert.equal(
+    (await f.portfolio.decideDisconnect("owner", id, 999, true)).status,
+    "unavailable",
+  );
+  await assert.rejects(f.portfolio.decideDisconnect("other", id, 101, true));
+  assert.equal((await f.auth.status("owner")).state, "connected");
+  assert.equal(
+    (await f.portfolio.decideDisconnect("owner", id, 101, true)).status,
+    "disconnected",
+  );
+  assert.equal((await f.auth.status("owner")).state, "revoked");
+  // Single use.
+  assert.equal(
+    (await f.portfolio.decideDisconnect("owner", id, 101, true)).status,
+    "unavailable",
+  );
+  // "Keep connected" and expiry leave the connection alone.
+  await f.connect();
+  const run2 = await turn(f);
+  await f.portfolio.call("owner", { operation: "portfolio_disconnect" }, run2);
+  await sendPortfolioApprovals(
+    bot,
+    f.db,
+    f.portfolio,
+    "owner",
+    undefined,
+    undefined,
+    run2,
+  );
+  const id2 =
+    sent[1]!.options.reply_markup.inline_keyboard[0][0].callback_data.split(
+      ":",
+    )[2];
+  assert.equal(
+    (await f.portfolio.decideDisconnect("owner", id2, 102, false)).status,
+    "kept",
+  );
+  assert.equal((await f.auth.status("owner")).state, "connected");
+  const run3 = await turn(f);
+  await f.portfolio.call("owner", { operation: "portfolio_disconnect" }, run3);
+  await sendPortfolioApprovals(
+    bot,
+    f.db,
+    f.portfolio,
+    "owner",
+    undefined,
+    undefined,
+    run3,
+  );
+  const id3 =
+    sent[2]!.options.reply_markup.inline_keyboard[0][0].callback_data.split(
+      ":",
+    )[2];
+  await f.db.query(
+    "UPDATE approvals SET expires_at=now()-interval '1 minute' WHERE id=$1",
+    [id3],
+  );
+  assert.equal(
+    (await f.portfolio.decideDisconnect("owner", id3, 103, true)).status,
+    "unavailable",
+  );
+  assert.equal((await f.auth.status("owner")).state, "connected");
+});
+
+test("portfolio proposals are writes, not reads", () => {
+  assert(!readOperations.has("portfolio_connect"));
+  assert(!readOperations.has("portfolio_disconnect"));
+  assert.equal(domainOf("portfolio_connect"), "watchlist");
 });

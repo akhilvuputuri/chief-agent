@@ -32,6 +32,17 @@ def candidate_compose(base=BASE_COMPOSE):
                      (release.ENV_ANCHOR + release.ENV_ADDITION).decode()))
 
 
+PREVIOUS_OPERATIONS = ['job_delete', 'skill_activate', 'calendar_create', 'library_borrow',
+                       'library_hold', 'library_hold_cancel', 'library_link', 'library_revoke',
+                       'responsibility_confirm']
+APPROVAL_STATEMENTS = [
+    'ALTER TABLE approvals DROP CONSTRAINT IF EXISTS approvals_operation_check;',
+    'ALTER TABLE approvals ADD CONSTRAINT approvals_operation_check CHECK(operation IN ('
+    + ','.join(f"'{o}'" for o in PREVIOUS_OPERATIONS + ['portfolio_connect', 'portfolio_disconnect'])
+    + '));',
+]
+
+
 class PortfolioRolloutTests(unittest.TestCase):
     def test_single_verified_baseline(self):
         self.assertEqual(release.BASES, {release.BASE})
@@ -42,6 +53,13 @@ class PortfolioRolloutTests(unittest.TestCase):
         live = (ROOT / 'compose.yaml').read_bytes()
         self.assertEqual(live.count(release.ENV_ANCHOR + release.ENV_ADDITION), 1)
         self.assertEqual(live.count(release.COMPOSE_ANCHOR + release.COMPOSE_ADDITION), 1)
+
+    def test_approval_check_keeps_every_existing_operation(self):
+        migration = (ROOT / 'db' / release.MIGRATION).read_text()
+        for statement in APPROVAL_STATEMENTS:
+            self.assertIn(statement, migration)
+        latest = (ROOT / 'db' / '023_responsibilities.sql').read_text()
+        self.assertIn(','.join(f"'{o}'" for o in PREVIOUS_OPERATIONS), latest)
 
     def test_unreviewed_baseline_is_refused(self):
         self.scenario(baseline='b' * 40, expected_error='exact documented baseline')
@@ -120,6 +138,9 @@ class PortfolioRolloutTests(unittest.TestCase):
                 self.assertEqual(statement, candidate['db/' + release.MIGRATION])
                 # Additive only: no deletes, drops, truncation, updates or table alterations.
                 safe = re.sub(r'--[^\n]*', '', statement.upper())
+                # The only permitted alteration widens the approvals operation check.
+                for allowed in APPROVAL_STATEMENTS:
+                    safe = safe.replace(allowed.upper(), '')
                 self.assertNotRegex(safe, r'\b(DELETE\s+FROM|DROP|TRUNCATE|UPDATE\s|ALTER\s+TABLE)')
                 if migration_failure:
                     raise RuntimeError('simulated transactional migration failure')

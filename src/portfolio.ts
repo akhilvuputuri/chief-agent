@@ -4,6 +4,7 @@ import type { Database } from "./db.js";
 import { IbkrAuth, IbkrAuthError } from "./ibkr/oauth.js";
 import { IbkrMcp, IbkrMcpError } from "./ibkr/mcp.js";
 import { errorFields, opsLog } from "./ops-log.js";
+import { ToolValidationError } from "./tool-errors.js";
 
 /**
  * Read-only IBKR holdings (issue #146, docs/ibkr-portfolio.md). Each sync is an immutable
@@ -553,8 +554,103 @@ export class Portfolio {
     };
   }
 
-  async call(user: string, a: { operation: string }) {
+  /**
+   * Chief may only propose: this queues a Telegram card. Connecting needs the owner to
+   * open the card's IBKR link and approve there; disconnecting needs the owner's tap.
+   */
+  async propose(user: string, run: string, kind: "connect" | "disconnect") {
+    const turn = (
+      await this.db.query(
+        "SELECT background FROM work_turns WHERE run_id=$1 AND user_id=$2",
+        [run, user],
+      )
+    ).rows[0];
+    if (!turn || turn.background)
+      throw new ToolValidationError(
+        "Only a foreground owner request may propose connecting or disconnecting IBKR",
+      );
+    const live = ["connected", "refresh_uncertain"].includes(
+      (await this.auth.status(user)).state,
+    );
+    if (kind === "connect" && live)
+      return {
+        status: "already_connected",
+        note: "IBKR is already connected; no card was created.",
+      };
+    if (kind === "disconnect" && !live)
+      return {
+        status: "not_connected",
+        note: "IBKR is not connected; no card was created.",
+      };
+    const operation = `portfolio_${kind}`;
+    // One open card per kind: a newer request supersedes an unanswered one.
+    await this.db.query(
+      "UPDATE approvals SET status='denied',payload=payload || '{\"superseded\":true}'::jsonb WHERE user_id=$1 AND operation=$2 AND status='pending'",
+      [user, operation],
+    );
+    // Approval expiry uses database time, like every other approval card.
+    const expiresAt = (
+      await this.db.query(
+        "INSERT INTO approvals(id,user_id,run_id,operation,payload,expires_at) VALUES($1,$2,$3,$4,'{}'::jsonb,now()+interval '15 minutes') RETURNING expires_at",
+        [randomUUID(), user, run, operation],
+      )
+    ).rows[0].expires_at as Date;
+    return {
+      status: "awaiting_owner_tap",
+      card: kind,
+      expiresAt: new Date(expiresAt).toISOString(),
+      note:
+        kind === "connect"
+          ? "A Telegram card with an 'Open IBKR (read-only)' button is sent after this reply. Nothing is connected until the owner opens it and approves on IBKR's site."
+          : "A Telegram card asks the owner to confirm. Nothing is disconnected until they tap Disconnect.",
+    };
+  }
+
+  /** The owner's tap on a disconnect card: the exact sent message, pending, unexpired, once. */
+  async decideDisconnect(
+    user: string,
+    approvalId: string,
+    messageId: number | undefined,
+    approve: boolean,
+  ): Promise<{
+    status: "disconnected" | "kept" | "unavailable";
+    text: string;
+  }> {
+    if (!this.allowed(user)) throw new Error("Unauthorized portfolio decision");
+    const claimed = (
+      await this.db.query(
+        `UPDATE approvals SET status=$3 WHERE id=$1 AND user_id=$2 AND operation='portfolio_disconnect'
+           AND status='pending' AND expires_at>now() AND (payload->>'telegramMessageId')::bigint=$4
+         RETURNING id`,
+        [approvalId, user, approve ? "approved" : "denied", messageId ?? -1],
+      )
+    ).rows[0];
+    if (!claimed)
+      return {
+        status: "unavailable",
+        text: "This card is expired or already used. Ask Chief again if you still want to disconnect.",
+      };
+    if (!approve) return { status: "kept", text: "IBKR stays connected." };
+    return {
+      status: "disconnected",
+      text: (await this.command(user, "disconnect")).text,
+    };
+  }
+
+  async call(user: string, a: { operation: string }, run?: string) {
     if (!this.allowed(user)) throw new Error("Unauthorized portfolio access");
+    if (
+      a.operation === "portfolio_connect" ||
+      a.operation === "portfolio_disconnect"
+    ) {
+      if (!run)
+        throw new ToolValidationError("A conversation turn is required");
+      return this.propose(
+        user,
+        run,
+        a.operation === "portfolio_connect" ? "connect" : "disconnect",
+      );
+    }
     if (a.operation === "portfolio_read") return this.read(user);
     if (a.operation === "portfolio_status") {
       const snap = await this.snapshot(user);

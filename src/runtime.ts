@@ -228,6 +228,10 @@ export function runtimeContext(
                 "List watched stocks, effective thresholds and monitoring windows, the next periods each stock is actually checked (nextChecks, Singapore time), latest alerts and the most recent observation decision.",
               portfolio_read:
                 "Read the owner's IBKR holdings (read-only): each position's quantity, IBKR mark price, market value, average cost, cost basis and unrealized P&L, per-currency totals, account net liquidation and cash, with asOf, ageMinutes and freshness. Holdings older than 15 minutes are re-synced first; if that fails the last successful snapshot is returned with lastAttempt. Prices are IBKR marks at sync time, not live quotes. Never trading advice; Chief cannot place or change trades.",
+              portfolio_connect:
+                "Only when the owner explicitly asks to connect IBKR: queue a Telegram card with an 'Open IBKR (read-only)' button. Nothing is connected until the owner opens it, logs in on IBKR's site and approves read-only access; never say it is connected. Refused while already connected.",
+              portfolio_disconnect:
+                "Only when the owner explicitly asks to stop Chief reading IBKR: queue a Telegram confirmation card. Nothing is disconnected until the owner taps Disconnect; never say it is done.",
               portfolio_status:
                 "IBKR connection state, last successful sync, position count and last attempt. The owner connects or disconnects with /portfolio connect or /portfolio disconnect in Telegram.",
               watchlist_settings:

@@ -211,7 +211,13 @@ The deliverable is a sanitized findings section in the journal, plus fixtures bu
 - **Tools.**
   - `portfolio_read` and `portfolio_status` are read operations owned by a separate `core/portfolio` agent. They are gated on `availability.portfolio`, so the stocks agent never disappears when IBKR is off.
   - The `portfolio_` prefix maps to the existing `watchlist` domain. These tools are delegated, never offered to the coordinator, so `config/tool-picker.json` and its paid eval are unchanged.
-- **Telegram.** `/portfolio`, `/portfolio connect` (an IBKR link button), `/portfolio refresh` and `/portfolio disconnect`. These are host commands, not model tools.
+- **Conversational connect and disconnect (owner request, 3 October 2026).**
+  - The owner asks Chief, for example "connect my IBKR" or "stop Chief reading my portfolio". The portfolio agent's `portfolio_connect` or `portfolio_disconnect` only **queues a Telegram card** in `approvals`, and the model can never complete it.
+  - Both tools are foreground-only. At most one pending card of each kind exists, and it expires after 15 minutes.
+  - **Connect card.** The IBKR authorize link is created at send time (`sendPortfolioApprovals`) and placed only in the Telegram button. The model's tool result carries no link or state, and nothing readable is stored. The owner's own IBKR login and consent are the approval.
+  - **Disconnect card.** Disconnect and Keep connected buttons, which act only on the exact sent message while pending and unexpired, and only once.
+  - Migration 026 widens `approvals_operation_check` to include the two operations and keeps every existing one.
+- **Telegram shortcuts.** `/portfolio`, `/portfolio connect`, `/portfolio refresh` and `/portfolio disconnect` remain as host commands.
 - **Configuration.**
   - `IBKR_PORTFOLIO=on|off` and `IBKR_TOKEN_KEY` (64 hex characters).
   - The redirect is `MINIAPP_ORIGIN + /oauth/ibkr/callback`.
@@ -281,7 +287,7 @@ Two findings were already resolved: "empty balances erase holdings" (empty must 
 1. Add `IBKR_TOKEN_KEY` (from `openssl rand -hex 32`, generated on the host and never printed or copied off it) and `IBKR_PORTFOLIO=on` to `/opt/hermes-companion/.env`. Keep the file at mode 0600.
 2. Install the reviewed `ops/oauth-site/Caddyfile`, which adds only `/oauth/ibkr/callback`, with the `install-host.sh` steps: `install`, `caddy validate`, `mv`, then reload Caddy.
 3. Recreate the gateway with `docker compose up -d --no-deps --no-build gateway` and check its health.
-4. The owner sends `/portfolio connect` from the phone, approves read-only access on IBKR's site, and gets the holdings in Telegram.
+4. The owner asks Chief to connect IBKR, or sends `/portfolio connect`, taps the card's IBKR button, approves read-only access on IBKR's site, and gets the holdings in Telegram.
 
 To turn it off, set `IBKR_PORTFOLIO=off` and recreate the gateway. `/portfolio disconnect` beforehand revokes the token. Snapshots are retained.
 

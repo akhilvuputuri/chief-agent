@@ -57,6 +57,7 @@ import {
   telegram,
   sendCalendarApprovals,
   sendLibraryApprovals,
+  sendPortfolioApprovals,
   sendResponsibilityApprovals,
 } from "./telegram.js";
 // Startup refusals carry a fixed code so the sanitized crash line identifies them.
@@ -703,6 +704,15 @@ async function sendWorkMessage(user: string, text: string | Delivery) {
       await sendLibraryApprovals(
         bot,
         db,
+        user,
+        undefined,
+        extra.message_thread_id,
+        delivery.runId,
+      );
+      await sendPortfolioApprovals(
+        bot,
+        db,
+        portfolio,
         user,
         undefined,
         extra.message_thread_id,
