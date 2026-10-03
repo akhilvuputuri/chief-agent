@@ -1251,3 +1251,120 @@ test("Chromium does not inherit the control secret or gateway credentials", () =
   ]);
   assert.equal(JSON.stringify(env).includes("synthetic"), false);
 });
+
+test("sibling ChatGPT and API targets resolve the same vendor using their distinct product evidence", async () => {
+  const f = await fixture();
+  try {
+    const api = await f.vault.put(
+      "alice",
+      await f.vault.prepare(
+        "alice",
+        "api.pdf",
+        pdf(
+          "OpenAI API Invoice number API-002 Invoice date September 5, 2026 API usage charges USD 15.00",
+        ),
+      ),
+    );
+    await f.db.query(
+      "UPDATE work_turns SET request=request||$2 WHERE run_id=$1",
+      [f.run, " " + api.id],
+    );
+    await f.gather.call(
+      "alice",
+      f.run,
+      action.parse({
+        operation: "gather_revise",
+        id: f.c.id,
+        baseRevision: 1,
+        requestKey: randomUUID(),
+        objective: "Gather ChatGPT and API",
+        targets: [
+          { key: "chatgpt", label: "ChatGPT", month: "2026-09" },
+          { key: "api", label: "OpenAI API", month: "2026-09" },
+        ],
+        sources: ["provided"],
+        providedFiles: [f.file.id, api.id],
+      }),
+    );
+    for (const [targetKey, file] of [
+      ["chatgpt", f.file],
+      ["api", api],
+    ]) {
+      for (const candidate of [f.file, api])
+        await f.call({
+          operation: "gather_capture",
+          targetKey,
+          source: { kind: "provided", artifactId: candidate.id },
+        });
+      assert.equal(
+        (
+          await f.call({
+            operation: "gather_match",
+            targetKey,
+            artifactId: file.id,
+            date: "2026-09-05",
+            dateBasis: "invoice_date",
+          })
+        ).matched,
+        true,
+      );
+      assert.equal(
+        (
+          await f.call({
+            operation: "gather_check",
+            targetKey,
+            source: "provided",
+          })
+        ).state,
+        "covered",
+      );
+    }
+    assert.equal(
+      (
+        await f.gather.call(
+          "alice",
+          f.run,
+          action.parse({
+            operation: "gather_finish",
+            id: f.c.id,
+            requestKey: randomUUID(),
+          }),
+        )
+      ).complete,
+      true,
+    );
+    assert.equal((await f.gather.status("alice", f.c.id)).counts.files, 2);
+  } finally {
+    await f.db.close();
+  }
+});
+
+test("unrelated issuer ambiguity remains refused even with owner target attestation", async () => {
+  const f = await fixture({
+    text: "OpenAI ChatGPT and Anthropic Invoice number MIX-001 Invoice date September 5, 2026 USD 20.00",
+  });
+  try {
+    await f.gather.call(
+      "alice",
+      f.run,
+      action.parse({
+        operation: "gather_revise",
+        id: f.c.id,
+        baseRevision: 1,
+        requestKey: randomUUID(),
+        objective: "Inspect mixed issuer",
+        targets: [
+          { key: "one", label: "ChatGPT", month: "2026-09" },
+          { key: "two", label: "Anthropic", month: "2026-09" },
+        ],
+        sources: ["provided"],
+        providedFiles: [f.file.id],
+      }),
+    );
+    await f.capture();
+    await f.gather.verifyTarget("alice", f.c.id, "one", f.file.id, 2);
+    await assert.rejects(f.match, /complete recorded issuer/);
+  } finally {
+    await f.db.close();
+  }
+});

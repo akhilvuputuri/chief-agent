@@ -10,6 +10,7 @@ import {
   issuerTerms,
   invoiceFacts,
   productEvidence,
+  issuerIdentity,
   type InvoiceFacts,
 } from "./facts.js";
 import {
@@ -888,7 +889,7 @@ export class Gathering {
         !facts.invoiceHeading ||
         facts.invoiceNumbers.length > 1 ||
         (a.dateBasis === "invoice_date" && facts.invoiceDates.length !== 1) ||
-        facts.issuerLabels.length !== 1 ||
+        new Set(facts.issuerLabels.map(issuerIdentity)).size !== 1 ||
         !facts.issuerLabels.includes(t.label) ||
         a.date.slice(0, 7) !== t.month ||
         a.dateBasis !== t.dateBasis ||

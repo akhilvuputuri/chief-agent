@@ -19,6 +19,10 @@ const aliases: Record<string, string[]> = {
   anthropicapi: ["anthropic"],
   claudeapi: ["anthropic", "claude"],
   claude: ["anthropic"],
+  claudepro: ["anthropic", "claude"],
+  claudemax: ["anthropic", "claude"],
+  claudeteam: ["anthropic", "claude"],
+  claudesubscription: ["anthropic", "claude"],
   anthropic: ["anthropic"],
   digitalocean: ["digitalocean", "digital ocean"],
 };
@@ -237,4 +241,25 @@ export function productEvidence(
   const found = (facts.productLabels ?? []).filter((p) => family.includes(p));
   if (found.length && !found.includes(expected)) return "conflict";
   return found.length === 1 && found[0] === expected ? "exact" : "ambiguous";
+}
+
+/** Group known shared-vendor labels without treating company aliases as product evidence. */
+export function issuerIdentity(label: string) {
+  const value = label.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (value === "openai" || value === "openaiapi" || value === "chatgpt")
+    return "openai";
+  if (
+    [
+      "anthropic",
+      "anthropicapi",
+      "claude",
+      "claudeapi",
+      "claudepro",
+      "claudemax",
+      "claudeteam",
+      "claudesubscription",
+    ].includes(value)
+  )
+    return "anthropic";
+  return value;
 }
