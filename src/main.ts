@@ -2,6 +2,7 @@ import { Gathering } from "./gathering/controller.js";
 import { FileVault } from "./gathering/vault.js";
 import { GatheringBrowsers } from "./gathering/sessions.js";
 import { BrowserRpc } from "./gathering/browser-client.js";
+import { formatTelegram } from "./telegram-format.js";
 import { recordFeedSent } from "./telegram-feeds.js";
 import { readFileSync } from "node:fs";
 import { CodeBuildClient } from "@aws-sdk/client-codebuild";
@@ -789,20 +790,44 @@ const routineTimer = setInterval(() => {
       opsLog("coding.tick_failed", "error", errorFields(error)),
     );
   void coding
-    ?.deliver(async (user, threadId, text) =>
-      topics.deliver(
-        user,
-        {
-          kind: threadId ? "thread" : "general",
-          ...(threadId ? { threadId } : {}),
-        } as import("./delivery-routing.js").Destination,
-        (extra) =>
-          bot.api.sendMessage(user, text, {
-            ...extra,
-            link_preview_options: { is_disabled: true },
-          }),
-      ),
-    )
+    ?.deliver(async (user, threadId, text, approvalId) => {
+      const parts = formatTelegram(text);
+      let last;
+      for (const [index, part] of parts.entries()) {
+        last = await topics.deliver(
+          user,
+          {
+            kind: threadId ? "thread" : "general",
+            ...(threadId ? { threadId } : {}),
+          } as import("./delivery-routing.js").Destination,
+          (extra) =>
+            bot.api.sendMessage(user, part.text, {
+              ...extra,
+              entities: part.entities,
+              link_preview_options: { is_disabled: true },
+              ...(approvalId && index === parts.length - 1
+                ? {
+                    reply_markup: {
+                      inline_keyboard: [
+                        [
+                          {
+                            text: "Approve requirements",
+                            callback_data: `cod:yes:${approvalId}`,
+                          },
+                          {
+                            text: "Request changes",
+                            callback_data: `cod:no:${approvalId}`,
+                          },
+                        ],
+                      ],
+                    },
+                  }
+                : {}),
+            }),
+        );
+      }
+      return last;
+    })
     .catch((error) =>
       opsLog("coding.delivery_failed", "error", errorFields(error)),
     );

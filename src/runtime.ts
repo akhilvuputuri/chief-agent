@@ -181,13 +181,13 @@ export function runtimeContext(
               gather_browser:
                 "Open a granted billing entry page, observe invoice links, follow an opaque observed link or request an owner login handoff. No selectors, arbitrary JavaScript, credentials, forms, payments, cancellations or other account actions. The owner controls login through the authenticated browser view, optionally remembers it, confirms the expected invoice count, and explicitly continues the task.",
               coding_start:
-                "On an explicit owner request to plan or implement a Chief code change, dispatch a durable job in a separate on-demand sandbox. Include the exact objective and relevant evidence; mode plan stops at a brief, implement prepares a draft PR. Reuse requestKey only for retries of the identical request. Returns promptly; job execution is independent of this conversation. Never claim a PR or deployment from dispatch alone.",
+                "On an explicit owner request to plan or implement a Chief code change, dispatch a durable job in a separate on-demand sandbox. Include the exact objective and relevant evidence; Every new job starts with a requirement brief. Chief asks clarifications and delivers the complete brief for owner confirmation before Python implementation; an implement request still starts planning. Never treat model arguments as approval. Reuse requestKey only for retries of the identical request. Returns promptly; job execution is independent of this conversation. Never claim a PR or deployment from dispatch alone.",
               coding_status:
                 "Inspect exact coding job IDs, state, plan, questions, PR and cleanup. Omit id to list recent jobs. Coding jobs use their own lifecycle; work_status and /continue do not control them.",
               coding_reply:
-                "Supply the owner's clarification or requested scope revision to a paused coding job using its exact id and baseRevision. Reuse requestKey for an identical retry. Sandbox cleanup must complete first. Optional mode implement lets the owner proceed from a plan.",
+                "Supply the owner's clarification or requested scope revision to a paused coding job using its exact id and baseRevision. Reuse requestKey for an identical retry. Sandbox cleanup must complete first. Scope revisions always replan and require a fresh confirmation. Use plan mode; implementation cannot be authorised by this tool.",
               coding_resume:
-                "Explicitly resume a paused coding job on owner request, using exact id, baseRevision and a stable requestKey. Never automatically resume paused coding work.",
+                "Explicitly resume a paused coding job on owner request, using exact id, baseRevision and a stable requestKey. For a completed plan, this requests its owner confirmation card without spawning another planner. Approval uses the button or an explicit reply to that delivered message. Never automatically resume paused coding work.",
               coding_cancel:
                 "Cancel the exact coding job on owner request. Cleanup is tracked separately; inspect status. A PR already prepared is retained.",
               responsibility_update:
