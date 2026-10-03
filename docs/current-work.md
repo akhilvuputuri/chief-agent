@@ -1,6 +1,6 @@
-# Conversational coding requirements — v0.3.36 candidate
+# Conversational coding requirements — released v0.3.36, off
 
-[PR #157](https://github.com/akhilvuputuri/chief-agent/pull/157) integrated an enforced plan → owner confirmation → Python implementation flow with buttons or a direct yes reply, no slash commands. Models cannot grant approval. Existing coding-event JSON stores scope/receipt/decision metadata; no DB/Compose change. GPT-6 Astra approved `aafecf3`; Linux CI passed and merge `b8ffb21` is integrated. Python 0.1.1 is published/anonymously verified; pin review and exact release pending. Coding activation remains blocked by provisioning login and scoped provider/App/ingress setup. See [journal 58](journey/58-coding-requirements.md).
+[PR #157](https://github.com/akhilvuputuri/chief-agent/pull/157)/[PR #158](https://github.com/akhilvuputuri/chief-agent/pull/158) enforce plan → owner confirmation → Python implementation without slash commands. Astra approved exact heads `aafecf3` and `140c97d`; PR/main Linux CI passed. The [exact release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37120011881), separate health/policy/preservation checks and immutable [v0.3.36](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.36) verify `67db5e135c99eee85a10416dbe159ce93432eee0`. No DB/Compose change. Coding remains off with zero jobs; provisioning authentication and scoped provider/App/ingress setup are incomplete. No paid/live coding acceptance. See [journal closure](journey/58-coding-requirements.md#release-closure--3-october-2026).
 
 # Python coding runtime — released v0.3.35, off
 
