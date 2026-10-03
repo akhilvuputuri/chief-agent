@@ -1,6 +1,6 @@
-# Python coding runtime — integrated, image pin candidate
+# Python coding runtime — released v0.3.35, off
 
-[PR #154](https://github.com/akhilvuputuri/chief-agent/pull/154) integrated Python execution at `888caea5fecb2d431190233195d7f93a0c78f461` after GPT-6 Astra approved exact head `e0b0b63cf629544ef41d025fa1eec9efc682f964` and Linux CI passed. The independently built public Python image is published and anonymously verified. `codex/python-coding-runtime-pin` switches its immutable digest with the fixed Python launcher; pin review and exact release verification remain pending. Chief stays TypeScript, coding remains off, no DB/Compose change or paid acceptance. See [journal 57](journey/57-python-coding-runtime.md).
+[PR #154](https://github.com/akhilvuputuri/chief-agent/pull/154) refactored execution into Python; [PR #155](https://github.com/akhilvuputuri/chief-agent/pull/155) pinned the public image with the matching fixed launcher. GPT-6 Astra approved exact heads `e0b0b63cf629544ef41d025fa1eec9efc682f964` and `8b2dac76d1023c0da15a4e9a88816f2dcf8fd111`; PR/main Linux CI passed. The [exact release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37099789621), separate health/deployed-policy/preservation checks and [v0.3.35](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.35) verify `448597a475827c3eb88df5ae3f3697f04a125563`. Chief stays TypeScript; OpenRouter uses DeepSeek V4.1 Flash for coding and the existing reviewer. Coding remains off, zero jobs, no DB/Compose change or paid acceptance. Provider/App/ingress activation remains pending. See [journal closure](journey/57-python-coding-runtime.md#release-closure--3-october-2026).
 
 # Issue 132 — Bill/subscription manual milestone released v0.3.34
 
