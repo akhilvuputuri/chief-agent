@@ -79,7 +79,7 @@ services:
         "-f",
         "/migrations/026_portfolio.sql",
         "-f",
-        "/migrations/027_gathering.sql",
+        "/migrations/028_gathering.sql",
       ]
     depends_on:
       postgres: { condition: service_healthy }

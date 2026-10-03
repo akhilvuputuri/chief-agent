@@ -22,6 +22,8 @@ import {
 } from "./responsibility-worker.js";
 import { StockMonitor, StockDelivery, WatchlistTools } from "./stocks.js";
 import { TwelveDataProvider } from "./stock-provider.js";
+import { CreditBucket } from "./market-credits.js";
+import { StockLookup } from "./stock-lookup.js";
 import { NewsBulletin, NewsTools, voteKeyboard } from "./news.js";
 import { PublicFeedFetcher } from "./news-feed.js";
 import { run as runTelegram } from "@grammyjs/runner";
@@ -225,6 +227,14 @@ const stockProvider =
         supportsExtended: c.MARKET_DATA_EXTENDED === "true",
       })
     : undefined;
+// One credit allowance shared by the monitor and on-demand lookups.
+const marketCredits = stockProvider
+  ? new CreditBucket(stockProvider.creditsPerMinute)
+  : undefined;
+const stockLookup =
+  stockProvider && marketCredits
+    ? new StockLookup(db, stockProvider, marketCredits)
+    : undefined;
 if (c.MARKET_DATA_PROVIDER === "twelvedata" && !c.TWELVE_DATA_API_KEY)
   throw startupError(
     "STARTUP_MARKET_DATA_KEY",
@@ -386,12 +396,12 @@ if (c.GATHERING_RUNTIME === "on") {
       "Gathering needs an artifact key and authenticated Mini App origin",
     );
   if (
-    !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=27")).rows
+    !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=28")).rows
       .length
   )
     throw startupError(
-      "STARTUP_MIGRATION_027",
-      "Gathering migration 027 must be installed before enabling the capability",
+      "STARTUP_MIGRATION_028",
+      "Gathering migration 028 must be installed before enabling the capability",
     );
   const key = secretKey(c.GATHERING_ARTIFACT_KEY);
   if (c.GATHERING_BROWSER === "on" && !c.GATHERING_BROWSER_KEY)
@@ -462,11 +472,12 @@ const assistant = new Assistant(
     new CalendarActions(db, calendar, c.GMAIL_OWNER_USER_ID),
     library,
     libraryActions,
-    new WatchlistTools(db, stockProvider),
+    new WatchlistTools(db, stockProvider, undefined, marketCredits),
     new NewsTools(db, newsFetcher, newsBulletin),
     responsibilities,
     coding,
     portfolio,
+    stockLookup,
     gathering,
   ),
   {
@@ -792,6 +803,7 @@ const stockMonitor = stockProvider
       (user) => allowed.has(user),
       undefined,
       (user) => topics.capture(user, { kind: "topic", topic: "markets" }),
+      marketCredits,
     )
   : undefined;
 const stockDelivery = new StockDelivery(db, async (user, payload) => {

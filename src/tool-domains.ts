@@ -89,6 +89,7 @@ const PREFIXES: [string, ToolDomain][] = [
   ["library_", "library"],
   ["watchlist_", "watchlist"],
   ["portfolio_", "watchlist"],
+  ["stock_", "watchlist"],
   ["news_", "news"],
   ["routine_", "routines"],
   ["responsibility_", "responsibilities"],

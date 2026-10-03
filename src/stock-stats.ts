@@ -1,0 +1,176 @@
+import type { PriceBar, Quote } from "./stock-provider.js";
+
+/**
+ * Reference statistics for one instrument (docs/stock-rules.md). Pure and deterministic:
+ * questions, rules and digests all use these figures, so answers and alerts agree. Every
+ * figure comes from the same provider as the price. A window with too little history is
+ * null with a reason, never a shorter window presented as the full one. The quote's
+ * `fifty_two_week` block is deliberately unused: at the monitor's 1-minute interval it
+ * covers recent minutes, not 52 weeks (measured 4 October 2026).
+ */
+
+export const WINDOWS = { "12w": 60, "26w": 130, "52w": 260 } as const;
+export type WindowKey = keyof typeof WINDOWS;
+/** Sessions fetched so the 52-week window is complete with margin for holidays. */
+export const DAILY_BARS = 300;
+const MIN_COVERAGE = 0.9;
+/** Daily history ending longer ago than this before the quote's date is treated as stale. */
+const STALE_DAYS = 7;
+
+const round = (value: number, digits: number) =>
+  Math.round(value * 10 ** digits) / 10 ** digits;
+const fromPct = (price: number, reference: number) =>
+  round((price / reference - 1) * 100, 2);
+
+type Missing = { value: null; reason: string };
+
+export interface Average {
+  value: number;
+  sessions: number;
+  fromPct: number;
+}
+export interface Range {
+  low: number;
+  lowDate: string;
+  high: number;
+  highDate: string;
+  sessions: number;
+  fromLowPct: number;
+  fromHighPct: number;
+}
+
+export interface StockStats {
+  price: number;
+  currency: string;
+  quoteTime: string;
+  tradingDate: string;
+  previousClose: number | null;
+  dayChangePct: number | null;
+  averages: Record<WindowKey, Average | Missing>;
+  ranges: Record<WindowKey, Range | Missing>;
+  allTime:
+    (Omit<Range, "sessions"> & { since: string; months: number }) | Missing;
+  basis: string;
+}
+
+/** Extremes over bars, with the current price included (it may be today's new extreme). */
+function extremes(bars: PriceBar[], price: number, today: string) {
+  let low = { value: price, date: today };
+  let high = { value: price, date: today };
+  for (const b of bars) {
+    if (b.low < low.value) low = { value: b.low, date: b.date };
+    if (b.high > high.value) high = { value: b.high, date: b.date };
+  }
+  return { low, high };
+}
+
+export function computeStats(input: {
+  quote: Quote;
+  daily: PriceBar[] | null;
+  monthly: PriceBar[] | null;
+}): StockStats {
+  const q = input.quote;
+  if (!(Number.isFinite(q.price) && q.price > 0))
+    throw new Error("Quote has no usable price");
+  const price = q.price;
+  const today = q.tradingDate || q.quoteTime.toISOString().slice(0, 10);
+  // History is fetched once per trading day, so a cached bar for today may be a mid-session
+  // snapshot. Once the market is closed the quote price is today's close: fold it in.
+  const daily = (input.daily ?? []).map((b) =>
+    b.date === today && !q.marketOpen
+      ? {
+          ...b,
+          close: price,
+          low: Math.min(b.low, price),
+          high: Math.max(b.high, price),
+        }
+      : b,
+  );
+  // Averages use completed sessions only. During a session today's bar is still moving;
+  // once the market is closed (after the close, weekends) the quote date's bar is final.
+  const completed = daily.filter(
+    (b) => b.date < today || (b.date === today && !q.marketOpen),
+  );
+  const last = completed.at(-1)?.date;
+  const stale =
+    input.daily && last
+      ? (Date.parse(today) - Date.parse(last)) / 86400000 > STALE_DAYS
+      : false;
+  const averages = {} as StockStats["averages"];
+  const ranges = {} as StockStats["ranges"];
+  for (const [key, sessions] of Object.entries(WINDOWS) as [
+    WindowKey,
+    number,
+  ][]) {
+    const closes = completed.slice(-sessions);
+    if (stale || closes.length < sessions * MIN_COVERAGE) {
+      const reason = !input.daily
+        ? "daily history unavailable"
+        : stale
+          ? `daily history ends ${last}, too long before ${today}`
+          : `only ${closes.length} of ${sessions} sessions of history`;
+      averages[key] = { value: null, reason };
+      ranges[key] = { value: null, reason };
+      continue;
+    }
+    const mean = closes.reduce((t, b) => t + b.close, 0) / closes.length;
+    averages[key] = {
+      value: round(mean, 4),
+      sessions: closes.length,
+      fromPct: fromPct(price, mean),
+    };
+    // Lows/highs include today's bar and price: a new low today counts.
+    // The window is `sessions` completed bars, plus today's bar while it is still open.
+    const window = daily.slice(
+      -sessions - (daily.at(-1)?.date === today && q.marketOpen ? 1 : 0),
+    );
+    const { low, high } = extremes(window, price, today);
+    ranges[key] = {
+      low: round(low.value, 4),
+      lowDate: low.date,
+      high: round(high.value, 4),
+      highDate: high.date,
+      sessions: closes.length,
+      fromLowPct: fromPct(price, low.value),
+      fromHighPct: fromPct(price, high.value),
+    };
+  }
+  let allTime: StockStats["allTime"];
+  const monthly = input.monthly ?? [];
+  if (!monthly.length)
+    allTime = {
+      value: null,
+      reason: input.monthly
+        ? "no monthly history"
+        : "monthly history unavailable",
+    };
+  else {
+    // Daily bars first: on a tie the daily bar's exact date wins over the month's first day.
+    const { low, high } = extremes([...daily, ...monthly], price, today);
+    allTime = {
+      low: round(low.value, 4),
+      lowDate: low.date,
+      high: round(high.value, 4),
+      highDate: high.date,
+      fromLowPct: fromPct(price, low.value),
+      fromHighPct: fromPct(price, high.value),
+      since: monthly[0]!.date,
+      months: monthly.length,
+    };
+  }
+  const previousClose =
+    Number.isFinite(q.prevClose) && q.prevClose > 0 ? q.prevClose : null;
+  return {
+    price,
+    currency: q.currency,
+    quoteTime: q.quoteTime.toISOString(),
+    tradingDate: today,
+    previousClose,
+    dayChangePct: previousClose ? fromPct(price, previousClose) : null,
+    averages,
+    ranges,
+    allTime,
+    basis:
+      "Split-adjusted history from the same provider as the price. Averages are simple averages of completed daily closes (12w=60, 26w=130, 52w=260 sessions; today's bar counts once the market is closed); lows/highs use daily bar lows/highs plus the current price. All-time figures start at the provider's first monthly bar ('since'); an extreme older than the daily history is dated by its month (YYYY-MM-01). History is fetched once per trading day, so today's intraday range is as of that fetch plus the current price.",
+  };
+}

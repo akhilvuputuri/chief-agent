@@ -1,4 +1,4 @@
-# 60 — Gathering files without losing scope or coverage
+# 61 — Gathering files without losing scope or coverage
 
 Work dates: 3–4 October 2026. Status: implementation candidate; not deployed.
 
@@ -51,3 +51,5 @@ Astra's `f8d44b7` review found same-vendor sibling targets unmatchable because b
 Fresh main advanced to `c3cea89d0a666ba1b64bb9235648358fce27ce7d` with the read-only IBKR portfolio foundation. The server RELEASE and marker 26 also matched that integrated baseline. Gathering incorporates it and uses migration **027**; its earlier planned number 026 is superseded. The upstream portfolio schema/approval cards, feature flags and journal 59 remain intact. This candidate is journal 60. Exact-head review and all affected checks must be repeated on the combined code; gathering remains not deployed. Patch numbering will follow the latest verified release, not an earlier branch assumption.
 
 A root regression also checks byte-different regenerated PDFs carrying the same invoice identifier: those variants must not inflate browser invoice-history coverage. Counts now use distinct recorded invoice IDs, with only a sole matched PDF allowed without an identifier. Original variants remain preserved; byte deduplication is not represented as semantic invoice uniqueness. The separate browser/proxy image rollout remains an operator boundary until shared release tooling manages them with owner-session guards.
+
+Fresh main advanced again to `baa5a72f024cb1200a20a24627e4b418b3c58472` with the v0.3.37 stock lookup and portfolio activation closure. That baseline is incorporated. Stock rules reserve 027/journal 60; gathering uses **028/journal 61** and prepares v0.3.38. The claim is recorded on PR160. Existing IBKR on-state, stock capabilities and release notes remain intact; no stock rule schema is installed by gathering. Final combined-head checks/review and exact-image proofs remain required before release.

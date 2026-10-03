@@ -134,7 +134,7 @@
     },
     {
       "id": "stocks",
-      "description": "Configure and report the stock watchlist: stocks, drop thresholds, pause/resume and Singapore-time monitoring windows.",
+      "description": "Answer stock questions now (price, day change, 12/26/52-week averages, lows and highs, all-time low and high) and configure and report the stock watchlist: stocks, drop thresholds, pause/resume and Singapore-time monitoring windows.",
       "instructions": "agents/stocks.md",
       "contract": "findings/v1",
       "tools": [
@@ -142,7 +142,8 @@
         "watchlist_update",
         "watchlist_remove",
         "watchlist_list",
-        "watchlist_settings"
+        "watchlist_settings",
+        "stock_lookup"
       ],
       "skills": [],
       "limits": {
