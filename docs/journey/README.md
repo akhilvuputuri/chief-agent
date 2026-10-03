@@ -61,6 +61,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 1–3 October                          | [54 — Subscriptions](54-subscriptions.md): how do owner statements, decision dates and reminders stay consistent?                                     | Released v0.3.34; migration 025, normal release and rolled-back deployed-module smoke verified; owner acceptance pending     |
 
 | 3 October | [57 — Python coding runtime](57-python-coding-runtime.md): can disposable execution change language while preserving Chief’s durable boundary? | Released v0.3.35 off; Python image/policy and exact release verified; live activation pending |
+| 2–3 October | [58 — IBKR portfolio access](58-ibkr-portfolio.md): can Chief read IBKR holdings without becoming a trading client? | Proposed; read-only consent, rotating refresh, 12h idle refresh, tools, holdings and a real-time quote measured; owner reconciled holdings |
 
 ## Connected case studies
 

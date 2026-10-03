@@ -1,0 +1,55 @@
+# 58 — Can Chief read IBKR holdings without becoming a trading client?
+
+Work date(s): 2026-10-02 to 2026-10-03. Written/revised: 2026-10-03.
+Status: proposed; Phase 0 feasibility spike in progress. Registration, read-only consent, rotating refresh, the tool catalogue, holdings structure and one real-time quote were measured; the refresh token survived a 12-hour idle gap. The absolute session lifetime is untested. No production code exists and nothing is deployed.
+
+## User-visible problem and preceding iteration
+
+[Issue #146](https://github.com/akhilvuputuri/chief-agent/issues/146) asks for read-only access to the owner's Interactive Brokers holdings, and then for an evidence-based decision on whether IBKR can replace Twelve Data for unattended price monitoring. The [stock watchlist](25-stock-watchlist.md) and its [monitoring windows](39-watch-monitoring-window.md) established a deterministic, model-free monitor keyed by symbol + MIC. Nothing in Chief reads brokerage state today. The plan and architecture are in [IBKR portfolio access](../ibkr-portfolio.md).
+
+## Evidence
+
+- **Measured on 2 October 2026 SGT, unauthenticated.** IBKR's protected-resource metadata advertises `mcp.read` and `mcp.write`. Its authorization-server metadata additionally lists `mcp.orders.submit`, `account-ids`, `openid`, the `client_credentials` grant and the public-client auth method `none`. An unauthenticated MCP `initialize` returns 401 with a `resource_metadata` challenge.
+- **Measured on 2 October 2026 SGT, with owner authorization.** One dynamic client registration returned HTTP 201: a public client with a loopback redirect. The requested scope `mcp.read openid account-ids` was **replaced** by `mcp.orders.submit mcp.read mcp.write`. The response is stored privately with 0600 permissions; no identifier is recorded here.
+- **Reported by IBKR's consent guide.** Access is set up by choosing named AI vendors' connectors. The guide states no consent lifetime.
+- **Measured on 2 October 2026, about 23:43–23:45 SGT, during the owner's consent run.**
+  - Consent succeeded for Chief's loopback client and the grant was exactly `mcp.read`. Access tokens last 599 seconds, and refresh tokens are issued and **rotate on every refresh**.
+  - The server is `ibkr-cpapi-mcp` 1.2.2. It lists 34 tools, **including order-instruction, alert and watchlist write tools under the read token**. No write was attempted.
+  - Positions, summary and balances returned the expected structure, with no account ID, listing exchange, pagination or source timestamp.
+  - One AAPL snapshot reported `REALTIME`, 5–6 seconds old, with the previous close missing on the first call and present on the second.
+  - Full details are in the [plan's Phase 0 progress](../ibkr-portfolio.md#phase-0-progress--2-october-2026-sgt).
+- **Measured on 3 October 2026, 11:46 SGT.** A refresh 723 minutes after the previous one (an overnight idle gap) succeeded, still read-only, and rotated the token.
+- **Reported by the owner on 3 October 2026 SGT.** At the owner's request, the three account reads were displayed once in the development session, fetched at 12:18 SGT. The owner confirmed that the positions and account figures matched the IBKR app. No values are recorded here.
+  - **Measured:** the position market values summed exactly to the USD stock market value, and the positions' unrealized P&L to the USD unrealized P&L. The SGD totals equalled the USD totals multiplied by the reported exchange rate.
+  - **Observed design inputs:**
+    - Symbols use IBKR's local form (`BRK B`, not `BRK.B`).
+    - ETFs are reported as `asset_class` `STK`.
+    - The base currency is SGD, and positions are in USD.
+    - Several summary fields (`equity_with_loan_value`, `buying_power`, `leverage`) do not look like conventional definitions, so they are not shown until verified.
+- **Not tested.** Absolute refresh-token lifetime beyond 12 hours; mobile-session coexistence; revocation; pacing; the hosted redirect.
+
+## Diagnosis and alternatives
+
+- **Registration does not enforce read-only.** Read-only must be requested at authorization and verified in the token response. Chief then needs its own host-enforced tool allowlist as a second boundary. The probe fails closed: it revokes and stops if a broader `mcp.*` scope is granted.
+- **Client eligibility is resolved for loopback clients.** Chief's own registration completed consent, so the remaining gating unknown is the absolute session lifetime. The hosted HTTPS redirect still needs its own test.
+- **Alternatives, in order:**
+  1. Flex Web Service for holdings. It uses an IP-restricted token and no interactive OAuth.
+  2. A vendor-CLI proxy (Claude Code headless with a strict MCP tool allowlist), for holdings only. It costs a model call per read and adds paid usage. It is probably no help, because it uses the same registration mechanism.
+  3. Copying a vendor client's token is rejected.
+
+  See [§6/§6b](../ibkr-portfolio.md#6-fallback-flex-web-service).
+
+## Implementation and review
+
+- **Plan:** [docs/ibkr-portfolio.md](../ibkr-portfolio.md).
+- **Phase 0 probe:** [scripts/ibkr-probe.mjs](../../scripts/ibkr-probe.mjs). It runs on the owner's machine, stores tokens with 0600 permissions outside the repository and prints only structure. It refuses order and instruction tools.
+- **Not yet reviewed:** no independent review has run; it happens on the implementation PRs.
+
+## Verification and outcome
+
+- **Offline:** the probe's output reducer masked account-like keys and printed no values for a synthetic positions payload.
+- **Live:** the read calls above printed only structure, plus public quote facts for AAPL. No write tool was called.
+
+## Follow-up and next iteration
+
+The remaining Phase 0 measurements are any absolute refresh-token lifetime beyond 12 hours (the loop continues), mobile-session coexistence, and revocation. Gate G0 is decided after those.
