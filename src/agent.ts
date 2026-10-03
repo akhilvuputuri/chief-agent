@@ -345,6 +345,7 @@ export class Assistant {
       "UPDATE work_tasks SET status='cancelled',lease=NULL,pause_reason='cancelled' WHERE user_id=$1 AND id=$2 AND status NOT IN ('done','cancelled')",
       [user, id],
     );
+    await this.tools.gathering?.browsers?.closeTask(user, id);
     return { cancelled: true };
   }
   async grant(user: string, id?: string) {
@@ -1001,25 +1002,37 @@ export class Assistant {
           return this.call(capability, input, childRun);
         },
         agentState: async (agentId) =>
-          agentId === "core/calendar"
-            ? {
-                calendarApprovals: (
+          agentId === "core/gathering" && this.tools.gathering
+            ? await (async () => {
+                const linked = (
                   await this.db.query(
-                    "SELECT id,status,expires_at,payload->'draft' AS draft,payload->>'execution' AS execution FROM approvals WHERE user_id=$1 AND operation='calendar_create' AND status='pending' AND expires_at>now() ORDER BY created_at DESC LIMIT 3",
-                    [user],
+                    "SELECT c.id FROM gather_collections c JOIN work_turns w ON w.task_id=c.task_id AND w.user_id=c.user_id WHERE w.run_id=$1 AND c.user_id=$2",
+                    [run, user],
                   )
-                ).rows,
-              }
-            : agentId === "core/library"
+                ).rows[0];
+                return linked
+                  ? this.tools.gathering!.status(user, linked.id)
+                  : null;
+              })()
+            : agentId === "core/calendar"
               ? {
-                  libraryApprovals: (
+                  calendarApprovals: (
                     await this.db.query(
-                      "SELECT id,operation,expires_at,payload->'draft' AS draft,payload->>'execution' AS execution FROM approvals WHERE user_id=$1 AND operation LIKE 'library\\_%' AND status='pending' AND expires_at>now() ORDER BY created_at DESC LIMIT 5",
+                      "SELECT id,status,expires_at,payload->'draft' AS draft,payload->>'execution' AS execution FROM approvals WHERE user_id=$1 AND operation='calendar_create' AND status='pending' AND expires_at>now() ORDER BY created_at DESC LIMIT 3",
                       [user],
                     )
                   ).rows,
                 }
-              : null,
+              : agentId === "core/library"
+                ? {
+                    libraryApprovals: (
+                      await this.db.query(
+                        "SELECT id,operation,expires_at,payload->'draft' AS draft,payload->>'execution' AS execution FROM approvals WHERE user_id=$1 AND operation LIKE 'library\\_%' AND status='pending' AND expires_at>now() ORDER BY created_at DESC LIMIT 5",
+                        [user],
+                      )
+                    ).rows,
+                  }
+                : null,
         refreshContext: async () => {
           runtime.context = JSON.stringify({
             ...JSON.parse(runtime.context),
@@ -1252,7 +1265,7 @@ export class Assistant {
         background ||
         (
           await this.db.query(
-            `SELECT 1 FROM events WHERE run_id=$1 AND type='tool.completed' AND data->>'operation' IN ('work_start','work_revise','work_step','work_evidence','work_yield') LIMIT 1`,
+            `SELECT 1 FROM events WHERE run_id=$1 AND type='tool.completed' AND data->>'operation' IN ('work_start','work_revise','work_step','work_evidence','work_yield','gather_start','gather_revise','gather_finish') LIMIT 1`,
             [run],
           )
         ).rows.length > 0;
@@ -1407,6 +1420,10 @@ export class Assistant {
       true,
     );
     if (op === "work_cancel") {
+      await this.tools.gathering?.browsers?.closeTask(
+        scope.user,
+        (input as any).id,
+      );
       const run = this.taskRuns.get((input as any).id);
       if (run) this.controllers.get(run)?.abort();
     }

@@ -45,9 +45,17 @@ const date = (value: string) =>
     dateStyle: "medium",
     timeStyle: "short",
   }) + " SGT";
-async function api(path: string, signal = controller.signal) {
+async function api(
+  path: string,
+  signal = controller.signal,
+  options: RequestInit = {},
+) {
   const r = await fetch("/api/miniapp" + path, {
-    headers: { Authorization: "Bearer " + token },
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: "Bearer " + token,
+    },
     cache: "no-store",
     signal,
   });
@@ -671,12 +679,230 @@ async function responsibilities(id?: string, offset = 0) {
       );
   }
 }
+async function downloadFile(path: string, name: string) {
+  const response = await fetch("/api/miniapp" + path, {
+    headers: { Authorization: "Bearer " + token },
+    cache: "no-store",
+    signal: controller.signal,
+  });
+  if (!response.ok)
+    throw new Error("This file could not be retrieved. Reopen the workspace.");
+  const blob = await response.blob();
+  controller.signal.throwIfAborted();
+  const url = URL.createObjectURL(blob),
+    a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+async function gathering(id?: string, offset = 0) {
+  root.replaceChildren(
+    el("h1", id ? "Invoice collection" : "Invoice collections"),
+  );
+  const data = await api(
+    id ? "/gathering/" + id : "/gathering?offset=" + offset,
+  );
+  if (!id) {
+    const profiles = await api("/browser-profiles").catch(() => []);
+    for (const profile of profiles) {
+      const forget = btn(
+        `Forget saved login: ${profile.origin} · ${profile.account_label}`,
+        () => {
+          forget.disabled = true;
+          root.append(
+            btn("Confirm forget login and close its browsers", () => {
+              void api("/browser-profiles/forget", controller.signal, {
+                method: "POST",
+                body: JSON.stringify({
+                  origin: profile.origin,
+                  accountLabel: profile.account_label,
+                  confirmed: true,
+                }),
+              })
+                .then(() => gathering())
+                .catch(showError);
+            }),
+          );
+        },
+      );
+      root.append(forget);
+    }
+    for (const c of data.collections) {
+      const card = btn("", () => go({ view: "gathering", gather: c.id }));
+      card.className = "card link";
+      card.append(
+        el("strong", c.objective),
+        el("small", `${c.state} · task ${c.task_status}`),
+      );
+      root.append(card);
+    }
+    if (!data.collections.length)
+      root.append(
+        el(
+          "p",
+          "Tell Chief which providers, accounts and invoice months to gather.",
+          "empty",
+        ),
+      );
+    if (data.nextOffset !== null)
+      root.append(
+        btn("Older collections", () =>
+          go({ view: "gathering", offset: String(data.nextOffset) }),
+        ),
+      );
+    return;
+  }
+  root.append(
+    el("p", data.objective, "prose"),
+    el(
+      "p",
+      `${data.counts.covered} of ${data.counts.expected} targets checked · ${data.counts.files} matched PDFs · ${data.state}`,
+    ),
+    el("p", data.notice, "muted"),
+  );
+  const archive = btn("Download matched PDFs as ZIP", () =>
+    downloadFile(
+      "/gathering/" + id + "/archive",
+      "invoices-" + id.slice(0, 8) + ".zip",
+    ).catch(showError),
+  );
+  archive.disabled = !data.counts.files;
+  root.append(archive);
+  for (const target of data.targets) {
+    const box = el("section", undefined, "block");
+    box.append(
+      el("h2", `${target.label} · ${target.month}`),
+      el(
+        "p",
+        `${target.accountLabel ?? "Selected account"} · ${target.dateBasis === "service_period" ? "Billed service period" : "Invoice issue month"} · ${target.state}`,
+      ),
+    );
+    if (target.reason)
+      box.append(el("p", String(target.reason).replace(/_/g, " "), "muted"));
+    if (target.coverage_note)
+      box.append(el("p", target.coverage_note, "muted"));
+    for (const file of target.files)
+      box.append(
+        btn(`Download matched invoice · ${file.date}`, () =>
+          downloadFile("/files/" + file.artifact_id, file.name).catch(
+            showError,
+          ),
+        ),
+      );
+    for (const candidate of target.candidates.filter(
+      (c: any) =>
+        !target.files.some((f: any) => f.artifact_id === c.artifact_id),
+    )) {
+      box.append(
+        el(
+          "p",
+          `${candidate.facts.invoiceNumbers?.[0] ?? candidate.name} · ${candidate.facts.invoiceDates?.join(", ") || "Date unverified"}`,
+          "muted",
+        ),
+      );
+      if (candidate.targetConflict)
+        box.append(
+          el(
+            "p",
+            "This PDF identifies a different product. It cannot match this target.",
+            "muted",
+          ),
+        );
+      if (candidate.target_verified)
+        box.append(
+          el(
+            "p",
+            `Target verified by you: ${target.label}${target.accountLabel ? " · " + target.accountLabel : ""}`,
+            "muted",
+          ),
+        );
+      box.append(
+        btn("Download unverified candidate PDF", () =>
+          downloadFile("/files/" + candidate.artifact_id, candidate.name).catch(
+            showError,
+          ),
+        ),
+      );
+      if (
+        candidate.needsTargetVerification &&
+        !candidate.targetConflict &&
+        !candidate.target_verified &&
+        !["complete", "cancelled"].includes(data.state)
+      ) {
+        const verify = btn(
+          `Verify this PDF belongs to ${target.label}${target.accountLabel ? " · " + target.accountLabel : ""}`,
+          () => {
+            verify.disabled = true;
+            const confirm = btn(
+              `I inspected this PDF: ${target.label}${target.accountLabel ? " · " + target.accountLabel : ""}`,
+              () => {
+                confirm.disabled = true;
+                void api(
+                  "/gathering/" + id + "/verify-target",
+                  controller.signal,
+                  {
+                    method: "POST",
+                    body: JSON.stringify({
+                      targetKey: target.key,
+                      artifactId: candidate.artifact_id,
+                      revision: data.revision,
+                      confirmed: true,
+                    }),
+                  },
+                )
+                  .then(() => gathering(id))
+                  .catch(showError);
+              },
+            );
+            box.append(
+              el(
+                "p",
+                `Download and inspect this PDF. Confirm the product is ${target.label}${target.accountLabel ? " and the account is " + target.accountLabel : ""}, ${target.month}. Dates and coverage are checked separately.`,
+              ),
+              confirm,
+            );
+          },
+        );
+        box.append(verify);
+      }
+    }
+    for (const browser of data.browsers.filter(
+      (b: any) => b.target_key === target.key && b.state === "owner",
+    ))
+      box.append(
+        btn("Sign in and review invoice history", () =>
+          go({ view: "gathering", browser: browser.id }),
+        ),
+      );
+    root.append(box);
+  }
+  if (!["complete", "cancelled"].includes(data.state))
+    root.append(
+      el(
+        "p",
+        `Task: ${data.taskId}. Resolve blockers, then explicitly continue in Telegram with /continue ${data.taskId}.`,
+        "muted",
+      ),
+    );
+  root.append(btn("Refresh collection", () => void route()));
+}
 async function route() {
   controller.abort();
   controller = new AbortController();
   if (poll) clearInterval(poll);
   poll = undefined;
   const p = new URLSearchParams(location.hash.slice(1));
+  const gatheringView =
+    p.has("gather") || p.has("browser") || p.get("view") === "gathering";
+  const privacyFooter = document.querySelector("footer");
+  if (privacyFooter)
+    privacyFooter.textContent = gatheringView
+      ? "Private workspace · Only you verify accounts and control sign-in."
+      : "Private workspace · Changes and approvals stay in Telegram";
+  document
+    .getElementById("gathering")
+    ?.classList.toggle("selected", gatheringView);
   const subscriptionsView =
     p.has("subscription") || p.get("view") === "subscriptions";
   document
@@ -690,6 +916,7 @@ async function route() {
     .classList.toggle(
       "selected",
       !subscriptionsView &&
+        !gatheringView &&
         !p.has("role") &&
         !["roles", "responsibilities"].includes(p.get("view") ?? ""),
     );
@@ -697,7 +924,15 @@ async function route() {
     .getElementById("responsibilities")!
     .classList.toggle("selected", p.get("view") === "responsibilities");
   try {
-    if (subscriptionsView)
+    if (p.has("browser")) {
+      const { browserView } = await import("./browser-ui.js");
+      await browserView(root, token, p.get("browser")!, controller.signal);
+    } else if (gatheringView)
+      await gathering(
+        p.get("gather") ?? undefined,
+        Number(p.get("offset") ?? 0),
+      );
+    else if (subscriptionsView)
       await subscriptions(p.get("subscription") ?? undefined);
     else if (p.get("view") === "responsibilities")
       await responsibilities(
@@ -713,6 +948,9 @@ async function route() {
   }
 }
 async function start() {
+  document
+    .getElementById("gathering")
+    ?.addEventListener("click", () => go({ view: "gathering" }));
   document
     .getElementById("subscriptions")!
     .addEventListener("click", () => go({ view: "subscriptions" }));
@@ -750,6 +988,7 @@ async function start() {
   const capabilities = await api("/capabilities");
   document.getElementById("responsibilities")!.hidden =
     !capabilities.responsibilities;
+  document.getElementById("gathering")!.hidden = !capabilities.gathering;
   // Telegram's launch fragment is parsed by the SDK; never retain signed data in our navigation URLs.
   const query = new URLSearchParams(location.search);
   const initial = new URLSearchParams();
@@ -759,6 +998,8 @@ async function start() {
     "view",
     "subscription",
     "responsibility",
+    "gather",
+    "browser",
   ])
     if (query.has(key)) initial.set(key, query.get(key)!);
   history.replaceState(null, "", "/miniapp/#" + initial.toString());

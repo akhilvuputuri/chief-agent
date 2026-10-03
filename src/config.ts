@@ -2,6 +2,14 @@ import "dotenv/config";
 import { readFileSync } from "node:fs";
 import { z } from "zod";
 const schema = z.object({
+  GATHERING_RUNTIME: z.enum(["on", "off"]).default("off"),
+  GATHERING_BROWSER: z.enum(["on", "off"]).default("off"),
+  GATHERING_ARTIFACT_KEY: z
+    .union([z.literal(""), z.string().regex(/^[0-9a-f]{64}$/i)])
+    .default(""),
+  GATHERING_BROWSER_KEY: z
+    .union([z.literal(""), z.string().regex(/^[0-9a-f]{64}$/i)])
+    .default(""),
   CODING_RUNTIME: z.enum(["on", "off"]).default("off"),
   CODING_PUBLIC_ORIGIN: z.string().default(""),
   CODING_CODEBUILD_PROJECT: z.string().default(""),

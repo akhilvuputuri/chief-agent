@@ -129,6 +129,13 @@ export class WorkTools {
       );
       return { cancelled: true };
     }
+    if (
+      task.delivery_context?.source === "gathering" &&
+      !["work_yield", "work_cancel"].includes(a.operation)
+    )
+      throw new ToolValidationError(
+        "Gathering steps and completion are host-checked; use the gathering tools rather than rewriting its scope or proofs",
+      );
     if (a.operation === "work_revise") {
       if (turn.background)
         throw new Error("Only a user follow-up can revise scope");

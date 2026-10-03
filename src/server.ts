@@ -1,7 +1,7 @@
 import Fastify from "fastify";
 import { miniapp, type MiniConfig } from "./miniapp.js";
 import type { Database } from "./db.js";
-/** No tool callback. Public APIs are read-only and require an authenticated owner. */
+/** No model-tool callback. Saved views are read-only; gathering account/browser controls require authenticated owner input. */
 export function server(db?: Database, config?: MiniConfig) {
   const app = Fastify({
     logger: false,

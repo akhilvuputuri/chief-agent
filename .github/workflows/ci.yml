@@ -26,3 +26,15 @@ jobs:
           docker build -f Dockerfile.coding -t chief-coding:test .
           docker run --rm --entrypoint sh chief-coding:test -c 'test "$(id -u)" != 0 && node --version && git --version && rg --version && python3 --version'
           docker run --rm --user root --env CODING_TEST_SECRET=synthetic --entrypoint setpriv chief-coding:test --reuid=1000 --regid=1000 --clear-groups --no-new-privs --bounding-set=-all python -I -m chief_coding_runtime.security_smoke
+      - name: Verify isolated browser sandbox with synthetic pages
+        run: |
+          docker build -f Dockerfile.browser --target browser -t chief-browser:test .
+          docker run --rm --init --network=none --read-only --tmpfs /tmp:size=192m,mode=1777 --shm-size=192m --cap-drop=ALL --security-opt=no-new-privileges --security-opt=seccomp=deploy/browser/seccomp.json --memory=640m --pids-limit=192 --entrypoint node chief-browser:test /app/browser-smoke.mjs
+
+      - name: Verify PostgreSQL gathering revocation interleaving
+        run: |
+          docker build -t chief-gathering-app:test .
+          docker run -d --name gathering-pg-proof --network=none --user postgres --read-only --tmpfs /tmp:size=256m,mode=1777 --tmpfs /var/run/postgresql:mode=1777 --memory=384m --pids-limit=96 --env PGDATA=/tmp/pgdata --env POSTGRES_USER=synthetic --env POSTGRES_PASSWORD=synthetic-only --env POSTGRES_DB=gathering_test postgres:17-alpine
+          trap 'docker rm -f gathering-pg-proof >/dev/null' EXIT
+          for i in $(seq 1 30); do docker exec gathering-pg-proof pg_isready -U synthetic -d gathering_test && break; sleep 1; done
+          docker run --rm --network=container:gathering-pg-proof --read-only --cap-drop=ALL --security-opt=no-new-privileges --memory=384m --pids-limit=96 --env GATHERING_TEST_DATABASE_URL=postgresql://synthetic:synthetic-only@127.0.0.1:5432/gathering_test --mount type=bind,source="$PWD/db",target=/app/db,readonly --mount type=bind,source="$PWD/scripts/gathering-postgres-smoke.mjs",target=/app/scripts/gathering-postgres-smoke.mjs,readonly --entrypoint node chief-gathering-app:test /app/scripts/gathering-postgres-smoke.mjs

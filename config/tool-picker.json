@@ -55,6 +55,10 @@
       "description": "Saved recurring payments, subscriptions, memberships, bills, trial ends, cancellation deadlines and linked reminders.",
       "examples": "track Netflix at 22.98 SGD monthly, what am I paying for, remind me before my gym renewal, I cancelled Adobe"
     },
+    "gathering": {
+      "description": "Gather invoice PDF files across exact providers/accounts/months, using selected email, supplied documents or authenticated browser portals; inspect collection progress and login handoffs.",
+      "examples": "gather my September invoices, collect OpenAI Anthropic and DigitalOcean invoices, use the billing portal only, did that collection finish"
+    },
     "parcels": {
       "description": "Track or update parcels, packages or online orders the user awaits.",
       "examples": "where's my Amazon package, did the DHL thing arrive, what am I still waiting on"

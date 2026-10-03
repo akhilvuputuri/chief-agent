@@ -17,7 +17,11 @@
         "observation_read"
       ],
       "skills": [],
-      "limits": { "ms": 150000, "models": 10, "tools": 24 },
+      "limits": {
+        "ms": 150000,
+        "models": 10,
+        "tools": 24
+      },
       "model": "fast",
       "effort": "medium"
     },
@@ -36,7 +40,11 @@
         "parcel_record"
       ],
       "skills": [],
-      "limits": { "ms": 180000, "models": 12, "tools": 30 },
+      "limits": {
+        "ms": 180000,
+        "models": 12,
+        "tools": 30
+      },
       "model": "fast",
       "effort": "medium"
     },
@@ -51,7 +59,11 @@
         "subscription_settings"
       ],
       "skills": [],
-      "limits": { "ms": 90000, "models": 8, "tools": 16 },
+      "limits": {
+        "ms": 90000,
+        "models": 8,
+        "tools": 16
+      },
       "model": "fast",
       "effort": "medium"
     },
@@ -62,7 +74,11 @@
       "contract": "findings/v1",
       "tools": ["calendar_list", "calendar_draft"],
       "skills": [],
-      "limits": { "ms": 90000, "models": 6, "tools": 10 },
+      "limits": {
+        "ms": 90000,
+        "models": 6,
+        "tools": 10
+      },
       "model": "fast",
       "effort": "medium"
     },
@@ -85,7 +101,11 @@
         "routine_update"
       ],
       "skills": [],
-      "limits": { "ms": 90000, "models": 8, "tools": 16 },
+      "limits": {
+        "ms": 90000,
+        "models": 8,
+        "tools": 16
+      },
       "model": "fast",
       "effort": "medium"
     },
@@ -104,7 +124,11 @@
         "source_read"
       ],
       "skills": [],
-      "limits": { "ms": 120000, "models": 8, "tools": 16 },
+      "limits": {
+        "ms": 120000,
+        "models": 8,
+        "tools": 16
+      },
       "model": "fast",
       "effort": "medium"
     },
@@ -122,7 +146,11 @@
         "stock_lookup"
       ],
       "skills": [],
-      "limits": { "ms": 60000, "models": 6, "tools": 10 },
+      "limits": {
+        "ms": 60000,
+        "models": 6,
+        "tools": 10
+      },
       "model": "fast",
       "effort": "low"
     },
@@ -155,7 +183,11 @@
         "news_edition_now"
       ],
       "skills": [],
-      "limits": { "ms": 60000, "models": 6, "tools": 10 },
+      "limits": {
+        "ms": 60000,
+        "models": 6,
+        "tools": 10
+      },
       "model": "fast",
       "effort": "low"
     },
@@ -166,7 +198,11 @@
       "contract": "findings/v1",
       "tools": ["library_check", "library_availability", "library_shelf"],
       "skills": [],
-      "limits": { "ms": 60000, "models": 4, "tools": 6 },
+      "limits": {
+        "ms": 60000,
+        "models": 4,
+        "tools": 6
+      },
       "model": "fast",
       "effort": "low"
     },
@@ -177,7 +213,11 @@
       "contract": "findings/v1",
       "tools": ["web_search", "web_read", "source_read"],
       "skills": [],
-      "limits": { "ms": 90000, "models": 6, "tools": 12 },
+      "limits": {
+        "ms": 90000,
+        "models": 6,
+        "tools": 12
+      },
       "model": "fast",
       "effort": "low"
     },
@@ -188,7 +228,37 @@
       "contract": "media/v1",
       "tools": ["source_read"],
       "skills": [],
-      "limits": { "ms": 120000, "models": 6, "tools": 12 },
+      "limits": {
+        "ms": 120000,
+        "models": 6,
+        "tools": 12
+      },
+      "model": "fast",
+      "effort": "medium"
+    },
+    {
+      "id": "gathering",
+      "description": "Gather invoice PDFs for an exact durable collection from its selected sources, preserve files/provenance, match issuer/period clues and verify source coverage. Human login takeover is supported; no external account writes or automatic ledger intake.",
+      "instructions": "agents/gathering.md",
+      "contract": "findings/v1",
+      "tools": [
+        "gather_status",
+        "gather_progress",
+        "gather_search",
+        "gather_email_files",
+        "gather_capture",
+        "gather_match",
+        "gather_check",
+        "gather_block",
+        "gather_finish",
+        "gather_browser"
+      ],
+      "skills": [],
+      "limits": {
+        "ms": 180000,
+        "models": 12,
+        "tools": 40
+      },
       "model": "fast",
       "effort": "medium"
     }

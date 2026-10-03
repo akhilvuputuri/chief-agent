@@ -1,3 +1,6 @@
+import websocket from "@fastify/websocket";
+import type { Gathering } from "./gathering/controller.js";
+import { gatheringApi } from "./gathering/api.js";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
@@ -12,12 +15,15 @@ export interface MiniConfig {
   token: string;
   allowed: Set<string>;
   responsibilities?: boolean;
+  gathering?: Gathering;
 }
 export async function miniapp(
   app: FastifyInstance,
   db: Database,
   config: MiniConfig,
 ) {
+  if (config.gathering?.browsers)
+    await app.register(websocket, { options: { maxPayload: 8000 } });
   const auth = new MiniAuth(config.token, config.allowed);
   const canvases = new Canvases(db);
   const files: Record<string, { type: string; body: string }> = {
@@ -40,13 +46,21 @@ export async function miniapp(
       body: await readFile(new URL("../web/app.css", import.meta.url), "utf8"),
     },
   };
+  if (config.gathering)
+    files["/miniapp/browser-ui.js"] = {
+      type: "text/javascript; charset=utf-8",
+      body: await readFile(
+        new URL("../dist/browser-ui.js", import.meta.url),
+        "utf8",
+      ),
+    };
   for (const [path, file] of Object.entries(files))
     app.get(path, async (_req, reply) =>
       reply
         .header("Cache-Control", "no-store")
         .header(
           "Content-Security-Policy",
-          "default-src 'none'; script-src 'self' https://telegram.org; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'",
+          `default-src 'none'; script-src 'self' https://telegram.org; style-src 'self'; connect-src 'self' ${config.origin.replace(/^https:/, "wss:")}; img-src 'self' blob:; base-uri 'none'; form-action 'none'`,
         )
         .header("X-Content-Type-Options", "nosniff")
         .header("Referrer-Policy", "no-referrer")
@@ -73,6 +87,14 @@ export async function miniapp(
         if (req.headers.origin && req.headers.origin !== config.origin)
           return reply.code(403).send({ error: "Forbidden" });
         if (req.routeOptions.url?.endsWith("/session")) return;
+        if (req.routeOptions.url?.includes("/browser-control/")) {
+          if (
+            req.headers.origin !== config.origin ||
+            req.headers.upgrade?.toLowerCase() !== "websocket"
+          )
+            return reply.code(401).send({ error: "Open from Chief" });
+          return; // The one-use ticket is authenticated in the first encrypted WebSocket frame. No credential is placed in a URL or a logged protocol header.
+        }
         try {
           auth.verify(req.headers.authorization);
         } catch {
@@ -111,6 +133,8 @@ export async function miniapp(
           })
           .strict()
           .parse(q);
+      if (config.gathering)
+        await gatheringApi(api, auth, config.gathering, config.origin);
       const subscriptions = new SubscriptionTools(db);
       api.get("/subscriptions", async (req) => {
         const { offset } = page(req.query);
@@ -132,6 +156,8 @@ export async function miniapp(
 
       api.get("/capabilities", async () => ({
         responsibilities: !!config.responsibilities,
+        gathering: !!config.gathering,
+        browser: !!config.gathering?.browsers,
       }));
       if (config.responsibilities) {
         const responsibilities = new Responsibilities(db);

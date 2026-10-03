@@ -80,12 +80,18 @@ services:
         "/migrations/026_portfolio.sql",
         "-f",
         "/migrations/027_coding_squad.sql",
+        "-f",
+        "/migrations/028_gathering.sql",
       ]
     depends_on:
       postgres: { condition: service_healthy }
   gateway:
     build: .
     environment:
+      GATHERING_RUNTIME: ${GATHERING_RUNTIME:-off}
+      GATHERING_BROWSER: ${GATHERING_BROWSER:-off}
+      GATHERING_ARTIFACT_KEY: ${GATHERING_ARTIFACT_KEY:-}
+      GATHERING_BROWSER_KEY: ${GATHERING_BROWSER_KEY:-}
       CODING_RUNTIME: ${CODING_RUNTIME:-off}
       CODING_PUBLIC_ORIGIN: ${CODING_PUBLIC_ORIGIN:-}
       CODING_CODEBUILD_PROJECT: ${CODING_CODEBUILD_PROJECT:-}
@@ -147,6 +153,7 @@ services:
       TTS_VOICE: ${TTS_VOICE:-alloy}
       VOICE_REPLIES: ${VOICE_REPLIES:-false}
     ports: ["127.0.0.1:3000:3000"]
+    networks: [default, browser-control]
     depends_on:
       migrate: { condition: service_completed_successfully }
     read_only: true
@@ -165,5 +172,61 @@ services:
       timeout: 3s
       retries: 3
     restart: unless-stopped
+  gathering-proxy:
+    profiles: [gathering]
+    build: { context: ., dockerfile: Dockerfile.browser, target: proxy }
+    image: chief-gathering-proxy
+    networks: [browser-control, default]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 96m
+    pids_limit: 64
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3002/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+  gathering-browser:
+    profiles: [gathering]
+    build: { context: ., dockerfile: Dockerfile.browser, target: browser }
+    image: chief-gathering-browser
+    environment:
+      BROWSER_CONTROL_KEY: ${GATHERING_BROWSER_KEY:-}
+      BROWSER_PROXY: http://gathering-proxy:3002
+    networks: [browser-control]
+    depends_on:
+      gathering-proxy: { condition: service_healthy }
+    init: true
+    read_only: true
+    tmpfs: ["/tmp:size=192m,mode=1777"]
+    shm_size: 192m
+    cap_drop: [ALL]
+    security_opt:
+      ["no-new-privileges:true", "seccomp:./deploy/browser/seccomp.json"]
+    mem_limit: 640m
+    cpus: 1.0
+    pids_limit: 192
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3001/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+networks:
+  browser-control: { internal: true }
 volumes:
   postgres-data:

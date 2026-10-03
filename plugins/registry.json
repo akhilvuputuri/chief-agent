@@ -4,7 +4,7 @@
   "enabled": [
     {
       "path": "core",
-      "sha256": "b9782c32e54fcc99a08bba3ec96ee223993ea92da624d2069f079c1b6f4df2b0",
+      "sha256": "056a7e2fe0bed852154febd26ea07d69557a64d8226f4b6e140d034cd5a1664f",
       "agents": [
         "email",
         "parcels",
@@ -17,12 +17,23 @@
         "news",
         "library",
         "web",
-        "media"
+        "media",
+        "gathering"
       ],
       "allowTools": [
         "calendar_draft",
         "calendar_list",
         "daily_sync",
+        "gather_block",
+        "gather_browser",
+        "gather_capture",
+        "gather_check",
+        "gather_email_files",
+        "gather_finish",
+        "gather_match",
+        "gather_progress",
+        "gather_search",
+        "gather_status",
         "gmail_accounts",
         "gmail_read",
         "gmail_search",
@@ -91,12 +102,22 @@
     "web": "core/web",
     "media": "core/media",
     "subscriptions": "core/subscriptions",
-    "portfolio": "core/portfolio"
+    "portfolio": "core/portfolio",
+    "gathering": "core/gathering"
   },
   "delegated": [
     "calendar_draft",
     "calendar_list",
     "daily_sync",
+    "gather_block",
+    "gather_browser",
+    "gather_capture",
+    "gather_check",
+    "gather_email_files",
+    "gather_finish",
+    "gather_match",
+    "gather_progress",
+    "gather_search",
     "gmail_accounts",
     "gmail_read",
     "gmail_search",

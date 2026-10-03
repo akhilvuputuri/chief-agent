@@ -1,3 +1,7 @@
+import { Gathering } from "./gathering/controller.js";
+import { FileVault } from "./gathering/vault.js";
+import { GatheringBrowsers } from "./gathering/sessions.js";
+import { BrowserRpc } from "./gathering/browser-client.js";
 import { formatTelegram } from "./telegram-format.js";
 import { recordFeedSent } from "./telegram-feeds.js";
 import { readFileSync } from "node:fs";
@@ -393,6 +397,47 @@ if (c.IBKR_PORTFOLIO === "on") {
   );
   await portfolio.recover();
 }
+let gathering: Gathering | undefined;
+if (c.GATHERING_RUNTIME === "on") {
+  if (!c.GATHERING_ARTIFACT_KEY || !c.MINIAPP_ORIGIN)
+    throw startupError(
+      "STARTUP_GATHERING_CONFIG",
+      "Gathering needs an artifact key and authenticated Mini App origin",
+    );
+  if (
+    !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=28")).rows
+      .length
+  )
+    throw startupError(
+      "STARTUP_MIGRATION_028",
+      "Gathering migration 028 must be installed before enabling the capability",
+    );
+  const key = secretKey(c.GATHERING_ARTIFACT_KEY);
+  if (c.GATHERING_BROWSER === "on" && !c.GATHERING_BROWSER_KEY)
+    throw startupError(
+      "STARTUP_BROWSER_CONFIG",
+      "Browser control is not configured",
+    );
+  const browsers =
+    c.GATHERING_BROWSER === "on"
+      ? new GatheringBrowsers(
+          db,
+          key,
+          new BrowserRpc(
+            "http://gathering-browser:3001",
+            c.GATHERING_BROWSER_KEY,
+          ),
+          c.MINIAPP_ORIGIN,
+        )
+      : undefined;
+  gathering = new Gathering(
+    db,
+    new FileVault(db, key),
+    c.GMAIL_OWNER_USER_ID && c.GOOGLE_REFRESH_TOKEN ? gmail : undefined,
+    browsers,
+    c.MINIAPP_ORIGIN,
+  );
+}
 const assistant = new Assistant(
   db,
   new CustomAgent(
@@ -442,6 +487,7 @@ const assistant = new Assistant(
     coding,
     portfolio,
     stockLookup,
+    gathering,
   ),
   {
     canvases: !!c.MINIAPP_ORIGIN,
@@ -459,6 +505,7 @@ const assistant = new Assistant(
     ...(responsibilities ? { responsibilities: true } : {}),
     ...(coding ? { coding: true } : {}),
     ...(portfolio ? { portfolio: true } : {}),
+    ...(gathering ? { gathering: true } : {}),
   },
   {
     ms: c.AGENT_BUDGET_MS,
@@ -485,6 +532,7 @@ const app = server(
         token: c.TELEGRAM_BOT_TOKEN,
         allowed: new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(",")),
         responsibilities: !!responsibilities,
+        gathering,
       }
     : undefined,
 );
@@ -944,6 +992,14 @@ const workTimer = setInterval(() => {
     .catch((error) => opsLog("work.tick_failed", "error", errorFields(error)));
 }, 15000);
 workTimer.unref();
+const gatheringTimer = gathering?.browsers
+  ? setInterval(() => {
+      void gathering?.browsers
+        ?.sweep()
+        .catch(() => opsLog("gathering.cleanup_failed", "error"));
+    }, 10000)
+  : undefined;
+gatheringTimer?.unref();
 const scheduleTimer = setInterval(() => {
   void worker
     .tick()
@@ -958,6 +1014,7 @@ for (const signal of ["SIGINT", "SIGTERM"])
     opsLog("gateway.stopping", "info");
     void (async () => {
       clearInterval(scheduleTimer);
+      clearInterval(gatheringTimer);
       clearInterval(workTimer);
       clearInterval(routineTimer);
       shutdown.abort();

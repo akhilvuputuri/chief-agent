@@ -8,14 +8,20 @@ const part: z.ZodType<Part> = z.lazy(() =>
   z.object({
     mimeType: z.string().optional(),
     filename: z.string().optional(),
-    body: z.object({ data: z.string().optional() }).optional(),
+    body: z
+      .object({
+        data: z.string().optional(),
+        attachmentId: z.string().optional(),
+        size: z.number().int().nonnegative().optional(),
+      })
+      .optional(),
     parts: z.array(part).optional(),
   }),
 );
 type Part = {
   mimeType?: string;
   filename?: string;
-  body?: { data?: string };
+  body?: { data?: string; attachmentId?: string; size?: number };
   parts?: Part[];
 };
 const headers = z
@@ -67,7 +73,7 @@ export class ResponseTooLarge extends Error {
     super("Gmail response too large");
   }
 }
-async function json(response: Response) {
+async function json(response: Response, maxBytes = 2_000_000) {
   if (!response.ok)
     throw new Error(
       `Gmail request failed (${response.status}); reconnect if authorization expired`,
@@ -81,7 +87,7 @@ async function json(response: Response) {
       const { done, value } = await reader.read();
       if (done) break;
       size += value.length;
-      if (size > 2_000_000) throw new ResponseTooLarge();
+      if (size > maxBytes) throw new ResponseTooLarge();
       chunks.push(value);
     }
   } finally {
@@ -266,13 +272,14 @@ export class GmailTools {
     this.expires = this.now() + Math.max(0, t.expires_in - 60) * 1000;
     return this.token;
   }
-  private async get(token: string, url: URL) {
+  private async get(token: string, url: URL, maxBytes = 2_000_000) {
     return json(
       await this.request(url, {
         headers: { Authorization: `Bearer ${token}` },
         signal: AbortSignal.timeout(15000),
         redirect: "error",
       }),
+      maxBytes,
     );
   }
   /** Sender, subject, date and snippet for one hit, so the model triages without reading bodies. */
@@ -488,6 +495,121 @@ export class GmailTools {
       truncated: body.length > MESSAGE_CHARS,
     };
   }
+  private selectAccount(account: string) {
+    if (account === "primary") return this;
+    if (account === "secondary" && this.secondary) return this.secondary;
+    throw new ToolValidationError(
+      "The selected mailbox is not connected; do not fall back to another mailbox",
+    );
+  }
+  private async attachmentMessage(
+    user: string,
+    id: string,
+    run: string | undefined,
+  ) {
+    if (!ID.test(id))
+      throw new ToolValidationError("Invalid message reference");
+    const token = await this.access(user);
+    this.charge(run);
+    const url = new URL(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}`,
+    );
+    url.searchParams.set("format", "full");
+    // Gathering needs the MIME tree, never a persisted email body. This separate bounded
+    // path accommodates inline PDF data without changing ordinary Gmail read limits.
+    const message = messageSchema.parse(await this.get(token, url, 29_000_000));
+    if (message.id !== id)
+      throw new ToolValidationError("Message identity did not match");
+    const files: {
+      partKey: string;
+      name: string;
+      bytes: number;
+      mimeType: string;
+      body: NonNullable<Part["body"]>;
+    }[] = [];
+    let parts = 0;
+    const walk = (p: Part, path: string, depth: number) => {
+      if (++parts > 200 || depth > 16)
+        throw new ToolValidationError("MIME tree is too large");
+      if (
+        p.filename &&
+        (p.mimeType === "application/pdf" || /\.pdf$/i.test(p.filename)) &&
+        p.body &&
+        (p.body.data || p.body.attachmentId)
+      )
+        files.push({
+          partKey: path,
+          name: p.filename.slice(0, 120),
+          bytes: p.body.size ?? 0,
+          mimeType: "application/pdf",
+          body: p.body,
+        });
+      for (const [i, child] of (p.parts ?? []).entries())
+        walk(child, path + "." + i, depth + 1);
+    };
+    if (message.payload) walk(message.payload, "0", 0);
+    return { token, files };
+  }
+  async attachmentInfo(
+    user: string,
+    id: string,
+    account: string,
+    run?: string,
+  ) {
+    const { files } = await this.selectAccount(account).attachmentMessage(
+      user,
+      id,
+      run,
+    );
+    return files.map(({ body, ...file }) => file);
+  }
+  async attachmentBytes(
+    user: string,
+    id: string,
+    partKey: string,
+    account: string,
+    run?: string,
+  ) {
+    const selected = this.selectAccount(account),
+      { token, files } = await selected.attachmentMessage(user, id, run);
+    const file = files.find((f) => f.partKey === partKey);
+    if (!file || file.bytes > 20 * 1024 * 1024)
+      throw new ToolValidationError(
+        "This PDF attachment is unavailable or larger than 20 MB",
+      );
+    let encoded = file.body.data;
+    let responseSize: number | undefined;
+    if (!encoded) {
+      const attachment = file.body.attachmentId;
+      if (!attachment || !/^[A-Za-z0-9_-]{1,512}$/.test(attachment))
+        throw new ToolValidationError("Attachment reference is invalid");
+      selected.charge(run);
+      const url = new URL(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}/attachments/${encodeURIComponent(attachment)}`,
+      );
+      const response = z
+        .object({ data: z.string(), size: z.number().int().nonnegative() })
+        .parse(await selected.get(token, url, 29_000_000));
+      if (response.size > 20 * 1024 * 1024)
+        throw new ToolValidationError("Attachment is larger than 20 MB");
+      encoded = response.data;
+      responseSize = response.size;
+    }
+    if (encoded.length > 28_000_000 || !/^[A-Za-z0-9_=-]*$/.test(encoded))
+      throw new ToolValidationError(
+        "Attachment encoding is invalid or too large",
+      );
+    const data = Buffer.from(encoded, "base64url");
+    if (
+      !data.length ||
+      data.length > 20 * 1024 * 1024 ||
+      (file.bytes && data.length !== file.bytes) ||
+      (responseSize !== undefined && data.length !== responseSize)
+    )
+      throw new ToolValidationError("Attachment size did not match");
+    return { name: file.name, data };
+  }
+
   async call(
     user: string,
     operation:
