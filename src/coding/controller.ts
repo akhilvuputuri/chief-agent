@@ -1,3 +1,4 @@
+import { CodingRequirements, requirementScope } from "./requirements.js";
 import {
   createHash,
   createHmac,
@@ -52,6 +53,7 @@ export type CodingJob = {
 };
 
 export class CodingController {
+  readonly requirements: CodingRequirements;
   private ticking = false;
   private delivering = false;
   private inFlightModels = new Map<
@@ -73,6 +75,7 @@ export class CodingController {
     private models: (model: string) => ModelAdapter,
     private clock: () => Date = () => new Date(),
   ) {
+    this.requirements = new CodingRequirements(db, allowed, clock);
     if (!/^[a-f0-9]{64}$/i.test(authKey))
       throw new Error(
         "Coding authentication key must be 64 hexadecimal characters",
@@ -176,7 +179,7 @@ export class CodingController {
           run,
           a.objective,
           a.context,
-          a.mode,
+          "plan",
           base,
           JSON.stringify(this.settings),
         ],
@@ -230,6 +233,19 @@ export class CodingController {
       )
     ).rows[0];
     if (!job) throw new Error("Coding job unavailable");
+    if (a.operation === "coding_reply" && a.mode === "implement")
+      throw new Error(
+        "Implementation requires confirmed requirements. Use coding_resume to request the confirmation card, or coding_reply in plan mode to revise requirements.",
+      );
+    if (
+      a.operation === "coding_resume" &&
+      job.state === "plan_ready" &&
+      job.mode === "plan"
+    ) {
+      if (job.revision !== a.baseRevision)
+        throw new Error("Coding revision changed");
+      return this.requirements.request(job, a.requestKey);
+    }
     const prior = (
       await this.db.query(
         "SELECT revision,message,mode FROM coding_revisions WHERE job_id=$1 AND request_key=$2",
@@ -247,17 +263,22 @@ export class CodingController {
         throw new Error("Coding revision request key conflict");
       return this.status(user, a.id);
     }
-    if (job.context.length + message.length + 18 > 24000)
+    if (
+      a.operation === "coding_reply" &&
+      job.context.length + message.length + 18 > 24000
+    )
       throw new Error(
         "Coding follow-up exceeds the supported brief size; prepare a new bounded job",
       );
     assertCodingBrief(
       job.objective,
-      job.context + "\nOwner follow-up: " + message,
+      a.operation === "coding_reply"
+        ? job.context + "\nOwner follow-up: " + message
+        : job.context,
     );
     const changed = await this.db.query(
       `WITH changed AS (
-      UPDATE coding_jobs SET revision=revision+1,mode=COALESCE($5,mode),context=context || E'\nOwner follow-up: ' || $4,state='queued',stage='queued',question='',result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,used_models=0,model_busy=false,publication_started=false,lease=NULL,lease_until=NULL,updated_at=now()
+      UPDATE coding_jobs SET revision=revision+1,mode=COALESCE($5,mode),context=CASE WHEN $7 THEN context || E'\nOwner follow-up: ' || $4 ELSE context END,state='queued',stage='queued',question='',result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,used_models=0,model_busy=false,publication_started=false,lease=NULL,lease_until=NULL,updated_at=now()
       WHERE id=$1 AND user_id=$2 AND revision=$3 AND state IN ('plan_ready','awaiting_input','paused','failed') AND NOT publication_started AND cleanup IN ('none','complete') AND (lease IS NULL OR lease_until<now()) RETURNING id,revision,mode
     ) INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$6,$4,mode FROM changed RETURNING job_id`,
       [
@@ -265,8 +286,9 @@ export class CodingController {
         user,
         a.baseRevision,
         message,
-        a.operation === "coding_reply" ? (a.mode ?? null) : null,
+        a.operation === "coding_reply" ? "plan" : null,
         a.requestKey,
+        a.operation === "coding_reply",
       ],
     );
     if (!changed.rows.length)
@@ -295,6 +317,8 @@ export class CodingController {
           new Date(job.attempt_deadline).getTime() <= this.clock().getTime()))
     )
       throw new Error("Invalid worker capability");
+    if (job.mode === "implement" && !(await this.requirements.approved(job)))
+      throw new Error("Requirements are not approved");
     return job;
   }
   async assignment(job: CodingJob) {
@@ -349,6 +373,14 @@ export class CodingController {
   }
   async save(job: CodingJob, raw: unknown) {
     const c = checkpoint.parse(raw);
+    if (
+      job.mode === "implement" &&
+      (c.plan !== job.checkpoint.plan ||
+        !(await this.requirements.approved(job)))
+    )
+      throw new Error(
+        "Approved requirements are immutable; revise and confirm a new plan first",
+      );
     validateFiles(c.files);
     const update = await this.db.query(
       "UPDATE coding_jobs SET checkpoint=$3::jsonb,updated_at=now() WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') RETURNING id",
@@ -360,6 +392,17 @@ export class CodingController {
   async finish(job: CodingJob, raw: unknown) {
     const r = outcome.parse(raw);
     validateFiles(r.checkpoint.files);
+    if (
+      job.mode === "implement" &&
+      (r.checkpoint.plan !== job.checkpoint.plan ||
+        !(await this.requirements.approved(job)))
+    )
+      throw new Error("Implementation needs the exact approved requirements");
+    if (
+      r.kind === "plan_ready" &&
+      (job.mode !== "plan" || !r.checkpoint.plan.trim())
+    )
+      throw new Error("Planning must produce a non-empty requirement brief");
     if (!active.includes(job.state)) {
       if (job.result && hash(job.result) === hash(r)) return { accepted: true };
       throw new Error("Worker attempt superseded");
@@ -384,7 +427,7 @@ export class CodingController {
     const state = r.kind === "candidate" ? "publishing" : r.kind;
     const update = await this.db.query(
       `WITH changed AS (UPDATE coding_jobs SET state=$3,stage=$3,summary=$4,question=$5,checkpoint=$6::jsonb,result=$7::jsonb,cleanup='pending',model_busy=false,updated_at=now() WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') RETURNING id)
-      INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$8,jsonb_build_object('summary',$4::text,'question',$5::text) FROM changed ON CONFLICT DO NOTHING RETURNING id`,
+      INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$8,jsonb_build_object('summary',$4::text,'question',$5::text) || $9::jsonb FROM changed ON CONFLICT DO NOTHING RETURNING id`,
       [
         job.id,
         job.attempt_id,
@@ -394,6 +437,18 @@ export class CodingController {
         JSON.stringify(r.checkpoint),
         JSON.stringify(r),
         `${job.attempt_id}:finished`,
+        JSON.stringify(
+          r.kind === "plan_ready"
+            ? {
+                requirements: {
+                  revision: job.revision,
+                  scope: requirementScope({ ...job, checkpoint: r.checkpoint }),
+                  artifact: artifactHash(r.checkpoint),
+                  plan: r.checkpoint.plan,
+                },
+              }
+            : {},
+        ),
       ],
     );
     if (!update.rows.length) throw new Error("Worker attempt superseded");
@@ -586,6 +641,17 @@ export class CodingController {
           return;
         }
         try {
+          if (
+            j.mode === "implement" &&
+            !(await this.requirements.approved(j))
+          ) {
+            await this.stopped(
+              j,
+              "Requirements must be confirmed before implementation",
+              false,
+            );
+            return;
+          }
           const id = await this.provider.create({
             jobId: j.id,
             attemptId: j.attempt_id,
@@ -697,6 +763,7 @@ export class CodingController {
       user: string,
       thread: number | undefined,
       text: string,
+      approvalId?: string,
     ) => Promise<unknown>,
   ) {
     if (this.delivering) return;
@@ -704,19 +771,28 @@ export class CodingController {
     try {
       const e = (
         await this.db.query(
-          `UPDATE coding_events SET delivery='sending' WHERE id=(SELECT e.id FROM coding_events e JOIN coding_jobs j ON j.id=e.job_id WHERE e.delivery='pending' ORDER BY e.created_at FOR UPDATE OF e SKIP LOCKED LIMIT 1) RETURNING *`,
+          `UPDATE coding_events SET delivery='sending' WHERE id=(SELECT e.id FROM coding_events e JOIN coding_jobs j ON j.id=e.job_id WHERE e.delivery='pending' AND (NOT(e.payload ? 'requirements') OR j.state!='plan_ready' OR j.revision!=(e.payload->'requirements'->>'revision')::int OR (j.cleanup IN ('none','complete') AND (j.lease IS NULL OR j.lease_until<now()))) ORDER BY e.created_at FOR UPDATE OF e SKIP LOCKED LIMIT 1) RETURNING *`,
         )
       ).rows[0];
       if (!e) return;
       let attempted = false;
       try {
         const j = (
-          await this.db.query(
-            "SELECT user_id,thread_id FROM coding_jobs WHERE id=$1",
-            [e.job_id],
-          )
+          await this.db.query("SELECT * FROM coding_jobs WHERE id=$1", [
+            e.job_id,
+          ])
         ).rows[0];
-        if (!this.allowed(j.user_id)) {
+        const req = e.payload.requirements;
+        if (
+          !this.allowed(j.user_id) ||
+          (req &&
+            (j.state !== "plan_ready" ||
+              j.mode !== "plan" ||
+              j.revision !== req.revision ||
+              j.checkpoint.plan !== req.plan ||
+              requirementScope(j) !== req.scope ||
+              artifactHash(j.checkpoint) !== req.artifact))
+        ) {
           await this.db.query(
             "UPDATE coding_events SET delivery='suppressed' WHERE id=$1",
             [e.id],
@@ -724,7 +800,7 @@ export class CodingController {
           return;
         }
         attempted = true;
-        await send(
+        const sent = await send(
           j.user_id,
           j.thread_id ? Number(j.thread_id) : undefined,
           [
@@ -736,10 +812,30 @@ export class CodingController {
               ? e.payload.question.slice(0, 2000)
               : undefined,
             e.payload.url,
+            req
+              ? `Requirements — revision ${req.revision}\n\n${req.plan}\n\nApprove these requirements, or reply directly to this message with yes. To revise them, tell Chief what to change. Confirmation expires in 15 minutes.`
+              : undefined,
           ]
             .filter(Boolean)
             .join("\n\n"),
+          req ? e.id : undefined,
         );
+        if (req) {
+          const receipt = sent as { message_id?: number } | undefined;
+          if (
+            !Number.isSafeInteger(receipt?.message_id) ||
+            receipt!.message_id! <= 0
+          )
+            throw new Error("Requirement delivery receipt unavailable");
+          await this.db.query(
+            "UPDATE coding_events SET payload=payload || jsonb_build_object('telegramMessageId',$2::bigint,'confirmUntil',$3::text) WHERE id=$1",
+            [
+              e.id,
+              receipt!.message_id,
+              new Date(this.clock().getTime() + 900000).toISOString(),
+            ],
+          );
+        }
         await this.db.query(
           "UPDATE coding_events SET delivery='sent' WHERE id=$1",
           [e.id],
