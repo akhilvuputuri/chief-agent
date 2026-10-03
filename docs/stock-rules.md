@@ -78,11 +78,11 @@ One module, `src/stock-stats.ts`, computes every reference. Questions, rules and
 
 ## Phases
 
-| Phase | Ships                                                                                    | Schema        |
-| ----- | ---------------------------------------------------------------------------------------- | ------------- |
-| 2a    | Statistics layer, shared credit limiter, read-only `stock_lookup` for the stocks agent   | None          |
-| 2b    | General rules, deterministic evaluation, alerts, the "every holding" subject (IBKR cost) | Migration 027 |
-| 2c    | Daily digest and the agent's rule-writing guide                                          | None expected |
+| Phase | Ships                                                                                    | Schema                                            |
+| ----- | ---------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| 2a    | Statistics layer, shared credit limiter, read-only `stock_lookup` for the stocks agent   | None                                              |
+| 2b    | General rules, deterministic evaluation, alerts, the "every holding" subject (IBKR cost) | Next additive migration (027 is the coding squad) |
+| 2c    | Daily digest and the agent's rule-writing guide                                          | None expected                                     |
 
 Each phase has its own PR, tests, independent review, journal update and release record.
 

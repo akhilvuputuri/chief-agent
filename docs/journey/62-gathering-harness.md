@@ -59,3 +59,5 @@ Astra's `0f9b298` review reproduced a specific Claude Max target accepting Claud
 Main `3b3bf8ca2a482e067a924b3b20e81adcab49b37e` then integrated the coding squad with migration 027 and journal 61. Its source/deployed release was refreshed and incorporated. Gathering retains **028**, moves its candidate journal to **62**, and prepares v0.3.39 after the coding v0.3.38 milestone. The gathering code and one-time operator artifact were Astra-approved at `57b0452` / `bf66f4bf7368194f42909373e71579ec278485db916d6d586d1821ba994438e9`; review/checks must be repeated on this integrated head. No coding activation or allocation/filter change is part of gathering.
 
 Final baseline refresh incorporates `c0373741b0a0b289e9a245e309940c323ac4ceee`, the verified coding-squad image/policy pin. Gathering runtime and migration remain unchanged; coding is not activated by this work.
+
+The last freshness check incorporates docs-only closure main `995363187cac74e5c4e122c88842646a1a8c7b21`. Runtime, configuration, migration and image source are unchanged from the prior approved integrated tree. Coding v0.3.38 is now recorded as verified; gathering retains v0.3.39.
