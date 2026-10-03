@@ -48,6 +48,15 @@ export interface Quote {
   delayed: boolean;
 }
 
+/** One split-adjusted OHLC bar; `date` is the provider's bar date (YYYY-MM-DD). */
+export interface PriceBar {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
 export interface MarketDataProvider {
   readonly name: string;
   /** API credits consumed per symbol per quote request; paces batches. */
@@ -59,6 +68,41 @@ export interface MarketDataProvider {
     refs: SymbolRef[],
     opts?: { extended?: boolean },
   ): Promise<Map<string, Quote>>;
+  /** Split-adjusted bars in ascending date order; one credit per call. */
+  history?(
+    ref: SymbolRef,
+    interval: "1day" | "1month",
+    outputsize: number,
+  ): Promise<PriceBar[]>;
+}
+
+/** Validates provider bars: any malformed bar fails the whole series, never a silent gap. */
+export function parseBars(values: unknown): PriceBar[] {
+  if (!Array.isArray(values))
+    throw new ProviderError("history returned no values", false);
+  const bars = values.map((v: any) => {
+    const bar = {
+      date: String(v?.datetime ?? "").slice(0, 10),
+      open: Number(v?.open),
+      high: Number(v?.high),
+      low: Number(v?.low),
+      close: Number(v?.close),
+    };
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(bar.date) ||
+      ![bar.open, bar.high, bar.low, bar.close].every(
+        (n) => Number.isFinite(n) && n > 0,
+      ) ||
+      bar.low > bar.high
+    )
+      throw new ProviderError("history returned a malformed bar", false);
+    return bar;
+  });
+  bars.sort((a, b) => a.date.localeCompare(b.date));
+  for (let i = 1; i < bars.length; i++)
+    if (bars[i]!.date === bars[i - 1]!.date)
+      throw new ProviderError("history returned duplicate bars", false);
+  return bars;
 }
 
 export const quoteKey = (ref: SymbolRef) => `${ref.mic}:${ref.symbol}`;
@@ -201,5 +245,22 @@ export class TwelveDataProvider implements MarketDataProvider {
       out.set(quoteKey(ref), rowToQuote(row));
     }
     return out;
+  }
+  async history(
+    ref: SymbolRef,
+    interval: "1day" | "1month",
+    outputsize: number,
+  ): Promise<PriceBar[]> {
+    const body = await this.get("/time_series", {
+      symbol: ref.symbol,
+      mic_code: ref.mic,
+      interval,
+      outputsize: String(Math.min(5000, Math.max(1, outputsize))),
+      order: "asc",
+      // Split-adjusted (also the provider default): all-time levels stay comparable
+      // with today's price across splits.
+      adjust: "splits",
+    });
+    return parseBars(body?.values);
   }
 }

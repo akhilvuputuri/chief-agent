@@ -10,6 +10,7 @@ import {
   type SymbolHit,
 } from "./stock-provider.js";
 import { marketCalendar, sessionsFor } from "./market-calendar.js";
+import { CreditBucket } from "./market-credits.js";
 import {
   describeWindow,
   effectiveWindow,
@@ -141,44 +142,12 @@ export class WatchlistTools {
     };
   }
   private pick(hits: SymbolHit[], query: string, exchange?: string) {
-    let pool = hits;
-    if (exchange) {
-      const needle = exchange.toLowerCase();
-      pool = hits.filter(
-        (h) =>
-          h.exchange.toLowerCase() === needle ||
-          h.mic.toLowerCase() === needle ||
-          h.exchange.toLowerCase().includes(needle),
-      );
-      if (!pool.length)
-        throw new ToolValidationError(
-          `No stock matching "${query}" on exchange "${exchange}"; check the exchange name or omit it to see all matches`,
-        );
-    }
-    const ticker = /^[a-zA-Z0-9.\-]{1,15}$/.test(query.trim())
-      ? query.trim().toUpperCase()
-      : null;
-    const exact = pool.filter((h) => h.symbol.toUpperCase() === ticker);
-    if (exact.length === 1) return exact[0]!;
-    if (!exact.length && pool.length === 1) return pool[0]!;
-    const candidates = (exact.length ? exact : pool).slice(0, 5);
-    if (!candidates.length)
-      throw new ToolValidationError(
-        `No stock found for "${query}"; try the exact ticker symbol`,
-      );
-    return {
-      needsChoice: true,
-      candidates: candidates.map((h) => ({
-        symbol: h.symbol,
-        name: h.name,
-        exchange: h.exchange,
-        currency: h.currency,
-        type: h.type,
-        access: h.access,
-      })),
-      instruction:
-        "Multiple instruments match; ask the owner to pick an exchange, then call watchlist_add again with the symbol and that exchange.",
-    };
+    return pickInstrument(
+      hits,
+      query,
+      exchange,
+      "Multiple instruments match; ask the owner to pick an exchange, then call watchlist_add again with the symbol and that exchange.",
+    );
   }
   private async add(
     user: string,
@@ -384,8 +353,54 @@ export class WatchlistTools {
   }
 }
 
+/** Resolves a search to one listing, or candidates for the owner to choose between. */
+export function pickInstrument(
+  hits: SymbolHit[],
+  query: string,
+  exchange: string | undefined,
+  instruction: string,
+) {
+  let pool = hits;
+  if (exchange) {
+    const needle = exchange.toLowerCase();
+    pool = hits.filter(
+      (h) =>
+        h.exchange.toLowerCase() === needle ||
+        h.mic.toLowerCase() === needle ||
+        h.exchange.toLowerCase().includes(needle),
+    );
+    if (!pool.length)
+      throw new ToolValidationError(
+        `No stock matching "${query}" on exchange "${exchange}"; check the exchange name or omit it to see all matches`,
+      );
+  }
+  const ticker = /^[a-zA-Z0-9.\-]{1,15}$/.test(query.trim())
+    ? query.trim().toUpperCase()
+    : null;
+  const exact = pool.filter((h) => h.symbol.toUpperCase() === ticker);
+  if (exact.length === 1) return exact[0]!;
+  if (!exact.length && pool.length === 1) return pool[0]!;
+  const candidates = (exact.length ? exact : pool).slice(0, 5);
+  if (!candidates.length)
+    throw new ToolValidationError(
+      `No stock found for "${query}"; try the exact ticker symbol`,
+    );
+  return {
+    needsChoice: true,
+    candidates: candidates.map((h) => ({
+      symbol: h.symbol,
+      name: h.name,
+      exchange: h.exchange,
+      currency: h.currency,
+      type: h.type,
+      access: h.access,
+    })),
+    instruction,
+  };
+}
+
 const zoneFormats = new Map<string, Intl.DateTimeFormat>();
-function zoned(date: Date, tz: string) {
+export function zoned(date: Date, tz: string) {
   let fmt = zoneFormats.get(tz);
   if (!fmt) {
     try {
@@ -462,6 +477,8 @@ export class StockMonitor {
       kind: "topic",
       topic: "markets",
     }),
+    /** Shared with on-demand lookups so they never take the monitor's allowance. */
+    private credits: CreditBucket = new CreditBucket(provider.creditsPerMinute),
   ) {}
   private async observe(
     item: { id: string; user_id: string },
@@ -546,12 +563,8 @@ export class StockMonitor {
    * replenishes the full allowance at each minute boundary rather than
    * dripping credits, so a batch can never borrow from the next window
    * inside the same minute. */
-  private bucket = { left: 0, minute: -1 };
   private creditsNow(now: Date) {
-    const cap = this.provider.creditsPerMinute;
-    const minute = Math.floor(now.getTime() / 60000);
-    if (minute !== this.bucket.minute) this.bucket = { left: cap, minute };
-    return this.bucket.left;
+    return this.credits.available(now);
   }
   private evaluate(item: any, q: Quote) {
     if (!Number.isFinite(q.price) || q.price <= 0)
@@ -687,7 +700,7 @@ export class StockMonitor {
           );
           // Reserve the credits before dispatch: a timed-out request may
           // still have been processed — and billed — provider-side.
-          this.bucket.left -= chunk.length;
+          this.credits.spend(chunk.length, now);
           try {
             quotes = await this.provider.quotes(
               chunk.map((i) => ({ symbol: i.symbol, mic: i.mic_code })),
