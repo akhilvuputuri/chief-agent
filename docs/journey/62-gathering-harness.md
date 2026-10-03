@@ -1,6 +1,6 @@
 # 62 — Gathering files without losing scope or coverage
 
-Work dates: 3–4 October 2026. Status: implementation candidate; not deployed.
+Work dates: 3–4 October 2026. Status: released v0.3.39; gathering enabled. Real provider acceptance pending.
 
 ## Preceding iteration and problem
 
@@ -18,7 +18,7 @@ Eight initial PGlite tests pass: privacy of extracted clues, encrypted owner-bou
 
 The current TypeScript modules and initial integration compile. Dependency audit initially identified the existing Fastify URI-parser advisory; the compatible lockfile update now reports zero known vulnerabilities. Real Linux browser/sandbox verification is pending because the local Docker daemon is unavailable. Use the existing Linux CI path rather than starting an unknown local container fleet or using production credentials.
 
-## Remaining work and limitations
+## Initial remaining work — before review
 
 Finish frontend/control and Telegram integration, real browser sandbox/egress checks, source/ownership/restart/race regressions, full check/build/format and exact-head independent GPT-6 Astra review. Add reviewed migration 026/Compose/key install and rollback; ordinary releases must keep refusing these prerequisites. No operator activation, actual merchant account login, production invoice collection, paid model smoke/eval, extra paid infrastructure or coding activation has occurred. Document deployed SHA/health, preservation, release receipt and version only after verification. Invoice gathering does not automatically change subscription records. Document generation, broader website writes, price-change alerts, monthly summaries and responsibility integration remain separate.
 
@@ -61,3 +61,17 @@ Main `3b3bf8ca2a482e067a924b3b20e81adcab49b37e` then integrated the coding squad
 Final baseline refresh incorporates `c0373741b0a0b289e9a245e309940c323ac4ceee`, the verified coding-squad image/policy pin. Gathering runtime and migration remain unchanged; coding is not activated by this work.
 
 The last freshness check incorporates docs-only closure main `995363187cac74e5c4e122c88842646a1a8c7b21`. Runtime, configuration, migration and image source are unchanged from the prior approved integrated tree. Coding v0.3.38 is now recorded as verified; gathering retains v0.3.39.
+
+## Release closure — 4 October 2026
+
+[PR #160](https://github.com/akhilvuputuri/chief-agent/pull/160) merged at `3aeafe316aa04c310c8e2f4a651b94a2989a6509`; its tree exactly equals GPT-6 Astra-approved head `cd5b0633b0508837eaf8a41dbfe69ef72ffe8177` against fresh baseline `995363187cac74e5c4e122c88842646a1a8c7b21`. Astra's review/fix/re-review loop closed the findings recorded above. It separately approved the one-time operator artifact SHA-256 `bf66f4bf7368194f42909373e71579ec278485db916d6d586d1821ba994438e9`, including four offline refusal/recovery scenarios. No implementation delegation occurred.
+
+[Exact main checks](https://github.com/akhilvuputuri/chief-agent/actions/runs/37156022660) passed. The full local check recorded 729 application tests, 50 JavaScript script tests and 59 Python tests (8 picker, 7 context, 15 decisions, 29 coding), with typecheck, build, formatting, Ruff and mypy. The gathering boundary suite contains 27 synthetic regressions. No paid picker/model evaluation ran. Synthetic Mini App UI verification exposed all six candidates and exercised explicit product/account attestation; it did not establish production Telegram acceptance.
+
+The exact merged archive was verified before building on the existing Lightsail host. Browser image `sha256:20c7ed7660e4b88eb44c6e1988af5b687612cc77fd5d7273f65fa3149dc272e7` and proxy `sha256:56387c98c09173aaa122012c17a42faf37d47ccaea9f8e25bc43a589148690a2` are installed. Actual constrained Chromium assertions passed with Namespace/PID/network/Seccomp-BPF sandboxing, denied outer-container chroot, owner isolation/input, retained original download and stale-link refusal; zero external network/model calls. Disposable PostgreSQL 17 exercised the real concurrent Done/Forget interleaving and confirmed credentials revoked, with no production database/model/Telegram access. Existing Docker/AppArmor policy remains; no host security policy was weakened.
+
+The first [release attempt](https://github.com/akhilvuputuri/chief-agent/actions/runs/37156340441) refused DB/Compose prerequisites as designed. The reviewed idle-only operator install then applied only migration **028**, retained host-only encryption/control keys and unrelated settings, installed separate browser/proxy services on their restricted networks, and added only the browser script asset to the existing Caddy inventory. The same exact-main normal release retried successfully (attempt 2; receipt recorded 3 October 21:56:56 UTC / 4 October SGT). Its trusted receipt was independently validated with `releaseStatus` after intermittent GitHub API timeouts; server RELEASE and embedded gateway SHA matched, and local health, public script HTTP 200, unauthenticated gathering API HTTP 401 and unknown public path HTTP 404 passed. The browser has only the internal control network, no published ports, a read-only filesystem, all capabilities dropped and existing resource bounds. Gathering runtime/browser are on, IBKR remains on and coding remains off.
+
+A deployed-module synthetic collection ran in a rolled-back PostgreSQL transaction: encrypted original bytes, owner binding, exact provided-file scope, distinct capture/match/coverage/finish, paused-task refusal and completion passed. It left zero fixture owners/records and made zero provider/model/Telegram requests. Counts and content hashes across 17 existing tables were unchanged: jobs, memories, parcels, responsibilities, coding records, schedules, subscriptions/updates, portfolio records, watchlist, approvals and conversation ownership/context. No active runs or pending inputs were cancelled or resumed. Private source rows, credentials and checksums were not published.
+
+The immutable [v0.3.39](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.39) tag targets the verified implementation release SHA above. Actual owner Telegram/Mini App and merchant login/invoice collection remain unmeasured. Complex billing portals may require owner navigation because background traffic is frozen; scanned/unsupported/ambiguous PDFs leave coverage incomplete. Automatic subscription intake, price alerts, summaries, responsibility adapters and broader document editing/external writes remain separate. Future browser/proxy updates still require the reviewed sidecar install/proof path; ordinary gateway release alone does not update them. Reviewed DB/Compose/key installation remains operator-only, a remaining cloud/local parity gap.
