@@ -4,7 +4,7 @@ import type { Delivery } from "./answer.js";
 export type Destination =
   | { kind: "general" }
   | { kind: "thread"; threadId: number }
-  | { kind: "topic"; topic: "news" | "markets" | "updates" };
+  | { kind: "topic"; topic: "news" | "markets" | "coding" | "updates" };
 
 export const threadId = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isSafeInteger(value) && value > 1
@@ -26,9 +26,18 @@ export function destination(input: {
       : { kind: "general" };
   if (input.kind === "news" || input.kind === "markets")
     return { kind: "topic", topic: input.kind };
-  if (input.kind === "unprompted" && input.reason === "answer")
-    return { kind: "topic", topic: "updates" };
   return { kind: "general" };
+}
+
+/** Redirect already queued background posts away from the retired Updates feed. */
+export function workDestination(payload: Delivery): Destination {
+  if (
+    payload.sourceLabel ||
+    (payload.destination?.kind === "topic" &&
+      payload.destination.topic === "updates")
+  )
+    return { kind: "general" };
+  return payload.destination ?? { kind: "general" };
 }
 
 export async function taskDelivery(

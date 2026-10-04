@@ -8,12 +8,12 @@ import type { Database } from "./db.js";
 import { event } from "./db.js";
 import { errorFields, opsLog } from "./ops-log.js";
 
-export type TopicKey = "news" | "markets" | "updates";
+export type TopicKey = "news" | "markets" | "coding";
 // icon_color must be one of Telegram's six topic colours.
 const topics = {
   news: { name: "News", icon_color: 0x6fb9f0 },
   markets: { name: "Markets", icon_color: 0x8eee98 },
-  updates: { name: "Updates", icon_color: 0xffd67e },
+  coding: { name: "Coding", icon_color: 0xffd67e },
 } as const satisfies Record<TopicKey, { name: string; icon_color: number }>;
 
 /**
@@ -59,9 +59,9 @@ type TopicApi = Pick<Api, "getMe" | "createForumTopic"> &
 // Thread ids live in the existing events table (no migration), one stable run id per
 // owner and topic, so the lookup uses the run index. The newest row wins; a null
 // threadId records that the topic was deleted in Telegram.
-const ledger = (user: string, key: TopicKey | "email") => {
+const ledger = (user: string, key: TopicKey | "updates" | "email") => {
   const h = createHash("sha256")
-    .update(`telegram-topic:${user}:${key}`)
+    .update(`telegram-topic:${user}:${key === "coding" ? "updates" : key}`)
     .digest("hex");
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
 };
@@ -163,26 +163,32 @@ export class TelegramTopics {
 
   /** Creates any missing topics, so the owner can write in them before Chief posts there. */
   async ensure(user: string) {
-    // Rename the retired Email topic in place. Deleting it would also delete messages;
-    // this preserves any owner input that arrived since the issue was written.
+    // Keep the Updates ledger/thread identity: only rename the visible topic. Historical
+    // messages, owner origins and explicit feed references remain valid.
     if ((await this.available()) && this.api.editForumTopic) {
-      const old = (
+      const saved = (
         await this.db.query(
-          "SELECT data->'threadId' AS thread FROM events WHERE user_id=$1 AND run_id=$2 AND type='telegram.topic' ORDER BY id DESC LIMIT 1",
-          [user, ledger(user, "email")],
+          "SELECT data FROM events WHERE user_id=$1 AND run_id=$2 AND type='telegram.topic' ORDER BY id DESC LIMIT 1",
+          [user, ledger(user, "coding")],
         )
-      ).rows[0]?.thread;
-      if (typeof old === "number" && !(await this.stored(user, "updates"))) {
+      ).rows[0]?.data;
+      const old =
+        saved ??
+        (
+          await this.db.query(
+            "SELECT data FROM events WHERE user_id=$1 AND run_id=$2 AND type='telegram.topic' ORDER BY id DESC LIMIT 1",
+            [user, ledger(user, "email")],
+          )
+        ).rows[0]?.data;
+      if (typeof old?.threadId === "number" && old.key !== "coding") {
+        // Even an uncertain rename is not evidence that the existing topic is gone.
+        this.known.set(`${user}:coding`, old.threadId);
         try {
-          await this.api.editForumTopic(user, old, { name: "Updates" });
-          await event(
-            this.db,
-            user,
-            ledger(user, "updates"),
-            "telegram.topic",
-            { key: "updates", threadId: old },
-          );
-          this.known.set(`${user}:updates`, old);
+          await this.api.editForumTopic(user, old.threadId, { name: "Coding" });
+          await event(this.db, user, ledger(user, "coding"), "telegram.topic", {
+            key: "coding",
+            threadId: old.threadId,
+          });
         } catch (error) {
           opsLog("telegram.topic_retire_failed", "warn", errorFields(error));
         }
@@ -257,7 +263,7 @@ export class TelegramTopics {
           return await send(
             inThread(recreated),
             recreated
-              ? `Topic recreated. Say 'stop the ${key === "news" ? "news bulletin" : key === "markets" ? "stock alerts" : "routine"}' in General to turn it off.`
+              ? `Topic recreated. Say 'stop the ${key === "news" ? "news bulletin" : key === "markets" ? "stock alerts" : "coding job"}' in General to turn it off.`
               : undefined,
           );
         } catch (retryError) {
@@ -274,7 +280,7 @@ export class TelegramTopics {
     }
   }
 
-  /** Captured destinations survive restarts; only an explicit topic failure changes one. */
+  /** Captured origins survive restarts; retired Updates feeds explicitly move to General. */
   async deliver<T>(
     user: string,
     target: import("./delivery-routing.js").Destination,
@@ -283,7 +289,10 @@ export class TelegramTopics {
       notice?: string,
     ) => Promise<T>,
   ) {
-    if (target.kind === "topic") return this.send(user, target.topic, send);
+    if (target.kind === "topic")
+      return target.topic === "updates"
+        ? send({})
+        : this.send(user, target.topic, send);
     if (target.kind === "general") return send({});
     try {
       return await send(inThread(target.threadId));
@@ -312,6 +321,7 @@ export class TelegramTopics {
     target: import("./delivery-routing.js").Destination,
   ): Promise<import("./delivery-routing.js").Destination> {
     if (target.kind !== "topic") return target;
+    if (target.topic === "updates") return { kind: "general" };
     const thread = await this.thread(user, target.topic).catch(() => undefined);
     return thread ? { kind: "thread", threadId: thread } : { kind: "general" };
   }

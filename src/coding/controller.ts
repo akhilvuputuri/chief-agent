@@ -1,4 +1,5 @@
 import { assertSquadCheckpoint } from "./squad-state.js";
+import { codingDestination } from "./delivery-routing.js";
 import { CodingRequirements, requirementScope } from "./requirements.js";
 import {
   createHash,
@@ -820,7 +821,7 @@ export class CodingController {
   async deliver(
     send: (
       user: string,
-      thread: number | undefined,
+      target: import("../delivery-routing.js").Destination,
       text: string,
       approvalId?: string,
     ) => Promise<unknown>,
@@ -861,7 +862,7 @@ export class CodingController {
         attempted = true;
         const sent = await send(
           j.user_id,
-          j.thread_id ? Number(j.thread_id) : undefined,
+          codingDestination(e.payload),
           [
             `Coding job ${e.job_id}`,
             typeof e.payload.summary === "string"
