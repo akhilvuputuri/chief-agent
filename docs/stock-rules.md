@@ -121,6 +121,11 @@ The owner agreed the defaults on 4 October 2026:
   - **Delivery queue.** The scan covers up to 500 pending alerts, so held alerts cannot block deliverable ones.
   - **Isolation and ordering.** Each rule is isolated, so one failure never blocks a stock's other rules. Rule checks run after the batch's daily-drop decisions.
   - **Text and duplicates.** The cost alert wording was fixed ("below your IBKR average cost"), and margin updates are checked for duplicates.
+- **Re-review of `4e84742`: approved.** Its follow-ups were also applied:
+  - **Logging.** Per-rule failures are logged again (`stock.rules_failed`).
+  - **Closing attempts.** A closing check without a final quote is visible ("waiting for the final close quote (attempt n)"). After 6 attempts, about an hour, the day ends with "close not confirmed: no final quote", so a thinly traded stock cannot spend credits for the whole closing window.
+  - **Late re-checks.** An intraday re-check by `warm()` only happens inside the monitoring window, so a crossing cannot be used up by an alert that would be muted.
+  - **Known paid-plan limit (not fixed).** For an extended-hours stock on a long cadence, a closing-only fetch moves `last_polled_at` and can delay the next post-market daily-drop poll.
 - **Rollout.** `scripts/deploy-stock-rules.py`, with 15 offline tests. It permits only migration 029 and its Compose entry, and its baseline must equal the live release.
 
 ## Phases

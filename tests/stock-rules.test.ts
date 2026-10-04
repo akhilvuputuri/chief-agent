@@ -619,7 +619,13 @@ test("a delayed pre-close quote is not taken as the close; the final quote is, e
   );
   await f.tick(new Date("2026-01-15T21:05:00Z"));
   assert.equal((await f.alerts()).length, 0);
-  assert.equal((await f.state()).length, 0);
+  // The attempt is visible, and the day is not marked done.
+  const [waiting] = await f.state();
+  assert.equal(
+    waiting.last_outcome,
+    "waiting for the final close quote (attempt 1)",
+  );
+  assert.equal(waiting.last_closing_date, null);
   // 10 minutes later the final quote arrives and is accepted.
   f.setQuote(
     "ACME",
@@ -716,4 +722,38 @@ test("pausing stock alerts also mutes queued rule alerts, and held alerts never 
     ).rows[0].n,
     0,
   );
+});
+
+test("a stock with no final close quote stops after bounded attempts, visibly", async () => {
+  const f = await fixture();
+  const id = await f.add("THIN");
+  await f.rule({
+    scope: "item",
+    itemId: id,
+    direction: "below",
+    reference: "prev_close",
+    basis: "close",
+    label: "thin close",
+  });
+  // The last trade was at 15:55 ET: never stamped at the close.
+  f.setQuote(
+    "THIN",
+    quote(90, {
+      prevClose: 100,
+      marketOpen: false,
+      quoteTime: new Date("2026-01-15T20:55:00Z"),
+    }),
+  );
+  const before = f.provider.calls.quotes;
+  for (let m = 5; m <= 180; m += 5)
+    await f.tick(new Date(Date.parse("2026-01-15T21:00:00Z") + m * 60000));
+  // Six attempts (at least 10 minutes apart), then the day is closed visibly.
+  assert.equal(f.provider.calls.quotes - before, 6);
+  const [state] = await f.state();
+  assert.equal(state.last_outcome, "close not confirmed: no final quote");
+  assert.equal(
+    state.last_closing_date.toISOString().slice(0, 10),
+    "2026-01-15",
+  );
+  assert.equal((await f.alerts()).length, 0);
 });

@@ -8,6 +8,7 @@ import { currentHoldings } from "./portfolio.js";
 import type { PriceBar, Quote } from "./stock-provider.js";
 import { DEFAULT_WINDOW_COLUMNS, zoned } from "./stocks.js";
 import { ToolValidationError } from "./tool-errors.js";
+import { errorFields, opsLog } from "./ops-log.js";
 import {
   describeWindow,
   effectiveWindow,
@@ -66,6 +67,8 @@ const HOLD_MAX_MS = 4 * 24 * 60 * 60 * 1000;
 /** The closing check runs between 5 minutes and 3 hours after the regular close. */
 const CLOSING_FROM_MIN = 5;
 const CLOSING_UNTIL_MIN = 180;
+/** Closing checks per stock and day before giving up on a final quote. */
+const CLOSE_ATTEMPTS = 6;
 
 type Value = { value: number; asOf: string; source: string };
 type Missing = { value: null; reason: string };
@@ -279,6 +282,30 @@ export class RuleEngine {
     return out;
   }
 
+  private closeAttempts = new Map<string, number>();
+  /**
+   * A closing check whose quote is not yet the session's final one. Each attempt is
+   * visible in stock_rule_list; after a bounded number (about an hour at the 10-minute
+   * spacing) the day is marked done, so a stock with no final-minute trade cannot spend
+   * credits for the whole closing window.
+   */
+  async closeNotFinal(item: any, closing: Closing, now: Date) {
+    const key = `${item.id}:${closing.date}`;
+    const attempts = (this.closeAttempts.get(key) ?? 0) + 1;
+    this.closeAttempts.set(key, attempts);
+    if (this.closeAttempts.size > 500) this.closeAttempts.clear();
+    const giveUp = attempts >= CLOSE_ATTEMPTS;
+    for (const rule of await this.applicable(item, "close", now))
+      await this.record(rule, item, now, {
+        outcome: giveUp
+          ? "close not confirmed: no final quote"
+          : `waiting for the final close quote (attempt ${attempts})`,
+        ...(giveUp ? { closingDate: closing.date } : {}),
+      }).catch((error) =>
+        opsLog("stock.rules_failed", "warn", errorFields(error)),
+      );
+  }
+
   /** Cheap pre-filter: whether the owner has any active close-based rule. */
   hasCloseRules(user: string) {
     return (this.rules.get(user) ?? []).some((r) => r.basis === "close");
@@ -325,9 +352,12 @@ export class RuleEngine {
       if (missing && !this.credits.tryTake(missing, now, 0)) return;
       this.pending.delete(key);
       await this.history.load(ref, p.quote.tradingDate);
+      // A late intraday re-check only counts inside the owner's monitoring window: an
+      // alert muted for the window would otherwise use up the crossing.
       const fresh =
         p.basis === "close" ||
-        now.getTime() - p.quote.quoteTime.getTime() <= 20 * 60 * 1000;
+        (now.getTime() - p.quote.quoteTime.getTime() <= 20 * 60 * 1000 &&
+          inWindow(effectiveWindow(p.item), now));
       if (fresh) await this.evaluate(p.item, p.quote, now, p.basis);
     }
   }
@@ -403,7 +433,7 @@ export class RuleEngine {
       }
       // One failing rule (for example deleted mid-evaluation) never blocks the others.
       await this.apply(rule, item, quote, now, basis, reference).catch(
-        () => {},
+        (error) => opsLog("stock.rules_failed", "warn", errorFields(error)),
       );
     }
   }

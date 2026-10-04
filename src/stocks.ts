@@ -793,8 +793,13 @@ export class StockMonitor {
               // A closing check only feeds close-based rules, and only with the session's
               // final quote; otherwise it retries later. Daily-drop monitoring never sees it.
               if (item.closing) {
-                if (rules && acceptsClose(item, q, item.closing))
+                const closing = item.closing;
+                if (rules && acceptsClose(item, q, closing))
                   ruleChecks.push(() => rules.evaluate(item, q, now, "close"));
+                else if (rules)
+                  ruleChecks.push(() =>
+                    rules.closeNotFinal(item, closing, now),
+                  );
                 continue;
               }
               // An ordinary poll after the regular close (extended hours) can also
