@@ -1,6 +1,6 @@
 # 63 — Coding progress has a topic; key updates return to Chief
 
-Work date(s): 2026-10-04. Status: v0.3.40 candidate; checks, independent review and exact release pending. Live coding remains off.
+Work date(s): 2026-10-04. Status: v0.3.40 reviewed, deployed and separately verified at `1975525`. Live coding remains off.
 
 ## Preceding iteration and requirement
 
@@ -22,4 +22,14 @@ Regression coverage exercises rename retry after unknown acknowledgement without
 
 ## Next iteration
 
-Complete checks and independent exact-head review, merge and verify the normal exact release. Verify the stored topic ledger after startup rename without sending synthetic messages. Sandbox activation still needs scoped CodeBuild credentials/project, repository-only GitHub App and authenticated HTTPS worker ingress; flipping the switch alone cannot supply them.
+The reviewed notification release is verified below. Sandbox activation still needs scoped CodeBuild credentials/project, repository-only GitHub App and authenticated HTTPS worker ingress; flipping the switch alone cannot supply them.
+
+## Release closure — 4 October 2026
+
+GPT-6 Astra APPROVED exact head `5c0cc778902ca8797a9ae41f9cf2679b909a5a67` after independently passing 77 routing/feed/topic/controller/confirmation tests, typechecks/format/diff checks and additional failure scenarios: restart after an unknown rename acknowledgement without duplication, closed-topic fallback and queued background redirect without changing owner origins. The reviewer verified the official Telegram rename contract, confirmation receipt fences and preserved explicit historical references; it did not access production or run paid tests.
+
+[PR #167](https://github.com/akhilvuputuri/chief-agent/pull/167) passed [exact-head CI](https://github.com/akhilvuputuri/chief-agent/actions/runs/37169120038) and merged at `1975525a7b5dd00b76c803d065cf2847298acbfb`. [Main CI](https://github.com/akhilvuputuri/chief-agent/actions/runs/37169429003) passed, including worker isolation/cleanup, browser sandbox and PostgreSQL gathering interleaving checks. The [normal release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37169850070) recorded a successful exact-commit receipt at 2026-10-04T02:05:03Z.
+
+Separate bounded production reads confirmed matching server RELEASE, healthy gateway/Postgres, migration 28 and unchanged Python squad image/models/allocations. A structural comparison of the Updates ledger before deployment and Coding ledger after deployment confirmed the same owner/thread identity; the Coding marker is recorded only after the successful Telegram edit acknowledgement. The release record contains only structural comparison results, with no raw owner/message identifiers or private content. No synthetic chat message was sent. This verifies the actual startup rename and thread preservation, not future notification quality.
+
+Immutable [v0.3.40](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.40) targets that verified merge. Coding stays off with zero jobs and missing project/App/auth/origin/scoped AWS configuration. A bounded `chief` operator-profile STS identity check also failed; this is not a proof of account-wide permissions and no credentials/error payload were exported. Provisioning/login/App/ingress activation remains unfinished. No paid sandbox/model job, user-work cancellation, data reset or paused-task resumption occurred.
