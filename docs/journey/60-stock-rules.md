@@ -1,7 +1,7 @@
 # 60 — How can one stock agent answer, watch and report on the owner's own stock questions?
 
 Work date(s): 2026-10-03 to 2026-10-04. Written/revised: 2026-10-04.
-Status: Phase 2a released in v0.3.37; Phase 2b (rules, migration 029) implemented and tested, pending review and rollout.
+Status: Phase 2a released in v0.3.37; Phase 2b (rules) released in v0.3.41 (4 October 2026); Phase 2c (digest) planned.
 
 ## User-visible problem and preceding iteration
 
@@ -49,3 +49,15 @@ Phase 2b (rules and migration 027) and Phase 2c (digest).
 ### Release closure — 3 October 2026
 
 [PR #161](https://github.com/akhilvuputuri/chief-agent/pull/161) merged at `7e8198517c141b0e64b93cf1d87f16001b9f2876`, with independent approval of exact head `b80ca55` and CI passing on that head. The [automatic release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37137918493) and server checks verified that exact `RELEASE`, a healthy gateway and Twelve Data configured. No schema change. Released in v0.3.37. Pending: owner acceptance of a live question; Phase 2b and Phase 2c.
+
+### Release closure (Phase 2b) — 4 October 2026
+
+- **Merged.** [PR #168](https://github.com/akhilvuputuri/chief-agent/pull/168) merged at `84149f9c7569ee69525df219f8471817ab55f09c`, with independent approval of exact head `7acf775` and CI passing on that head.
+- **Operator rollout (`scripts/deploy-stock-rules.py`).**
+  - Pre-merge checks confirmed main and the live `RELEASE` both at `33c152c`: healthy, idle, migration 28, 3 watch items and 0 stock alerts.
+  - The archive and script hashes matched on the host.
+  - Result: deployed and healthy, migration 29.
+  - Separate checks: `RELEASE`, health, no startup error, marker 29, the new tables empty, 3 watch items and 0 stock alerts preserved, IBKR and Twelve Data still configured.
+- **Automatic release.** The [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37172042402) for the same commit then succeeded as a no-op redeploy.
+- **Version.** Released as v0.3.41.
+- **Pending:** owner acceptance of a live rule and alert; the IBKR connection, needed for average-cost rules; Phase 2c.
