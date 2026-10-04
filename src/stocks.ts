@@ -11,6 +11,8 @@ import {
 } from "./stock-provider.js";
 import { marketCalendar, sessionsFor } from "./market-calendar.js";
 import { CreditBucket } from "./market-credits.js";
+import { acceptsClose, type RuleEngine } from "./stock-rules.js";
+import { errorFields, opsLog } from "./ops-log.js";
 import {
   describeWindow,
   effectiveWindow,
@@ -22,7 +24,7 @@ import {
 
 /** Owner default window columns joined onto item rows, so every consumer
  * resolves the same effective window (item override, else default). */
-const DEFAULT_WINDOW_COLUMNS = `s.window_start AS default_window_start,
+export const DEFAULT_WINDOW_COLUMNS = `s.window_start AS default_window_start,
   s.window_end AS default_window_end, s.window_days AS default_window_days`;
 const WINDOW_OUTSIDE_NOTE =
   "Outside the window no prices are fetched and no alerts are sent. When it reopens, the first check alerts only if the stock is still down past its threshold for that trading day; a drop that recovers while the window is closed is not reported.";
@@ -41,6 +43,12 @@ export async function mutePending(
      WHERE user_id=$1 AND (state='pending' OR (state='muted' AND payload ? 'windowMuted'))${
        itemId ? " AND item_id=$2" : ""
      }`,
+    itemId ? [userId, itemId] : [userId],
+  );
+  // Rule alerts for the same stock (or all stocks) are paused with it.
+  await db.query(
+    `UPDATE watch_rule_alerts SET state='muted'
+     WHERE user_id=$1 AND state='pending'${itemId ? " AND item_id=$2" : ""}`,
     itemId ? [userId, itemId] : [userId],
   );
 }
@@ -482,6 +490,8 @@ export class StockMonitor {
     }),
     /** Shared with on-demand lookups so they never take the monitor's allowance. */
     private credits: CreditBucket = new CreditBucket(provider.creditsPerMinute),
+    /** Owner-defined rules (docs/stock-rules.md); evaluated after the quote checks. */
+    private rules?: RuleEngine,
   ) {}
   private async observe(
     item: { id: string; user_id: string },
@@ -613,6 +623,14 @@ export class StockMonitor {
     this.busy = true;
     try {
       const now = this.clock();
+      // Rule failures never affect daily-drop monitoring.
+      const rules = await this.rules
+        ?.beginTick(now)
+        .then(() => this.rules)
+        .catch((error) => {
+          opsLog("stock.rules_failed", "warn", errorFields(error));
+          return undefined;
+        });
       const items = (
         await this.db.query(
           `SELECT i.*,COALESCE(s.default_drop_pct,5) AS eff_drop,
@@ -625,14 +643,20 @@ export class StockMonitor {
            ORDER BY i.last_polled_at ASC NULLS FIRST`,
           [now],
         )
-      ).rows.filter(
-        (i) =>
-          this.allowed(i.user_id) &&
-          !i.settings_paused &&
-          (!i.last_polled_at ||
-            now.getTime() - new Date(i.last_polled_at).getTime() >=
-              i.eff_poll * 60000),
-      );
+      ).rows.filter((i) => {
+        if (!this.allowed(i.user_id) || i.settings_paused) return false;
+        const since = i.last_polled_at
+          ? now.getTime() - new Date(i.last_polled_at).getTime()
+          : Infinity;
+        if (since >= i.eff_poll * 60000) return true;
+        // A long poll cadence must not skip the closing check of close-based rules:
+        // such items are considered again every 10 minutes, for that check only.
+        if (rules?.hasCloseRules(i.user_id) && since >= 10 * 60000) {
+          i.closingOnly = true;
+          return true;
+        }
+        return false;
+      });
       const groups = new Map<string, any[]>();
       for (const item of items) {
         const key = item.mic_code;
@@ -668,12 +692,33 @@ export class StockMonitor {
             extendedOk ? ["regular", "pre", "post"] : ["regular"],
           );
           const window = effectiveWindow(item);
+          // Close-based rules follow the regular session, whatever the extended opt-in.
+          const regularOpen = inSessions(local, sessions, ["regular"]);
+          if (item.closingOnly) {
+            const closing = regularOpen
+              ? null
+              : await rules?.closingDue(item, now).catch(() => null);
+            if (closing) {
+              item.closing = closing;
+              openItems.push(item);
+            }
+            continue;
+          }
           if (sessionOpen && inWindow(window, now)) {
             // The first poll after a gate opens may see a delayed feed's
             // previous-session quote; a stale result then retries sooner.
             item.firstAfterGate = this.gated.delete(item.id);
             openItems.push(item);
             continue;
+          }
+          // A closed regular session may still owe its close-based rules a final check.
+          if (!regularOpen && rules) {
+            const closing = await rules.closingDue(item, now).catch(() => null);
+            if (closing) {
+              item.closing = closing;
+              openItems.push(item);
+              continue;
+            }
           }
           // A gated check does not consume the poll cursor: the first tick
           // after the session or window opens polls at once rather than up to
@@ -722,6 +767,8 @@ export class StockMonitor {
               );
             continue;
           }
+          // Rule checks run after this batch's daily-drop decisions, never before them.
+          const ruleChecks: (() => Promise<void>)[] = [];
           for (const item of chunk) {
             const q = quotes.get(
               quoteKey({ symbol: item.symbol, mic: item.mic_code }),
@@ -740,6 +787,29 @@ export class StockMonitor {
                   detail: { reason: "provider returned no quote" },
                 });
                 continue;
+              }
+              // A closing check only feeds close-based rules: the final regular-session
+              // quote for that date. Daily-drop monitoring never sees it.
+              // A closing check only feeds close-based rules, and only with the session's
+              // final quote; otherwise it retries later. Daily-drop monitoring never sees it.
+              if (item.closing) {
+                const closing = item.closing;
+                if (rules && acceptsClose(item, q, closing))
+                  ruleChecks.push(() => rules.evaluate(item, q, now, "close"));
+                else if (rules)
+                  ruleChecks.push(() =>
+                    rules.closeNotFinal(item, closing, now),
+                  );
+                continue;
+              }
+              // An ordinary poll after the regular close (extended hours) can also
+              // supply the final quote close-based rules are owed.
+              if (rules && !q.marketOpen && rules.hasCloseRules(item.user_id)) {
+                const closing = await rules
+                  .closingDue(item, now)
+                  .catch(() => null);
+                if (closing && acceptsClose(item, q, closing))
+                  ruleChecks.push(() => rules.evaluate(item, q, now, "close"));
               }
               // Pick the session's own price and timestamp BEFORE checking
               // freshness: outside regular hours the regular `quoteTime` goes
@@ -815,6 +885,10 @@ export class StockMonitor {
                 continue;
               }
               const changePct = verdict.changePct!;
+              if (rules && q.marketOpen && !useExtended)
+                ruleChecks.push(() =>
+                  rules.evaluate(item, basis, now, "intraday"),
+                );
               const tradingDate = useExtended
                 ? zoned(basisTime!, item.exchange_timezone).date
                 : q.tradingDate ||
@@ -927,8 +1001,18 @@ export class StockMonitor {
               );
             }
           }
+          for (const check of ruleChecks)
+            await check().catch((error) =>
+              opsLog("stock.rules_failed", "warn", errorFields(error)),
+            );
         }
       }
+      // Leftover credits load history that waiting rule evaluations need.
+      await rules
+        ?.warm(now)
+        .catch((error) =>
+          opsLog("stock.rules_failed", "warn", errorFields(error)),
+        );
     } finally {
       this.busy = false;
     }

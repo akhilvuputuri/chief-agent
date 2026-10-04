@@ -28,6 +28,8 @@ import { StockMonitor, StockDelivery, WatchlistTools } from "./stocks.js";
 import { TwelveDataProvider } from "./stock-provider.js";
 import { CreditBucket } from "./market-credits.js";
 import { StockLookup } from "./stock-lookup.js";
+import { MarketHistory } from "./market-history.js";
+import { RuleDelivery, RuleEngine } from "./stock-rules.js";
 import { NewsBulletin, NewsTools, voteKeyboard } from "./news.js";
 import { PublicFeedFetcher } from "./news-feed.js";
 import { run as runTelegram } from "@grammyjs/runner";
@@ -132,6 +134,14 @@ if (
     "STARTUP_MIGRATION_025",
     "Subscriptions migration 025 must be applied with the gateway stopped",
   );
+if (
+  !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=29")).rows
+    .length
+)
+  throw startupError(
+    "STARTUP_MIGRATION_029",
+    "Stock rules migration 029 must be applied with the gateway stopped",
+  );
 await recoverRuntime(db);
 // Library account features need migration 016; without the key they stay off even if tables exist.
 const libraryReady = await libraryMigrated(db);
@@ -235,9 +245,19 @@ const stockProvider =
 const marketCredits = stockProvider
   ? new CreditBucket(stockProvider.creditsPerMinute)
   : undefined;
+// Split-adjusted history shared by lookups and rules: fetched once per stock per day.
+const marketHistory = stockProvider
+  ? new MarketHistory(stockProvider)
+  : undefined;
 const stockLookup =
   stockProvider && marketCredits
-    ? new StockLookup(db, stockProvider, marketCredits)
+    ? new StockLookup(
+        db,
+        stockProvider,
+        marketCredits,
+        undefined,
+        marketHistory,
+      )
     : undefined;
 if (c.MARKET_DATA_PROVIDER === "twelvedata" && !c.TWELVE_DATA_API_KEY)
   throw startupError(
@@ -814,6 +834,15 @@ const stockMonitor = stockProvider
       undefined,
       (user) => topics.capture(user, { kind: "topic", topic: "markets" }),
       marketCredits,
+      marketCredits && marketHistory
+        ? new RuleEngine(
+            db,
+            stockProvider.name,
+            marketCredits,
+            marketHistory,
+            (user) => topics.capture(user, { kind: "topic", topic: "markets" }),
+          )
+        : undefined,
     )
   : undefined;
 const stockDelivery = new StockDelivery(db, async (user, payload) => {
@@ -859,6 +888,50 @@ const stockDelivery = new StockDelivery(db, async (user, payload) => {
   );
 });
 await stockDelivery.recover();
+// Rule alerts: same Markets delivery, with a pause button for the rule itself.
+const ruleDelivery = new RuleDelivery(db, async (user, payload) => {
+  if (!allowed.has(user)) throw new Error("Unauthorized delivery");
+  await topics.deliver(
+    user,
+    payload.destination ?? { kind: "topic", topic: "markets" },
+    async (thread, notice) => {
+      const sent = await bot.api.sendMessage(
+        user,
+        [notice, payload.reply].filter(Boolean).join("\n\n"),
+        {
+          ...thread,
+          link_preview_options: { is_disabled: true },
+          reply_markup: {
+            inline_keyboard: [
+              [
+                {
+                  text: "Pause this rule",
+                  callback_data: `wr:pause:${payload.ruleId}`,
+                },
+              ],
+              [
+                {
+                  text: "Pause all stock alerts",
+                  callback_data: `stk:all:${payload.alertId}`,
+                },
+              ],
+            ],
+          },
+        },
+      );
+      await recordFeedSent(
+        db,
+        user,
+        payload.alertId,
+        "markets",
+        sent,
+        thread.message_thread_id,
+      );
+      return sent;
+    },
+  );
+});
+await ruleDelivery.recover();
 await newsBulletin.recover();
 await coding?.recoverDelivery();
 const routineTimer = setInterval(() => {
@@ -935,6 +1008,11 @@ const routineTimer = setInterval(() => {
     .tick()
     .catch((error) =>
       opsLog("stock.delivery_failed", "error", errorFields(error)),
+    );
+  void ruleDelivery
+    .tick()
+    .catch((error) =>
+      opsLog("stock.rule_delivery_failed", "error", errorFields(error)),
     );
   void newsBulletin
     .tick()

@@ -62,7 +62,7 @@ export async function readFeed(
   } else if (kind === "markets") {
     value = (
       await db.query(
-        "SELECT id,payload,sent_at,state,trading_date FROM stock_alerts WHERE id=$1 AND user_id=$2",
+        "SELECT id,payload,sent_at,state,trading_date FROM stock_alerts WHERE id=$1 AND user_id=$2 UNION ALL SELECT id,payload,sent_at,state,trading_date FROM watch_rule_alerts WHERE id=$1 AND user_id=$2 LIMIT 1",
         [id, user],
       )
     ).rows[0];
@@ -119,7 +119,7 @@ export async function recentFeedIndex(db: Database, user: string) {
         : kind === "markets"
           ? (
               await db.query(
-                "SELECT payload->>'symbol' AS title FROM stock_alerts WHERE user_id=$1 AND id=$2",
+                "SELECT payload->>'symbol' AS title FROM stock_alerts WHERE user_id=$1 AND id=$2 UNION ALL SELECT payload->>'symbol' AS title FROM watch_rule_alerts WHERE user_id=$1 AND id=$2",
                 [user, id],
               )
             ).rows.map((r) => `${r.title} alert`)
@@ -226,7 +226,7 @@ export async function inputAnchor(
       : metadata.topic === "markets"
         ? (
             await db.query(
-              "SELECT payload->>'symbol' AS title FROM stock_alerts WHERE user_id=$1 AND id=ANY($2::uuid[]) LIMIT 5",
+              "SELECT payload->>'symbol' AS title FROM stock_alerts WHERE user_id=$1 AND id=ANY($2::uuid[]) UNION ALL SELECT payload->>'symbol' AS title FROM watch_rule_alerts WHERE user_id=$1 AND id=ANY($2::uuid[]) LIMIT 5",
               [user, selected.map((r) => r.data.id)],
             )
           ).rows.map((r) => r.title)

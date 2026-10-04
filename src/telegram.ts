@@ -303,6 +303,31 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
       }
     });
   });
+  // Rule alert pause button: pauses that rule and mutes its queued alerts.
+  bot.callbackQuery(/^wr:pause:([0-9a-f-]{36})$/, async (ctx) => {
+    if (!allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids)) return;
+    const user = String(ctx.from.id);
+    const paused = (
+      await db.query(
+        "UPDATE watch_rules SET status='paused',updated_at=now() WHERE id=$1 AND user_id=$2 RETURNING label",
+        [ctx.match[1], user],
+      )
+    ).rows[0];
+    if (paused)
+      await db.query(
+        "UPDATE watch_rule_alerts SET state='muted' WHERE rule_id=$1 AND user_id=$2 AND state='pending'",
+        [ctx.match[1], user],
+      );
+    await ctx.answerCallbackQuery({
+      text: paused
+        ? "Rule paused. Ask me to resume it anytime."
+        : "That rule no longer exists.",
+    });
+    if (paused)
+      await ctx
+        .editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } })
+        .catch(() => {});
+  });
   // Stock alert pause buttons: direct owner-scoped writes, never queued behind the model.
   bot.callbackQuery(/^stk:(item|all):([0-9a-f-]{36})$/, async (ctx) => {
     if (!allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids)) return;

@@ -10,7 +10,8 @@ import {
   type SymbolHit,
   type SymbolRef,
 } from "./stock-provider.js";
-import { computeStats, DAILY_BARS } from "./stock-stats.js";
+import { computeStats } from "./stock-stats.js";
+import { MarketHistory } from "./market-history.js";
 import { pickInstrument, zoned } from "./stocks.js";
 import { ToolValidationError } from "./tool-errors.js";
 
@@ -34,8 +35,6 @@ export interface LookupAction {
  * No model calls; no writes.
  */
 export class StockLookup {
-  /** null records a failed fetch for the day, so a broken series is not re-billed on retry. */
-  private history = new Map<string, PriceBar[] | null>();
   private quotes = new Map<string, { at: number; quote: Quote }>();
   /** Resolved searches for the UTC day, so a repeated question costs no search credit. */
   private resolved = new Map<string, { day: string; hit: SymbolHit }>();
@@ -44,6 +43,8 @@ export class StockLookup {
     private provider: MarketDataProvider,
     private credits: CreditBucket,
     private clock = () => new Date(),
+    /** Shared with the rule engine so a stock's history is fetched once per day. */
+    private history: MarketHistory = new MarketHistory(provider),
   ) {}
 
   private take(credits: number, now: Date) {
@@ -191,15 +192,11 @@ export class StockLookup {
       );
     const key = quoteKey(instrument.ref);
     const tradingDay = zoned(now, calendar.timezone).date;
-    const dailyKey = `${key}:1day:${tradingDay}`;
-    const monthlyKey = `${key}:1month:${tradingDay}`;
     const cachedQuote = this.quotes.get(key);
     const needQuote =
       !cachedQuote || now.getTime() - cachedQuote.at > QUOTE_TTL_MS;
     const needed =
-      (needQuote ? 1 : 0) +
-      (this.history.has(dailyKey) ? 0 : 1) +
-      (this.history.has(monthlyKey) ? 0 : 1);
+      (needQuote ? 1 : 0) + this.history.missing(instrument.ref, tradingDay);
     const busy = this.take(needed, now);
     if (busy) return busy;
     let quote: Quote;
@@ -218,31 +215,10 @@ export class StockLookup {
       );
     }
     // A failed history series degrades to null figures with reasons, not a failed answer.
-    // Only a permanent failure is remembered for the day; a transient one (429, 5xx,
-    // timeout) is fetched again on the next question.
-    const series = new Map<string, PriceBar[] | null>();
-    for (const [cacheKey, interval, size] of [
-      [dailyKey, "1day", DAILY_BARS],
-      [monthlyKey, "1month", 5000],
-    ] as const) {
-      if (this.history.has(cacheKey)) {
-        series.set(cacheKey, this.history.get(cacheKey)!);
-        continue;
-      }
-      try {
-        const bars = await this.provider.history(
-          instrument.ref,
-          interval,
-          size,
-        );
-        this.remember(cacheKey, bars);
-        series.set(cacheKey, bars);
-      } catch (error) {
-        if (error instanceof ProviderError && !error.retryable)
-          this.remember(cacheKey, null);
-        series.set(cacheKey, null);
-      }
-    }
+    const { daily, monthly } = await this.history.load(
+      instrument.ref,
+      tradingDay,
+    );
     if (quote.currency && quote.currency !== instrument.currency)
       throw new Error(
         `Quote currency ${quote.currency} differs from the listing's ${instrument.currency}`,
@@ -256,8 +232,8 @@ export class StockLookup {
       },
       stats: computeStats({
         quote,
-        daily: series.get(dailyKey) ?? null,
-        monthly: series.get(monthlyKey) ?? null,
+        daily,
+        monthly,
       }),
       source: {
         provider: this.provider.name,
@@ -267,14 +243,5 @@ export class StockLookup {
       },
       note: "Facts only: these are reference levels, not buy or sell advice.",
     };
-  }
-
-  /** Keeps only the current trading day's history per instrument and interval. */
-  private remember(key: string, bars: PriceBar[] | null) {
-    const prefix = key.slice(0, key.lastIndexOf(":"));
-    for (const existing of this.history.keys())
-      if (existing.startsWith(prefix + ":") && existing !== key)
-        this.history.delete(existing);
-    this.history.set(key, bars);
   }
 }

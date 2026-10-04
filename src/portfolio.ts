@@ -766,3 +766,72 @@ export class Portfolio {
     return lines.join("\n");
   }
 }
+
+/** An IBKR local symbol in the market-data provider's form: "BRK B" → "BRK.B". */
+export function providerSymbol(ibkr: string) {
+  return ibkr.trim().toUpperCase().replace(/\s+/g, ".");
+}
+
+/** Holdings older than this are not used as a rule reference. */
+export const HOLDINGS_MAX_AGE_MS = 26 * 60 * 60 * 1000;
+
+/**
+ * The owner's current stock holdings for rules (docs/stock-rules.md): the latest complete
+ * or empty sync under the current IBKR grant, if it is fresh. Only `STK` positions count,
+ * keyed by provider symbol and currency; a reason is returned when holdings are unusable.
+ */
+export async function currentHoldings(
+  db: Database,
+  user: string,
+  now: Date,
+): Promise<
+  | {
+      asOf: Date;
+      positions: {
+        symbol: string;
+        currency: string;
+        averageCost: number | null;
+      }[];
+    }
+  | { unavailable: string }
+> {
+  const connection = (
+    await db.query(
+      "SELECT state,connected_at FROM brokerage_connections WHERE user_id=$1 AND provider='ibkr'",
+      [user],
+    )
+  ).rows[0];
+  if (
+    !connection ||
+    !["connected", "refresh_uncertain"].includes(connection.state)
+  )
+    return { unavailable: "ibkr_not_connected" };
+  const sync = (
+    await db.query(
+      `SELECT id,finished_at FROM portfolio_syncs WHERE user_id=$1 AND provider='ibkr'
+         AND status IN ('complete','empty') AND started_at>=$2
+       ORDER BY started_at DESC LIMIT 1`,
+      [user, connection.connected_at],
+    )
+  ).rows[0];
+  if (!sync) return { unavailable: "no_holdings_sync" };
+  if (
+    now.getTime() - new Date(sync.finished_at).getTime() >
+    HOLDINGS_MAX_AGE_MS
+  )
+    return { unavailable: "holdings_stale" };
+  const rows = (
+    await db.query(
+      "SELECT symbol,currency,average_price FROM portfolio_positions WHERE sync_id=$1 AND user_id=$2 AND asset_class='STK'",
+      [sync.id, user],
+    )
+  ).rows;
+  return {
+    asOf: new Date(sync.finished_at),
+    positions: rows.map((r) => ({
+      symbol: providerSymbol(r.symbol),
+      currency: r.currency,
+      averageCost: r.average_price == null ? null : Number(r.average_price),
+    })),
+  };
+}

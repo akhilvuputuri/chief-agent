@@ -1,6 +1,6 @@
 # Stock questions, rules and digests (issue #146, Phase 2)
 
-Status: **plan agreed with the owner on 3–4 October 2026. Phase 2a is released in v0.3.37; Phase 2b and Phase 2c are next.** Builds on the deterministic [stock watchlist](stock-watchlist.md) and read-only [IBKR holdings](ibkr-portfolio.md). Journal: [60](journey/60-stock-rules.md).
+Status: **plan agreed with the owner on 3–4 October 2026. Phase 2a is released in v0.3.37; Phase 2b (rules) is implemented on `feat/stock-rules-2b`, pending review and the migration-029 rollout.** Builds on the deterministic [stock watchlist](stock-watchlist.md) and read-only [IBKR holdings](ibkr-portfolio.md). Journal: [60](journey/60-stock-rules.md).
 
 ## Goal
 
@@ -75,6 +75,58 @@ One module, `src/stock-stats.ts`, computes every reference. Questions, rules and
   - History is fetched once per exchange trading day, so today's intraday range is as of that fetch, plus the current price.
   - The 300-credit daily reserve is fixed. At the default 15-minute cadence a full US session uses about 26 credits per watched stock, so the reserve covers about 11 stocks; it should be revisited if the watchlist grows beyond that.
 - **Tool and agent.** `stock_lookup` is a read operation in the `watchlist` domain, gated on market data and granted to `core/stocks`, whose instructions now cover "ask now" questions, provenance, null figures and busy results.
+
+## Phase 2b implementation
+
+The owner agreed the defaults on 4 October 2026:
+
+- holdings rules cover only holdings that are on the watchlist; Chief offers to add the others, after the exchange is confirmed;
+- a close-based alert is held for the next monitoring window;
+- IBKR cost older than 26 hours is treated as unknown;
+- at most 50 rules.
+
+**Storage.** Migration `029_stock_rules.sql` (027 and 028 were taken by other work) adds three tables, all additive, so `stock_alerts` and daily-drop alerts are unchanged and an older image keeps working after a rollback:
+
+- `watch_rules`: scope, direction, reference, margin, basis, notify, status and the owner's restated label;
+- `watch_rule_states`: armed state and the latest evaluation, per rule and watched stock;
+- `watch_rule_alerts`: an outbox with `UNIQUE(rule, stock, trading_date)` and a `hold_for_window` flag.
+
+**`src/stock-rules.ts`.**
+
+- **`ruleReferences`.** Reference levels **exclude today's bar and price**, so "below its 52-week low" means a new low.
+  - Averages, lows and highs come from completed sessions before today.
+  - All-time levels use whole earlier months plus prior daily bars; the current month's bar is never used.
+  - Too-short or stale history gives `null` with a reason.
+  - `prev_close` comes from the quote, and `avg_cost` from fresh IBKR holdings (`currentHoldings` in `src/portfolio.ts`). The holdings must come from the current grant, be at most 26 hours old and be `STK` positions, matched by provider symbol (`BRK B` → `BRK.B`) and currency.
+- **`RuleEngine`.** Called by `StockMonitor` only after its existing quote checks.
+  - **Intraday rules** run on regular-session quotes.
+  - **Close rules** get one extra quote 5 to 180 minutes after the regular close, accepted only if it is the final quote for that session date. The daily-drop logic never sees it.
+  - **Alerting.** An alert is created on crossing, then waits for a recovery of 1% past the trigger; `daily` alerts once per trading day while the condition holds. The rule, the stock and the owner's pause are rechecked before each alert is queued.
+  - **History.** Fetched through the shared `MarketHistory` with `tryTake(…, 0)`. With no credits this minute, the rule records "references pending" and runs on the next poll.
+  - Rule errors are logged and never affect daily-drop monitoring.
+- **`RuleDelivery`.** The same uncertain-send outbox contract as daily-drop alerts.
+  - Intraday alerts are muted outside the window, as daily-drop alerts are.
+  - Close alerts wait for the next window and are dropped after 4 days.
+  - Pauses mute queued alerts.
+- **`RuleTools`.** `stock_rule_add`, `stock_rule_update` and `stock_rule_remove` are foreground-only writes; `stock_rule_list` is a read. Validation covers the watched item, ownership, `avg_cost` scope, duplicates and the limit. A holdings rule reports `coverage`: which holdings are monitored and which are not watched.
+- **Wiring.** `stock_rule_*` belongs to the `core/stocks` agent, whose limits rise to 120 s, 8 model calls and 20 tool calls. The instructions map phrases to rules and require the owner's confirmation of the restated rule.
+  - Rule alerts go to the Markets topic with "Pause this rule" and "Pause all stock alerts" buttons, and can be read with `feed_read`.
+  - Startup requires migration 29 (`STARTUP_MIGRATION_029`).
+- **Independent review of `e55b3c9` (REQUEST CHANGES), all fixed with regressions:**
+  - **Blocking.** With 7 or more watched stocks polled together, the quote batch used every credit in the minute, so history-based rules never loaded and never alerted. Evaluations waiting for history are now queued. `RuleEngine.warm()` runs at the end of each tick, loads their history from leftover credits on quiet ticks, and re-runs them with the same validated quote (intraday quotes only while at most 20 minutes old). Eight synchronized stocks now all alert within 3 minutes.
+  - **Blocking.** A delayed feed could hand back a 15:50 quote as the close. `acceptsClose` now also requires the quote to be stamped at or after the regular close (early closes included), and otherwise retries.
+  - **Long cadences.** The closing check bypasses the poll cadence, spaced at least 10 minutes apart, so a 240-minute cadence still gets it.
+  - **Extended hours.** Close rules follow the regular session, so extended-hours stocks get them too, through the closing check or an ordinary post-market poll.
+  - **Pauses.** The rule-delivery claim rechecks rule, stock and owner pauses, and `mutePending` ("Pause …" buttons and settings) now also mutes queued rule alerts.
+  - **Delivery queue.** The scan covers up to 500 pending alerts, so held alerts cannot block deliverable ones.
+  - **Isolation and ordering.** Each rule is isolated, so one failure never blocks a stock's other rules. Rule checks run after the batch's daily-drop decisions.
+  - **Text and duplicates.** The cost alert wording was fixed ("below your IBKR average cost"), and margin updates are checked for duplicates.
+- **Re-review of `4e84742`: approved.** Its follow-ups were also applied:
+  - **Logging.** Per-rule failures are logged again (`stock.rules_failed`).
+  - **Closing attempts.** A closing check without a final quote is visible ("waiting for the final close quote (attempt n)"). After 6 attempts, about an hour, the day ends with "close not confirmed: no final quote", so a thinly traded stock cannot spend credits for the whole closing window.
+  - **Late re-checks.** An intraday re-check by `warm()` only happens inside the monitoring window, so a crossing cannot be used up by an alert that would be muted.
+  - **Known paid-plan limit (not fixed).** For an extended-hours stock on a long cadence, a closing-only fetch moves `last_polled_at` and can delay the next post-market daily-drop poll.
+- **Rollout.** `scripts/deploy-stock-rules.py`, with 15 offline tests. It permits only migration 029 and its Compose entry, and its baseline must equal the live release.
 
 ## Phases
 
