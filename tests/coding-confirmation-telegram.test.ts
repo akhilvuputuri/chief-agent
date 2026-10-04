@@ -96,7 +96,8 @@ test("Telegram buttons and direct yes replies confirm the displayed coding brief
     await coding.tick();
     let approval = "";
     for (let i = 0; i < 2; i++)
-      await coding.deliver(async (_u, _t, _text, id) => {
+      await coding.deliver(async (_u, target, _text, id) => {
+        assert.deepEqual(target, { kind: "general" });
         if (id) approval = id;
         return { message_id: 100 };
       });

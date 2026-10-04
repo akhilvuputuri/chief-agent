@@ -12,7 +12,7 @@ import {
   sendSlowPointer,
 } from "../src/telegram.js";
 import { CalendarActions } from "../src/calendar-actions.js";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { readConfig } from "../src/config.js";
 import { Assistant } from "../src/agent.js";
 import { JobTools } from "../src/tools.js";
@@ -41,13 +41,72 @@ function fakeApi(enabled = true) {
         created.push(name);
         await new Promise((r) => setTimeout(r, 5));
         return {
-          message_thread_id: name === "Updates" ? 42 : next++,
+          message_thread_id: name === "Coding" ? 42 : next++,
           name,
         } as any;
       },
     },
   };
 }
+
+test("Updates is renamed in place without duplicate topics, and old queued feed targets go to General", async () => {
+  const { pg, db } = await database();
+  const { api, created } = fakeApi();
+  const h = createHash("sha256")
+    .update("telegram-topic:123:updates")
+    .digest("hex");
+  const run = `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
+  await db.query(
+    "INSERT INTO events(user_id,run_id,type,data) VALUES('123',$1,'telegram.topic',$2::jsonb)",
+    [run, JSON.stringify({ key: "updates", threadId: 77 })],
+  );
+  const edits: unknown[] = [];
+  let loseAck = true;
+  const topics = new TelegramTopics(db, {
+    ...api,
+    editForumTopic: async (
+      _user: unknown,
+      thread: unknown,
+      options: unknown,
+    ) => {
+      edits.push([thread, options]);
+      if (loseAck) {
+        loseAck = false;
+        throw new Error("unknown rename acknowledgement");
+      }
+      return true;
+    },
+  } as any);
+  try {
+    await topics.ensure("123");
+    assert.equal(await topics.keyFor("123", 77), "coding");
+    await topics.ensure("123");
+    await topics.ensure("123");
+    assert.deepEqual(created, ["News", "Markets"]);
+    assert.deepEqual(edits, [
+      [77, { name: "Coding" }],
+      [77, { name: "Coding" }],
+    ]);
+    const sent: unknown[] = [];
+    await topics.deliver(
+      "123",
+      { kind: "topic", topic: "updates" },
+      async (extra) => sent.push(extra),
+    );
+    await topics.deliver(
+      "123",
+      { kind: "topic", topic: "coding" },
+      async (extra) => sent.push(extra),
+    );
+    assert.deepEqual(sent, [{}, { message_thread_id: 77 }]);
+    assert.deepEqual(
+      await topics.capture("123", { kind: "topic", topic: "updates" }),
+      { kind: "general" },
+    );
+  } finally {
+    await pg.close();
+  }
+});
 
 test("thread helpers leave General and plain messages without a thread id", () => {
   assert.deepEqual(inThread(undefined), {});
@@ -433,8 +492,8 @@ test("topics are created up front and a thread maps back to its topic", async ()
   try {
     await topics.ensure("123");
     await topics.ensure("123");
-    assert.deepEqual(created, ["News", "Markets", "Updates"]);
-    assert.equal(await topics.keyFor("123", 42), "updates");
+    assert.deepEqual(created, ["News", "Markets", "Coding"]);
+    assert.equal(await topics.keyFor("123", 42), "coding");
     assert.equal(await topics.keyFor("123", 40), "news");
     assert.equal(await topics.keyFor("123", 99), undefined);
     assert.equal(await topics.keyFor("123", undefined), undefined);
@@ -443,7 +502,7 @@ test("topics are created up front and a thread maps back to its topic", async ()
   }
 });
 
-test("a message typed in Chief's Updates topic is recorded with its topic", async () => {
+test("a message typed in Chief's Coding topic is recorded with its topic", async () => {
   const { pg, db } = await database();
   await new TelegramTopics(db, fakeApi().api).ensure("123");
   const assistant = new Assistant(
@@ -503,7 +562,7 @@ test("a message typed in Chief's Updates topic is recorded with its topic", asyn
       date: 0,
       chat: { id: 123, type: "private" },
       ...(topicRoot
-        ? { forum_topic_created: { name: "Updates", icon_color: 0xffd67e } }
+        ? { forum_topic_created: { name: "Coding", icon_color: 0xffd67e } }
         : { text: "an earlier answer" }),
     },
   });
@@ -520,7 +579,7 @@ test("a message typed in Chief's Updates topic is recorded with its topic", asyn
     ).rows;
     assert.deepEqual(
       topics.map((r) => r.topic),
-      ["updates", "news", null, "updates"],
+      ["coding", "news", null, "coding"],
     );
     assert.deepEqual(
       topics.map((r) => r.thread),
