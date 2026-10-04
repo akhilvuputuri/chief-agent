@@ -23,7 +23,7 @@ import {
   ruleReferences,
   triggerLevel,
 } from "../src/stock-rules.js";
-import { StockMonitor, WatchlistTools } from "../src/stocks.js";
+import { StockMonitor, WatchlistTools, mutePending } from "../src/stocks.js";
 import { readOperations } from "../src/execution.js";
 import { action } from "../src/protocol.js";
 import { runtimeContext } from "../src/runtime.js";
@@ -375,10 +375,7 @@ test("below-cost rules use fresh IBKR holdings under the current grant, matched 
   f.setQuote("BRK.B", quote(470));
   await f.tick(OPEN);
   const [alert] = await f.alerts();
-  assert.match(
-    alert.payload.reply,
-    /below its your IBKR average cost|below its IBKR|average cost/,
-  );
+  assert.match(alert.payload.reply, /is below your IBKR average cost\./);
   assert.match(alert.payload.reply, /471\.35/);
   // Stale holdings (over 26 hours) are not used.
   await f.db.query("DELETE FROM watch_rule_alerts");
@@ -564,4 +561,159 @@ test("rule tools are gated with market data and only listing is a read", () => {
   assert(on.tools.some((t) => t.name === "stock_rule_add"));
   const off = runtimeContext({ stocks: false }, null);
   assert(!off.tools.some((t) => t.name.startsWith("stock_rule_")));
+});
+
+test("history for many synchronized stocks loads from leftover credits and every rule still alerts", async () => {
+  const f = await fixture(new Date("2026-01-15T14:00:00Z"));
+  const symbols = ["AA", "BB", "CC", "DD", "EE", "FF", "GG", "HH"];
+  for (const s of symbols) {
+    await f.add(s);
+    f.setQuote(s, quote(79));
+  }
+  await f.rule({
+    scope: "watchlist",
+    direction: "below",
+    reference: "low_52w",
+    basis: "intraday",
+    label: "Tell me when any watched stock makes a new 52-week low",
+  });
+  // The open: all 8 quotes are due together and use the whole minute.
+  await f.tick(OPEN);
+  assert.equal((await f.alerts()).length, 0);
+  // Quiet ticks spend leftover credits on history and re-run with the same quotes.
+  for (let m = 1; m <= 3; m++)
+    await f.tick(new Date(OPEN.getTime() + m * 60000));
+  assert.equal((await f.alerts()).length, 8);
+  assert.equal(f.provider.calls.history, 16);
+});
+
+test("a delayed pre-close quote is not taken as the close; the final quote is, even with a long cadence", async () => {
+  const f = await fixture();
+  const id = await f.add("ACME");
+  await f.db.query(
+    "INSERT INTO stock_settings(user_id,poll_minutes) VALUES('a',240) ON CONFLICT(user_id) DO UPDATE SET poll_minutes=240",
+  );
+  await f.rule({
+    scope: "item",
+    itemId: id,
+    direction: "below",
+    reference: "prev_close",
+    marginPct: 5,
+    basis: "close",
+    label: "Tell me if ACME closes 5% below yesterday",
+  });
+  // Last session poll at 15:30 ET; the next cadence poll would be 19:30 ET.
+  f.setQuote(
+    "ACME",
+    quote(100, { prevClose: 100, quoteTime: new Date("2026-01-15T20:30:00Z") }),
+  );
+  await f.tick(new Date("2026-01-15T20:30:00Z"));
+  // 16:05 ET: the delayed feed still returns 15:50.
+  f.setQuote(
+    "ACME",
+    quote(90, {
+      prevClose: 100,
+      marketOpen: false,
+      quoteTime: new Date("2026-01-15T20:50:00Z"),
+    }),
+  );
+  await f.tick(new Date("2026-01-15T21:05:00Z"));
+  assert.equal((await f.alerts()).length, 0);
+  assert.equal((await f.state()).length, 0);
+  // 10 minutes later the final quote arrives and is accepted.
+  f.setQuote(
+    "ACME",
+    quote(94, {
+      prevClose: 100,
+      marketOpen: false,
+      quoteTime: new Date("2026-01-15T21:00:00Z"),
+    }),
+  );
+  await f.tick(new Date("2026-01-15T21:16:00Z"));
+  const [alert] = await f.alerts();
+  assert.match(alert.payload.reply, /closed 5% below its previous close/);
+  assert.match(alert.payload.reply, /Price 94\.00/);
+});
+
+test("close rules also run for extended-hours stocks polled after the close", async () => {
+  const f = await fixture();
+  f.provider.supportsExtended = true;
+  const id = await f.add("ACME");
+  await f.db.query(
+    "INSERT INTO stock_settings(user_id,include_extended) VALUES('a',true) ON CONFLICT(user_id) DO UPDATE SET include_extended=true",
+  );
+  await f.rule({
+    scope: "item",
+    itemId: id,
+    direction: "above",
+    reference: "prev_close",
+    basis: "close",
+    label: "Tell me if ACME closes above yesterday",
+  });
+  f.setQuote(
+    "ACME",
+    quote(110, {
+      prevClose: 100,
+      marketOpen: false,
+      quoteTime: new Date("2026-01-15T21:00:00Z"),
+      extended: {
+        price: 111,
+        changePct: 11,
+        time: new Date("2026-01-15T21:09:00Z"),
+      },
+    }),
+  );
+  await f.tick(AFTER_CLOSE);
+  const [alert] = await f.alerts();
+  assert.match(alert.payload.reply, /closed above its previous close/);
+  assert.match(alert.payload.reply, /Price 110\.00/);
+});
+
+test("pausing stock alerts also mutes queued rule alerts, and held alerts never block deliverable ones", async () => {
+  const f = await fixture();
+  const held = await f.add("HELD");
+  await f.db.query(
+    "UPDATE watchlist_items SET window_start='01:00',window_end='02:00' WHERE id=$1",
+    [held],
+  );
+  const open = await f.add("OPEN");
+  const ruleId = (
+    (await f.rule({
+      scope: "watchlist",
+      direction: "below",
+      reference: "prev_close",
+      basis: "intraday",
+      label: "x",
+    })) as any
+  ).rule.id;
+  for (let d = 1; d <= 25; d++)
+    await f.db.query(
+      "INSERT INTO watch_rule_alerts(id,user_id,rule_id,item_id,trading_date,hold_for_window,payload,created_at) VALUES($1,'a',$2,$3,$4,true,'{}',$5)",
+      [
+        randomUUID(),
+        ruleId,
+        held,
+        `2025-12-${String(d).padStart(2, "0")}`,
+        new Date(OPEN.getTime() - 3600_000),
+      ],
+    );
+  const deliverable = randomUUID();
+  await f.db.query(
+    "INSERT INTO watch_rule_alerts(id,user_id,rule_id,item_id,trading_date,payload) VALUES($1,'a',$2,$3,'2026-01-15','{\"reply\":\"x\"}')",
+    [deliverable, ruleId, open],
+  );
+  f.setNow(OPEN);
+  await f.delivery.tick();
+  assert.equal(f.sent.length, 1);
+  assert.equal(f.sent[0].alertId, deliverable);
+  // "Pause all stock alerts" (mutePending) also mutes queued rule alerts.
+  await mutePending(f.db, "a");
+  assert.equal(
+    (
+      await f.db.query(
+        "SELECT count(*)::int n FROM watch_rule_alerts WHERE state='pending'",
+      )
+    ).rows[0].n,
+    0,
+  );
 });

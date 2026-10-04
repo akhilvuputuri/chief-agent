@@ -42,7 +42,7 @@ export type Reference = (typeof REFERENCES)[number];
 
 export const LABELS: Record<Reference, string> = {
   prev_close: "previous close",
-  avg_cost: "your IBKR average cost",
+  avg_cost: "IBKR average cost",
   avg_12w: "12-week average",
   avg_26w: "26-week average",
   avg_52w: "52-week average",
@@ -186,15 +186,42 @@ export function describeRule(rule: {
   notify: string;
 }) {
   const margin = Number(rule.margin_pct);
-  const ref = LABELS[rule.reference as Reference] ?? rule.reference;
+  const ref =
+    rule.reference === "avg_cost"
+      ? "your IBKR average cost"
+      : (LABELS[rule.reference as Reference] ?? rule.reference);
   return `${rule.basis === "close" ? "closes" : "trades"} ${margin ? `${margin}% ` : ""}${rule.direction} ${ref}${rule.notify === "daily" ? ", reminded daily while true" : ", alert on crossing"}`;
 }
 
 const fmt = (n: number) =>
   n >= 100 ? n.toFixed(2) : n >= 1 ? n.toFixed(2) : n.toPrecision(3);
 
+export interface Closing {
+  date: string;
+  closeMinutes: number;
+  timezone: string;
+}
+
+/**
+ * A quote is the session's close only if it is dated that session and stamped at or after
+ * the regular close (minus a minute): a delayed feed can still return a mid-afternoon
+ * quote after 16:00, which must not stand in for the close.
+ */
+export function acceptsClose(item: any, q: Quote, closing: Closing) {
+  if (q.marketOpen || q.tradingDate !== closing.date) return false;
+  if (!(Number.isFinite(q.price) && q.price > 0)) return false;
+  if (q.currency && item.currency && q.currency !== item.currency) return false;
+  const at = zoned(q.quoteTime, closing.timezone);
+  return at.date === closing.date && at.minutes >= closing.closeMinutes - 1;
+}
+
 /** Evaluates rules for a watched stock after the monitor validated its quote. */
 export class RuleEngine {
+  /** Evaluations waiting for history credits, re-run by warm() with the same quote. */
+  private pending = new Map<
+    string,
+    { item: any; quote: Quote; basis: "intraday" | "close"; at: number }
+  >();
   private rules = new Map<string, any[]>();
   private holdings = new Map<
     string,
@@ -252,8 +279,13 @@ export class RuleEngine {
     return out;
   }
 
-  /** Whether a closing check is due for this stock now; returns the session date. */
-  async closingDue(item: any, now: Date) {
+  /** Cheap pre-filter: whether the owner has any active close-based rule. */
+  hasCloseRules(user: string) {
+    return (this.rules.get(user) ?? []).some((r) => r.basis === "close");
+  }
+
+  /** Whether a closing check is due for this stock now, with the session's close time. */
+  async closingDue(item: any, now: Date): Promise<Closing | null> {
     const rules = await this.applicable(item, "close", now);
     if (!rules.length) return null;
     const tz = marketCalendar(item.mic_code)?.timezone;
@@ -264,7 +296,8 @@ export class RuleEngine {
     );
     if (!regular) return null;
     const [h, m] = regular.close.split(":").map(Number);
-    const since = local.minutes - (h! * 60 + m!);
+    const closeMinutes = h! * 60 + m!;
+    const since = local.minutes - closeMinutes;
     if (since < CLOSING_FROM_MIN || since > CLOSING_UNTIL_MIN) return null;
     const done = (
       await this.db.query(
@@ -272,7 +305,31 @@ export class RuleEngine {
         [item.id, local.date, rules.map((r) => r.id)],
       )
     ).rows.length;
-    return done < rules.length ? local.date : null;
+    return done < rules.length
+      ? { date: local.date, closeMinutes, timezone: tz }
+      : null;
+  }
+
+  /**
+   * Spend leftover credits this minute loading history for evaluations that were waiting,
+   * then re-run them with their validated quote (intraday only while it is fresh).
+   */
+  async warm(now: Date) {
+    for (const [key, p] of this.pending) {
+      if (now.getTime() - p.at > 30 * 60 * 1000) {
+        this.pending.delete(key);
+        continue;
+      }
+      const ref = { symbol: p.item.symbol, mic: p.item.mic_code };
+      const missing = this.history.missing(ref, p.quote.tradingDate);
+      if (missing && !this.credits.tryTake(missing, now, 0)) return;
+      this.pending.delete(key);
+      await this.history.load(ref, p.quote.tradingDate);
+      const fresh =
+        p.basis === "close" ||
+        now.getTime() - p.quote.quoteTime.getTime() <= 20 * 60 * 1000;
+      if (fresh) await this.evaluate(p.item, p.quote, now, p.basis);
+    }
   }
 
   /**
@@ -298,6 +355,13 @@ export class RuleEngine {
       const missing = this.history.missing(ref, day);
       // Monitoring may use the daily reserve, but never this minute's exhausted allowance.
       if (missing && !this.credits.tryTake(missing, now, 0)) {
+        // Load later from leftover credits (warm), then evaluate with this same quote.
+        this.pending.set(`${item.id}:${basis}`, {
+          item,
+          quote,
+          basis,
+          at: now.getTime(),
+        });
         for (const r of rules.filter((r) => historyRefs.has(r.reference)))
           await this.record(r, item, now, {
             outcome: "references pending: market-data credits",
@@ -337,7 +401,10 @@ export class RuleEngine {
                   source: "IBKR holdings",
                 };
       }
-      await this.apply(rule, item, quote, now, basis, reference);
+      // One failing rule (for example deleted mid-evaluation) never blocks the others.
+      await this.apply(rule, item, quote, now, basis, reference).catch(
+        () => {},
+      );
     }
   }
 
@@ -446,7 +513,7 @@ export class RuleEngine {
     }
     const alertId = randomUUID();
     const reply =
-      `${item.name} (${item.symbol}, ${item.exchange}) ${basis === "close" ? "closed" : "is"} ${Number(rule.margin_pct) ? `${Number(rule.margin_pct)}% ` : ""}${rule.direction} its ${LABELS[rule.reference as Reference]}.\n` +
+      `${item.name} (${item.symbol}, ${item.exchange}) ${basis === "close" ? "closed" : "is"} ${Number(rule.margin_pct) ? `${Number(rule.margin_pct)}% ` : ""}${rule.direction} ${rule.reference === "avg_cost" ? "your IBKR average cost" : `its ${LABELS[rule.reference as Reference]}`}.\n` +
       `Price ${fmt(price)} ${quote.currency || item.currency} vs ${LABELS[rule.reference as Reference]} ${fmt(reference.value)} (${reference.source}, ${reference.asOf.slice(0, 10)}); trigger ${fmt(trigger)}.\n` +
       `Rule: “${rule.label}”. ${basis === "close" ? `Close of ${quote.tradingDate}` : `Quote ${zoned(quote.quoteTime, item.exchange_timezone).time} ${item.exchange_timezone}${quote.delayed ? " (delayed)" : ""}`} · ${this.providerName}.\n` +
       `A condition you set has been met; this is not advice.`;
@@ -510,7 +577,7 @@ export class RuleDelivery {
           `SELECT a.*,i.window_start,i.window_end,i.window_days,${DEFAULT_WINDOW_COLUMNS}
            FROM watch_rule_alerts a JOIN watchlist_items i ON i.id=a.item_id
            LEFT JOIN stock_settings s ON s.user_id=a.user_id
-           WHERE a.state='pending' ORDER BY a.created_at LIMIT 20`,
+           WHERE a.state='pending' ORDER BY a.created_at LIMIT 500`,
         )
       ).rows;
       for (const d of candidates) {
@@ -535,7 +602,11 @@ export class RuleDelivery {
         }
         const claimed = (
           await this.db.query(
-            "UPDATE watch_rule_alerts SET state='sending' WHERE id=$1 AND state='pending' RETURNING id",
+            `UPDATE watch_rule_alerts a SET state='sending' WHERE a.id=$1 AND a.state='pending'
+               AND EXISTS(SELECT 1 FROM watch_rules r JOIN watchlist_items i ON i.id=a.item_id
+                          WHERE r.id=a.rule_id AND r.status='active' AND i.status='active')
+               AND NOT EXISTS(SELECT 1 FROM stock_settings s WHERE s.user_id=a.user_id AND s.paused)
+             RETURNING a.id`,
             [d.id],
           )
         ).rows.length;
@@ -785,6 +856,21 @@ export class RuleTools {
     user: string,
     a: Extract<RuleAction, { operation: "stock_rule_update" }>,
   ) {
+    if (a.marginPct !== undefined) {
+      const clash = (
+        await this.db.query(
+          `SELECT o.id FROM watch_rules r JOIN watch_rules o ON o.user_id=r.user_id AND o.id<>r.id
+             AND o.scope=r.scope AND o.item_id IS NOT DISTINCT FROM r.item_id AND o.direction=r.direction
+             AND o.reference=r.reference AND o.basis=r.basis AND o.margin_pct=$3
+           WHERE r.id=$1 AND r.user_id=$2`,
+          [a.id, user, a.marginPct],
+        )
+      ).rows[0];
+      if (clash)
+        throw new ToolValidationError(
+          `That change would duplicate rule ${clash.id}; remove one of them instead`,
+        );
+    }
     const row = (
       await this.db.query(
         `UPDATE watch_rules SET status=COALESCE($3,status),margin_pct=COALESCE($4,margin_pct),

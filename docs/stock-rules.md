@@ -112,6 +112,15 @@ The owner agreed the defaults on 4 October 2026:
 - **Wiring.** `stock_rule_*` belongs to the `core/stocks` agent, whose limits rise to 120 s, 8 model calls and 20 tool calls. The instructions map phrases to rules and require the owner's confirmation of the restated rule.
   - Rule alerts go to the Markets topic with "Pause this rule" and "Pause all stock alerts" buttons, and can be read with `feed_read`.
   - Startup requires migration 29 (`STARTUP_MIGRATION_029`).
+- **Independent review of `e55b3c9` (REQUEST CHANGES), all fixed with regressions:**
+  - **Blocking.** With 7 or more watched stocks polled together, the quote batch used every credit in the minute, so history-based rules never loaded and never alerted. Evaluations waiting for history are now queued. `RuleEngine.warm()` runs at the end of each tick, loads their history from leftover credits on quiet ticks, and re-runs them with the same validated quote (intraday quotes only while at most 20 minutes old). Eight synchronized stocks now all alert within 3 minutes.
+  - **Blocking.** A delayed feed could hand back a 15:50 quote as the close. `acceptsClose` now also requires the quote to be stamped at or after the regular close (early closes included), and otherwise retries.
+  - **Long cadences.** The closing check bypasses the poll cadence, spaced at least 10 minutes apart, so a 240-minute cadence still gets it.
+  - **Extended hours.** Close rules follow the regular session, so extended-hours stocks get them too, through the closing check or an ordinary post-market poll.
+  - **Pauses.** The rule-delivery claim rechecks rule, stock and owner pauses, and `mutePending` ("Pause …" buttons and settings) now also mutes queued rule alerts.
+  - **Delivery queue.** The scan covers up to 500 pending alerts, so held alerts cannot block deliverable ones.
+  - **Isolation and ordering.** Each rule is isolated, so one failure never blocks a stock's other rules. Rule checks run after the batch's daily-drop decisions.
+  - **Text and duplicates.** The cost alert wording was fixed ("below your IBKR average cost"), and margin updates are checked for duplicates.
 - **Rollout.** `scripts/deploy-stock-rules.py`, with 15 offline tests. It permits only migration 029 and its Compose entry, and its baseline must equal the live release.
 
 ## Phases

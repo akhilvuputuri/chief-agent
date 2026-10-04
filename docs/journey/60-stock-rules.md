@@ -31,6 +31,12 @@ A fixed menu of alert types would grow with every new phrasing. Instead, request
 - **Phase 2b (4 October 2026).** Described in [stock rules](../stock-rules.md#phase-2b-implementation). Rule references deliberately differ from the "ask now" statistics: they exclude today, so a crossing means a new level. Rule alerts use their own outbox table, so a rollback cannot break daily-drop alerts. Close-based rules add one closing quote per stock and day; the daily-drop path never uses it.
 - **Defects found while testing.** The state upsert needed explicit parameter casts: PostgreSQL error 42P08 was caught by the monitor's guard and logged as `stock.rules_failed`. Two test assumptions were wrong: a 21% fall also trips the default daily-drop alert, and `watchlist_add`'s search spends a shared credit.
 
+- **Independent review of `e55b3c9`.** Opus 5.5 returned **REQUEST CHANGES**, with two blocking findings:
+  - history-based rules starved once 7 or more stocks were polled together;
+  - a delayed pre-close quote could be accepted as the close.
+
+  It also raised eight non-blocking findings: long cadences and extended-hours stocks skipping close rules, a pause race in delivery, held alerts blocking the queue, a failing rule aborting the others, rule checks delaying daily-drop alerts, the cost alert wording and duplicate margin updates. All were fixed with regressions.
+
 ## Verification and outcome
 
 - **Live check, 4 October 2026, with the public demo key.** Daily `outputsize=300&order=asc` for AAPL returned the latest 300 sessions (2025-07-25 to 2026-10-02).
