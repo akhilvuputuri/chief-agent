@@ -1,3 +1,21 @@
+## Released v0.3.41 — owner-defined stock rules
+
+- **What it adds ([PR #168](https://github.com/akhilvuputuri/chief-agent/pull/168), Phase 2b of the [stock rules plan](stock-rules.md)).** The stocks agent turns "tell me when…" requests into structured rules: one watched stock, every IBKR holding on the watchlist, or every watched stock; above or below the previous close, IBKR average cost, 12/26/52-week averages, lows and highs, or all-time levels; an optional margin; intraday or at the close.
+- **How rules behave.**
+  - Rules are evaluated deterministically inside the watchlist monitor.
+  - References exclude today, so "a new low" means below every earlier level.
+  - Alerts fire on crossing, re-arm after a 1% recovery, and fire at most once per rule, stock and day.
+  - Close rules accept only the session's final quote and are held for the monitoring window.
+  - History is shared with `stock_lookup` and loaded from leftover credits.
+  - Daily-drop alerts are unchanged.
+- **Review.** Claude Opus 5.5 approved final head `7acf775` after three rounds, including two blocking fixes: history starvation with 7 or more stocks, and a delayed pre-close quote being accepted as the close. PR and main CI passed.
+- **Deployment.**
+  - Additive migration 029 was installed through the reviewed operator rollout at `84149f9c7569ee69525df219f8471817ab55f09c`, from the verified baseline `33c152c`, with matching archive and script hashes.
+  - Separate checks of `RELEASE`, health, marker 29, the empty new tables, the preserved watch items and alerts, and IBKR and market data still on all passed.
+  - The automatic [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37172042402) then succeeded.
+- **Pending.** Owner acceptance of a live rule and alert, and the Phase 2c digest.
+- **Version.** v0.3.41 tags this record's verified release, which carries the feature unchanged. See [journal 60](journey/60-stock-rules.md).
+
 ## Released v0.3.40 — Coding topic and main-channel updates
 
 [PR #167](https://github.com/akhilvuputuri/chief-agent/pull/167) shipped [v0.3.40](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.40) at `1975525a7b5dd00b76c803d065cf2847298acbfb`: Updates is renamed Coding in place, preserving its thread/messages. Coding milestones go there; unprompted answers/responsibility findings and coding requirements/questions/terminal results go to General. GPT-6 Astra approved exact head `5c0cc77`; PR/main CI, [exact release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37169850070), separate health/policy and unchanged topic-identity checks passed. No DB/Compose/image change or synthetic message send. Live coding remains off with zero jobs; scoped project/App/auth/ingress configuration is absent, and the `chief` AWS identity check did not succeed. Activation and paid/live coding acceptance remain separate. See [journal closure](journey/63-coding-topic.md#release-closure--4-october-2026).

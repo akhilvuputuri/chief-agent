@@ -1,3 +1,7 @@
+# Owner-defined stock rules — released v0.3.41
+
+"Tell me when…" stock rules ([PR #168](https://github.com/akhilvuputuri/chief-agent/pull/168)) are live at `84149f9`, through reviewed migration 029. Rules for average cost need IBKR connected, which is still pending the owner's consent. Next: the Phase 2c daily digest. See [stock rules](stock-rules.md) and [journal 60](journey/60-stock-rules.md).
+
 # Coding topic / main-channel updates — released v0.3.40
 
 [PR #167](https://github.com/akhilvuputuri/chief-agent/pull/167) shipped [v0.3.40](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.40) at `1975525a7b5dd00b76c803d065cf2847298acbfb`: Updates is renamed Coding in place, preserving its thread/messages. Coding milestones go there; unprompted answers/responsibility findings and coding requirements/questions/terminal results go to General. GPT-6 Astra approved exact head `5c0cc77`; PR/main CI, [exact release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37169850070), separate health/policy and unchanged topic-identity checks passed. No DB/Compose/image change or synthetic message send. Live coding remains off with zero jobs; scoped project/App/auth/ingress configuration is absent, and the `chief` AWS identity check did not succeed. Activation and paid/live coding acceptance remain separate. See [journal closure](journey/63-coding-topic.md#release-closure--4-october-2026).
