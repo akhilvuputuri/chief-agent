@@ -82,6 +82,8 @@ services:
         "/migrations/027_coding_squad.sql",
         "-f",
         "/migrations/028_gathering.sql",
+        "-f",
+        "/migrations/029_stock_rules.sql",
       ]
     depends_on:
       postgres: { condition: service_healthy }

@@ -28,6 +28,7 @@ import type { LibraryActions } from "./library-actions.js";
 import type { WatchlistTools } from "./stocks.js";
 import type { Portfolio } from "./portfolio.js";
 import type { StockLookup } from "./stock-lookup.js";
+import { RuleTools } from "./stock-rules.js";
 export class JobTools {
   constructor(
     private db: Database,
@@ -251,6 +252,16 @@ export class JobTools {
     ) {
       if (!this.news) throw new Error("News bulletin is not configured");
       return this.news.call(user, run, a);
+    }
+    if (
+      a.operation === "stock_rule_add" ||
+      a.operation === "stock_rule_list" ||
+      a.operation === "stock_rule_update" ||
+      a.operation === "stock_rule_remove"
+    ) {
+      if (!this.stockLookup)
+        throw new Error("Stock market data is not configured");
+      return new RuleTools(this.db).call(user, run, a);
     }
     if (a.operation === "stock_lookup") {
       if (!this.stockLookup)

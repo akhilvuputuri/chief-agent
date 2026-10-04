@@ -263,6 +263,14 @@ export function runtimeContext(
                 "Only when the owner explicitly asks to stop Chief reading IBKR: queue a Telegram confirmation card. Nothing is disconnected until the owner taps Disconnect; never say it is done.",
               portfolio_status:
                 "IBKR connection state, last successful sync, position count and last attempt. The owner connects or disconnects with /portfolio connect or /portfolio disconnect in Telegram.",
+              stock_rule_add:
+                "Save an owner-defined stock rule after the owner confirmed your restated interpretation. scope item (itemId from watchlist_list), holdings (every IBKR holding that is on the watchlist) or watchlist (every watched stock). direction below/above a reference: prev_close, avg_cost (IBKR average cost; holdings or a held stock), avg_/low_/high_ 12w/26w/52w, all_time_low, all_time_high; optional marginPct (e.g. 15 for 15% below). basis intraday (each poll in session and monitoring hours) or close (final close, alert held for the next monitoring window). notify cross (default; re-arms after a 1% recovery) or daily. label restates the owner's request. Lows/highs/averages exclude today, so 'below its 52-week low' means a new low. Returns coverage for holdings rules: offer to watch notWatched holdings via watchlist_add. Facts, not advice.",
+              stock_rule_list:
+                "List the owner's stock rules with each stock's latest check: price, reference, trigger, outcome, armed and last alert.",
+              stock_rule_update:
+                "Pause/resume a rule or change its margin, notify mode or label by exact id from stock_rule_list. Pausing mutes its queued alerts.",
+              stock_rule_remove:
+                "Remove a rule by exact id from stock_rule_list, with its state and alert history.",
               stock_lookup:
                 "Answer a stock question now: price, day change, 12/26/52-week simple averages, 12/26/52-week lows and highs, and all-time low and high (split-adjusted, with 'since' date), each with distance in percent. query is a ticker or company name (or pass a watched stock id); when candidates span exchanges ask the owner which, then repeat with exchange. Returns status busy with retryAfterSeconds when market-data credits are exhausted for now. US listings only. Facts, not advice.",
               watchlist_settings:

@@ -11,6 +11,8 @@ import {
 } from "./stock-provider.js";
 import { marketCalendar, sessionsFor } from "./market-calendar.js";
 import { CreditBucket } from "./market-credits.js";
+import type { RuleEngine } from "./stock-rules.js";
+import { errorFields, opsLog } from "./ops-log.js";
 import {
   describeWindow,
   effectiveWindow,
@@ -22,7 +24,7 @@ import {
 
 /** Owner default window columns joined onto item rows, so every consumer
  * resolves the same effective window (item override, else default). */
-const DEFAULT_WINDOW_COLUMNS = `s.window_start AS default_window_start,
+export const DEFAULT_WINDOW_COLUMNS = `s.window_start AS default_window_start,
   s.window_end AS default_window_end, s.window_days AS default_window_days`;
 const WINDOW_OUTSIDE_NOTE =
   "Outside the window no prices are fetched and no alerts are sent. When it reopens, the first check alerts only if the stock is still down past its threshold for that trading day; a drop that recovers while the window is closed is not reported.";
@@ -482,6 +484,8 @@ export class StockMonitor {
     }),
     /** Shared with on-demand lookups so they never take the monitor's allowance. */
     private credits: CreditBucket = new CreditBucket(provider.creditsPerMinute),
+    /** Owner-defined rules (docs/stock-rules.md); evaluated after the quote checks. */
+    private rules?: RuleEngine,
   ) {}
   private async observe(
     item: { id: string; user_id: string },
@@ -613,6 +617,14 @@ export class StockMonitor {
     this.busy = true;
     try {
       const now = this.clock();
+      // Rule failures never affect daily-drop monitoring.
+      const rules = await this.rules
+        ?.beginTick(now)
+        .then(() => this.rules)
+        .catch((error) => {
+          opsLog("stock.rules_failed", "warn", errorFields(error));
+          return undefined;
+        });
       const items = (
         await this.db.query(
           `SELECT i.*,COALESCE(s.default_drop_pct,5) AS eff_drop,
@@ -674,6 +686,15 @@ export class StockMonitor {
             item.firstAfterGate = this.gated.delete(item.id);
             openItems.push(item);
             continue;
+          }
+          // A closed session may still owe its close-based rules one final check.
+          if (!sessionOpen && rules) {
+            const closing = await rules.closingDue(item, now).catch(() => null);
+            if (closing) {
+              item.closing = closing;
+              openItems.push(item);
+              continue;
+            }
           }
           // A gated check does not consume the poll cursor: the first tick
           // after the session or window opens polls at once rather than up to
@@ -739,6 +760,23 @@ export class StockMonitor {
                 await this.observe(item, "invalid", {
                   detail: { reason: "provider returned no quote" },
                 });
+                continue;
+              }
+              // A closing check only feeds close-based rules: the final regular-session
+              // quote for that date. Daily-drop monitoring never sees it.
+              if (item.closing) {
+                if (
+                  !q.marketOpen &&
+                  q.tradingDate === item.closing &&
+                  Number.isFinite(q.price) &&
+                  q.price > 0 &&
+                  (!q.currency || q.currency === item.currency)
+                )
+                  await rules
+                    ?.evaluate(item, q, now, "close")
+                    .catch((error) =>
+                      opsLog("stock.rules_failed", "warn", errorFields(error)),
+                    );
                 continue;
               }
               // Pick the session's own price and timestamp BEFORE checking
@@ -815,6 +853,12 @@ export class StockMonitor {
                 continue;
               }
               const changePct = verdict.changePct!;
+              if (q.marketOpen && !useExtended)
+                await rules
+                  ?.evaluate(item, basis, now, "intraday")
+                  .catch((error) =>
+                    opsLog("stock.rules_failed", "warn", errorFields(error)),
+                  );
               const tradingDate = useExtended
                 ? zoned(basisTime!, item.exchange_timezone).date
                 : q.tradingDate ||

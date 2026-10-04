@@ -68,6 +68,7 @@ export const readOperations = new Set([
   "subscription_list",
   "portfolio_read",
   "stock_lookup",
+  "stock_rule_list",
   "portfolio_status",
   "parcel_list",
   "parcel_match",

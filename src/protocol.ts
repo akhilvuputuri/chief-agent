@@ -314,6 +314,45 @@ export const action = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("watchlist_list") }).strict(),
   z
     .object({
+      operation: z.literal("stock_rule_add"),
+      scope: z.enum(["item", "holdings", "watchlist"]),
+      itemId: id.optional(),
+      direction: z.enum(["below", "above"]),
+      reference: z.enum([
+        "prev_close",
+        "avg_cost",
+        "avg_12w",
+        "avg_26w",
+        "avg_52w",
+        "low_12w",
+        "low_26w",
+        "low_52w",
+        "high_12w",
+        "high_26w",
+        "high_52w",
+        "all_time_low",
+        "all_time_high",
+      ]),
+      marginPct: z.number().min(0).max(90).optional(),
+      basis: z.enum(["intraday", "close"]),
+      notify: z.enum(["cross", "daily"]).optional(),
+      label: z.string().trim().min(1).max(200),
+    })
+    .strict(),
+  z.object({ operation: z.literal("stock_rule_list") }).strict(),
+  z
+    .object({
+      operation: z.literal("stock_rule_update"),
+      id,
+      status: z.enum(["active", "paused"]).optional(),
+      marginPct: z.number().min(0).max(90).optional(),
+      notify: z.enum(["cross", "daily"]).optional(),
+      label: z.string().trim().min(1).max(200).optional(),
+    })
+    .strict(),
+  z.object({ operation: z.literal("stock_rule_remove"), id }).strict(),
+  z
+    .object({
       operation: z.literal("stock_lookup"),
       query: z.string().trim().min(1).max(100).optional(),
       exchange: z.string().trim().min(1).max(100).optional(),

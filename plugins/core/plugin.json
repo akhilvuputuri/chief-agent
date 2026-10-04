@@ -134,7 +134,7 @@
     },
     {
       "id": "stocks",
-      "description": "Answer stock questions now (price, day change, 12/26/52-week averages, lows and highs, all-time low and high) and configure and report the stock watchlist: stocks, drop thresholds, pause/resume and Singapore-time monitoring windows.",
+      "description": "Answer stock questions now (price, day change, 12/26/52-week averages, lows and highs, all-time low and high), set up 'tell me when…' stock rules (below cost, averages, lows/highs, all-time levels, intraday or at the close), and configure and report the stock watchlist: stocks, drop thresholds, pause/resume and Singapore-time monitoring windows.",
       "instructions": "agents/stocks.md",
       "contract": "findings/v1",
       "tools": [
@@ -143,13 +143,17 @@
         "watchlist_remove",
         "watchlist_list",
         "watchlist_settings",
-        "stock_lookup"
+        "stock_lookup",
+        "stock_rule_add",
+        "stock_rule_list",
+        "stock_rule_update",
+        "stock_rule_remove"
       ],
       "skills": [],
       "limits": {
-        "ms": 60000,
-        "models": 6,
-        "tools": 10
+        "ms": 120000,
+        "models": 8,
+        "tools": 20
       },
       "model": "fast",
       "effort": "low"
