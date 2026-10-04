@@ -389,6 +389,20 @@ test("implicit Updates anchor ignores a newer post actually delivered in General
       threadId: 45,
     });
     assert.equal(anchor?.references?.[0]?.id, right);
+    assert.equal(
+      await inputAnchor(db, "owner", { topic: "coding", threadId: 45 }),
+      null,
+    );
+    assert.equal(
+      (
+        await inputAnchor(db, "owner", {
+          topic: "coding",
+          threadId: 45,
+          replyToMessageId: 601,
+        })
+      )?.references?.[0]?.id,
+      right,
+    );
   } finally {
     await pg.close();
   }

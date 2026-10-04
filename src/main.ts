@@ -11,7 +11,11 @@ import { CodeBuildSandbox } from "./coding/provider.js";
 import { GitHubPublisher } from "./coding/github.js";
 import { codingSettings } from "./coding/schema.js";
 import { codingApi } from "./coding/api.js";
-import { destination, taskDelivery } from "./delivery-routing.js";
+import {
+  destination,
+  taskDelivery,
+  workDestination,
+} from "./delivery-routing.js";
 import "./process-guard.js";
 import { errorFields, opsLog } from "./ops-log.js";
 import { RoutineScheduler, RoutineDelivery } from "./routines.js";
@@ -590,42 +594,39 @@ const responsibilityDelivery = responsibilities
               }`,
           )
           .join("\n\n");
-        return topics.deliver(
-          user,
-          { kind: "topic", topic: "updates" },
-          async (extra) =>
-            bot.api.sendMessage(user, reply, {
-              ...extra,
-              link_preview_options: { is_disabled: true },
-              reply_markup: {
-                inline_keyboard: members.flatMap((f: any) => [
-                  ...(c.MINIAPP_ORIGIN
-                    ? [
-                        [
-                          {
-                            text: "Details · " + f.spec.title.slice(0, 40),
-                            web_app: {
-                              url:
-                                c.MINIAPP_ORIGIN +
-                                "/miniapp/?view=responsibilities&responsibility=" +
-                                f.responsibility_id,
-                            },
+        return topics.deliver(user, { kind: "general" }, async (extra) =>
+          bot.api.sendMessage(user, reply, {
+            ...extra,
+            link_preview_options: { is_disabled: true },
+            reply_markup: {
+              inline_keyboard: members.flatMap((f: any) => [
+                ...(c.MINIAPP_ORIGIN
+                  ? [
+                      [
+                        {
+                          text: "Details · " + f.spec.title.slice(0, 40),
+                          web_app: {
+                            url:
+                              c.MINIAPP_ORIGIN +
+                              "/miniapp/?view=responsibilities&responsibility=" +
+                              f.responsibility_id,
                           },
-                        ],
-                      ]
-                    : []),
-                  [
-                    { text: "Useful", callback_data: `rsp:useful:${f.id}` },
-                    { text: "Later", callback_data: `rsp:later:${f.id}` },
-                    { text: "Resolved", callback_data: `rsp:resolved:${f.id}` },
-                    {
-                      text: "Less like this",
-                      callback_data: `rsp:less:${f.id}`,
-                    },
-                  ],
-                ]),
-              },
-            }),
+                        },
+                      ],
+                    ]
+                  : []),
+                [
+                  { text: "Useful", callback_data: `rsp:useful:${f.id}` },
+                  { text: "Later", callback_data: `rsp:later:${f.id}` },
+                  { text: "Resolved", callback_data: `rsp:resolved:${f.id}` },
+                  {
+                    text: "Less like this",
+                    callback_data: `rsp:less:${f.id}`,
+                  },
+                ],
+              ]),
+            },
+          }),
         );
       },
       undefined,
@@ -722,7 +723,7 @@ async function sendWorkMessage(user: string, text: string | Delivery) {
   const delivery: Delivery = typeof text === "string" ? { reply: text } : text;
   await topics.deliver(
     user,
-    delivery.destination ?? { kind: "general" },
+    workDestination(delivery),
     async (extra, notice) => {
       await views.deliver(
         user,
@@ -867,40 +868,34 @@ const routineTimer = setInterval(() => {
       opsLog("coding.tick_failed", "error", errorFields(error)),
     );
   void coding
-    ?.deliver(async (user, threadId, text, approvalId) => {
+    ?.deliver(async (user, target, text, approvalId) => {
       const parts = formatTelegram(text);
       let last;
       for (const [index, part] of parts.entries()) {
-        last = await topics.deliver(
-          user,
-          {
-            kind: threadId ? "thread" : "general",
-            ...(threadId ? { threadId } : {}),
-          } as import("./delivery-routing.js").Destination,
-          (extra) =>
-            bot.api.sendMessage(user, part.text, {
-              ...extra,
-              entities: part.entities,
-              link_preview_options: { is_disabled: true },
-              ...(approvalId && index === parts.length - 1
-                ? {
-                    reply_markup: {
-                      inline_keyboard: [
-                        [
-                          {
-                            text: "Approve requirements",
-                            callback_data: `cod:yes:${approvalId}`,
-                          },
-                          {
-                            text: "Request changes",
-                            callback_data: `cod:no:${approvalId}`,
-                          },
-                        ],
+        last = await topics.deliver(user, target, (extra) =>
+          bot.api.sendMessage(user, part.text, {
+            ...extra,
+            entities: part.entities,
+            link_preview_options: { is_disabled: true },
+            ...(approvalId && index === parts.length - 1
+              ? {
+                  reply_markup: {
+                    inline_keyboard: [
+                      [
+                        {
+                          text: "Approve requirements",
+                          callback_data: `cod:yes:${approvalId}`,
+                        },
+                        {
+                          text: "Request changes",
+                          callback_data: `cod:no:${approvalId}`,
+                        },
                       ],
-                    },
-                  }
-                : {}),
-            }),
+                    ],
+                  },
+                }
+              : {}),
+          }),
         );
       }
       return last;

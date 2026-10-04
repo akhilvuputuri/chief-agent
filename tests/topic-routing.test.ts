@@ -10,6 +10,7 @@ import {
   destination,
   slowReply,
   taskDelivery,
+  workDestination,
 } from "../src/delivery-routing.js";
 import { RoutineDelivery } from "../src/routines.js";
 import { randomUUID } from "node:crypto";
@@ -28,6 +29,31 @@ async function database() {
   return { pg, db };
 }
 
+test("queued background answers move to General while owner origins remain intact", () => {
+  assert.deepEqual(
+    workDestination({
+      reply: "Routine result",
+      sourceLabel: "From routine:",
+      destination: { kind: "thread", threadId: 42 },
+    }),
+    { kind: "general" },
+  );
+  assert.deepEqual(
+    workDestination({
+      reply: "Legacy result",
+      destination: { kind: "topic", topic: "updates" },
+    }),
+    { kind: "general" },
+  );
+  assert.deepEqual(
+    workDestination({
+      reply: "Owner result",
+      destination: { kind: "thread", threadId: 42 },
+    }),
+    { kind: "thread", threadId: 42 },
+  );
+});
+
 test("host destinations cover foreground, owner work, feeds, unprompted decisions and failures", () => {
   for (const kind of ["foreground", "owner_work"] as const) {
     assert.deepEqual(
@@ -39,8 +65,7 @@ test("host destinations cover foreground, owner work, feeds, unprompted decision
   for (const kind of ["news", "markets"] as const)
     assert.deepEqual(destination({ kind }), { kind: "topic", topic: kind });
   assert.deepEqual(destination({ kind: "unprompted", reason: "answer" }), {
-    kind: "topic",
-    topic: "updates",
+    kind: "general",
   });
   for (const reason of [
     "awaiting_user",

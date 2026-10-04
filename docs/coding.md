@@ -34,7 +34,7 @@ Only a candidate with passing `check`, `build`, `format:check`, a reviewer-model
 
 The worker review is a recorded report, not authority to merge. The public PR explicitly requires CI and independent approval of its published exact head under REVIEW.md. This milestone does not merge or deploy runtime-created PRs. Once publication has started, cancellation is refused until the uncertain/in-flight write is reconciled. Completed PRs are retained. A failed publication remains inspectable and is reconciled by later ticks rather than creating a second PR.
 
-Milestone updates and questions use an outbox. A send with unknown outcome becomes `uncertain`; restart recovery does not resend it. Owner status reads preserve the underlying result. Messages are bounded for Telegram and keep the host-recorded origin; model text cannot choose a delivery target. Revoked owners cannot use worker APIs or receive updates.
+Milestone updates and questions use an outbox. A send with unknown outcome becomes `uncertain`; restart recovery does not resend it. Owner status reads preserve the underlying result. Messages are bounded for Telegram. Host routing sends validated milestones to Coding and requirement briefs/decisions, questions, pauses/failures and completed PRs to General. The original job thread remains stored; model text cannot choose a delivery target. Revoked owners cannot use worker APIs or receive updates.
 
 ## Operator activation
 

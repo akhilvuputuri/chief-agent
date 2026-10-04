@@ -1130,12 +1130,12 @@ test("Chief dispatch returns to the conversation and worker delivery preserves t
     stage: "planning",
     summary: "Inspecting the fixture",
   });
-  let thread: number | undefined;
-  await f.c.deliver(async (user, threadId) => {
+  let target: unknown;
+  await f.c.deliver(async (user, destination) => {
     assert.equal(user, "a");
-    thread = threadId;
+    target = destination;
   });
-  assert.equal(thread, 17);
+  assert.deepEqual(target, { kind: "topic", topic: "coding" });
 });
 
 test("revocation preserves the publication fence until a lost PR acknowledgement is reconciled", async (t) => {
@@ -1774,14 +1774,16 @@ async function requirementBrief(
   let messageId = 100;
   let approvalId = "";
   let brief = "";
-  await f.c.deliver(async (_user, _thread, text, id) => {
+  await f.c.deliver(async (_user, target, text, id) => {
+    assert.deepEqual(target, { kind: "general" });
     if (id) {
       approvalId = id;
       brief = text;
     }
     return { message_id: ++messageId };
   });
-  await f.c.deliver(async (_user, _thread, text, id) => {
+  await f.c.deliver(async (_user, target, text, id) => {
+    assert.deepEqual(target, { kind: "general" });
     if (id) {
       approvalId = id;
       brief = text;
