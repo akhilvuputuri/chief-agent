@@ -1,3 +1,9 @@
+## Released v0.3.42 — coding model choices and scoped diagnostics
+
+[PR #172](https://github.com/akhilvuputuri/chief-agent/pull/172)/[PR #173](https://github.com/akhilvuputuri/chief-agent/pull/173) shipped [v0.3.42](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.42) at `1136126e8a86439aec84b94c27183b1d41d1f4ff`. Telegram can select leader/coder/reviewer models for future jobs within existing provider filters. The pinned Python 0.1.3 worker gives all three members bounded owner-scoped operational diagnostics through Chief, without production credentials or raw private content. Separate roles and one review loop remain intact.
+
+GPT-6 Astra approved exact implementation/pin heads `182fbdc`/`5118f28`; PR/main Linux CI and Devin passed. The [exact release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37524629358), separate server SHA/health/policy and read-only diagnostic/model-preference checks passed. Coding remains on with zero jobs. No DB/Compose migration or paid live acceptance ran. The integrated MR feedback/guarded merge framework remains off pending owner approval of additional App read scopes and a later reviewed selector; this milestone does not claim automatic merge activation. See [contract](coding-automation.md) and [journal closure](journey/64-coding-automation.md#verified-diagnosticmodel-milestone--7-october-2026).
+
 ## Released v0.3.41 — owner-defined stock rules
 
 - **What it adds ([PR #168](https://github.com/akhilvuputuri/chief-agent/pull/168), Phase 2b of the [stock rules plan](stock-rules.md)).** The stocks agent turns "tell me when…" requests into structured rules: one watched stock, every IBKR holding on the watchlist, or every watched stock; above or below the previous close, IBKR average cost, 12/26/52-week averages, lows and highs, or all-time levels; an optional margin; intraday or at the close.

@@ -1,6 +1,6 @@
 # 64 — One squad review, MR feedback and guarded merge
 
-Work date(s): 2026-10-07. Status: v0.3.42 candidate; independent review, final CI, image pin/App read-scope setup and exact release pending. Coding remains on at the preceding verified release; the automatic selector is not yet enabled.
+Work date(s): 2026-10-07. Status: v0.3.42 verified for model preferences and scoped Python diagnostics at `1136126e8a86439aec84b94c27183b1d41d1f4ff`. Coding remains on. Automatic MR repair/merge is implemented but off pending owner approval and installation of additional App read permissions.
 
 ## Preceding iteration and requirement
 
@@ -18,11 +18,11 @@ Owner model-role choices use append-only owner-scoped records and a live eligibl
 
 ## Verification and limits
 
-The first full local check passed 764 application tests, 50 script tests and 30 existing Python tests; one new Python test used the wrong Workspace.git return type and was corrected. The affected Python suite then passed 32 tests, including bounded log reads and shared-tool recovery; the existing 51 coding/controller/confirmation tests passed. Focused automation/telemetry tests passed, including actual encrypted reviewer-journal binding rather than trusting a worker report. Final full checks/review/deployment evidence will be appended after completion. These are synthetic correctness results, not coding-quality, model-cost or live merge measurements. No paid model/CodeBuild acceptance job has run.
+The first full local check passed 764 application tests, 50 script tests and 30 existing Python tests; one new Python test used the wrong Workspace.git return type and was corrected. The affected Python suite then passed 32 tests, including bounded log reads and shared-tool recovery; the existing 51 coding/controller/confirmation tests passed. Focused automation/telemetry tests passed, including actual encrypted reviewer-journal binding rather than trusting a worker report. Final review/check/deployment evidence is recorded below. These are synthetic correctness results, not coding-quality, model-cost or live merge measurements. No paid model/CodeBuild acceptance job has run.
 
 ## Next step
 
-Complete exact-head independent review/CI, release the implementation, publish the trusted Python image, obtain the App's additional read-only scope and pin image/automatic selector through a reviewed follow-up. Verify exact release, current health and effective policy. Then run a separately authorized live plan/confirmation/repair/merge cycle with actual cleanup/release evidence. The source default-off coding switch and existing paused-work boundaries remain intact.
+Obtain owner approval for the App's additional read-only Checks, Actions and Commit statuses scope, verify installed scoped reads, and activate the automatic selector through a reviewed config/release follow-up. Then run a separately authorized live plan/confirmation/repair/merge cycle with actual cleanup/release evidence. The source default-off coding switch and existing paused-work boundaries remain intact.
 
 ### Independent review/fix checkpoint — 7 October 2026
 
@@ -47,3 +47,11 @@ The reopened-thread fix passed 56 affected automation, GitHub, review-proof, fee
 ### Worker image follow-up — 7 October 2026
 
 The trusted-main [image publication](https://github.com/akhilvuputuri/chief-agent/actions/runs/37522280197) succeeded for `0cb710c2653324d8f4d99adf566b6fefa547dd6b`, Python package 0.1.3. Anonymous index/manifest/config verification confirms linux/amd64, non-root worker and `python -I -m chief_coding_runtime.worker` at `sha256:d4be34f01a98a82acf03635d3d44061c2488ed9ed0fbd9cda7b0c46b96f151c8`. The follow-up pins only that image; model/effort/allocation/price settings are unchanged and automatic merge remains absent pending owner approval for App read scopes. This enables the new logs_read tool when the pin is deployed. Exact pin-head review/checks and production verification remain required.
+
+### Verified diagnostic/model milestone — 7 October 2026
+
+Implementation [release 37523372761](https://github.com/akhilvuputuri/chief-agent/actions/runs/37523372761) verified `0cb710c2653324d8f4d99adf566b6fefa547dd6b`. [PR #173](https://github.com/akhilvuputuri/chief-agent/pull/173) pinned the image at `1136126e8a86439aec84b94c27183b1d41d1f4ff`; GPT-6 Astra [approved exact head](https://github.com/akhilvuputuri/chief-agent/pull/173#issuecomment-6024356740) `5118f284a7a26d87adbba768830dec2304db3dad`, independently verifying image publication/anonymous provenance and passing 51 focused tests. Both PRs passed Linux CI and Devin. The implementation's main check passed 785 application, 50 script, 30 existing Python and 32 coding-worker tests, build/format and disposable worker/browser/PostgreSQL checks. The pin's [main checks](https://github.com/akhilvuputuri/chief-agent/actions/runs/37523867523) and [exact release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37524629358) passed; its trusted receipt was recorded at 2026-10-06T20:14:10Z.
+
+Separate post-pin checks matched server RELEASE, healthy gateway/Postgres, coding on, migration 29, zero coding jobs and the new immutable worker digest. Models stayed DeepSeek V4.1 Flash for leader/coder and GPT-6.1 Sol for reviewer, high effort and shared allocations 900000 ms/40 model calls/100 tools. `autoMerge` remained false. A deployed-module diagnostic read over 60 minutes/limit 5 returned a bounded 453-byte response with zero matching runs/events/calls; this proves the read/query path, not historical incident coverage. The public log endpoint rejected an unauthenticated POST with HTTP 401. Owner-scoped model-preference reads returned all three valid roles without changing preferences. These checks printed only bounded technical metadata.
+
+[v0.3.42](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.42) tags the exact verified pin SHA. No DB/Compose or secret migration, additional App permission, automatic selector, model preference write, paid model/CodeBuild acceptance or live repair/merge cycle ran. The diagnostic worker and model tools are available; automatic merge activation remains the specific unresolved boundary. Full private incident traces and actual Telegram/sandbox behavior remain separate acceptance limits.
