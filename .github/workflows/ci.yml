@@ -36,5 +36,10 @@ jobs:
           docker build -t chief-gathering-app:test .
           docker run -d --name gathering-pg-proof --network=none --user postgres --read-only --tmpfs /tmp:size=256m,mode=1777 --tmpfs /var/run/postgresql:mode=1777 --memory=384m --pids-limit=96 --env PGDATA=/tmp/pgdata --env POSTGRES_USER=synthetic --env POSTGRES_PASSWORD=synthetic-only --env POSTGRES_DB=gathering_test postgres:17-alpine
           trap 'docker rm -f gathering-pg-proof >/dev/null' EXIT
-          for i in $(seq 1 30); do docker exec gathering-pg-proof pg_isready -U synthetic -d gathering_test && break; sleep 1; done
+          pg_ready=false
+          for i in $(seq 1 30); do
+            if docker exec gathering-pg-proof pg_isready -h 127.0.0.1 -U synthetic -d gathering_test; then pg_ready=true; break; fi
+            sleep 1
+          done
+          if [ "$pg_ready" != true ]; then echo 'Disposable PostgreSQL TCP readiness timed out' >&2; exit 1; fi
           docker run --rm --network=container:gathering-pg-proof --read-only --cap-drop=ALL --security-opt=no-new-privileges --memory=384m --pids-limit=96 --env GATHERING_TEST_DATABASE_URL=postgresql://synthetic:synthetic-only@127.0.0.1:5432/gathering_test --mount type=bind,source="$PWD/db",target=/app/db,readonly --mount type=bind,source="$PWD/scripts/gathering-postgres-smoke.mjs",target=/app/scripts/gathering-postgres-smoke.mjs,readonly --entrypoint node chief-gathering-app:test /app/scripts/gathering-postgres-smoke.mjs
