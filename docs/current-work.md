@@ -1,3 +1,7 @@
+# Coding activation — setup checkpoint, 6 October 2026
+
+At verified `2273e8c`, coding is still off. Owner AWS login is restored; the dedicated Singapore CodeBuild stack is provisioned with a policy-free worker role, and the explicitly approved publisher App is installed only on Chief. The App PEM download is pending owner recovery; scoped controller credentials, host configuration/ingress and live acceptance remain incomplete. No paid build/model run. Operator artifacts are under independent review. See [activation checkpoint](journey/61-coding-squad.md#activation-checkpoint--6-october-2026).
+
 # Owner-defined stock rules — released v0.3.41
 
 "Tell me when…" stock rules ([PR #168](https://github.com/akhilvuputuri/chief-agent/pull/168)) are live at `84149f9`, through reviewed migration 029. Rules for average cost need IBKR connected, which is still pending the owner's consent. Next: the Phase 2c daily digest. See [stock rules](stock-rules.md) and [journal 60](journey/60-stock-rules.md).
