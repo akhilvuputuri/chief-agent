@@ -74,6 +74,10 @@ class Squad:
             if previous and previous.scopeHash == scope_hash(a, self.saved.plan)
             else None
         )
+        if a.settings.autoMerge and self.recovered:
+            self.budget.tools = max(
+                0, a.settings.limits.tools - self.recovered.toolsUsed
+            )
         self.state = SquadState(
             sequence=1,
             revision=a.revision,
@@ -94,6 +98,7 @@ class Squad:
             "objective": self.a.objective,
             "context": self.a.context,
             "baseSha": self.a.baseSha,
+            "reviewFindings": self.recovered.findings if self.recovered else "",
             "mode": self.a.mode,
             "planPreview": self.saved.plan[:500],
             "summaryPreview": self.saved.summary[:500],
@@ -201,6 +206,7 @@ class Squad:
                 }
             )
             report = await coding_loop(
+                logs=lambda query: self.client.request("logs", query),
                 model=self.client.adapter("coder"),
                 workspace=self.workspace,
                 messages=self.coder_messages,
@@ -270,6 +276,7 @@ class Squad:
                 if artifact_hash(restored) != self.state.candidateHash:
                     raise ValueError("Reviewer checkout differs from candidate")
                 verdict = await coding_loop(
+                    logs=lambda query: self.client.request("logs", query),
                     model=self.client.adapter("reviewer"),
                     workspace=reviewer,
                     messages=[
@@ -349,6 +356,7 @@ class Squad:
                 },
             ]
             report = await coding_loop(
+                logs=lambda query: self.client.request("logs", query),
                 model=self.client.adapter("leader"),
                 workspace=self.workspace,
                 messages=messages,

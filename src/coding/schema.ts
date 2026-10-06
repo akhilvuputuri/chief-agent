@@ -35,12 +35,21 @@ export const codingResume = z
     requestKey: z.string().min(1).max(100),
   })
   .strict();
+export const codingModels = z
+  .object({
+    operation: z.literal("coding_models"),
+    role: z.enum(["leader", "coder", "reviewer"]).optional(),
+    model: z.string().min(1).max(120).optional(),
+    list: z.boolean().optional(),
+  })
+  .strict();
 export const codingAction = z.discriminatedUnion("operation", [
   codingStart,
   codingStatus,
   codingReply,
   codingCancel,
   codingResume,
+  codingModels,
 ]);
 export type CodingAction = z.infer<typeof codingAction>;
 
@@ -121,6 +130,7 @@ export const codingSettings = z
     reviewerModel: z.string().min(1).max(120),
     leaderModel: z.string().min(1).max(120).optional(),
     squad: z.boolean().optional(),
+    autoMerge: z.boolean().optional(),
     runtime: z.enum(["node", "python"]).optional(),
     effort: z.enum(["low", "medium", "high"]),
     limits: z

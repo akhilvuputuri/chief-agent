@@ -60,6 +60,7 @@ export async function codingApi(
         ["POST", "checkpoint"],
         ["POST", "finish"],
         ["POST", "model"],
+        ["POST", "logs"],
       ] as const) {
         api.route({
           method,
@@ -92,6 +93,7 @@ export async function codingApi(
                 return await controller.save(job, req.body);
               if (path === "finish")
                 return await controller.finish(job, req.body);
+              if (path === "logs") return await controller.logs(job, req.body);
               if (path === "model") {
                 if (Buffer.byteLength(JSON.stringify(req.body)) > 180000)
                   return reply.code(413).send({

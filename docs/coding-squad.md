@@ -29,3 +29,7 @@ After exact-head independent review and passing CI, use the reviewed idle operat
 ## Current activation — 7 October 2026
 
 Coding is **on** at verified production `2273e8c8eb6a81d764bc74c84016f3022750fa80` after the independently approved idle-only operator activation on 7 October. Deployed GitHub installation authentication, scoped CodeBuild project validation, gateway/Postgres health and public worker 401/unknown-path 404 checks passed. The Singapore worker role has no identity policies; the controller has only exact-project operations and exact-worker PassRole. Secrets stay on Chief, source defaults remain off, and jobs stop at a draft PR for owner review/merge. Zero jobs; paid/live plan→confirmation→candidate acceptance remains pending. See [journal evidence](journey/61-coding-squad.md#activation-verified--7-october-2026).
+
+## MR automation candidate
+
+The [automation contract](coding-automation.md) binds the configured independent squad review to the exact published artifact/head, without an unconditional final review. Feedback triggers repair and fresh review. Role-model preferences and owner-scoped operational diagnostics apply through the host; the image/selector rollout remains pending.

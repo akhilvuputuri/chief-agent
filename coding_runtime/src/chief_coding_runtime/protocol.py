@@ -206,6 +206,7 @@ class Settings(Record):
     reviewerModel: str
     leaderModel: str | None = None
     squad: bool = False
+    autoMerge: bool = False
     effort: Literal["low", "medium", "high"]
     limits: Limits
     runtime: Literal["node", "python"] = "node"

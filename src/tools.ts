@@ -134,6 +134,7 @@ export class JobTools {
       return this.gathering.call(user, run, gatheringAction.parse(a));
     }
     if (
+      a.operation === "coding_models" ||
       a.operation === "coding_start" ||
       a.operation === "coding_status" ||
       a.operation === "coding_reply" ||
