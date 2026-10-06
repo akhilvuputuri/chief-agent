@@ -135,6 +135,7 @@ export class JobTools {
     }
     if (
       a.operation === "coding_models" ||
+      a.operation === "coding_model_set" ||
       a.operation === "coding_start" ||
       a.operation === "coding_status" ||
       a.operation === "coding_reply" ||

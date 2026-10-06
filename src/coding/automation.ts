@@ -359,6 +359,36 @@ export class CodingAutomation {
         artifactHash(j.result.checkpoint),
         d.handled,
       );
+      // Feedback/check state can change without changing the Git SHA. Re-read after attestation.
+      const final = await this.repository.inspect(target);
+      if (
+        final.head !== d.head ||
+        final.tree !== d.tree ||
+        final.base !== j.base_sha ||
+        final.main !== j.base_sha ||
+        final.closed ||
+        final.merged
+      ) {
+        await this.manual(
+          j,
+          d,
+          "PR state changed before merge; inspect the new target.",
+        );
+        return;
+      }
+      if (
+        final.feedback.some((f) => !d.handled.includes(f.id)) ||
+        final.checks !== "passed" ||
+        final.mergeable !== true
+      ) {
+        await this.phase(
+          j,
+          d,
+          "awaiting_ci",
+          "New feedback or check changes arrived before merge; collecting them before any write.",
+        );
+        return;
+      }
       if (!this.allowed(j.user_id)) {
         await this.manual(j, d, "Owner access revoked before merge.");
         return;

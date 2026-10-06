@@ -38,9 +38,14 @@ export const codingResume = z
 export const codingModels = z
   .object({
     operation: z.literal("coding_models"),
-    role: z.enum(["leader", "coder", "reviewer"]).optional(),
-    model: z.string().min(1).max(120).optional(),
     list: z.boolean().optional(),
+  })
+  .strict();
+export const codingModelSet = z
+  .object({
+    operation: z.literal("coding_model_set"),
+    role: z.enum(["leader", "coder", "reviewer"]),
+    model: z.string().min(1).max(120),
   })
   .strict();
 export const codingAction = z.discriminatedUnion("operation", [
@@ -50,6 +55,7 @@ export const codingAction = z.discriminatedUnion("operation", [
   codingCancel,
   codingResume,
   codingModels,
+  codingModelSet,
 ]);
 export type CodingAction = z.infer<typeof codingAction>;
 

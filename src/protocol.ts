@@ -57,6 +57,7 @@ import {
   codingCancel,
   codingResume,
   codingModels,
+  codingModelSet,
 } from "./coding/schema.js";
 const id = z.string().uuid();
 // Singapore-time monitoring window; end < start runs past midnight, 24:00 = end of day.
@@ -489,6 +490,7 @@ export const action = z.discriminatedUnion("operation", [
   codingCancel,
   codingResume,
   codingModels,
+  codingModelSet,
   responsibilityCreate,
   responsibilityUpdate,
   responsibilityList,

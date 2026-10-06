@@ -1,3 +1,4 @@
+import { Execution, recoverRuntime } from "../src/execution.js";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -188,6 +189,8 @@ for (const scenario of [
   "python-runtime",
   "plugin-registry",
   "runtime-policy",
+  "security-control",
+  "plugin-execution",
 ]) {
   test(`${scenario} invalidation never merges`, async (t) => {
     const f = await fixture(t);
@@ -203,6 +206,8 @@ for (const scenario of [
         "python-runtime",
         "plugin-registry",
         "runtime-policy",
+        "security-control",
+        "plugin-execution",
       ].includes(scenario)
     ) {
       const r = structuredClone(f.result);
@@ -213,7 +218,11 @@ for (const scenario of [
             ? "plugins/registry.json"
             : scenario === "runtime-policy"
               ? "src/model-policy.ts"
-              : "src/coding/automation.ts";
+              : scenario === "security-control"
+                ? "src/security.ts"
+                : scenario === "plugin-execution"
+                  ? "src/plugin-execution.ts"
+                  : "src/coding/automation.ts";
       await f.db.query("UPDATE coding_jobs SET result=$2::jsonb WHERE id=$1", [
         f.id,
         JSON.stringify(r),
@@ -401,7 +410,7 @@ test("oversized aggregate feedback is batched without marking unseen comments ha
   assert.deepEqual(budget.handled, ["seen"]);
   assert(!(await f.job()).checkpoint.squadState!.findings.includes("BBBB"));
 });
-for (const scenario of ["valid", "forged", "uncertain"]) {
+for (const scenario of ["valid", "forged", "uncertain", "incomplete-plan"]) {
   test(`host reviewer journal ${scenario} controls approval independently of worker report`, async (t) => {
     const f = await fixture(t);
     const publisher = {
@@ -467,13 +476,47 @@ for (const scenario of ["valid", "forged", "uncertain"]) {
             context: j.context,
             baseSha: j.base_sha,
             handoff: {
+              id: "review-handoff",
               recipient: "reviewer",
               candidateHash: artifactHash(j.result.checkpoint),
             },
           }),
         },
+        ...(scenario === "incomplete-plan"
+          ? []
+          : [
+              {
+                role: "assistant" as const,
+                content: null,
+                tool_calls: [
+                  {
+                    id: "plan-page",
+                    type: "function" as const,
+                    function: {
+                      name: "plan_read",
+                      arguments: JSON.stringify({ offset: 0 }),
+                    },
+                  },
+                ],
+              },
+              {
+                role: "tool" as const,
+                tool_call_id: "plan-page",
+                content: JSON.stringify({
+                  text: j.checkpoint.plan,
+                  nextOffset: null,
+                }),
+              },
+            ]),
       ],
-      tools: [{ name: "file_read", description: "Read only", parameters: {} }],
+      tools: [
+        {
+          name: "plan_read",
+          description: "Read approved plan",
+          parameters: {},
+        },
+        { name: "file_read", description: "Read only", parameters: {} },
+      ],
     });
     await f.db.query("UPDATE coding_jobs SET state='pr_ready' WHERE id=$1", [
       f.id,
@@ -553,4 +596,53 @@ test("ordinary approved drafts become ready before waiting for Devin, without gr
   f.setInspection({ checks: "passed" });
   await f.auto.tick();
   assert.equal(f.counts().merges, 1);
+});
+
+test("model preference reads remain interrupted reads after restart; sets remain uncertain writes", async (t) => {
+  const f = await fixture(t);
+  for (const op of ["coding_models", "coding_model_set"]) {
+    const run = randomUUID();
+    await f.db.query(
+      "INSERT INTO runtime_runs(id,user_id,state) VALUES($1,'owner','running')",
+      [run],
+    );
+    const ex = new Execution(f.db, "owner", run, new AbortController().signal);
+    await ex.beginCall("fixture", op, {
+      raw: JSON.stringify(
+        op === "coding_models"
+          ? { list: true }
+          : { role: "coder", model: "fixture/coder" },
+      ),
+    });
+  }
+  await recoverRuntime(f.db);
+  const rows = (
+    await f.db.query(
+      "SELECT operation,is_write,state FROM runtime_calls WHERE operation IN ('coding_models','coding_model_set') ORDER BY operation",
+    )
+  ).rows;
+  assert.deepEqual(rows, [
+    { operation: "coding_model_set", is_write: true, state: "uncertain" },
+    { operation: "coding_models", is_write: false, state: "interrupted" },
+  ]);
+});
+test("new feedback arriving during attestation prevents merge and returns to the coder", async (t) => {
+  const f = await fixture(t);
+  f.setInspection({ checks: "passed" });
+  const original = f.repository.attest;
+  f.repository.attest = async () => {
+    await original();
+    f.setInspection({
+      feedback: [{ id: "new-comment", text: "Required late fix" }],
+    });
+  };
+  await f.auto.tick();
+  assert.equal(f.counts().merges, 0);
+  assert.equal((await f.job()).stage, "awaiting_ci");
+  await f.auto.tick();
+  assert.equal((await f.job()).state, "queued");
+  assert.match(
+    (await f.job()).checkpoint.squadState!.findings,
+    /Required late fix/,
+  );
 });

@@ -1,3 +1,4 @@
+import { reviewMetadata, completePlanDelivered } from "./review-proof.js";
 import { CodingAutomation } from "./automation.js";
 import { codingDiagnostics } from "./diagnostics.js";
 import {
@@ -114,47 +115,32 @@ export class CodingController {
     return codingDiagnostics(this.db, job.user_id, raw);
   }
   private async hasReviewerProof(job: CodingJob) {
-    const call = (
+    const calls = (
       await this.db.query(
-        "SELECT id,state,input,result_box FROM coding_model_calls WHERE job_id=$1 AND attempt_id=$2 AND role='reviewer' ORDER BY created_at DESC,id DESC LIMIT 1",
-        [job.id, job.attempt_id],
+        "SELECT id,state,input,result_box FROM coding_model_calls WHERE job_id=$1 AND attempt_id=$2 AND role='reviewer' ORDER BY created_at DESC,id DESC LIMIT $3",
+        [job.id, job.attempt_id, job.settings.limits.models],
       )
-    ).rows[0];
+    ).rows;
+    const call = calls[0];
+    if (call?.state !== "complete" || !call.result_box) return false;
+    const handoff = reviewMetadata(call.input, job);
     if (
-      call?.state !== "complete" ||
-      !call?.result_box ||
-      call.input.tools.some(
-        (t: any) =>
-          ![
-            "file_read",
-            "plan_read",
-            "command",
-            "report",
-            "logs_read",
-          ].includes(t.name),
+      !handoff ||
+      !completePlanDelivered(
+        calls
+          .filter(
+            (c) =>
+              c.state === "complete" &&
+              reviewMetadata(c.input, job) === handoff,
+          )
+          .map((c) => c.input),
+        job.result.checkpoint.plan,
       )
-    )
-      return false;
-    const metadata = call.input.messages.find((m: any) => m.role === "user");
-    let brief: any;
-    try {
-      brief = JSON.parse(metadata.content);
-    } catch {
-      return false;
-    }
-    const hash = artifactHash(job.result.checkpoint);
-    if (
-      brief.handoff?.recipient !== "reviewer" ||
-      brief.handoff?.candidateHash !== hash ||
-      brief.baseSha !== job.base_sha ||
-      brief.objective !== scrubTrace(job.objective) ||
-      brief.context !== scrubTrace(job.context)
     )
       return false;
     const response = JSON.parse(
       open(this.resultKey(), call.result_box, this.resultScope(job, call.id)),
     );
-    if (call.input.requestedModel !== job.settings.reviewerModel) return false;
     return (
       response.message?.tool_calls?.some((c: any) => {
         if (c.function?.name !== "report") return false;
@@ -244,27 +230,20 @@ export class CodingController {
     const a = codingAction.parse(raw);
     if (a.operation === "coding_status") return this.status(user, a.id);
     await this.foreground(user, run);
+    if (a.operation === "coding_model_set") {
+      if (!this.catalog) throw new Error("Coding model catalog unavailable");
+      return setModelPreference(
+        this.db,
+        user,
+        this.settings,
+        a.role,
+        a.model,
+        this.catalog,
+        this.priceFilters.input,
+        this.priceFilters.output,
+      );
+    }
     if (a.operation === "coding_models") {
-      if (
-        (a.role === undefined) !== (a.model === undefined) ||
-        (a.list && a.model)
-      )
-        throw new Error(
-          "Set one role/model, list choices, or read preferences",
-        );
-      if (a.model && a.role) {
-        if (!this.catalog) throw new Error("Coding model catalog unavailable");
-        return setModelPreference(
-          this.db,
-          user,
-          this.settings,
-          a.role,
-          a.model,
-          this.catalog,
-          this.priceFilters.input,
-          this.priceFilters.output,
-        );
-      }
       const preferences = await modelPreferences(this.db, user, this.settings);
       return {
         preferences,

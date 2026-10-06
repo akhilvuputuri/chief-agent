@@ -183,7 +183,9 @@ export function runtimeContext(
               gather_browser:
                 "Open a granted billing entry page, observe invoice links, follow an opaque observed link or request an owner login handoff. No selectors, arbitrary JavaScript, credentials, forms, payments, cancellations or other account actions. The owner controls login through the authenticated browser view, optionally remembers it, confirms the expected invoice count, and explicitly continues the task.",
               coding_models:
-                "Read the owner's leader/coder/reviewer model preferences or list eligible models. On an explicit owner request, set one role to an exact catalog model ID. Changes apply only to new coding jobs; running and approved jobs retain their settings. Provider price filters are unchanged and ineligible models are rejected. Do not change preferences on your own.",
+                "Read the owner's coding leader/coder/reviewer model preferences or list eligible models. This operation is read-only; use coding_model_set for an explicit owner-requested change.",
+              coding_model_set:
+                "On an explicit owner request, set one coding role to an exact eligible OpenRouter catalog model ID. Changes apply only to new jobs; running/approved jobs retain their snapshot. Provider price filters are unchanged. Do not change preferences on your own.",
               coding_start:
                 "On an explicit owner request to plan or implement a Chief code change, dispatch a durable job in a separate on-demand sandbox. Include the exact objective and relevant evidence; Every new job starts with a requirement brief. Chief asks clarifications and delivers the complete brief for owner confirmation before Python implementation; an implement request still starts planning. Never treat model arguments as approval. Reuse requestKey only for retries of the identical request. Returns promptly; job execution is independent of this conversation. Never claim a PR or deployment from dispatch alone.",
               coding_status:
