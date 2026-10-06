@@ -74,7 +74,15 @@ function fixture() {
       };
     throw Error("Unexpected fixture request " + path);
   };
-  const graph = async () => {
+  const graph = async (query: string) => {
+    if (query.startsWith("query"))
+      return {
+        repository: {
+          pullRequest: {
+            reviewThreads: { pageInfo: { hasNextPage: false }, nodes: [] },
+          },
+        },
+      };
     writes.push({ ready: true });
     return {
       markPullRequestReadyForReview: { pullRequest: { isDraft: false } },

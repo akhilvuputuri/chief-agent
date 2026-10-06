@@ -1,3 +1,4 @@
+import { activeInlineComments } from "./mr-feedback.js";
 import { createHash } from "node:crypto";
 import { MergeRefused } from "./merge-policy.js";
 import type {
@@ -132,9 +133,31 @@ export class GitHubAutomation implements PrAutomationRepository {
       )
     )
       throw new Error("Feedback exceeds inspection bound");
+    const [owner, name] = this.repository.split("/");
+    const threads = await this.graphql(
+      "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){pageInfo{hasNextPage}nodes{isResolved comments(first:100){pageInfo{hasNextPage}nodes{databaseId}}}}}}}",
+      { owner, name, number: this.number(t) },
+    );
+    const collection = threads.repository?.pullRequest?.reviewThreads;
+    if (
+      !collection ||
+      collection.pageInfo?.hasNextPage ||
+      !Array.isArray(collection.nodes) ||
+      collection.nodes.some(
+        (n: any) =>
+          n.comments?.pageInfo?.hasNextPage ||
+          !Array.isArray(n.comments?.nodes),
+      )
+    )
+      throw new Error("Review thread state is unavailable or exceeds bounds");
+    const resolved = new Set<number>(
+      collection.nodes
+        .filter((n: any) => n.isResolved === true)
+        .flatMap((n: any) => n.comments.nodes.map((c: any) => c.databaseId)),
+    );
     for (const c of [
       ...comments,
-      ...inline,
+      ...activeInlineComments(inline, resolved),
       ...reviews.filter(
         (r: any) => r.state !== "PENDING" && r.commit_id === t.head,
       ),
