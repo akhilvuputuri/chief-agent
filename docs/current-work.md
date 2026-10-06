@@ -1,3 +1,7 @@
+# Coding activation — enabled, 7 October 2026
+
+Coding is **on** at verified production `2273e8c8eb6a81d764bc74c84016f3022750fa80` after the independently approved idle-only operator activation on 7 October. Deployed GitHub installation authentication, scoped CodeBuild project validation, gateway/Postgres health and public worker 401/unknown-path 404 checks passed. The Singapore worker role has no identity policies; the controller has only exact-project operations and exact-worker PassRole. Secrets stay on Chief, source defaults remain off, and jobs stop at a draft PR for owner review/merge. Zero jobs; paid/live plan→confirmation→candidate acceptance remains pending. See [activation evidence](journey/61-coding-squad.md#activation-verified--7-october-2026).
+
 # Owner-defined stock rules — released v0.3.41
 
 "Tell me when…" stock rules ([PR #168](https://github.com/akhilvuputuri/chief-agent/pull/168)) are live at `84149f9`, through reviewed migration 029. Rules for average cost need IBKR connected, which is still pending the owner's consent. Next: the Phase 2c daily digest. See [stock rules](stock-rules.md) and [journal 60](journey/60-stock-rules.md).

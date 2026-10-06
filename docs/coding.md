@@ -36,6 +36,10 @@ The worker review is a recorded report, not authority to merge. The public PR ex
 
 Milestone updates and questions use an outbox. A send with unknown outcome becomes `uncertain`; restart recovery does not resend it. Owner status reads preserve the underlying result. Messages are bounded for Telegram. Host routing sends validated milestones to Coding and requirement briefs/decisions, questions, pauses/failures and completed PRs to General. The original job thread remains stored; model text cannot choose a delivery target. Revoked owners cannot use worker APIs or receive updates.
 
+## Current activation — 7 October 2026
+
+Coding is **on** at verified production `2273e8c8eb6a81d764bc74c84016f3022750fa80` after the independently approved idle-only operator activation on 7 October. Deployed GitHub installation authentication, scoped CodeBuild project validation, gateway/Postgres health and public worker 401/unknown-path 404 checks passed. The Singapore worker role has no identity policies; the controller has only exact-project operations and exact-worker PassRole. Secrets stay on Chief, source defaults remain off, and jobs stop at a draft PR for owner review/merge. Zero jobs; paid/live plan→confirmation→candidate acceptance remains pending. See [journal evidence](journey/61-coding-squad.md#activation-verified--7-october-2026). No runtime-created PR is automatically merged or deployed. New jobs still plan first and require the owner’s exact requirement confirmation.
+
 ## Operator activation
 
 The default is off. The code and migration can ship before provider activation. Live sandbox execution additionally requires all of these reviewed setup steps:
