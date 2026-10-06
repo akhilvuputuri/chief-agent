@@ -114,6 +114,7 @@ async def run_worker(
         round_number = 0
         while True:
             report = await coding_loop(
+                logs=lambda query: client.request("logs", query),
                 model=client.adapter("coder"),
                 workspace=w,
                 messages=messages,
@@ -185,6 +186,7 @@ async def run_worker(
                 await checkout(reviewer, a.settings.repository, a.baseSha, saved)
                 await reviewer.git("add", "-A")
                 verdict = await coding_loop(
+                    logs=lambda query: client.request("logs", query),
                     model=client.adapter("reviewer"),
                     workspace=reviewer,
                     mode="review",

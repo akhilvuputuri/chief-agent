@@ -15,3 +15,7 @@ An approval is a bounded claim about an exact commit. State the reviewed SHA, ac
 - For GitHub workflows, inspect event trust, permissions, exact commit identity, injection paths, checkout origin and failure/cancellation handling. Never execute PR-controlled code with privileged workflow secrets to make review easier.
 
 Every finding needs a concrete trigger, the incorrect outcome and a code location. Discuss disagreements with evidence. An unavailable paid/live check is a stated limitation, not fabricated validation. Automated Devin Review supplements the independent feature reviewer; neither guarantees absence of bugs.
+
+## Owned squad publication binding
+
+For the owner-authorized fixed coding squad, one configured reviewer loop is accepted under the bounded AGENTS.md exception. Chief binds the approved artifact to its exact published Git tree/head and checks its host-journalled reviewer result. New MR/CI feedback returns to the coder and fresh squad review. The deterministic publication/check/merge gates are not another model review. Model/provider price filters and shared allocations remain intact; a selected model is not evidence of measured quality. Other development retains the most-capable fresh reviewer requirement. See [the automation contract](docs/coding-automation.md).

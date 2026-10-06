@@ -302,6 +302,37 @@ class SquadTests(unittest.IsolatedAsyncioTestCase):
             result["checkpoint"]["squadState"]["handoff"]["recipient"], "coder"
         )
 
+    async def test_automatic_feedback_cannot_reset_the_shared_tool_allocation(self):
+        self.assignment.settings.autoMerge = True
+        self.assignment.usedModels = 29
+        self.assignment.checkpoint.squadState = SquadState(
+            sequence=5,
+            revision=1,
+            attemptId=str(uuid4()),
+            scopeHash=scope_hash(self.assignment, self.assignment.checkpoint.plan),
+            phase="rework",
+            candidateVersion=1,
+            candidateHash=artifact_hash(self.assignment.checkpoint),
+            toolsUsed=99,
+            findings="MR feedback: handle the recorded edge case",
+        )
+
+        def model(body):
+            self.assertEqual(
+                body["role"], "leader", "Tool allocation was reset and coder ran"
+            )
+            return httpx.Response(
+                200,
+                json=response(
+                    ("assign_coder", {"instructions": "Handle the MR feedback"})
+                ),
+            )
+
+        result = await self.run_case(model)
+        self.assertEqual(result["kind"], "paused")
+        self.assertEqual(len(self.inputs["coder"]), 0)
+        self.assertGreaterEqual(result["checkpoint"]["squadState"]["toolsUsed"], 99)
+
     async def test_all_members_share_one_model_and_tool_allocation(self):
         self.assignment.settings.limits.models = 1
 

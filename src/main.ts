@@ -376,6 +376,8 @@ if (c.CODING_RUNTIME === "on") {
       c.CODING_GITHUB_INSTALLATION_ID,
       c.CODING_GITHUB_PRIVATE_KEY,
       { name: c.CODING_COMMIT_NAME, email: c.CODING_COMMIT_EMAIL },
+      undefined,
+      settings.autoMerge === true,
     ),
     c.CODING_AUTH_KEY,
     c.CODING_PUBLIC_ORIGIN,
@@ -387,6 +389,32 @@ if (c.CODING_RUNTIME === "on") {
         c.OPENROUTER_MAX_INPUT_PRICE,
         c.OPENROUTER_MAX_OUTPUT_PRICE,
       ),
+    undefined,
+    async () => {
+      const response = await fetch("https://openrouter.ai/api/v1/models", {
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!response.ok) throw new Error("Coding model catalog unavailable");
+      const result: any = await response.json();
+      if (!Array.isArray(result.data))
+        throw new Error("Invalid coding model catalog");
+      return result.data
+        .filter((m: any) => typeof m.id === "string" && m.id.length <= 120)
+        .map((m: any) => ({
+          id: m.id,
+          inputPrice: Number(m.pricing?.prompt) * 1e6,
+          outputPrice: Number(m.pricing?.completion) * 1e6,
+          tools:
+            Array.isArray(m.supported_parameters) &&
+            m.supported_parameters.includes("tools") &&
+            (m.supported_parameters.includes("reasoning") ||
+              m.supported_parameters.includes("reasoning_effort")),
+        }));
+    },
+    {
+      input: c.OPENROUTER_MAX_INPUT_PRICE,
+      output: c.OPENROUTER_MAX_OUTPUT_PRICE,
+    },
   );
 }
 // Read-only IBKR holdings (issue #146): off unless explicitly enabled with its migration.
@@ -935,6 +963,11 @@ await ruleDelivery.recover();
 await newsBulletin.recover();
 await coding?.recoverDelivery();
 const routineTimer = setInterval(() => {
+  void coding
+    ?.automationTick()
+    .catch((error) =>
+      opsLog("coding.automation_failed", "error", errorFields(error)),
+    );
   void coding
     ?.tick()
     .catch((error) =>

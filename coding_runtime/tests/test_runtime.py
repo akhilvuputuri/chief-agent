@@ -81,6 +81,56 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
             "fixture",
         )
 
+    async def test_readonly_logs_use_gateway_and_shared_tool_budget(self):
+        model = ScriptedModel(
+            generation(("logs_read", {"minutes": 15, "limit": 5})),
+            generation(report("plan_ready", plan="Investigate the recorded failure")),
+        )
+        queries = []
+
+        async def logs(query):
+            queries.append(query)
+            return {"events": [{"httpStatus": 429}], "bounded": True}
+
+        budget = Budget(2, 3)
+        result = await coding_loop(
+            model=model,
+            workspace=self.w,
+            messages=[{"role": "system", "content": "Read only"}],
+            mode="plan",
+            budget=budget,
+            stop=self.stop,
+            checkpoint=lambda: asyncio.sleep(0),
+            logs=logs,
+        )
+        self.assertEqual(result.kind, "plan_ready")
+        self.assertEqual(queries, [{"minutes": 15, "limit": 5}])
+        self.assertEqual(budget.tools, 1)
+        self.assertIn("429", model.inputs[1][-1]["content"])
+        self.assertEqual(await self.w.git("status", "--short"), b"")
+
+    async def test_invalid_log_window_never_calls_gateway(self):
+        model = ScriptedModel(
+            generation(("logs_read", {"minutes": 1441})),
+            generation(
+                report("plan_ready", plan="Ask for a supported incident window")
+            ),
+        )
+
+        async def logs(query):
+            self.fail("Invalid log request reached gateway")
+
+        await coding_loop(
+            model=model,
+            workspace=self.w,
+            messages=[],
+            mode="plan",
+            budget=Budget(2, 3),
+            stop=self.stop,
+            checkpoint=lambda: asyncio.sleep(0),
+            logs=logs,
+        )
+
     async def loop(self, model, mode="review", plan="", budget=None):
         return await coding_loop(
             model=model,

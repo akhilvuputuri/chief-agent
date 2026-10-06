@@ -40,6 +40,7 @@ export const readOperations = new Set([
   "job_alignment_input",
   "work_status",
   "coding_status",
+  "coding_models",
   "gather_status",
   "gather_progress",
   "gather_search",

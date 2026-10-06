@@ -1,3 +1,11 @@
+import { reviewMetadata, completePlanDelivered } from "./review-proof.js";
+import { CodingAutomation } from "./automation.js";
+import { codingDiagnostics } from "./diagnostics.js";
+import {
+  modelPreferences,
+  setModelPreference,
+  type CodingCatalog,
+} from "./model-settings.js";
 import { assertSquadCheckpoint } from "./squad-state.js";
 import { codingDestination } from "./delivery-routing.js";
 import { CodingRequirements, requirementScope } from "./requirements.js";
@@ -58,6 +66,7 @@ export class CodingController {
   readonly requirements: CodingRequirements;
   private ticking = false;
   private delivering = false;
+  private automation?: CodingAutomation;
   private inFlightModels = new Map<
     string,
     { jobId: string; controller: AbortController }
@@ -76,8 +85,18 @@ export class CodingController {
     private allowed: (user: string) => boolean,
     private models: (model: string) => ModelAdapter,
     private clock: () => Date = () => new Date(),
+    private catalog?: CodingCatalog,
+    private priceFilters = { input: 2, output: 10 },
   ) {
     this.requirements = new CodingRequirements(db, allowed, clock);
+    if (settings.autoMerge && publisher.automation)
+      this.automation = new CodingAutomation(
+        db,
+        publisher.automation(),
+        allowed,
+        (job) => this.hasReviewerProof(job),
+        clock,
+      );
     if (!/^[a-f0-9]{64}$/i.test(authKey))
       throw new Error(
         "Coding authentication key must be 64 hexadecimal characters",
@@ -90,6 +109,54 @@ export class CodingController {
       url.password
     )
       throw new Error("Coding origin must be an HTTPS origin");
+  }
+  async logs(job: CodingJob, raw: unknown) {
+    if (!this.allowed(job.user_id)) throw new Error("Owner unavailable");
+    return codingDiagnostics(this.db, job.user_id, raw);
+  }
+  private async hasReviewerProof(job: CodingJob) {
+    const calls = (
+      await this.db.query(
+        "SELECT id,state,input,result_box FROM coding_model_calls WHERE job_id=$1 AND attempt_id=$2 AND role='reviewer' ORDER BY created_at DESC,id DESC LIMIT $3",
+        [job.id, job.attempt_id, job.settings.limits.models],
+      )
+    ).rows;
+    const call = calls[0];
+    if (call?.state !== "complete" || !call.result_box) return false;
+    const handoff = reviewMetadata(call.input, job);
+    if (
+      !handoff ||
+      !completePlanDelivered(
+        calls
+          .filter(
+            (c) =>
+              c.state === "complete" &&
+              reviewMetadata(c.input, job) === handoff,
+          )
+          .map((c) => c.input),
+        job.result.checkpoint.plan,
+      )
+    )
+      return false;
+    const response = JSON.parse(
+      open(this.resultKey(), call.result_box, this.resultScope(job, call.id)),
+    );
+    return (
+      response.message?.tool_calls?.some((c: any) => {
+        if (c.function?.name !== "report") return false;
+        try {
+          const r = JSON.parse(c.function.arguments);
+          return (
+            r.kind === "APPROVE" && r.summary === job.result.review?.findings
+          );
+        } catch {
+          return false;
+        }
+      }) ?? false
+    );
+  }
+  async automationTick() {
+    await this.automation?.tick();
   }
   token(jobId: string, attemptId: string) {
     return createHmac("sha256", Buffer.from(this.authKey, "hex"))
@@ -163,6 +230,45 @@ export class CodingController {
     const a = codingAction.parse(raw);
     if (a.operation === "coding_status") return this.status(user, a.id);
     await this.foreground(user, run);
+    if (a.operation === "coding_model_set") {
+      if (!this.catalog) throw new Error("Coding model catalog unavailable");
+      return setModelPreference(
+        this.db,
+        user,
+        this.settings,
+        a.role,
+        a.model,
+        this.catalog,
+        this.priceFilters.input,
+        this.priceFilters.output,
+      );
+    }
+    if (a.operation === "coding_models") {
+      const preferences = await modelPreferences(this.db, user, this.settings);
+      return {
+        preferences,
+        appliesTo: "new jobs only",
+        bounded: true,
+        notice:
+          "The catalog shows up to 100 eligible models; setting an exact ID validates the full live catalog. Running jobs retain their model snapshot.",
+        ...(a.list
+          ? {
+              models: ((await this.catalog?.()) ?? [])
+                .filter(
+                  (m) =>
+                    m.tools &&
+                    Number.isFinite(m.inputPrice) &&
+                    Number.isFinite(m.outputPrice) &&
+                    m.inputPrice >= 0 &&
+                    m.outputPrice >= 0 &&
+                    m.inputPrice <= this.priceFilters.input &&
+                    m.outputPrice <= this.priceFilters.output,
+                )
+                .slice(0, 100),
+            }
+          : {}),
+      };
+    }
     if (a.operation === "coding_start") {
       assertCodingBrief(a.objective, a.context);
       if (!this.settings.image)
@@ -188,6 +294,15 @@ export class CodingController {
       const base = await this.publisher.resolve();
       if (!/^[a-f0-9]{40}$/.test(base))
         throw new Error("Repository base identity unavailable");
+      const preferred = await modelPreferences(this.db, user, this.settings);
+      const selected = {
+        ...this.settings,
+        leaderModel: this.settings.squad
+          ? preferred.leader
+          : this.settings.leaderModel,
+        model: preferred.coder,
+        reviewerModel: preferred.reviewer,
+      };
       const id = randomUUID();
       const made = await this.db.query(
         `WITH made AS (
@@ -205,7 +320,7 @@ export class CodingController {
           a.context,
           "plan",
           base,
-          JSON.stringify(this.settings),
+          JSON.stringify(selected),
         ],
       );
       if (!made.rows.length) {
@@ -233,7 +348,7 @@ export class CodingController {
           "PR publication is in flight or uncertain; inspect its result before cancelling",
         );
       await this.db.query(
-        `WITH changed AS (UPDATE coding_jobs SET state='cancelled',summary='Cancelled by the owner',cleanup=CASE WHEN attempt_id IS NULL THEN cleanup ELSE 'pending' END,updated_at=now() WHERE id=$1 AND user_id=$2 AND state NOT IN ('cancelled','pr_ready') AND NOT (state='publishing' AND publication_started) RETURNING id)
+        `WITH changed AS (UPDATE coding_jobs SET state='cancelled',summary='Cancelled by the owner',cleanup=CASE WHEN attempt_id IS NULL THEN cleanup ELSE 'pending' END,updated_at=now() WHERE id=$1 AND user_id=$2 AND state!='cancelled' AND (state!='pr_ready' OR (settings->>'autoMerge'='true' AND stage NOT IN ('merging','release_pending','deployed'))) AND NOT (state='publishing' AND publication_started) RETURNING id)
         INSERT INTO coding_events(job_id,event_key,payload) SELECT id,'cancelled',jsonb_build_object('summary','Coding job cancelled; sandbox cleanup is tracked separately.') FROM changed ON CONFLICT DO NOTHING`,
         [a.id, user],
       );
@@ -362,9 +477,16 @@ export class CodingController {
     };
   }
   async heartbeat(job: CodingJob) {
+    const feedback = (
+      await this.db.query(
+        "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key=$2",
+        [job.id, `feedback:${job.revision}`],
+      )
+    ).rows[0]?.payload;
+    const activeMs = feedback?.remainingMs ?? job.settings.limits.ms;
     const update = await this.db.query(
-      "UPDATE coding_jobs SET heartbeat_at=$3,attempt_deadline=CASE WHEN state='provisioning' THEN $3::timestamptz + ((settings->'limits'->>'ms')::bigint * interval '1 millisecond') ELSE attempt_deadline END,state='running',updated_at=now() WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') RETURNING id",
-      [job.id, job.attempt_id, this.clock()],
+      "UPDATE coding_jobs SET heartbeat_at=$3,attempt_deadline=CASE WHEN state='provisioning' THEN $3::timestamptz + ($4::bigint * interval '1 millisecond') ELSE attempt_deadline END,state='running',updated_at=now() WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') RETURNING id",
+      [job.id, job.attempt_id, this.clock(), activeMs],
     );
     if (!update.rows.length) throw new Error("Worker attempt superseded");
     return { accepted: true };
@@ -569,7 +691,15 @@ export class CodingController {
           input.callId,
           input.role,
           hash(input),
-          JSON.stringify(scrubTrace(input)),
+          JSON.stringify({
+            ...scrubTrace(input),
+            requestedModel:
+              input.role === "reviewer"
+                ? job.settings.reviewerModel
+                : input.role === "leader"
+                  ? (job.settings.leaderModel ?? job.settings.model)
+                  : job.settings.model,
+          }),
         ],
       );
       if (!claimed.rows.length)
@@ -791,10 +921,25 @@ export class CodingController {
         if (!fresh) return;
         const published = await this.publisher.publish(fresh);
         await this.db.query(
-          `WITH changed AS (UPDATE coding_jobs SET state='pr_ready',stage='pr_ready',pr_url=$2,head_sha=$3,summary='Draft PR prepared; CI and independent review of its head remain required',updated_at=now() WHERE id=$1 AND state='publishing' RETURNING id)
-          INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$4,jsonb_build_object('summary','Draft PR prepared; CI and independent review remain required.','url',$2::text) FROM changed ON CONFLICT DO NOTHING`,
-          [j.id, published.url, published.head, `${j.attempt_id}:pr`],
+          `WITH changed AS (UPDATE coding_jobs SET state='pr_ready',stage='pr_ready',pr_url=$2,head_sha=$3,summary=$6,updated_at=now() WHERE id=$1 AND state='publishing' RETURNING id)
+          INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$4,jsonb_build_object('summary',$6::text,'url',$2::text,'tree',$5::text) FROM changed ON CONFLICT DO NOTHING`,
+          [
+            j.id,
+            published.url,
+            published.head,
+            `${j.attempt_id}:pr`,
+            published.tree ?? null,
+            j.settings.autoMerge
+              ? "Draft PR prepared; checking CI, Devin and MR feedback before guarded merge."
+              : "Draft PR prepared; CI and independent review of its head remain required.",
+          ],
         );
+        if (j.settings.autoMerge && published.tree) {
+          await this.automation?.start(
+            { ...fresh, head_sha: published.head, pr_url: published.url },
+            published.tree,
+          );
+        }
       } else if (j.state === "publishing") {
         await this.db.query(
           "UPDATE coding_jobs SET state='paused',summary='Owner access revoked; inspect any uncertain PR publication before resuming',updated_at=now() WHERE id=$1 AND state='publishing'",
@@ -872,6 +1017,9 @@ export class CodingController {
               ? e.payload.question.slice(0, 2000)
               : undefined,
             e.payload.url,
+            req
+              ? `Models: leader ${j.settings.leaderModel ?? j.settings.model}; coder ${j.settings.model}; reviewer ${j.settings.reviewerModel}. Publication: ${j.settings.autoMerge ? "ordinary changes may merge after exact-artifact review and GitHub checks; protected changes stop for explicit review" : "draft PR for owner review"}.`
+              : undefined,
             req
               ? `Requirements — revision ${req.revision}\n\n${req.plan}\n\nApprove these requirements, or reply directly to this message with yes. To revise them, tell Chief what to change. Confirmation expires in 15 minutes.`
               : undefined,

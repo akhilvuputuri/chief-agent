@@ -1,3 +1,4 @@
+import { GitHubAutomation } from "./github-automation.js";
 import { createHash, createSign } from "node:crypto";
 import type { Checkpoint, Outcome } from "./schema.js";
 
@@ -58,10 +59,13 @@ export interface RepositoryPublisher {
       base_sha: string;
       objective: string;
       result: Outcome;
-      settings: { repository: string };
+      settings: { repository: string; autoMerge?: boolean };
+      pr_url?: string;
+      head_sha?: string;
     },
     signal?: AbortSignal,
-  ): Promise<{ url: string; head: string }>;
+  ): Promise<{ url: string; head: string; tree?: string }>;
+  automation?: () => import("./merge-policy.js").PrAutomationRepository;
 }
 
 /** The installation credential never crosses the worker boundary. */
@@ -74,6 +78,7 @@ export class GitHubPublisher implements RepositoryPublisher {
     private privateKey: string,
     private author: { name: string; email: string },
     private transport: typeof fetch = fetch,
+    private automationEnabled = false,
   ) {
     if (!author.name.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(author.email))
       throw new Error("Human commit identity must be configured");
@@ -104,7 +109,13 @@ export class GitHubPublisher implements RepositoryPublisher {
         },
         body: JSON.stringify({
           repositories: [this.repository.split("/")[1]],
-          permissions: { contents: "write", pull_requests: "write" },
+          permissions: {
+            contents: "write",
+            pull_requests: "write",
+            ...(this.automationEnabled
+              ? { checks: "read", actions: "read", statuses: "read" }
+              : {}),
+          },
         }),
       },
     );
@@ -144,8 +155,37 @@ export class GitHubPublisher implements RepositoryPublisher {
       },
     );
     if (!response.ok)
-      throw new Error(`GitHub repository request failed (${response.status})`);
+      throw Object.assign(
+        new Error(`GitHub repository request failed (${response.status})`),
+        { httpStatus: response.status },
+      );
     return response.json() as Promise<any>;
+  }
+  automation() {
+    if (!this.automationEnabled) throw new Error("Automatic merge is disabled");
+    return new GitHubAutomation(
+      this.repository,
+      (path, method, body, signal) => this.api(path, method, body, signal),
+      async (query, variables) => {
+        const response = await this.transport(
+          "https://api.github.com/graphql",
+          {
+            method: "POST",
+            signal: AbortSignal.timeout(20000),
+            headers: {
+              Authorization: `Bearer ${await this.credential()}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ query, variables }),
+          },
+        );
+        if (!response.ok) throw new Error("GitHub readiness request failed");
+        const result: any = await response.json();
+        if (result.errors?.length || !result.data)
+          throw new Error("GitHub readiness acknowledgement uncertain");
+        return result.data;
+      },
+    );
   }
   async resolve() {
     const ref = await this.api("git/ref/heads/main");
@@ -160,13 +200,38 @@ export class GitHubPublisher implements RepositoryPublisher {
     if (j.settings.repository !== this.repository)
       throw new Error("Repository not allowed");
     validateFiles(j.result.checkpoint.files);
-    const branch = `chief/coding-${j.id}-r${j.revision}`;
-    const existing = await this.api(
-      `pulls?state=all&head=${encodeURIComponent(this.repository.split("/")[0] + ":" + branch)}&base=main`,
-      "GET",
-      undefined,
-      signal,
-    );
+    let branch = `chief/coding-${j.id}-r${j.revision}`;
+    let continuation: any;
+    if (j.pr_url) {
+      const prefix = `https://github.com/${this.repository}/pull/`;
+      if (
+        !j.pr_url.startsWith(prefix) ||
+        !/^[1-9][0-9]*$/.test(j.pr_url.slice(prefix.length)) ||
+        !/^[a-f0-9]{40}$/.test(j.head_sha ?? "")
+      )
+        throw new Error("Invalid PR continuation");
+      continuation = await this.api(`pulls/${j.pr_url.slice(prefix.length)}`);
+      if (
+        continuation.state !== "open" ||
+        continuation.head?.repo?.full_name !== this.repository ||
+        continuation.base?.repo?.full_name !== this.repository ||
+        continuation.base?.ref !== "main" ||
+        continuation.base.sha !== j.base_sha ||
+        !new RegExp(`^chief/coding-${j.id}-r[1-9][0-9]*$`).test(
+          continuation.head?.ref ?? "",
+        )
+      )
+        throw new Error("PR continuation identity changed");
+      branch = continuation.head.ref;
+    }
+    const existing = continuation
+      ? []
+      : await this.api(
+          `pulls?state=all&head=${encodeURIComponent(this.repository.split("/")[0] + ":" + branch)}&base=main`,
+          "GET",
+          undefined,
+          signal,
+        );
     if (existing.length) {
       if (
         existing.length !== 1 ||
@@ -210,6 +275,29 @@ export class GitHubPublisher implements RepositoryPublisher {
       { base_tree: commit.tree.sha, tree },
       signal,
     );
+    if (continuation && continuation.head.sha === j.head_sha) {
+      const current = await this.api(`git/commits/${j.head_sha}`);
+      if (current.tree?.sha === newTree.sha)
+        return {
+          url: j.pr_url!,
+          head: j.head_sha!,
+          tree: newTree.sha as string,
+        };
+    }
+    if (continuation && continuation.head.sha !== j.head_sha) {
+      const current = await this.api(`git/commits/${continuation.head.sha}`);
+      if (
+        current.tree?.sha !== newTree.sha ||
+        current.parents?.length !== 1 ||
+        current.parents[0].sha !== j.head_sha
+      )
+        throw new Error("PR continuation was changed externally");
+      return {
+        url: j.pr_url!,
+        head: continuation.head.sha as string,
+        tree: newTree.sha as string,
+      };
+    }
     if (existing.length) {
       const head = await this.api(
         `git/commits/${existing[0].head.sha}`,
@@ -230,6 +318,7 @@ export class GitHubPublisher implements RepositoryPublisher {
       return {
         url: String(existing[0].html_url),
         head: String(existing[0].head.sha),
+        tree: String(newTree.sha),
       };
     }
     const newCommit = await this.api(
@@ -238,13 +327,35 @@ export class GitHubPublisher implements RepositoryPublisher {
       {
         message: `Coding job ${j.id}: proposed change`,
         tree: newTree.sha,
-        parents: [j.base_sha],
+        parents: [continuation ? j.head_sha : j.base_sha],
         author: this.author,
         committer: this.author,
         // Commit identity is the human repository owner, configured by the operator.
       },
       signal,
     );
+    if (continuation) {
+      try {
+        await this.api(
+          `git/refs/heads/${branch}`,
+          "PATCH",
+          { sha: newCommit.sha, force: false },
+          signal,
+        );
+      } catch {
+        const ref = await this.api(`git/ref/heads/${branch}`);
+        if (ref.object?.sha !== newCommit.sha)
+          throw new Error("PR update uncertain; reconcile before retry");
+      }
+      const latest = await this.api(`pulls/${j.pr_url!.split("/").at(-1)}`);
+      if (latest.head?.sha !== newCommit.sha)
+        throw new Error("PR update identity unavailable");
+      return {
+        url: j.pr_url!,
+        head: newCommit.sha as string,
+        tree: newTree.sha as string,
+      };
+    }
     // No force update. Reconcile a lost create-ref acknowledgement against the exact tree.
     try {
       await this.api(
@@ -281,7 +392,7 @@ export class GitHubPublisher implements RepositoryPublisher {
         head: branch,
         base: "main",
         draft: true,
-        body: `Prepared by Chief's isolated coding runtime.\n\nBase: \`${j.base_sha}\`\nArtifact: \`${artifactHash(j.result.checkpoint)}\`\n\nSandbox checks: ${j.result.checks.map((c) => `${c.command}: exit ${c.exitCode}`).join(", ")}.\n\nSandbox review: ${j.result.review?.verdict ?? "unavailable"} (${j.result.review?.model ?? "unknown"}). This is a worker report; independent review of the published head and CI are still required.\n\nPrivate request, traces and command output are retained outside this public PR.`,
+        body: `Prepared by Chief's isolated coding runtime.\n\nBase: \`${j.base_sha}\`\nArtifact: \`${artifactHash(j.result.checkpoint)}\`\n\nSandbox checks: ${j.result.checks.map((c) => `${c.command}: exit ${c.exitCode}`).join(", ")}.\n\nSandbox review: ${j.result.review?.verdict ?? "unavailable"} (${j.result.review?.model ?? "unknown"}). ${j.settings.autoMerge ? "Chief binds this independent squad review to the verified published Git tree and exact head; CI and MR feedback remain merge gates. There is no additional final review when the candidate is unchanged." : "This is a worker report; independent review of the published head and CI are still required."}\n\nPrivate request, traces and command output are retained outside this public PR.`,
       },
       signal,
     );
@@ -290,6 +401,10 @@ export class GitHubPublisher implements RepositoryPublisher {
       pr.head.sha !== newCommit.sha
     )
       throw new Error("Published PR identity unavailable");
-    return { url: pr.html_url as string, head: newCommit.sha as string };
+    return {
+      url: pr.html_url as string,
+      head: newCommit.sha as string,
+      tree: newTree.sha as string,
+    };
   }
 }

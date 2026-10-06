@@ -519,6 +519,22 @@ const projections: Record<string, Projection> = {
   ],
 };
 
+/** Read-only projection for bounded private diagnostics; never logs raw payloads. */
+export function projectEventRecord(
+  type: string,
+  run: string,
+  data: Record<string, unknown>,
+) {
+  const projection = projections[type];
+  if (!projection) return null;
+  try {
+    const result = projection(run, data);
+    return result ? sanitize(type, result[0], result[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Called after an events row is written. Unlisted types are not logged. */
 export function projectEvent(
   type: string,
