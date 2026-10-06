@@ -322,7 +322,11 @@ export class CodingAutomation {
         );
         return;
       }
-      if (i.checks !== "passed" || i.mergeable !== true) {
+      if (
+        i.checks !== "passed" ||
+        i.mergeable !== true ||
+        (i.unresolvedThreads ?? 0) > 0
+      ) {
         if (this.now().getTime() - Date.parse(d.waitingSince) > 3600000)
           await this.manual(
             j,
@@ -334,7 +338,9 @@ export class CodingAutomation {
             j,
             d,
             "awaiting_ci",
-            "Waiting for exact-head CI, Devin and mergeability.",
+            (i.unresolvedThreads ?? 0) > 0
+              ? "Waiting for the reviewer to resolve outstanding GitHub threads; merge remains blocked."
+              : "Waiting for exact-head CI, Devin and mergeability.",
           );
         return;
       }
@@ -379,7 +385,8 @@ export class CodingAutomation {
       if (
         final.feedback.some((f) => !d.handled.includes(f.id)) ||
         final.checks !== "passed" ||
-        final.mergeable !== true
+        final.mergeable !== true ||
+        (final.unresolvedThreads ?? 0) > 0
       ) {
         await this.phase(
           j,

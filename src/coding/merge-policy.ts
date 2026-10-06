@@ -45,6 +45,7 @@ export type PrInspection = {
   mergeable: boolean | null;
   checks: "pending" | "passed" | "failed";
   feedback: { id: string; text: string }[];
+  unresolvedThreads?: number;
 };
 export type MergeTarget = {
   id: string;

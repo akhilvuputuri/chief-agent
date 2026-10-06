@@ -150,6 +150,9 @@ export class GitHubAutomation implements PrAutomationRepository {
       )
     )
       throw new Error("Review thread state is unavailable or exceeds bounds");
+    result.unresolvedThreads = collection.nodes.filter(
+      (n: any) => n.isResolved !== true,
+    ).length;
     const resolved = new Set<number>(
       collection.nodes
         .filter((n: any) => n.isResolved === true)

@@ -646,3 +646,11 @@ test("new feedback arriving during attestation prevents merge and returns to the
     /Required late fix/,
   );
 });
+
+test("a reopened thread blocks merge even when its comment fingerprint was handled before", async (t) => {
+  const f = await fixture(t);
+  f.setInspection({ checks: "passed", feedback: [], unresolvedThreads: 1 });
+  await f.auto.tick();
+  assert.equal(f.counts().merges, 0);
+  assert.equal((await f.job()).stage, "awaiting_ci");
+});

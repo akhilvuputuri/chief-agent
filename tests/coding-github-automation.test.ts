@@ -74,12 +74,16 @@ function fixture() {
       };
     throw Error("Unexpected fixture request " + path);
   };
+  let threadNodes: any[] = [];
   const graph = async (query: string) => {
     if (query.startsWith("query"))
       return {
         repository: {
           pullRequest: {
-            reviewThreads: { pageInfo: { hasNextPage: false }, nodes: [] },
+            reviewThreads: {
+              pageInfo: { hasNextPage: false },
+              nodes: threadNodes,
+            },
           },
         },
       };
@@ -99,6 +103,7 @@ function fixture() {
     reviews,
     writes,
     gh,
+    setThreads: (nodes: any[]) => (threadNodes = nodes),
     setStatuses: (s: any[]) => (statuses = s),
     setRuns: (r: any[]) => (runs = r),
   };
@@ -188,4 +193,47 @@ test("merge reconciliation verifies the same head and returns the existing merge
   assert.equal(f.writes.length, 0);
   f.pr.head.sha = "e".repeat(40);
   await assert.rejects(f.gh.merge(f.t), /Different head/);
+});
+
+test("an explicitly reopened thread remains feedback despite old Devin resolved replies", async () => {
+  const f = fixture();
+  f.inline.push(
+    {
+      id: 1,
+      body: "Required finding",
+      updated_at: "2026-10-07T00:00:00Z",
+      user: { login: "devin-ai-integration[bot]" },
+    },
+    {
+      id: 2,
+      in_reply_to_id: 1,
+      body: "✅ **Resolved**: historical",
+      created_at: "2026-10-07T00:01:00Z",
+      user: { login: "devin-ai-integration[bot]" },
+    },
+  );
+  f.setThreads([
+    {
+      isResolved: false,
+      comments: {
+        pageInfo: { hasNextPage: false },
+        nodes: [{ databaseId: 1 }, { databaseId: 2 }],
+      },
+    },
+  ]);
+  let i = await f.gh.inspect(f.t);
+  assert.equal(i.feedback.length, 2);
+  assert.equal(i.unresolvedThreads, 1);
+  f.setThreads([
+    {
+      isResolved: true,
+      comments: {
+        pageInfo: { hasNextPage: false },
+        nodes: [{ databaseId: 1 }, { databaseId: 2 }],
+      },
+    },
+  ]);
+  i = await f.gh.inspect(f.t);
+  assert.equal(i.feedback.length, 0);
+  assert.equal(i.unresolvedThreads, 0);
 });
