@@ -23,3 +23,7 @@ The first full local check passed 764 application tests, 50 script tests and 30 
 ## Next step
 
 Complete exact-head independent review/CI, release the implementation, publish the trusted Python image, obtain the App's additional read-only scope and pin image/automatic selector through a reviewed follow-up. Verify exact release, current health and effective policy. Then run a separately authorized live plan/confirmation/repair/merge cycle with actual cleanup/release evidence. The source default-off coding switch and existing paused-work boundaries remain intact.
+
+### Independent review/fix checkpoint — 7 October 2026
+
+GPT-6 Astra REQUESTED CHANGES at `91cc27d924248ad26843c5b0e439081177882022`: the protected-path gate omitted Python execution/isolation/approval/dependency code and the plugin capability registry; an independent full automation reproduction merged a worker.py change. It also reproduced a row-limited diagnostic read incorrectly reporting no truncation. The fixes protect the complete coding_runtime/plugins trees and runtime/model policy owners, and query an extra row with per-category hasMore flags while retaining the byte bound. New full-path automation and event/call/run cap regressions cover both findings. The original full local check subsequently passed 769 application, 50 script, 30 existing Python and 32 worker tests; affected fixes and a new exact-head review remain required. No automatic selector or App permission was enabled from the rejected head.

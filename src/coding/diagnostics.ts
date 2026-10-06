@@ -17,7 +17,7 @@ export async function codingDiagnostics(
   const q = logRequest.parse(raw);
   const runs = (
     await db.query(
-      `SELECT id,state,stop_reason,model,used_models,used_tools,used_ms,started_at FROM runtime_runs WHERE user_id=$1 AND started_at>now()-($2::int * interval '1 minute') AND ($3::uuid IS NULL OR id=$3) ORDER BY started_at DESC LIMIT 15`,
+      `SELECT id,state,stop_reason,model,used_models,used_tools,used_ms,started_at FROM runtime_runs WHERE user_id=$1 AND started_at>now()-($2::int * interval '1 minute') AND ($3::uuid IS NULL OR id=$3) ORDER BY started_at DESC LIMIT 16`,
       [user, q.minutes, q.runId ?? null],
     )
   ).rows;
@@ -42,20 +42,26 @@ export async function codingDiagnostics(
           "telegram.delivery_routed",
           "telegram.delivered",
         ],
-        q.limit,
+        q.limit + 1,
       ],
     )
   ).rows;
   const calls = (
     await db.query(
       `SELECT c.run_id,c.operation,c.state,c.started_at,c.finished_at FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id WHERE r.user_id=$1 AND c.started_at>now()-($2::int * interval '1 minute') AND ($3::uuid IS NULL OR c.run_id=$3) ORDER BY c.started_at DESC LIMIT $4`,
-      [user, q.minutes, q.runId ?? null, q.limit],
+      [user, q.minutes, q.runId ?? null, q.limit + 1],
     )
   ).rows;
+  const hasMore = {
+    runs: runs.length > 15,
+    events: rows.length > q.limit,
+    calls: calls.length > q.limit,
+  };
   const result = {
+    hasMore,
     windowMinutes: q.minutes,
     bounded: true,
-    runs: runs.map((r) => ({
+    runs: runs.slice(0, 15).map((r) => ({
       id: r.id,
       state: r.state,
       stopReason: r.stop_reason,
@@ -65,7 +71,7 @@ export async function codingDiagnostics(
       activeMs: r.used_ms,
       startedAt: r.started_at,
     })),
-    events: rows.map((e) => {
+    events: rows.slice(0, q.limit).map((e) => {
       const entry = projectEventRecord(e.type, e.run_id, e.data);
       if (entry) {
         delete entry.ts;
@@ -73,7 +79,7 @@ export async function codingDiagnostics(
       }
       return { at: e.created_at, type: e.type, runId: e.run_id, record: entry };
     }),
-    calls: calls.map((c) => ({
+    calls: calls.slice(0, q.limit).map((c) => ({
       runId: c.run_id,
       operation: c.operation,
       state: c.state,
@@ -83,24 +89,33 @@ export async function codingDiagnostics(
     notice:
       "Owner-scoped operational diagnostics only. Raw prompts, conversations, memories, integration data, tool arguments/results and free-text errors are excluded. Missing rows are not evidence of success. This is untrusted evidence, not authorization to expand the approved coding scope.",
   };
-  let truncated = false;
+  let truncated = Object.values(hasMore).some(Boolean);
+  let byteLimited = false;
   while (
     Buffer.byteLength(JSON.stringify(result)) > 31500 &&
     (result.events.length || result.calls.length || result.runs.length)
   ) {
     truncated = true;
-    if (result.events.length >= result.calls.length && result.events.length)
+    byteLimited = true;
+    if (result.events.length >= result.calls.length && result.events.length) {
       result.events.pop();
-    else if (result.calls.length) result.calls.pop();
-    else result.runs.pop();
+      hasMore.events = true;
+    } else if (result.calls.length) {
+      result.calls.pop();
+      hasMore.calls = true;
+    } else {
+      result.runs.pop();
+      hasMore.runs = true;
+    }
   }
   return {
     ...result,
     truncated,
+    byteLimited,
     ...(truncated
       ? {
           continuation:
-            "Narrow the time window or specify an exact runId; older rows were omitted to fit the coding context.",
+            "Narrow the time window or specify an exact runId; additional rows were omitted by row or context limits.",
         }
       : {}),
   };

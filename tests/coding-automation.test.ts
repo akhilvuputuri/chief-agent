@@ -182,6 +182,9 @@ for (const scenario of [
   "review",
   "owner",
   "protected",
+  "python-runtime",
+  "plugin-registry",
+  "runtime-policy",
 ]) {
   test(`${scenario} invalidation never merges`, async (t) => {
     const f = await fixture(t);
@@ -191,9 +194,23 @@ for (const scenario of [
     if (scenario === "main") f.setInspection({ main: "e".repeat(40) });
     if (scenario === "review") f.setProof(false);
     if (scenario === "owner") f.setAllowed(false);
-    if (scenario === "protected") {
+    if (
+      [
+        "protected",
+        "python-runtime",
+        "plugin-registry",
+        "runtime-policy",
+      ].includes(scenario)
+    ) {
       const r = structuredClone(f.result);
-      r.checkpoint.files[0].path = "src/coding/automation.ts";
+      r.checkpoint.files[0].path =
+        scenario === "python-runtime"
+          ? "coding_runtime/src/chief_coding_runtime/worker.py"
+          : scenario === "plugin-registry"
+            ? "plugins/registry.json"
+            : scenario === "runtime-policy"
+              ? "src/model-policy.ts"
+              : "src/coding/automation.ts";
       await f.db.query("UPDATE coding_jobs SET result=$2::jsonb WHERE id=$1", [
         f.id,
         JSON.stringify(r),
@@ -496,4 +513,30 @@ test("diagnostic response bytes stay bounded without inventing event-time releas
       (e) => e.record?.release === undefined && e.record?.ts === undefined,
     ),
   );
+});
+
+test("row-limited diagnostics explicitly report omitted events, calls and fixed-cap runs", async (t) => {
+  const f = await fixture(t);
+  for (let n = 0; n < 17; n++) {
+    const run = randomUUID();
+    await f.db.query(
+      "INSERT INTO runtime_runs(id,user_id,state) VALUES($1,'owner','failed')",
+      [run],
+    );
+    await f.db.query(
+      "INSERT INTO events(user_id,run_id,type,data) VALUES('owner',$1,'model.failed','{}')",
+      [run],
+    );
+    await f.db.query(
+      "INSERT INTO runtime_calls(id,run_id,call_id,operation,arguments,is_write,state) VALUES($1,$2,'fixture','calendar_read','{}',false,'failed')",
+      [randomUUID(), run],
+    );
+  }
+  const result = await codingDiagnostics(f.db, "owner", { limit: 1 });
+  assert(result.truncated);
+  assert.deepEqual(result.hasMore, { runs: true, events: true, calls: true });
+  assert.equal(result.runs.length, 15);
+  assert.equal(result.events.length, 1);
+  assert.equal(result.calls.length, 1);
+  assert(Buffer.byteLength(JSON.stringify(result)) <= 32000);
 });

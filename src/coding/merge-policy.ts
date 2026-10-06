@@ -4,12 +4,14 @@ import { artifactHash } from "./github.js";
 /** Operator-reviewed boundary. A model cannot widen it through task instructions. */
 export function protectedMergePath(path: string) {
   return (
-    /^(?:\.github|db|deploy|scripts|config|evals)(?:\/|$)/.test(path) ||
+    /^(?:\.github|db|deploy|scripts|config|evals|coding_runtime|plugins)(?:\/|$)/.test(
+      path,
+    ) ||
     /^(?:AGENTS\.md|REVIEW\.md|compose(?:\..+)?\.ya?ml|Dockerfile(?:\..+)?|package(?:-lock)?\.json)$/.test(
       path,
     ) ||
     path.split("/").some((p) => p.startsWith(".env") && p !== ".env.example") ||
-    /^src\/(?:coding\/|browser\/|main\.ts$|config\.ts$|model\.ts$|server\.ts$|process-guard\.ts$|ops-log\.ts$|trace-scrub\.ts$|tools\.ts$|protocol\.ts$|execution\.ts$|agent\.ts$|custom-agent\.ts$|telegram\.ts$|history\.ts$|db\.ts$|plugins\.ts$|miniapp\.ts$|gathering\/(?:api|vault|sessions)\.ts$|ibkr\/)/.test(
+    /^src\/(?:coding\/|browser\/|main\.ts$|config\.ts$|model\.ts$|server\.ts$|process-guard\.ts$|ops-log\.ts$|trace-scrub\.ts$|tools\.ts$|protocol\.ts$|execution\.ts$|runtime\.ts$|model-policy\.ts$|agent\.ts$|custom-agent\.ts$|telegram\.ts$|history\.ts$|db\.ts$|plugins\.ts$|miniapp\.ts$|gathering\/(?:api|vault|sessions)\.ts$|ibkr\/)/.test(
       path,
     ) ||
     /(?:^|\/)[^/]*(?:auth|secret|credential|permission|approval|actions)[^/]*\.[cm]?[jt]s$/.test(
