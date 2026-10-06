@@ -1,6 +1,6 @@
-# Coding automation — v0.3.42 candidate
+# Coding diagnostics and models — released v0.3.42; automatic merge pending permission
 
-One independent squad review bound to the exact published tree/head, MR feedback repair, guarded ordinary-change merge/release, Telegram model preferences and bounded owner-scoped diagnostics. Price filters and shared allocations preserved. Implementation [PR #172](https://github.com/akhilvuputuri/chief-agent/pull/172) is integrated at `0cb710c` with exact-head Astra approval and passing Linux/Devin checks. Main release and Python 0.1.3 image pin are pending. App read scopes await owner approval; coding stays on with draft-only settings until separately enabled. See [contract](coding-automation.md) and [journal 64](journey/64-coding-automation.md).
+[v0.3.42](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.42) is verified at `1136126e8a86439aec84b94c27183b1d41d1f4ff`: Telegram role-model preferences and Python 0.1.3 scoped diagnostics are available; coding stays on. The one-review MR repair/merge implementation is integrated, but automatic merge remains off while additional read-only App scopes await owner approval. Models, effort, allocations and price filters are unchanged; zero coding jobs and no paid/live acceptance. See [contract](coding-automation.md) and [journal 64](journey/64-coding-automation.md).
 
 # Coding activation — enabled, 7 October 2026
 
