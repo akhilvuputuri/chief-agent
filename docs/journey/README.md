@@ -67,7 +67,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 3–4 October | [60 — Stock questions, rules and digests](60-stock-rules.md): how can one stock agent answer, watch and report on the owner's own stock questions? | Phase 2a v0.3.37; rules (2b) released v0.3.41; digest (2c) planned |
 
 | 4 October | [63 — Coding topic](63-coding-topic.md): where should milestones and key updates arrive? | v0.3.40 reviewed/released; healthy, Coding renamed on the same thread, live coding off |
-| 4–6 October | [61 — Fixed coding squad](61-coding-squad.md): who coordinates coder/reviewer handoffs while code enforces approval? | v0.3.38 verified; activation project/App setup underway, PEM/host setup pending, coding off |
+| 4–7 October | [61 — Fixed coding squad](61-coding-squad.md): who coordinates coder/reviewer handoffs while code enforces approval? | v0.3.38 verified; coding enabled at 2273e8c with scoped auth/project/ingress checks, paid/live acceptance pending |
 | 3–4 October | [62 — Durable gathering](62-gathering-harness.md): how can source selection, private files and coverage survive long tasks? | Released v0.3.39, enabled; exact receipt, sandbox/PG proofs and preservation verified; provider acceptance pending |
 
 ## Connected case studies

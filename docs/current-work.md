@@ -1,6 +1,6 @@
-# Coding activation — setup checkpoint, 6 October 2026
+# Coding activation — enabled, 7 October 2026
 
-At verified `2273e8c`, coding is still off. Owner AWS login is restored; the dedicated Singapore CodeBuild stack is provisioned with a policy-free worker role, and the explicitly approved publisher App is installed only on Chief. The App PEM download is pending owner recovery; scoped controller credentials, host configuration/ingress and live acceptance remain incomplete. No paid build/model run. Operator artifacts are under independent review. See [activation checkpoint](journey/61-coding-squad.md#activation-checkpoint--6-october-2026).
+Coding is **on** at verified production `2273e8c8eb6a81d764bc74c84016f3022750fa80` after the independently approved idle-only operator activation on 7 October. Deployed GitHub installation authentication, scoped CodeBuild project validation, gateway/Postgres health and public worker 401/unknown-path 404 checks passed. The Singapore worker role has no identity policies; the controller has only exact-project operations and exact-worker PassRole. Secrets stay on Chief, source defaults remain off, and jobs stop at a draft PR for owner review/merge. Zero jobs; paid/live plan→confirmation→candidate acceptance remains pending. See [activation evidence](journey/61-coding-squad.md#activation-verified--7-october-2026).
 
 # Owner-defined stock rules — released v0.3.41
 
