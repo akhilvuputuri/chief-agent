@@ -198,6 +198,23 @@ export class GitHubAutomation implements PrAutomationRepository {
     }
     return result;
   }
+  async ready(t: MergeTarget) {
+    const pr = await this.owned(t);
+    if (
+      pr.state !== "open" ||
+      pr.merged ||
+      pr.head.sha !== t.head ||
+      pr.base.sha !== t.baseSha
+    )
+      throw new Error("Readiness target changed");
+    if (!pr.draft) return;
+    const data = await this.graphql(
+      "mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{isDraft}}}",
+      { id: pr.node_id },
+    );
+    if (data.markPullRequestReadyForReview?.pullRequest?.isDraft !== false)
+      throw new Error("PR readiness acknowledgement uncertain");
+  }
   async attest(
     t: MergeTarget,
     model: string,
@@ -234,14 +251,7 @@ export class GitHubAutomation implements PrAutomationRepository {
       pr.base.sha !== t.baseSha
     )
       throw new Error("Merge target changed");
-    if (pr.draft) {
-      const data = await this.graphql(
-        "mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{isDraft}}}",
-        { id: pr.node_id },
-      );
-      if (data.markPullRequestReadyForReview?.pullRequest?.isDraft !== false)
-        throw new Error("PR readiness uncertain");
-    }
+    if (pr.draft) await this.ready(t);
     let r;
     try {
       r = await this.api(`pulls/${this.number(t)}/merge`, "PUT", {

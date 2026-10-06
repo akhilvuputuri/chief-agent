@@ -105,7 +105,7 @@ async function fixture(t: TestContext) {
     main: base,
     merged: false,
     closed: false,
-    draft: true,
+    draft: false,
     mergeable: true,
     checks: "pending",
     feedback: [],
@@ -118,6 +118,9 @@ async function fixture(t: TestContext) {
     release: "pending" | "success" | "failure" = "pending";
   const repository = {
     inspect: async () => inspection,
+    ready: async () => {
+      inspection = { ...inspection, draft: false };
+    },
     attest: async () => {
       attests++;
     },
@@ -539,4 +542,15 @@ test("row-limited diagnostics explicitly report omitted events, calls and fixed-
   assert.equal(result.events.length, 1);
   assert.equal(result.calls.length, 1);
   assert(Buffer.byteLength(JSON.stringify(result)) <= 32000);
+});
+
+test("ordinary approved drafts become ready before waiting for Devin, without granting merge", async (t) => {
+  const f = await fixture(t);
+  f.setInspection({ draft: true, checks: "pending" });
+  await f.auto.tick();
+  assert.equal((await f.job()).stage, "awaiting_ci");
+  assert.equal(f.counts().merges, 0);
+  f.setInspection({ checks: "passed" });
+  await f.auto.tick();
+  assert.equal(f.counts().merges, 1);
 });

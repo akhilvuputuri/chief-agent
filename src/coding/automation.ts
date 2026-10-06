@@ -94,7 +94,7 @@ export class CodingAutomation {
     try {
       j = (
         await this.db.query(
-          `UPDATE coding_jobs SET lease=$1,lease_until=now()+interval '3 minutes' WHERE id=(SELECT id FROM coding_jobs WHERE state='pr_ready' AND settings->>'autoMerge'='true' AND cleanup IN ('none','complete') AND stage IN ('pr_ready','awaiting_ci','merging','release_pending') AND (lease IS NULL OR lease_until<now()) ORDER BY updated_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *`,
+          `UPDATE coding_jobs SET lease=$1,lease_until=now()+interval '3 minutes' WHERE id=(SELECT id FROM coding_jobs WHERE state='pr_ready' AND settings->>'autoMerge'='true' AND cleanup IN ('none','complete') AND stage IN ('pr_ready','readying','awaiting_ci','merging','release_pending') AND (lease IS NULL OR lease_until<now()) ORDER BY updated_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *`,
           [randomUUID()],
         )
       ).rows[0];
@@ -233,6 +233,23 @@ export class CodingAutomation {
           j,
           d,
           "Independent reviewer proof is missing or does not match this exact artifact.",
+        );
+        return;
+      }
+      // Devin can start only after ready_for_review. Readiness is not merge approval.
+      if (i.draft) {
+        await this.phase(
+          j,
+          d,
+          "readying",
+          "Approved ordinary candidate is being marked ready for GitHub/Devin review.",
+        );
+        await this.repository.ready(target);
+        await this.phase(
+          j,
+          d,
+          "awaiting_ci",
+          "PR ready; waiting for exact-head CI, Devin and MR feedback.",
         );
         return;
       }

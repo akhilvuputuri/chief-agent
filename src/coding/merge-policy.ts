@@ -56,6 +56,7 @@ export type MergeTarget = {
 };
 export interface PrAutomationRepository {
   inspect(target: MergeTarget): Promise<PrInspection>;
+  ready(target: MergeTarget): Promise<void>;
   attest(
     target: MergeTarget,
     model: string,
