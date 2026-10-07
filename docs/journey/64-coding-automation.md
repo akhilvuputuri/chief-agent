@@ -1,6 +1,6 @@
 # 64 — One squad review, MR feedback and guarded merge
 
-Work date(s): 2026-10-07. Status: v0.3.42 verified for model preferences and scoped Python diagnostics at `1136126e8a86439aec84b94c27183b1d41d1f4ff`. Coding remains on. Automatic MR repair/merge is implemented but off pending owner approval and installation of additional App read permissions.
+Work date(s): 2026-10-07. Status: v0.3.43 verified at `60b3ec55f03f0296ef027b413debab61eef7d2f7`. Coding and guarded automatic MR feedback/merge are on for new jobs. The prior v0.3.42 diagnostic/model milestone remains immutable at `1136126`; legacy/paused settings and paid/live acceptance boundaries remain intact.
 
 ## Preceding iteration and requirement
 
@@ -22,7 +22,7 @@ The first full local check passed 764 application tests, 50 script tests and 30 
 
 ## Next step
 
-Obtain owner approval for the App's additional read-only Checks, Actions and Commit statuses scope, verify installed scoped reads, and activate the automatic selector through a reviewed config/release follow-up. Then run a separately authorized live plan/confirmation/repair/merge cycle with actual cleanup/release evidence. The source default-off coding switch and existing paused-work boundaries remain intact.
+Run a separately authorized live plan/confirmation/repair/merge cycle with actual cleanup/release evidence. App scope/read verification and reviewed automatic-selector activation are complete, as recorded below. The source default-off coding switch and existing paused-work boundaries remain intact.
 
 ### Independent review/fix checkpoint — 7 October 2026
 
@@ -71,3 +71,13 @@ The owner approved repository-only additional read-only Checks, Actions and Comm
 The v0.3.43 candidate selects `autoMerge: true` for new coding jobs against the already verified Python 0.1.3 image. Legacy jobs retain their captured draft-only settings; no paused task is resumed. One independent squad review, exact host publication proof, MR/CI feedback repair, remaining allocation, protected-path/manual boundaries, unresolved-thread/CI gates, idle release and unknown-write reconciliation remain unchanged. Models, effort, provider filters and allocations are unchanged. No migration, credential export or paid/live acceptance is part of this selector change.
 
 Before merge, require actual installation scope/read verification, exact-head independent approval and passing checks. Then watch the exact release and separately verify current health/effective selector. Until these prerequisites pass, production remains healthy at `9c1d6ca77dc93f14dedb9622f9d8cf0467dbe44f`, coding on with automatic MR repair/merge off.
+
+### Automatic selector release closure — 7 October 2026
+
+The owner approved the additional repository-only read permissions and completed GitHub Mobile account confirmation. The App registration and existing installation accepted only Actions read, Checks read and Commit statuses read, preserving Contents/Pull requests write and Metadata read. The UI still selected only `akhilvuputuri/chief-agent`; a fresh scoped installation token and signed installation metadata matched those exact six grants. The deployed adapter read actual Actions/check/status metadata successfully and returned exactly one token repository. No Workflows, Administration or Actions-write permission was added; no token/key was exported. Earlier email-code agent submission was rejected by automatic approval review; the owner completed Mobile authentication themselves, without a bypass.
+
+[PR #176](https://github.com/akhilvuputuri/chief-agent/pull/176) merged at `60b3ec55f03f0296ef027b413debab61eef7d2f7`. GPT-6 Astra [approved exact head](https://github.com/akhilvuputuri/chief-agent/pull/176#issuecomment-6029765379) `d7f151e3eba7b551b3755857300110ab9ccac96d`, independently passing 40 focused tests and three additional legacy/paused/new-planning activation scenarios. Parent checks passed the same 40 tests, configuration invariants, both typechecks, build and formatting. [PR CI](https://github.com/akhilvuputuri/chief-agent/actions/runs/37562978385), Devin and [main CI](https://github.com/akhilvuputuri/chief-agent/actions/runs/37567001884) passed, including Linux worker/browser/PostgreSQL checks. App prerequisites were [verified before merge](https://github.com/akhilvuputuri/chief-agent/pull/176#issuecomment-6030300747).
+
+The [exact release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37567573205) succeeded; the trusted receipt was recorded at 2026-10-07T03:39:10Z. Separate post-release checks matched server RELEASE, healthy gateway/Postgres, coding on, `autoMerge: true`, zero coding jobs, migration 29 and the unchanged Python 0.1.3 digest/models/effort/allocations. Actual scoped App reads passed again at the deployed head. Owner-scoped diagnostic and model-preference reads passed without writes; the 60-minute diagnostic window returned a bounded 453-byte response with zero matching rows, so it is not evidence of historical incident coverage.
+
+The immutable [v0.3.43](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.43) target is the exact verified activation SHA. New jobs capture automatic MR repair/guarded merge; legacy and paused jobs retain settings. One reviewer loop, actual checks/publication proof, trusted CI/Devin/readable feedback/current threads, protected paths, idle release and unknown-write reconciliation remain required. No new image, migration, credential export, model/price/allocation change, paid model/CodeBuild job or live repair/merge acceptance ran. Startup/config/read verification establishes activation, not measured coding quality or an executed production coding cycle.
