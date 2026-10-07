@@ -1,8 +1,8 @@
-## Released v0.3.43 — guarded coding MR automation
-
 ## Released v0.3.44 — explicit Main conversation
 
 [PR #178](https://github.com/akhilvuputuri/chief-agent/pull/178) adds Main beside News/Coding/Markets, normalizes root intake before execution, routes default owner sends there and preserves guarded fallback plus actual destination receipts. Final independent GPT-6 Astra approved exact head `d628ec714be2741fa78e55bf63904452317d2f71` after failure-oriented review loops. Hosted full CI passed 794 application, 50 script, 30 Python evaluation and 32 coding-runtime tests plus isolation checks. [Release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37615771842), receipt and separate server health verified merge `e522f5349af2d7be869bb18bcff2ba0327b06e08`; the bot reported threaded mode and Telegram accepted one Main introduction with zero model calls. [v0.3.44](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.44) is immutable. No migration/Compose/history changes; All stays the aggregate and owner-client acceptance remains separate. [Journal 65](journey/65-main-conversation-topic.md).
+
+## Released v0.3.43 — guarded coding MR automation
 
 [PR #176](https://github.com/akhilvuputuri/chief-agent/pull/176) shipped [v0.3.43](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.43) at `60b3ec55f03f0296ef027b413debab61eef7d2f7`. New coding jobs capture automatic MR feedback repair and guarded ordinary-change merge/release. Planning and owner requirements confirmation remain mandatory; the configured independent reviewer loop is the only model review loop, with fresh review of changed candidates. Exact publication proof, CI/Devin/feedback/current-thread gates, protected paths, idle release and uncertain-write handling remain intact. Legacy/paused jobs keep their settings.
 
