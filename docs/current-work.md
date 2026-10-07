@@ -1,6 +1,6 @@
-# Coding MR automation activation — approved v0.3.43 candidate
+# Coding MR automation — enabled v0.3.43
 
-Owner approval for additional repository-only App Checks/Actions/Commit statuses read access is recorded. GitHub account authentication, actual permission/read verification, exact selector-head review/checks and deployment remain required. The candidate selects automatic MR feedback repair/guarded merge for new jobs using the verified Python 0.1.3 image; it does not resume legacy/paused jobs or change models/allocations. Production remains coding on with automatic MR automation off at `9c1d6ca`. See [contract](coding-automation.md) and [journal 64](journey/64-coding-automation.md).
+[v0.3.43](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.43) is verified at `60b3ec55f03f0296ef027b413debab61eef7d2f7`: coding and guarded MR feedback/merge automation are on for new jobs. Exact-head Astra/PR/main CI/Devin, repository-only App scope/read verification, exact release and separate current health/effective selector checks passed. Planning/owner confirmation, one independent reviewer loop, protected paths and shared allocations remain intact; legacy/paused jobs retain settings. Zero jobs and no paid/live coding acceptance. See [contract](coding-automation.md) and [journal closure](journey/64-coding-automation.md#automatic-selector-release-closure--7-october-2026).
 
 # Coding diagnostics and models — released v0.3.42; automatic merge pending permission
 
