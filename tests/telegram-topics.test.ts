@@ -1,3 +1,4 @@
+import { Voice } from "../src/providers.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
@@ -1205,6 +1206,95 @@ test("closed Main root retry still checks an approval's cancellation guard", asy
         ])
       ).rows[0].payload.telegramDeliveryState,
       undefined,
+    );
+  } finally {
+    await pg.close();
+  }
+});
+
+test("foreground voice root fallback respects cancellation after closed Main rejection", async (t) => {
+  const { pg, db } = await database();
+  let current = true;
+  const voiceSends: unknown[] = [];
+  t.mock.method(Voice.prototype, "speak", async () => ({
+    bytes: new Uint8Array([1, 2, 3]),
+    filename: "reply.ogg",
+  }));
+  const assistant = {
+    tools: {},
+    recordInput: async () => randomUUID(),
+    prepareInput: async () => {},
+    failInput: async () => {},
+    respondDetailed: async () => ({
+      reply: "Answer",
+      runId: randomUUID(),
+      voiceReply: true,
+      threadId: 900,
+    }),
+    isCurrentDelivery: async () => current,
+    isCurrentRun: async () => current,
+    finishDelivery: async () => {},
+  } as unknown as Assistant;
+  const bot = telegram(
+    readConfig({
+      DATABASE_URL: "postgres://x:x@localhost/x",
+      TELEGRAM_BOT_TOKEN: "123:test-token",
+      TELEGRAM_ALLOWED_USER_IDS: "123",
+      VOICE_REPLIES: "true",
+    }),
+    assistant,
+    db,
+  );
+  bot.api.config.use(async (_p, method, payload) => {
+    if (method === "getMe")
+      return {
+        ok: true,
+        result: {
+          id: 999,
+          is_bot: true,
+          first_name: "T",
+          username: "t_bot",
+          has_topics_enabled: true,
+        },
+      } as any;
+    if (method === "createForumTopic")
+      return {
+        ok: true,
+        result: { message_thread_id: 900, name: "Main" },
+      } as any;
+    const thread = (payload as any).message_thread_id;
+    if (method === "sendMessage" && thread === 900)
+      return { ok: false, error_code: 400, description: "TOPIC_CLOSED" } as any;
+    if (method === "sendVoice") {
+      voiceSends.push({ thread, current });
+      current = false;
+      if (thread === 900)
+        return {
+          ok: false,
+          error_code: 400,
+          description: "TOPIC_CLOSED",
+        } as any;
+    }
+    return { ok: true, result: { message_id: 1000 } } as any;
+  });
+  routeUnthreadedToMain(bot.api, bot.topics, new Set(["123"]));
+  try {
+    await bot.init();
+    await bot.handleUpdate({
+      update_id: 501,
+      message: {
+        message_id: 501,
+        date: 0,
+        chat: { id: 123, type: "private" },
+        from: { id: 123, is_bot: false, first_name: "T" },
+        text: "Please answer aloud",
+      },
+    } as any);
+    assert.deepEqual(voiceSends, [{ thread: 900, current: true }]);
+    assert.equal(
+      (await db.query("SELECT status FROM inbound_updates WHERE update_id=501"))
+        .rows[0].status,
+      "completed",
     );
   } finally {
     await pg.close();

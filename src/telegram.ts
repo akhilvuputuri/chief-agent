@@ -1160,16 +1160,32 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
               );
               // New input can arrive during TTS even after the text was sent.
               if (await deliveryGuard())
-                await bot.api.sendVoice(
-                  user,
-                  new InputFile(audio.bytes, audio.filename),
-                  { ...inThread(actualThread), caption: "AI-generated voice" },
+                await withTelegramSendGuard(deliveryGuard, () =>
+                  bot.api.sendVoice(
+                    user,
+                    new InputFile(audio.bytes, audio.filename),
+                    {
+                      ...inThread(actualThread),
+                      caption: "AI-generated voice",
+                    },
+                  ),
                 );
-            } catch {
-              if (await deliveryGuard())
-                await ctx.reply(
-                  "The text reply is ready; audio generation is unavailable.",
-                );
+            } catch (error) {
+              if (
+                !(error instanceof TelegramSendWithheld) &&
+                (await deliveryGuard())
+              ) {
+                try {
+                  await withTelegramSendGuard(deliveryGuard, () =>
+                    ctx.reply(
+                      "The text reply is ready; audio generation is unavailable.",
+                    ),
+                  );
+                } catch (fallbackError) {
+                  if (!(fallbackError instanceof TelegramSendWithheld))
+                    throw fallbackError;
+                }
+              }
             }
           }
         }
