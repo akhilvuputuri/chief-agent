@@ -1,3 +1,7 @@
+# Coding MR automation activation — approved v0.3.43 candidate
+
+Owner approval for additional repository-only App Checks/Actions/Commit statuses read access is recorded. GitHub account authentication, actual permission/read verification, exact selector-head review/checks and deployment remain required. The candidate selects automatic MR feedback repair/guarded merge for new jobs using the verified Python 0.1.3 image; it does not resume legacy/paused jobs or change models/allocations. Production remains coding on with automatic MR automation off at `9c1d6ca`. See [contract](coding-automation.md) and [journal 64](journey/64-coding-automation.md).
+
 # Coding diagnostics and models — released v0.3.42; automatic merge pending permission
 
 [v0.3.42](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.42) is verified at `1136126e8a86439aec84b94c27183b1d41d1f4ff`: Telegram role-model preferences and Python 0.1.3 scoped diagnostics are available; coding stays on. The one-review MR repair/merge implementation is integrated, but automatic merge remains off while additional read-only App scopes await owner approval. Models, effort, allocations and price filters are unchanged; zero coding jobs and no paid/live acceptance. See [contract](coding-automation.md) and [journal 64](journey/64-coding-automation.md).
