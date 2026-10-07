@@ -1221,5 +1221,23 @@
     "message": "stop sending me articles from that site",
     "gold": ["news"],
     "split": "held-out"
+  },
+  {
+    "id": "mcp-reader-save",
+    "message": "Save this article to Reader for offline reading: https://example.org/article",
+    "gold": ["mcp"],
+    "split": "tuning"
+  },
+  {
+    "id": "mcp-reader-brief",
+    "message": "Save the research brief you just wrote to Reader with its sources.",
+    "gold": ["mcp"],
+    "split": "held-out"
+  },
+  {
+    "id": "mcp-reader-status",
+    "message": "Check whether that Reader submission is ready.",
+    "gold": ["mcp"],
+    "split": "held-out"
   }
 ]

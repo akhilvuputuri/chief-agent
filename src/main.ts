@@ -492,16 +492,18 @@ if (c.GATHERING_RUNTIME === "on") {
   );
 }
 let mcp: McpTools | undefined;
-if (c.MCP_RUNTIME === "on") {
-  if (
-    !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=30")).rows
-      .length
-  )
-    throw startupError(
-      "STARTUP_MIGRATION_030",
-      "MCP migration 030 must be installed before enabling connectors",
-    );
-  const credentials = parseMcpCredentials(c.MCP_CREDENTIALS_JSON);
+const mcpMigrated = !!(
+  await db.query("SELECT 1 FROM runtime_migrations WHERE version=30")
+).rows.length;
+if (c.MCP_RUNTIME === "on" && !mcpMigrated)
+  throw startupError(
+    "STARTUP_MIGRATION_030",
+    "MCP migration 030 must be installed before enabling connectors",
+  );
+// Keep pending-write protection active after disabling connections; disabling does not settle uncertainty.
+if (mcpMigrated) {
+  const credentials =
+    c.MCP_RUNTIME === "on" ? parseMcpCredentials(c.MCP_CREDENTIALS_JSON) : {};
   const owners = new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(","));
   if (Object.values(credentials).some((secret) => !owners.has(secret.owner)))
     throw startupError(

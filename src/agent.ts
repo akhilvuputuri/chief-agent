@@ -1422,6 +1422,20 @@ export class Assistant {
           });
         }
       }
+      if (
+        this.tools.mcp &&
+        uncertain.rows.some((r) => r.operation === "mcp_write")
+      ) {
+        try {
+          await this.tools.mcp.settleUnsubmitted(scope.user);
+          uncertain = await unresolved();
+        } catch (error) {
+          opsLog("runtime.settle_failed", "warn", {
+            runId: scope.run,
+            ...errorFields(error),
+          });
+        }
+      }
       const exactMcpReplay =
         this.tools.mcp &&
         op === "mcp_write" &&

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 DOMAINS = (
+    "mcp",
     "gmail",
     "calendar",
     "daily",

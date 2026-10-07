@@ -44,11 +44,21 @@ submission. Registry grants cannot be expanded through plugins or server hints.
 Migration 030 preserves operations; Reader's receipts distinguish accepted saves,
 server preparation and unverified phone downloads.
 
-Independent review and exact-head CI evidence will be appended before release.
+Independent reviewer requested changes on `b3b3d10` on 8 October 2026. The
+review was dispatched to GPT-6 Astra; the reviewer reported GPT-6 family with the
+exact variant unavailable in its context. Its executable probes found escaped
+credential redaction, missing polling network deadline and mismatched status IDs;
+it also found lost discovery Retry-After timing and missing immediate-bookmark
+explanations. Those fixes add regressions, persistent connection throttling/auth
+state, and narrow no-intent restart settlement. Final exact-head re-review and CI
+remain required before release.
 
 ## Verification and outcome
 
-Nine focused mocked tests pass; full-suite results are pending. Startup health of
+Sixteen focused mocked tests are being checked after review fixes. The initial
+full Node/script suites passed, then the Python picker contract rejected the new
+domain; the shared domain inventory and offline scenarios were updated. Final full
+checks are rerunning. Startup health of
 the preceding release does not establish this feature. Production credentials are
 not available to this development checkout. Authenticated Reader article/brief
 saving, revocation and phone offline acceptance remain pending.

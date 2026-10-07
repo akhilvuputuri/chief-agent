@@ -13,6 +13,7 @@ import {
   sdkTransport,
   type McpTransport,
   type RemoteTool,
+  type McpSession,
 } from "./mcp-client.js";
 import { mcpAction, type McpAction } from "./mcp-schema.js";
 
@@ -179,6 +180,94 @@ export class McpTools {
       (c) => !!this.credentials[c.credential],
     );
   }
+  private async session<T>(
+    user: string,
+    c: Connection,
+    token: string,
+    use: (session: McpSession) => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    const { binding } = this.owned(user, c.id);
+    const row = (
+      await this.db.query(
+        "SELECT * FROM mcp_connection_state WHERE user_id=$1 AND connection=$2 AND binding=$3",
+        [user, c.id, binding],
+      )
+    ).rows[0];
+    if (row?.category === "auth") throw new McpFailure("auth");
+    if (row?.retry_at && new Date(row.retry_at).getTime() > Date.now())
+      throw new McpFailure(
+        "capacity",
+        Math.ceil((new Date(row.retry_at).getTime() - Date.now()) / 1000),
+      );
+    const remember = async (e: unknown) => {
+      if (e instanceof McpFailure && ["auth", "capacity"].includes(e.category))
+        await this.db.query(
+          "INSERT INTO mcp_connection_state(user_id,connection,binding,category,retry_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT(user_id,connection) DO UPDATE SET binding=EXCLUDED.binding,category=EXCLUDED.category,retry_at=EXCLUDED.retry_at",
+          [
+            user,
+            c.id,
+            binding,
+            e.category,
+            e.category === "capacity"
+              ? new Date(Date.now() + (e.retryAfterSeconds ?? 60) * 1000)
+              : null,
+          ],
+        );
+    };
+    const track = async <R>(fn: () => Promise<R>) => {
+      try {
+        return await fn();
+      } catch (e) {
+        await remember(e);
+        throw e;
+      }
+    };
+    try {
+      return await this.transport(
+        c.url,
+        token,
+        (s) =>
+          use({
+            list: () => track(() => s.list()),
+            call: (name, args) => track(() => s.call(name, args)),
+          }),
+        signal,
+      );
+    } catch (e) {
+      await remember(e);
+      throw e;
+    }
+  }
+  /** A stopped call with no durable intent cannot have reached tools/call. Never replays. */
+  async settleUnsubmitted(user: string) {
+    const calls = (
+      await this.db.query(
+        "SELECT c.id,c.arguments FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id WHERE r.user_id=$1 AND r.state='stopped' AND c.operation='mcp_write' AND c.state='uncertain'",
+        [user],
+      )
+    ).rows;
+    for (const call of calls) {
+      let prior: McpAction;
+      try {
+        prior = mcpAction.parse({
+          ...JSON.parse(call.arguments.raw),
+          operation: "mcp_write",
+        });
+      } catch {
+        continue;
+      }
+      if (
+        prior.operation !== "mcp_write" ||
+        (await this.stored(user, prior.connection, prior.requestKey))
+      )
+        continue;
+      await this.db.query(
+        "UPDATE runtime_calls c SET state='failed',finished_at=now(),result=jsonb_build_object('reconciliation','stopped MCP call without persisted intent; no submission was dispatched') FROM runtime_runs r WHERE c.id=$1 AND c.run_id=r.id AND r.user_id=$2 AND r.state='stopped' AND c.state='uncertain'",
+        [call.id, user],
+      );
+    }
+  }
   private owned(user: string, id: string) {
     const c = this.registry.connections.find((c) => c.id === id);
     const secret = c && this.credentials[c.credential];
@@ -242,7 +331,25 @@ export class McpTools {
     const encoded = JSON.stringify(result);
     if (!encoded || Buffer.byteLength(encoded) > 200000)
       throw new McpFailure("uncertain");
-    return JSON.parse(encoded.split(token).join("[REDACTED_CREDENTIAL]"));
+    const replaceSecret = (value: string) =>
+      value
+        .split(token)
+        .join("[REDACTED_CREDENTIAL]")
+        .split(JSON.stringify(token).slice(1, -1))
+        .join("[REDACTED_CREDENTIAL]");
+    const redact = (value: unknown): unknown => {
+      if (typeof value === "string") return replaceSecret(value);
+      if (Array.isArray(value)) return value.map(redact);
+      if (value && typeof value === "object")
+        return Object.fromEntries(
+          Object.entries(value).map(([key, v]) => [
+            replaceSecret(key),
+            redact(v),
+          ]),
+        );
+      return value;
+    };
+    return redact(JSON.parse(encoded));
   }
   private async stored(user: string, connection: string, requestKey: string) {
     return (
@@ -364,8 +471,9 @@ export class McpTools {
         try {
           out.push(
             this.safe(
-              await this.transport(
-                c.url,
+              await this.session(
+                user,
+                c,
                 secret.token,
                 async (s) => {
                   const discovered = await s.list();
@@ -417,16 +525,24 @@ export class McpTools {
     }
     if (a.operation === "mcp_read") {
       const g = this.grant(c, a.tool, "read");
-      return this.transport(
-        c.url,
+      return this.session(
+        user,
+        c,
         secret.token,
         async (s) => {
           this.validate(this.discovered(await s.list(), a.tool), a.arguments);
           try {
-            return decode(
+            const result = decode(
               this.safe(await s.call(a.tool, a.arguments), secret.token),
               g.result,
             );
+            if (
+              g.result === "reader_status" &&
+              (result as { submissionId: string }).submissionId !==
+                a.arguments.submission_id
+            )
+              throw new McpFailure("uncertain");
+            return result;
           } catch (e) {
             if (e instanceof McpFailure) throw e;
             throw new McpFailure("uncertain");
@@ -486,8 +602,9 @@ export class McpTools {
         );
       let dispatched = false;
       try {
-        return await this.transport(
-          c.url,
+        return await this.session(
+          user,
+          c,
           secret.token,
           async (s) => {
             const schema = this.discovered(await s.list(), a.tool);
@@ -590,7 +707,7 @@ export class McpTools {
             if (
               g.result === "reader_receipt" &&
               result.submissionId &&
-              ["queued", "processing"].includes(result.status) &&
+              ["queued", "processing", "bookmark"].includes(result.status) &&
               c.tools.some(
                 (t) => t.name === "get_save_status" && t.mode === "read",
               )
@@ -599,7 +716,9 @@ export class McpTools {
                 ...(signal ? [signal] : []),
                 AbortSignal.timeout(45000),
               ]);
-              for (const seconds of [2, 5, 10, 20]) {
+              for (const seconds of result.status === "bookmark"
+                ? [0]
+                : [2, 5, 10, 20]) {
                 try {
                   await this.wait(seconds * 1000, pollSignal);
                   if (pollSignal.aborted) break;
@@ -611,7 +730,7 @@ export class McpTools {
                       tool: "get_save_status",
                       arguments: { submission_id: result.submissionId },
                     },
-                    signal,
+                    pollSignal,
                   )) as any;
                   result = {
                     ...result,
@@ -642,7 +761,13 @@ export class McpTools {
           signal,
         );
       } catch (e) {
-        if (dispatched || e instanceof ToolValidationError) throw e;
+        if (
+          dispatched ||
+          e instanceof ToolValidationError ||
+          (e instanceof McpFailure &&
+            ["capacity", "auth", "permission"].includes(e.category))
+        )
+          throw e;
         throw new ToolValidationError(
           e instanceof McpFailure && e.category === "auth"
             ? "MCP authentication failed before saving; reconnect first"

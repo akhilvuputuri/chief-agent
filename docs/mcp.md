@@ -50,12 +50,15 @@ closed. Descriptions/results are untrusted data, not host instructions.
 The host persists payload, schema digest and connection/credential binding before
 submission. A reused key with different content, tool, endpoint or credential is
 refused. Complete replays return the stored receipt. Uncertain outcomes retain
-the key, block unrelated writes and allow only the exact configured idempotent
+the key, block unrelated writes even after connections are disabled and allow only the exact configured idempotent
 replay. An unrelated uncertain runtime call continues to block it. Successful
 replay reconciles matching stopped runtime calls; paused jobs stay paused.
-No startup task resumption or automatic write retry is added.
+A stopped pre-submission call with no durable intent is marked failed because it
+could not have reached the server save call. No startup task resumption or automatic
+write retry is added.
 
-HTTP 429 retains Retry-After timing. Authentication failure suppresses further
+Connection-wide HTTP 429 timing and authentication rejection are persisted across
+restart. HTTP 429 without a valid delay uses a 60-second backoff. Authentication failure suppresses further
 unchanged attempts. Schema drift and credential replacement stop replay for
 operator inspection. A text-only MCP business error has no dependable certainty
 contract, so its operation stays pending. Provider errors are categorized without
@@ -73,7 +76,9 @@ After an accepted pending save, Chief polls at 2, 5, 10 and 20 seconds with a
 submission IDs and can be checked later through existing authorized durable work.
 `complete` describes an accepted save operation, not completed extraction.
 `ready` describes server preparation. Only the phone verifies **Available
-offline**. `bookmark` retains the URL after extraction failure; it is never replaced
+offline**. An immediate bookmark receipt receives one bounded status lookup for its
+explanation. Status UUIDs must match the requested submission. `bookmark` retains
+the URL after extraction failure; it is never replaced
 with an invented summary. `already_saved` with a null submission ID is not polled.
 Cancellation does not delete an accepted article.
 

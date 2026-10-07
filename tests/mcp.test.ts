@@ -370,6 +370,7 @@ test("rate limiting honours retry-after; authentication rejection stops unchange
     assert.ok(throttled.retryAfterSeconds > 0);
     assert.equal(f.calls.length, 1);
     await f.db.query("DELETE FROM mcp_operations");
+    await f.db.query("DELETE FROM mcp_connection_state");
     const b = save();
     f.setOutcome(async () => {
       throw new McpFailure("auth");
@@ -565,7 +566,8 @@ test("failure before write dispatch creates no pending intent; text business err
       throw new McpFailure("auth");
     };
     const unavailable = new McpTools(f.db, registry, credentials, broken);
-    await assert.rejects(unavailable.call("123", save()), ToolValidationError);
+    await assert.rejects(unavailable.call("123", save()), McpFailure);
+    await f.db.query("DELETE FROM mcp_connection_state");
     assert.equal(
       (await f.db.query("SELECT * FROM mcp_operations")).rows.length,
       0,
@@ -602,8 +604,8 @@ test("concurrent duplicate requests produce one dispatch; discovered schema and 
       ).includes(token),
       false,
     );
-    f.setOutcome(async () =>
-      text({ id: randomUUID(), status: "bookmark", error: token }),
+    f.setOutcome(async (_name, args) =>
+      text({ id: args.submission_id, status: "bookmark", error: token }),
     );
     const status = await f.tools.call("123", {
       operation: "mcp_read",
@@ -612,6 +614,172 @@ test("concurrent duplicate requests produce one dispatch; discovered schema and 
       arguments: { submission_id: randomUUID() },
     });
     assert.equal(JSON.stringify(status).includes(token), false);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("escaped bearer values are removed before JSON serialization", async () => {
+  const f = await fixture();
+  try {
+    const escaped = 'synthetic-quote-"-and-backslash-\\-credential';
+    const transport: McpTransport = async (_url, _token, use) =>
+      use({
+        list: async () => remote,
+        call: async (_name, args) =>
+          text({ id: args.submission_id, status: "bookmark", error: escaped }),
+      });
+    const tools = new McpTools(
+      f.db,
+      registry,
+      { reader: { owner: "123", token: escaped } },
+      transport,
+    );
+    const result: any = await tools.call("123", {
+      operation: "mcp_read",
+      connection: "reader",
+      tool: "get_save_status",
+      arguments: { submission_id: randomUUID() },
+    });
+    assert.equal(result.error, "[REDACTED_CREDENTIAL]");
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("Reader preserves pending receipt on a mismatched or deadline-expired status", async () => {
+  const f = await fixture();
+  const id = randomUUID();
+  const timeout = AbortSignal.timeout;
+  try {
+    f.setOutcome(async (name) =>
+      name === "get_save_status"
+        ? text({ id: randomUUID(), status: "ready", error: null })
+        : text({ submission_id: id, status: "queued", duplicate: false }),
+    );
+    const mismatch: any = await f.tools.call("123", save());
+    assert.equal(mismatch.result.status, "queued");
+    AbortSignal.timeout = (ms) => timeout(ms === 45000 ? 1 : ms);
+    const transport: McpTransport = async (_url, _token, use, signal) =>
+      use({
+        list: async () => remote,
+        call: async (name) => {
+          if (name === "get_save_status") {
+            await new Promise((resolve) => setTimeout(resolve, 10));
+            if (signal?.aborted) throw new McpFailure("uncertain");
+            return text({ id, status: "ready", error: null });
+          }
+          return text({
+            submission_id: id,
+            status: "queued",
+            duplicate: false,
+          });
+        },
+      });
+    const tools = new McpTools(
+      f.db,
+      registry,
+      credentials,
+      transport,
+      async () => {},
+    );
+    const expired: any = await tools.call("123", save());
+    assert.equal(expired.result.status, "queued");
+  } finally {
+    AbortSignal.timeout = timeout;
+    await f.pg.close();
+  }
+});
+
+test("initial bookmark fetches its explanation without waiting or claiming offline availability", async () => {
+  const f = await fixture();
+  const id = randomUUID();
+  try {
+    f.setOutcome(async (name) =>
+      name === "get_save_status"
+        ? text({
+            id,
+            status: "bookmark",
+            error: "Extraction failed; retained URL",
+          })
+        : text({ submission_id: id, status: "bookmark", duplicate: false }),
+    );
+    const result: any = await f.tools.call("123", save());
+    assert.equal(result.result.error, "Extraction failed; retained URL");
+    assert.equal(result.result.phoneOffline, "unverified");
+    assert.equal(f.calls.length, 2);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("discovery throttling survives restart and preserves retry timing without submitting a save", async () => {
+  const f = await fixture();
+  let attempts = 0;
+  try {
+    const transport: McpTransport = async () => {
+      attempts++;
+      throw new McpFailure("capacity", 60);
+    };
+    const first = new McpTools(f.db, registry, credentials, transport);
+    const second = new McpTools(f.db, registry, credentials, transport);
+    await assert.rejects(
+      first.call("123", save()),
+      (e: unknown) => e instanceof McpFailure && e.retryAfterSeconds === 60,
+    );
+    await assert.rejects(
+      second.call("123", save()),
+      (e: unknown) => e instanceof McpFailure && (e.retryAfterSeconds ?? 0) > 0,
+    );
+    assert.equal(attempts, 1);
+    assert.equal(
+      (await f.db.query("SELECT * FROM mcp_operations")).rows.length,
+      0,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("restart before persistence settles only stopped calls without intents, never pending writes", async () => {
+  const f = await fixture();
+  const a = save();
+  const run = randomUUID();
+  const id = randomUUID();
+  try {
+    await f.db.query(
+      "INSERT INTO runtime_runs(id,user_id,state) VALUES($1,'123','stopped')",
+      [run],
+    );
+    await f.db.query(
+      "INSERT INTO runtime_calls(id,run_id,call_id,operation,arguments,is_write,state) VALUES($1,$2,'before-persistence','mcp_write',$3::jsonb,true,'uncertain')",
+      [id, run, JSON.stringify({ raw: JSON.stringify(a) })],
+    );
+    await f.tools.settleUnsubmitted("456");
+    assert.equal(
+      (await f.db.query("SELECT state FROM runtime_calls WHERE id=$1", [id]))
+        .rows[0].state,
+      "uncertain",
+    );
+    await f.tools.settleUnsubmitted("123");
+    assert.equal(
+      (await f.db.query("SELECT state FROM runtime_calls WHERE id=$1", [id]))
+        .rows[0].state,
+      "failed",
+    );
+    f.setOutcome(async () => {
+      throw new McpFailure("uncertain");
+    });
+    await f.tools.call("123", a);
+    await f.db.query("UPDATE runtime_calls SET state='uncertain' WHERE id=$1", [
+      id,
+    ]);
+    await f.tools.settleUnsubmitted("123");
+    assert.equal(
+      (await f.db.query("SELECT state FROM runtime_calls WHERE id=$1", [id]))
+        .rows[0].state,
+      "uncertain",
+    );
   } finally {
     await f.pg.close();
   }
