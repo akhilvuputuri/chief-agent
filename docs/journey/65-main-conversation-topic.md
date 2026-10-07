@@ -1,6 +1,6 @@
 # 65 — An explicit Main topic instead of the aggregate All view
 
-Work date: 7 October 2026. Status: implementation/review candidate, not released.
+Work date: 7 October 2026. Status: released as v0.3.44 on 7 October 2026. Candidate/review observations below are historical.
 
 ## Problem and preceding iteration
 
@@ -31,3 +31,11 @@ The first Astra review reproduced a new intake delay that reversed input order, 
 The initial local full-suite run was interrupted when host swap/disk pressure prevented temporary writes; it is not recorded as passed. Focused tests, typecheck, hosted full CI and exact-head re-review are required for release. No production setting or user data was changed during this investigation.
 
 A second review reproduced a closed Main topic being added back to an intentional root fallback. The fix distinguishes intentional root fallback from default routing, rechecks cancellation before any definite-rejection root retry, and carries actual thread identity separately from intended destination (including an actual root send). New tests confirm the Main → root attempts, root receipts and withheld cancellation. Re-review remains required for the final head.
+
+The final review also reproduced a voice fallback sending after cancellation. Foreground voice sends and speech-error notices now propagate their guard through the router, and the committed test uses mocked speech generation with actual handler/transport behavior. Independent Astra review approved final head `d628ec714be2741fa78e55bf63904452317d2f71` after nine focused failure regressions passed. Required hosted CI passed the full 794 application tests, 50 script tests, 30 Python evaluation tests and 32 coding-runtime tests, plus worker, browser-sandbox and PostgreSQL interleaving checks. The initial local full run remains explicitly interrupted; local focused/typecheck/format checks passed.
+
+## Release closure — 7 October 2026
+
+[PR #178](https://github.com/akhilvuputuri/chief-agent/pull/178) merged as `e522f5349af2d7be869bb18bcff2ba0327b06e08` after exact-head Astra approval and passing required hosted CI. [Main checks](https://github.com/akhilvuputuri/chief-agent/actions/runs/37615032704) and [automatic release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37615771842) passed for that merge; the authenticated release receipt and separate server RELEASE/health matched. [v0.3.44](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.44) labels the verified merge without moving an existing tag.
+
+The live bot's read-only `getMe` reported threaded mode enabled; its owner-scoped Main topic record was present. Telegram accepted one introductory message explicitly addressed to Main, with a claimed/sent operational receipt to avoid repeating the introduction. It made zero model calls and left existing history intact. No database/Compose or infrastructure changes were required. The Mac was locked during the initial UI inspection. Later desktop inspection visibly confirmed the Main/News/Coding/Markets sidebar and the introduction labelled Main in All; no screenshot or private conversation was copied into the repo. Subsequent owner conversation and exclusive Main-view navigation remain acceptance checks. All still aggregates the streams.
