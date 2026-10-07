@@ -1,6 +1,6 @@
 {
   "name": "chief-agent",
-  "version": "0.3.44",
+  "version": "0.3.45",
   "private": true,
   "type": "module",
   "description": "A personal AI assistant with an owned TypeScript runtime, Telegram voice, memory, research and durable tasks",
@@ -40,6 +40,9 @@
     "@aws-sdk/client-sts": "3.1141.0",
     "@fastify/websocket": "11.3.2",
     "@grammyjs/runner": "^2.0.3",
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
     "cron-parser": "^5.10.0",
     "dotenv": "^16.4.7",
     "fastify": "^5.2.1",

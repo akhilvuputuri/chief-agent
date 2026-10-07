@@ -1398,7 +1398,7 @@ export class Assistant {
     if (!readOperations.has(op)) {
       const unresolved = () =>
         this.db.query(
-          "SELECT c.operation FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id WHERE r.user_id=$1 AND c.state='uncertain'",
+          "SELECT c.operation,c.arguments FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id WHERE r.user_id=$1 AND c.state='uncertain'",
           [scope.user],
         );
       let uncertain = await unresolved();
@@ -1422,7 +1422,18 @@ export class Assistant {
           });
         }
       }
-      if (uncertain.rows.length)
+      const exactMcpReplay =
+        this.tools.mcp &&
+        op === "mcp_write" &&
+        (await this.tools.mcp.replayMatches(scope.user, input, uncertain.rows));
+      if (
+        this.tools.mcp &&
+        !(await this.tools.mcp.pendingAllows(scope.user, input))
+      )
+        throw new Error(
+          "An uncertain write requires inspection: reconcile the pending MCP operation first",
+        );
+      if (uncertain.rows.length && !exactMcpReplay)
         throw new Error(
           uncertain.rows.every((r) => r.operation === "calendar_draft")
             ? "An uncertain write requires inspection before further writes. It is an earlier Calendar draft attempt. It is checked again on the owner's next write, from two minutes after it started, and cleared if it saved nothing; ask the owner to try again then, or request operator inspection if it persists."
@@ -1440,6 +1451,7 @@ export class Assistant {
       childRun ?? scope.run,
       input,
       true,
+      this.controllers.get(scope.run)?.signal,
     );
     if (op === "work_cancel") {
       await this.tools.gathering?.browsers?.closeTask(

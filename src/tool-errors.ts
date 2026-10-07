@@ -9,6 +9,7 @@ export class NotDispatchedError extends Error {
   }
 }
 import { ZodError } from "zod";
+import { McpFailure } from "./mcp-errors.js";
 /** This call form already failed the same way in consecutive steps of the run; it was not dispatched. */
 export class RepeatedFailureError extends Error {
   constructor(operation: string, code: string, count: number) {
@@ -21,6 +22,27 @@ export class RepeatedFailureError extends Error {
 export class ToolValidationError extends Error {}
 export function toolError(error: unknown) {
   const message = error instanceof Error ? error.message : "";
+  if (error instanceof McpFailure)
+    return {
+      code:
+        error.category === "auth"
+          ? "AUTHORIZATION_REQUIRED"
+          : error.category === "permission"
+            ? "PERMISSION_DENIED"
+            : error.category === "invalid"
+              ? "INVALID_INPUT"
+              : error.category === "capacity"
+                ? "RATE_LIMITED"
+                : "TOOL_FAILED",
+      retryable: false,
+      message:
+        error.category === "auth"
+          ? "Reconnect the MCP connection before retrying."
+          : error.category === "capacity"
+            ? "MCP capacity limit; honour retryAfterSeconds or request owner action."
+            : "MCP operation failed; inspect its durable state before retrying a write.",
+      retryAfterSeconds: error.retryAfterSeconds,
+    };
   if (error instanceof ToolValidationError)
     return { code: "VALIDATION_FAILED", retryable: false, message };
   if (error instanceof RepeatedFailureError)

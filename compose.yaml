@@ -84,12 +84,16 @@ services:
         "/migrations/028_gathering.sql",
         "-f",
         "/migrations/029_stock_rules.sql",
+        "-f",
+        "/migrations/030_mcp.sql",
       ]
     depends_on:
       postgres: { condition: service_healthy }
   gateway:
     build: .
     environment:
+      MCP_RUNTIME: ${MCP_RUNTIME:-off}
+      MCP_CREDENTIALS_JSON: ${MCP_CREDENTIALS_JSON:-}
       GATHERING_RUNTIME: ${GATHERING_RUNTIME:-off}
       GATHERING_BROWSER: ${GATHERING_BROWSER:-off}
       GATHERING_ARTIFACT_KEY: ${GATHERING_ARTIFACT_KEY:-}

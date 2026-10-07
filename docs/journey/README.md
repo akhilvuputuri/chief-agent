@@ -59,6 +59,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 2 October                            | [55 — Runtime config](55-runtime-config.md): can behaviour settings move to reviewed repo config without changing production?                         | Implemented and tested; not yet deployed                                                                                     |
 | 2 October                            | [56 — Coding work outside the live assistant](56-coding-runtime.md): can Chief dispatch engineering work to a durable remote runtime?                 | Released v0.3.33 foundation off; scoped provider/App/ingress activation pending                                              |
 | 1–3 October                          | [54 — Subscriptions](54-subscriptions.md): how do owner statements, decision dates and reminders stay consistent?                                     | Released v0.3.34; migration 025, normal release and rolled-back deployed-module smoke verified; owner acceptance pending     |
+| 8 October                            | [67 — Remote MCP connectors](67-mcp-connectors.md): can external tools share the durable execution boundary?                                          | Implemented candidate; review, deployment and authenticated Reader acceptance pending                                        |
 
 | 3 October | [57 — Python coding runtime](57-python-coding-runtime.md): can disposable execution change language while preserving Chief’s durable boundary? | Released v0.3.35 off; Python image/policy and exact release verified; live activation pending |
 
@@ -140,3 +141,5 @@ Python execution: [56 — Coding work](56-coding-runtime.md) → [57 — Python 
 - 1 October 2026: [53 — Feed destinations](53-feed-destinations.md): issue 137 corrects queue boundaries, approval placement and durable delivery; released in v0.3.29/v0.3.30 with review loops, exact deployment and rolled-back module smoke.
 
 - 7 October 2026: [65 — Explicit Main conversation](65-main-conversation-topic.md): correct the assumption that topic-less General produces an exclusive client view; released v0.3.44; exact release/health and Main introduction verified, owner-client acceptance separate.
+
+MCP integrations: [67 — Remote MCP connectors](67-mcp-connectors.md), [15 — Portable plugins](15-portable-plugins.md).
