@@ -12,7 +12,7 @@
     "start": "node dist/main.js",
     "build": "tsc",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.evals.json",
-    "test": "npm run build && tsx --test tests/*.test.ts && node --test scripts/*.test.mjs && python3 -m unittest discover -s evals/picker -p 'test_*.py' && python3 -m unittest discover -s evals/context -p 'test_*.py' && python3 -m unittest discover -s evals/decisions -p 'test_*.py'",
+    "test": "npm run build && tsx --test tests/*.test.ts && node --test scripts/*.test.mjs && python3 -m unittest discover -s evals/picker -p 'test_*.py' && python3 -m unittest discover -s evals/context -p 'test_*.py' && python3 -m unittest discover -s evals/decisions -p 'test_*.py' && python3 -m unittest discover -s evals/coding -p 'test_*.py'",
     "migrate": "tsx src/migrate.ts",
     "check": "npm run typecheck && npm test && npm run check:coding",
     "format": "prettier --write .",
@@ -32,7 +32,8 @@
     "release:status": "node scripts/release-status.mjs",
     "logs:cloudwatch": "node scripts/cloudwatch-logs.mjs",
     "context:inventory": "tsx scripts/context-inventory.ts",
-    "check:coding": "python3 -m ruff check coding_runtime && python3 -m ruff format --check coding_runtime && python3 -m mypy coding_runtime/src --strict && PYTHONPATH=coding_runtime/src python3 -m unittest discover -s coding_runtime/tests -v"
+    "check:coding": "python3 -m ruff check coding_runtime && python3 -m ruff format --check coding_runtime && python3 -m mypy coding_runtime/src --strict && PYTHONPATH=coding_runtime/src python3 -m unittest discover -s coding_runtime/tests -v",
+    "eval:coding": "python3 evals/coding/run.py"
   },
   "dependencies": {
     "@aws-sdk/client-codebuild": "3.1141.0",

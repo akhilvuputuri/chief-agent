@@ -71,6 +71,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 7 October | [65 — Explicit Main conversation](65-main-conversation-topic.md): why does All still contain every feed? | Released v0.3.44; dedicated Main topic, exact release and API introduction verified |
 | 4–7 October | [61 — Fixed coding squad](61-coding-squad.md): who coordinates coder/reviewer handoffs while code enforces approval? | v0.3.38 verified; coding enabled at 2273e8c with scoped auth/project/ingress checks, paid/live acceptance pending |
 | 3–4 October | [62 — Durable gathering](62-gathering-harness.md): how can source selection, private files and coverage survive long tasks? | Released v0.3.39, enabled; exact receipt, sandbox/PG proofs and preservation verified; provider acceptance pending |
+| 7–8 October | [66 — Coding benchmarks](66-coding-benchmarks.md): can repairs be graded independently of squad approval? | Offline pack under review; model success and live integration unmeasured |
 
 ## Connected case studies
 
