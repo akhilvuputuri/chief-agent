@@ -11,7 +11,15 @@ import { formatTelegram } from "./telegram-format.js";
 import { telegramChunks, type Portfolio } from "./portfolio.js";
 import { slowReply } from "./delivery-routing.js";
 import { runFamily } from "./run-family.js";
-import { inThread, TelegramTopics, threadOf } from "./telegram-topics.js";
+import {
+  inThread,
+  TelegramTopics,
+  threadOf,
+  routeUnthreadedToMain,
+  withTelegramSendGuard,
+  TelegramSendWithheld,
+  sentThread,
+} from "./telegram-topics.js";
 import { calendarPreview, validateDraft } from "./calendar-draft.js";
 import { GoogleAuthError } from "./calendar.js";
 import {
@@ -49,6 +57,7 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
   const controls = new SerialQueue();
   const preparation = new PreparationQueue(2);
   const ids = new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(","));
+  routeUnthreadedToMain(bot.api, topics, ids);
   if (assistant.tools?.responsibilities) {
     const responsibilities = assistant.tools.responsibilities;
     const feedback = new ResponsibilityDelivery(
@@ -468,7 +477,7 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
     }
     // A message typed in a topic is answered in that topic (ctx.reply does this itself).
     // Phase 1: the topic only decides where replies go; the conversation is shared.
-    const thread = threadOf(ctx.message);
+    let thread = threadOf(ctx.message) ?? topics.cachedThread(user, "main");
     const here = { id: String(ctx.chat.id), thread };
     if (/^\/invoices(?:@\w+)?$/i.test(ctx.message.text ?? "")) {
       await ensureUser(db, user);
@@ -823,9 +832,9 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
               ctx.message.quote?.text
             )?.slice(0, 2000),
         receivedAt: new Date().toISOString(),
-        preparing: needsPreparation,
+        preparing: true,
         voiceReply: !!ctx.message.voice,
-        topic: await topics.keyFor(user, thread).catch(() => undefined),
+        topic: topics.cachedKey(user, thread),
         threadId: thread,
       },
     );
@@ -838,6 +847,16 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
     let deliveryGuard: (() => Promise<boolean>) | undefined;
     let deliveryRun: string | undefined;
     try {
+      // Intake is durable before any topic API/ledger wait. Pending preparation is
+      // the FIFO fence while Main/subject identity is resolved.
+      thread ??= await topics.thread(user, "main").catch(() => undefined);
+      here.thread = thread;
+      await assistant.routeInput?.(
+        user,
+        inputId,
+        thread,
+        await topics.keyFor(user, thread).catch(() => undefined),
+      );
       const prepare = async () => {
         let message = ctx.message.text ?? "";
         let images: ImageAttachment[] | undefined;
@@ -1119,7 +1138,14 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
               },
             );
           if (reply.reply && reply.runId)
-            await sendSlowPointer(bot, db, user, reply.runId, actualThread);
+            await sendSlowPointer(
+              bot,
+              db,
+              user,
+              reply.runId,
+              actualThread,
+              await topics.thread(user, "main").catch(() => undefined),
+            );
           if (
             reply.reply &&
             reply.voiceReply &&
@@ -1134,16 +1160,32 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
               );
               // New input can arrive during TTS even after the text was sent.
               if (await deliveryGuard())
-                await bot.api.sendVoice(
-                  user,
-                  new InputFile(audio.bytes, audio.filename),
-                  { ...inThread(actualThread), caption: "AI-generated voice" },
+                await withTelegramSendGuard(deliveryGuard, () =>
+                  bot.api.sendVoice(
+                    user,
+                    new InputFile(audio.bytes, audio.filename),
+                    {
+                      ...inThread(actualThread),
+                      caption: "AI-generated voice",
+                    },
+                  ),
                 );
-            } catch {
-              if (await deliveryGuard())
-                await ctx.reply(
-                  "The text reply is ready; audio generation is unavailable.",
-                );
+            } catch (error) {
+              if (
+                !(error instanceof TelegramSendWithheld) &&
+                (await deliveryGuard())
+              ) {
+                try {
+                  await withTelegramSendGuard(deliveryGuard, () =>
+                    ctx.reply(
+                      "The text reply is ready; audio generation is unavailable.",
+                    ),
+                  );
+                } catch (fallbackError) {
+                  if (!(fallbackError instanceof TelegramSendWithheld))
+                    throw fallbackError;
+                }
+              }
             }
           }
         }
@@ -1223,8 +1265,8 @@ export function sendResponsibilityApprovals(
       );
       if (sent)
         await db.query(
-          "UPDATE approvals SET payload=payload || jsonb_build_object('telegramMessageId',$3::bigint,'telegramDeliveryState','sent') WHERE id=$1 AND user_id=$2",
-          [row.id, user, sent.message_id],
+          "UPDATE approvals SET payload=payload || jsonb_build_object('telegramMessageId',$3::bigint,'telegramDeliveryState','sent','telegramThreadId',$4::bigint) WHERE id=$1 AND user_id=$2",
+          [row.id, user, sent.message_id, sentThread(sent, thread) ?? null],
         );
     }
   });
@@ -1354,8 +1396,16 @@ async function sendPortfolioApprovalsOnce(
     );
     if (!message) return;
     await db.query(
-      `UPDATE approvals SET payload=jsonb_set(payload,'{telegramMessageId}',$3::jsonb) || '{"telegramDeliveryState":"sent"}'::jsonb WHERE id=$1 AND user_id=$2`,
-      [row.id, user, JSON.stringify(message.message_id)],
+      `UPDATE approvals SET payload=jsonb_set(payload,'{telegramMessageId}',$3::jsonb) || jsonb_build_object('telegramDeliveryState','sent','telegramThreadId',$4::bigint) WHERE id=$1 AND user_id=$2`,
+      [
+        row.id,
+        user,
+        JSON.stringify(message.message_id),
+        sentThread(
+          message,
+          run && family.has(row.run_id) ? thread : undefined,
+        ) ?? null,
+      ],
     );
   }
 }
@@ -1367,8 +1417,11 @@ async function sendApprovalMessage(
   guard?: () => Promise<boolean>,
 ) {
   try {
-    return await bot.api.sendMessage(user, text, options);
+    return await withTelegramSendGuard(guard, () =>
+      bot.api.sendMessage(user, text, options),
+    );
   } catch (error) {
+    if (error instanceof TelegramSendWithheld) return undefined;
     if (
       options?.message_thread_id &&
       (error as { error_code?: number }).error_code === 400 &&
@@ -1378,7 +1431,14 @@ async function sendApprovalMessage(
     ) {
       if (guard && !(await guard())) return undefined;
       const { message_thread_id: _thread, ...rest } = options;
-      return bot.api.sendMessage(user, text, rest);
+      try {
+        return await withTelegramSendGuard(guard, () =>
+          bot.api.sendMessage(user, text, rest),
+        );
+      } catch (retryError) {
+        if (retryError instanceof TelegramSendWithheld) return undefined;
+        throw retryError;
+      }
     }
     throw error;
   }
@@ -1437,7 +1497,9 @@ export async function sendSlowPointer(
   user: string,
   run: string,
   thread?: number,
+  mainThread?: number,
 ) {
+  if (mainThread !== undefined && mainThread === thread) return;
   const input = (
     await db.query(
       "SELECT metadata,received_at FROM conversation_inputs WHERE user_id=$1 AND run_id=$2 ORDER BY ordinal LIMIT 1",
@@ -1534,8 +1596,16 @@ async function sendCalendarApprovalsOnce(
     );
     if (!message) return;
     await db.query(
-      `UPDATE approvals SET payload=jsonb_set(payload,'{telegramMessageId}',$3::jsonb) || '{"telegramDeliveryState":"sent"}'::jsonb WHERE id=$1 AND user_id=$2`,
-      [row.id, user, JSON.stringify(message.message_id)],
+      `UPDATE approvals SET payload=jsonb_set(payload,'{telegramMessageId}',$3::jsonb) || jsonb_build_object('telegramDeliveryState','sent','telegramThreadId',$4::bigint) WHERE id=$1 AND user_id=$2`,
+      [
+        row.id,
+        user,
+        JSON.stringify(message.message_id),
+        sentThread(
+          message,
+          run && family.has(row.run_id) ? thread : undefined,
+        ) ?? null,
+      ],
     );
   }
 }
@@ -1592,8 +1662,16 @@ async function sendLibraryApprovalsOnce(
     );
     if (!message) return;
     await db.query(
-      `UPDATE approvals SET payload=jsonb_set(payload,'{telegramMessageId}',$3::jsonb) || '{"telegramDeliveryState":"sent"}'::jsonb WHERE id=$1 AND user_id=$2`,
-      [row.id, user, JSON.stringify(message.message_id)],
+      `UPDATE approvals SET payload=jsonb_set(payload,'{telegramMessageId}',$3::jsonb) || jsonb_build_object('telegramDeliveryState','sent','telegramThreadId',$4::bigint) WHERE id=$1 AND user_id=$2`,
+      [
+        row.id,
+        user,
+        JSON.stringify(message.message_id),
+        sentThread(
+          message,
+          run && family.has(row.run_id) ? thread : undefined,
+        ) ?? null,
+      ],
     );
   }
 }

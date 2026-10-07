@@ -1,10 +1,16 @@
+import { Voice } from "../src/providers.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
-import { GrammyError } from "grammy";
+import { Bot, GrammyError } from "grammy";
 import { ensureUser, type Database } from "../src/db.js";
-import { TelegramTopics, inThread, threadOf } from "../src/telegram-topics.js";
+import {
+  TelegramTopics,
+  inThread,
+  threadOf,
+  routeUnthreadedToMain,
+} from "../src/telegram-topics.js";
 import { TelegramViews } from "../src/telegram-views.js";
 import {
   telegram,
@@ -41,7 +47,7 @@ function fakeApi(enabled = true) {
         created.push(name);
         await new Promise((r) => setTimeout(r, 5));
         return {
-          message_thread_id: name === "Coding" ? 42 : next++,
+          message_thread_id: next++,
           name,
         } as any;
       },
@@ -82,7 +88,7 @@ test("Updates is renamed in place without duplicate topics, and old queued feed 
     assert.equal(await topics.keyFor("123", 77), "coding");
     await topics.ensure("123");
     await topics.ensure("123");
-    assert.deepEqual(created, ["News", "Markets"]);
+    assert.deepEqual(created, ["News", "Markets", "Main"]);
     assert.deepEqual(edits, [
       [77, { name: "Coding" }],
       [77, { name: "Coding" }],
@@ -98,10 +104,13 @@ test("Updates is renamed in place without duplicate topics, and old queued feed 
       { kind: "topic", topic: "coding" },
       async (extra) => sent.push(extra),
     );
-    assert.deepEqual(sent, [{}, { message_thread_id: 77 }]);
+    assert.deepEqual(sent, [
+      { message_thread_id: 42 },
+      { message_thread_id: 77 },
+    ]);
     assert.deepEqual(
       await topics.capture("123", { kind: "topic", topic: "updates" }),
-      { kind: "general" },
+      { kind: "thread", threadId: 42 },
     );
   } finally {
     await pg.close();
@@ -492,7 +501,7 @@ test("topics are created up front and a thread maps back to its topic", async ()
   try {
     await topics.ensure("123");
     await topics.ensure("123");
-    assert.deepEqual(created, ["News", "Markets", "Coding"]);
+    assert.deepEqual(created, ["News", "Markets", "Coding", "Main"]);
     assert.equal(await topics.keyFor("123", 42), "coding");
     assert.equal(await topics.keyFor("123", 40), "news");
     assert.equal(await topics.keyFor("123", 99), undefined);
@@ -579,11 +588,11 @@ test("a message typed in Chief's Coding topic is recorded with its topic", async
     ).rows;
     assert.deepEqual(
       topics.map((r) => r.topic),
-      ["coding", "news", null, "coding"],
+      ["coding", "news", "main", "coding"],
     );
     assert.deepEqual(
       topics.map((r) => r.thread),
-      ["42", "40", null, "42"],
+      ["42", "40", "43", "42"],
     );
   } finally {
     await pg.close();
@@ -745,6 +754,548 @@ test("slow pointer needs an actually delivered answer, and is deduplicated", asy
       sendSlowPointer(bot, db, "123", run, 42),
     ]);
     assert.equal(sends, 1);
+  } finally {
+    await pg.close();
+  }
+});
+
+test("unthreaded owner sends land in Main while explicit feed sends and other chats stay unchanged", async () => {
+  const { pg, db } = await database();
+  const bot = new Bot("123:test-token");
+  const calls: { method: string; payload: any }[] = [];
+  bot.api.config.use(async (_prev, method, payload) => {
+    calls.push({ method, payload });
+    if (method === "getMe")
+      return { ok: true, result: { has_topics_enabled: true } } as any;
+    if (method === "createForumTopic")
+      return {
+        ok: true,
+        result: { message_thread_id: 900, name: "Main" },
+      } as any;
+    return { ok: true, result: { message_id: 901 } } as any;
+  });
+  const topics = new TelegramTopics(db, bot.api);
+  routeUnthreadedToMain(bot.api, topics, new Set(["123"]));
+  try {
+    await bot.api.sendMessage("123", "Conversation");
+    await bot.api.sendMessage("123", "Root helper", { message_thread_id: 1 });
+    await bot.api.sendVoice("123", "voice-file");
+    await bot.api.sendDocument("123", "document-file");
+    await bot.api.sendChatAction("123", "typing");
+    await bot.api.sendMessage("123", "News feed", { message_thread_id: 42 });
+    await bot.api.sendMessage("999", "Other chat");
+    const sends = calls.filter((c) => c.method.startsWith("send"));
+    assert.deepEqual(
+      sends.map((c) => c.payload.message_thread_id),
+      [900, 900, 900, 900, 900, 42, undefined],
+    );
+    assert.equal(
+      calls.filter((c) => c.method === "createForumTopic").length,
+      1,
+    );
+    assert.deepEqual(await topics.capture("123", { kind: "general" }), {
+      kind: "thread",
+      threadId: 900,
+    });
+    assert.equal(await topics.keyFor("123", 900), "main");
+  } finally {
+    await pg.close();
+  }
+});
+
+test("Main recovery retries only definite missing-thread errors and works with threaded mode off", async () => {
+  for (const mode of ["missing", "unknown", "off"] as const) {
+    const { pg, db } = await database();
+    const bot = new Bot("123:test-token");
+    let created = 0;
+    const sends: number[] = [];
+    bot.api.config.use(async (_prev, method, payload) => {
+      if (method === "getMe")
+        return {
+          ok: true,
+          result: { has_topics_enabled: mode !== "off" },
+        } as any;
+      if (method === "createForumTopic")
+        return {
+          ok: true,
+          result: { message_thread_id: 900 + created++, name: "Main" },
+        } as any;
+      if (method === "sendMessage") {
+        const thread = (payload as any).message_thread_id;
+        sends.push(thread);
+        if (mode === "missing" && thread === 900)
+          return {
+            ok: false,
+            error_code: 400,
+            description: "message thread not found",
+          } as any;
+        if (mode === "unknown")
+          throw Error("Unknown transport acknowledgement");
+      }
+      return { ok: true, result: { message_id: 902 } } as any;
+    });
+    routeUnthreadedToMain(
+      bot.api,
+      new TelegramTopics(db, bot.api),
+      new Set(["123"]),
+    );
+    try {
+      if (mode === "unknown")
+        await assert.rejects(() => bot.api.sendMessage("123", "Message"));
+      else if (mode === "missing") {
+        await assert.rejects(() => bot.api.sendMessage("123", "Message"));
+        await bot.api.sendMessage("123", "Message");
+      } else await bot.api.sendMessage("123", "Message");
+      assert.deepEqual(
+        sends,
+        mode === "missing" ? [900, 901] : mode === "off" ? [undefined] : [900],
+      );
+    } finally {
+      await pg.close();
+    }
+  }
+});
+
+test("Main conversation never receives a slow-reply pointer about itself", async () => {
+  const { pg, db } = await database();
+  let sent = 0;
+  try {
+    await sendSlowPointer(
+      {
+        api: {
+          sendMessage: async () => {
+            sent++;
+            return { message_id: 1 };
+          },
+        },
+      } as any,
+      db,
+      "123",
+      randomUUID(),
+      900,
+      900,
+    );
+    assert.equal(sent, 0);
+  } finally {
+    await pg.close();
+  }
+});
+
+test("root intake persists before slow Main creation and explicit topic input cannot overtake it", async () => {
+  const { pg, db } = await database();
+  let enter!: () => void, release!: () => void;
+  const entered = new Promise<void>((r) => (enter = r)),
+    wait = new Promise<void>((r) => (release = r));
+  const assistant = new Assistant(
+    db,
+    {
+      run: async (req) => ({
+        reply: "Answer",
+        history: [
+          ...req.history,
+          { role: "user", content: req.message },
+          { role: "assistant", content: "Answer" },
+        ],
+      }),
+    },
+    new JobTools(db, { call: async () => ({}) }),
+  );
+  const bot = telegram(
+    readConfig({
+      DATABASE_URL: "postgres://x:x@localhost/x",
+      TELEGRAM_BOT_TOKEN: "123:test-token",
+      TELEGRAM_ALLOWED_USER_IDS: "123",
+    }),
+    assistant,
+    db,
+  );
+  let messages = 1000;
+  bot.api.config.use(async (_prev, method) => {
+    if (method === "getMe")
+      return {
+        ok: true,
+        result: {
+          id: 999,
+          is_bot: true,
+          first_name: "T",
+          username: "t_bot",
+          has_topics_enabled: true,
+        },
+      } as any;
+    if (method === "createForumTopic") {
+      enter();
+      await wait;
+      return {
+        ok: true,
+        result: { message_thread_id: 900, name: "Main" },
+      } as any;
+    }
+    return { ok: true, result: { message_id: messages++ } } as any;
+  });
+  const update = (id: number, thread?: number) =>
+    ({
+      update_id: id,
+      message: {
+        message_id: id,
+        date: 0,
+        chat: { id: 123, type: "private" },
+        from: { id: 123, is_bot: false, first_name: "T" },
+        text: `Question ${id}`,
+        ...(thread
+          ? { is_topic_message: true, message_thread_id: thread }
+          : {}),
+      },
+    }) as any;
+  try {
+    await bot.init();
+    const first = bot.handleUpdate(update(1));
+    await entered;
+    const second = bot.handleUpdate(update(2, 55));
+    while (
+      (await db.query("SELECT count(*)::int AS n FROM conversation_inputs"))
+        .rows[0].n < 2
+    )
+      await new Promise((r) => setTimeout(r, 5));
+    assert.deepEqual(
+      (
+        await db.query(
+          "SELECT metadata->>'updateId' AS id FROM conversation_inputs ORDER BY ordinal",
+        )
+      ).rows.map((r) => r.id),
+      ["1", "2"],
+    );
+    release();
+    await Promise.all([first, second]);
+    assert.deepEqual(
+      (
+        await db.query(
+          "SELECT metadata->>'threadId' AS thread,state FROM conversation_inputs ORDER BY ordinal",
+        )
+      ).rows,
+      [
+        { thread: "900", state: "completed" },
+        { thread: "55", state: "completed" },
+      ],
+    );
+  } finally {
+    release();
+    await pg.close();
+  }
+});
+
+test("Main lookup and missing-thread repair do not send an approval after cancellation", async () => {
+  for (const cancelAt of ["lookup", "rejection"] as const) {
+    const { pg, db } = await database();
+    const actions = new CalendarActions(db, {} as any, "123");
+    const run = randomUUID();
+    const draft = await actions.draft("123", run, {
+      title: "Decision",
+      start: "2026-10-08T15:00:00+08:00",
+      end: "2026-10-08T16:00:00+08:00",
+    });
+    const bot = new Bot("123:test-token");
+    let current = true,
+      created = 0;
+    const sends: unknown[] = [];
+    bot.api.config.use(async (_p, method, payload) => {
+      if (method === "getMe")
+        return { ok: true, result: { has_topics_enabled: true } } as any;
+      if (method === "createForumTopic") {
+        if (cancelAt === "lookup") current = false;
+        return {
+          ok: true,
+          result: { message_thread_id: 900 + created++, name: "Main" },
+        } as any;
+      }
+      if (method === "sendMessage") {
+        sends.push({ thread: (payload as any).message_thread_id, current });
+        current = false;
+        return {
+          ok: false,
+          error_code: 400,
+          description: "message thread not found",
+        } as any;
+      }
+      return { ok: true, result: true } as any;
+    });
+    routeUnthreadedToMain(
+      bot.api,
+      new TelegramTopics(db, bot.api),
+      new Set(["123"]),
+    );
+    try {
+      if (cancelAt === "rejection")
+        await assert.rejects(() =>
+          sendCalendarApprovals(bot, db, "123", async () => current),
+        );
+      else await sendCalendarApprovals(bot, db, "123", async () => current);
+      assert.deepEqual(
+        sends,
+        cancelAt === "lookup" ? [] : [{ thread: 900, current: true }],
+      );
+      const payload = (
+        await db.query("SELECT payload FROM approvals WHERE id=$1", [
+          draft.approvalId,
+        ])
+      ).rows[0].payload;
+      assert.equal(payload.telegramMessageId, undefined);
+      assert.equal(payload.telegramDeliveryState, undefined);
+    } finally {
+      await pg.close();
+    }
+  }
+});
+
+test("message and feed receipts store Main's actual sent thread", async () => {
+  const { pg, db } = await database();
+  const bot = new Bot("123:test-token");
+  let id = 1000;
+  bot.api.config.use(async (_p, method) => {
+    if (method === "getMe")
+      return { ok: true, result: { has_topics_enabled: true } } as any;
+    if (method === "createForumTopic")
+      return {
+        ok: true,
+        result: { message_thread_id: 900, name: "Main" },
+      } as any;
+    return { ok: true, result: { message_id: id++ } } as any;
+  });
+  routeUnthreadedToMain(
+    bot.api,
+    new TelegramTopics(db, bot.api),
+    new Set(["123"]),
+  );
+  try {
+    const run = randomUUID();
+    await new TelegramViews(db, bot.api).deliver(
+      "123",
+      "123",
+      { reply: "Progress", runId: run },
+      "progress",
+    );
+    assert.equal(
+      (
+        await db.query(
+          "SELECT data FROM events WHERE type='telegram.message_sent' AND run_id=$1",
+          [run],
+        )
+      ).rows[0].data.threadId,
+      900,
+    );
+    const sent = await bot.api.sendMessage("123", "Feed fallback");
+    const { recordFeedSent } = await import("../src/telegram-feeds.js");
+    await recordFeedSent(db, "123", run, "updates", sent, undefined);
+    assert.equal(
+      (
+        await db.query(
+          "SELECT data FROM events WHERE type='telegram.feed_sent' AND run_id=$1",
+          [run],
+        )
+      ).rows[0].data.threadId,
+      900,
+    );
+  } finally {
+    await pg.close();
+  }
+});
+
+test("closed Main falls back to actual root without being re-added and records root receipts", async () => {
+  const { pg, db } = await database();
+  const bot = new Bot("123:test-token");
+  const sends: (number | undefined)[] = [];
+  bot.api.config.use(async (_p, method, payload) => {
+    if (method === "getMe")
+      return { ok: true, result: { has_topics_enabled: true } } as any;
+    if (method === "createForumTopic")
+      return {
+        ok: true,
+        result: { message_thread_id: 900, name: "Main" },
+      } as any;
+    if (method === "sendMessage") {
+      const thread = (payload as any).message_thread_id;
+      sends.push(thread);
+      if (thread === 900)
+        return {
+          ok: false,
+          error_code: 400,
+          description: "TOPIC_CLOSED",
+        } as any;
+    }
+    return { ok: true, result: { message_id: 1000 + sends.length } } as any;
+  });
+  const topics = new TelegramTopics(db, bot.api);
+  routeUnthreadedToMain(bot.api, topics, new Set(["123"]));
+  try {
+    const run = randomUUID();
+    await topics.deliver("123", { kind: "general" }, (extra) =>
+      new TelegramViews(db, bot.api).deliver(
+        "123",
+        { id: "123", thread: extra.message_thread_id },
+        { reply: "Answer", runId: run },
+      ),
+    );
+    assert.deepEqual(sends, [900, undefined]);
+    assert.equal(
+      (
+        await db.query(
+          "SELECT data FROM events WHERE type='telegram.message_sent' AND run_id=$1",
+          [run],
+        )
+      ).rows[0].data.threadId,
+      null,
+    );
+    const a = new CalendarActions(db, {} as any, "123");
+    const draft = await a.draft("123", randomUUID(), {
+      title: "Decision",
+      start: "2026-10-08T15:00:00+08:00",
+      end: "2026-10-08T16:00:00+08:00",
+    });
+    await sendCalendarApprovals(bot, db, "123", async () => true);
+    assert.deepEqual(sends, [900, undefined, 900, undefined]);
+    assert.equal(
+      (
+        await db.query("SELECT payload FROM approvals WHERE id=$1", [
+          draft.approvalId,
+        ])
+      ).rows[0].payload.telegramThreadId,
+      null,
+    );
+  } finally {
+    await pg.close();
+  }
+});
+
+test("closed Main root retry still checks an approval's cancellation guard", async () => {
+  const { pg, db } = await database();
+  const a = new CalendarActions(db, {} as any, "123");
+  const draft = await a.draft("123", randomUUID(), {
+    title: "Decision",
+    start: "2026-10-08T15:00:00+08:00",
+    end: "2026-10-08T16:00:00+08:00",
+  });
+  const bot = new Bot("123:test-token");
+  let current = true;
+  const sends: unknown[] = [];
+  bot.api.config.use(async (_p, method, payload) => {
+    if (method === "getMe")
+      return { ok: true, result: { has_topics_enabled: true } } as any;
+    if (method === "createForumTopic")
+      return {
+        ok: true,
+        result: { message_thread_id: 900, name: "Main" },
+      } as any;
+    if (method === "sendMessage") {
+      sends.push((payload as any).message_thread_id);
+      current = false;
+      return { ok: false, error_code: 400, description: "TOPIC_CLOSED" } as any;
+    }
+    return { ok: true, result: true } as any;
+  });
+  routeUnthreadedToMain(
+    bot.api,
+    new TelegramTopics(db, bot.api),
+    new Set(["123"]),
+  );
+  try {
+    await sendCalendarApprovals(bot, db, "123", async () => current);
+    assert.deepEqual(sends, [900]);
+    assert.equal(
+      (
+        await db.query("SELECT payload FROM approvals WHERE id=$1", [
+          draft.approvalId,
+        ])
+      ).rows[0].payload.telegramDeliveryState,
+      undefined,
+    );
+  } finally {
+    await pg.close();
+  }
+});
+
+test("foreground voice root fallback respects cancellation after closed Main rejection", async (t) => {
+  const { pg, db } = await database();
+  let current = true;
+  const voiceSends: unknown[] = [];
+  t.mock.method(Voice.prototype, "speak", async () => ({
+    bytes: new Uint8Array([1, 2, 3]),
+    filename: "reply.ogg",
+  }));
+  const assistant = {
+    tools: {},
+    recordInput: async () => randomUUID(),
+    prepareInput: async () => {},
+    failInput: async () => {},
+    respondDetailed: async () => ({
+      reply: "Answer",
+      runId: randomUUID(),
+      voiceReply: true,
+      threadId: 900,
+    }),
+    isCurrentDelivery: async () => current,
+    isCurrentRun: async () => current,
+    finishDelivery: async () => {},
+  } as unknown as Assistant;
+  const bot = telegram(
+    readConfig({
+      DATABASE_URL: "postgres://x:x@localhost/x",
+      TELEGRAM_BOT_TOKEN: "123:test-token",
+      TELEGRAM_ALLOWED_USER_IDS: "123",
+      VOICE_REPLIES: "true",
+    }),
+    assistant,
+    db,
+  );
+  bot.api.config.use(async (_p, method, payload) => {
+    if (method === "getMe")
+      return {
+        ok: true,
+        result: {
+          id: 999,
+          is_bot: true,
+          first_name: "T",
+          username: "t_bot",
+          has_topics_enabled: true,
+        },
+      } as any;
+    if (method === "createForumTopic")
+      return {
+        ok: true,
+        result: { message_thread_id: 900, name: "Main" },
+      } as any;
+    const thread = (payload as any).message_thread_id;
+    if (method === "sendMessage" && thread === 900)
+      return { ok: false, error_code: 400, description: "TOPIC_CLOSED" } as any;
+    if (method === "sendVoice") {
+      voiceSends.push({ thread, current });
+      current = false;
+      if (thread === 900)
+        return {
+          ok: false,
+          error_code: 400,
+          description: "TOPIC_CLOSED",
+        } as any;
+    }
+    return { ok: true, result: { message_id: 1000 } } as any;
+  });
+  routeUnthreadedToMain(bot.api, bot.topics, new Set(["123"]));
+  try {
+    await bot.init();
+    await bot.handleUpdate({
+      update_id: 501,
+      message: {
+        message_id: 501,
+        date: 0,
+        chat: { id: 123, type: "private" },
+        from: { id: 123, is_bot: false, first_name: "T" },
+        text: "Please answer aloud",
+      },
+    } as any);
+    assert.deepEqual(voiceSends, [{ thread: 900, current: true }]);
+    assert.equal(
+      (await db.query("SELECT status FROM inbound_updates WHERE update_id=501"))
+        .rows[0].status,
+      "completed",
+    );
   } finally {
     await pg.close();
   }

@@ -1,6 +1,7 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 // Topics in the bot's private chat (Telegram threaded mode). Chief owns a small fixed set
-// of topics and posts scheduled output there; General stays the main conversation.
-// Everything degrades to General: with threaded mode off, the switch off, or any failure
+// of topics and posts scheduled output there; Main is the explicit conversation topic.
+// When topic delivery is unavailable, everything degrades to the root/All view: with threaded mode off, the switch off, or any failure
 // to create a topic, sends simply leave out message_thread_id.
 import { createHash } from "node:crypto";
 import type { Api } from "grammy";
@@ -8,20 +9,15 @@ import type { Database } from "./db.js";
 import { event } from "./db.js";
 import { errorFields, opsLog } from "./ops-log.js";
 
-export type TopicKey = "news" | "markets" | "coding";
+export type TopicKey = "news" | "markets" | "coding" | "main";
 // icon_color must be one of Telegram's six topic colours.
 const topics = {
   news: { name: "News", icon_color: 0x6fb9f0 },
   markets: { name: "Markets", icon_color: 0x8eee98 },
   coding: { name: "Coding", icon_color: 0xffd67e },
+  main: { name: "Main", icon_color: 0x6fb9f0 },
 } as const satisfies Record<TopicKey, { name: string; icon_color: number }>;
 
-/**
- * Phase 2: a message typed in one of these topics goes first to this agent type. Only
- * topics whose agent matches what people ask there: the news and stocks agents manage
- * bulletin and alert settings, while questions typed in News or Markets usually need the
- * web, so those topics only tell Chief where the message came from.
- */
 const keys = Object.keys(topics) as TopicKey[];
 
 /** Send options for a thread. General (id 1) is addressed by leaving the id out. */
@@ -114,7 +110,10 @@ export class TelegramTopics {
       if (this.known.has(id)) return this.known.get(id);
       throw error;
     });
-    if (typeof saved === "number") return saved;
+    if (typeof saved === "number") {
+      this.known.set(id, saved);
+      return saved;
+    }
     // Created earlier in this process but never recorded (a null row means deleted).
     if (saved === undefined && this.known.has(id)) return this.known.get(id);
     let pending = this.creating.get(id);
@@ -159,6 +158,19 @@ export class TelegramTopics {
       });
       return undefined;
     }
+  }
+
+  cachedThread(user: string, key: TopicKey) {
+    return this.known.get(`${user}:${key}`);
+  }
+  cachedKey(user: string, thread: number | undefined) {
+    return keys.find(
+      (key) =>
+        thread !== undefined && this.known.get(`${user}:${key}`) === thread,
+    );
+  }
+  async repairMain(user: string, stale: number) {
+    return this.recover(user, "main", stale);
   }
 
   /** Creates any missing topics, so the owner can write in them before Chief posts there. */
@@ -263,12 +275,16 @@ export class TelegramTopics {
           return await send(
             inThread(recreated),
             recreated
-              ? `Topic recreated. Say 'stop the ${key === "news" ? "news bulletin" : key === "markets" ? "stock alerts" : "coding job"}' in General to turn it off.`
+              ? key === "main"
+                ? "Main was recreated. Continue your conversation here."
+                : `Topic recreated. Say 'stop the ${key === "news" ? "news bulletin" : key === "markets" ? "stock alerts" : "coding job"}' in Main to turn it off.`
               : undefined,
           );
         } catch (retryError) {
           if (!unusable(retryError)) throw retryError;
-          return send({});
+          return key === "main"
+            ? withTelegramRootFallback(() => send({}))
+            : send({});
         }
       }
       if (!unusable(error)) throw error;
@@ -276,7 +292,9 @@ export class TelegramTopics {
         kind: key,
         ...errorFields(error),
       });
-      return send({});
+      return key === "main"
+        ? withTelegramRootFallback(() => send({}))
+        : send({});
     }
   }
 
@@ -291,9 +309,9 @@ export class TelegramTopics {
   ) {
     if (target.kind === "topic")
       return target.topic === "updates"
-        ? send({})
+        ? this.send(user, "main", send)
         : this.send(user, target.topic, send);
-    if (target.kind === "general") return send({});
+    if (target.kind === "general") return this.send(user, "main", send);
     try {
       return await send(inThread(target.threadId));
     } catch (error) {
@@ -305,14 +323,16 @@ export class TelegramTopics {
           return await send(
             inThread(replacement),
             replacement
-              ? "Topic recreated. Change its schedule in General to stop future updates."
+              ? "Topic recreated. Change its schedule in Main to stop future updates."
               : undefined,
           );
         } catch (retryError) {
           if (!unusable(retryError)) throw retryError;
         }
       }
-      return send({});
+      return key === "main"
+        ? withTelegramRootFallback(() => send({}))
+        : send({});
     }
   }
 
@@ -320,9 +340,126 @@ export class TelegramTopics {
     user: string,
     target: import("./delivery-routing.js").Destination,
   ): Promise<import("./delivery-routing.js").Destination> {
-    if (target.kind !== "topic") return target;
-    if (target.topic === "updates") return { kind: "general" };
-    const thread = await this.thread(user, target.topic).catch(() => undefined);
+    if (target.kind === "thread") return target;
+    const key =
+      target.kind === "general" || target.topic === "updates"
+        ? "main"
+        : target.topic;
+    const thread = await this.thread(user, key).catch(() => undefined);
     return thread ? { kind: "thread", threadId: thread } : { kind: "general" };
   }
+}
+
+const threadSendMethods = new Set([
+  "sendMessage",
+  "sendPhoto",
+  "sendAudio",
+  "sendDocument",
+  "sendVideo",
+  "sendAnimation",
+  "sendVoice",
+  "sendVideoNote",
+  "sendMediaGroup",
+  "sendChatAction",
+]);
+
+/** Cover unthreaded notices, approvals and attachment sends, including legacy outboxes.
+ * Calls with an explicit thread keep it. Only known private-chat owners are routed.
+ * The raw downstream call bypasses this transformer during failure fallback.
+ */
+export function routeUnthreadedToMain(
+  api: Api,
+  topics: TelegramTopics,
+  owners: ReadonlySet<string>,
+) {
+  api.config.use(async (previous, method, payload, signal) => {
+    const data = payload as {
+      chat_id?: string | number;
+      message_thread_id?: number;
+    };
+    const user = String(data.chat_id ?? "");
+    if (!threadSendMethods.has(method) || !owners.has(user))
+      return previous(method, payload, signal);
+    if (data.message_thread_id !== undefined && data.message_thread_id !== 1)
+      return rememberSent(
+        await previous(method, payload, signal),
+        data.message_thread_id,
+      );
+    const { message_thread_id: _root, ...plain } = payload as typeof payload & {
+      message_thread_id?: number;
+    };
+    const guard = sendGuard.getStore();
+    const fresh = async () => {
+      if (signal?.aborted || (guard && !(await guard())))
+        throw new TelegramSendWithheld();
+    };
+    if (rootFallback.getStore()) {
+      await fresh();
+      return rememberSent(
+        await previous(method, plain as typeof payload, signal),
+      );
+    }
+    const thread = await topics.thread(user, "main").catch(() => undefined);
+    await fresh();
+    const response = await previous(
+      method,
+      { ...plain, ...inThread(thread) } as typeof payload,
+      signal,
+    );
+    if (!response.ok) {
+      if (thread && missing(response)) {
+        await topics.repairMain(user, thread).catch(() => undefined);
+        return response;
+      }
+      if (thread && unusable(response)) {
+        // Telegram rejected the Main send definitively. Root retry is safe only
+        // after a fresh cancellation/delivery check; unknown outcomes never retry.
+        await fresh();
+        return rememberSent(
+          await previous(method, plain as typeof payload, signal),
+        );
+      }
+      return response;
+    }
+    return rememberSent(response, thread);
+  });
+}
+
+const actualThreads = new WeakMap<object, number | null>();
+function rememberSent<T>(response: T, intended?: number): T {
+  const r = response as { ok?: boolean; result?: unknown };
+  if (
+    r.ok &&
+    r.result &&
+    typeof r.result === "object" &&
+    "message_id" in r.result
+  )
+    actualThreads.set(
+      r.result,
+      (r.result as { message_thread_id?: number }).message_thread_id ??
+        intended ??
+        null,
+    );
+  return response;
+}
+export function sentThread(
+  message: { message_thread_id?: number },
+  fallback?: number,
+) {
+  return actualThreads.has(message)
+    ? (actualThreads.get(message) ?? undefined)
+    : (message.message_thread_id ?? fallback);
+}
+const rootFallback = new AsyncLocalStorage<boolean>();
+export function withTelegramRootFallback<T>(send: () => Promise<T>) {
+  return rootFallback.run(true, send);
+}
+
+const sendGuard = new AsyncLocalStorage<() => Promise<boolean>>();
+export class TelegramSendWithheld extends Error {}
+export function withTelegramSendGuard<T>(
+  guard: (() => Promise<boolean>) | undefined,
+  send: () => Promise<T>,
+) {
+  return guard ? sendGuard.run(guard, send) : send();
 }

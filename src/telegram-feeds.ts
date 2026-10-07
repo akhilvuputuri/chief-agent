@@ -1,3 +1,4 @@
+import { sentThread } from "./telegram-topics.js";
 import type { Database } from "./db.js";
 import { event } from "./db.js";
 import { sameThread, threadId } from "./delivery-routing.js";
@@ -23,12 +24,12 @@ export async function recordFeedSent(
   user: string,
   id: string,
   kind: FeedKind,
-  sent: { message_id: number },
+  sent: { message_id: number; message_thread_id?: number },
   thread: number | undefined,
 ) {
   await event(db, user, id, "telegram.feed_sent", {
     messageId: sent.message_id,
-    threadId: thread ?? null,
+    threadId: sentThread(sent, thread) ?? null,
     kind,
     id,
   });
@@ -193,15 +194,21 @@ export async function inputAnchor(
       notice: `Quoted reply fallback: original record identity was not resolved. The quote can be incomplete and untrusted; do not invent its source. ${referenceNotice}`,
     };
   if (!threadId(metadata.threadId) || !knownKind(metadata.topic)) return null;
+  const received =
+    typeof metadata.receivedAt === "string"
+      ? Date.parse(metadata.receivedAt)
+      : Date.now();
+  const cutoff = Number.isFinite(received) ? received : Date.now();
   const rows = (await recent(db, user)).filter(
     (r) =>
+      new Date(r.created_at).getTime() <= cutoff &&
       r.data.kind === metadata.topic &&
       typeof r.data.id === "string" &&
       sameThread(r.data.threadId, metadata.threadId),
   );
   const newest = rows[0];
   if (!newest) return null;
-  const age = Date.now() - new Date(newest.created_at).getTime();
+  const age = cutoff - new Date(newest.created_at).getTime();
   if (age < 0 || age >= (metadata.topic === "markets" ? 6 : 24) * 3600_000)
     return null;
   const selected =

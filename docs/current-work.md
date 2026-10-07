@@ -1,3 +1,7 @@
+# Explicit Main conversation topic — candidate v0.3.44
+
+Adds a real Main topic beside News, Coding and Markets. General destinations and unthreaded owner sends map to Main; root input is normalized to it. All remains Telegram's aggregate view. No schema/Compose or history changes. Full checks, independent review and release are pending. See [contract](telegram-topics.md) and [journal 65](journey/65-main-conversation-topic.md).
+
 # Coding MR automation — enabled v0.3.43
 
 [v0.3.43](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.43) is verified at `60b3ec55f03f0296ef027b413debab61eef7d2f7`: coding and guarded MR feedback/merge automation are on for new jobs. Exact-head Astra/PR/main CI/Devin, repository-only App scope/read verification, exact release and separate current health/effective selector checks passed. Planning/owner confirmation, one independent reviewer loop, protected paths and shared allocations remain intact; legacy/paused jobs retain settings. Zero jobs and no paid/live coding acceptance. See [contract](coding-automation.md) and [journal closure](journey/64-coding-automation.md#automatic-selector-release-closure--7-october-2026).
