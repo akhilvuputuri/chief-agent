@@ -1,6 +1,6 @@
-# Explicit Main conversation topic — candidate v0.3.44
+# Explicit Main conversation topic — released v0.3.44
 
-Adds a real Main topic beside News, Coding and Markets. General destinations and unthreaded owner sends map to Main; root input is normalized to it. All remains Telegram's aggregate view. No schema/Compose or history changes. Full checks, independent review and release are pending. See [contract](telegram-topics.md) and [journal 65](journey/65-main-conversation-topic.md).
+[PR #178](https://github.com/akhilvuputuri/chief-agent/pull/178) ships Main beside News, Coding and Markets. Root/All input is persisted first and normalized to Main before execution; default owner sends and logical general destinations use Main. All remains Telegram's combined history. Final GPT-6 Astra review approved `d628ec714be2741fa78e55bf63904452317d2f71`; required hosted full CI and [automatic release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37615771842) passed at merge `e522f5349af2d7be869bb18bcff2ba0327b06e08`. Separate server RELEASE/health, threaded-mode and Main-record checks passed; Telegram accepted one introduction in Main with zero model calls. No schema/Compose/history changes. Owner-client acceptance remains separate. See [contract](telegram-topics.md), [journal 65](journey/65-main-conversation-topic.md) and [v0.3.44](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.44).
 
 # Coding MR automation — enabled v0.3.43
 
