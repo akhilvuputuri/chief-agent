@@ -1,27 +1,22 @@
 // Topics in the bot's private chat (Telegram threaded mode). Chief owns a small fixed set
-// of topics and posts scheduled output there; General stays the main conversation.
-// Everything degrades to General: with threaded mode off, the switch off, or any failure
+// of topics and posts scheduled output there; Main is the explicit conversation topic.
+// When topic delivery is unavailable, everything degrades to the root/All view: with threaded mode off, the switch off, or any failure
 // to create a topic, sends simply leave out message_thread_id.
 import { createHash } from "node:crypto";
-import type { Api } from "grammy";
+import { GrammyError, type Api } from "grammy";
 import type { Database } from "./db.js";
 import { event } from "./db.js";
 import { errorFields, opsLog } from "./ops-log.js";
 
-export type TopicKey = "news" | "markets" | "coding";
+export type TopicKey = "news" | "markets" | "coding" | "main";
 // icon_color must be one of Telegram's six topic colours.
 const topics = {
   news: { name: "News", icon_color: 0x6fb9f0 },
   markets: { name: "Markets", icon_color: 0x8eee98 },
   coding: { name: "Coding", icon_color: 0xffd67e },
+  main: { name: "Main", icon_color: 0x6fb9f0 },
 } as const satisfies Record<TopicKey, { name: string; icon_color: number }>;
 
-/**
- * Phase 2: a message typed in one of these topics goes first to this agent type. Only
- * topics whose agent matches what people ask there: the news and stocks agents manage
- * bulletin and alert settings, while questions typed in News or Markets usually need the
- * web, so those topics only tell Chief where the message came from.
- */
 const keys = Object.keys(topics) as TopicKey[];
 
 /** Send options for a thread. General (id 1) is addressed by leaving the id out. */
@@ -263,7 +258,9 @@ export class TelegramTopics {
           return await send(
             inThread(recreated),
             recreated
-              ? `Topic recreated. Say 'stop the ${key === "news" ? "news bulletin" : key === "markets" ? "stock alerts" : "coding job"}' in General to turn it off.`
+              ? key === "main"
+                ? "Main was recreated. Continue your conversation here."
+                : `Topic recreated. Say 'stop the ${key === "news" ? "news bulletin" : key === "markets" ? "stock alerts" : "coding job"}' in Main to turn it off.`
               : undefined,
           );
         } catch (retryError) {
@@ -291,9 +288,9 @@ export class TelegramTopics {
   ) {
     if (target.kind === "topic")
       return target.topic === "updates"
-        ? send({})
+        ? this.send(user, "main", send)
         : this.send(user, target.topic, send);
-    if (target.kind === "general") return send({});
+    if (target.kind === "general") return this.send(user, "main", send);
     try {
       return await send(inThread(target.threadId));
     } catch (error) {
@@ -305,7 +302,7 @@ export class TelegramTopics {
           return await send(
             inThread(replacement),
             replacement
-              ? "Topic recreated. Change its schedule in General to stop future updates."
+              ? "Topic recreated. Change its schedule in Main to stop future updates."
               : undefined,
           );
         } catch (retryError) {
@@ -320,9 +317,63 @@ export class TelegramTopics {
     user: string,
     target: import("./delivery-routing.js").Destination,
   ): Promise<import("./delivery-routing.js").Destination> {
-    if (target.kind !== "topic") return target;
-    if (target.topic === "updates") return { kind: "general" };
-    const thread = await this.thread(user, target.topic).catch(() => undefined);
+    if (target.kind === "thread") return target;
+    const key =
+      target.kind === "general" || target.topic === "updates"
+        ? "main"
+        : target.topic;
+    const thread = await this.thread(user, key).catch(() => undefined);
     return thread ? { kind: "thread", threadId: thread } : { kind: "general" };
   }
+}
+
+const threadSendMethods = new Set([
+  "sendMessage",
+  "sendPhoto",
+  "sendAudio",
+  "sendDocument",
+  "sendVideo",
+  "sendAnimation",
+  "sendVoice",
+  "sendVideoNote",
+  "sendMediaGroup",
+  "sendChatAction",
+]);
+
+/** Cover unthreaded notices, approvals and attachment sends, including legacy outboxes.
+ * Calls with an explicit thread keep it. Only known private-chat owners are routed.
+ * The raw downstream call bypasses this transformer during failure fallback.
+ */
+export function routeUnthreadedToMain(
+  api: Api,
+  topics: TelegramTopics,
+  owners: ReadonlySet<string>,
+) {
+  api.config.use(async (previous, method, payload, signal) => {
+    const data = payload as {
+      chat_id?: string | number;
+      message_thread_id?: number;
+    };
+    const user = String(data.chat_id ?? "");
+    if (
+      !threadSendMethods.has(method) ||
+      !owners.has(user) ||
+      (data.message_thread_id !== undefined && data.message_thread_id !== 1)
+    )
+      return previous(method, payload, signal);
+    const { message_thread_id: _root, ...plain } = payload as typeof payload & {
+      message_thread_id?: number;
+    };
+    return topics.send(user, "main", async (extra) => {
+      const response = await previous(method, { ...plain, ...extra }, signal);
+      if (!response.ok)
+        throw new GrammyError(
+          `Telegram ${method} failed`,
+          response,
+          method,
+          payload,
+        );
+      return response;
+    });
+  });
 }

@@ -11,7 +11,12 @@ import { formatTelegram } from "./telegram-format.js";
 import { telegramChunks, type Portfolio } from "./portfolio.js";
 import { slowReply } from "./delivery-routing.js";
 import { runFamily } from "./run-family.js";
-import { inThread, TelegramTopics, threadOf } from "./telegram-topics.js";
+import {
+  inThread,
+  TelegramTopics,
+  threadOf,
+  routeUnthreadedToMain,
+} from "./telegram-topics.js";
 import { calendarPreview, validateDraft } from "./calendar-draft.js";
 import { GoogleAuthError } from "./calendar.js";
 import {
@@ -49,6 +54,7 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
   const controls = new SerialQueue();
   const preparation = new PreparationQueue(2);
   const ids = new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(","));
+  routeUnthreadedToMain(bot.api, topics, ids);
   if (assistant.tools?.responsibilities) {
     const responsibilities = assistant.tools.responsibilities;
     const feedback = new ResponsibilityDelivery(
@@ -468,7 +474,9 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
     }
     // A message typed in a topic is answered in that topic (ctx.reply does this itself).
     // Phase 1: the topic only decides where replies go; the conversation is shared.
-    const thread = threadOf(ctx.message);
+    const thread =
+      threadOf(ctx.message) ??
+      (await topics.thread(user, "main").catch(() => undefined));
     const here = { id: String(ctx.chat.id), thread };
     if (/^\/invoices(?:@\w+)?$/i.test(ctx.message.text ?? "")) {
       await ensureUser(db, user);
@@ -1119,7 +1127,14 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
               },
             );
           if (reply.reply && reply.runId)
-            await sendSlowPointer(bot, db, user, reply.runId, actualThread);
+            await sendSlowPointer(
+              bot,
+              db,
+              user,
+              reply.runId,
+              actualThread,
+              await topics.thread(user, "main").catch(() => undefined),
+            );
           if (
             reply.reply &&
             reply.voiceReply &&
@@ -1437,7 +1452,9 @@ export async function sendSlowPointer(
   user: string,
   run: string,
   thread?: number,
+  mainThread?: number,
 ) {
+  if (mainThread !== undefined && mainThread === thread) return;
   const input = (
     await db.query(
       "SELECT metadata,received_at FROM conversation_inputs WHERE user_id=$1 AND run_id=$2 ORDER BY ordinal LIMIT 1",

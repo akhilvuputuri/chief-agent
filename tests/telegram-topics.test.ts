@@ -2,9 +2,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
-import { GrammyError } from "grammy";
+import { Bot, GrammyError } from "grammy";
 import { ensureUser, type Database } from "../src/db.js";
-import { TelegramTopics, inThread, threadOf } from "../src/telegram-topics.js";
+import {
+  TelegramTopics,
+  inThread,
+  threadOf,
+  routeUnthreadedToMain,
+} from "../src/telegram-topics.js";
 import { TelegramViews } from "../src/telegram-views.js";
 import {
   telegram,
@@ -41,7 +46,7 @@ function fakeApi(enabled = true) {
         created.push(name);
         await new Promise((r) => setTimeout(r, 5));
         return {
-          message_thread_id: name === "Coding" ? 42 : next++,
+          message_thread_id: next++,
           name,
         } as any;
       },
@@ -82,7 +87,7 @@ test("Updates is renamed in place without duplicate topics, and old queued feed 
     assert.equal(await topics.keyFor("123", 77), "coding");
     await topics.ensure("123");
     await topics.ensure("123");
-    assert.deepEqual(created, ["News", "Markets"]);
+    assert.deepEqual(created, ["News", "Markets", "Main"]);
     assert.deepEqual(edits, [
       [77, { name: "Coding" }],
       [77, { name: "Coding" }],
@@ -98,10 +103,13 @@ test("Updates is renamed in place without duplicate topics, and old queued feed 
       { kind: "topic", topic: "coding" },
       async (extra) => sent.push(extra),
     );
-    assert.deepEqual(sent, [{}, { message_thread_id: 77 }]);
+    assert.deepEqual(sent, [
+      { message_thread_id: 42 },
+      { message_thread_id: 77 },
+    ]);
     assert.deepEqual(
       await topics.capture("123", { kind: "topic", topic: "updates" }),
-      { kind: "general" },
+      { kind: "thread", threadId: 42 },
     );
   } finally {
     await pg.close();
@@ -492,7 +500,7 @@ test("topics are created up front and a thread maps back to its topic", async ()
   try {
     await topics.ensure("123");
     await topics.ensure("123");
-    assert.deepEqual(created, ["News", "Markets", "Coding"]);
+    assert.deepEqual(created, ["News", "Markets", "Coding", "Main"]);
     assert.equal(await topics.keyFor("123", 42), "coding");
     assert.equal(await topics.keyFor("123", 40), "news");
     assert.equal(await topics.keyFor("123", 99), undefined);
@@ -579,11 +587,11 @@ test("a message typed in Chief's Coding topic is recorded with its topic", async
     ).rows;
     assert.deepEqual(
       topics.map((r) => r.topic),
-      ["coding", "news", null, "coding"],
+      ["coding", "news", "main", "coding"],
     );
     assert.deepEqual(
       topics.map((r) => r.thread),
-      ["42", "40", null, "42"],
+      ["42", "40", "43", "42"],
     );
   } finally {
     await pg.close();
@@ -745,6 +753,125 @@ test("slow pointer needs an actually delivered answer, and is deduplicated", asy
       sendSlowPointer(bot, db, "123", run, 42),
     ]);
     assert.equal(sends, 1);
+  } finally {
+    await pg.close();
+  }
+});
+
+test("unthreaded owner sends land in Main while explicit feed sends and other chats stay unchanged", async () => {
+  const { pg, db } = await database();
+  const bot = new Bot("123:test-token");
+  const calls: { method: string; payload: any }[] = [];
+  bot.api.config.use(async (_prev, method, payload) => {
+    calls.push({ method, payload });
+    if (method === "getMe")
+      return { ok: true, result: { has_topics_enabled: true } } as any;
+    if (method === "createForumTopic")
+      return {
+        ok: true,
+        result: { message_thread_id: 900, name: "Main" },
+      } as any;
+    return { ok: true, result: { message_id: 901 } } as any;
+  });
+  const topics = new TelegramTopics(db, bot.api);
+  routeUnthreadedToMain(bot.api, topics, new Set(["123"]));
+  try {
+    await bot.api.sendMessage("123", "Conversation");
+    await bot.api.sendMessage("123", "Root helper", { message_thread_id: 1 });
+    await bot.api.sendVoice("123", "voice-file");
+    await bot.api.sendDocument("123", "document-file");
+    await bot.api.sendChatAction("123", "typing");
+    await bot.api.sendMessage("123", "News feed", { message_thread_id: 42 });
+    await bot.api.sendMessage("999", "Other chat");
+    const sends = calls.filter((c) => c.method.startsWith("send"));
+    assert.deepEqual(
+      sends.map((c) => c.payload.message_thread_id),
+      [900, 900, 900, 900, 900, 42, undefined],
+    );
+    assert.equal(
+      calls.filter((c) => c.method === "createForumTopic").length,
+      1,
+    );
+    assert.deepEqual(await topics.capture("123", { kind: "general" }), {
+      kind: "thread",
+      threadId: 900,
+    });
+    assert.equal(await topics.keyFor("123", 900), "main");
+  } finally {
+    await pg.close();
+  }
+});
+
+test("Main recovery retries only definite missing-thread errors and works with threaded mode off", async () => {
+  for (const mode of ["missing", "unknown", "off"] as const) {
+    const { pg, db } = await database();
+    const bot = new Bot("123:test-token");
+    let created = 0;
+    const sends: number[] = [];
+    bot.api.config.use(async (_prev, method, payload) => {
+      if (method === "getMe")
+        return {
+          ok: true,
+          result: { has_topics_enabled: mode !== "off" },
+        } as any;
+      if (method === "createForumTopic")
+        return {
+          ok: true,
+          result: { message_thread_id: 900 + created++, name: "Main" },
+        } as any;
+      if (method === "sendMessage") {
+        const thread = (payload as any).message_thread_id;
+        sends.push(thread);
+        if (mode === "missing" && thread === 900)
+          return {
+            ok: false,
+            error_code: 400,
+            description: "message thread not found",
+          } as any;
+        if (mode === "unknown")
+          throw Error("Unknown transport acknowledgement");
+      }
+      return { ok: true, result: { message_id: 902 } } as any;
+    });
+    routeUnthreadedToMain(
+      bot.api,
+      new TelegramTopics(db, bot.api),
+      new Set(["123"]),
+    );
+    try {
+      if (mode === "unknown")
+        await assert.rejects(() => bot.api.sendMessage("123", "Message"));
+      else await bot.api.sendMessage("123", "Message");
+      assert.deepEqual(
+        sends,
+        mode === "missing" ? [900, 901] : mode === "off" ? [undefined] : [900],
+      );
+    } finally {
+      await pg.close();
+    }
+  }
+});
+
+test("Main conversation never receives a slow-reply pointer about itself", async () => {
+  const { pg, db } = await database();
+  let sent = 0;
+  try {
+    await sendSlowPointer(
+      {
+        api: {
+          sendMessage: async () => {
+            sent++;
+            return { message_id: 1 };
+          },
+        },
+      } as any,
+      db,
+      "123",
+      randomUUID(),
+      900,
+      900,
+    );
+    assert.equal(sent, 0);
   } finally {
     await pg.close();
   }
