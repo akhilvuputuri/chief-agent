@@ -12,5 +12,6 @@
   },
   "runtime": "python",
   "squad": true,
-  "leaderModel": "deepseek/deepseek-v4.1-flash"
+  "leaderModel": "deepseek/deepseek-v4.1-flash",
+  "autoMerge": true
 }
