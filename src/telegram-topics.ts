@@ -1,9 +1,10 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 // Topics in the bot's private chat (Telegram threaded mode). Chief owns a small fixed set
 // of topics and posts scheduled output there; Main is the explicit conversation topic.
 // When topic delivery is unavailable, everything degrades to the root/All view: with threaded mode off, the switch off, or any failure
 // to create a topic, sends simply leave out message_thread_id.
 import { createHash } from "node:crypto";
-import { GrammyError, type Api } from "grammy";
+import type { Api } from "grammy";
 import type { Database } from "./db.js";
 import { event } from "./db.js";
 import { errorFields, opsLog } from "./ops-log.js";
@@ -109,7 +110,10 @@ export class TelegramTopics {
       if (this.known.has(id)) return this.known.get(id);
       throw error;
     });
-    if (typeof saved === "number") return saved;
+    if (typeof saved === "number") {
+      this.known.set(id, saved);
+      return saved;
+    }
     // Created earlier in this process but never recorded (a null row means deleted).
     if (saved === undefined && this.known.has(id)) return this.known.get(id);
     let pending = this.creating.get(id);
@@ -154,6 +158,19 @@ export class TelegramTopics {
       });
       return undefined;
     }
+  }
+
+  cachedThread(user: string, key: TopicKey) {
+    return this.known.get(`${user}:${key}`);
+  }
+  cachedKey(user: string, thread: number | undefined) {
+    return keys.find(
+      (key) =>
+        thread !== undefined && this.known.get(`${user}:${key}`) === thread,
+    );
+  }
+  async repairMain(user: string, stale: number) {
+    return this.recover(user, "main", stale);
   }
 
   /** Creates any missing topics, so the owner can write in them before Chief posts there. */
@@ -364,16 +381,40 @@ export function routeUnthreadedToMain(
     const { message_thread_id: _root, ...plain } = payload as typeof payload & {
       message_thread_id?: number;
     };
-    return topics.send(user, "main", async (extra) => {
-      const response = await previous(method, { ...plain, ...extra }, signal);
-      if (!response.ok)
-        throw new GrammyError(
-          `Telegram ${method} failed`,
-          response,
-          method,
-          payload,
-        );
+    const thread = await topics.thread(user, "main").catch(() => undefined);
+    const guard = sendGuard.getStore();
+    if (signal?.aborted || (guard && !(await guard())))
+      throw new TelegramSendWithheld();
+    const response = await previous(
+      method,
+      { ...plain, ...inThread(thread) } as typeof payload,
+      signal,
+    );
+    if (!response.ok) {
+      // Repair for a later caller, but never hide a message retry beneath a caller's guard.
+      if (thread && missing(response))
+        await topics.repairMain(user, thread).catch(() => undefined);
       return response;
-    });
+    }
+    if (
+      thread &&
+      typeof response.result === "object" &&
+      response.result !== null &&
+      "message_id" in response.result
+    )
+      return {
+        ...response,
+        result: { ...(response.result as object), message_thread_id: thread },
+      } as typeof response;
+    return response;
   });
+}
+
+const sendGuard = new AsyncLocalStorage<() => Promise<boolean>>();
+export class TelegramSendWithheld extends Error {}
+export function withTelegramSendGuard<T>(
+  guard: (() => Promise<boolean>) | undefined,
+  send: () => Promise<T>,
+) {
+  return guard ? sendGuard.run(guard, send) : send();
 }

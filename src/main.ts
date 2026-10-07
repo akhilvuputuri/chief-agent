@@ -797,13 +797,22 @@ async function sendWorkMessage(user: string, text: string | Delivery) {
             user,
             delivery.runId,
             "updates",
-            { message_id: sent.data.messageId },
+            {
+              message_id: sent.data.messageId,
+              message_thread_id: sent.data.threadId ?? undefined,
+            },
             extra.message_thread_id,
           );
       }
-      if (delivery.runId)
+      if (delivery.runId) {
+        const receipt = (
+          await db.query(
+            "SELECT data FROM events WHERE user_id=$1 AND run_id=$2 AND type IN ('telegram.message_sent','telegram.view_opened') ORDER BY id DESC LIMIT 1",
+            [user, delivery.runId],
+          )
+        ).rows[0];
         await event(db, user, delivery.runId, "telegram.delivery_routed", {
-          threadId: extra.message_thread_id ?? null,
+          threadId: receipt?.data?.threadId ?? extra.message_thread_id ?? null,
           intendedThreadId:
             delivery.destination?.kind === "thread"
               ? delivery.destination.threadId
@@ -811,6 +820,7 @@ async function sendWorkMessage(user: string, text: string | Delivery) {
           stopReason: delivery.reason,
           kind: "work",
         });
+      }
       await sendCalendarApprovals(
         bot,
         db,

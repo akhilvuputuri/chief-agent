@@ -841,7 +841,10 @@ test("Main recovery retries only definite missing-thread errors and works with t
     try {
       if (mode === "unknown")
         await assert.rejects(() => bot.api.sendMessage("123", "Message"));
-      else await bot.api.sendMessage("123", "Message");
+      else if (mode === "missing") {
+        await assert.rejects(() => bot.api.sendMessage("123", "Message"));
+        await bot.api.sendMessage("123", "Message");
+      } else await bot.api.sendMessage("123", "Message");
       assert.deepEqual(
         sends,
         mode === "missing" ? [900, 901] : mode === "off" ? [undefined] : [900],
@@ -872,6 +875,224 @@ test("Main conversation never receives a slow-reply pointer about itself", async
       900,
     );
     assert.equal(sent, 0);
+  } finally {
+    await pg.close();
+  }
+});
+
+test("root intake persists before slow Main creation and explicit topic input cannot overtake it", async () => {
+  const { pg, db } = await database();
+  let enter!: () => void, release!: () => void;
+  const entered = new Promise<void>((r) => (enter = r)),
+    wait = new Promise<void>((r) => (release = r));
+  const assistant = new Assistant(
+    db,
+    {
+      run: async (req) => ({
+        reply: "Answer",
+        history: [
+          ...req.history,
+          { role: "user", content: req.message },
+          { role: "assistant", content: "Answer" },
+        ],
+      }),
+    },
+    new JobTools(db, { call: async () => ({}) }),
+  );
+  const bot = telegram(
+    readConfig({
+      DATABASE_URL: "postgres://x:x@localhost/x",
+      TELEGRAM_BOT_TOKEN: "123:test-token",
+      TELEGRAM_ALLOWED_USER_IDS: "123",
+    }),
+    assistant,
+    db,
+  );
+  let messages = 1000;
+  bot.api.config.use(async (_prev, method) => {
+    if (method === "getMe")
+      return {
+        ok: true,
+        result: {
+          id: 999,
+          is_bot: true,
+          first_name: "T",
+          username: "t_bot",
+          has_topics_enabled: true,
+        },
+      } as any;
+    if (method === "createForumTopic") {
+      enter();
+      await wait;
+      return {
+        ok: true,
+        result: { message_thread_id: 900, name: "Main" },
+      } as any;
+    }
+    return { ok: true, result: { message_id: messages++ } } as any;
+  });
+  const update = (id: number, thread?: number) =>
+    ({
+      update_id: id,
+      message: {
+        message_id: id,
+        date: 0,
+        chat: { id: 123, type: "private" },
+        from: { id: 123, is_bot: false, first_name: "T" },
+        text: `Question ${id}`,
+        ...(thread
+          ? { is_topic_message: true, message_thread_id: thread }
+          : {}),
+      },
+    }) as any;
+  try {
+    await bot.init();
+    const first = bot.handleUpdate(update(1));
+    await entered;
+    const second = bot.handleUpdate(update(2, 55));
+    while (
+      (await db.query("SELECT count(*)::int AS n FROM conversation_inputs"))
+        .rows[0].n < 2
+    )
+      await new Promise((r) => setTimeout(r, 5));
+    assert.deepEqual(
+      (
+        await db.query(
+          "SELECT metadata->>'updateId' AS id FROM conversation_inputs ORDER BY ordinal",
+        )
+      ).rows.map((r) => r.id),
+      ["1", "2"],
+    );
+    release();
+    await Promise.all([first, second]);
+    assert.deepEqual(
+      (
+        await db.query(
+          "SELECT metadata->>'threadId' AS thread,state FROM conversation_inputs ORDER BY ordinal",
+        )
+      ).rows,
+      [
+        { thread: "900", state: "completed" },
+        { thread: "55", state: "completed" },
+      ],
+    );
+  } finally {
+    release();
+    await pg.close();
+  }
+});
+
+test("Main lookup and missing-thread repair do not send an approval after cancellation", async () => {
+  for (const cancelAt of ["lookup", "rejection"] as const) {
+    const { pg, db } = await database();
+    const actions = new CalendarActions(db, {} as any, "123");
+    const run = randomUUID();
+    const draft = await actions.draft("123", run, {
+      title: "Decision",
+      start: "2026-10-08T15:00:00+08:00",
+      end: "2026-10-08T16:00:00+08:00",
+    });
+    const bot = new Bot("123:test-token");
+    let current = true,
+      created = 0;
+    const sends: unknown[] = [];
+    bot.api.config.use(async (_p, method, payload) => {
+      if (method === "getMe")
+        return { ok: true, result: { has_topics_enabled: true } } as any;
+      if (method === "createForumTopic") {
+        if (cancelAt === "lookup") current = false;
+        return {
+          ok: true,
+          result: { message_thread_id: 900 + created++, name: "Main" },
+        } as any;
+      }
+      if (method === "sendMessage") {
+        sends.push({ thread: (payload as any).message_thread_id, current });
+        current = false;
+        return {
+          ok: false,
+          error_code: 400,
+          description: "message thread not found",
+        } as any;
+      }
+      return { ok: true, result: true } as any;
+    });
+    routeUnthreadedToMain(
+      bot.api,
+      new TelegramTopics(db, bot.api),
+      new Set(["123"]),
+    );
+    try {
+      if (cancelAt === "rejection")
+        await assert.rejects(() =>
+          sendCalendarApprovals(bot, db, "123", async () => current),
+        );
+      else await sendCalendarApprovals(bot, db, "123", async () => current);
+      assert.deepEqual(
+        sends,
+        cancelAt === "lookup" ? [] : [{ thread: 900, current: true }],
+      );
+      const payload = (
+        await db.query("SELECT payload FROM approvals WHERE id=$1", [
+          draft.approvalId,
+        ])
+      ).rows[0].payload;
+      assert.equal(payload.telegramMessageId, undefined);
+      assert.equal(payload.telegramDeliveryState, undefined);
+    } finally {
+      await pg.close();
+    }
+  }
+});
+
+test("message and feed receipts store Main's actual sent thread", async () => {
+  const { pg, db } = await database();
+  const bot = new Bot("123:test-token");
+  let id = 1000;
+  bot.api.config.use(async (_p, method) => {
+    if (method === "getMe")
+      return { ok: true, result: { has_topics_enabled: true } } as any;
+    if (method === "createForumTopic")
+      return {
+        ok: true,
+        result: { message_thread_id: 900, name: "Main" },
+      } as any;
+    return { ok: true, result: { message_id: id++ } } as any;
+  });
+  routeUnthreadedToMain(
+    bot.api,
+    new TelegramTopics(db, bot.api),
+    new Set(["123"]),
+  );
+  try {
+    const run = randomUUID();
+    await new TelegramViews(db, bot.api).deliver(
+      "123",
+      "123",
+      { reply: "Progress", runId: run },
+      "progress",
+    );
+    assert.equal(
+      (
+        await db.query(
+          "SELECT data FROM events WHERE type='telegram.message_sent' AND run_id=$1",
+          [run],
+        )
+      ).rows[0].data.threadId,
+      900,
+    );
+    const sent = await bot.api.sendMessage("123", "Feed fallback");
+    const { recordFeedSent } = await import("../src/telegram-feeds.js");
+    await recordFeedSent(db, "123", run, "updates", sent, undefined);
+    assert.equal(
+      (
+        await db.query(
+          "SELECT data FROM events WHERE type='telegram.feed_sent' AND run_id=$1",
+          [run],
+        )
+      ).rows[0].data.threadId,
+      900,
+    );
   } finally {
     await pg.close();
   }

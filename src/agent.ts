@@ -123,6 +123,28 @@ export class Assistant {
     }
     return id;
   }
+  async routeInput(
+    user: string,
+    id: string,
+    thread: number | undefined,
+    topic: string | undefined,
+  ) {
+    const row = (
+      await this.db.query(
+        "SELECT metadata FROM conversation_inputs WHERE user_id=$1 AND id=$2 AND state='queued' AND preparation='pending'",
+        [user, id],
+      )
+    ).rows[0];
+    if (!row) return;
+    const metadata = { ...row.metadata, threadId: thread, topic };
+    // An explicit anchor is already frozen. A cold topic-cache implicit lookup uses
+    // the original receivedAt cutoff rather than any post that arrived during lookup.
+    metadata.anchor ??= await inputAnchor(this.db, user, metadata);
+    await this.db.query(
+      "UPDATE conversation_inputs SET metadata=$3::jsonb WHERE user_id=$1 AND id=$2 AND state='queued' AND preparation='pending'",
+      [user, id, JSON.stringify(metadata)],
+    );
+  }
   async prepareInput(
     user: string,
     id: string,

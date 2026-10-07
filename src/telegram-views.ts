@@ -1,3 +1,7 @@
+import {
+  withTelegramSendGuard,
+  TelegramSendWithheld,
+} from "./telegram-topics.js";
 import { errorFields, opsLog } from "./ops-log.js";
 import { HistoryStore } from "./history.js";
 import { Canvases } from "./canvases.js";
@@ -101,12 +105,18 @@ export class TelegramViews {
       state as unknown as Record<string, unknown>,
     );
     if (guard && !(await guard())) return;
-    const sent = await this.api.sendMessage(chat, rendered.text, {
-      ...extra,
-      entities: rendered.entities,
-      reply_markup: keyboard(id, state),
-      link_preview_options: { is_disabled: true },
-    });
+    const sent = await this.sendMessage(
+      chat,
+      rendered.text,
+      {
+        ...extra,
+        entities: rendered.entities,
+        reply_markup: keyboard(id, state),
+        link_preview_options: { is_disabled: true },
+      },
+      guard,
+    );
+    if (!sent) return;
     await onSent?.();
     state.message = sent.message_id;
     await this.db.query(
@@ -117,7 +127,7 @@ export class TelegramViews {
       viewId: id,
       kind: view.kind,
       messageId: sent.message_id,
-      threadId: extra.message_thread_id ?? null,
+      threadId: sent.message_thread_id ?? extra.message_thread_id ?? null,
     });
     return id;
   }
@@ -230,6 +240,21 @@ export class TelegramViews {
       throw error;
     }
   }
+  private async sendMessage(
+    chat: Parameters<Api["sendMessage"]>[0],
+    text: string,
+    options: Parameters<Api["sendMessage"]>[2],
+    guard?: () => Promise<boolean>,
+  ) {
+    try {
+      return await withTelegramSendGuard(guard, () =>
+        this.api.sendMessage(chat, text, options),
+      );
+    } catch (error) {
+      if (error instanceof TelegramSendWithheld) return undefined;
+      throw error;
+    }
+  }
   private async deliverOnce(
     user: string,
     to: Chat,
@@ -267,15 +292,21 @@ export class TelegramViews {
     else
       for (const part of parts) {
         if (guard && !(await guard())) return;
-        const sent = await this.api.sendMessage(chat, part.text, {
-          ...extra,
-          entities: part.entities,
-          link_preview_options: { is_disabled: true },
-        });
+        const sent = await this.sendMessage(
+          chat,
+          part.text,
+          {
+            ...extra,
+            entities: part.entities,
+            link_preview_options: { is_disabled: true },
+          },
+          guard,
+        );
+        if (!sent) return;
         await onSent?.();
         await event(this.db, user, run, "telegram.message_sent", {
           messageId: sent.message_id,
-          threadId: extra.message_thread_id ?? null,
+          threadId: sent.message_thread_id ?? extra.message_thread_id ?? null,
           kind,
         });
       }
@@ -306,10 +337,16 @@ export class TelegramViews {
       }
       if (buttons.length) {
         if (guard && !(await guard())) return;
-        await this.api.sendMessage(chat, "Open saved canvases", {
-          ...extra,
-          reply_markup: { inline_keyboard: buttons },
-        });
+        const sent = await this.sendMessage(
+          chat,
+          "Open saved canvases",
+          {
+            ...extra,
+            reply_markup: { inline_keyboard: buttons },
+          },
+          guard,
+        );
+        if (!sent) return;
         canvasMessages = 1;
       }
     }
@@ -318,10 +355,16 @@ export class TelegramViews {
     for (const notice of delivery.notices ?? [])
       for (const part of formatTelegram(notice)) {
         if (guard && !(await guard())) return;
-        await this.api.sendMessage(chat, part.text, {
-          ...extra,
-          entities: part.entities,
-        });
+        const sent = await this.sendMessage(
+          chat,
+          part.text,
+          {
+            ...extra,
+            entities: part.entities,
+          },
+          guard,
+        );
+        if (!sent) return;
         noticeMessages++;
       }
     await event(this.db, user, run, "telegram.delivered", {
