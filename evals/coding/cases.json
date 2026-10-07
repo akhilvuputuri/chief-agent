@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "suite": "chief-coding-smoke-v1",
+  "provenance": {
+    "repository": "akhilvuputuri/chief-agent",
+    "revision": "0e714880d989edfe89d11de2ead95ec45846513f"
+  },
+  "cases": [
+    {
+      "id": "chief-format-surrogate",
+      "kind": "seeded_component_regression",
+      "split": "development",
+      "language": "typescript",
+      "source_path": "src/telegram-format.ts",
+      "source_sha256": "9bd999b69d4d2cc6cf714cea310b5022aac8bfda989c90c286cdbe018d9a7474",
+      "source_file": "telegram-format.ts.txt",
+      "problem": "Telegram chunks can split an emoji at the message limit. Keep every chunk within the UTF-16 limit and preserve text and entity positions.",
+      "mutation": {
+        "before": "      if (/[\\uD800-\\uDBFF]/.test(text[end - 1]!)) end--;",
+        "after": "      // Chunk at the selected boundary."
+      },
+      "grader": "format.mjs"
+    },
+    {
+      "id": "chief-format-entities",
+      "kind": "seeded_component_regression",
+      "split": "development",
+      "language": "typescript",
+      "source_path": "src/telegram-format.ts",
+      "source_sha256": "9bd999b69d4d2cc6cf714cea310b5022aac8bfda989c90c286cdbe018d9a7474",
+      "source_file": "telegram-format.ts.txt",
+      "problem": "Formatting entities that cross a chunk boundary have incorrect lengths. Clip and rebase each entity to its chunk while preserving the rendered text.",
+      "mutation": {
+        "before": "length: Math.min(e.offset + e.length, end) - Math.max(e.offset, start),",
+        "after": "length: e.length,"
+      },
+      "grader": "format.mjs"
+    },
+    {
+      "id": "chief-routing-owner",
+      "kind": "seeded_component_regression",
+      "split": "development",
+      "language": "typescript",
+      "source_path": "src/delivery-routing.ts",
+      "source_sha256": "c57f7668212006102481fdde14420ffb40f1ca770b828cea43dc615202ef45a4",
+      "source_file": "delivery-routing.ts.txt",
+      "problem": "A delayed owner-requested task loses its original topic. Preserve valid topic IDs for foreground and owner work; scheduled or unprompted work must continue using its intended default destination.",
+      "mutation": {
+        "before": "input.kind === \"foreground\" || input.kind === \"owner_work\"",
+        "after": "input.kind === \"foreground\""
+      },
+      "grader": "routing.mjs"
+    },
+    {
+      "id": "chief-routing-retired",
+      "kind": "seeded_component_regression",
+      "split": "development",
+      "language": "typescript",
+      "source_path": "src/delivery-routing.ts",
+      "source_sha256": "c57f7668212006102481fdde14420ffb40f1ca770b828cea43dc615202ef45a4",
+      "source_file": "delivery-routing.ts.txt",
+      "problem": "Already queued items addressed to the retired Updates feed still route there. Route those items to general (the logical Main destination), preserve explicit active destinations, and keep routine-labelled background posts in general.",
+      "mutation": {
+        "before": "(payload.destination?.kind === \"topic\" &&\n      payload.destination.topic === \"updates\")",
+        "after": "false"
+      },
+      "grader": "routing.mjs"
+    },
+    {
+      "id": "chief-protocol-unicode",
+      "kind": "seeded_component_regression",
+      "split": "development",
+      "language": "python",
+      "source_path": "coding_runtime/src/chief_coding_runtime/protocol.py",
+      "source_sha256": "eeedc1e84da6c2d49fcfea874beccd3061b6857dadaec8c2ba579acc60b19604",
+      "source_file": "protocol.py.txt",
+      "problem": "Python artifact text limits disagree with the TypeScript host for supplementary Unicode characters. Enforce the shared UTF-16 code-unit contract without changing UTF-8 wire byte accounting or accepting malformed Unicode.",
+      "mutation": {
+        "before": "return len(value.encode(\"utf-16-le\", errors=\"strict\")) // 2",
+        "after": "return len(value)"
+      },
+      "grader": "protocol.py"
+    },
+    {
+      "id": "chief-protocol-duplicates",
+      "kind": "seeded_component_regression",
+      "split": "development",
+      "language": "python",
+      "source_path": "coding_runtime/src/chief_coding_runtime/protocol.py",
+      "source_sha256": "eeedc1e84da6c2d49fcfea874beccd3061b6857dadaec8c2ba579acc60b19604",
+      "source_file": "protocol.py.txt",
+      "problem": "Artifacts with the same path twice are accepted, making restore and review ambiguous. Reject duplicate paths, preserve the 100-file and byte limits, and keep valid add/delete artifacts working.",
+      "mutation": {
+        "before": "len(files) > 100 or len({f.path for f in files}) != len(files)",
+        "after": "len(files) > 100"
+      },
+      "grader": "protocol.py"
+    }
+  ]
+}

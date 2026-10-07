@@ -5,3 +5,6 @@ services/hermes
 
 coding_runtime/requirements*.txt
 coding_runtime/*.egg-info
+
+# Frozen benchmark source bytes are hash-pinned, not reformatted.
+evals/coding/sources
