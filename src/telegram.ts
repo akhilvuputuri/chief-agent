@@ -18,6 +18,7 @@ import {
   routeUnthreadedToMain,
   withTelegramSendGuard,
   TelegramSendWithheld,
+  sentThread,
 } from "./telegram-topics.js";
 import { calendarPreview, validateDraft } from "./calendar-draft.js";
 import { GoogleAuthError } from "./calendar.js";
@@ -1248,8 +1249,8 @@ export function sendResponsibilityApprovals(
       );
       if (sent)
         await db.query(
-          "UPDATE approvals SET payload=payload || jsonb_build_object('telegramMessageId',$3::bigint,'telegramDeliveryState','sent') WHERE id=$1 AND user_id=$2",
-          [row.id, user, sent.message_id],
+          "UPDATE approvals SET payload=payload || jsonb_build_object('telegramMessageId',$3::bigint,'telegramDeliveryState','sent','telegramThreadId',$4::bigint) WHERE id=$1 AND user_id=$2",
+          [row.id, user, sent.message_id, sentThread(sent, thread) ?? null],
         );
     }
   });
@@ -1384,8 +1385,10 @@ async function sendPortfolioApprovalsOnce(
         row.id,
         user,
         JSON.stringify(message.message_id),
-        message.message_thread_id ??
-          (run && family.has(row.run_id) ? (thread ?? null) : null),
+        sentThread(
+          message,
+          run && family.has(row.run_id) ? thread : undefined,
+        ) ?? null,
       ],
     );
   }
@@ -1582,8 +1585,10 @@ async function sendCalendarApprovalsOnce(
         row.id,
         user,
         JSON.stringify(message.message_id),
-        message.message_thread_id ??
-          (run && family.has(row.run_id) ? (thread ?? null) : null),
+        sentThread(
+          message,
+          run && family.has(row.run_id) ? thread : undefined,
+        ) ?? null,
       ],
     );
   }
@@ -1646,8 +1651,10 @@ async function sendLibraryApprovalsOnce(
         row.id,
         user,
         JSON.stringify(message.message_id),
-        message.message_thread_id ??
-          (run && family.has(row.run_id) ? (thread ?? null) : null),
+        sentThread(
+          message,
+          run && family.has(row.run_id) ? thread : undefined,
+        ) ?? null,
       ],
     );
   }

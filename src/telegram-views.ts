@@ -1,6 +1,7 @@
 import {
   withTelegramSendGuard,
   TelegramSendWithheld,
+  sentThread,
 } from "./telegram-topics.js";
 import { errorFields, opsLog } from "./ops-log.js";
 import { HistoryStore } from "./history.js";
@@ -127,7 +128,7 @@ export class TelegramViews {
       viewId: id,
       kind: view.kind,
       messageId: sent.message_id,
-      threadId: sent.message_thread_id ?? extra.message_thread_id ?? null,
+      threadId: sentThread(sent, extra.message_thread_id) ?? null,
     });
     return id;
   }
@@ -306,7 +307,7 @@ export class TelegramViews {
         await onSent?.();
         await event(this.db, user, run, "telegram.message_sent", {
           messageId: sent.message_id,
-          threadId: sent.message_thread_id ?? extra.message_thread_id ?? null,
+          threadId: sentThread(sent, extra.message_thread_id) ?? null,
           kind,
         });
       }

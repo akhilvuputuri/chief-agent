@@ -1,3 +1,4 @@
+import { sentThread } from "./telegram-topics.js";
 import type { Database } from "./db.js";
 import { event } from "./db.js";
 import { sameThread, threadId } from "./delivery-routing.js";
@@ -28,7 +29,7 @@ export async function recordFeedSent(
 ) {
   await event(db, user, id, "telegram.feed_sent", {
     messageId: sent.message_id,
-    threadId: sent.message_thread_id ?? thread ?? null,
+    threadId: sentThread(sent, thread) ?? null,
     kind,
     id,
   });

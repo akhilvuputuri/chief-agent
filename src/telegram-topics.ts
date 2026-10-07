@@ -282,7 +282,9 @@ export class TelegramTopics {
           );
         } catch (retryError) {
           if (!unusable(retryError)) throw retryError;
-          return send({});
+          return key === "main"
+            ? withTelegramRootFallback(() => send({}))
+            : send({});
         }
       }
       if (!unusable(error)) throw error;
@@ -290,7 +292,9 @@ export class TelegramTopics {
         kind: key,
         ...errorFields(error),
       });
-      return send({});
+      return key === "main"
+        ? withTelegramRootFallback(() => send({}))
+        : send({});
     }
   }
 
@@ -326,7 +330,9 @@ export class TelegramTopics {
           if (!unusable(retryError)) throw retryError;
         }
       }
-      return send({});
+      return key === "main"
+        ? withTelegramRootFallback(() => send({}))
+        : send({});
     }
   }
 
@@ -372,42 +378,81 @@ export function routeUnthreadedToMain(
       message_thread_id?: number;
     };
     const user = String(data.chat_id ?? "");
-    if (
-      !threadSendMethods.has(method) ||
-      !owners.has(user) ||
-      (data.message_thread_id !== undefined && data.message_thread_id !== 1)
-    )
+    if (!threadSendMethods.has(method) || !owners.has(user))
       return previous(method, payload, signal);
+    if (data.message_thread_id !== undefined && data.message_thread_id !== 1)
+      return rememberSent(
+        await previous(method, payload, signal),
+        data.message_thread_id,
+      );
     const { message_thread_id: _root, ...plain } = payload as typeof payload & {
       message_thread_id?: number;
     };
-    const thread = await topics.thread(user, "main").catch(() => undefined);
     const guard = sendGuard.getStore();
-    if (signal?.aborted || (guard && !(await guard())))
-      throw new TelegramSendWithheld();
+    const fresh = async () => {
+      if (signal?.aborted || (guard && !(await guard())))
+        throw new TelegramSendWithheld();
+    };
+    if (rootFallback.getStore()) {
+      await fresh();
+      return rememberSent(
+        await previous(method, plain as typeof payload, signal),
+      );
+    }
+    const thread = await topics.thread(user, "main").catch(() => undefined);
+    await fresh();
     const response = await previous(
       method,
       { ...plain, ...inThread(thread) } as typeof payload,
       signal,
     );
     if (!response.ok) {
-      // Repair for a later caller, but never hide a message retry beneath a caller's guard.
-      if (thread && missing(response))
+      if (thread && missing(response)) {
         await topics.repairMain(user, thread).catch(() => undefined);
+        return response;
+      }
+      if (thread && unusable(response)) {
+        // Telegram rejected the Main send definitively. Root retry is safe only
+        // after a fresh cancellation/delivery check; unknown outcomes never retry.
+        await fresh();
+        return rememberSent(
+          await previous(method, plain as typeof payload, signal),
+        );
+      }
       return response;
     }
-    if (
-      thread &&
-      typeof response.result === "object" &&
-      response.result !== null &&
-      "message_id" in response.result
-    )
-      return {
-        ...response,
-        result: { ...(response.result as object), message_thread_id: thread },
-      } as typeof response;
-    return response;
+    return rememberSent(response, thread);
   });
+}
+
+const actualThreads = new WeakMap<object, number | null>();
+function rememberSent<T>(response: T, intended?: number): T {
+  const r = response as { ok?: boolean; result?: unknown };
+  if (
+    r.ok &&
+    r.result &&
+    typeof r.result === "object" &&
+    "message_id" in r.result
+  )
+    actualThreads.set(
+      r.result,
+      (r.result as { message_thread_id?: number }).message_thread_id ??
+        intended ??
+        null,
+    );
+  return response;
+}
+export function sentThread(
+  message: { message_thread_id?: number },
+  fallback?: number,
+) {
+  return actualThreads.has(message)
+    ? (actualThreads.get(message) ?? undefined)
+    : (message.message_thread_id ?? fallback);
+}
+const rootFallback = new AsyncLocalStorage<boolean>();
+export function withTelegramRootFallback<T>(send: () => Promise<T>) {
+  return rootFallback.run(true, send);
 }
 
 const sendGuard = new AsyncLocalStorage<() => Promise<boolean>>();

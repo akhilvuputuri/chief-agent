@@ -1097,3 +1097,116 @@ test("message and feed receipts store Main's actual sent thread", async () => {
     await pg.close();
   }
 });
+
+test("closed Main falls back to actual root without being re-added and records root receipts", async () => {
+  const { pg, db } = await database();
+  const bot = new Bot("123:test-token");
+  const sends: (number | undefined)[] = [];
+  bot.api.config.use(async (_p, method, payload) => {
+    if (method === "getMe")
+      return { ok: true, result: { has_topics_enabled: true } } as any;
+    if (method === "createForumTopic")
+      return {
+        ok: true,
+        result: { message_thread_id: 900, name: "Main" },
+      } as any;
+    if (method === "sendMessage") {
+      const thread = (payload as any).message_thread_id;
+      sends.push(thread);
+      if (thread === 900)
+        return {
+          ok: false,
+          error_code: 400,
+          description: "TOPIC_CLOSED",
+        } as any;
+    }
+    return { ok: true, result: { message_id: 1000 + sends.length } } as any;
+  });
+  const topics = new TelegramTopics(db, bot.api);
+  routeUnthreadedToMain(bot.api, topics, new Set(["123"]));
+  try {
+    const run = randomUUID();
+    await topics.deliver("123", { kind: "general" }, (extra) =>
+      new TelegramViews(db, bot.api).deliver(
+        "123",
+        { id: "123", thread: extra.message_thread_id },
+        { reply: "Answer", runId: run },
+      ),
+    );
+    assert.deepEqual(sends, [900, undefined]);
+    assert.equal(
+      (
+        await db.query(
+          "SELECT data FROM events WHERE type='telegram.message_sent' AND run_id=$1",
+          [run],
+        )
+      ).rows[0].data.threadId,
+      null,
+    );
+    const a = new CalendarActions(db, {} as any, "123");
+    const draft = await a.draft("123", randomUUID(), {
+      title: "Decision",
+      start: "2026-10-08T15:00:00+08:00",
+      end: "2026-10-08T16:00:00+08:00",
+    });
+    await sendCalendarApprovals(bot, db, "123", async () => true);
+    assert.deepEqual(sends, [900, undefined, 900, undefined]);
+    assert.equal(
+      (
+        await db.query("SELECT payload FROM approvals WHERE id=$1", [
+          draft.approvalId,
+        ])
+      ).rows[0].payload.telegramThreadId,
+      null,
+    );
+  } finally {
+    await pg.close();
+  }
+});
+
+test("closed Main root retry still checks an approval's cancellation guard", async () => {
+  const { pg, db } = await database();
+  const a = new CalendarActions(db, {} as any, "123");
+  const draft = await a.draft("123", randomUUID(), {
+    title: "Decision",
+    start: "2026-10-08T15:00:00+08:00",
+    end: "2026-10-08T16:00:00+08:00",
+  });
+  const bot = new Bot("123:test-token");
+  let current = true;
+  const sends: unknown[] = [];
+  bot.api.config.use(async (_p, method, payload) => {
+    if (method === "getMe")
+      return { ok: true, result: { has_topics_enabled: true } } as any;
+    if (method === "createForumTopic")
+      return {
+        ok: true,
+        result: { message_thread_id: 900, name: "Main" },
+      } as any;
+    if (method === "sendMessage") {
+      sends.push((payload as any).message_thread_id);
+      current = false;
+      return { ok: false, error_code: 400, description: "TOPIC_CLOSED" } as any;
+    }
+    return { ok: true, result: true } as any;
+  });
+  routeUnthreadedToMain(
+    bot.api,
+    new TelegramTopics(db, bot.api),
+    new Set(["123"]),
+  );
+  try {
+    await sendCalendarApprovals(bot, db, "123", async () => current);
+    assert.deepEqual(sends, [900]);
+    assert.equal(
+      (
+        await db.query("SELECT payload FROM approvals WHERE id=$1", [
+          draft.approvalId,
+        ])
+      ).rows[0].payload.telegramDeliveryState,
+      undefined,
+    );
+  } finally {
+    await pg.close();
+  }
+});
