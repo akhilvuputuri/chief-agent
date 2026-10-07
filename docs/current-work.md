@@ -1,6 +1,6 @@
-# Coding benchmark pack — implementation under review
+# Coding benchmark pack — offline validation complete
 
-Six runnable Chief seeded component repair fixtures and four pinned public SWE-bench selections are prepared in [the coding benchmark pack](../evals/coding/README.md). Offline source/grader validation passes; live inference integration, public environment checks and paid trials remain pending. No production coding settings change. See [journal 66](journey/66-coding-benchmarks.md).
+Six runnable Chief seeded component repair fixtures and four pinned public SWE-bench selections are prepared in [the coding benchmark pack](../evals/coding/README.md). Offline source/grader validation, actual local Docker checks and the full repository suite pass. GPT-6 Astra approved the implementation; final-head review, hosted checks and merge/release receipts are tracked in [PR #180](https://github.com/akhilvuputuri/chief-agent/pull/180). Live inference integration, public environment checks and paid trials remain pending. No production coding settings change. See [journal 66](journey/66-coding-benchmarks.md).
 
 # Explicit Main conversation topic — released v0.3.44
 
