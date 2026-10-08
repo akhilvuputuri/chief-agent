@@ -1,4 +1,9 @@
 import { spending } from "./spending.js";
+import {
+  readGenerationStream,
+  StreamFailure,
+  type StreamProgress,
+} from "./openrouter-stream.js";
 export type Message = {
   role: "system" | "user" | "assistant" | "tool";
   content: string | null;
@@ -55,6 +60,9 @@ export interface ModelAdapter {
     sessionId?: string;
     /** Sent as OpenRouter session_id instead of sessionId; prompt caches are partitioned by it. */
     cacheKey?: string;
+    /** Coding-only opt-in. Ordinary assistant requests keep their existing path. */
+    stream?: boolean;
+    onProgress?: (value: StreamProgress) => Promise<void> | void;
   }): Promise<Generation>;
 }
 export class ModelError extends Error {
@@ -90,36 +98,45 @@ export class OpenRouter implements ModelAdapter {
         1e6 +
       (8000 * this.outputPrice) / 1e6;
     const charge = await ledger?.begin("openrouter-main", estimate);
-    const response = await this.transport(
-      "https://openrouter.ai/api/v1/chat/completions",
-      {
-        method: "POST",
-        signal: input.signal,
-        headers: {
-          Authorization: `Bearer ${this.key}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: this.model,
-          ...((input.cacheKey ?? input.sessionId)
-            ? { session_id: input.cacheKey ?? input.sessionId }
-            : {}),
-          messages: input.messages,
-          tools: input.tools.map((f) => ({ type: "function", function: f })),
-          reasoning: { enabled: true, effort: input.reasoning },
-          provider: {
-            sort: "price",
-            max_price: {
-              prompt: this.inputPrice,
-              completion: this.outputPrice,
-            },
-            require_parameters: true,
+    let response: Response;
+    try {
+      response = await this.transport(
+        "https://openrouter.ai/api/v1/chat/completions",
+        {
+          method: "POST",
+          signal: input.signal,
+          headers: {
+            Authorization: `Bearer ${this.key}`,
+            "Content-Type": "application/json",
           },
-          max_tokens: 8000,
-          stream: false,
-        }),
-      },
-    );
+          body: JSON.stringify({
+            model: this.model,
+            ...((input.cacheKey ?? input.sessionId)
+              ? { session_id: input.cacheKey ?? input.sessionId }
+              : {}),
+            messages: input.messages,
+            tools: input.tools.map((f) => ({ type: "function", function: f })),
+            reasoning: { enabled: true, effort: input.reasoning },
+            provider: {
+              sort: "price",
+              max_price: {
+                prompt: this.inputPrice,
+                completion: this.outputPrice,
+              },
+              require_parameters: true,
+            },
+            max_tokens: 8000,
+            stream: input.stream ?? false,
+          }),
+        },
+      );
+    } catch (error) {
+      if (!input.stream) throw error;
+      if (input.signal.aborted) throw input.signal.reason;
+      throw new ModelError("Model transport failed", true, {
+        failureCode: "transport",
+      });
+    }
     if (!response.ok)
       throw new ModelError(
         response.status === 404
@@ -128,7 +145,27 @@ export class OpenRouter implements ModelAdapter {
         response.status === 429 || response.status >= 500,
         { httpStatus: response.status },
       );
-    const data: any = await response.json();
+    let data: any;
+    try {
+      data = input.stream
+        ? await readGenerationStream(response, input.signal, input.onProgress)
+        : await response.json();
+    } catch (error) {
+      if (!input.stream) throw error;
+      if (input.signal.aborted) throw input.signal.reason;
+      if (error instanceof StreamFailure)
+        throw new ModelError(
+          "Model stream failed",
+          error.code !== "malformed",
+          {
+            failureCode: error.code,
+            ...(error.httpStatus ? { httpStatus: error.httpStatus } : {}),
+          },
+        );
+      throw new ModelError("Model response transport failed", true, {
+        failureCode: "transport",
+      });
+    }
     if (charge) await ledger!.settle(charge, data?.usage);
     const choice = data?.choices?.[0];
     const m = choice?.message;

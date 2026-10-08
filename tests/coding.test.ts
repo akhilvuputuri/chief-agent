@@ -108,6 +108,7 @@ async function fixture(t: TestContext) {
     uncertainCreate = false,
     uncertainPublish = false,
     failModel = false;
+  let stallModel = false;
   const sandboxes = new Map<
     string,
     { id: string; state: "running" | "terminal" }
@@ -159,8 +160,18 @@ async function fixture(t: TestContext) {
     "https://coding.example.com",
     (u) => u === "a" && permitted,
     () => ({
-      generate: async () => {
+      generate: async (input) => {
         modelCalls++;
+        if (stallModel) {
+          if (input.signal.aborted) throw input.signal.reason;
+          await new Promise((_resolve, reject) =>
+            input.signal.addEventListener(
+              "abort",
+              () => reject(input.signal.reason),
+              { once: true },
+            ),
+          );
+        }
         if (failModel) throw failModelError;
         return { message: { role: "assistant", content: modelReply } };
       },
@@ -241,6 +252,9 @@ async function fixture(t: TestContext) {
     failModel: (error = new Error("private model error")) => {
       failModel = true;
       failModelError = error;
+    },
+    stallModel: () => {
+      stallModel = true;
     },
     setReply: (text: string) => {
       modelReply = text;
@@ -608,6 +622,82 @@ test("coding continuation accepts indexed tool calls and keeps strict payload va
   assert.equal(denied.statusCode, 409);
   assert(!denied.body.includes("private payload"));
   assert.equal(f.modelCalls(), 1);
+});
+
+test("remaining job deadline aborts a stalled model and exposes its exact timeout category", async (t) => {
+  const f = await fixture(t);
+  const job: any = await f.start("deadline-stream", "plan");
+  await f.c.tick();
+  const row = await f.row(job.id);
+  // The fixture host clock is stable, so the remaining allocation is deterministic.
+  const allocationStart = new Date(row.heartbeat_at).getTime();
+  await f.db.query(
+    'UPDATE coding_jobs SET attempt_deadline=$2,settings=settings || \'{"harnessVersion":2,"squad":true}\'::jsonb WHERE id=$1',
+    [job.id, new Date(allocationStart + 100)],
+  );
+  f.stallModel();
+  const current = await f.row(job.id);
+  const token = (f.c as any).token(job.id, current.attempt_id);
+  const app = await server({} as any);
+  t.after(() => app.close());
+  await codingApi(app, f.c);
+  const keepAlive = setTimeout(() => {}, 2000);
+  t.after(() => clearTimeout(keepAlive));
+  const response = await app.inject({
+    method: "POST",
+    url: `/coding/worker/${job.id}/model`,
+    headers: { authorization: `Bearer ${token}` },
+    payload: {
+      callId: randomUUID(),
+      role: "leader",
+      messages: [{ role: "user", content: "Synthetic task" }],
+      tools: [],
+    },
+  });
+  assert.equal(response.json().code, "model_timeout");
+  const status: any = await f.c.status("a", job.id);
+  assert.equal(status.lastFailure.timeoutKind, "total");
+  assert.equal(status.lastFailure.phase, "model");
+  assert.ok(status.lastFailure.elapsedMs >= 50);
+  assert.equal((await f.row(job.id)).model_busy, false);
+});
+
+test("new harness exposes a bounded transient model category without provider error text", async (t) => {
+  const f = await fixture(t);
+  const job: any = await f.start("transient-model", "plan");
+  await f.c.tick();
+  await f.db.query(
+    'UPDATE coding_jobs SET settings=settings || \'{"harnessVersion":2,"squad":true}\'::jsonb WHERE id=$1',
+    [job.id],
+  );
+  const active = await f.row(job.id);
+  const token = (f.c as any).token(job.id, active.attempt_id);
+  f.failModel(
+    new ModelError("private provider error", true, { httpStatus: 429 }),
+  );
+  const app = await server({} as any);
+  t.after(() => app.close());
+  await codingApi(app, f.c);
+  const callId = randomUUID();
+  const response = await app.inject({
+    method: "POST",
+    url: `/coding/worker/${job.id}/model`,
+    headers: { authorization: `Bearer ${token}` },
+    payload: {
+      callId,
+      role: "leader",
+      messages: [{ role: "user", content: "Synthetic task" }],
+      tools: [],
+    },
+  });
+  assert.equal(response.statusCode, 409);
+  assert.equal(response.json().code, "model_rate_limited");
+  assert.ok(!response.body.includes("private provider error"));
+  const status: any = await f.c.status("a", job.id);
+  assert.equal(status.lastFailure.code, "model_rate_limited");
+  assert.equal(status.lastFailure.callId, callId);
+  assert.ok(status.lastFailure.elapsedMs >= 0);
+  assert.equal((await f.row(job.id)).model_busy, false);
 });
 
 test("worker rejection status is bounded, owner-scoped and fenced to the current attempt", async (t) => {

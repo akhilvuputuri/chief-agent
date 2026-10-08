@@ -1,3 +1,7 @@
+# Coding progress and recovery candidate — 8 October 2026
+
+The six requested reliability changes are being implemented in an isolated worktree from main `7f2fa9c`. Foundation version 0.3.50 / Python 0.1.5 does not activate the new executor: publish from reviewed main, verify installed image bytes and pin `harnessVersion: 2` with its digest in a reviewed follow-up. Current production remains the v0.3.49 selector. See [current work](docs/current-work.md) and [journal 71](docs/journey/71-coding-progress-recovery.md) for validation/release status.
+
 Coding allocations released as [v0.3.49](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.49), verified deployed `b44e1cee723ccfdd624152bbea54e7f23b1134d7`: new attempts use Python 0.1.4 and two hours / 400 model calls / 1,000 tool calls. Independent foundation/pin reviews, hosted checks, exact receipt and separate health/effective-selector reads passed. Stored paused jobs retain old settings; request a fresh job to use the new allocation. No job was resumed and no paid/live coding acceptance ran. See [journal closure](docs/journey/70-coding-allocations.md#release-closure--8-october-2026).
 
 ## Link resolution — released v0.3.47, 8 October 2026

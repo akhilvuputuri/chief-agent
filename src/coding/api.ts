@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { CodingController } from "./controller.js";
 import { ModelError } from "../model.js";
+import { CodingModelFailure } from "./model-failure.js";
 
 const message = z
   .object({
@@ -119,16 +120,19 @@ export async function codingApi(
               }
             } catch (error) {
               const code =
-                error instanceof z.ZodError
-                  ? "invalid_worker_payload"
-                  : error instanceof ModelError
-                    ? "model_provider_failed"
-                    : "worker_request_rejected";
+                error instanceof CodingModelFailure
+                  ? error.code
+                  : error instanceof z.ZodError
+                    ? "invalid_worker_payload"
+                    : error instanceof ModelError
+                      ? "model_provider_failed"
+                      : "worker_request_rejected";
               await controller
                 .recordRejection(job, {
                   phase: path,
                   code,
                   httpStatus: 409,
+                  ...(error instanceof CodingModelFailure ? error.details : {}),
                 })
                 .catch(() => {});
               return reply.code(409).send({

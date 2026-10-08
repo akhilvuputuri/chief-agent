@@ -28,6 +28,12 @@ const transitions: Record<string, string[]> = {
   awaiting_input: ["awaiting_input"],
 };
 export function assertSquadCheckpoint(job: CodingJob, c: Checkpoint) {
+  if (
+    c.runtimeMemory &&
+    (job.settings.harnessVersion !== 2 ||
+      c.runtimeMemory.scopeHash !== squadScope(job, c.plan))
+  )
+    throw new Error("Working notebook is outside the reviewed harness scope");
   const s = c.squadState;
   if (!job.settings.squad) {
     if (s) throw new Error("Legacy jobs cannot introduce squad state");

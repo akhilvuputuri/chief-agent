@@ -39,9 +39,30 @@ async def cancellable(awaitable: Any, stop: asyncio.Event) -> Any:
 
 
 class GatewayError(RuntimeError):
-    def __init__(self, status: int) -> None:
-        super().__init__(f"Worker gateway rejected request ({status})")
+    def __init__(self, status: int, code: str = "worker_request_rejected") -> None:
+        known = {
+            "worker_request_rejected",
+            "invalid_worker_payload",
+            "model_provider_failed",
+            "model_timeout",
+            "model_disconnected",
+            "model_rate_limited",
+            "model_transient_failure",
+            "model_context_limit",
+            "model_cancelled",
+        }
+        self.code = code if code in known else "worker_request_rejected"
+        super().__init__(f"Worker gateway rejected request ({status}, {self.code})")
         self.status = status
+
+    @property
+    def recoverable(self) -> bool:
+        return self.code in {
+            "model_timeout",
+            "model_disconnected",
+            "model_rate_limited",
+            "model_transient_failure",
+        }
 
 
 class WorkerClient:
@@ -57,10 +78,12 @@ class WorkerClient:
         *,
         retry_delay: float = 3,
         retry_window: float = 120,
+        model_timeout: float = 130,
     ) -> None:
         self.origin, self.job_id, self._token = origin, job_id, token
         self.stop, self.http = stop, http
         self.retry_delay, self.retry_window = retry_delay, retry_window
+        self.model_timeout = model_timeout
 
     async def request(self, path: str, body: Json | None = None) -> Json:
         deadline = time.monotonic() + self.retry_window
@@ -76,12 +99,16 @@ class WorkerClient:
                             "Content-Type": "application/json",
                         },
                         content=payload,
-                        timeout=130 if path == "model" else 30,
+                        timeout=self.model_timeout if path == "model" else 30,
                     ),
                     self.stop,
                 )
                 if response.status_code >= 400:
-                    raise GatewayError(response.status_code)
+                    try:
+                        code = response.json().get("code", "worker_request_rejected")
+                    except (ValueError, AttributeError):
+                        code = "worker_request_rejected"
+                    raise GatewayError(response.status_code, code)
                 if len(response.content) > 1600000:
                     raise ValueError("Gateway response exceeds supported bound")
                 value = response.json()

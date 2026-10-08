@@ -1,3 +1,7 @@
+# Coding progress and recovery — implementation candidate
+
+The owner requested all six improvements following the fresh planning stop: durable member notebooks, state-preserving compaction, targeted inspection, loop recovery, model streaming/failure handling and Chief status. Work starts from `7f2fa9c26eaa9d973d141e6cbf72b188ac48251b` on `codex/coding-progress-recovery`. Python 0.1.5 and compatible host support passed local full/focused checks; the production selector remains Python 0.1.4 until the new image is independently verified and pinned with `harnessVersion: 2`. Review, hosted checks and release are pending. Paused work is retained and not resumed. See [journal 71](journey/71-coding-progress-recovery.md).
+
 # Coding allocations — released v0.3.49
 
 [v0.3.49](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.49) is verified at `b44e1cee723ccfdd624152bbea54e7f23b1134d7`. New coding attempts use the public verified Python 0.1.4 image with two hours / 400 model calls / 1,000 tool calls shared by the squad. Foundation/pin independent reviews, PR/main checks, exact release receipt and separate production configuration/gateway/Postgres health passed. Existing paused jobs retain their original image/limits/checkpoints; ordinary resume does not upgrade them. An owner-requested fresh job uses the new defaults. No paid/live coding acceptance ran. See [journal 70](journey/70-coding-allocations.md#release-closure--8-october-2026).

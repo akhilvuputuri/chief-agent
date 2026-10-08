@@ -1,0 +1,34 @@
+# 71 — Coding progress across context loss and provider failure
+
+Work date(s): 2026-10-08. Written/revised: 2026-10-08.
+Status: implementation candidate. Six owner-requested improvements are being validated; independent review, hosted checks, image publication/activation and release remain pending. No paused work is resumed and no paid model trial is run.
+
+## User-visible problem and preceding iteration
+
+[Journal 70](70-coding-allocations.md) shipped a realistic shared allocation and verified compatible image. A fresh planning attempt still stopped without a saved plan. More allocation allowed longer inspection but did not preserve useful findings across context reduction or classify the final model failure precisely. The owner requested research followed by all six recommended reliability improvements.
+
+## Evidence
+
+Measured 8 October, 09:24–09:48 UTC, one fresh read-only planning attempt on verified `7f2fa9c26eaa9d973d141e6cbf72b188ac48251b`, Python 0.1.4, DeepSeek V4.1 Flash/high and two hours / 400 models / 1,000 tools. Bounded private SQL/operational-log inspection found 139 host-admitted requests: 138 complete, one uncertain. It recorded 237 file reads over 58 files, 123 distinct path/offset pairs and 114 repeats; every repeat's previous tool result ID was absent from that model request. Returned page length varied with batch size, so identical offsets do not establish identical full ranges. There were 24 observed file-read errors. No plan or changed file was acknowledged; the stored initial tool count was zero despite activity.
+
+The final admitted model request and generic rejection were 120 seconds apart, matching the host request timeout. The old generic failure category does not prove the exact provider/network cause. No raw objective, conversation, source excerpt, credentials or production trace is included here. These measurements are one incident, not a benchmark score or quality comparison.
+
+## Diagnosis and alternatives
+
+Observed source behavior: `compact` deleted whole old groups without summarizing findings; planning checkpointed at initialization/completion rather than after inspection. The leader could list paths but had no dedicated content search, and missing files returned opaque errors. Context loss plausibly explains repeat inspection, but the metadata correlation is not causal proof. Raising limits, vector retrieval, additional members or a model switch alone would not establish a fix.
+
+Research sources: [Anthropic context engineering](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents), [long-running artifacts](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), [tool design](https://www.anthropic.com/engineering/writing-tools-for-agents), [Codex guidance](https://developers.openai.com/cookbook/examples/gpt-5/codex_prompting_guide), [OpenCode compaction at inspected revision](https://github.com/anomalyco/opencode/blob/5d9cd9b259f0456522f318a7435501d03cfbee79/packages/opencode/src/session/compaction.ts), [OpenHands condensation at inspected revision](https://github.com/OpenHands/software-agent-sdk/blob/69e26889401fe69157fff536e6a69049e6644cb3/openhands-sdk/openhands/sdk/context/condenser/llm_summarizing_condenser.py), [Aider repository maps](https://aider.chat/docs/repomap.html), [OpenRouter streaming](https://openrouter.ai/docs/api/reference/streaming) and [reasoning preservation](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens). Adopt mechanisms in the owned runtime; do not infer their published results transfer to this model/workload. Repository maps/vector retrieval remain later experiments.
+
+## Implementation and review
+
+The [progress contract](../coding-progress.md) specifies separate scope-fenced member notebooks, bounded automatic evidence, lightweight checkpoints, restricted summary-before-trimming, safe grep/glob/line reads, nudge/reset/pause escalation, complete-stream assembly, bounded fresh model-generation recovery and owner-scoped Chief status/Main milestones. Requirements, code artifact identity, actual checks, independent review, price filters/models/effort, existing shared allocation and uncertain-write fences remain authoritative. No database, Compose or credential mutation is needed.
+
+Compatible host code and Python 0.1.5 are the foundation. Production keeps the old selector until a main-built immutable image is verified and activated with `harnessVersion: 2` in a reviewed follow-up. Existing pinned jobs are preserved. Review outcomes and exact heads will be recorded here after independent examination.
+
+## Verification and outcome
+
+The full local check passed 983 tests (842 application, 50 script, 42 offline eval and 49 Python runtime tests), plus build and formatting. Added final selector/deadline/cancellation checks passed; focused stream and final Python checks/typecheck were rerun after boundary fixes. An initial full invocation was blocked by the restricted tsx IPC socket; the authorized local test invocation passed. A deadline fixture initially included provisioning headroom and was corrected to use the actual fixture host clock before its timeout assertion passed. Early verification exposed a missing notes timestamp import, and recovery inspection exposed stale per-member counters that could incorrectly limit a fresh attempt; both were corrected before review. Stream tests caught representation handling differences; fragmented opaque reasoning remains byte-equivalent in the JSON wire result. Independent review, hosted checks, exact release evidence and image verification are pending. No successful real planning/coding trajectory or model-quality improvement is claimed.
+
+## Follow-up and next iteration
+
+Keep the frozen component/public benchmark pack, add realistic planning/navigation cases and compare harnesses with models/allocations held fixed. Measure completion, repeated evidence, context-summary recall, recovery, latency, actual usage and reviewer false approvals. Paid model inference requires its separate authorization. Scoped full private trace inspection from cloud tasks remains unfinished; new owner-scoped status/metadata improves diagnosis without exporting conversations or giving workers SSH access.

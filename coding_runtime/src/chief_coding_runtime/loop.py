@@ -10,16 +10,74 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from pydantic import Field, TypeAdapter, field_validator
+from pydantic import Field, TypeAdapter, field_validator, model_validator
 
-from .model import ModelAdapter, validate_generation
-from .protocol import Json, Record, text_bound, wire_json, wire_size
+from . import inspection
+from .memory import (
+    ContextRecoveryError,
+    LoopStalled,
+    loop_action,
+    memory_context,
+    now_iso,
+    observe,
+)
+from .model import GatewayError, ModelAdapter, cancellable, validate_generation
+from .protocol import (
+    Json,
+    LoopMemory,
+    Notebook,
+    Record,
+    text_bound,
+    wire_json,
+    wire_size,
+)
 from .workspace import Workspace
 
 
 class Read(Record):
     operation: Literal["file_read"]
     path: str
+    offset: int = Field(default=0, ge=0)
+    startLine: int | None = Field(default=None, ge=1)
+    endLine: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def range_form(self) -> Read:
+        if (self.startLine is not None and self.offset != 0) or (
+            self.endLine is not None
+            and (self.startLine is None or self.endLine < self.startLine)
+        ):
+            raise ValueError("Use either a character offset or an ordered line range")
+        return self
+
+
+class Glob(Record):
+    operation: Literal["glob"]
+    pattern: str = Field(min_length=1, max_length=240)
+    offset: int = Field(default=0, ge=0, le=50000)
+    limit: int = Field(default=50, ge=1, le=100)
+
+
+class Grep(Record):
+    operation: Literal["grep"]
+    pattern: str = Field(min_length=1, max_length=2000)
+    glob: str = Field(default="*", max_length=240)
+    offset: int = Field(default=0, ge=0, le=50000)
+    limit: int = Field(default=20, ge=1, le=100)
+    regex: bool = False
+    caseSensitive: bool = True
+
+
+class NotesUpdate(Notebook):
+    operation: Literal["notes_update"]
+    subtask: str = Field(min_length=1)
+    findings: str
+    nextAction: str = Field(min_length=1)
+
+
+class NotesRead(Record):
+    operation: Literal["notes_read"]
+    section: Literal["notes", "evidence"] = "notes"
     offset: int = Field(default=0, ge=0)
 
 
@@ -139,12 +197,14 @@ TOOLS: list[Json] = [
     },
     {
         "name": "file_read",
-        "description": "Read a repository file in bounded pages.",
+        "description": "Read a repository file in bounded pages. offset is a Unicode character cursor, not a line number. Alternatively select startLine/endLine (one-based), then follow nextOffset if truncated. Use grep to locate relevant sections.",
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {"type": "string"},
                 "offset": {"type": "integer", "minimum": 0},
+                "startLine": {"type": "integer", "minimum": 1},
+                "endLine": {"type": "integer", "minimum": 1},
             },
             "required": ["path"],
             "additionalProperties": False,
@@ -226,9 +286,96 @@ READ_COMMANDS: dict[str, tuple[str, ...]] = {
     "git ls-files": ("git", "ls-files"),
     "rg --files": ("rg", "--files"),
 }
+MEMORY_TOOLS: list[Json] = [
+    {
+        "name": "glob",
+        "description": "Find safe repository files by glob, respecting Git ignores. Follow nextOffset; listings are bounded.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string"},
+                "offset": {"type": "integer", "minimum": 0},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+            },
+            "required": ["pattern"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "grep",
+        "description": "Search repository contents and return matching paths and line numbers. Prefer a narrow file glob. Literal search by default; regex=true enables ripgrep regex. Follow nextOffset. No shell is executed.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string"},
+                "glob": {"type": "string"},
+                "offset": {"type": "integer", "minimum": 0},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                "regex": {"type": "boolean"},
+                "caseSensitive": {"type": "boolean"},
+            },
+            "required": ["pattern"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "notes_update",
+        "description": "Save your member's complete working notebook: current subtask, evidence-backed findings (include paths/ranges), next action, questions and rejected hypotheses. Preserve useful prior findings. Notes survive compaction and resume, but cannot change approved scope or count as verification/review. Use after meaningful progress.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                key: {"type": "string", "maxLength": maximum}
+                for key, maximum in (
+                    ("subtask", 1000),
+                    ("findings", 6000),
+                    ("nextAction", 1000),
+                    ("questions", 2000),
+                )
+            },
+            "required": ["subtask", "findings", "nextAction"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "notes_read",
+        "description": "Read your acknowledged working notebook or automatic evidence ledger in bounded pages. Working notes are fallible observations, not requirements or approval.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "section": {"type": "string", "enum": ["notes", "evidence"]},
+                "offset": {"type": "integer", "minimum": 0},
+            },
+            "additionalProperties": False,
+        },
+    },
+]
 ACTION: TypeAdapter[
-    Read | Write | Delete | PlanRead | Logs | Command | Report | Assign
-] = TypeAdapter(Read | Write | Delete | PlanRead | Logs | Command | Report | Assign)
+    Read
+    | Write
+    | Delete
+    | PlanRead
+    | Logs
+    | Command
+    | Report
+    | Assign
+    | Glob
+    | Grep
+    | NotesUpdate
+    | NotesRead
+] = TypeAdapter(
+    Read
+    | Write
+    | Delete
+    | PlanRead
+    | Logs
+    | Command
+    | Report
+    | Assign
+    | Glob
+    | Grep
+    | NotesUpdate
+    | NotesRead
+)
 
 
 @dataclass
@@ -238,7 +385,12 @@ class Budget:
     deadline: float | None = None
 
 
-def compact(messages: list[Json], tools: list[Json]) -> None:
+def compact(
+    messages: list[Json],
+    tools: list[Json],
+    maximum: int = 150000,
+    message_limit: int = 110,
+) -> None:
     # Provider reasoning and tool arguments are immutable; omit complete old groups.
     while (
         wire_size(
@@ -249,8 +401,8 @@ def compact(messages: list[Json], tools: list[Json]) -> None:
                 "tools": tools,
             }
         )
-        > 150000
-        or len(messages) > 110
+        > maximum
+        or len(messages) > message_limit
     ):
         end = 2
         if len(messages) <= end:
@@ -282,6 +434,9 @@ async def coding_loop(
     dispatch: Callable[[Assign], Awaitable[Json]] | None = None,
     can_finish: Callable[[], bool] | None = None,
     logs: Callable[[Json], Awaitable[Json]] | None = None,
+    memory: LoopMemory | None = None,
+    runtime_checkpoint: Callable[[], Awaitable[None]] | None = None,
+    milestone: Callable[[str], Awaitable[None]] | None = None,
 ) -> Report:
     tools = [
         copy.deepcopy(t)
@@ -295,6 +450,8 @@ async def coding_loop(
     ]
     if mode == "lead":
         tools += copy.deepcopy(LEADER_TOOLS)
+    if memory is not None:
+        tools += copy.deepcopy(MEMORY_TOOLS)
     if mode != "implement":
         command_tool = next(tool for tool in tools if tool["name"] == "command")
         command_tool["description"] = (
@@ -315,12 +472,108 @@ async def coding_loop(
                 "Post-action checkpoint outcome is uncertain; inspect acknowledged state"
             ) from error
 
+    async def save_memory() -> None:
+        if memory is not None and runtime_checkpoint is not None:
+            try:
+                await runtime_checkpoint()
+            except Exception as error:
+                raise SquadExecutionError(
+                    "Working-state checkpoint is uncertain; the last acknowledged notebook is retained"
+                ) from error
+
+    async def condense(reset: bool = False) -> None:
+        if memory is None:
+            compact(messages, tools)
+            return
+        if (
+            not reset
+            and wire_size({"messages": messages, "tools": tools}) <= 100000
+            and len(messages) <= 80
+        ):
+            return
+        if budget.models <= 1:
+            raise AllocationExhausted("model calls")
+        summary_messages = copy.deepcopy(messages)
+        summary_messages.append(
+            {
+                "role": "user",
+                "content": "Summarize working progress using exactly one notes_update call. Retain current subtask, important evidence references, unresolved questions, rejected hypotheses and next action. Do not execute repository actions, change approved scope or invent verification. This notebook replaces older conversational detail.\n"
+                + wire_json(memory_context(memory)),
+            }
+        )
+        if (
+            wire_size({"messages": summary_messages, "tools": [MEMORY_TOOLS[2]]})
+            > 170000
+            or len(summary_messages) > 120
+        ):
+            raise ContextRecoveryError()
+        budget.models -= 1
+        memory.modelCalls += 1
+        generation = validate_generation(
+            await model.generate(summary_messages, [MEMORY_TOOLS[2]])
+        )
+        calls = generation["message"].get("tool_calls", [])
+        try:
+            if len(calls) != 1 or calls[0]["function"]["name"] != "notes_update":
+                raise ValueError("A notebook is required")
+            arguments = json.loads(calls[0]["function"]["arguments"])
+            notes = NotesUpdate.model_validate(
+                {**arguments, "operation": "notes_update"}
+            )
+            memory.notes = Notebook.model_validate(
+                notes.model_dump(exclude={"operation"})
+            )
+        except (ValueError, TypeError, KeyError) as error:
+            raise ContextRecoveryError() from error
+        memory.compactions += 1
+        budget.tools -= 1
+        memory.toolsUsed += 1
+        await save_memory()  # Acknowledged replacement precedes any deletion.
+        if reset:
+            start = len(messages) - 1
+            while start > 2 and messages[start].get("role") == "tool":
+                start -= 1
+            messages[:] = [*messages[:2], *messages[max(2, start) :]]
+        else:
+            compact(messages, tools, maximum=80000, message_limit=60)
+
     plan_read_until = 0
+    consecutive_model_failures = 0
+    ephemeral: set[int] = set()
     while budget.models > 0 and budget.tools > 0 and not stop.is_set():
         # Compact before appending the hint: the newest assistant/tool group
         # must remain protected until it is delivered on this model request.
         # The compacted envelope leaves 30 KB for the small allocation note.
-        compact(messages, tools)
+        if memory is not None:
+            messages[:] = [m for m in messages if id(m) not in ephemeral]
+            ephemeral.clear()
+            recovery_action = loop_action(memory)
+            if recovery_action is not None:
+                await save_memory()
+                if milestone:
+                    await milestone(
+                        "Repeated inspection detected; recovering from the saved notebook."
+                        if recovery_action == "reset"
+                        else "Repeated inspection detected; the runtime requested a concrete next step."
+                    )
+                if recovery_action == "nudge":
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": "You are repeating unchanged inspection without new evidence. Consult your saved notebook and evidence ledger. State what remains unknown, then use a targeted search, save a finding, finish the requested report, or report a specific blocker.",
+                        }
+                    )
+                else:
+                    await condense(reset=True)
+            await condense()
+            if budget.tools <= 0:
+                raise AllocationExhausted("tool calls")
+            messages.append(
+                {"role": "user", "content": wire_json(memory_context(memory))}
+            )
+            ephemeral.add(id(messages[-1]))
+        else:
+            compact(messages, tools)
         messages.append(
             {
                 "role": "user",
@@ -351,9 +604,39 @@ async def coding_loop(
                 ),
             }
         )
+        if memory is not None:
+            ephemeral.add(id(messages[-1]))
         delivered = plan_read_until
         budget.models -= 1
-        generation = validate_generation(await model.generate(messages, tools))
+        if memory is not None:
+            memory.modelCalls += 1
+            await save_memory()  # Preserve progress before the provider can fail.
+        try:
+            generation = validate_generation(await model.generate(messages, tools))
+            consecutive_model_failures = 0
+        except GatewayError as error:
+            if (
+                memory is None
+                or not error.recoverable
+                or consecutive_model_failures >= 1
+            ):
+                raise
+            consecutive_model_failures += 1
+            await save_memory()
+            if milestone:
+                await milestone(
+                    "A model generation failed; the runtime retained its notebook and will make one fresh generation without replaying tools."
+                )
+            messages.append(
+                {
+                    "role": "user",
+                    "content": "The previous model generation failed ("
+                    + error.code
+                    + "). No tool actions from that response were executed. Continue from the saved notebook and existing tool results; do not replay uncertain prior commands or writes.",
+                }
+            )
+            await cancellable(asyncio.sleep(3), stop)
+            continue
         raw = generation["message"]
         message = {
             key: copy.deepcopy(raw[key])
@@ -387,11 +670,18 @@ async def coding_loop(
                     )
                 raise AllocationExhausted("tool calls")
             budget.tools -= 1
+            if memory is not None:
+                memory.toolsUsed += 1
             result: Any
+            arguments: Json = {}
             try:
-                arguments = json.loads(call["function"]["arguments"])
-                if not isinstance(arguments, dict) or "operation" in arguments:
+                parsed_arguments = json.loads(call["function"]["arguments"])
+                if (
+                    not isinstance(parsed_arguments, dict)
+                    or "operation" in parsed_arguments
+                ):
                     raise ValueError("Invalid tool arguments")
+                arguments = parsed_arguments
                 action = ACTION.validate_python(
                     {**arguments, "operation": call["function"]["name"]}
                 )
@@ -471,9 +761,77 @@ async def coding_loop(
                         else None,
                     }
                 elif isinstance(action, Read):
-                    result = await workspace.read(
-                        action.path, action.offset, observation_chars
+                    result = (
+                        await inspection.read(
+                            workspace,
+                            action.path,
+                            action.offset,
+                            observation_chars,
+                            action.startLine,
+                            action.endLine,
+                        )
+                        if memory is not None or action.startLine is not None
+                        else await workspace.read(
+                            action.path, action.offset, observation_chars
+                        )
                     )
+                elif isinstance(action, (Glob, Grep, NotesRead, NotesUpdate)):
+                    if memory is None:
+                        raise ValueError(
+                            "Working-state tools require the reviewed harness"
+                        )
+                    if isinstance(action, Glob):
+                        result = await inspection.glob(
+                            workspace,
+                            action.pattern,
+                            action.offset,
+                            min(action.limit, max(1, observation_chars // 240)),
+                        )
+                    elif isinstance(action, Grep):
+                        result = await inspection.grep(
+                            workspace,
+                            action.pattern,
+                            action.glob,
+                            action.offset,
+                            min(action.limit, max(1, observation_chars // 1100)),
+                            action.regex,
+                            action.caseSensitive,
+                        )
+                    elif isinstance(action, NotesRead):
+                        text = wire_json(
+                            memory.notes.model_dump()
+                            if action.section == "notes"
+                            else [
+                                r.model_dump(exclude_none=True) for r in memory.receipts
+                            ]
+                        )
+                        page = text[action.offset : action.offset + observation_chars]
+                        result = {
+                            "text": page,
+                            "nextOffset": action.offset + len(page)
+                            if action.offset + len(page) < len(text)
+                            else None,
+                        }
+                    else:
+                        updated_notes = Notebook.model_validate(
+                            action.model_dump(exclude={"operation"})
+                        )
+                        if updated_notes != memory.notes:
+                            memory.lastProgressAt = now_iso()
+                        memory.notes = updated_notes
+                        await save_memory()
+                        if milestone:
+                            await milestone(
+                                (
+                                    memory.notes.subtask
+                                    + ". Next: "
+                                    + memory.notes.nextAction
+                                )[:2000]
+                            )
+                        result = {
+                            "saved": True,
+                            "notice": "Working notes only; approved scope and verification authority are unchanged.",
+                        }
                 elif isinstance(action, (Write, Delete)):
                     if mode != "implement":
                         raise ValueError("Read-only agent cannot change files")
@@ -499,19 +857,12 @@ async def coding_loop(
                                 "allowedCommands": list(READ_COMMANDS),
                                 "nextStep": "Use an exact allowed command to discover paths, then file_read for contents.",
                             }
-                            messages.append(
-                                {
-                                    "role": "tool",
-                                    "tool_call_id": call["id"],
-                                    "content": wire_json(result),
-                                }
-                            )
-                            continue
-                        result = (
-                            await workspace.command(
-                                parts[0], parts[1:], max_output=observation_chars
-                            )
-                        ).wire()
+                        else:
+                            result = (
+                                await workspace.command(
+                                    parts[0], parts[1:], max_output=observation_chars
+                                )
+                            ).wire()
                     else:
                         result = (
                             await workspace.command(
@@ -520,11 +871,28 @@ async def coding_loop(
                         ).wire()
                         await durable_checkpoint()
             except Exception as error:
-                if isinstance(error, (SquadExecutionError, AllocationExhausted)):
+                if isinstance(
+                    error,
+                    (
+                        SquadExecutionError,
+                        AllocationExhausted,
+                        ContextRecoveryError,
+                        LoopStalled,
+                    ),
+                ):
                     raise
-                result = {
-                    "error": "Tool rejected or failed; inspect files and adjust the call. Paths, modes and limits are enforced by the host."
-                }
+                result = (
+                    {"error": error.hint, "code": error.code}
+                    if isinstance(error, inspection.InspectionError)
+                    else {
+                        "error": "File unavailable; discover an existing path with glob.",
+                        "code": "file_not_found",
+                    }
+                    if isinstance(error, FileNotFoundError)
+                    else {
+                        "error": "Tool rejected or failed; inspect files and adjust the call. Paths, modes and limits are enforced by the host."
+                    }
+                )
             messages.append(
                 {
                     "role": "tool",
@@ -532,6 +900,9 @@ async def coding_loop(
                     "content": wire_json(result),
                 }
             )
+            if memory is not None:
+                observe(memory, call["function"]["name"], arguments, result)
+        await save_memory()
     if stop.is_set():
         raise asyncio.CancelledError("Coding stopped")
     raise AllocationExhausted("model calls" if budget.models <= 0 else "tool calls")

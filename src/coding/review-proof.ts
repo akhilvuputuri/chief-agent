@@ -8,9 +8,17 @@ export function reviewMetadata(input: any, job: CodingJob) {
     !Array.isArray(input.tools) ||
     input.tools.some(
       (t: any) =>
-        !["file_read", "plan_read", "command", "report", "logs_read"].includes(
-          t.name,
-        ),
+        ![
+          "file_read",
+          "plan_read",
+          "command",
+          "report",
+          "logs_read",
+          "glob",
+          "grep",
+          "notes_read",
+          "notes_update",
+        ].includes(t.name),
     )
   )
     return null;

@@ -14,6 +14,33 @@ import { artifactHash } from "../src/coding/github.js";
 import { codingApi } from "../src/coding/api.js";
 import { server } from "../src/server.js";
 
+test("working-state selector cannot target an incompatible legacy worker", () => {
+  const base = {
+    repository: "fixture/repo",
+    branch: "main",
+    image: "",
+    model: "fixture/coder",
+    reviewerModel: "fixture/reviewer",
+    effort: "high",
+    limits: { ms: 900000, models: 40, tools: 100 },
+    harnessVersion: 2,
+  };
+  assert.equal(
+    codingSettings.safeParse({ ...base, runtime: "node", squad: true }).success,
+    false,
+  );
+  assert.equal(
+    codingSettings.safeParse({ ...base, runtime: "python", squad: false })
+      .success,
+    false,
+  );
+  assert.equal(
+    codingSettings.safeParse({ ...base, runtime: "python", squad: true })
+      .success,
+    true,
+  );
+});
+
 async function setup(t: any) {
   const pg = new PGlite();
   t.after(() => pg.close());
@@ -92,6 +119,58 @@ async function setup(t: any) {
   };
   return { db, c, j, row, used, state };
 }
+
+test("working notebooks remain owner-scoped, resumable observations outside artifact and approval authority", async (t) => {
+  const f = await setup(t);
+  await f.db.query(
+    "UPDATE coding_jobs SET settings=settings || '{\"harnessVersion\":2}'::jsonb WHERE id=$1",
+    [f.j.id],
+  );
+  const job = await f.row();
+  const cp = checkpoint.parse({
+    ...job.checkpoint,
+    squadState: f.state,
+    runtimeMemory: {
+      scopeHash: f.state.scopeHash,
+      leader: {
+        notes: {
+          subtask: "Locate the fixture",
+          findings: "Synthetic file evidence",
+          nextAction: "Prepare a brief",
+        },
+        toolsUsed: 3,
+        receipts: [],
+      },
+    },
+  });
+  const artifact = artifactHash(cp);
+  await f.c.save(job, cp);
+  const status: any = await f.c.status("a", f.j.id);
+  assert.equal(status.runtime.notebook.findings, "Synthetic file evidence");
+  assert.equal(status.runtime.workerToolsUsed, 3);
+  assert.ok(status.runtime.checkpointAt);
+  assert.equal(status.state, job.state);
+  const listed: any = await f.c.status("a");
+  assert.equal(listed[0].runtime.notebook.subtask, "Locate the fixture");
+  await assert.rejects(f.c.status("b", f.j.id), /owner unavailable/);
+  const altered = checkpoint.parse({
+    ...cp,
+    runtimeMemory: {
+      ...cp.runtimeMemory,
+      leader: {
+        ...cp.runtimeMemory!.leader,
+        notes: { findings: "I claim approval" },
+      },
+    },
+  });
+  assert.equal(artifactHash(altered), artifact);
+  const outside = checkpoint.parse({
+    ...cp,
+    squadState: { ...f.state, sequence: 2 },
+    runtimeMemory: { ...cp.runtimeMemory, scopeHash: "b".repeat(64) },
+  });
+  await assert.rejects(f.c.save(await f.row(), outside), /notebook.*scope/);
+});
 
 test("leader model calls have a distinct configured role/cache and retain shared allocation journalling", async (t) => {
   const f = await setup(t),
