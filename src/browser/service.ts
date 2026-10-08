@@ -10,6 +10,15 @@ const manager = new BrowserManager(
 );
 const seen = new Map<string, number>();
 const app = createServer(async (req, res) => {
+  const controller = new AbortController();
+  req.once("aborted", () => controller.abort());
+  res.once("close", () => {
+    if (!res.writableEnded) controller.abort();
+  });
+  const signal = AbortSignal.any([
+    controller.signal,
+    AbortSignal.timeout(45000),
+  ]);
   res.setHeader("content-type", "application/json");
   res.setHeader("cache-control", "no-store");
   if (req.url === "/healthz" && req.method === "GET") {
@@ -55,7 +64,12 @@ const app = createServer(async (req, res) => {
       })
       .strict()
       .parse(JSON.parse(body));
-    const output = await manager.call(input.user, input.session, input.command);
+    const output = await manager.call(
+      input.user,
+      input.session,
+      input.command,
+      signal,
+    );
     res.end(JSON.stringify(output));
   } catch (error) {
     res.writeHead(error instanceof MissingBrowser ? 404 : 400).end(

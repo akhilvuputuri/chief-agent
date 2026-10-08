@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { mock } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
@@ -12,6 +12,10 @@ import {
 import { McpTools } from "../src/mcp.js";
 import { McpFailure } from "../src/mcp-client.js";
 import type { McpTransport as Transport } from "../src/mcp-client.js";
+import https from "node:https";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
+import { PublicFeedFetcher } from "../src/news-feed.js";
 
 const share = "https://www.reddit.com/r/worldnews/s/example";
 const post = "https://www.reddit.com/r/worldnews/comments/abc123/story/";
@@ -81,6 +85,97 @@ test("JSON crossposts preserve the exact parent relationship and stop cycles", (
     ).blocked,
     true,
   );
+});
+test("pseudo-elements and conflicting selected-post nodes never become publisher evidence", () => {
+  for (const body of [
+    `<!-- ${html} -->`,
+    `<script>${html}</script>`,
+    `<textarea>${html}</textarea>`,
+    `<template>${html}</template>`,
+    html + html.replace(article, "https://wrong.example.com/story"),
+  ]) {
+    assert.equal(postEvidence(body, post).blocked, true);
+  }
+  assert.deepEqual(
+    postEvidence(
+      `<!-- ${html.replace(article, "https://wrong.example.com")} -->` + html,
+      post,
+    ).outbound,
+    [article],
+  );
+});
+test("mobile Reddit and blocked shortener destinations cannot be saved as publisher articles", async () => {
+  const f = await fixture();
+  try {
+    const resolver = new LinkResolver(f.db, {
+      get: async (_url, _signal, observe) => {
+        observe?.(post);
+        throw Error("403");
+      },
+    });
+    assert.equal(
+      (await resolver.resolve("123", "https://short.example.com/a")).status,
+      "blocked",
+    );
+    for (const host of ["m.reddit.com", "np.reddit.com"]) {
+      const blocked = new LinkResolver(f.db, {
+        get: async () => {
+          throw Error("403");
+        },
+      });
+      assert.equal(
+        (await blocked.resolve("123", post.replace("www.reddit.com", host)))
+          .status,
+        "blocked",
+      );
+    }
+  } finally {
+    await f.pg.close();
+  }
+});
+test("redirect and error streams are cancelled before following or settling; destination survives a 403", async () => {
+  const responses: PassThrough[] = [];
+  const requests: { destroyed: boolean }[] = [];
+  const destinations: string[] = [];
+  const replacement = mock.method(https, "request", ((
+    _url: unknown,
+    _options: unknown,
+    callback: any,
+  ) => {
+    const req = new EventEmitter() as any;
+    req.destroyed = false;
+    req.destroy = () => {
+      req.destroyed = true;
+    };
+    req.end = () =>
+      queueMicrotask(() => {
+        const res = new PassThrough() as any;
+        res.statusCode = responses.length ? 403 : 302;
+        res.headers = responses.length ? {} : { location: post };
+        responses.push(res);
+        callback(res);
+        // A response capable of endless streaming must have been destroyed.
+        if (!res.destroyed) res.write(Buffer.alloc(1_600_000));
+      });
+    requests.push(req);
+    return req;
+  }) as any);
+  try {
+    await assert.rejects(
+      new PublicFeedFetcher().get(
+        "https://short.example.com/a",
+        undefined,
+        (url) => destinations.push(url),
+      ),
+      /HTTP 403/,
+    );
+    assert.deepEqual(destinations, ["https://short.example.com/a", post]);
+    assert.equal(responses.length, 2);
+    assert.ok(responses.every((res) => res.destroyed));
+    assert.ok(requests.every((req) => req.destroyed));
+  } finally {
+    replacement.mock.restore();
+  }
 });
 test("resolution is owner-scoped, records provenance and never guesses blocked pages", async () => {
   const f = await fixture();
@@ -280,6 +375,31 @@ test("Reader freezes original intent and resolved wire URL before uncertain writ
     assert.equal(resolves, 1);
     await assert.rejects(
       tools.call("123", { ...a, readerTarget: "discussion" }),
+      /bound/,
+    );
+    submitted = [];
+    const discussion = {
+      ...a,
+      requestKey: randomUUID(),
+      readerTarget: "discussion",
+    };
+    assert.equal(
+      ((await tools.call("123", discussion)) as any).state,
+      "pending",
+    );
+    assert.equal(
+      (
+        (await tools.call("123", {
+          ...discussion,
+          readerTarget: undefined,
+          arguments: undefined,
+        })) as any
+      ).state,
+      "complete",
+    );
+    assert.deepEqual(submitted, [share, share]);
+    await assert.rejects(
+      tools.call("123", { ...discussion, readerTarget: "article" }),
       /bound/,
     );
   } finally {

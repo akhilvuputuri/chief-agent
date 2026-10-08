@@ -115,7 +115,11 @@ try {
     });
     return ctx;
   };
-  const publicResult = await manager.call(
+  const publicManager = new BrowserManager(
+    "http://127.0.0.1:9",
+    async () => browser,
+  );
+  const publicResult = await publicManager.call(
     user,
     "00000000-0000-4000-8000-000000000002",
     {
@@ -128,6 +132,68 @@ try {
     "https://publisher.example.com/story",
   ]);
   assert.equal(mutationRequests, 0);
+  let publicContexts = 0;
+  let mode = "duplicate";
+  browser.newContext = async (options) => {
+    publicContexts++;
+    const ctx = await original(options);
+    await ctx.route("https://www.reddit.com/**", async (route) => {
+      if (mode === "slow") {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        await route.abort().catch(() => {});
+        return;
+      }
+      return route.fulfill({
+        contentType: "text/html",
+        body: '<!-- <shreddit-post id="t3_abc123" content-href="https://fake.example.com"></shreddit-post> --><shreddit-post id="t3_abc123" content-href="https://one.example.com"></shreddit-post><shreddit-post id="t3_abc123" content-href="https://two.example.com"></shreddit-post>',
+      });
+    });
+    return ctx;
+  };
+  const duplicateManager = new BrowserManager(
+    "http://127.0.0.1:9",
+    async () => browser,
+  );
+  const duplicate = await duplicateManager.call(user, crypto.randomUUID(), {
+    kind: "resolve_public",
+    url: "https://www.reddit.com/comments/abc123/story/",
+  });
+  assert.equal(duplicate.blocked, true);
+  mode = "slow";
+  publicContexts = 0;
+  const cancelManager = new BrowserManager(
+    "http://127.0.0.1:9",
+    async () => browser,
+  );
+  const activeAbort = new AbortController();
+  const queuedAbort = new AbortController();
+  const active = cancelManager.call(
+    user,
+    crypto.randomUUID(),
+    {
+      kind: "resolve_public",
+      url: "https://www.reddit.com/comments/abc123/story/",
+    },
+    activeAbort.signal,
+  );
+  const queued = cancelManager.call(
+    user,
+    crypto.randomUUID(),
+    {
+      kind: "resolve_public",
+      url: "https://www.reddit.com/comments/abc123/story/",
+    },
+    queuedAbort.signal,
+  );
+  // Attach rejection handlers before issuing cancellation.
+  const activeRejected = assert.rejects(active);
+  const queuedRejected = assert.rejects(queued);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  queuedAbort.abort();
+  activeAbort.abort();
+  await Promise.all([activeRejected, queuedRejected]);
+  assert.equal(publicContexts, 1);
+  assert.equal(browser.contexts().length, 0);
   console.log(
     JSON.stringify({
       nonRoot: true,
@@ -141,6 +207,8 @@ try {
       staleLinksRefused: true,
       realChromium: true,
       isolatedPublicResolution: true,
+      publicCancellation: true,
+      conflictingPostRefused: true,
       externalNetworkCalls: 0,
       modelCalls: 0,
     }),

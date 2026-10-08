@@ -1,17 +1,13 @@
 import { randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
-import {
-  decodeEntities,
-  PublicFeedFetcher,
-  type FeedFetcher,
-} from "./news-feed.js";
+import { PublicFeedFetcher, type FeedFetcher } from "./news-feed.js";
+import { parse, type DefaultTreeAdapterMap } from "parse5";
+import { z } from "zod";
 import { publicHttps } from "./security.js";
 import { linkResult, type LinkResult } from "./link-schema.js";
 
 export const isReddit = (url: string) =>
-  /^(?:www\.|old\.|new\.)?reddit\.com$|^redd\.it$/.test(
-    new URL(url).hostname.toLowerCase(),
-  );
+  /(?:^|\.)reddit\.com$|^redd\.it$/.test(new URL(url).hostname.toLowerCase());
 export function redditPostId(url: string) {
   const u = new URL(url);
   return (
@@ -46,13 +42,19 @@ export type PublicLinkBrowser = (
   url: string,
   signal?: AbortSignal,
 ) => Promise<PostEvidence>;
-function attrs(tag: string) {
-  return Object.fromEntries(
-    [...tag.matchAll(/([a-z][a-z0-9-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)].map(
-      (m) => [m[1]!.toLowerCase(), decodeEntities(m[2] ?? m[3] ?? "")],
-    ),
-  );
-}
+export const postEvidenceSchema = z
+  .object({
+    pageUrl: z.string().url().max(2048),
+    postId: z
+      .string()
+      .regex(/^[a-z0-9]+$/)
+      .max(30)
+      .nullable(),
+    outbound: z.array(z.string().url().max(2048)).max(6),
+    self: z.boolean(),
+    blocked: z.boolean(),
+  })
+  .strict();
 /** Only the exact post's metadata is evidence; comments, ads and suggested posts are ignored. */
 export function postEvidence(body: string, pageUrl: string): PostEvidence {
   const expected = redditPostId(pageUrl);
@@ -67,9 +69,11 @@ export function postEvidence(body: string, pageUrl: string): PostEvidence {
   try {
     const data = JSON.parse(body);
     const listing = Array.isArray(data) ? data[0] : data;
-    const post = listing?.data?.children?.find(
+    const posts = listing?.data?.children?.filter(
       (p: any) => p.kind === "t3" && p.data?.id === expected,
-    )?.data;
+    );
+    if (posts?.length > 1) return base;
+    const post = posts?.[0]?.data;
     if (post) {
       const urls: string[] = [];
       let p = post;
@@ -99,18 +103,40 @@ export function postEvidence(body: string, pageUrl: string): PostEvidence {
       };
     }
   } catch {}
-  for (const match of body.matchAll(/<shreddit-post\b([^>]{0,16000})>/gi)) {
-    const a = attrs(match[1]!);
-    if (a.id !== "t3_" + expected && a["thingid"] !== "t3_" + expected)
-      continue;
+  const nodes: DefaultTreeAdapterMap["node"][] = [parse(body)];
+  const matching: DefaultTreeAdapterMap["element"][] = [];
+  while (nodes.length) {
+    const node = nodes.pop()!;
+    if (
+      "tagName" in node &&
+      node.tagName === "shreddit-post" &&
+      node.attrs.some(
+        (a) =>
+          ["id", "thingid"].includes(a.name) && a.value === "t3_" + expected,
+      )
+    )
+      matching.push(node);
+    // Templates, comments and raw-text elements do not contribute fake elements.
+    if ("childNodes" in node) nodes.push(...node.childNodes);
+  }
+  if (matching.length === 1) {
+    const a = Object.fromEntries(
+      matching[0]!.attrs.map((a) => [a.name, a.value]),
+    );
+    if ([a.id, a.thingid].some((id) => id && id !== "t3_" + expected))
+      return base;
     const href = a["content-href"];
-    return {
-      ...base,
-      postId: expected,
-      outbound: href ? [new URL(href, pageUrl).href] : [],
-      self: a["post-type"] === "text",
-      blocked: false,
-    };
+    try {
+      return {
+        ...base,
+        postId: expected,
+        outbound: href ? [new URL(href, pageUrl).href] : [],
+        self: a["post-type"] === "text",
+        blocked: false,
+      };
+    } catch {
+      return base;
+    }
   }
   return base;
 }
@@ -160,9 +186,13 @@ export class LinkResolver {
       };
     else {
       let evidence: PostEvidence | undefined;
+      let destination = originalUrl;
       try {
-        const response = await this.fetcher.get(originalUrl, signal);
+        const response = await this.fetcher.get(originalUrl, signal, (url) => {
+          destination = publicLink(url);
+        });
         const final = publicLink(response.finalUrl);
+        destination = final;
         if (!isReddit(final))
           result = {
             ...result,
@@ -173,7 +203,12 @@ export class LinkResolver {
           };
         else evidence = postEvidence(response.body, final);
       } catch {}
-      if (!isReddit(originalUrl) && result.status === "blocked") {
+      if (
+        !isReddit(originalUrl) &&
+        !isReddit(destination) &&
+        !evidence &&
+        result.status === "blocked"
+      ) {
         result = {
           ...result,
           pageUrl: originalUrl,
@@ -185,49 +220,63 @@ export class LinkResolver {
         };
       }
       if (
-        isReddit(originalUrl) &&
+        isReddit(destination) &&
         (!evidence || evidence.blocked) &&
         this.browser &&
         !signal?.aborted
       ) {
         try {
-          evidence = await this.browser(user, originalUrl, signal);
+          evidence = postEvidenceSchema.parse(
+            await this.browser(user, destination, signal),
+          );
           result.method = "browser";
         } catch {}
       }
       if (
         evidence &&
         !evidence.blocked &&
+        isReddit(evidence.pageUrl) &&
         evidence.postId === redditPostId(evidence.pageUrl) &&
         (!redditPostId(originalUrl) ||
           redditPostId(originalUrl) === evidence.postId)
       ) {
-        const candidates = [
-          ...new Set(
-            evidence.outbound
-              .map((url) => publicLink(url))
-              .filter((url) => !isReddit(url)),
-          ),
-        ].slice(0, 6);
-        result = {
-          ...result,
-          pageUrl: postPage(evidence.pageUrl),
-          candidates,
-          ...(candidates.length === 1 && !evidence.self
-            ? {
-                articleUrl: candidates[0]!,
-                status: "resolved" as const,
-                reason:
-                  "Publisher URL is explicitly linked by the selected Reddit post.",
-              }
-            : {
-                status: candidates.length
-                  ? ("ambiguous" as const)
-                  : ("discussion" as const),
-                reason:
-                  "No single publisher article was verified; choose the discussion or supply the article URL.",
-              }),
-        };
+        let candidates: string[];
+        try {
+          candidates = [
+            ...new Set(
+              evidence.outbound
+                .map((url) => publicLink(url))
+                .filter((url) => !isReddit(url)),
+            ),
+          ].slice(0, 6);
+        } catch {
+          evidence.blocked = true;
+          candidates = [];
+        }
+        if (evidence.blocked) {
+          result.reason =
+            "The selected post's destination was unsafe or malformed; no article was verified.";
+        } else {
+          result = {
+            ...result,
+            pageUrl: postPage(evidence.pageUrl),
+            candidates,
+            ...(candidates.length === 1 && !evidence.self
+              ? {
+                  articleUrl: candidates[0]!,
+                  status: "resolved" as const,
+                  reason:
+                    "Publisher URL is explicitly linked by the selected Reddit post.",
+                }
+              : {
+                  status: candidates.length
+                    ? ("ambiguous" as const)
+                    : ("discussion" as const),
+                  reason:
+                    "No single publisher article was verified; choose the discussion or supply the article URL.",
+                }),
+          };
+        }
       }
     }
     if (signal?.aborted) throw new Error("Task cancelled");

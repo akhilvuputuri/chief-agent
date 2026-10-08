@@ -3,7 +3,9 @@ import type { Browser, BrowserContext } from "playwright-core";
 import { publicHttps } from "../security.js";
 
 const redditHost = (url: string) =>
-  /^(?:www\.|old\.|new\.)?reddit\.com$|^redd\.it$/.test(new URL(url).hostname);
+  /^(?:www\.|old\.|new\.|m\.|np\.)?reddit\.com$|^redd\.it$/.test(
+    new URL(url).hostname,
+  );
 export function publicPostUrl(input: string) {
   const url = new URL(publicHttps(input));
   if (
@@ -48,9 +50,38 @@ export function publicPostRequest(url: string, method: string, type: string) {
   }
 }
 /** One anonymous context, no owner storage, downloads, forms, clicks or caller-written JS. */
-export async function readPublicPost(browser: Browser, input: string) {
+export async function readPublicPost(
+  browser: Browser,
+  input: string,
+  signal?: AbortSignal,
+) {
+  signal = AbortSignal.any([
+    ...(signal ? [signal] : []),
+    AbortSignal.timeout(35000),
+  ]);
+  signal.throwIfAborted();
   const url = publicPostUrl(input);
   let context: BrowserContext | undefined;
+  let closing: Promise<void> | undefined;
+  const close = () =>
+    (closing ??= (async () => {
+      if (!context) return;
+      try {
+        await Promise.race([
+          context.close(),
+          delay(2000).then(() => {
+            throw Error("Context close timed out");
+          }),
+        ]);
+      } catch {
+        // No invoice contexts coexist with public resolution. Retire the browser
+        // if this anonymous context cannot be proven closed.
+        await Promise.race([browser.close(), delay(2000)]);
+      }
+    })());
+  const abort = () => {
+    void close().catch(() => {});
+  };
   const result = {
     pageUrl: url,
     postId: null as string | null,
@@ -63,6 +94,8 @@ export async function readPublicPost(browser: Browser, input: string) {
       acceptDownloads: false,
       serviceWorkers: "block",
     });
+    signal.addEventListener("abort", abort, { once: true });
+    signal.throwIfAborted();
     let navigations = 0,
       requests = 0;
     await context.route("**/*", async (route) => {
@@ -82,9 +115,11 @@ export async function readPublicPost(browser: Browser, input: string) {
     await page
       .goto(url, { waitUntil: "domcontentloaded", timeout: 20000 })
       .catch(() => {});
+    signal.throwIfAborted();
     await page
       .waitForSelector("shreddit-post", { timeout: 5000 })
       .catch(() => {});
+    signal.throwIfAborted();
     const final = new URL(publicPostUrl(page.url()));
     const expected =
       /\/comments\/([a-z0-9]+)/i.exec(final.pathname)?.[1]?.toLowerCase() ??
@@ -93,12 +128,19 @@ export async function readPublicPost(browser: Browser, input: string) {
     const evidence = await Promise.race([
       page.evaluate((id) => {
         const posts = [...document.querySelectorAll("shreddit-post")];
-        const post = posts.find(
+        const matching = posts.filter(
           (p) =>
             p.getAttribute("id") === "t3_" + id ||
             p.getAttribute("thingid") === "t3_" + id,
         );
-        if (!post) return null;
+        if (matching.length !== 1) return null;
+        const post = matching[0]!;
+        if (
+          [post.getAttribute("id"), post.getAttribute("thingid")].some(
+            (v) => v && v !== "t3_" + id,
+          )
+        )
+          return null;
         const href = post.getAttribute("content-href");
         const outbound = href
           ? [href]
@@ -117,10 +159,11 @@ export async function readPublicPost(browser: Browser, input: string) {
       }, expected),
       delay(2000, null),
     ]);
+    signal.throwIfAborted();
     if (evidence) return { ...evidence, pageUrl: final.href, blocked: false };
     return result;
   } finally {
-    if (context)
-      await Promise.race([context.close().catch(() => {}), delay(2000)]);
+    signal.removeEventListener("abort", abort);
+    await close();
   }
 }

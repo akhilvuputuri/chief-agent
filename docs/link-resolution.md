@@ -7,7 +7,10 @@ the explicitly selected Reddit URL. HTTP redirects use the existing public-only,
 DNS-pinned feed fetcher with cancellation, byte/hop limits and a shared deadline.
 
 For Reddit, evidence comes only from the selected post's structured metadata or
-`shreddit-post` outbound destination, matched to its canonical post ID. Structured
+actual `shreddit-post` element outbound destination, matched uniquely to its canonical post ID.
+Comments, raw text and template contents are not elements; conflicting selected-post
+nodes remain blocked. Mobile/alternate Reddit hosts remain discussion hosts, and
+a known Reddit redirect never becomes an owner-supplied publisher fallback. Structured
 crosspost parents are bounded and their relationship must match. Ads, comments,
 suggested posts and title-search guesses are not article evidence. An ambiguous,
 self-post or blocked response never becomes an invented publisher URL.
@@ -15,8 +18,8 @@ self-post or blocked response never becomes an invented publisher URL.
 The anonymous browser fallback is a separate fixed `resolve_public` RPC command.
 It accepts only public Reddit post/share paths, uses a fresh context without
 storage state, denies non-GET requests, account routes, downloads, service workers
-and web sockets, bounds resource requests/navigation/time, and returns only post
-metadata. It never exposes arbitrary JavaScript or click/form commands. Existing
+and web sockets, bounds resource requests/navigation/time, closes contexts on cancellation, skips
+cancelled queued requests, and returns only post metadata. It never exposes arbitrary JavaScript or click/form commands. Existing
 invoice contexts and their positive route inventory remain unchanged. Public
 resolution returns blocked while invoice sessions occupy the service. Public
 egress uses the existing DNS-pinned proxy and Chromium sandbox; it is not a

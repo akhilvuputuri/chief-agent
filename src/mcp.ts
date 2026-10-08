@@ -344,7 +344,8 @@ export class McpTools {
     if (
       row.binding !== binding ||
       row.tool !== a.tool ||
-      (row.reader_target ?? "article") !== (a.readerTarget ?? "article") ||
+      (a.readerTarget !== undefined &&
+        (row.reader_target ?? "article") !== a.readerTarget) ||
       (a.arguments &&
         canonical(a.arguments) !== canonical(row.source_payload ?? row.payload))
     )

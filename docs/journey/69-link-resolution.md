@@ -1,7 +1,7 @@
 # 69 — Can shared Reddit links preserve their publisher target?
 
 Work date(s): 2026-10-08. Written/revised: 2026-10-08.
-Status: implementation candidate; review, full checks and installation pending.
+Status: implementation candidate; review corrections complete, hosted checks and installation pending.
 
 ## User-visible problem and preceding iteration
 
@@ -39,13 +39,22 @@ payload. Public HTTP requests retain pinned-DNS protection and add cancellation.
 The browser command has no login/storage/form/model-JavaScript capability. Reader
 replays use the persisted winner; generic transport and unrelated grants stay intact.
 
-Independent review and full checks will be appended before release. Changes to the
-browser image require separate reviewed sandbox proof and operator installation.
+Independent GPT-6 Astra review of `cea0e83` requested changes for shortener/mobile
+Reddit classification, pseudo-elements/conflicting selected-post nodes, discussion
+retry target retention, browser cancellation and redirect/error response drainage.
+The corrected candidate retains observed redirect destinations even on HTTP errors,
+uses parse5 actual HTML nodes and rejects duplicates, preserves an omitted retry
+target, propagates RPC disconnect/deadline cancellation into browser queues/contexts,
+and destroys redirect/error streams. Changes to the browser image require separate
+reviewed sandbox proof and operator installation. See [PR #185](https://github.com/akhilvuputuri/chief-agent/pull/185).
 
 ## Verification and outcome
 
-The initial 26 focused tests passed; additional owner-observation coverage is being
-run. Public production browser success remains unverified; the measured block is
+The initial full local checks/build/format and 27 focused tests passed. The first
+Linux CI browser smoke exposed reuse of a closed synthetic browser; the smoke now
+uses a separate manager for the anonymous context and tests active/queued cancellation
+and conflicting metadata. Local Docker export failed with a storage I/O error; shared
+Docker state was preserved. The corrected 30 focused tests pass. Public production browser success remains unverified; the measured block is
 explicitly retained as a limitation. No live save from this candidate was made.
 
 ## Follow-up

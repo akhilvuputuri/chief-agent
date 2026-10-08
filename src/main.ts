@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { LinkResolver } from "./link-resolution.js";
+import { LinkResolver, postEvidenceSchema } from "./link-resolution.js";
 import { McpTools, loadMcpRegistry, parseMcpCredentials } from "./mcp.js";
 import { Gathering } from "./gathering/controller.js";
 import { FileVault } from "./gathering/vault.js";
@@ -512,13 +512,7 @@ const links = linksMigrated
               { kind: "resolve_public", url },
               signal,
             );
-            return {
-              pageUrl: String(result.pageUrl),
-              postId: typeof result.postId === "string" ? result.postId : null,
-              outbound: Array.isArray(result.outbound) ? result.outbound : [],
-              self: result.self === true,
-              blocked: result.blocked !== false,
-            };
+            return postEvidenceSchema.parse(result);
           }
         : undefined,
     )

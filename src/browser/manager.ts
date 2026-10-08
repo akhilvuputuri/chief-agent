@@ -399,13 +399,17 @@ export class BrowserManager {
     user: string,
     id: string,
     input: unknown,
+    signal?: AbortSignal,
   ): Promise<Record<string, unknown>> {
     return this.queue.run(id, async () => {
       const a = command.parse(input) as Record<string, any>;
       if (a.kind === "resolve_public") {
+        signal?.throwIfAborted();
         const url = z.string().max(2048).parse(a.url);
         return this.lifecycle.run("open", async () => {
+          signal?.throwIfAborted();
           await this.expireSessions();
+          signal?.throwIfAborted();
           if (this.sessions.size)
             return {
               pageUrl: url,
@@ -415,7 +419,12 @@ export class BrowserManager {
               blocked: true,
             };
           this.browser ??= await this.launch();
-          return readPublicPost(this.browser, url);
+          try {
+            signal?.throwIfAborted();
+            return await readPublicPost(this.browser, url, signal);
+          } finally {
+            if (!this.browser.isConnected()) this.browser = undefined;
+          }
         });
       }
       if (a.kind === "open" || a.kind === "restore")
