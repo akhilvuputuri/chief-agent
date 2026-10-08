@@ -1,7 +1,7 @@
 # 69 — Can shared Reddit links preserve their publisher target?
 
 Work date(s): 2026-10-08. Written/revised: 2026-10-08.
-Status: implementation candidate; review corrections complete, hosted checks and installation pending.
+Status: released v0.3.47; exact release/health and bounded Reader acceptance verified.
 
 ## User-visible problem and preceding iteration
 
@@ -62,12 +62,46 @@ Actual Chromium smoke then exposed a pending `newPage` promise after cancellatio
 and completed context closure; the independent reviewer reproduced it separately.
 All setup/page protocol awaits now race cancellation. A new pending-page regression
 passes, and the disposable smoke has a 90-second watchdog to avoid indefinite CI.
-The previous approval is superseded until this corrected head is re-reviewed. Public production browser success remains unverified; the measured block is
-explicitly retained as a limitation. No live save from this candidate was made.
+The previous approval was superseded by fresh review of the corrected head. The
+measured production anonymous block remains a limitation; final live acceptance
+uses explicitly labelled owner observation evidence, as recorded below.
 
 ## Follow-up
 
-Verify the exact supplied link through an imported observed target plus frozen save
-receipt. Anonymous links that remain blocked need their publisher URL or a future
+Anonymous links that remain blocked need their publisher URL or a future
 authorized Reddit API connection. Browser/proxy automatic release parity remains
 separate infrastructure work. Phone offline and paid semantic tests are separate.
+
+## Release closure — 8 October 2026
+
+Independent Codex review, dispatched as GPT-6 Astra, approved exact head
+`c0a35cbf440be5f3d3924006a66d3d08e9d751e1` after the real-Chromium cancellation
+fix. The reviewer independently passed all 32 focused tests, typecheck/whitespace
+and a real-Chrome probe: both cancelled calls rejected, one context was created and
+none remained. [PR CI](https://github.com/akhilvuputuri/chief-agent/actions/runs/37739229504)
+passed 830 application, 50 script, 42 offline evaluation and 32 coding-runtime tests,
+plus real Chromium sandbox/cancellation and PostgreSQL isolation proofs. Devin
+review passed. No paid semantic evaluation ran.
+
+[PR #185](https://github.com/akhilvuputuri/chief-agent/pull/185) merged at
+`df3c08848c268e23f83c82303ecc31615d096ad4`, with the same tree as the approved head.
+The separately reviewed operator artifact installed only migration 031 and the
+reviewed gateway/browser images from a checksum-verified exact-commit archive.
+Its fresh network-none browser proof passed; environment, proxy, browser security
+boundary and paused-data preservation checks passed. Separate current-health,
+marker-31 and image-identity checks passed. The browser image is
+`sha256:53d17b9e88a17f8cd0927419dd154f07de5e315fece41ae9af73c7fe1f75ca3b`.
+[Main checks](https://github.com/akhilvuputuri/chief-agent/actions/runs/37740205891),
+[normal release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37740955551)
+and the exact-SHA receipt succeeded. [v0.3.47](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.47)
+is immutable at that verified commit.
+
+Measured live acceptance, one supplied public-source case: anonymous resolution
+returned blocked. A separately reviewed operator imported the selected-post outbound
+URL directly observed in the local browser, with its actual observation timestamp
+and a 24-hour expiry. It remains labelled `owner_verified`; no mapping was hardcoded
+in application source and no server browsing success was inferred. Reader returned
+server ready with a duplicate receipt. The private operation retained original URL,
+publisher URL, target and evidence; same-key cached replay passed. This direct
+adapter/API check used no Chief model call or Telegram send. Phone offline availability,
+conversational selection and other blocked links remain unverified.

@@ -88,4 +88,7 @@ Cancellation does not delete an accepted article.
 
 Public discovery was measured on 8 October 2026 using the new SDK: protocol
 2025-06-18, server `offline-reader` 0.1.0 and the exact three tools. Authenticated
-production saves, revocation and phone offline acceptance remain separate checks.
+production saves and idempotent retries were verified on 8 October 2026. Shared
+article/discussion targeting and frozen URL provenance are documented in
+[link resolution](link-resolution.md). Live revocation, conversational selection
+and phone offline acceptance remain separate checks.
