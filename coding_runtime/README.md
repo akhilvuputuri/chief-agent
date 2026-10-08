@@ -6,7 +6,7 @@ The production adapter is `ChiefOpenRouter`: it submits OpenRouter-compatible me
 
 ## Development
 
-Use Node 22 for Chief and Python 3.12+ for this package. From the repository root:
+Use Node 22 for Chief, Python 3.12+, Git and ripgrep (`rg`) for this package. Install ripgrep with your platform package manager before the navigation tests. From the repository root:
 
 ```sh
 python3 -m venv .venv

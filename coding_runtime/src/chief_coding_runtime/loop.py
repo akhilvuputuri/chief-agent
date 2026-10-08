@@ -138,8 +138,10 @@ class SquadExecutionError(RuntimeError):
 class AllocationExhausted(ValueError):
     """A shared execution allocation ended; not an unspecified worker failure."""
 
-    def __init__(self, resource: Literal["model calls", "tool calls"]) -> None:
-        super().__init__(f"Shared {resource} allocation exhausted")
+    def __init__(
+        self, resource: Literal["model calls", "tool calls"], detail: str | None = None
+    ) -> None:
+        super().__init__(detail or f"Shared {resource} allocation exhausted")
         self.resource = resource
 
 
@@ -501,7 +503,12 @@ async def coding_loop(
         ):
             return
         if budget.models <= 1:
-            raise AllocationExhausted("model calls")
+            raise AllocationExhausted(
+                "model calls",
+                "Remaining model allocation cannot summarize context and continue safely",
+            )
+        if budget.tools <= 0:
+            raise AllocationExhausted("tool calls")
         summary_messages = copy.deepcopy(messages)
         summary_messages.append(
             {
@@ -568,6 +575,7 @@ async def coding_loop(
             messages[:] = [m for m in messages if id(m) not in ephemeral]
             ephemeral.clear()
             recovery_action = loop_action(memory)
+            recovered_context = False
             if recovery_action is not None:
                 await save_memory()
                 if milestone:
@@ -585,7 +593,9 @@ async def coding_loop(
                     )
                 else:
                     await condense(reset=True)
-            await condense()
+                    recovered_context = True
+            if not recovered_context:
+                await condense()
             if budget.tools <= 0:
                 raise AllocationExhausted("tool calls")
             messages.append(

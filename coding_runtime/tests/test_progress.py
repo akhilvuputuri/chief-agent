@@ -10,7 +10,12 @@ from pathlib import Path
 from test_runtime import ScriptedModel, generation, report
 
 from chief_coding_runtime import inspection
-from chief_coding_runtime.loop import Budget, SquadExecutionError, coding_loop
+from chief_coding_runtime.loop import (
+    AllocationExhausted,
+    Budget,
+    SquadExecutionError,
+    coding_loop,
+)
 from chief_coding_runtime.memory import LoopStalled, observe
 from chief_coding_runtime.model import GatewayError, InvalidGeneration
 from chief_coding_runtime.protocol import LoopMemory, Notebook, text_clip, utf16_length
@@ -245,6 +250,51 @@ class ProgressTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertFalse((self.w.root / "first.txt").exists())
         self.assertFalse((self.w.root / "second.txt").exists())
+
+    async def test_reset_with_one_tool_left_saves_one_summary_then_reports_allocation(
+        self,
+    ):
+        self.budget = Budget(10, 1)
+        self.memory.loopLevel = 1
+        for _ in range(4):
+            observe(
+                self.memory,
+                "file_read",
+                {"path": "src/fixture.ts"},
+                {"fingerprint": "a" * 64, "start": 0, "end": 10, "unit": "characters"},
+            )
+        self.memory.loopLevel = 1
+        latest = generation(
+            ("file_read", {"path": "src/fixture.ts"}),
+            reasoning=[{"type": "reasoning.encrypted", "data": "x" * 105000}],
+        )["message"]
+        self.messages += [
+            latest,
+            {
+                "role": "tool",
+                "tool_call_id": latest["tool_calls"][0]["id"],
+                "content": "Pending observation",
+            },
+        ]
+        model = ScriptedModel(
+            generation(
+                (
+                    "notes_update",
+                    {
+                        "subtask": "Save findings",
+                        "findings": "Current evidence retained",
+                        "nextAction": "Report blocker",
+                    },
+                )
+            )
+        )
+        with self.assertRaises(AllocationExhausted) as caught:
+            await self.run_loop(model)
+        self.assertEqual(caught.exception.resource, "tool calls")
+        self.assertEqual(self.budget.tools, 0)
+        self.assertEqual(len(model.inputs), 1)
+        self.assertEqual(self.memory.compactions, 1)
+        self.assertTrue(all(saved.toolsUsed <= 1 for saved in self.saved))
 
     async def test_repeated_reads_receive_nudge_reset_then_specific_pause(self):
         class RepeatingModel:

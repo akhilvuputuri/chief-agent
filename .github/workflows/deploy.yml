@@ -61,6 +61,9 @@ jobs:
       - uses: actions/setup-python@v5
         if: github.event_name == 'workflow_dispatch'
         with: { python-version: "3.12" }
+      - name: Install repository search dependency for manual checks
+        if: github.event_name == 'workflow_dispatch'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ripgrep
       - if: github.event_name == 'workflow_dispatch'
         run: python -m pip install --require-hashes -r coding_runtime/requirements-dev.txt
       - if: github.event_name == 'workflow_dispatch'

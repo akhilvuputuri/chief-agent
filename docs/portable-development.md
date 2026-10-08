@@ -67,4 +67,6 @@ Database/Compose migration, account consent, production secret rotation, server 
 
 ## Python coding-worker checks
 
+Repository navigation checks require Git and ripgrep (`rg`) on the development machine. Install ripgrep with the platform package manager (`brew install ripgrep` on macOS or `sudo apt-get install ripgrep` on Ubuntu). CI/manual-check workflows declare this dependency; the trusted worker image already contains it.
+
 Chief's control service remains Node 22/TypeScript. Coding execution is a Python 3.12+ package in `coding_runtime/`; combined `npm run check` also verifies it. Create/activate a development virtual environment and install `coding_runtime/requirements-dev.txt` with `python -m pip install --require-hashes -r coding_runtime/requirements-dev.txt` before running those checks. Do not install production credentials. See [package development](../coding_runtime/README.md). CI and manual releases install the same locked dependencies; automatic releases use the passing exact-main CI result.
