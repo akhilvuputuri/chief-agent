@@ -68,3 +68,15 @@ saving, revocation and phone offline acceptance remain pending.
 Ship remote bearer-authenticated connectors first. OAuth discovery/consent,
 encrypted rotating token storage and owner reconnect/disconnect remain the next
 milestone; they should reduce the operator-only connection setup requirement.
+
+### Follow-up review — 8 October 2026
+
+The independently approved `7277eff` passed hosted full CI and local checks (810
+application, 50 script, 42 offline evaluation and 32 coding-runtime tests). Devin's
+final posted finding identified synchronous remote-schema regex execution as a
+gateway denial-of-service risk. Before merge, input and output schema validation
+were moved to a bounded trusted worker, including the SDK's dynamic output
+validation path. New executable tests use catastrophic patterns to verify deadline
+termination and main-thread responsiveness, cancellation and ungranted schemas.
+This updated source needs fresh exact-head independent review and CI; the earlier
+approval does not cover it. No production installation has occurred.

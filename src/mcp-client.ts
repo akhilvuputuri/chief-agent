@@ -1,12 +1,28 @@
+import { validateMcpSchema } from "./mcp-validation.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { ToolValidationError } from "./tool-errors.js";
 import { McpFailure } from "./mcp-errors.js";
+import type {
+  JsonSchemaValidator,
+  JsonSchemaType,
+  jsonSchemaValidator,
+} from "@modelcontextprotocol/sdk/validation/types.js";
+class DeferredOutputValidation implements jsonSchemaValidator {
+  getValidator<T>(_schema: JsonSchemaType): JsonSchemaValidator<T> {
+    return (data) => ({
+      valid: true,
+      data: data as T,
+      errorMessage: undefined,
+    });
+  }
+}
 export { McpFailure } from "./mcp-errors.js";
 export type RemoteTool = {
   name: string;
   inputSchema: Record<string, unknown>;
   description?: string;
+  outputSchema?: Record<string, unknown>;
 };
 export interface McpSession {
   list(): Promise<RemoteTool[]>;
@@ -24,7 +40,12 @@ export function sdkTransport(http: typeof fetch = fetch): McpTransport {
   return async (url, token, use, signal) => {
     const client = new Client(
       { name: "chief", version: "1" },
-      { capabilities: {} },
+      {
+        capabilities: {},
+        // SDK wire envelopes remain validated. Server output schemas are validated
+        // asynchronously below; never compile untrusted schemas on this thread.
+        jsonSchemaValidator: new DeferredOutputValidation(),
+      },
     );
     const transport = new StreamableHTTPClientTransport(new URL(url), {
       reconnectionOptions: {
@@ -96,6 +117,7 @@ export function sdkTransport(http: typeof fetch = fetch): McpTransport {
         });
       },
     });
+    const outputSchemas = new Map<string, Record<string, unknown>>();
     try {
       await client.connect(transport, { timeout: 20000 });
       return await use({
@@ -107,6 +129,9 @@ export function sdkTransport(http: typeof fetch = fetch): McpTransport {
               timeout: 20000,
             });
             tools.push(...result.tools);
+            for (const tool of result.tools)
+              if (tool.outputSchema)
+                outputSchemas.set(tool.name, tool.outputSchema);
             if (tools.length > 200)
               throw new ToolValidationError("MCP catalogue exceeds limits");
             cursor = result.nextCursor;
@@ -121,6 +146,18 @@ export function sdkTransport(http: typeof fetch = fetch): McpTransport {
             { timeout: 20000 },
           );
           if (result.isError) throw new McpFailure("tool");
+          const outputSchema = outputSchemas.get(name);
+          if (outputSchema) {
+            try {
+              await validateMcpSchema(
+                outputSchema,
+                result.structuredContent,
+                signal,
+              );
+            } catch {
+              throw new McpFailure("uncertain");
+            }
+          }
           // Do not expose binary/resource content or server instructions as host authority.
           return {
             ...(result.structuredContent

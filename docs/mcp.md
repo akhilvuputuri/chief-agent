@@ -44,8 +44,12 @@ The stable host protocol has four operations:
 Server tools are addressed through these typed host operations, rather than
 adding arbitrary operation names to Chief's closed protocol. A compatible new
 server needs registry/credential configuration, not another transport adapter.
-Input schemas support draft-07 and 2020-12; unresolved external references fail
-closed. Descriptions/results are untrusted data, not host instructions.
+Input and declared output schemas support draft-07 and 2020-12; unresolved
+external references fail closed. Compilation and validation run in a trusted
+worker with a two-second deadline, memory limits, empty environment and shared
+cancellation. Expensive patterns cannot stall the gateway event loop. SDK dynamic
+output validation is deferred to that worker; fixed MCP wire envelopes remain
+validated by the SDK. Descriptions/results are untrusted data, not host instructions.
 
 The host persists payload, schema digest and connection/credential binding before
 submission. A reused key with different content, tool, endpoint or credential is

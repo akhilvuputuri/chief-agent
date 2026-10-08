@@ -19,6 +19,7 @@ import { runtimeContext } from "../src/runtime.js";
 import { readOperations } from "../src/execution.js";
 import { action } from "../src/protocol.js";
 import { ToolValidationError, toolError } from "../src/tool-errors.js";
+import { validateMcpSchema } from "../src/mcp-validation.js";
 
 const token = "test-credential-for-mcp-only";
 const registry = {
@@ -782,5 +783,96 @@ test("restart before persistence settles only stopped calls without intents, nev
     );
   } finally {
     await f.pg.close();
+  }
+});
+
+test("catastrophic remote patterns terminate off-thread while the gateway stays responsive", async () => {
+  let heartbeat = false;
+  const timer = setTimeout(() => {
+    heartbeat = true;
+  }, 25);
+  try {
+    await assert.rejects(
+      validateMcpSchema(
+        { type: "string", pattern: "^(a+)+$" },
+        "a".repeat(10000) + "!",
+      ),
+      ToolValidationError,
+    );
+    assert.equal(heartbeat, true);
+    await validateMcpSchema({ type: "string", pattern: "^safe$" }, "safe");
+  } finally {
+    clearTimeout(timer);
+  }
+});
+
+test("schema cancellation terminates the worker without accepting late validation", async () => {
+  const controller = new AbortController();
+  const validation = validateMcpSchema(
+    { type: "string", pattern: "^(a+)+$" },
+    "a".repeat(10000) + "!",
+    controller.signal,
+  );
+  controller.abort();
+  await assert.rejects(validation, ToolValidationError);
+});
+
+test("SDK isolates output schemas too, including schemas of ungranted tools", async () => {
+  const http: typeof fetch = async (_input, init) => {
+    if (init?.method === "GET") return new Response(null, { status: 405 });
+    const body = JSON.parse(String(init?.body));
+    if (body.id === undefined) return new Response(null, { status: 202 });
+    const result =
+      body.method === "initialize"
+        ? {
+            protocolVersion: "2025-06-18",
+            capabilities: { tools: {} },
+            serverInfo: { name: "fixture", version: "1" },
+          }
+        : body.method === "tools/list"
+          ? {
+              tools: [
+                {
+                  name: "lookup",
+                  inputSchema: { type: "object" },
+                  outputSchema: {
+                    type: "object",
+                    properties: {
+                      text: { type: "string", pattern: "^(a+)+$" },
+                    },
+                    required: ["text"],
+                  },
+                },
+                {
+                  name: "ungranted",
+                  inputSchema: { type: "object" },
+                  outputSchema: {
+                    type: "object",
+                    $ref: "https://example.com/unresolvable",
+                  },
+                },
+              ],
+            }
+          : {
+              structuredContent: { text: "a".repeat(10000) + "!" },
+              content: [],
+            };
+    return Response.json({ jsonrpc: "2.0", id: body.id, result });
+  };
+  let heartbeat = false;
+  const timer = setTimeout(() => {
+    heartbeat = true;
+  }, 25);
+  try {
+    await assert.rejects(
+      sdkTransport(http)("https://reader.example.com/mcp", token, async (s) => {
+        assert.equal((await s.list()).length, 2);
+        return s.call("lookup", {});
+      }),
+      (e: unknown) => e instanceof McpFailure && e.category === "uncertain",
+    );
+    assert.equal(heartbeat, true);
+  } finally {
+    clearTimeout(timer);
   }
 });

@@ -1,9 +1,7 @@
+import { validateMcpSchema } from "./mcp-validation.js";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
-import { Ajv } from "ajv";
-import { Ajv2020 } from "ajv/dist/2020.js";
-import addFormats from "ajv-formats";
 import { z } from "zod";
 import type { Database } from "./db.js";
 import { publicHttps, SerialQueue } from "./security.js";
@@ -304,29 +302,6 @@ export class McpTools {
       );
     return matches[0]!.inputSchema;
   }
-  private validate(
-    schema: Record<string, unknown>,
-    args: Record<string, unknown>,
-  ) {
-    try {
-      // Compile locally, never retrieve remote references or execute schemas. No coercion/default mutation.
-      const Validator =
-        schema.$schema === "https://json-schema.org/draft/2020-12/schema"
-          ? Ajv2020
-          : Ajv;
-      const ajv = new Validator({
-        strict: false,
-        validateFormats: true,
-        ownProperties: true,
-      });
-      addFormats.default(ajv);
-      if (!ajv.compile(schema)(args)) throw new Error();
-    } catch {
-      throw new ToolValidationError(
-        "MCP arguments or discovered schema are invalid; inspect mcp_tools",
-      );
-    }
-  }
   private safe(result: unknown, token: string) {
     const encoded = JSON.stringify(result);
     if (!encoded || Buffer.byteLength(encoded) > 200000)
@@ -530,7 +505,11 @@ export class McpTools {
         c,
         secret.token,
         async (s) => {
-          this.validate(this.discovered(await s.list(), a.tool), a.arguments);
+          await validateMcpSchema(
+            this.discovered(await s.list(), a.tool),
+            a.arguments,
+            signal,
+          );
           try {
             const result = decode(
               this.safe(await s.call(a.tool, a.arguments), secret.token),
@@ -614,7 +593,7 @@ export class McpTools {
                 "MCP schema changed; reconcile the previous operation before retrying",
               );
             const args = { ...payload, [g.idempotencyArgument!]: a.requestKey };
-            this.validate(schema, args);
+            await validateMcpSchema(schema, args, signal);
             if (
               Buffer.byteLength(
                 JSON.stringify({
