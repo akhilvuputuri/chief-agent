@@ -131,7 +131,8 @@ The owner explicitly authorized use of the supplied personal Reader credential.
 It was extracted only from the authorized reply in the current local session into
 process memory and delivered over encrypted SSH stdin. Its value never appeared
 in command arguments, generated scripts, output, repository files or public
-artifacts. The credential is stored only in the host's owner-only environment.
+artifacts. The runtime credential is configured in the host's owner-only environment; the
+authorized source session also retains the supplied value.
 No private conversation or credential value is included in this record.
 
 Two secret-free ephemeral operation artifacts were independently approved by the

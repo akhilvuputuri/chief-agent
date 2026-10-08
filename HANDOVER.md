@@ -5,7 +5,7 @@ Coding incident, 8 October 2026: indexed tool-call continuation was reproduced a
 Reader was activated on verified deployed `ace4a33d956da1d427ac38b0104ebe6a0278d298`
 through independently reviewed, owner-authorized credential installation on the
 host. Health/owner binding/discovery passed. One public guide and one labelled
-brief reached server ready; identical cached/server retries preserve submission
+brief reached server ready; cached replays preserve original receipts; server retries preserve submission
 identity and report duplicates, with zero pending writes. No secret was copied to
 source, artifacts, command arguments or output. Phone offline, conversational
 selection and live revocation acceptance remain separate. OAuth is later work.

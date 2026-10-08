@@ -9,8 +9,8 @@ The owner-authorized credential was installed directly in the private host envir
 through reviewed SSH-stdin operations, with idle/migration/uncertain-write checks
 and preserved unrelated settings. Health and owner binding passed. Authenticated
 discovery returned exactly the three grants; one public guide and one labelled test
-brief reached server `ready`. Cached and server-side retries returned the same
-submissions and duplicate receipts; zero pending writes remain. No model call or
+brief reached server `ready`. Cached replays preserved the original receipts. Server-side retries returned the
+same submissions with duplicate receipts; zero pending writes remain. No model call or
 Telegram send was used for these acceptance checks. Phone **Available offline**,
 actual conversational selection and live revocation acceptance remain unverified.
 
