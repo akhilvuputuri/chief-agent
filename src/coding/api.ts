@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { CodingController } from "./controller.js";
+import { ModelError } from "../model.js";
 
 const message = z
   .object({
@@ -14,6 +15,9 @@ const message = z
           .object({
             id: z.string().max(200),
             type: z.literal("function"),
+            // OpenRouter may return this ordering metadata in a complete response.
+            // The Python worker preserves it in the next assistant message.
+            index: z.number().int().nonnegative().optional(),
             function: z
               .object({
                 name: z.string().max(100),
@@ -95,19 +99,42 @@ export async function codingApi(
                 return await controller.finish(job, req.body);
               if (path === "logs") return await controller.logs(job, req.body);
               if (path === "model") {
-                if (Buffer.byteLength(JSON.stringify(req.body)) > 180000)
+                if (Buffer.byteLength(JSON.stringify(req.body)) > 180000) {
+                  await controller
+                    .recordRejection(job, {
+                      phase: path,
+                      code: "model_context_limit",
+                      httpStatus: 413,
+                    })
+                    .catch(() => {});
                   return reply.code(413).send({
                     error: "Model input exceeds coding context limit",
+                    code: "model_context_limit",
                   });
+                }
                 return await controller.generate(
                   job,
                   generation.parse(req.body),
                 );
               }
-            } catch {
+            } catch (error) {
+              const code =
+                error instanceof z.ZodError
+                  ? "invalid_worker_payload"
+                  : error instanceof ModelError
+                    ? "model_provider_failed"
+                    : "worker_request_rejected";
+              await controller
+                .recordRejection(job, {
+                  phase: path,
+                  code,
+                  httpStatus: 409,
+                })
+                .catch(() => {});
               return reply.code(409).send({
                 error:
                   "Coding request rejected; inspect job state before retrying",
+                code,
               });
             }
           },

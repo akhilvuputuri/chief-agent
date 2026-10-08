@@ -28,6 +28,8 @@ export function estimateInputBytes(messages: ModelMessage[]) {
 export type ToolCall = {
   id: string;
   type: "function";
+  /** Optional provider ordering metadata, preserved across tool continuation. */
+  index?: number;
   function: { name: string; arguments: string };
 };
 export type ToolDefinition = {

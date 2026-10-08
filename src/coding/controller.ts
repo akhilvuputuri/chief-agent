@@ -36,6 +36,7 @@ import {
 import type { SandboxProvider } from "./provider.js";
 import { scrubTrace } from "../trace-scrub.js";
 import { seal, open } from "../secret-box.js";
+import { opsLog } from "../ops-log.js";
 
 const active = ["provisioning", "running"];
 const hash = (v: unknown) =>
@@ -198,14 +199,25 @@ export class CodingController {
     const job = rows[0];
     const stored = (
       await this.db.query(
-        "SELECT checkpoint FROM coding_jobs WHERE user_id=$1 AND id=$2",
+        "SELECT checkpoint,attempt_id FROM coding_jobs WHERE user_id=$1 AND id=$2",
         [user, id],
       )
     ).rows[0];
     const state = stored.checkpoint.squadState;
+    const rejection = (
+      await this.db.query(
+        `SELECT payload,created_at FROM coding_events WHERE job_id=$1
+         AND event_key LIKE $2 AND payload->>'kind'='worker_request_rejected'
+         ORDER BY created_at DESC,id DESC LIMIT 1`,
+        [id, `${stored.attempt_id}:request-rejected:%`],
+      )
+    ).rows[0];
     return {
       ...job,
       plan: stored.checkpoint.plan,
+      ...(rejection
+        ? { lastFailure: { ...rejection.payload, at: rejection.created_at } }
+        : {}),
       ...(state
         ? {
             squad: {
@@ -225,6 +237,46 @@ export class CodingController {
           }
         : {}),
     };
+  }
+  /** Fixed host error categories only; never persist raw exceptions or request data. */
+  async recordRejection(
+    job: CodingJob,
+    failure: {
+      phase:
+        | "assignment"
+        | "heartbeat"
+        | "progress"
+        | "checkpoint"
+        | "finish"
+        | "model"
+        | "logs";
+      code:
+        | "invalid_worker_payload"
+        | "model_provider_failed"
+        | "worker_request_rejected"
+        | "model_context_limit";
+      httpStatus: 409 | 413;
+    },
+  ) {
+    opsLog("coding.request_rejected", "warn", {
+      taskId: job.id,
+      phase: failure.phase,
+      errorCode: failure.code,
+      httpStatus: failure.httpStatus,
+    });
+    await this.db.query(
+      `INSERT INTO coding_events(job_id,event_key,payload,delivery)
+       SELECT id,$3,$4::jsonb,'suppressed' FROM coding_jobs
+       WHERE id=$1 AND attempt_id=$2
+       AND (state IN ('provisioning','running') OR ($5='finish' AND state!='queued'))`,
+      [
+        job.id,
+        job.attempt_id,
+        `${job.attempt_id}:request-rejected:${randomUUID()}`,
+        JSON.stringify({ kind: "worker_request_rejected", ...failure }),
+        failure.phase,
+      ],
+    );
   }
   async call(user: string, run: string, raw: CodingAction) {
     const a = codingAction.parse(raw);

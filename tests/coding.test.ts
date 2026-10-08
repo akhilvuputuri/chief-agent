@@ -18,6 +18,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { ensureUser, type Database } from "../src/db.js";
 import { requirementScope } from "../src/coding/requirements.js";
 import { CodingController } from "../src/coding/controller.js";
+import { ModelError } from "../src/model.js";
 import {
   codingSettings,
   outcome,
@@ -129,6 +130,7 @@ async function fixture(t: TestContext) {
       s.state = "terminal";
     },
   };
+  let failModelError = new Error("private model error");
   let published = false;
   let modelReply = "fixture reply";
   const publisher = {
@@ -156,7 +158,7 @@ async function fixture(t: TestContext) {
     () => ({
       generate: async () => {
         modelCalls++;
-        if (failModel) throw new Error("private model error");
+        if (failModel) throw failModelError;
         return { message: { role: "assistant", content: modelReply } };
       },
     }),
@@ -232,8 +234,9 @@ async function fixture(t: TestContext) {
     uncertainPublish: () => {
       uncertainPublish = true;
     },
-    failModel: () => {
+    failModel: (error = new Error("private model error")) => {
       failModel = true;
+      failModelError = error;
     },
     setReply: (text: string) => {
       modelReply = text;
@@ -425,6 +428,230 @@ test("worker HTTP routes validate capabilities and reject malformed calls withou
   assert(!bad.body.includes("secret"));
   await assert.rejects(f.c.finish(j, candidate()), /Plan-only/);
 });
+test("coding continuation accepts indexed tool calls and keeps strict payload validation", async (t) => {
+  const f = await fixture(t),
+    job = await f.start();
+  await f.c.tick();
+  const j = await f.row(job.id),
+    app = server();
+  t.after(() => app.close());
+  await codingApi(app, f.c);
+  const calls = [0, 1].map((index) => ({
+    id: `call-${index}`,
+    type: "function",
+    index,
+    function: {
+      name: "plan_read",
+      arguments: JSON.stringify({
+        section: index === 0 ? "plan" : "summary",
+        offset: 0,
+      }),
+    },
+  }));
+  const payload = {
+    callId: randomUUID(),
+    role: "coder",
+    messages: [
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: calls,
+        reasoning_details: [
+          {
+            type: "reasoning.text",
+            text: "Synthetic reasoning",
+            format: "synthetic",
+            index: 0,
+          },
+        ],
+      },
+      ...calls.map((c) => ({
+        role: "tool",
+        tool_call_id: c.id,
+        content: '{"text":"","nextOffset":null}',
+      })),
+    ],
+    tools: [],
+  };
+  const request = {
+    method: "POST" as const,
+    url: `/coding/worker/${j.id}/model`,
+    headers: { authorization: `Bearer ${f.c.token(j.id, j.attempt_id)}` },
+    payload,
+  };
+  const response = await app.inject(request);
+  assert.equal(response.statusCode, 200);
+  assert.equal(f.modelCalls(), 1);
+  const stored = (
+    await f.db.query("SELECT input FROM coding_model_calls WHERE id=$1", [
+      payload.callId,
+    ])
+  ).rows[0].input;
+  assert.deepEqual(stored.messages, payload.messages);
+  for (const index of [-1, 0.5, "0"]) {
+    const invalid = {
+      ...payload,
+      callId: randomUUID(),
+      messages: [
+        { ...payload.messages[0], tool_calls: [{ ...calls[0], index }] },
+      ],
+    };
+    assert.equal(
+      (await app.inject({ ...request, payload: invalid })).statusCode,
+      409,
+    );
+  }
+  const invalid = {
+    ...payload,
+    callId: randomUUID(),
+    messages: [
+      {
+        ...payload.messages[0],
+        tool_calls: [{ ...calls[0], arbitrary: "private payload" }],
+      },
+    ],
+  };
+  const denied = await app.inject({ ...request, payload: invalid });
+  assert.equal(denied.statusCode, 409);
+  assert(!denied.body.includes("private payload"));
+  assert.equal(f.modelCalls(), 1);
+});
+
+test("worker rejection status is bounded, owner-scoped and fenced to the current attempt", async (t) => {
+  const f = await fixture(t),
+    job = await f.start();
+  await f.c.tick();
+  const j = await f.row(job.id),
+    app = server();
+  t.after(() => app.close());
+  await codingApi(app, f.c);
+  const url = `/coding/worker/${j.id}/model`,
+    payload = { private: "Bearer hidden-secret" };
+  assert.equal(
+    (await app.inject({ method: "POST", url, payload })).statusCode,
+    401,
+  );
+  assert.equal((await f.c.status("a", j.id)).lastFailure, undefined);
+  const rejected = await app.inject({
+    method: "POST",
+    url,
+    payload,
+    headers: { authorization: `Bearer ${f.c.token(j.id, j.attempt_id)}` },
+  });
+  assert.equal(rejected.statusCode, 409);
+  assert.equal(rejected.json().code, "invalid_worker_payload");
+  const status = await f.c.status("a", j.id);
+  assert.equal(status.lastFailure.code, "invalid_worker_payload");
+  assert.equal(status.lastFailure.phase, "model");
+  assert.equal(status.lastFailure.httpStatus, 409);
+  assert(!JSON.stringify(status).includes("hidden-secret"));
+  await assert.rejects(f.c.status("b", j.id));
+  await f.c.progress(j, {
+    key: "request-rejected:fake",
+    stage: "planning",
+    summary: "Fake failure",
+  });
+  assert.equal(
+    (await f.c.status("a", j.id)).lastFailure.code,
+    "invalid_worker_payload",
+  );
+  const before = (
+    await f.db.query(
+      "SELECT count(*)::int AS n FROM coding_events WHERE payload->>'kind'='worker_request_rejected'",
+    )
+  ).rows[0].n;
+  await f.db.query("UPDATE coding_jobs SET attempt_id=$2 WHERE id=$1", [
+    j.id,
+    randomUUID(),
+  ]);
+  await f.c.recordRejection(j, {
+    phase: "model",
+    code: "worker_request_rejected",
+    httpStatus: 409,
+  });
+  assert.equal((await f.c.status("a", j.id)).lastFailure, undefined);
+  const after = (
+    await f.db.query(
+      "SELECT count(*)::int AS n FROM coding_events WHERE payload->>'kind'='worker_request_rejected'",
+    )
+  ).rows[0].n;
+  assert.equal(after, before);
+});
+
+test("late finish rejection remains visible for the same completed attempt", async (t) => {
+  const f = await fixture(t),
+    job = await f.start("late-finish", "plan");
+  await f.c.tick();
+  const j = await f.row(job.id),
+    app = server();
+  t.after(() => app.close());
+  await codingApi(app, f.c);
+  await f.c.finish(j, {
+    kind: "plan_ready",
+    summary: "Synthetic ready plan",
+    checkpoint: { ...j.checkpoint, plan: "Synthetic complete requirements" },
+  });
+  const request = {
+    method: "POST" as const,
+    url: `/coding/worker/${j.id}/finish`,
+    headers: { authorization: `Bearer ${f.c.token(j.id, j.attempt_id)}` },
+    payload: { private: "Secret must not appear" },
+  };
+  const rejected = await app.inject(request);
+  assert.equal(rejected.statusCode, 409);
+  const status = await f.c.status("a", j.id);
+  assert.equal(status.state, "plan_ready");
+  assert.equal(status.lastFailure.phase, "finish");
+  assert.equal(status.lastFailure.code, "invalid_worker_payload");
+  assert(!JSON.stringify(status).includes("Secret must not appear"));
+  await f.db.query("UPDATE coding_jobs SET attempt_id=$2 WHERE id=$1", [
+    j.id,
+    randomUUID(),
+  ]);
+  assert.equal((await app.inject(request)).statusCode, 401);
+  assert.equal((await f.c.status("a", j.id)).lastFailure, undefined);
+});
+
+test("provider failure is recorded without exposing provider error text", async (t) => {
+  const f = await fixture(t),
+    job = await f.start();
+  await f.c.tick();
+  const j = await f.row(job.id),
+    app = server();
+  t.after(() => app.close());
+  await codingApi(app, f.c);
+  f.failModel(
+    new ModelError("private provider response Bearer secret", false, {
+      httpStatus: 404,
+    }),
+  );
+  const response = await app.inject({
+    method: "POST",
+    url: `/coding/worker/${j.id}/model`,
+    headers: { authorization: `Bearer ${f.c.token(j.id, j.attempt_id)}` },
+    payload: {
+      callId: randomUUID(),
+      role: "coder",
+      messages: [{ role: "user", content: "Synthetic" }],
+      tools: [],
+    },
+  });
+  assert.equal(response.statusCode, 409);
+  assert.equal(response.json().code, "model_provider_failed");
+  assert.equal(
+    (await f.c.status("a", j.id)).lastFailure.code,
+    "model_provider_failed",
+  );
+  assert(!response.body.includes("secret"));
+  const events = (
+    await f.db.query(
+      "SELECT payload FROM coding_events WHERE payload->>'kind'='worker_request_rejected'",
+    )
+  ).rows;
+  assert(!JSON.stringify(events).includes("secret"));
+  assert.equal((await f.row(j.id)).used_models, 1);
+});
+
 test("model calls are counted once, persist evidence and never replay an uncertain request", async (t) => {
   const f = await fixture(t),
     job = await f.start();
