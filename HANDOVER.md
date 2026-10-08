@@ -1,10 +1,14 @@
-## Remote MCP connector candidate — 8 October 2026
+## Remote MCP connectors — released v0.3.45, off, 8 October 2026
 
-The reusable remote MCP framework and Reader registry are implemented on an isolated
-branch, pending independent review, full checks and deployment. MCP defaults off.
-Migration 030/Compose require the [reviewed operator rollout](docs/mcp-deployment.md).
-Credential setup, authenticated saving/revocation and phone acceptance are separate.
-See [contract](docs/mcp.md) and [journal 67](docs/journey/67-mcp-connectors.md).
+[PR #181](https://github.com/akhilvuputuri/chief-agent/pull/181) is verified at
+`c1b72c7ce394d8cfb52870d5228568c195a3999d`: exact-head independent review,
+PR/main CI, reviewed migration 030/Compose, normal release receipt and separate
+health/disabled flag/public discovery/deployed synthetic smoke all passed.
+MCP stays off; a fresh Reader credential, authenticated saves/revocation and phone
+Available offline acceptance remain separate. Existing credentials/data/paused
+work are preserved. OAuth, stdio and non-idempotent writes remain later work.
+See [contract](docs/mcp.md), [rollout](docs/mcp-deployment.md) and
+[journal closure](docs/journey/67-mcp-connectors.md#release-closure--8-october-2026).
 
 Coding benchmark work, 8 October 2026: [the offline pack](evals/coding/README.md) adds six Chief component repair fixtures and a four-instance public comparison lock. It does not run the live squad or paid models. Offline tests, real Docker grading and the full repository suite pass; independent implementation review approved. Final-head and integration/release evidence are linked from [journal 66](docs/journey/66-coding-benchmarks.md).
 

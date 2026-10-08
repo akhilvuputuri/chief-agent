@@ -1,3 +1,18 @@
+## Released v0.3.45 — remote MCP connectors, off
+
+[PR #181](https://github.com/akhilvuputuri/chief-agent/pull/181) ships reusable
+remote MCP connections and Reader's save/status grants. The official SDK handles
+Streamable HTTP; bounded workers validate discovered input/output schemas;
+persisted keys/payloads protect exact retries and owner scoping. Final independent
+approval covered `411e3fa`; PR/main CI and the reviewed migration 030/Compose install
+passed. [Normal release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37717573236),
+receipt and separate server health verified `c1b72c7ce394d8cfb52870d5228568c195a3999d`.
+Public discovery and rolled-back deployed smoke passed; data/credentials/paused
+work are preserved. [v0.3.45](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.45)
+is immutable. MCP stays off pending fresh credential setup; authenticated
+Reader/revocation/phone acceptance, OAuth, stdio and paid picker eval are separate.
+See [journal closure](journey/67-mcp-connectors.md#release-closure--8-october-2026).
+
 ## Released v0.3.44 — explicit Main conversation
 
 [PR #178](https://github.com/akhilvuputuri/chief-agent/pull/178) adds Main beside News/Coding/Markets, normalizes root intake before execution, routes default owner sends there and preserves guarded fallback plus actual destination receipts. Final independent GPT-6 Astra approved exact head `d628ec714be2741fa78e55bf63904452317d2f71` after failure-oriented review loops. Hosted full CI passed 794 application, 50 script, 30 Python evaluation and 32 coding-runtime tests plus isolation checks. [Release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37615771842), receipt and separate server health verified merge `e522f5349af2d7be869bb18bcff2ba0327b06e08`; the bot reported threaded mode and Telegram accepted one Main introduction with zero model calls. [v0.3.44](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.44) is immutable. No migration/Compose/history changes; All stays the aggregate and owner-client acceptance remains separate. [Journal 65](journey/65-main-conversation-topic.md).
