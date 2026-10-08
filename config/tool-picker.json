@@ -19,6 +19,10 @@
   },
   "alwaysAvailable": "Web search, reading web pages, memory, conversation-history search and skill reading are always available and are not part of these groups.",
   "domains": {
+    "mcp": {
+      "description": "Use reviewed remote MCP connections, including saving articles and sourced briefs to Reader or checking submission status.",
+      "examples": "save this article to Reader, save the brief for offline reading, check that Reader save, list MCP tools"
+    },
     "gmail": {
       "description": "Search or read the user's Gmail (two connected accounts).",
       "examples": "did X reply, anything from my bank, find the invoice, what did the landlord say, summarise unread"

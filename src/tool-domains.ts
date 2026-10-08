@@ -24,6 +24,7 @@ export const CORE_OPERATIONS = new Set([
 ]);
 
 export const TOOL_DOMAINS = [
+  "mcp",
   "gmail",
   "calendar",
   "daily",
@@ -46,6 +47,7 @@ export type ToolDomain = (typeof TOOL_DOMAINS)[number];
 
 /** One line per domain for the model's catalogue of loadable tools. */
 export const DOMAIN_SUMMARIES: Record<ToolDomain, string> = {
+  mcp: "connected remote MCP tools, Reader article/brief saving and submission status",
   gmail: "read-only Gmail search/thread/read across connected accounts",
   calendar: "Calendar lookups and approval-gated event drafts",
   daily: "saved items, reminders, briefings and the daily Sheet",
@@ -69,6 +71,7 @@ export const DOMAIN_SUMMARIES: Record<ToolDomain, string> = {
 };
 
 const PREFIXES: [string, ToolDomain][] = [
+  ["mcp_", "mcp"],
   ["gmail_", "gmail"],
   ["calendar_", "calendar"],
   ["item_", "daily"],
@@ -105,6 +108,10 @@ export function domainOf(operation: string): ToolDomain | undefined {
 // Conservative cues: a missed domain costs one tools_load step, an extra one
 // costs only schema characters. Word boundaries avoid matching inside words.
 const CUES: [ToolDomain, RegExp][] = [
+  [
+    "mcp",
+    /\b(mcp|reader|offline|read later|save.{0,40}(article|brief|link))\b/i,
+  ],
   [
     "gathering",
     /\b(gather|collect|download|retrieve|find).{0,70}\b(invoices?|receipts?|billing documents?)\b|\b(invoice collection|billing portal|browser login|gathering task)\b|\[Attached invoice PDF/i,

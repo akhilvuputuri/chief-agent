@@ -116,6 +116,10 @@ function unique(values: string[], what: string) {
 }
 /** Coordinator and report operations; an agent can never be granted these. */
 export const NEVER_GRANTED = new Set([
+  "mcp_tools",
+  "mcp_read",
+  "mcp_write",
+  "mcp_operation",
   "agent_run",
   "agent_report",
   "research_report",

@@ -1,6 +1,6 @@
 # Portable capability plugins
 
-Product requirement: [issue #37](https://github.com/akhilvuputuri/chief-agent/issues/37). The first implementation packages public research as a declarative plugin. It supports import/export between compatible Chief checkouts, namespaced agent discovery, host-granted tool access, lazy skills and durable definition pins. This is not universal Claude/Codex plugin compatibility or an MCP client implementation.
+Product requirement: [issue #37](https://github.com/akhilvuputuri/chief-agent/issues/37). The first implementation packages public research as a declarative plugin. It supports import/export between compatible Chief checkouts, namespaced agent discovery, host-granted tool access, lazy skills and durable definition pins. This is not universal Claude/Codex plugin compatibility. Remote MCP connections are a separate host capability described in [MCP connectors](mcp.md); packages cannot install or grant them.
 
 ## Ownership of behavior
 
@@ -60,7 +60,7 @@ npm run plugins -- registry plugins
 
 Export creates a new JSON bundle and refuses to overwrite a file. Import validates first and writes into a new destination directory; it does not enable the plugin. Review the text, then add the printed content hash and explicit agent/tool grants to the host registry. Do not enable two packages with the same plugin identity. Use a branch/PR, independent review, tests and the standard release pipeline for production changes. No install tool is exposed to the conversational agent.
 
-Bundles export package definitions only: no private skill overrides, conversation state, memory, account configuration, host model overrides or credentials. A standalone skill's SKILL.md can be copied to another host that supports its format, but referenced tool names still need compatible implementations. Full package export requires another host that implements this manifest and `public-research/v1` contract or an adapter. Native Claude/Codex agent frontmatter, marketplaces, remote downloads and MCP-backed tools are future compatibility work; they are not silently translated.
+Bundles export package definitions only: no private skill overrides, conversation state, memory, account configuration, host model overrides or credentials. A standalone skill's SKILL.md can be copied to another host that supports its format, but referenced tool names still need compatible implementations. Full package export requires another host that implements this manifest and `public-research/v1` contract or an adapter. Native Claude/Codex agent frontmatter, marketplaces and remote downloads remain future compatibility work; they are not silently translated. The host MCP bridge is separate and coordinator-only.
 
 ## Task pins, private skills and rollback
 

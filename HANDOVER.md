@@ -1,3 +1,11 @@
+## Remote MCP connector candidate — 8 October 2026
+
+The reusable remote MCP framework and Reader registry are implemented on an isolated
+branch, pending independent review, full checks and deployment. MCP defaults off.
+Migration 030/Compose require the [reviewed operator rollout](docs/mcp-deployment.md).
+Credential setup, authenticated saving/revocation and phone acceptance are separate.
+See [contract](docs/mcp.md) and [journal 67](docs/journey/67-mcp-connectors.md).
+
 Coding benchmark work, 8 October 2026: [the offline pack](evals/coding/README.md) adds six Chief component repair fixtures and a four-instance public comparison lock. It does not run the live squad or paid models. Offline tests, real Docker grading and the full repository suite pass; independent implementation review approved. Final-head and integration/release evidence are linked from [journal 66](docs/journey/66-coding-benchmarks.md).
 
 Coding MR automation is enabled as [v0.3.43](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.43) at verified `60b3ec55f03f0296ef027b413debab61eef7d2f7`. New jobs use MR feedback repair and guarded ordinary-change merge/release after planning/owner confirmation and one independent reviewer loop. App read scopes are installed/verified only for chief-agent; models/image/effort/allocations/filters and legacy/paused settings remain unchanged. Exact review/checks/release/current health/effective selector passed; zero jobs, no paid/live coding acceptance. See [journal closure](docs/journey/64-coding-automation.md#automatic-selector-release-closure--7-october-2026).

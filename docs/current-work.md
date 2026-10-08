@@ -1,3 +1,10 @@
+# Remote MCP connectors — implementation candidate, 8 October 2026
+
+Reusable Streamable HTTP connections and Reader's three tools are in development.
+The default is off. Migration 030/Compose need the reviewed operator rollout;
+API credential setup and authenticated Reader/phone acceptance remain pending.
+See [contract](mcp.md), [rollout](mcp-deployment.md) and [journal 67](journey/67-mcp-connectors.md).
+
 # Coding benchmark pack — offline validation complete
 
 Six runnable Chief seeded component repair fixtures and four pinned public SWE-bench selections are prepared in [the coding benchmark pack](../evals/coding/README.md). Offline source/grader validation, actual local Docker checks and the full repository suite pass. GPT-6 Astra approved the implementation; final-head review, hosted checks and merge/release receipts are tracked in [PR #180](https://github.com/akhilvuputuri/chief-agent/pull/180). Live inference integration, public environment checks and paid trials remain pending. No production coding settings change. See [journal 66](journey/66-coding-benchmarks.md).

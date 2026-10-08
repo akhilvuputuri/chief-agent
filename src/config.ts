@@ -2,6 +2,8 @@ import "dotenv/config";
 import { readFileSync } from "node:fs";
 import { z } from "zod";
 const schema = z.object({
+  MCP_RUNTIME: z.enum(["on", "off"]).default("off"),
+  MCP_CREDENTIALS_JSON: z.string().default("{}"),
   GATHERING_RUNTIME: z.enum(["on", "off"]).default("off"),
   GATHERING_BROWSER: z.enum(["on", "off"]).default("off"),
   GATHERING_ARTIFACT_KEY: z

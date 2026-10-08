@@ -1,3 +1,4 @@
+import type { McpTools } from "./mcp.js";
 import type { Gathering } from "./gathering/controller.js";
 import { action as gatheringAction } from "./gathering/schema.js";
 import { readFeed } from "./telegram-feeds.js";
@@ -47,6 +48,7 @@ export class JobTools {
     readonly portfolio?: Portfolio,
     private stockLookup?: StockLookup,
     readonly gathering?: Gathering,
+    readonly mcp?: McpTools,
   ) {}
   get searchUsesModel() {
     return this.web.usesModelSearch === true;
@@ -56,6 +58,7 @@ export class JobTools {
     run: string,
     input: unknown,
     withReceipt = false,
+    signal?: AbortSignal,
   ) {
     const a = action.parse(input);
     await this.responsibilities?.authorize(user, run, a);
@@ -64,7 +67,7 @@ export class JobTools {
     await event(this.db, user, run, "tool.started", { operation: a.operation });
     let dispatched = false;
     try {
-      const result = await this.dispatch(user, run, a);
+      const result = await this.dispatch(user, run, a, signal);
       dispatched = true;
       await event(this.db, user, run, "tool.completed", {
         operation: a.operation,
@@ -114,7 +117,17 @@ export class JobTools {
     user: string,
     run: string,
     a: ReturnType<typeof action.parse>,
+    signal?: AbortSignal,
   ): Promise<unknown> {
+    if (
+      a.operation === "mcp_tools" ||
+      a.operation === "mcp_read" ||
+      a.operation === "mcp_write" ||
+      a.operation === "mcp_operation"
+    ) {
+      if (!this.mcp) throw new Error("MCP is not configured");
+      return this.mcp.call(user, a, signal);
+    }
     const db = this.db;
     if (
       a.operation === "gather_start" ||

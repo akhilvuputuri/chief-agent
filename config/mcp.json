@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "connections": [
+    {
+      "id": "reader",
+      "url": "https://p01--reader-api--2sn8tjhm47hb.code.run/mcp",
+      "credential": "reader",
+      "description": "Save requested articles and sourced Markdown briefs to Reader. Server ready does not mean downloaded on the phone.",
+      "tools": [
+        {
+          "name": "save_link",
+          "mode": "idempotent_write",
+          "idempotencyArgument": "idempotency_key",
+          "result": "reader_receipt"
+        },
+        {
+          "name": "save_document",
+          "mode": "idempotent_write",
+          "idempotencyArgument": "idempotency_key",
+          "result": "reader_receipt"
+        },
+        { "name": "get_save_status", "mode": "read", "result": "reader_status" }
+      ]
+    }
+  ]
+}

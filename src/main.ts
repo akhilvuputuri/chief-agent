@@ -1,3 +1,4 @@
+import { McpTools, loadMcpRegistry, parseMcpCredentials } from "./mcp.js";
 import { Gathering } from "./gathering/controller.js";
 import { FileVault } from "./gathering/vault.js";
 import { GatheringBrowsers } from "./gathering/sessions.js";
@@ -490,6 +491,27 @@ if (c.GATHERING_RUNTIME === "on") {
     c.MINIAPP_ORIGIN,
   );
 }
+let mcp: McpTools | undefined;
+const mcpMigrated = !!(
+  await db.query("SELECT 1 FROM runtime_migrations WHERE version=30")
+).rows.length;
+if (c.MCP_RUNTIME === "on" && !mcpMigrated)
+  throw startupError(
+    "STARTUP_MIGRATION_030",
+    "MCP migration 030 must be installed before enabling connectors",
+  );
+// Keep pending-write protection active after disabling connections; disabling does not settle uncertainty.
+if (mcpMigrated) {
+  const credentials =
+    c.MCP_RUNTIME === "on" ? parseMcpCredentials(c.MCP_CREDENTIALS_JSON) : {};
+  const owners = new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(","));
+  if (Object.values(credentials).some((secret) => !owners.has(secret.owner)))
+    throw startupError(
+      "STARTUP_MCP_OWNER",
+      "MCP credential owner must be an allowed Telegram user",
+    );
+  mcp = new McpTools(db, loadMcpRegistry(), credentials);
+}
 const assistant = new Assistant(
   db,
   new CustomAgent(
@@ -540,8 +562,10 @@ const assistant = new Assistant(
     portfolio,
     stockLookup,
     gathering,
+    mcp,
   ),
   {
+    mcp: !!mcp?.configured,
     canvases: !!c.MINIAPP_ORIGIN,
     web: !!(c.TAVILY_API_KEY || c.OPENROUTER_API_KEY),
     gmail: !!c.GOOGLE_REFRESH_TOKEN,

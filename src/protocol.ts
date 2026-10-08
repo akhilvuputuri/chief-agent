@@ -1,3 +1,4 @@
+import { mcpTools, mcpRead, mcpWrite, mcpOperation } from "./mcp-schema.js";
 import {
   start as gatherStart,
   revise as gatherRevise,
@@ -113,6 +114,10 @@ const workSteps = z
     "Unique step keys required",
   );
 export const action = z.discriminatedUnion("operation", [
+  mcpTools,
+  mcpRead,
+  mcpWrite,
+  mcpOperation,
   z
     .object({
       operation: z.literal("conversation_search"),
