@@ -296,12 +296,14 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_reasoning_survives_tool_continuation(self):
         reasoning = [{"type": "reasoning.encrypted", "data": "opaque", "index": 0}]
-        model = ScriptedModel(
-            generation(("plan_read", {}), reasoning=reasoning),
-            generation(report("APPROVE")),
-        )
+        response = generation(("plan_read", {}), reasoning=reasoning)
+        response["message"]["tool_calls"][0]["index"] = 0
+        model = ScriptedModel(response, generation(report("APPROVE")))
         self.assertEqual((await self.loop(model, plan="complete plan")).kind, "APPROVE")
         self.assertEqual(model.inputs[1][2]["reasoning_details"], reasoning)
+        self.assertEqual(
+            model.inputs[1][2]["tool_calls"], response["message"]["tool_calls"]
+        )
 
     async def test_review_requires_plan_delivered_on_later_generation_both_batch_orders(
         self,
