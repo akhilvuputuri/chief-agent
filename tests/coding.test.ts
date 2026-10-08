@@ -578,6 +578,40 @@ test("worker rejection status is bounded, owner-scoped and fenced to the current
   assert.equal(after, before);
 });
 
+test("late finish rejection remains visible for the same completed attempt", async (t) => {
+  const f = await fixture(t),
+    job = await f.start("late-finish", "plan");
+  await f.c.tick();
+  const j = await f.row(job.id),
+    app = server();
+  t.after(() => app.close());
+  await codingApi(app, f.c);
+  await f.c.finish(j, {
+    kind: "plan_ready",
+    summary: "Synthetic ready plan",
+    checkpoint: { ...j.checkpoint, plan: "Synthetic complete requirements" },
+  });
+  const request = {
+    method: "POST" as const,
+    url: `/coding/worker/${j.id}/finish`,
+    headers: { authorization: `Bearer ${f.c.token(j.id, j.attempt_id)}` },
+    payload: { private: "Secret must not appear" },
+  };
+  const rejected = await app.inject(request);
+  assert.equal(rejected.statusCode, 409);
+  const status = await f.c.status("a", j.id);
+  assert.equal(status.state, "plan_ready");
+  assert.equal(status.lastFailure.phase, "finish");
+  assert.equal(status.lastFailure.code, "invalid_worker_payload");
+  assert(!JSON.stringify(status).includes("Secret must not appear"));
+  await f.db.query("UPDATE coding_jobs SET attempt_id=$2 WHERE id=$1", [
+    j.id,
+    randomUUID(),
+  ]);
+  assert.equal((await app.inject(request)).statusCode, 401);
+  assert.equal((await f.c.status("a", j.id)).lastFailure, undefined);
+});
+
 test("provider failure is recorded without exposing provider error text", async (t) => {
   const f = await fixture(t),
     job = await f.start();

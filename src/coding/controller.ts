@@ -267,12 +267,14 @@ export class CodingController {
     await this.db.query(
       `INSERT INTO coding_events(job_id,event_key,payload,delivery)
        SELECT id,$3,$4::jsonb,'suppressed' FROM coding_jobs
-       WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running')`,
+       WHERE id=$1 AND attempt_id=$2
+       AND (state IN ('provisioning','running') OR ($5='finish' AND state!='queued'))`,
       [
         job.id,
         job.attempt_id,
         `${job.attempt_id}:request-rejected:${randomUUID()}`,
         JSON.stringify({ kind: "worker_request_rejected", ...failure }),
+        failure.phase,
       ],
     );
   }
