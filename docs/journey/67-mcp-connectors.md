@@ -1,7 +1,7 @@
 # 67 — Can external MCP tools share Chief's durable execution boundary?
 
 Work date(s): 2026-10-08. Written/revised: 2026-10-08.
-Status: released v0.3.45 with MCP off. Authenticated Reader and phone acceptance remain pending.
+Status: released v0.3.45; Reader activated on 8 October 2026. Authenticated saves/retries passed; phone and conversational acceptance remain pending.
 
 ## User-visible problem and preceding iteration
 
@@ -124,3 +124,45 @@ remain unverified. MCP is disabled pending fresh credential installation; no cha
 credential was used. OAuth, stdio, non-idempotent writes, server idempotency
 retention measurement and paid picker evaluation remain separate work. These
 limitations do not change the verified code/migration/health outcomes above.
+
+### Reader activation — 8 October 2026
+
+The owner explicitly authorized use of the supplied personal Reader credential.
+It was extracted only from the authorized reply in the current local session into
+process memory and delivered over encrypted SSH stdin. Its value never appeared
+in command arguments, generated scripts, output, repository files or public
+artifacts. The runtime credential is configured in the host's owner-only environment; the
+authorized source session also retains the supplied value.
+No private conversation or credential value is included in this record.
+
+Two secret-free ephemeral operation artifacts were independently approved by the
+reviewer dispatched as GPT-6 Astra: host activation SHA256
+`e171efd236cfde517c0814be73f78aaa5ebaa5cb95cafdda6d0f95f3ad34743d` and delivery
+SHA256 `27b4971add9ce2fb310f2ad3301d9c146f2d20046db2bd79abca4398e86782b0`.
+An initial outer SSH timeout could cut off host recovery; it was removed before
+approval/execution. Review independently checked hashes/source/Python syntax,
+without reading the credential or executing the operation. Live fault injection
+was not performed.
+
+Verified deployed source was `ace4a33d956da1d427ac38b0104ebe6a0278d298` while freshly
+fetched main was `af9bf8c231db3388bf5b387da47008e4d595eaef`; the intervening coding
+fix did not change MCP sources/configuration. The operation confirmed migration
+030, zero active runs/queued inputs/pending MCP writes, release/health and a single
+allowed Telegram owner under the existing release lock. It atomically updated only
+MCP environment entries, preserved other credentials/settings and environment
+ownership/permissions, recreated only gateway and verified MCP on/owner binding/
+unchanged release/health. No paused task was resumed.
+
+Measured acceptance on 8 October 2026: authenticated discovery returned exactly
+save_link/save_document/get_save_status. Two new saves (one public SDK guide and
+one clearly labelled test brief) reached server ready. Two cached replays and two
+server-side retries with the original keys returned identical submission identities;
+server retries reported duplicates, and pending write count was zero. An initial
+JSON-string comparison differed because PostgreSQL JSONB reordered object keys;
+semantic equality and server identity checks passed. Private submission IDs and
+content remain on the host. These checks used no model call or Telegram send.
+
+Phone Available offline, actual conversational selection and live credential
+revocation acceptance remain unverified. Revocation was not performed because it
+would disconnect the newly activated connection. OAuth/secure self-service setup,
+stdio, non-idempotent writes and paid picker evaluation remain separate work.
