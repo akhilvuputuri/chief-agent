@@ -20,6 +20,7 @@ import { requirementScope } from "../src/coding/requirements.js";
 import { CodingController } from "../src/coding/controller.js";
 import { squadScope } from "../src/coding/squad-state.js";
 import { ModelError } from "../src/model.js";
+import { formatTelegram } from "../src/telegram-format.js";
 import {
   codingSettings,
   outcome,
@@ -2158,6 +2159,7 @@ test("coding gateway preserves opaque OpenRouter reasoning through validated mod
 async function requirementBrief(
   f: Awaited<ReturnType<typeof fixture>>,
   key = "real-plan",
+  plan = "Scope: requested feature. Acceptance: synthetic tests pass.",
 ) {
   const job: any = await f.c.call("a", f.run, {
     operation: "coding_start",
@@ -2173,7 +2175,7 @@ async function requirementBrief(
     kind: "plan_ready",
     summary: "Brief prepared",
     checkpoint: {
-      plan: "Scope: requested feature. Acceptance: synthetic tests pass.",
+      plan,
       patch: "",
       summary: "Brief prepared",
       files: [],
@@ -2212,9 +2214,46 @@ async function requirementBrief(
       ).rows,
     }),
   );
-  assert(brief.includes("Scope: requested feature"));
-  return { jobId: job.id, approvalId, messageId };
+  assert(brief.includes(plan));
+  return { jobId: job.id, approvalId, messageId, brief };
 }
+
+test("approval delivery presents the complete scope once with visible headings and policy", async (t) => {
+  const f = await fixture(t);
+  const plan =
+    "**Scope**\nRepair the requested fixture behavior.\n\n**Acceptance**\nExisting checks pass; unrelated behavior is preserved.";
+  const r = await requirementBrief(f, "concise-delivery", plan);
+  assert.equal(r.brief.split(plan).length, 2);
+  assert(!r.brief.includes("Brief prepared"));
+  const parts = formatTelegram(r.brief);
+  assert.equal(parts.length, 1);
+  assert(parts[0]!.entities.some((e) => e.type === "bold"));
+  assert(r.brief.includes("Leader:"));
+  assert(r.brief.includes("Reviewer:"));
+  assert(r.brief.includes("Draft PR for owner review."));
+  const before = await f.row(r.jobId);
+  assert.equal(before.checkpoint.plan, plan);
+  assert.equal(
+    (await f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId))
+      .status,
+    "approved",
+  );
+});
+
+test("existing long saved proposals remain fully delivered and bound to confirmation", async (t) => {
+  const f = await fixture(t);
+  const plan =
+    "Synthetic complete scope. ".repeat(450) + "FINAL_ACCEPTANCE_SENTINEL";
+  const r = await requirementBrief(f, "legacy-long-delivery", plan);
+  assert.equal((await f.row(r.jobId)).checkpoint.plan, plan);
+  assert(r.brief.includes("FINAL_ACCEPTANCE_SENTINEL"));
+  assert(formatTelegram(r.brief).length > 1);
+  assert.equal(
+    (await f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId))
+      .status,
+    "approved",
+  );
+});
 
 test("natural coding dispatch plans first; model tools cannot authorise implementation", async (t) => {
   const f = await fixture(t),
