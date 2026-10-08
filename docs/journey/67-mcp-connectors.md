@@ -1,7 +1,7 @@
 # 67 — Can external MCP tools share Chief's durable execution boundary?
 
 Work date(s): 2026-10-08. Written/revised: 2026-10-08.
-Status: in progress; independent review, full checks and deployment pending.
+Status: released v0.3.45 with MCP off. Authenticated Reader and phone acceptance remain pending.
 
 ## User-visible problem and preceding iteration
 
@@ -87,3 +87,40 @@ worker now rejects async validators and requires an actual boolean result before
 reporting success. An executable regression verifies invalid async data and that
 no save is submitted or intent created. Previous 19 tests passed independently;
 the new head requires fresh review and checks.
+
+### Release closure — 8 October 2026
+
+[PR #181](https://github.com/akhilvuputuri/chief-agent/pull/181) merged the final
+independently approved `411e3fa33af182fbfc3555fb7bb146966b3367a3` as
+`c1b72c7ce394d8cfb52870d5228568c195a3999d`; their Git trees are identical.
+The reviewer was dispatched as GPT-6 Astra and reported GPT-6 family identity.
+All 20 focused tests, typecheck and additional async/input/output fail-closed probes
+passed independently. [Exact-head CI](https://github.com/akhilvuputuri/chief-agent/actions/runs/37716098502)
+and [main CI](https://github.com/akhilvuputuri/chief-agent/actions/runs/37717070461)
+passed 814 application, 50 script, 42 offline evaluation and 32 coding-runtime tests,
+plus worker/browser isolation and PostgreSQL checks.
+
+The concrete ephemeral operator artifact was independently approved at SHA256
+`db2ca322ccf2df711a38e7b9e8a7be9a94c5322d84b6eee3751ba4930061a0d2` after
+fixing flag overrides, stop recovery, health timeout and rollback identity. Its
+syntax/source were checked; live fault injection was not performed. Matching
+merged archive/tree, baseline, release lock and idle checks preceded the additive
+migration 030/Compose installation. Source environment remained unchanged, MCP was
+forced off, and 32 jobs / 6 memories / 1 paused task / 1 user / 11 daily schedules were preserved.
+No paused task resumed and no real provider/model/message action was made.
+
+The [normal release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37717573236)
+and exact-commit receipt report successful deployment/startup health at
+2026-10-08 02:23:21 UTC. Separate server RELEASE/embedded SHA, health and MCP-off
+checks passed. A deployed-module synthetic transaction verified persistence,
+replay, owner isolation, compiled worker validation and async-schema rejection,
+then rolled back and confirmed no fixture remained. Public discovery from the
+production container also returned exactly the three Reader tools without an
+API credential or save. [v0.3.45](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.45)
+is the shipped milestone.
+
+Authenticated Reader article/brief saving, revocation and phone offline acceptance
+remain unverified. MCP is disabled pending fresh credential installation; no chat
+credential was used. OAuth, stdio, non-idempotent writes, server idempotency
+retention measurement and paid picker evaluation remain separate work. These
+limitations do not change the verified code/migration/health outcomes above.

@@ -1,9 +1,15 @@
-# Remote MCP connectors — implementation candidate, 8 October 2026
+# Remote MCP connectors — released v0.3.45, off
 
-Reusable Streamable HTTP connections and Reader's three tools are in development.
-The default is off. Migration 030/Compose need the reviewed operator rollout;
-API credential setup and authenticated Reader/phone acceptance remain pending.
-See [contract](mcp.md), [rollout](mcp-deployment.md) and [journal 67](journey/67-mcp-connectors.md).
+[PR #181](https://github.com/akhilvuputuri/chief-agent/pull/181) ships reusable
+Streamable HTTP connections, reviewed owner-scoped grants, bounded schema workers
+and durable idempotent saves. Final independent review approved `411e3fa`; exact
+PR/main CI passed. Reviewed migration 030/Compose installation, [normal release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37717573236),
+receipt and separate server health verified `c1b72c7ce394d8cfb52870d5228568c195a3999d`.
+Public Reader discovery and a rolled-back deployed-module smoke passed. MCP stays
+**off** until a fresh credential is securely installed; authenticated saves,
+revocation and phone offline acceptance remain pending. OAuth/stdio/non-idempotent
+writes and paid picker eval are separate. See [contract](mcp.md), [rollout](mcp-deployment.md)
+and [journal 67](journey/67-mcp-connectors.md).
 
 # Coding benchmark pack — offline validation complete
 
