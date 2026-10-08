@@ -190,7 +190,7 @@ export class CodingController {
     if (!this.allowed(user)) throw new Error("Coding owner unavailable");
     const rows = (
       await this.db.query(
-        `SELECT id,revision,objective,mode,state,stage,summary,question,base_sha,pr_url,head_sha,cleanup,publication_started,used_models,updated_at FROM coding_jobs WHERE user_id=$1 ${id ? "AND id=$2" : ""} ORDER BY created_at DESC LIMIT 20`,
+        `SELECT id,revision,objective,mode,state,stage,summary,question,base_sha,pr_url,head_sha,cleanup,publication_started,used_models,settings->'limits' AS limits,updated_at FROM coding_jobs WHERE user_id=$1 ${id ? "AND id=$2" : ""} ORDER BY created_at DESC LIMIT 20`,
         id ? [user, id] : [user],
       )
     ).rows;
@@ -936,19 +936,29 @@ export class CodingController {
       }
       const state = await this.provider.inspect(j.sandbox_id);
       if (active.includes(j.state)) {
-        if (state === "terminal")
+        if (!this.allowed(j.user_id))
+          await this.stopped(j, "Owner access revoked; saved work is retained");
+        else if (
+          new Date(j.attempt_deadline).getTime() <= this.clock().getTime()
+        )
+          await this.stopped(
+            j,
+            state === "terminal"
+              ? "Sandbox exited without a result and its allocated deadline has expired; stopping cause is unconfirmed, saved work is retained"
+              : "Allocated coding time expired while the sandbox was still active; saved work is retained",
+          );
+        else if (state === "terminal")
           await this.stopped(
             j,
             "Sandbox stopped before a result was recorded; saved work is retained",
           );
         else if (
-          !this.allowed(j.user_id) ||
-          new Date(j.attempt_deadline).getTime() <= this.clock().getTime() ||
-          this.clock().getTime() - new Date(j.heartbeat_at).getTime() > 180000
+          this.clock().getTime() - new Date(j.heartbeat_at).getTime() >
+          180000
         )
           await this.stopped(
             j,
-            "Worker allocation expired or heartbeat was lost; saved work is retained",
+            "Worker heartbeat was lost before verified completion; saved work is retained",
           );
         return;
       }

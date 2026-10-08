@@ -141,9 +141,9 @@ export const codingSettings = z
     effort: z.enum(["low", "medium", "high"]),
     limits: z
       .object({
-        ms: z.number().int().positive().max(3600000),
-        models: z.number().int().positive().max(200),
-        tools: z.number().int().positive().max(500),
+        ms: z.number().int().positive().max(7200000),
+        models: z.number().int().positive().max(400),
+        tools: z.number().int().positive().max(1000),
       })
       .strict(),
   })

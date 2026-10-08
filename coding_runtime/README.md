@@ -33,3 +33,5 @@ See [the host lifecycle and activation runbook](../docs/coding.md). The default 
 Python 0.1.2 includes an opt-in leader/coder/reviewer supervisor with separate histories, fixed dispatch tools, shared budgets and typed acknowledged handoff checkpoints. Legacy jobs retain their old image/settings path. See [squad contract](../docs/coding-squad.md) for exact-artifact review gates, recovery and reviewed migration/image activation.
 
 Python 0.1.3 adds job-scoped `logs_read` and preserves consumed tool allocation during automatic MR feedback recovery. Chief owns feedback, model preferences, publication witnesses and merge/release gates; no GitHub or production credentials enter the package. See [automation](../docs/coding-automation.md).
+
+Python 0.1.4 accepts a two-hour / 400-model / 1,000-tool allocation. Allocation notes are part of each role’s model conversation; the supervisor reports known allocation exhaustion explicitly and read-only command forms are enumerated. The compatible image and larger default must be activated together after publication; existing pinned jobs retain their old allocations. See [journal 70](../docs/journey/70-coding-allocations.md).

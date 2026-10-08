@@ -16,12 +16,14 @@ from uuid import uuid4
 
 import httpx
 
-from chief_coding_runtime.loop import Budget, coding_loop, compact
+from chief_coding_runtime.loop import AllocationExhausted, Budget, coding_loop, compact
 from chief_coding_runtime.model import GatewayError, OpenRouter, WorkerClient
 from chief_coding_runtime.protocol import (
     Assignment,
     Checkpoint,
     File,
+    Limits,
+    SquadState,
     artifact_hash,
     assert_brief,
 )
@@ -58,9 +60,11 @@ class ScriptedModel:
     def __init__(self, *responses):
         self.responses = list(responses)
         self.inputs = []
+        self.tool_inputs = []
 
     async def generate(self, messages, tools):
         self.inputs.append(copy.deepcopy(messages))
+        self.tool_inputs.append(copy.deepcopy(tools))
         return self.responses.pop(0)
 
 
@@ -80,6 +84,144 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
             "-m",
             "fixture",
         )
+
+    def test_expanded_wire_allocations_and_checkpoint_tool_usage(self):
+        limits = {"ms": 7200000, "models": 400, "tools": 1000}
+        self.assertEqual(Limits.model_validate(limits).model_dump(), limits)
+        for key in limits:
+            invalid = {**limits, key: limits[key] + 1}
+            with self.assertRaises(ValueError):
+                Limits.model_validate(invalid)
+        state = SquadState(
+            sequence=1,
+            revision=1,
+            attemptId=str(uuid4()),
+            scopeHash="a" * 64,
+            phase="planning",
+            toolsUsed=1000,
+        )
+        self.assertEqual(state.toolsUsed, 1000)
+        with self.assertRaises(ValueError):
+            SquadState.model_validate({**state.model_dump(), "toolsUsed": 1001})
+
+    async def test_remaining_allocation_and_readonly_command_recovery(self):
+        model = ScriptedModel(
+            generation(("command", {"command": "ls -la"})),
+            generation(
+                report(
+                    "plan_ready",
+                    plan="Inspect the relevant source using supported read tools",
+                )
+            ),
+        )
+        result = await self.loop(
+            model, mode="plan", budget=Budget(2, 4, time.time() + 60)
+        )
+        self.assertEqual(result.kind, "plan_ready")
+        first = json.loads(model.inputs[0][-1]["content"])["runtimeAllocation"]
+        last = json.loads(model.inputs[1][-1]["content"])["runtimeAllocation"]
+        self.assertEqual(first["modelCallsRemainingAfterThisResponse"], 1)
+        self.assertEqual(last["modelCallsRemainingAfterThisResponse"], 0)
+        self.assertEqual(last["toolCallsRemaining"], 3)
+        self.assertGreaterEqual(last["secondsRemaining"], 0)
+        self.assertLessEqual(last["secondsRemaining"], 60)
+        error = json.loads(
+            next(m["content"] for m in model.inputs[1] if m["role"] == "tool")
+        )
+        self.assertEqual(error["code"], "read_only_command_rejected")
+        self.assertIn("rg --files", error["allowedCommands"])
+        self.assertNotIn("ls -la", error["allowedCommands"])
+        tool = next(t for t in model.tool_inputs[0] if t["name"] == "command")
+        self.assertEqual(
+            tool["parameters"]["properties"]["command"]["enum"],
+            error["allowedCommands"],
+        )
+
+    async def test_allocation_hints_compact_without_orphaning_calls_or_brief(self):
+        replies = [
+            generation(
+                ("plan_read", {}),
+                reasoning=[{"type": "reasoning.encrypted", "data": f"opaque-{i}"}],
+            )
+            for i in range(65)
+        ]
+        model = ScriptedModel(
+            *replies, generation(report("plan_ready", plan="Complete synthetic brief"))
+        )
+        result = await self.loop(model, mode="plan", budget=Budget(70, 100))
+        self.assertEqual(result.kind, "plan_ready")
+        for messages in model.inputs:
+            self.assertEqual(
+                messages[:2],
+                [
+                    {"role": "system", "content": "Fixture"},
+                    {"role": "user", "content": "Fixture"},
+                ],
+            )
+            self.assertLessEqual(len(messages), 111)
+            for index, message in enumerate(messages):
+                if message.get("tool_calls"):
+                    ids = [c["id"] for c in message["tool_calls"]]
+                    following = messages[index + 1 : index + 1 + len(ids)]
+                    self.assertEqual([m.get("tool_call_id") for m in following], ids)
+        last = json.loads(model.inputs[-1][-1]["content"])["runtimeAllocation"]
+        self.assertEqual(last["modelCallsRemainingAfterThisResponse"], 4)
+
+    async def test_allocation_hint_cannot_discard_undelivered_opaque_tool_group(self):
+        for mode, call, report_kind in [
+            ("review", ("plan_read", {}), "APPROVE"),
+            (
+                "implement",
+                ("file_write", {"path": "changed.txt", "content": "Retained work"}),
+                "candidate",
+            ),
+        ]:
+            with self.subTest(mode=mode):
+                response = generation(
+                    call,
+                    reasoning=[{"type": "reasoning.encrypted", "data": "x" * 150000}],
+                )
+                model = ScriptedModel(response, generation(report(report_kind)))
+                messages = [
+                    {"role": "system", "content": "Fixture"},
+                    {"role": "user", "content": "Fixture"},
+                ]
+                with self.assertRaisesRegex(ValueError, "Current call group exceeds"):
+                    await coding_loop(
+                        model=model,
+                        workspace=self.w,
+                        messages=messages,
+                        mode=mode,
+                        budget=Budget(3, 4),
+                        stop=self.stop,
+                        checkpoint=lambda: asyncio.sleep(0),
+                        plan=lambda: "Complete approved requirements",
+                    )
+                self.assertEqual(len(model.inputs), 1)
+                assistant = next(m for m in messages if m["role"] == "assistant")
+                self.assertEqual(assistant, response["message"])
+                observation = next(m for m in messages if m["role"] == "tool")
+                self.assertEqual(
+                    observation["tool_call_id"],
+                    response["message"]["tool_calls"][0]["id"],
+                )
+                if mode == "review":
+                    self.assertEqual(
+                        json.loads(observation["content"])["text"],
+                        "Complete approved requirements",
+                    )
+                else:
+                    self.assertTrue(json.loads(observation["content"])["written"])
+                    self.assertEqual(
+                        (self.w.root / "changed.txt").read_text(), "Retained work"
+                    )
+
+    async def test_model_allocation_exhaustion_is_distinct_from_unknown_failure(self):
+        model = ScriptedModel(generation(("plan_read", {})))
+        with self.assertRaises(AllocationExhausted) as caught:
+            await self.loop(model, mode="plan", budget=Budget(1, 5))
+        self.assertEqual(caught.exception.resource, "model calls")
+        self.assertEqual(len(model.inputs), 1)
 
     async def test_readonly_logs_use_gateway_and_shared_tool_budget(self):
         model = ScriptedModel(
@@ -106,7 +248,9 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.kind, "plan_ready")
         self.assertEqual(queries, [{"minutes": 15, "limit": 5}])
         self.assertEqual(budget.tools, 1)
-        self.assertIn("429", model.inputs[1][-1]["content"])
+        self.assertTrue(
+            any(m["role"] == "tool" and "429" in m["content"] for m in model.inputs[1])
+        )
         self.assertEqual(await self.w.git("status", "--short"), b"")
 
     async def test_invalid_log_window_never_calls_gateway(self):
@@ -292,7 +436,10 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         result = await self.loop(model, mode="implement")
         self.assertEqual(result.kind, "candidate")
         self.assertEqual((self.w.root / "large.txt").read_text(), "x" * 32000)
-        self.assertEqual(model.inputs[1][2], response["message"])
+        self.assertEqual(
+            next(m for m in model.inputs[1] if m["role"] == "assistant"),
+            response["message"],
+        )
 
     async def test_reasoning_survives_tool_continuation(self):
         reasoning = [{"type": "reasoning.encrypted", "data": "opaque", "index": 0}]
@@ -300,10 +447,9 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         response["message"]["tool_calls"][0]["index"] = 0
         model = ScriptedModel(response, generation(report("APPROVE")))
         self.assertEqual((await self.loop(model, plan="complete plan")).kind, "APPROVE")
-        self.assertEqual(model.inputs[1][2]["reasoning_details"], reasoning)
-        self.assertEqual(
-            model.inputs[1][2]["tool_calls"], response["message"]["tool_calls"]
-        )
+        assistant = next(m for m in model.inputs[1] if m["role"] == "assistant")
+        self.assertEqual(assistant["reasoning_details"], reasoning)
+        self.assertEqual(assistant["tool_calls"], response["message"]["tool_calls"])
 
     async def test_review_requires_plan_delivered_on_later_generation_both_batch_orders(
         self,
@@ -372,7 +518,12 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             [m["tool_call_id"] for m in messages if m["role"] == "tool"],
-            [c["id"] for c in messages[2]["tool_calls"]],
+            [
+                c["id"]
+                for c in next(m for m in messages if m["role"] == "assistant")[
+                    "tool_calls"
+                ]
+            ],
         )
         with self.assertRaises(ValueError):
             await self.loop(

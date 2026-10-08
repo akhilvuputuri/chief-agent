@@ -75,6 +75,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 8 October | [67 — Remote MCP connectors](67-mcp-connectors.md): can external tools share the durable execution boundary? | v0.3.45; Reader on with authenticated saves/retries verified; phone, conversational and revocation acceptance pending |
 | 8 October | [68 — Coding tool-call index](68-coding-tool-index.md): why did planning stop after one valid response? | Protocol fix validated and independently reviewed; PR 183 tracks delivery |
 | 8 October | [69 — Shared article links](69-link-resolution.md): can a Reddit share preserve its publisher target? | Released v0.3.47; release/health and one observed-target Reader ready/replay verified; anonymous Reddit blocked |
+| 8 October | [70 — Coding allocations](70-coding-allocations.md): how can the squad use a realistic shared allocation? | Worker foundation under review; image/default activation pending |
 
 ## Connected case studies
 

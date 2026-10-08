@@ -17,7 +17,7 @@ from uuid import UUID
 
 import httpx
 
-from .loop import Budget, coding_loop
+from .loop import AllocationExhausted, Budget, coding_loop
 from .model import GatewayError, WorkerClient
 from .protocol import (
     Assignment,
@@ -66,7 +66,9 @@ async def run_worker(
         await run_squad(client, a, stop, checkout, INSTRUCTIONS, REVIEW_INSTRUCTIONS)
         return
     budget = Budget(
-        max(0, a.settings.limits.models - a.usedModels), a.settings.limits.tools
+        max(0, a.settings.limits.models - a.usedModels),
+        a.settings.limits.tools,
+        deadline_seconds(a.deadline),
     )
     w = Workspace(Path(tempfile.mkdtemp(prefix="chief-code-")), stop)
     saved = a.checkpoint.model_copy(deep=True)
@@ -247,10 +249,14 @@ async def run_worker(
                 ),
             )
             break
-    except Exception:
+    except Exception as error:
         result = Outcome(
             kind="paused",
-            summary="Coding stopped before verified completion. The last acknowledged checkpoint is retained; inspect status before explicitly resuming.",
+            summary=(
+                f"Coding paused: {error}. The last acknowledged checkpoint is retained; inspect status before explicitly resuming."
+                if isinstance(error, AllocationExhausted)
+                else "Coding stopped before verified completion. The last acknowledged checkpoint is retained; inspect status before explicitly resuming."
+            ),
             checkpoint=saved,
         )
     finally:

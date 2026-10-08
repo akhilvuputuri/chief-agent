@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -74,6 +75,14 @@ class DispatchRejected(ValueError):
 
 class SquadExecutionError(RuntimeError):
     """A started/uncertain dispatch must pause rather than be replayed."""
+
+
+class AllocationExhausted(ValueError):
+    """A shared execution allocation ended; not an unspecified worker failure."""
+
+    def __init__(self, resource: Literal["model calls", "tool calls"]) -> None:
+        super().__init__(f"Shared {resource} allocation exhausted")
+        self.resource = resource
 
 
 class Assign(Record):
@@ -226,6 +235,7 @@ ACTION: TypeAdapter[
 class Budget:
     models: int
     tools: int
+    deadline: float | None = None
 
 
 def compact(messages: list[Json], tools: list[Json]) -> None:
@@ -285,6 +295,17 @@ async def coding_loop(
     ]
     if mode == "lead":
         tools += copy.deepcopy(LEADER_TOOLS)
+    if mode != "implement":
+        command_tool = next(tool for tool in tools if tool["name"] == "command")
+        command_tool["description"] = (
+            "Read-only repository inspection. Only these exact command forms are "
+            "available; no flags, pipes or shell combinations: "
+            + "; ".join(READ_COMMANDS)
+            + ". Use file_read for file contents."
+        )
+        command_tool["parameters"]["properties"]["command"]["enum"] = list(
+            READ_COMMANDS
+        )
 
     async def durable_checkpoint() -> None:
         try:
@@ -296,7 +317,40 @@ async def coding_loop(
 
     plan_read_until = 0
     while budget.models > 0 and budget.tools > 0 and not stop.is_set():
+        # Compact before appending the hint: the newest assistant/tool group
+        # must remain protected until it is delivered on this model request.
+        # The compacted envelope leaves 30 KB for the small allocation note.
         compact(messages, tools)
+        messages.append(
+            {
+                "role": "user",
+                "content": wire_json(
+                    {
+                        "runtimeAllocation": {
+                            "modelCallsRemainingAfterThisResponse": budget.models - 1,
+                            "toolCallsRemaining": budget.tools,
+                            "sharedAcrossFixedMembers": True,
+                            **(
+                                {
+                                    "secondsRemaining": max(
+                                        0, int(budget.deadline - time.time())
+                                    )
+                                }
+                                if budget.deadline is not None
+                                else {}
+                            ),
+                        },
+                        "instruction": (
+                            "Use the remaining allocation to complete the requested "
+                            "report. As it runs low, stop broad exploration and "
+                            "report a complete result or an explicit blocker. "
+                            "Do not claim unverified completion, bypass checks or "
+                            "review, or change the approved scope."
+                        ),
+                    }
+                ),
+            }
+        )
         delivered = plan_read_until
         budget.models -= 1
         generation = validate_generation(await model.generate(messages, tools))
@@ -331,7 +385,7 @@ async def coding_loop(
                             "content": '{"skipped":"allocation exhausted"}',
                         }
                     )
-                raise ValueError("Coding allocation exhausted")
+                raise AllocationExhausted("tool calls")
             budget.tools -= 1
             result: Any
             try:
@@ -391,7 +445,7 @@ async def coding_loop(
                         )
                     try:
                         result = await dispatch(action)
-                    except DispatchRejected:
+                    except (DispatchRejected, AllocationExhausted):
                         raise
                     except Exception as error:
                         raise SquadExecutionError(
@@ -439,7 +493,20 @@ async def coding_loop(
                     if mode != "implement":
                         parts = READ_COMMANDS.get(action.command)
                         if parts is None:
-                            raise ValueError("Read-only command form rejected")
+                            result = {
+                                "error": "Read-only command form rejected.",
+                                "code": "read_only_command_rejected",
+                                "allowedCommands": list(READ_COMMANDS),
+                                "nextStep": "Use an exact allowed command to discover paths, then file_read for contents.",
+                            }
+                            messages.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": call["id"],
+                                    "content": wire_json(result),
+                                }
+                            )
+                            continue
                         result = (
                             await workspace.command(
                                 parts[0], parts[1:], max_output=observation_chars
@@ -453,7 +520,7 @@ async def coding_loop(
                         ).wire()
                         await durable_checkpoint()
             except Exception as error:
-                if isinstance(error, SquadExecutionError):
+                if isinstance(error, (SquadExecutionError, AllocationExhausted)):
                     raise
                 result = {
                     "error": "Tool rejected or failed; inspect files and adjust the call. Paths, modes and limits are enforced by the host."
@@ -467,4 +534,4 @@ async def coding_loop(
             )
     if stop.is_set():
         raise asyncio.CancelledError("Coding stopped")
-    raise ValueError("Coding allocation exhausted")
+    raise AllocationExhausted("model calls" if budget.models <= 0 else "tool calls")
