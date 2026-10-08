@@ -1,6 +1,6 @@
-# Coding allocations — verified image/default activation candidate
+# Coding allocations — released v0.3.49
 
-[PR #187](https://github.com/akhilvuputuri/chief-agent/pull/187) merged the compatible host and Python 0.1.4 foundation. The main-only image publication passed; anonymous digest/platform/user/entrypoint and installed-source hashes were verified. This selector pins the verified image and enables two hours / 400 model calls / 1,000 tool calls for new jobs. Independent pin review, checks and release remain pending. Existing paused jobs keep their original settings and are not resumed. See [journal 70](journey/70-coding-allocations.md).
+[v0.3.49](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.49) is verified at `b44e1cee723ccfdd624152bbea54e7f23b1134d7`. New coding attempts use the public verified Python 0.1.4 image with two hours / 400 model calls / 1,000 tool calls shared by the squad. Foundation/pin independent reviews, PR/main checks, exact release receipt and separate production configuration/gateway/Postgres health passed. Existing paused jobs retain their original image/limits/checkpoints; ordinary resume does not upgrade them. An owner-requested fresh job uses the new defaults. No paid/live coding acceptance ran. See [journal 70](journey/70-coding-allocations.md#release-closure--8-october-2026).
 
 # Public article-link resolution — released v0.3.47
 

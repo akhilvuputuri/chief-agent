@@ -1,6 +1,6 @@
-## v0.3.49 — coding-sized default allocation
+## Released v0.3.49 — coding-sized default allocation
 
-Pins the independently verified Python 0.1.4 image and enables two hours / 400 model calls / 1,000 tool calls for new coding attempts. The compatible foundation adds shared allocation/deadline hints, exact read-only command forms, explicit model/tool exhaustion and conservative host deadline reporting. Existing jobs retain their settings and checkpoints; no automatic resume, model/provider-price, permission, database or Compose change. [Journal 70](journey/70-coding-allocations.md) links the foundation, image verification and final selector review/release evidence.
+Pins the independently verified Python 0.1.4 image and enables two hours / 400 model calls / 1,000 tool calls for new coding attempts. The compatible foundation adds shared allocation/deadline hints, exact read-only command forms, explicit model/tool exhaustion and conservative host deadline reporting. Existing jobs retain their settings and checkpoints; no automatic resume, model/provider-price, permission, database or Compose change. [Journal 70](journey/70-coding-allocations.md#release-closure--8-october-2026) records exact deployed `b44e1cee723ccfdd624152bbea54e7f23b1134d7`, successful release and separate configuration/health checks; the immutable [v0.3.49](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.49) milestone is published.
 
 ## Released v0.3.47 — article link resolution
 

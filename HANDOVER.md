@@ -1,4 +1,4 @@
-Coding allocation activation, 8 October: the compatible foundation is merged in [PR #187](https://github.com/akhilvuputuri/chief-agent/pull/187), and Python 0.1.4 image publication/anonymous content verification passed. The selector now pins that image and two hours / 400 model calls / 1,000 tool calls for new jobs; final pin review/checks/release remain pending. Old jobs are unchanged and not resumed. See [journal 70](docs/journey/70-coding-allocations.md).
+Coding allocations released as [v0.3.49](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.49), verified deployed `b44e1cee723ccfdd624152bbea54e7f23b1134d7`: new attempts use Python 0.1.4 and two hours / 400 model calls / 1,000 tool calls. Independent foundation/pin reviews, hosted checks, exact receipt and separate health/effective-selector reads passed. Stored paused jobs retain old settings; request a fresh job to use the new allocation. No job was resumed and no paid/live coding acceptance ran. See [journal closure](docs/journey/70-coding-allocations.md#release-closure--8-october-2026).
 
 ## Link resolution — released v0.3.47, 8 October 2026
 
