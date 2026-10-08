@@ -1,3 +1,4 @@
+import type { LinkResolver } from "./link-resolution.js";
 import type { McpTools } from "./mcp.js";
 import type { Gathering } from "./gathering/controller.js";
 import { action as gatheringAction } from "./gathering/schema.js";
@@ -49,6 +50,7 @@ export class JobTools {
     private stockLookup?: StockLookup,
     readonly gathering?: Gathering,
     readonly mcp?: McpTools,
+    readonly links?: LinkResolver,
   ) {}
   get searchUsesModel() {
     return this.web.usesModelSearch === true;
@@ -127,6 +129,10 @@ export class JobTools {
     ) {
       if (!this.mcp) throw new Error("MCP is not configured");
       return this.mcp.call(user, a, signal);
+    }
+    if (a.operation === "link_resolve") {
+      if (!this.links) throw new Error("Link resolution is not configured");
+      return this.links.resolve(user, a.url, a.target, signal);
     }
     const db = this.db;
     if (

@@ -11,6 +11,7 @@ import { datesIn, invoiceFacts, fileName } from "../gathering/facts.js";
 import { invoiceLink, readUrl, safeLabel } from "./policy.js";
 import { request as httpsRequest } from "node:https";
 import { HttpsProxyAgent } from "https-proxy-agent";
+import { readPublicPost } from "./public-links.js";
 export function browserEnvironment(
   env: NodeJS.ProcessEnv = process.env,
 ): Record<string, string> {
@@ -401,6 +402,22 @@ export class BrowserManager {
   ): Promise<Record<string, unknown>> {
     return this.queue.run(id, async () => {
       const a = command.parse(input) as Record<string, any>;
+      if (a.kind === "resolve_public") {
+        const url = z.string().max(2048).parse(a.url);
+        return this.lifecycle.run("open", async () => {
+          await this.expireSessions();
+          if (this.sessions.size)
+            return {
+              pageUrl: url,
+              postId: null,
+              outbound: [],
+              self: false,
+              blocked: true,
+            };
+          this.browser ??= await this.launch();
+          return readPublicPost(this.browser, url);
+        });
+      }
       if (a.kind === "open" || a.kind === "restore")
         return this.lifecycle.run("open", () => this.newSession(user, id, a));
       const s = this.get(user, id);

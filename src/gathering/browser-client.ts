@@ -6,6 +6,7 @@ export interface BrowserClient {
     user: string,
     session: string,
     command: BrowserCommand,
+    signal?: AbortSignal,
   ): Promise<Record<string, any>>;
 }
 export class BrowserSessionMissing extends Error {
@@ -19,7 +20,12 @@ export class BrowserRpc implements BrowserClient {
     private key: string,
     private request: typeof fetch = fetch,
   ) {}
-  async call(user: string, session: string, command: BrowserCommand) {
+  async call(
+    user: string,
+    session: string,
+    command: BrowserCommand,
+    signal?: AbortSignal,
+  ) {
     const body = JSON.stringify({ user, session, command }),
       time = String(Date.now()),
       nonce = randomUUID();
@@ -35,7 +41,10 @@ export class BrowserRpc implements BrowserClient {
         "x-browser-signature": signature,
       },
       body,
-      signal: AbortSignal.timeout(45000),
+      signal: AbortSignal.any([
+        ...(signal ? [signal] : []),
+        AbortSignal.timeout(45000),
+      ]),
       redirect: "error",
     });
     if (response.status === 404) throw new BrowserSessionMissing();

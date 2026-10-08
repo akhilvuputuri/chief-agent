@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { LinkResolver } from "./link-resolution.js";
 import { McpTools, loadMcpRegistry, parseMcpCredentials } from "./mcp.js";
 import { Gathering } from "./gathering/controller.js";
 import { FileVault } from "./gathering/vault.js";
@@ -491,14 +493,44 @@ if (c.GATHERING_RUNTIME === "on") {
     c.MINIAPP_ORIGIN,
   );
 }
+const linksMigrated = !!(
+  await db.query("SELECT 1 FROM runtime_migrations WHERE version=31")
+).rows.length;
+const linkBrowser =
+  c.GATHERING_BROWSER === "on" && c.GATHERING_BROWSER_KEY
+    ? new BrowserRpc("http://gathering-browser:3001", c.GATHERING_BROWSER_KEY)
+    : undefined;
+const links = linksMigrated
+  ? new LinkResolver(
+      db,
+      undefined,
+      linkBrowser
+        ? async (user, url, signal) => {
+            const result = await linkBrowser.call(
+              user,
+              randomUUID(),
+              { kind: "resolve_public", url },
+              signal,
+            );
+            return {
+              pageUrl: String(result.pageUrl),
+              postId: typeof result.postId === "string" ? result.postId : null,
+              outbound: Array.isArray(result.outbound) ? result.outbound : [],
+              self: result.self === true,
+              blocked: result.blocked !== false,
+            };
+          }
+        : undefined,
+    )
+  : undefined;
 let mcp: McpTools | undefined;
 const mcpMigrated = !!(
   await db.query("SELECT 1 FROM runtime_migrations WHERE version=30")
 ).rows.length;
-if (c.MCP_RUNTIME === "on" && !mcpMigrated)
+if (c.MCP_RUNTIME === "on" && (!mcpMigrated || !linksMigrated))
   throw startupError(
     "STARTUP_MIGRATION_030",
-    "MCP migration 030 must be installed before enabling connectors",
+    "MCP migrations 030 and 031 must be installed before enabling connectors",
   );
 // Keep pending-write protection active after disabling connections; disabling does not settle uncertainty.
 if (mcpMigrated) {
@@ -510,7 +542,14 @@ if (mcpMigrated) {
       "STARTUP_MCP_OWNER",
       "MCP credential owner must be an allowed Telegram user",
     );
-  mcp = new McpTools(db, loadMcpRegistry(), credentials);
+  mcp = new McpTools(
+    db,
+    loadMcpRegistry(),
+    credentials,
+    undefined,
+    undefined,
+    links,
+  );
 }
 const assistant = new Assistant(
   db,
@@ -563,8 +602,10 @@ const assistant = new Assistant(
     stockLookup,
     gathering,
     mcp,
+    links,
   ),
   {
+    links: !!links,
     mcp: !!mcp?.configured,
     canvases: !!c.MINIAPP_ORIGIN,
     web: !!(c.TAVILY_API_KEY || c.OPENROUTER_API_KEY),

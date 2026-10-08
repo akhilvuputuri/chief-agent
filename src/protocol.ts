@@ -1,3 +1,4 @@
+import { linkResolve } from "./link-schema.js";
 import { mcpTools, mcpRead, mcpWrite, mcpOperation } from "./mcp-schema.js";
 import {
   start as gatherStart,
@@ -114,6 +115,7 @@ const workSteps = z
     "Unique step keys required",
   );
 export const action = z.discriminatedUnion("operation", [
+  linkResolve,
   mcpTools,
   mcpRead,
   mcpWrite,

@@ -101,6 +101,33 @@ try {
     }),
   );
   await manager.call(user, id, { kind: "close" });
+  let mutationRequests = 0;
+  browser.newContext = async (options) => {
+    assert.equal(options.storageState, undefined);
+    assert.equal(options.acceptDownloads, false);
+    const ctx = await original(options);
+    await ctx.route("https://www.reddit.com/**", async (route) => {
+      if (route.request().method() !== "GET") mutationRequests++;
+      return route.fulfill({
+        contentType: "text/html",
+        body: '<shreddit-post id="t3_abc123" post-type="link" content-href="https://publisher.example.com/story"></shreddit-post><a href="https://ad.example.com">Advertisement</a><script>fetch("/api/vote",{method:"POST"}).catch(()=>{})</script>',
+      });
+    });
+    return ctx;
+  };
+  const publicResult = await manager.call(
+    user,
+    "00000000-0000-4000-8000-000000000002",
+    {
+      kind: "resolve_public",
+      url: "https://www.reddit.com/r/worldnews/comments/abc123/story/",
+    },
+  );
+  assert.equal(publicResult.postId, "abc123");
+  assert.deepEqual(publicResult.outbound, [
+    "https://publisher.example.com/story",
+  ]);
+  assert.equal(mutationRequests, 0);
   console.log(
     JSON.stringify({
       nonRoot: true,
@@ -113,6 +140,7 @@ try {
       credentialsNotObserved: true,
       staleLinksRefused: true,
       realChromium: true,
+      isolatedPublicResolution: true,
       externalNetworkCalls: 0,
       modelCalls: 0,
     }),
