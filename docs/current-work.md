@@ -1,3 +1,7 @@
+# Coding allocations — worker foundation under review
+
+The requested two-hour / 400-model / 1,000-tool allocation is supported by Python 0.1.4 and matching host/checkpoint validation. Allocation hints, explicit read-only command forms and specific exhaustion summaries are implemented. The selector remains at 15 minutes / 40 / 100 until the new immutable worker image is published and independently pinned. Old paused jobs retain their settings and are not resumed. See [journal 70](journey/70-coding-allocations.md).
+
 # Public article-link resolution — implementation candidate
 
 Shared resolution and Reader article/discussion targeting are implemented in a

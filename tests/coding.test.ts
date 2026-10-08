@@ -18,6 +18,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { ensureUser, type Database } from "../src/db.js";
 import { requirementScope } from "../src/coding/requirements.js";
 import { CodingController } from "../src/coding/controller.js";
+import { squadScope } from "../src/coding/squad-state.js";
 import { ModelError } from "../src/model.js";
 import {
   codingSettings,
@@ -111,9 +112,11 @@ async function fixture(t: TestContext) {
     string,
     { id: string; state: "running" | "terminal" }
   >();
+  const sandboxRequests: { timeoutMinutes: number }[] = [];
   const provider = {
     create: async (r: any) => {
       creates++;
+      sandboxRequests.push({ timeoutMinutes: r.timeoutMinutes });
       const id = `fixture:${r.attemptId}`;
       sandboxes.set(r.attemptId, { id, state: "running" });
       if (uncertainCreate) throw new Error("private provider error");
@@ -217,6 +220,7 @@ async function fixture(t: TestContext) {
     provider,
     publisher,
     creates: () => creates,
+    sandboxRequests: () => sandboxRequests,
     publishes: () => publishes,
     modelCalls: () => modelCalls,
     advance: (ms: number) => {
@@ -243,6 +247,66 @@ async function fixture(t: TestContext) {
     },
   };
 }
+
+test("expanded coding allocations survive assignment, provisioning, status and checkpoint validation", async (t) => {
+  const limits = { ms: 7200000, models: 400, tools: 1000 };
+  const expanded = codingSettings.parse({
+    ...settings,
+    runtime: "python",
+    squad: true,
+    limits,
+  });
+  for (const key of Object.keys(limits) as (keyof typeof limits)[]) {
+    assert.throws(() =>
+      codingSettings.parse({
+        ...expanded,
+        limits: { ...limits, [key]: limits[key] + 1 },
+      }),
+    );
+  }
+  const f = await fixture(t),
+    job = await f.start("expanded", "plan");
+  await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
+    job.id,
+    JSON.stringify(expanded),
+  ]);
+  await f.c.tick();
+  const j = await f.row(job.id);
+  assert.equal(f.sandboxRequests()[0].timeoutMinutes, 125);
+  assert.deepEqual((await f.c.assignment(j)).settings.limits, limits);
+  await f.c.heartbeat(j);
+  const live = await f.row(job.id);
+  assert.equal(
+    new Date(live.attempt_deadline).getTime() -
+      new Date(live.heartbeat_at).getTime(),
+    7200000,
+  );
+  assert.deepEqual((await f.c.status("a", job.id)).limits, limits);
+  assert.deepEqual((await f.c.status("a"))[0].limits, limits);
+  const cp = {
+    ...live.checkpoint,
+    squadState: {
+      sequence: 1,
+      revision: live.revision,
+      attemptId: live.attempt_id,
+      scopeHash: squadScope(live, live.checkpoint.plan),
+      phase: "planning",
+      candidateVersion: 0,
+      candidateHash: "",
+      toolsUsed: 800,
+      checks: [],
+      findings: "",
+    },
+  };
+  await f.c.save(live, cp);
+  assert.equal((await f.c.status("a", job.id)).squad.toolsUsed, 800);
+  await assert.rejects(
+    f.c.save(await f.row(job.id), {
+      ...cp,
+      squadState: { ...cp.squadState, sequence: 2, toolsUsed: 1001 },
+    }),
+  );
+});
 
 test("coding is unavailable by default and discovered through the work tools when enabled", () => {
   const off = runtimeContext({}, null).tools;

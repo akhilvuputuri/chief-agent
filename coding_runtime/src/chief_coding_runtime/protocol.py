@@ -135,7 +135,7 @@ class SquadState(Record):
     phase: Phase
     candidateVersion: Annotated[int, Field(ge=0)] = 0
     candidateHash: str = ""
-    toolsUsed: Annotated[int, Field(ge=0, le=500)] = 0
+    toolsUsed: Annotated[int, Field(ge=0, le=1000)] = 0
     handoff: Handoff | None = None
     checks: list[Check] = Field(default_factory=list, max_length=4)
     review: Review | None = None
@@ -193,9 +193,9 @@ def artifact_hash(checkpoint: Checkpoint) -> str:
 
 
 class Limits(Record):
-    ms: Annotated[int, Field(gt=0, le=3600000)]
-    models: Annotated[int, Field(gt=0, le=200)]
-    tools: Annotated[int, Field(gt=0, le=500)]
+    ms: Annotated[int, Field(gt=0, le=7200000)]
+    models: Annotated[int, Field(gt=0, le=400)]
+    tools: Annotated[int, Field(gt=0, le=1000)]
 
 
 class Settings(Record):

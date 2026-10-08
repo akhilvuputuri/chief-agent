@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
-from .loop import Assign, Budget, DispatchRejected, coding_loop
+from .loop import AllocationExhausted, Assign, Budget, DispatchRejected, coding_loop
 from .model import WorkerClient
 from .protocol import (
     Assignment,
@@ -64,7 +64,9 @@ class Squad:
         self.client, self.a, self.stop, self.checkout = client, a, stop, checkout
         self.instructions, self.review_instructions = instructions, review_instructions
         self.budget = Budget(
-            max(0, a.settings.limits.models - a.usedModels), a.settings.limits.tools
+            max(0, a.settings.limits.models - a.usedModels),
+            a.settings.limits.tools,
+            deadline_seconds(a.deadline),
         )
         self.workspace = Workspace(Path(tempfile.mkdtemp(prefix="chief-squad-")), stop)
         self.saved = a.checkpoint.model_copy(deep=True)
@@ -393,10 +395,14 @@ class Squad:
                     checks=self.state.checks,
                     review=self.state.review,
                 )
-        except Exception:
+        except Exception as error:
             result = Outcome(
                 kind="paused",
-                summary="Squad stopped before verified completion. The last acknowledged checkpoint and handoff are retained; inspect status before explicitly resuming.",
+                summary=(
+                    f"Squad paused: {error}. The last acknowledged checkpoint and handoff are retained; inspect status before explicitly resuming."
+                    if isinstance(error, AllocationExhausted)
+                    else "Squad stopped before verified completion. The last acknowledged checkpoint and handoff are retained; inspect status before explicitly resuming."
+                ),
                 checkpoint=self.saved,
             )
         finally:

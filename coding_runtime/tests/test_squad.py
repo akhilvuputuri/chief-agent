@@ -166,7 +166,7 @@ class SquadTests(unittest.IsolatedAsyncioTestCase):
                         )
                     )
                 elif n in (2, 4):
-                    latest = json.loads(body["messages"][-1]["content"])
+                    latest = json.loads(body["messages"][-2]["content"])
                     result = response(
                         (
                             "assign_reviewer",
@@ -242,9 +242,9 @@ class SquadTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(set(self.roots)), 3)
         self.assertTrue(all(not root.exists() for root in self.roots))
-        # Reviewer begins again with only system/task, never the coder transcript.
-        self.assertEqual(len(self.inputs["reviewer"][0]["messages"]), 2)
-        self.assertEqual(len(self.inputs["reviewer"][2]["messages"]), 2)
+        # Reviewer begins with only its own system/task and allocation hint.
+        self.assertEqual(len(self.inputs["reviewer"][0]["messages"]), 3)
+        self.assertEqual(len(self.inputs["reviewer"][2]["messages"]), 3)
         states = [
             body["squadState"] for path, body in self.requests if path == "checkpoint"
         ]
@@ -333,6 +333,47 @@ class SquadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.inputs["coder"]), 0)
         self.assertGreaterEqual(result["checkpoint"]["squadState"]["toolsUsed"], 99)
 
+    async def test_expanded_planning_assignment_and_clear_allocation_pause(self):
+        self.assignment.mode = "plan"
+        self.assignment.settings.limits.models = 400
+        self.assignment.settings.limits.tools = 1000
+        self.assignment.settings.limits.ms = 7200000
+
+        def model(body):
+            hint = json.loads(body["messages"][-1]["content"])["runtimeAllocation"]
+            self.assertEqual(hint["modelCallsRemainingAfterThisResponse"], 399)
+            return httpx.Response(
+                200,
+                json=response(
+                    report("plan_ready", plan="Complete synthetic requirements")
+                ),
+            )
+
+        result = await self.run_case(model)
+        self.assertEqual(result["kind"], "plan_ready")
+        self.assertEqual(
+            result["checkpoint"]["plan"], "Complete synthetic requirements"
+        )
+        self.assertFalse(self.inputs["coder"] or self.inputs["reviewer"])
+
+    async def test_shared_allocation_failure_reaches_leader_without_replay(self):
+        self.assignment.settings.limits.models = 1
+
+        def model(body):
+            self.assertEqual(body["role"], "leader")
+            return httpx.Response(
+                200,
+                json=response(
+                    ("assign_coder", {"instructions": "Implement the approved scope"})
+                ),
+            )
+
+        result = await self.run_case(model)
+        self.assertEqual(result["kind"], "paused")
+        self.assertIn("model calls allocation exhausted", result["summary"])
+        self.assertEqual(len(self.inputs["leader"]), 1)
+        self.assertFalse(self.inputs["coder"] or self.inputs["reviewer"])
+
     async def test_all_members_share_one_model_and_tool_allocation(self):
         self.assignment.settings.limits.models = 1
 
@@ -375,7 +416,7 @@ class SquadTests(unittest.IsolatedAsyncioTestCase):
         def model(body):
             recovered = json.loads(body["messages"][1]["content"])["recovery"]
             self.assertEqual(recovered["findings"], cp.squadState.findings)
-            self.assertEqual(len(body["messages"]), 2)
+            self.assertEqual(len(body["messages"]), 3)
             return httpx.Response(200, json=response(report("candidate")))
 
         result = await self.run_case(model)
@@ -418,7 +459,7 @@ class SquadTests(unittest.IsolatedAsyncioTestCase):
                 return httpx.Response(
                     200, json=response(("assign_coder", {"instructions": "Implement"}))
                 )
-            latest = json.loads(body["messages"][-1]["content"])
+            latest = json.loads(body["messages"][-2]["content"])
             return httpx.Response(
                 200,
                 json=response(
