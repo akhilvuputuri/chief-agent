@@ -247,6 +247,35 @@ test("cancelled browser startup retires its browser and closes any late anonymou
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(closed, 2);
 });
+test("cancellation interrupts page setup even if closing the context does not settle newPage", async () => {
+  const controller = new AbortController();
+  let closed = 0;
+  let started!: () => void;
+  const setupStarted = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const context = {
+    route: async () => {},
+    routeWebSocket: async () => {},
+    newPage: () => {
+      started();
+      return new Promise(() => {});
+    },
+    close: async () => {
+      closed++;
+    },
+  };
+  const browser = {
+    newContext: async () => context,
+    close: async () => {},
+  } as unknown as Browser;
+  const reading = readPublicPost(browser, post, controller.signal);
+  const rejected = assert.rejects(reading);
+  await setupStarted;
+  controller.abort();
+  await rejected;
+  assert.equal(closed, 1);
+});
 test("resolution is owner-scoped, records provenance and never guesses blocked pages", async () => {
   const f = await fixture();
   try {

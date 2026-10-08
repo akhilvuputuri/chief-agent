@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { chromium } from "playwright-core";
 import { BrowserManager } from "./dist/browser/manager.js";
+const watchdog = setTimeout(() => {
+  console.error("Disposable browser proof exceeded its deadline");
+  process.exit(1);
+}, 90000);
+watchdog.unref();
 const browser = await chromium.launch({
   headless: true,
   chromiumSandbox: true,
@@ -215,4 +220,5 @@ try {
   );
 } finally {
   await browser.close();
+  clearTimeout(watchdog);
 }

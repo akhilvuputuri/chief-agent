@@ -57,7 +57,12 @@ and conflicting metadata. Local Docker export failed with a storage I/O error; s
 Docker state was preserved. The second review of `608cfa9` additionally found discussion intent lost through a
 shortener and context-creation cancellation ignored. The corrected 31 focused tests
 pass, including a stalled startup/late-context regression. Context cleanup failures
-retire the isolated browser process; cancelled launches cannot start page work. Public production browser success remains unverified; the measured block is
+retire the isolated browser process; cancelled launches cannot start page work.
+Actual Chromium smoke then exposed a pending `newPage` promise after cancellation
+and completed context closure; the independent reviewer reproduced it separately.
+All setup/page protocol awaits now race cancellation. A new pending-page regression
+passes, and the disposable smoke has a 90-second watchdog to avoid indefinite CI.
+The previous approval is superseded until this corrected head is re-reviewed. Public production browser success remains unverified; the measured block is
 explicitly retained as a limitation. No live save from this candidate was made.
 
 ## Follow-up

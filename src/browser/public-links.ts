@@ -148,67 +148,81 @@ export async function readPublicPost(
     signal.throwIfAborted();
     let navigations = 0,
       requests = 0;
-    await context.route("**/*", async (route) => {
-      const r = route.request();
-      if (
-        ++requests > 100 ||
-        !publicPostRequest(r.url(), r.method(), r.resourceType()) ||
-        (r.isNavigationRequest() && ++navigations > 5)
-      )
-        return route.abort();
-      return route.fallback();
-    });
-    await context.routeWebSocket("**", (socket) => socket.close());
-    const page = await context.newPage();
+    await publicAbortable(
+      context.route("**/*", async (route) => {
+        const r = route.request();
+        if (
+          signal.aborted ||
+          ++requests > 100 ||
+          !publicPostRequest(r.url(), r.method(), r.resourceType()) ||
+          (r.isNavigationRequest() && ++navigations > 5)
+        )
+          return route.abort();
+        return route.fallback();
+      }),
+      signal,
+    );
+    await publicAbortable(
+      context.routeWebSocket("**", (socket) => socket.close()),
+      signal,
+    );
+    const page = await publicAbortable(context.newPage(), signal);
     page.on("dialog", (d) => void d.dismiss());
     page.on("download", (d) => void d.cancel());
-    await page
-      .goto(url, { waitUntil: "domcontentloaded", timeout: 20000 })
-      .catch(() => {});
+    await publicAbortable(
+      page
+        .goto(url, { waitUntil: "domcontentloaded", timeout: 20000 })
+        .catch(() => {}),
+      signal,
+    );
     signal.throwIfAborted();
-    await page
-      .waitForSelector("shreddit-post", { timeout: 5000 })
-      .catch(() => {});
+    await publicAbortable(
+      page.waitForSelector("shreddit-post", { timeout: 5000 }).catch(() => {}),
+      signal,
+    );
     signal.throwIfAborted();
     const final = new URL(publicPostUrl(page.url()));
     const expected =
       /\/comments\/([a-z0-9]+)/i.exec(final.pathname)?.[1]?.toLowerCase() ??
       (final.hostname === "redd.it" ? final.pathname.slice(1) : undefined);
     if (!expected) return result;
-    const evidence = await Promise.race([
-      page.evaluate((id) => {
-        const posts = [...document.querySelectorAll("shreddit-post")];
-        const matching = posts.filter(
-          (p) =>
-            p.getAttribute("id") === "t3_" + id ||
-            p.getAttribute("thingid") === "t3_" + id,
-        );
-        if (matching.length !== 1) return null;
-        const post = matching[0]!;
-        if (
-          [post.getAttribute("id"), post.getAttribute("thingid")].some(
-            (v) => v && v !== "t3_" + id,
+    const evidence = await publicAbortable(
+      Promise.race([
+        page.evaluate((id) => {
+          const posts = [...document.querySelectorAll("shreddit-post")];
+          const matching = posts.filter(
+            (p) =>
+              p.getAttribute("id") === "t3_" + id ||
+              p.getAttribute("thingid") === "t3_" + id,
+          );
+          if (matching.length !== 1) return null;
+          const post = matching[0]!;
+          if (
+            [post.getAttribute("id"), post.getAttribute("thingid")].some(
+              (v) => v && v !== "t3_" + id,
+            )
           )
-        )
-          return null;
-        const href = post.getAttribute("content-href");
-        const outbound = href
-          ? [href]
-          : [
-              ...post.querySelectorAll(
-                'a[slot="post-media-container"],a[slot="full-post-link"],a[slot="post-link"]',
-              ),
-            ]
-              .map((a) => (a as HTMLAnchorElement).href)
-              .slice(0, 6);
-        return {
-          postId: id,
-          outbound,
-          self: post.getAttribute("post-type") === "text",
-        };
-      }, expected),
-      delay(2000, null),
-    ]);
+            return null;
+          const href = post.getAttribute("content-href");
+          const outbound = href
+            ? [href]
+            : [
+                ...post.querySelectorAll(
+                  'a[slot="post-media-container"],a[slot="full-post-link"],a[slot="post-link"]',
+                ),
+              ]
+                .map((a) => (a as HTMLAnchorElement).href)
+                .slice(0, 6);
+          return {
+            postId: id,
+            outbound,
+            self: post.getAttribute("post-type") === "text",
+          };
+        }, expected),
+        delay(2000, null),
+      ]),
+      signal,
+    );
     signal.throwIfAborted();
     if (evidence) return { ...evidence, pageUrl: final.href, blocked: false };
     return result;
