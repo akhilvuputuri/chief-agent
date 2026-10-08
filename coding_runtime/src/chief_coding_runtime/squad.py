@@ -21,7 +21,7 @@ from .loop import (
     coding_loop,
 )
 from .memory import ContextRecoveryError, LoopStalled
-from .model import GatewayError, WorkerClient
+from .model import GatewayError, InvalidGeneration, WorkerClient
 from .protocol import (
     Assignment,
     Check,
@@ -36,6 +36,7 @@ from .protocol import (
     SquadState,
     artifact_hash,
     deadline_seconds,
+    text_clip,
     wire_json,
 )
 from .workspace import Workspace
@@ -190,6 +191,7 @@ class Squad:
         )  # Only acknowledged state is recovery authority.
 
     async def milestone(self, summary: str) -> None:
+        summary = text_clip(summary, 2000)
         if (
             summary == self.last_milestone_text
             or time.monotonic() - self.last_milestone < 60
@@ -204,7 +206,7 @@ class Squad:
             if self.state.phase == "reviewing"
             else "implementing"
         )
-        await self.progress(stage, summary[:2000])
+        await self.progress(stage, summary)
 
     async def progress(self, stage: str, summary: str) -> None:
         await self.client.request(
@@ -488,6 +490,7 @@ class Squad:
                             ContextRecoveryError,
                             LoopStalled,
                             GatewayError,
+                            InvalidGeneration,
                         ),
                     )
                     else "Squad stopped before verified completion. The last acknowledged checkpoint and handoff are retained; inspect status before explicitly resuming."

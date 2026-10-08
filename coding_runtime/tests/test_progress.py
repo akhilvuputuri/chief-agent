@@ -11,9 +11,9 @@ from test_runtime import ScriptedModel, generation, report
 
 from chief_coding_runtime import inspection
 from chief_coding_runtime.loop import Budget, SquadExecutionError, coding_loop
-from chief_coding_runtime.memory import LoopStalled
-from chief_coding_runtime.model import GatewayError
-from chief_coding_runtime.protocol import LoopMemory, Notebook
+from chief_coding_runtime.memory import LoopStalled, observe
+from chief_coding_runtime.model import GatewayError, InvalidGeneration
+from chief_coding_runtime.protocol import LoopMemory, Notebook, text_clip, utf16_length
 from chief_coding_runtime.workspace import Workspace
 
 
@@ -182,6 +182,70 @@ class ProgressTests(unittest.IsolatedAsyncioTestCase):
             await self.run_loop(model, runtime_checkpoint=rejected)
         self.assertEqual(self.messages, before)
 
+    async def test_nudge_cannot_discard_a_large_pending_reasoning_tool_group(self):
+        for _ in range(4):
+            observe(
+                self.memory,
+                "file_read",
+                {"path": "src/fixture.ts"},
+                {"fingerprint": "a" * 64, "start": 0, "end": 10, "unit": "characters"},
+            )
+        latest = generation(
+            ("file_read", {"path": "src/fixture.ts"}),
+            reasoning=[{"type": "reasoning.encrypted", "data": "x" * 90000}],
+        )["message"]
+        result = {
+            "role": "tool",
+            "tool_call_id": latest["tool_calls"][0]["id"],
+            "content": "Current undelivered observation",
+        }
+        self.messages += [
+            {"role": "assistant", "content": "old evidence " + "o" * 16000},
+            latest,
+            result,
+        ]
+        model = ScriptedModel(
+            generation(
+                (
+                    "notes_update",
+                    {
+                        "subtask": "Prepare report",
+                        "findings": "Important evidence",
+                        "nextAction": "Finish",
+                    },
+                )
+            ),
+            generation(report("plan_ready", plan="Complete synthetic brief")),
+        )
+        await self.run_loop(model)
+        self.assertEqual(self.memory.nudges, 1)
+        self.assertIn(latest, model.inputs[-1])
+        self.assertIn(result, model.inputs[-1])
+
+    async def test_invalid_wire_batch_never_executes_its_valid_first_write(self):
+        invalid = generation(
+            ("file_write", {"path": "first.txt", "content": "Must not execute"}),
+            ("file_write", {"path": "second.txt", "content": "invalid"}),
+        )
+        invalid["message"]["tool_calls"][1]["function"]["arguments"] = (
+            '{"path":"second.txt"'
+        )
+        model = ScriptedModel(invalid)
+        with self.assertRaises(InvalidGeneration):
+            await coding_loop(
+                model=model,
+                workspace=self.w,
+                messages=self.messages,
+                mode="implement",
+                budget=self.budget,
+                stop=self.stop,
+                checkpoint=self.checkpoint,
+                memory=self.memory,
+                runtime_checkpoint=self.checkpoint,
+            )
+        self.assertFalse((self.w.root / "first.txt").exists())
+        self.assertFalse((self.w.root / "second.txt").exists())
+
     async def test_repeated_reads_receive_nudge_reset_then_specific_pause(self):
         class RepeatingModel:
             async def generate(inner, messages, tools):
@@ -282,7 +346,21 @@ class ProgressTests(unittest.IsolatedAsyncioTestCase):
         )
 
     def test_notebook_unicode_and_unknown_fields_remain_bounded(self):
+        clipped = text_clip("😀" * 500 + ". Next: " + "😀" * 500, 2000)
+        self.assertLessEqual(utf16_length(clipped), 2000)
+        clipped.encode("utf-16-le", errors="strict")
         with self.assertRaises(ValueError):
             Notebook(findings="😀" * 3001)
         with self.assertRaises(ValueError):
             Notebook.model_validate({"approvedScope": "different task"})
+
+    def test_equivalent_read_forms_and_argument_orders_are_not_new_evidence(self):
+        result = {"fingerprint": "a" * 64, "start": 0, "end": 46, "unit": "characters"}
+        for arguments in (
+            {"path": "src/fixture.ts"},
+            {"offset": 0, "path": "src/fixture.ts"},
+            {"path": "src/fixture.ts", "startLine": 1, "endLine": 10},
+        ):
+            observe(self.memory, "file_read", arguments, result)
+        self.assertEqual(len(self.memory.receipts), 1)
+        self.assertEqual(self.memory.repeatStreak, 2)

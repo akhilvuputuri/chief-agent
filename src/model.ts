@@ -156,9 +156,16 @@ export class OpenRouter implements ModelAdapter {
       if (error instanceof StreamFailure)
         throw new ModelError(
           "Model stream failed",
-          error.code !== "malformed",
+          error.code === "disconnected" ||
+            (error.code === "provider" &&
+              (error.providerTransient ||
+                error.httpStatus === 429 ||
+                (error.httpStatus !== undefined &&
+                  error.httpStatus >= 500 &&
+                  error.httpStatus <= 599))),
           {
             failureCode: error.code,
+            ...(error.finishReason ? { finishReason: error.finishReason } : {}),
             ...(error.httpStatus ? { httpStatus: error.httpStatus } : {}),
           },
         );

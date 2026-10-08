@@ -33,6 +33,15 @@ def text_bound(value: str, maximum: int) -> str:
     return value
 
 
+def text_clip(value: str, maximum: int) -> str:
+    units = 0
+    for index, char in enumerate(value):
+        units += 2 if ord(char) > 0xFFFF else 1
+        if units > maximum:
+            return value[:index]
+    return value
+
+
 class Record(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 

@@ -3,6 +3,7 @@ export type CodingFailureCode =
   | "model_disconnected"
   | "model_rate_limited"
   | "model_transient_failure"
+  | "model_incomplete"
   | "model_cancelled"
   | "model_provider_failed";
 /** Only fixed categories and bounded structural metadata cross the worker boundary. */
@@ -14,6 +15,8 @@ export class CodingModelFailure extends Error {
       callId: string;
       timeoutKind?: "first_output" | "idle" | "total";
       responseId?: string;
+      finishReason?: "length" | "content_filter";
+      providerStatus?: number;
     },
   ) {
     super(

@@ -385,6 +385,15 @@ class Budget:
     deadline: float | None = None
 
 
+def latest_group_start(messages: list[Json]) -> int:
+    # Runtime hints may follow the result. They never make a not-yet-delivered
+    # assistant/reasoning/tool group disposable.
+    for index in range(len(messages) - 1, 1, -1):
+        if messages[index].get("role") == "assistant":
+            return index
+    return len(messages) - 1
+
+
 def compact(
     messages: list[Json],
     tools: list[Json],
@@ -413,7 +422,7 @@ def compact(
                 end += 1
         else:
             end += 1
-        if end >= len(messages):
+        if end >= len(messages) or end > latest_group_start(messages):
             raise ValueError(
                 "Current call group exceeds model envelope; no reasoning may be altered"
             )
@@ -530,12 +539,23 @@ async def coding_loop(
         memory.toolsUsed += 1
         await save_memory()  # Acknowledged replacement precedes any deletion.
         if reset:
-            start = len(messages) - 1
-            while start > 2 and messages[start].get("role") == "tool":
-                start -= 1
+            start = latest_group_start(messages)
             messages[:] = [*messages[:2], *messages[max(2, start) :]]
         else:
-            compact(messages, tools, maximum=80000, message_limit=60)
+            try:
+                compact(messages, tools, maximum=80000, message_limit=60)
+            except ValueError as error:
+                # The 80 KB target is soft; the pending group may be larger.
+                # Keep it byte-exact if the next request still fits the hard wire
+                # bound, otherwise pause instead of silently dropping it.
+                if (
+                    len(messages) + 2 > 120
+                    or wire_size({"messages": messages, "tools": tools})
+                    + wire_size(memory_context(memory))
+                    + 2000
+                    > 170000
+                ):
+                    raise ContextRecoveryError() from error
 
     plan_read_until = 0
     consecutive_model_failures = 0

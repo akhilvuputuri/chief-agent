@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import UTC, datetime
 from typing import Any
 
@@ -40,13 +41,19 @@ def observe(memory: LoopMemory, name: str, arguments: Json, result: Any) -> None
     data = result if isinstance(result, dict) else {}
     identity: Json = {"tool": name, "arguments": arguments}
     if data.get("fingerprint"):
+        # Equivalent line/character forms are the same delivered evidence.
+        identity = {"tool": name, "path": arguments.get("path")}
         identity["fingerprint"] = data["fingerprint"]
         identity["start"] = data.get("start")
         identity["end"] = data.get("end")
     else:
         # Only hashes are retained, never raw command/log/source output.
         identity["resultHash"] = hashlib.sha256(wire_json(result).encode()).hexdigest()
-    key = hashlib.sha256(wire_json(identity).encode()).hexdigest()
+    key = hashlib.sha256(
+        json.dumps(
+            identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
     repeated = any(r.key == key for r in memory.receipts)
     memory.recent = [*memory.recent, key][-16:]
     if repeated:

@@ -133,6 +133,89 @@ test("partial tool streams, provider errors and post-terminal mutation never ret
     );
 });
 
+test("truncated or malformed tool batches never expose a complete first write", async () => {
+  const calls = [
+    {
+      index: 0,
+      id: "first",
+      type: "function",
+      function: {
+        name: "file_write",
+        arguments: '{"path":"first.txt","content":"must not execute"}',
+      },
+    },
+    {
+      index: 1,
+      id: "second",
+      type: "function",
+      function: { name: "file_write", arguments: '{"path":"second.txt"' },
+    },
+  ];
+  for (const finish of ["length", "stop", "content_filter"])
+    await assert.rejects(
+      readGenerationStream(
+        response([
+          frame(chunk({ tool_calls: calls }, finish)),
+          frame("[DONE]"),
+        ]),
+        new AbortController().signal,
+      ),
+      StreamFailure,
+    );
+});
+
+test("streamed authentication and request errors are not transient; rate limits and provider outages are", async () => {
+  for (const [code, transient] of [
+    [400, false],
+    [401, false],
+    [403, false],
+    [429, true],
+    [502, true],
+  ] as const) {
+    const adapter = new OpenRouter(
+      "fixture-key",
+      "fixture/model",
+      2,
+      10,
+      async () =>
+        response([
+          frame({ error: { code, message: "private upstream message" } }),
+        ]),
+    );
+    await assert.rejects(
+      adapter.generate({
+        messages: [],
+        tools: [],
+        reasoning: "high",
+        signal: new AbortController().signal,
+        stream: true,
+      }),
+      (error: any) =>
+        error instanceof ModelError &&
+        error.transient === transient &&
+        error.diagnostics.httpStatus === code &&
+        !error.message.includes("private upstream"),
+    );
+  }
+  const serverError = new OpenRouter(
+    "fixture-key",
+    "fixture/model",
+    2,
+    10,
+    async () => response([frame({ error: { code: "server_error" } })]),
+  );
+  await assert.rejects(
+    serverError.generate({
+      messages: [],
+      tools: [],
+      reasoning: "high",
+      signal: new AbortController().signal,
+      stream: true,
+    }),
+    (error: any) => error instanceof ModelError && error.transient,
+  );
+});
+
 test("stream cancellation interrupts a pending read and produces no tool result", async () => {
   const controller = new AbortController();
   const source = new ReadableStream({

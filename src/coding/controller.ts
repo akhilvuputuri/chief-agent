@@ -308,6 +308,8 @@ export class CodingController {
       callId?: string;
       timeoutKind?: "first_output" | "idle" | "total";
       responseId?: string;
+      finishReason?: "length" | "content_filter";
+      providerStatus?: number;
     },
   ) {
     opsLog("coding.request_rejected", "warn", {
@@ -952,17 +954,19 @@ export class CodingController {
           if (total.aborted) timeoutKind = "total";
         } else if (enhanced && error instanceof ModelError) {
           code =
-            error.diagnostics.httpStatus === 429
-              ? "model_rate_limited"
-              : ["transport", "disconnected"].includes(
-                    String(error.diagnostics.failureCode),
-                  )
-                ? "model_disconnected"
-                : error.transient &&
-                    (Number(error.diagnostics.httpStatus) >= 500 ||
-                      error.diagnostics.failureCode === "provider")
-                  ? "model_transient_failure"
-                  : "model_provider_failed";
+            error.diagnostics.failureCode === "incomplete"
+              ? "model_incomplete"
+              : error.diagnostics.httpStatus === 429
+                ? "model_rate_limited"
+                : ["transport", "disconnected"].includes(
+                      String(error.diagnostics.failureCode),
+                    )
+                  ? "model_disconnected"
+                  : error.transient &&
+                      (Number(error.diagnostics.httpStatus) >= 500 ||
+                        error.diagnostics.failureCode === "provider")
+                    ? "model_transient_failure"
+                    : "model_provider_failed";
         }
         if (code)
           throw new CodingModelFailure(code, {
@@ -970,6 +974,24 @@ export class CodingController {
             callId: input.callId,
             ...(code === "model_timeout" ? { timeoutKind } : {}),
             ...(responseId ? { responseId } : {}),
+            ...(error instanceof ModelError &&
+            Number.isInteger(error.diagnostics.httpStatus) &&
+            Number(error.diagnostics.httpStatus) >= 400 &&
+            Number(error.diagnostics.httpStatus) <= 599
+              ? { providerStatus: Number(error.diagnostics.httpStatus) }
+              : {}),
+            ...(["length", "content_filter"].includes(
+              String(
+                error instanceof ModelError
+                  ? error.diagnostics.finishReason
+                  : "",
+              ),
+            )
+              ? {
+                  finishReason: (error as ModelError).diagnostics
+                    .finishReason as "length" | "content_filter",
+                }
+              : {}),
           });
       }
       throw error;

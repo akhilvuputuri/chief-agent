@@ -1,8 +1,10 @@
 /** Assemble an entire generation before exposing any tool action to the worker. */
 export class StreamFailure extends Error {
   constructor(
-    readonly code: "disconnected" | "malformed" | "provider",
+    readonly code: "disconnected" | "malformed" | "provider" | "incomplete",
     readonly httpStatus?: number,
+    readonly finishReason?: "length" | "content_filter",
+    readonly providerTransient = false,
   ) {
     super("Model stream did not complete");
   }
@@ -83,7 +85,13 @@ export async function readGenerationStream(
     if (chunk?.error)
       throw new StreamFailure(
         "provider",
-        Number.isInteger(chunk.error.code) ? chunk.error.code : undefined,
+        Number.isInteger(chunk.error.code)
+          ? chunk.error.code
+          : /^\d{3}$/.test(String(chunk.error.code))
+            ? Number(chunk.error.code)
+            : undefined,
+        undefined,
+        chunk.error.code === "server_error",
       );
     if (!chunk || typeof chunk !== "object")
       throw new StreamFailure("malformed");
@@ -190,6 +198,35 @@ export async function readGenerationStream(
     if (signal.aborted) throw signal.reason;
     if (!done || !finish || finish === "error")
       throw new StreamFailure("disconnected");
+    if (finish === "length" || finish === "content_filter")
+      throw new StreamFailure("incomplete", undefined, finish);
+    if (!["stop", "tool_calls"].includes(finish))
+      throw new StreamFailure("malformed");
+    for (const call of calls.values()) {
+      if (
+        typeof call.id !== "string" ||
+        !call.id ||
+        call.id.length > 200 ||
+        !call.function.name ||
+        call.function.name.length > 100 ||
+        call.function.arguments.length > 180000
+      )
+        throw new StreamFailure("malformed");
+      let argumentsValue: unknown;
+      try {
+        argumentsValue = JSON.parse(call.function.arguments);
+      } catch {
+        throw new StreamFailure("malformed");
+      }
+      if (
+        !argumentsValue ||
+        typeof argumentsValue !== "object" ||
+        Array.isArray(argumentsValue)
+      )
+        throw new StreamFailure("malformed");
+    }
+    if (new Set([...calls.values()].map((call) => call.id)).size !== calls.size)
+      throw new StreamFailure("malformed");
     if (calls.size)
       message.tool_calls = [...calls.entries()]
         .sort(([a], [b]) => a - b)

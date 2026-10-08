@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import json
 import time
 from typing import Any, Literal, Protocol
 from uuid import uuid4
@@ -48,6 +49,7 @@ class GatewayError(RuntimeError):
             "model_disconnected",
             "model_rate_limited",
             "model_transient_failure",
+            "model_incomplete",
             "model_context_limit",
             "model_cancelled",
         }
@@ -63,6 +65,13 @@ class GatewayError(RuntimeError):
             "model_rate_limited",
             "model_transient_failure",
         }
+
+
+class InvalidGeneration(ValueError):
+    def __init__(self) -> None:
+        super().__init__(
+            "Model generation had an incomplete or invalid wire tool batch; no tools from it were executed"
+        )
 
 
 class WorkerClient:
@@ -216,6 +225,8 @@ class OpenRouter:
         if not isinstance(choices[0], dict):
             raise ValueError("Model provider returned invalid choices")
         message = choices[0].get("message")
+        if choices[0].get("finish_reason") in ("length", "content_filter"):
+            raise InvalidGeneration()
         return validate_generation(
             {
                 "message": message,
@@ -252,4 +263,16 @@ def validate_generation(value: Json) -> Json:
         ):
             raise ValueError("Invalid or duplicate model tool call")
         ids.add(call["id"])
+        if (
+            len(call["id"]) > 200
+            or len(call["function"]["name"]) > 100
+            or len(call["function"]["arguments"]) > 180000
+        ):
+            raise InvalidGeneration()
+        try:
+            arguments = json.loads(call["function"]["arguments"])
+        except (ValueError, TypeError) as error:
+            raise InvalidGeneration() from error
+        if not isinstance(arguments, dict) or "operation" in arguments:
+            raise InvalidGeneration()
     return copy.deepcopy(value)
