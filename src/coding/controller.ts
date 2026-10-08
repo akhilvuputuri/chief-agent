@@ -37,6 +37,9 @@ import type { SandboxProvider } from "./provider.js";
 import { scrubTrace } from "../trace-scrub.js";
 import { seal, open } from "../secret-box.js";
 import { opsLog } from "../ops-log.js";
+import { ModelError } from "../model.js";
+import { CodingModelFailure, type CodingFailureCode } from "./model-failure.js";
+import { runtimeMemory } from "./memory-schema.js";
 
 const active = ["provisioning", "running"];
 const hash = (v: unknown) =>
@@ -190,10 +193,40 @@ export class CodingController {
     if (!this.allowed(user)) throw new Error("Coding owner unavailable");
     const rows = (
       await this.db.query(
-        `SELECT id,revision,objective,mode,state,stage,summary,question,base_sha,pr_url,head_sha,cleanup,publication_started,used_models,settings->'limits' AS limits,updated_at FROM coding_jobs WHERE user_id=$1 ${id ? "AND id=$2" : ""} ORDER BY created_at DESC LIMIT 20`,
+        `SELECT id,revision,objective,mode,state,stage,summary,question,base_sha,pr_url,head_sha,cleanup,publication_started,used_models,settings->'limits' AS limits,updated_at,checkpoint->'runtimeMemory' AS runtime_memory,checkpoint->'squadState'->>'phase' AS runtime_phase,(SELECT max(created_at) FROM coding_events e WHERE e.job_id=coding_jobs.id AND e.payload->>'kind' IN ('squad_handoff','checkpoint')) AS checkpoint_at FROM coding_jobs WHERE user_id=$1 ${id ? "AND id=$2" : ""} ORDER BY created_at DESC LIMIT 20`,
         id ? [user, id] : [user],
       )
     ).rows;
+    for (const row of rows) {
+      const parsed = runtimeMemory.safeParse(row.runtime_memory);
+      if (parsed.success) {
+        const member =
+          row.runtime_phase === "coding"
+            ? "coder"
+            : row.runtime_phase === "reviewing"
+              ? "reviewer"
+              : "leader";
+        const memory = parsed.data[member];
+        row.runtime = memory
+          ? {
+              member,
+              checkpointAt: row.checkpoint_at,
+              lastProgressAt: memory.lastProgressAt,
+              workerModelCalls: memory.modelCalls,
+              workerToolsUsed: memory.toolsUsed,
+              compactions: memory.compactions,
+              nudges: memory.nudges,
+              resets: memory.resets,
+              notebook: memory.notes,
+              evidenceCount: memory.receipts.length,
+              notice:
+                "Worker-reported observations, not verified completion. used_models is the host-admitted shared counter; notebook claims do not satisfy checks or review.",
+            }
+          : { member, checkpointAt: row.checkpoint_at };
+      }
+      delete row.runtime_memory;
+      delete row.runtime_phase;
+    }
     if (id && !rows.length) throw new Error("Coding job unavailable");
     if (!id) return rows;
     const job = rows[0];
@@ -212,9 +245,23 @@ export class CodingController {
         [id, `${stored.attempt_id}:request-rejected:%`],
       )
     ).rows[0];
+    const modelProgress = (
+      await this.db.query(
+        `SELECT payload,created_at FROM coding_events WHERE job_id=$1 AND event_key LIKE $2 AND payload->>'kind'='model_progress' ORDER BY created_at DESC,id DESC LIMIT 1`,
+        [id, `${stored.attempt_id}:model-progress:%`],
+      )
+    ).rows[0];
     return {
       ...job,
       plan: stored.checkpoint.plan,
+      ...(modelProgress
+        ? {
+            modelProgress: {
+              ...modelProgress.payload,
+              at: modelProgress.created_at,
+            },
+          }
+        : {}),
       ...(rejection
         ? { lastFailure: { ...rejection.payload, at: rejection.created_at } }
         : {}),
@@ -254,8 +301,15 @@ export class CodingController {
         | "invalid_worker_payload"
         | "model_provider_failed"
         | "worker_request_rejected"
-        | "model_context_limit";
+        | "model_context_limit"
+        | CodingFailureCode;
       httpStatus: 409 | 413;
+      elapsedMs?: number;
+      callId?: string;
+      timeoutKind?: "first_output" | "idle" | "total";
+      responseId?: string;
+      finishReason?: "length" | "content_filter";
+      providerStatus?: number;
     },
   ) {
     opsLog("coding.request_rejected", "warn", {
@@ -731,6 +785,29 @@ export class CodingController {
       controller: cancellation,
     });
     let admitted = false;
+    let received = false;
+    const started = Date.now();
+    const enhanced = job.settings.harnessVersion === 2;
+    const total = AbortSignal.timeout(
+      Math.max(
+        1,
+        Math.min(
+          enhanced ? 300000 : 120000,
+          new Date(job.attempt_deadline).getTime() - this.clock().getTime(),
+        ),
+      ),
+    );
+    const idle = new AbortController();
+    let timeoutKind: "first_output" | "idle" | "total" = "first_output";
+    let responseId: string | undefined;
+    let progressSavedAt = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const arm = (ms: number) => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => idle.abort(), ms);
+      timer.unref();
+    };
+    if (enhanced) arm(120000);
     try {
       const claimed = await this.db.query(
         `WITH claimed AS (UPDATE coding_jobs SET used_models=used_models+1,model_busy=true WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') AND NOT model_busy AND used_models<$3 AND attempt_deadline>$4 RETURNING id)
@@ -783,21 +860,60 @@ export class CodingController {
         messages: input.messages,
         tools: input.tools,
         reasoning: job.settings.effort,
-        signal: AbortSignal.any([
-          cancellation.signal,
-          AbortSignal.timeout(
-            Math.max(
-              1,
-              Math.min(
-                120000,
-                new Date(job.attempt_deadline).getTime() -
-                  this.clock().getTime(),
-              ),
-            ),
-          ),
-        ]),
+        signal: AbortSignal.any([cancellation.signal, total, idle.signal]),
+        ...(enhanced
+          ? {
+              stream: true,
+              onProgress: async (value: {
+                responseId?: string;
+                provider?: string;
+                bytes: number;
+              }) => {
+                if (
+                  received ||
+                  cancellation.signal.aborted ||
+                  total.aborted ||
+                  idle.signal.aborted
+                )
+                  return;
+                timeoutKind = "idle";
+                responseId = value.responseId?.slice(0, 160);
+                arm(90000);
+                if (Date.now() - progressSavedAt < 10000) return;
+                progressSavedAt = Date.now();
+                const telemetryWrite = this.db.query(
+                  `INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,$3,$4::jsonb,'suppressed' FROM coding_jobs WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running')`,
+                  [
+                    job.id,
+                    job.attempt_id,
+                    `${job.attempt_id}:model-progress:${randomUUID()}`,
+                    JSON.stringify({
+                      kind: "model_progress",
+                      role: input.role,
+                      callId: input.callId,
+                      responseId,
+                      provider: value.provider?.slice(0, 100),
+                      elapsedMs: Date.now() - started,
+                      receivedBytes: value.bytes,
+                    }),
+                  ],
+                );
+                // Optional telemetry must not hold the stream reader indefinitely.
+                let telemetryTimer: ReturnType<typeof setTimeout> | undefined;
+                await Promise.race([
+                  telemetryWrite.catch(() => {}),
+                  new Promise<void>((resolve) => {
+                    telemetryTimer = setTimeout(resolve, 1000);
+                    telemetryTimer.unref();
+                  }),
+                ]);
+                if (telemetryTimer) clearTimeout(telemetryTimer);
+              },
+            }
+          : {}),
         cacheKey: `coding:${job.id}:${job.revision}:${input.role}`,
       });
+      received = true;
       await this.db.query(
         "UPDATE coding_model_calls SET state='complete',result=$2::jsonb,result_box=$3 WHERE id=$1",
         [
@@ -830,8 +946,57 @@ export class CodingController {
         "UPDATE coding_model_calls SET state='uncertain' WHERE id=$1 AND state='pending'",
         [input.callId],
       );
+      if (admitted && !received) {
+        let code: CodingFailureCode | undefined;
+        if (cancellation.signal.aborted) code = "model_cancelled";
+        else if (total.aborted || idle.signal.aborted) {
+          code = "model_timeout";
+          if (total.aborted) timeoutKind = "total";
+        } else if (enhanced && error instanceof ModelError) {
+          code =
+            error.diagnostics.failureCode === "incomplete"
+              ? "model_incomplete"
+              : error.diagnostics.httpStatus === 429
+                ? "model_rate_limited"
+                : ["transport", "disconnected"].includes(
+                      String(error.diagnostics.failureCode),
+                    )
+                  ? "model_disconnected"
+                  : error.transient &&
+                      (Number(error.diagnostics.httpStatus) >= 500 ||
+                        error.diagnostics.failureCode === "provider")
+                    ? "model_transient_failure"
+                    : "model_provider_failed";
+        }
+        if (code)
+          throw new CodingModelFailure(code, {
+            elapsedMs: Date.now() - started,
+            callId: input.callId,
+            ...(code === "model_timeout" ? { timeoutKind } : {}),
+            ...(responseId ? { responseId } : {}),
+            ...(error instanceof ModelError &&
+            Number.isInteger(error.diagnostics.httpStatus) &&
+            Number(error.diagnostics.httpStatus) >= 400 &&
+            Number(error.diagnostics.httpStatus) <= 599
+              ? { providerStatus: Number(error.diagnostics.httpStatus) }
+              : {}),
+            ...(["length", "content_filter"].includes(
+              String(
+                error instanceof ModelError
+                  ? error.diagnostics.finishReason
+                  : "",
+              ),
+            )
+              ? {
+                  finishReason: (error as ModelError).diagnostics
+                    .finishReason as "length" | "content_filter",
+                }
+              : {}),
+          });
+      }
       throw error;
     } finally {
+      if (timer) clearTimeout(timer);
       this.inFlightModels.delete(input.callId);
       if (admitted)
         await this.db.query(

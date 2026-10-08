@@ -1,4 +1,5 @@
 import { squadState } from "./squad-schema.js";
+import { runtimeMemory } from "./memory-schema.js";
 import { z } from "zod";
 
 const id = z.string().uuid();
@@ -65,6 +66,7 @@ export const checkpoint = z
     patch: z.string().max(500000).default(""),
     summary: z.string().max(4000).default(""),
     squadState: squadState.optional(),
+    runtimeMemory: runtimeMemory.optional(),
     files: z
       .array(
         z
@@ -138,6 +140,7 @@ export const codingSettings = z
     squad: z.boolean().optional(),
     autoMerge: z.boolean().optional(),
     runtime: z.enum(["node", "python"]).optional(),
+    harnessVersion: z.literal(2).optional(),
     effort: z.enum(["low", "medium", "high"]),
     limits: z
       .object({
@@ -147,7 +150,17 @@ export const codingSettings = z
       })
       .strict(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (
+      value.harnessVersion === 2 &&
+      (value.runtime !== "python" || value.squad !== true)
+    )
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Working-state harness requires the Python squad",
+      });
+  });
 export type CodingSettings = z.infer<typeof codingSettings>;
 
 /** Reserve room for model/tool schema and a complete current call group. */

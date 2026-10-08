@@ -12,20 +12,31 @@ from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
-from .loop import AllocationExhausted, Assign, Budget, DispatchRejected, coding_loop
-from .model import WorkerClient
+from .loop import (
+    AllocationExhausted,
+    Assign,
+    Budget,
+    DispatchRejected,
+    SquadExecutionError,
+    coding_loop,
+)
+from .memory import ContextRecoveryError, LoopStalled
+from .model import GatewayError, InvalidGeneration, WorkerClient
 from .protocol import (
     Assignment,
     Check,
     Checkpoint,
     Handoff,
     Json,
+    LoopMemory,
     Outcome,
     Phase,
     Review,
+    RuntimeMemory,
     SquadState,
     artifact_hash,
     deadline_seconds,
+    text_clip,
     wire_json,
 )
 from .workspace import Workspace
@@ -89,6 +100,38 @@ class Squad:
             candidateVersion=self.recovered.candidateVersion if self.recovered else 0,
             findings=self.recovered.findings if self.recovered else "",
         )
+        self.memory = (
+            (
+                self.saved.runtimeMemory.model_copy(deep=True)
+                if self.saved.runtimeMemory
+                and self.saved.runtimeMemory.scopeHash == scope_hash(a, self.saved.plan)
+                else RuntimeMemory(scopeHash=scope_hash(a, self.saved.plan))
+            )
+            if a.settings.harnessVersion == 2
+            else None
+        )
+        if self.memory is not None:
+            if previous and previous.attemptId != a.attemptId:
+                # Explicit resume starts a fresh context/attempt, preserving only
+                # observations. Old counters or a stalled-loop level cannot cap it.
+                for member in ("leader", "coder", "reviewer"):
+                    old = getattr(self.memory, member)
+                    if old is not None:
+                        setattr(
+                            self.memory,
+                            member,
+                            LoopMemory(
+                                notes=old.notes.model_copy(deep=True),
+                                receipts=[
+                                    r.model_copy(deep=True) for r in old.receipts
+                                ],
+                            ),
+                        )
+            self.memory.leader = self.memory.leader or LoopMemory()
+            self.memory.coder = self.memory.coder or LoopMemory()
+            self.client.model_timeout = 330
+        self.last_milestone = 0.0
+        self.last_milestone_text = ""
         # Contexts never inherit another member's conversation; only typed handoffs.
         self.coder_messages: list[Json] = [
             {"role": "system", "content": instructions},
@@ -112,10 +155,15 @@ class Squad:
         phase: Phase | None = None,
         summary: str | None = None,
         plan: str | None = None,
+        runtime_only: bool = False,
     ) -> None:
-        cp = await self.workspace.snapshot(
-            self.saved.plan if plan is None else plan,
-            self.saved.summary if summary is None else summary,
+        cp = (
+            self.saved.model_copy(deep=True)
+            if runtime_only
+            else await self.workspace.snapshot(
+                self.saved.plan if plan is None else plan,
+                self.saved.summary if summary is None else summary,
+            )
         )
         next_state = self.state.model_copy(deep=True)
         next_state.sequence = (
@@ -133,11 +181,32 @@ class Squad:
             next_state.candidateHash = artifact_hash(cp)
         next_state = SquadState.model_validate(next_state.model_dump())
         cp.squadState = next_state
+        if self.memory is not None:
+            self.memory.scopeHash = scope_hash(self.a, cp.plan)
+            cp.runtimeMemory = self.memory.model_copy(deep=True)
         await self.client.request("checkpoint", cp.wire())
         self.saved, self.state = (
             cp,
             next_state.model_copy(deep=True),
         )  # Only acknowledged state is recovery authority.
+
+    async def milestone(self, summary: str) -> None:
+        summary = text_clip(summary, 2000)
+        if (
+            summary == self.last_milestone_text
+            or time.monotonic() - self.last_milestone < 60
+        ):
+            return
+        self.last_milestone = time.monotonic()
+        self.last_milestone_text = summary
+        stage = (
+            "planning"
+            if self.a.mode == "plan"
+            else "reviewing"
+            if self.state.phase == "reviewing"
+            else "implementing"
+        )
+        await self.progress(stage, summary)
 
     async def progress(self, stage: str, summary: str) -> None:
         await self.client.request(
@@ -218,6 +287,9 @@ class Squad:
                 checkpoint=self.save,
                 plan=lambda: self.saved.plan,
                 summary=lambda: self.saved.summary,
+                memory=self.memory.coder if self.memory else None,
+                runtime_checkpoint=lambda: self.save(runtime_only=True),
+                milestone=self.milestone,
             )
             await self.save(
                 "awaiting_input" if report.kind == "awaiting_input" else "verifying",
@@ -262,6 +334,10 @@ class Squad:
             else:
                 await self.save("verifying")
         else:
+            if self.memory is not None:
+                self.memory.reviewer = (
+                    LoopMemory()
+                )  # New candidate, independent review context.
             await self.save("reviewing")
             await self.progress(
                 "reviewing",
@@ -311,6 +387,9 @@ class Squad:
                     checkpoint=lambda: asyncio.sleep(0),
                     plan=lambda: self.saved.plan,
                     summary=lambda: self.saved.summary,
+                    memory=self.memory.reviewer if self.memory else None,
+                    runtime_checkpoint=lambda: self.save(runtime_only=True),
+                    milestone=self.milestone,
                 )
             finally:
                 reviewer.close()
@@ -370,6 +449,9 @@ class Squad:
                 summary=lambda: self.saved.summary,
                 dispatch=self.dispatch,
                 can_finish=self.can_finish,
+                memory=self.memory.leader if self.memory else None,
+                runtime_checkpoint=lambda: self.save(runtime_only=True),
+                milestone=self.milestone,
             )
             if report.kind == "plan_ready":
                 await self.save("planned", summary=report.summary, plan=report.plan)
@@ -400,7 +482,17 @@ class Squad:
                 kind="paused",
                 summary=(
                     f"Squad paused: {error}. The last acknowledged checkpoint and handoff are retained; inspect status before explicitly resuming."
-                    if isinstance(error, AllocationExhausted)
+                    if isinstance(
+                        error,
+                        (
+                            AllocationExhausted,
+                            SquadExecutionError,
+                            ContextRecoveryError,
+                            LoopStalled,
+                            GatewayError,
+                            InvalidGeneration,
+                        ),
+                    )
                     else "Squad stopped before verified completion. The last acknowledged checkpoint and handoff are retained; inspect status before explicitly resuming."
                 ),
                 checkpoint=self.saved,

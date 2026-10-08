@@ -6,7 +6,7 @@ The production adapter is `ChiefOpenRouter`: it submits OpenRouter-compatible me
 
 ## Development
 
-Use Node 22 for Chief and Python 3.12+ for this package. From the repository root:
+Use Node 22 for Chief, Python 3.12+, Git and ripgrep (`rg`) for this package. Install ripgrep with your platform package manager before the navigation tests. From the repository root:
 
 ```sh
 python3 -m venv .venv
@@ -35,3 +35,7 @@ Python 0.1.2 includes an opt-in leader/coder/reviewer supervisor with separate h
 Python 0.1.3 adds job-scoped `logs_read` and preserves consumed tool allocation during automatic MR feedback recovery. Chief owns feedback, model preferences, publication witnesses and merge/release gates; no GitHub or production credentials enter the package. See [automation](../docs/coding-automation.md).
 
 Python 0.1.4 accepts a two-hour / 400-model / 1,000-tool allocation. Allocation notes are part of each role’s model conversation; the supervisor reports known allocation exhaustion explicitly and read-only command forms are enumerated. The compatible image and larger default must be activated together after publication; existing pinned jobs retain their old allocations. See [journal 70](../docs/journey/70-coding-allocations.md).
+
+## Working state v2
+
+Python 0.1.5 with the reviewed `harnessVersion: 2` selector adds separate durable member notebooks/evidence, targeted grep/glob/line reads, summary-before-trimming, progress-aware loop recovery and bounded fresh model-generation recovery. Chief assembles complete OpenRouter streams before returning tools; it preserves provider reasoning structure and records bounded timeout/progress categories. See [the contract](../docs/coding-progress.md). The selector is activated only after independent image verification; legacy pinned jobs are unchanged.

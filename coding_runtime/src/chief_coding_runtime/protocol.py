@@ -9,7 +9,7 @@ import re
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 PROTOCOL_VERSION = 1
 Json = dict[str, Any]
@@ -30,6 +30,15 @@ def utf16_length(value: str) -> int:
 def text_bound(value: str, maximum: int) -> str:
     if utf16_length(value) > maximum:
         raise ValueError("Text exceeds the wire contract")
+    return value
+
+
+def text_clip(value: str, maximum: int) -> str:
+    units = 0
+    for index, char in enumerate(value):
+        units += 2 if ord(char) > 0xFFFF else 1
+        if units > maximum:
+            return value[:index]
     return value
 
 
@@ -147,12 +156,86 @@ class SquadState(Record):
         return text_bound(value, 8000)
 
 
+class Notebook(Record):
+    subtask: str = ""
+    findings: str = ""
+    nextAction: str = ""
+    questions: str = ""
+
+    @field_validator("subtask", "findings", "nextAction", "questions")
+    @classmethod
+    def bounded_notes(cls, value: str, info: Any) -> str:
+        return text_bound(
+            value,
+            {"subtask": 1000, "findings": 6000, "nextAction": 1000, "questions": 2000}[
+                info.field_name
+            ],
+        )
+
+
+class Receipt(Record):
+    key: str = Field(pattern=r"^[a-f0-9]{64}$")
+    tool: str = Field(max_length=40)
+    path: str | None = Field(default=None, max_length=240)
+    fingerprint: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    start: int | None = Field(default=None, ge=0)
+    end: int | None = Field(default=None, ge=0)
+    unit: Literal["characters", "lines"] | None = None
+
+    @field_validator("path")
+    @classmethod
+    def receipt_path(cls, value: str | None) -> str | None:
+        if value is not None:
+            validate_path(value)
+        return value
+
+
+class LoopMemory(Record):
+    notes: Notebook = Field(default_factory=Notebook)
+    receipts: list[Receipt] = Field(default_factory=list, max_length=80)
+    recent: list[str] = Field(default_factory=list, max_length=16)
+    modelCalls: int = Field(default=0, ge=0, le=400)
+    toolsUsed: int = Field(default=0, ge=0, le=1000)
+    compactions: int = Field(default=0, ge=0, le=400)
+    nudges: int = Field(default=0, ge=0, le=1000)
+    resets: int = Field(default=0, ge=0, le=400)
+    loopLevel: int = Field(default=0, ge=0, le=2)
+    repeatStreak: int = Field(default=0, ge=0, le=1000)
+    lastProgressAt: str | None = None
+
+    @field_validator("recent")
+    @classmethod
+    def recent_hashes(cls, value: list[str]) -> list[str]:
+        if any(not re.fullmatch(r"[a-f0-9]{64}", item) for item in value):
+            raise ValueError("Invalid evidence key")
+        return value
+
+    @field_validator("lastProgressAt")
+    @classmethod
+    def progress_timestamp(cls, value: str | None) -> str | None:
+        if value is not None:
+            from datetime import datetime
+
+            if not value.endswith("Z"):
+                raise ValueError("Progress time must be UTC")
+            datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return value
+
+
+class RuntimeMemory(Record):
+    scopeHash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    leader: LoopMemory | None = None
+    coder: LoopMemory | None = None
+    reviewer: LoopMemory | None = None
+
+
 class Checkpoint(Record):
     plan: str = ""
     patch: str = ""
     summary: str = ""
     files: list[File] = Field(default_factory=list, max_length=100)
     squadState: SquadState | None = None
+    runtimeMemory: RuntimeMemory | None = None
 
     @field_validator("plan", "patch", "summary")
     @classmethod
@@ -176,6 +259,11 @@ class Checkpoint(Record):
             **(
                 {"squadState": self.squadState.model_dump(exclude_none=True)}
                 if self.squadState
+                else {}
+            ),
+            **(
+                {"runtimeMemory": self.runtimeMemory.model_dump(exclude_none=True)}
+                if self.runtimeMemory
                 else {}
             ),
         }
@@ -210,6 +298,13 @@ class Settings(Record):
     effort: Literal["low", "medium", "high"]
     limits: Limits
     runtime: Literal["node", "python"] = "node"
+    harnessVersion: Literal[2] | None = None
+
+    @model_validator(mode="after")
+    def harness_compatibility(self) -> Settings:
+        if self.harnessVersion == 2 and (self.runtime != "python" or not self.squad):
+            raise ValueError("Working-state harness requires the Python squad")
+        return self
 
     @field_validator("repository")
     @classmethod

@@ -565,3 +565,73 @@ class SquadTests(unittest.IsolatedAsyncioTestCase):
             if path == "checkpoint" and body["files"]
         )
         self.assertEqual([file["path"] for file in failed["files"]], ["first.txt"])
+
+    async def test_new_harness_planning_checkpoint_restores_notes_in_a_fresh_attempt(
+        self,
+    ):
+        self.assignment.mode = "plan"
+        self.assignment.settings.harnessVersion = 2
+        self.assignment.checkpoint = Checkpoint()
+        turns = 0
+
+        def model(body):
+            nonlocal turns
+            turns += 1
+            if turns == 1:
+                return httpx.Response(
+                    200, json=response(("file_read", {"path": "package.json"}))
+                )
+            if turns == 2:
+                return httpx.Response(
+                    200,
+                    json=response(
+                        (
+                            "notes_update",
+                            {
+                                "subtask": "Inspect visible checks",
+                                "findings": "package.json contains check, build and format:check scripts",
+                                "nextAction": "Prepare acceptance criteria",
+                            },
+                        )
+                    ),
+                )
+            return httpx.Response(409, json={"code": "invalid_worker_payload"})
+
+        stopped = await self.run_case(model)
+        self.assertEqual(stopped["kind"], "paused")
+        self.assertIn("invalid_worker_payload", stopped["summary"])
+        cp = Checkpoint.model_validate(stopped["checkpoint"])
+        self.assertEqual(
+            cp.runtimeMemory.leader.notes.nextAction, "Prepare acceptance criteria"
+        )
+        self.assertEqual(cp.squadState.toolsUsed, 2)
+        self.assertEqual(cp.runtimeMemory.leader.modelCalls, 3)
+        self.assertEqual(cp.runtimeMemory.leader.toolsUsed, 2)
+        self.assignment.checkpoint = cp
+        self.assignment.attemptId = str(uuid4())
+        self.assignment.revision += 1
+        self.assignment.usedModels = 0
+        self.requests.clear()
+
+        def resumed(body):
+            self.assertTrue(
+                any(
+                    "Prepare acceptance criteria" in (m.get("content") or "")
+                    for m in body["messages"]
+                )
+            )
+            return httpx.Response(
+                200,
+                json=response(
+                    report("plan_ready", plan="Complete synthetic acceptance criteria")
+                ),
+            )
+
+        finished = await self.run_case(resumed)
+        self.assertEqual(finished["kind"], "plan_ready")
+        self.assertEqual(
+            finished["checkpoint"]["runtimeMemory"]["leader"]["modelCalls"], 1
+        )
+        self.assertEqual(
+            finished["checkpoint"]["runtimeMemory"]["leader"]["toolsUsed"], 1
+        )
