@@ -936,19 +936,27 @@ export class CodingController {
       }
       const state = await this.provider.inspect(j.sandbox_id);
       if (active.includes(j.state)) {
-        if (state === "terminal")
+        if (!this.allowed(j.user_id))
+          await this.stopped(j, "Owner access revoked; saved work is retained");
+        else if (
+          new Date(j.attempt_deadline).getTime() <= this.clock().getTime()
+        )
+          await this.stopped(
+            j,
+            "Allocated coding time expired before verified completion; saved work is retained",
+          );
+        else if (state === "terminal")
           await this.stopped(
             j,
             "Sandbox stopped before a result was recorded; saved work is retained",
           );
         else if (
-          !this.allowed(j.user_id) ||
-          new Date(j.attempt_deadline).getTime() <= this.clock().getTime() ||
-          this.clock().getTime() - new Date(j.heartbeat_at).getTime() > 180000
+          this.clock().getTime() - new Date(j.heartbeat_at).getTime() >
+          180000
         )
           await this.stopped(
             j,
-            "Worker allocation expired or heartbeat was lost; saved work is retained",
+            "Worker heartbeat was lost before verified completion; saved work is retained",
           );
         return;
       }

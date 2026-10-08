@@ -426,6 +426,28 @@ test("lost provisioning acknowledgement reconciles one sandbox, cleans up and re
     /scope changed/,
   );
 });
+test("deadline expiry keeps an explicit reason even when the worker exits before reporting", async (t) => {
+  for (const terminal of [false, true]) {
+    await t.test(terminal ? "already exited" : "still running", async (t) => {
+      const f = await fixture(t),
+        job = await f.start("deadline", "plan");
+      await f.c.tick();
+      const j = await f.row(job.id);
+      await f.c.heartbeat(j);
+      if (terminal) await f.provider.terminate(j.sandbox_id);
+      f.advance(settings.limits.ms + 1);
+      await f.c.tick();
+      const stopped = await f.row(job.id);
+      assert.equal(stopped.state, "paused");
+      assert.match(stopped.summary, /Allocated coding time expired/);
+      assert.equal(f.creates(), 1);
+      await assert.rejects(
+        f.c.authenticate(j.id, f.c.token(j.id, j.attempt_id)),
+      );
+    });
+  }
+});
+
 test("heartbeat expiry pauses instead of starting another worker and revokes the old capability", async (t) => {
   const f = await fixture(t),
     job = await f.start();
