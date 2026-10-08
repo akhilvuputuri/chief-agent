@@ -1,3 +1,5 @@
+Coding-agent learning record: [cumulative lessons](journey/coding-agent-lessons.md) connects the released iterations and distinguishes verified mechanisms from unmeasured quality/cost improvements. Future meaningful harness changes update it alongside the detailed journal.
+
 # Coding progress and recovery — released v0.3.51
 
 [v0.3.51](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.51) is verified at `2bc5ea36a11014c2515de171f19d5e1f5471bfe4`. New jobs use the independently verified Python 0.1.5 image and `harnessVersion: 2` for all six progress/recovery improvements. Exact-head foundation/pin reviews, 992-test PR/main checks and container smoke, both exact release receipts and separate production configuration/gateway/Postgres reads passed. Models, effort, price filters and shared allocations are unchanged. Both old jobs remain paused on their original pins; ordinary resume does not upgrade them. No paid/live trajectory acceptance was run. See [journal 71 closure](journey/71-coding-progress-recovery.md#release-closure--8-october-2026).

@@ -27,6 +27,10 @@ What passed or failed, with scope and limitations? What was measured versus mere
 
 After actual verification, record the PR, approved head, merged/deployed SHA, published version/tag if any, successful release workflow and health/diagnostics evidence. Distinguish operator migration/install evidence from an ordinary application release when applicable; link the runbook for procedure and rollback. If unfinished, state the exact pending step instead of writing a release claim. Update the status above and the journal index once evidence closes it; keep earlier review failures and candidate-stage observations dated.
 
+## Coding-harness learning record (when applicable)
+
+Update [coding-agent lessons](coding-agent-lessons.md) in the same PR. What broke or remained ineffective? Which mechanism was changed? What did an independent counterexample reveal? What improvement is supported by evidence, at what baseline/workload/model/configuration, and what remains unmeasured? Include negative/mixed results and the next small test that could disprove the benefit. A deployed change is not automatically a measured improvement.
+
 ## Follow-up and next iteration
 
 Link the next entry when it exists. Record unresolved risks, the next narrow measurement or acceptance check, and intentionally deferred work. Explain what this iteration teaches without claiming outcomes beyond its evidence.

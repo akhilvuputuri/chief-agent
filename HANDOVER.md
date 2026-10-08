@@ -1,3 +1,5 @@
+Coding-harness changes also update the [cumulative learning guide](docs/journey/coding-agent-lessons.md) with evidence, failed approaches, review corrections and the next falsifying test; see the standing journal rule in AGENTS.md.
+
 # Coding progress and recovery released — 8 October 2026
 
 [PR #190](https://github.com/akhilvuputuri/chief-agent/pull/190)/[PR #191](https://github.com/akhilvuputuri/chief-agent/pull/191) shipped the six improvements as [v0.3.51](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.51), verified at `2bc5ea36a11014c2515de171f19d5e1f5471bfe4`. Independent exact-head reviews, hosted full checks, public Python 0.1.5 installed-source verification, exact foundation/activation receipts and separate healthy gateway/Postgres/effective-v2-selector reads passed. Old jobs remain paused on their original images/settings. Model-quality and paid-provider acceptance are unmeasured; request a fresh job to use the new runtime. See [journal closure](docs/journey/71-coding-progress-recovery.md#release-closure--8-october-2026).
