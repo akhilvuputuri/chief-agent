@@ -26,14 +26,14 @@ After exact-head independent review and passing CI, use the reviewed idle operat
 
 [PR #163](https://github.com/akhilvuputuri/chief-agent/pull/163)/[PR #164](https://github.com/akhilvuputuri/chief-agent/pull/164) shipped the fixed Python leader/coder/reviewer squad as [v0.3.38](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.38) at `c0373741b0a0b289e9a245e309940c323ac4ceee`. GPT-6 Astra approved exact implementation/pin heads `52b2e4c`/`8bc9f618`; PR/main Linux CI, reviewed migration 027/operator install, immutable image verification, [exact release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37143007928) and separate health/policy/preservation checks passed. Chief assigns the leader; coder edits and reviewer independently reviews, with changes returned through the leader until exact approval. Separate contexts, restricted tools, typed durable handoffs and owner confirmation preserve authority; shared allocations/price filters are unchanged. OpenRouter uses DeepSeek V4.1 Flash for leader/coder and GPT-6.1 Sol for reviewer. Coding remains off with zero jobs; scoped provider/App/ingress activation and paid/live acceptance remain pending. See [journal closure](journey/61-coding-squad.md#release-closure--4-october-2026).
 
-## Current activation — 7 October 2026
+## Initial activation — 7 October 2026
 
 Coding is **on** at verified production `2273e8c8eb6a81d764bc74c84016f3022750fa80` after the independently approved idle-only operator activation on 7 October. Deployed GitHub installation authentication, scoped CodeBuild project validation, gateway/Postgres health and public worker 401/unknown-path 404 checks passed. The Singapore worker role has no identity policies; the controller has only exact-project operations and exact-worker PassRole. Secrets stay on Chief, source defaults remain off, and jobs stop at a draft PR for owner review/merge. Zero jobs; paid/live plan→confirmation→candidate acceptance remains pending. See [journal evidence](journey/61-coding-squad.md#activation-verified--7-october-2026).
 
-## MR automation candidate
+## MR automation
 
-The [automation contract](coding-automation.md) binds the configured independent squad review to the exact published artifact/head, without an unconditional final review. Feedback triggers repair and fresh review. Role-model preferences and owner-scoped operational diagnostics apply through the host; the image/selector rollout remains pending.
+The [automation contract](coding-automation.md) binds the configured independent squad review to the exact published artifact/head, without an unconditional final review. Feedback triggers repair and fresh review. Role-model preferences and owner-scoped operational diagnostics apply through the host; automation was enabled in v0.3.43; current executor activation is recorded below.
 
-## Working progress and recovery candidate
+## Working progress and recovery — released v0.3.51
 
-Python 0.1.5 with `harnessVersion: 2` adds the [progress contract](coding-progress.md). Compatible host code is a foundation; the new image/selector must be independently verified and activated together. Existing jobs keep their image and settings. The three-member topology, requirement confirmation, verification and exact-artifact independent review remain unchanged.
+Python 0.1.5 with `harnessVersion: 2` adds the [progress contract](coding-progress.md). The compatible host foundation and independently verified image/selector were released together through PR #190/#191, with exact activation `2bc5ea36a11014c2515de171f19d5e1f5471bfe4`; see [journal closure](journey/71-coding-progress-recovery.md#release-closure--8-october-2026). Existing jobs keep their image and settings. The three-member topology, requirement confirmation, verification and exact-artifact independent review remain unchanged.

@@ -1,6 +1,6 @@
-# Coding progress and recovery — verified image activation candidate
+# Coding progress and recovery — released v0.3.51
 
-[PR #190](https://github.com/akhilvuputuri/chief-agent/pull/190) merged the compatible host/Python 0.1.5 foundation at `3fa44daff4fddc0c2dbe4aa5722abddad297c4cf`, after GPT-6 Astra approval of `12aaf0f` and passing PR checks. The main-only image publication and anonymous digest/platform/user/entrypoint/all-ten-module source verification passed. This candidate pins the verified image with `harnessVersion: 2`, enabling all six improvements for new jobs. Foundation exact release and independent pin review/checks/release remain pending. Existing jobs retain their pinned image/settings and are not resumed. See [journal 71](journey/71-coding-progress-recovery.md).
+[v0.3.51](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.51) is verified at `2bc5ea36a11014c2515de171f19d5e1f5471bfe4`. New jobs use the independently verified Python 0.1.5 image and `harnessVersion: 2` for all six progress/recovery improvements. Exact-head foundation/pin reviews, 992-test PR/main checks and container smoke, both exact release receipts and separate production configuration/gateway/Postgres reads passed. Models, effort, price filters and shared allocations are unchanged. Both old jobs remain paused on their original pins; ordinary resume does not upgrade them. No paid/live trajectory acceptance was run. See [journal 71 closure](journey/71-coding-progress-recovery.md#release-closure--8-october-2026).
 
 # Coding allocations — released v0.3.49
 

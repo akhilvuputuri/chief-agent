@@ -1,10 +1,10 @@
-# Candidate v0.3.51 — verified coding progress executor
+## Released v0.3.51 — coding progress and recovery
 
-Pins the independently verified Python 0.1.5 image and enables `harnessVersion: 2` for new jobs, selecting durable notebooks/compaction/navigation/loop recovery/stream handling/status from the reviewed foundation. Models, effort, provider price filters, shared allocations and existing pinned jobs are unchanged. Independent pin review, checks and exact release remain pending. See [journal 71](journey/71-coding-progress-recovery.md).
+[PR #191](https://github.com/akhilvuputuri/chief-agent/pull/191) selects the independently verified Python 0.1.5 image and `harnessVersion: 2` for new jobs. Exact-head review, 992-test PR/main checks and [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37779482330) passed at `2bc5ea36a11014c2515de171f19d5e1f5471bfe4` (2026-10-08T12:50:30Z). Separate gateway/Postgres/configuration reads confirmed the live selector. The immutable [v0.3.51](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.51) tag marks activation. Existing jobs remain paused/pinned; no paid/live trajectory or model-quality improvement is claimed. See [journal 71](journey/71-coding-progress-recovery.md#release-closure--8-october-2026).
 
-## Candidate v0.3.50 — coding progress foundation
+## Released v0.3.50 — coding progress foundation
 
-Implements the six owner-requested coding reliability changes in Python 0.1.5 and compatible host support. The new executor requires a separately verified image/`harnessVersion: 2` activation. Review, final checks and release remain pending; no paid model evaluation or automatic paused-job resumption. See [journal 71](journey/71-coding-progress-recovery.md).
+[PR #190](https://github.com/akhilvuputuri/chief-agent/pull/190) shipped compatible host/Python 0.1.5 support, with four independently reproduced review findings corrected. Exact approval of `12aaf0f`, PR/main checks and [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37777192044) passed at `3fa44daff4fddc0c2dbe4aa5722abddad297c4cf` (2026-10-08T12:31:37Z). Separate health verified the prior selector and preserved jobs. The immutable [v0.3.50](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.50) tag marks the compatible foundation; executor activation followed in v0.3.51.
 
 ## Released v0.3.49 — coding-sized default allocation
 
