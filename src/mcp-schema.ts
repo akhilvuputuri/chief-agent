@@ -20,6 +20,7 @@ export const mcpWrite = z
     tool,
     requestKey: z.string().uuid(),
     arguments: argumentsSchema.optional(),
+    readerTarget: z.enum(["article", "discussion"]).optional(),
   })
   .strict();
 export const mcpOperation = z

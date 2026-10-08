@@ -1,3 +1,11 @@
+## Link-resolution candidate — 8 October 2026
+
+Reader saves can resolve verified publisher URLs while retaining original requests
+and frozen retry destinations. The public browser path is anonymous and separate
+from invoice sessions; measured Reddit HTTP 403s remain blocked. Migration 031/browser
+image installation, independent review, full checks and live acceptance remain
+pending. See [contract](docs/link-resolution.md) and [journal 69](docs/journey/69-link-resolution.md).
+
 Coding incident, 8 October 2026: indexed tool-call continuation was reproduced and fixed; full local checks and independent implementation review passed. Failure categories are saved for owner-scoped status reads. [PR #183](https://github.com/akhilvuputuri/chief-agent/pull/183) records final review, checks and exact release evidence. The reported planning job stays paused. See [journal 68](docs/journey/68-coding-tool-index.md).
 
 ## Remote MCP connectors — Reader on, 8 October 2026

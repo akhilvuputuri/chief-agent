@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { BrowserManager, MissingBrowser } from "./manager.js";
+import { PublicBrowserCleanupFailure } from "./public-links.js";
 const key = process.env.BROWSER_CONTROL_KEY ?? "";
 if (!/^[0-9a-f]{64}$/.test(key))
   throw new Error("Browser control is not configured");
@@ -10,6 +11,15 @@ const manager = new BrowserManager(
 );
 const seen = new Map<string, number>();
 const app = createServer(async (req, res) => {
+  const controller = new AbortController();
+  req.once("aborted", () => controller.abort());
+  res.once("close", () => {
+    if (!res.writableEnded) controller.abort();
+  });
+  const signal = AbortSignal.any([
+    controller.signal,
+    AbortSignal.timeout(45000),
+  ]);
   res.setHeader("content-type", "application/json");
   res.setHeader("cache-control", "no-store");
   if (req.url === "/healthz" && req.method === "GET") {
@@ -55,7 +65,12 @@ const app = createServer(async (req, res) => {
       })
       .strict()
       .parse(JSON.parse(body));
-    const output = await manager.call(input.user, input.session, input.command);
+    const output = await manager.call(
+      input.user,
+      input.session,
+      input.command,
+      signal,
+    );
     res.end(JSON.stringify(output));
   } catch (error) {
     res.writeHead(error instanceof MissingBrowser ? 404 : 400).end(
@@ -66,6 +81,10 @@ const app = createServer(async (req, res) => {
             : "browser_action_failed",
       }),
     );
+    // Fail closed when an anonymous context/browser cannot be proven retired.
+    // The existing container restart policy restores a clean process boundary.
+    if (error instanceof PublicBrowserCleanupFailure)
+      setImmediate(() => process.exit(1));
   }
 });
 app.requestTimeout = 50000;

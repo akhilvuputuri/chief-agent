@@ -104,6 +104,7 @@ async function fixture() {
     "005_work",
     "006_runtime",
     "030_mcp",
+    "031_link_resolution",
   ])
     await pg.exec(
       await readFile(new URL(`../db/${name}.sql`, import.meta.url), "utf8"),

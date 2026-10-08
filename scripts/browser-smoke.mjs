@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { chromium } from "playwright-core";
 import { BrowserManager } from "./dist/browser/manager.js";
+const watchdog = setTimeout(() => {
+  console.error("Disposable browser proof exceeded its deadline");
+  process.exit(1);
+}, 90000);
+watchdog.unref();
 const browser = await chromium.launch({
   headless: true,
   chromiumSandbox: true,
@@ -101,6 +106,99 @@ try {
     }),
   );
   await manager.call(user, id, { kind: "close" });
+  let mutationRequests = 0;
+  browser.newContext = async (options) => {
+    assert.equal(options.storageState, undefined);
+    assert.equal(options.acceptDownloads, false);
+    const ctx = await original(options);
+    await ctx.route("https://www.reddit.com/**", async (route) => {
+      if (route.request().method() !== "GET") mutationRequests++;
+      return route.fulfill({
+        contentType: "text/html",
+        body: '<shreddit-post id="t3_abc123" post-type="link" content-href="https://publisher.example.com/story"></shreddit-post><a href="https://ad.example.com">Advertisement</a><script>fetch("/api/vote",{method:"POST"}).catch(()=>{})</script>',
+      });
+    });
+    return ctx;
+  };
+  const publicManager = new BrowserManager(
+    "http://127.0.0.1:9",
+    async () => browser,
+  );
+  const publicResult = await publicManager.call(
+    user,
+    "00000000-0000-4000-8000-000000000002",
+    {
+      kind: "resolve_public",
+      url: "https://www.reddit.com/r/worldnews/comments/abc123/story/",
+    },
+  );
+  assert.equal(publicResult.postId, "abc123");
+  assert.deepEqual(publicResult.outbound, [
+    "https://publisher.example.com/story",
+  ]);
+  assert.equal(mutationRequests, 0);
+  let publicContexts = 0;
+  let mode = "duplicate";
+  browser.newContext = async (options) => {
+    publicContexts++;
+    const ctx = await original(options);
+    await ctx.route("https://www.reddit.com/**", async (route) => {
+      if (mode === "slow") {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        await route.abort().catch(() => {});
+        return;
+      }
+      return route.fulfill({
+        contentType: "text/html",
+        body: '<!-- <shreddit-post id="t3_abc123" content-href="https://fake.example.com"></shreddit-post> --><shreddit-post id="t3_abc123" content-href="https://one.example.com"></shreddit-post><shreddit-post id="t3_abc123" content-href="https://two.example.com"></shreddit-post>',
+      });
+    });
+    return ctx;
+  };
+  const duplicateManager = new BrowserManager(
+    "http://127.0.0.1:9",
+    async () => browser,
+  );
+  const duplicate = await duplicateManager.call(user, crypto.randomUUID(), {
+    kind: "resolve_public",
+    url: "https://www.reddit.com/comments/abc123/story/",
+  });
+  assert.equal(duplicate.blocked, true);
+  mode = "slow";
+  publicContexts = 0;
+  const cancelManager = new BrowserManager(
+    "http://127.0.0.1:9",
+    async () => browser,
+  );
+  const activeAbort = new AbortController();
+  const queuedAbort = new AbortController();
+  const active = cancelManager.call(
+    user,
+    crypto.randomUUID(),
+    {
+      kind: "resolve_public",
+      url: "https://www.reddit.com/comments/abc123/story/",
+    },
+    activeAbort.signal,
+  );
+  const queued = cancelManager.call(
+    user,
+    crypto.randomUUID(),
+    {
+      kind: "resolve_public",
+      url: "https://www.reddit.com/comments/abc123/story/",
+    },
+    queuedAbort.signal,
+  );
+  // Attach rejection handlers before issuing cancellation.
+  const activeRejected = assert.rejects(active);
+  const queuedRejected = assert.rejects(queued);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  queuedAbort.abort();
+  activeAbort.abort();
+  await Promise.all([activeRejected, queuedRejected]);
+  assert.equal(publicContexts, 1);
+  assert.equal(browser.contexts().length, 0);
   console.log(
     JSON.stringify({
       nonRoot: true,
@@ -113,10 +211,14 @@ try {
       credentialsNotObserved: true,
       staleLinksRefused: true,
       realChromium: true,
+      isolatedPublicResolution: true,
+      publicCancellation: true,
+      conflictingPostRefused: true,
       externalNetworkCalls: 0,
       modelCalls: 0,
     }),
   );
 } finally {
   await browser.close();
+  clearTimeout(watchdog);
 }

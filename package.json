@@ -1,6 +1,6 @@
 {
   "name": "chief-agent",
-  "version": "0.3.46",
+  "version": "0.3.47",
   "private": true,
   "type": "module",
   "description": "A personal AI assistant with an owned TypeScript runtime, Telegram voice, memory, research and durable tasks",
@@ -48,6 +48,7 @@
     "fastify": "^5.2.1",
     "grammy": "^1.35.0",
     "https-proxy-agent": "9.1.0",
+    "parse5": "8.0.1",
     "pg": "^8.13.3",
     "playwright-core": "1.63.0",
     "unpdf": "^1.8.1",

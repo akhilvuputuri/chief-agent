@@ -1,3 +1,4 @@
+import type { LinkResolver } from "./link-resolution.js";
 import { validateMcpSchema } from "./mcp-validation.js";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -169,6 +170,7 @@ export class McpTools {
       ms,
       signal,
     ) => delay(ms, undefined, { signal }),
+    private links?: LinkResolver,
   ) {
     this.registry = mcpRegistrySchema.parse(registry);
     this.credentials = credentialSchema.parse(credentials);
@@ -342,7 +344,10 @@ export class McpTools {
     if (
       row.binding !== binding ||
       row.tool !== a.tool ||
-      (a.arguments && canonical(a.arguments) !== canonical(row.payload))
+      (a.readerTarget !== undefined &&
+        (row.reader_target ?? "article") !== a.readerTarget) ||
+      (a.arguments &&
+        canonical(a.arguments) !== canonical(row.source_payload ?? row.payload))
     )
       throw new ToolValidationError(
         "MCP operation is bound to another connection, tool or payload; do not replace its requestKey to retry",
@@ -531,6 +536,11 @@ export class McpTools {
       );
     }
     const g = this.grant(c, a.tool, "idempotent_write");
+    const readerSave = g.result === "reader_receipt" && a.tool === "save_link";
+    if (a.readerTarget && !readerSave)
+      throw new ToolValidationError(
+        "readerTarget is only supported for Reader link saves",
+      );
     return this.queue.run(user, async () => {
       let row = await this.stored(user, a.connection, a.requestKey);
       if (row) {
@@ -570,7 +580,9 @@ export class McpTools {
         throw new ToolValidationError(
           "A pending MCP write needs reconciliation before another write",
         );
-      const payload = row?.payload ?? a.arguments;
+      const sourcePayload = row?.source_payload ?? a.arguments ?? row?.payload;
+      let payload = row?.payload ?? a.arguments;
+      let resolution = row?.link_resolution;
       if (!payload || Object.hasOwn(payload, g.idempotencyArgument!))
         throw new ToolValidationError(
           "Supply new MCP arguments without the host's idempotency field; omit arguments only for a persisted retry",
@@ -592,6 +604,28 @@ export class McpTools {
               throw new ToolValidationError(
                 "MCP schema changed; reconcile the previous operation before retrying",
               );
+            if (!row && readerSave && this.links) {
+              if (typeof payload.url !== "string")
+                throw new ToolValidationError("Reader requires an article URL");
+              resolution = await this.links.resolve(
+                user,
+                payload.url,
+                a.readerTarget ?? "article",
+                signal,
+              );
+              const destination =
+                resolution.status === "resolved"
+                  ? resolution.articleUrl
+                  : a.readerTarget === "discussion" &&
+                      resolution.status === "discussion"
+                    ? resolution.pageUrl
+                    : null;
+              if (!destination)
+                throw new ToolValidationError(
+                  "The article link could not be verified. Supply the publisher URL, or explicitly choose the Reddit discussion; no save was submitted.",
+                );
+              payload = { ...payload, url: destination };
+            }
             const args = { ...payload, [g.idempotencyArgument!]: a.requestKey };
             await validateMcpSchema(schema, args, signal);
             if (
@@ -608,7 +642,7 @@ export class McpTools {
                 "MCP request exceeds the body limit",
               );
             await this.db.query(
-              "INSERT INTO mcp_operations(user_id,connection,request_key,tool,binding,schema_hash,payload) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb) ON CONFLICT DO NOTHING",
+              "INSERT INTO mcp_operations(user_id,connection,request_key,tool,binding,schema_hash,payload,source_payload,reader_target,link_resolution) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10::jsonb) ON CONFLICT DO NOTHING",
               [
                 user,
                 c.id,
@@ -617,10 +651,33 @@ export class McpTools {
                 binding,
                 schemaHash,
                 JSON.stringify(payload),
+                JSON.stringify(sourcePayload),
+                readerSave ? (a.readerTarget ?? "article") : null,
+                resolution ? JSON.stringify(resolution) : null,
               ],
             );
             row = await this.stored(user, c.id, a.requestKey);
             this.checkReplay(row, binding, a);
+            if (row.schema_hash !== schemaHash)
+              throw new ToolValidationError(
+                "MCP schema changed before submission; inspect the persisted operation",
+              );
+            if (row.state === "complete")
+              return {
+                requestKey: a.requestKey,
+                state: "complete",
+                result: row.result,
+              };
+            const dispatchArgs = {
+              ...row.payload,
+              [g.idempotencyArgument!]: a.requestKey,
+            };
+            if (canonical(row.payload).includes(secret.token))
+              throw new ToolValidationError(
+                "Resolved content must not contain the connection credential",
+              );
+            await validateMcpSchema(schema, dispatchArgs, signal);
+            resolution = row.link_resolution;
             if (signal?.aborted)
               throw new ToolValidationError(
                 "Task cancelled; operation retained for inspection",
@@ -629,7 +686,7 @@ export class McpTools {
             dispatched = true;
             try {
               result = decode(
-                this.safe(await s.call(a.tool, args), secret.token),
+                this.safe(await s.call(a.tool, dispatchArgs), secret.token),
                 g.result,
               );
             } catch (e) {
@@ -678,6 +735,7 @@ export class McpTools {
                     : "Inspect this operation; retry only with the same key and payload.",
               };
             }
+            if (resolution) result = { ...result, linkResolution: resolution };
             await this.db.query(
               "UPDATE mcp_operations SET state='complete',result=$4::jsonb,updated_at=now() WHERE user_id=$1 AND connection=$2 AND request_key=$3",
               [user, c.id, a.requestKey, JSON.stringify(result)],

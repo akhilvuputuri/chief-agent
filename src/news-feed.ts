@@ -494,7 +494,11 @@ export function guardedLookup(resolve: Resolver = systemResolver) {
 }
 
 export interface FeedFetcher {
-  get(url: string): Promise<{ body: string; finalUrl: string }>;
+  get(
+    url: string,
+    signal?: AbortSignal,
+    onDestination?: (url: string) => void,
+  ): Promise<{ body: string; finalUrl: string }>;
 }
 const MAX_FEED_BYTES = 1_500_000;
 /** Direct HTTPS feed retrieval: public hostnames only, pinned DNS answers,
@@ -505,10 +509,20 @@ export class PublicFeedFetcher implements FeedFetcher {
    * may throw inside a socket callback, where it would crash the gateway process. */
   async get(
     url: string,
-    redirects = 0,
+    signal?: AbortSignal,
+    onDestination?: (url: string) => void,
+  ): Promise<{ body: string; finalUrl: string }> {
+    return this.follow(url, 0, signal, onDestination);
+  }
+  private async follow(
+    url: string,
+    redirects: number,
+    signal?: AbortSignal,
+    onDestination?: (url: string) => void,
   ): Promise<{ body: string; finalUrl: string }> {
     const target = publicHttps(url);
-    const result = await this.once(target);
+    onDestination?.(target);
+    const result = await this.once(target, signal);
     if ("body" in result) return { body: result.body, finalUrl: target };
     if (redirects >= 3) throw new Error("Too many redirects");
     let next: string;
@@ -517,9 +531,9 @@ export class PublicFeedFetcher implements FeedFetcher {
     } catch {
       throw new Error("Invalid redirect");
     }
-    return this.get(next, redirects + 1);
+    return this.follow(next, redirects + 1, signal, onDestination);
   }
-  private once(target: string) {
+  private once(target: string, signal?: AbortSignal) {
     return new Promise<{ body: string } | { location: string }>(
       (resolve, reject) => {
         let settled = false;
@@ -527,15 +541,25 @@ export class PublicFeedFetcher implements FeedFetcher {
           if (settled) return;
           settled = true;
           clearTimeout(deadline);
+          signal?.removeEventListener("abort", abort);
           if (error)
             reject(error instanceof Error ? error : new Error("Feed error"));
           else resolve(value);
         };
         let req: ReturnType<typeof https.request>;
+        const abort = () => {
+          req?.destroy();
+          finish(new Error("Task cancelled"));
+        };
         const deadline = setTimeout(() => {
           req?.destroy();
           finish(new Error("Feed request timed out"));
         }, 15000);
+        signal?.addEventListener("abort", abort, { once: true });
+        if (signal?.aborted) {
+          abort();
+          return;
+        }
         try {
           req = https.request(
             target,
@@ -552,11 +576,13 @@ export class PublicFeedFetcher implements FeedFetcher {
               try {
                 const status = res.statusCode ?? 0;
                 if (status >= 300 && status < 400 && res.headers.location) {
-                  res.resume();
+                  res.destroy();
+                  req.destroy();
                   return finish(null, { location: res.headers.location });
                 }
                 if (status !== 200) {
-                  res.resume();
+                  res.destroy();
+                  req.destroy();
                   return finish(
                     new Error(`Feed request failed (HTTP ${status})`),
                   );
