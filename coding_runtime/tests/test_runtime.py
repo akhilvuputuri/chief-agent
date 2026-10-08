@@ -167,6 +167,55 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         last = json.loads(model.inputs[-1][-1]["content"])["runtimeAllocation"]
         self.assertEqual(last["modelCallsRemainingAfterThisResponse"], 4)
 
+    async def test_allocation_hint_cannot_discard_undelivered_opaque_tool_group(self):
+        for mode, call, report_kind in [
+            ("review", ("plan_read", {}), "APPROVE"),
+            (
+                "implement",
+                ("file_write", {"path": "changed.txt", "content": "Retained work"}),
+                "candidate",
+            ),
+        ]:
+            with self.subTest(mode=mode):
+                response = generation(
+                    call,
+                    reasoning=[{"type": "reasoning.encrypted", "data": "x" * 150000}],
+                )
+                model = ScriptedModel(response, generation(report(report_kind)))
+                messages = [
+                    {"role": "system", "content": "Fixture"},
+                    {"role": "user", "content": "Fixture"},
+                ]
+                with self.assertRaisesRegex(ValueError, "Current call group exceeds"):
+                    await coding_loop(
+                        model=model,
+                        workspace=self.w,
+                        messages=messages,
+                        mode=mode,
+                        budget=Budget(3, 4),
+                        stop=self.stop,
+                        checkpoint=lambda: asyncio.sleep(0),
+                        plan=lambda: "Complete approved requirements",
+                    )
+                self.assertEqual(len(model.inputs), 1)
+                assistant = next(m for m in messages if m["role"] == "assistant")
+                self.assertEqual(assistant, response["message"])
+                observation = next(m for m in messages if m["role"] == "tool")
+                self.assertEqual(
+                    observation["tool_call_id"],
+                    response["message"]["tool_calls"][0]["id"],
+                )
+                if mode == "review":
+                    self.assertEqual(
+                        json.loads(observation["content"])["text"],
+                        "Complete approved requirements",
+                    )
+                else:
+                    self.assertTrue(json.loads(observation["content"])["written"])
+                    self.assertEqual(
+                        (self.w.root / "changed.txt").read_text(), "Retained work"
+                    )
+
     async def test_model_allocation_exhaustion_is_distinct_from_unknown_failure(self):
         model = ScriptedModel(generation(("plan_read", {})))
         with self.assertRaises(AllocationExhausted) as caught:

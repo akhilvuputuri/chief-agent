@@ -317,6 +317,10 @@ async def coding_loop(
 
     plan_read_until = 0
     while budget.models > 0 and budget.tools > 0 and not stop.is_set():
+        # Compact before appending the hint: the newest assistant/tool group
+        # must remain protected until it is delivered on this model request.
+        # The compacted envelope leaves 30 KB for the small allocation note.
+        compact(messages, tools)
         messages.append(
             {
                 "role": "user",
@@ -347,7 +351,6 @@ async def coding_loop(
                 ),
             }
         )
-        compact(messages, tools)
         delivered = plan_read_until
         budget.models -= 1
         generation = validate_generation(await model.generate(messages, tools))
