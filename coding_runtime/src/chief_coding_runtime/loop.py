@@ -28,6 +28,7 @@ from .protocol import (
     Notebook,
     Record,
     text_bound,
+    utf16_length,
     wire_json,
     wire_size,
 )
@@ -110,6 +111,13 @@ class Command(Record):
     command: str = Field(min_length=1, max_length=4000)
 
 
+class PlanBriefRejected(ValueError):
+    """A new proposal needs revision before it can become approval authority."""
+
+
+PLANNING_GUIDANCE = """The owner reads the approval brief on a phone. Write report.plan as a concise, complete requirement brief, usually 200–400 words: problem, requested behavior, scope, acceptance checks and any consequential unresolved decision. Use short paragraphs and useful Markdown headings or bold labels; no fixed template is required. Keep source-by-source evidence, long alternatives, rejected hypotheses and detailed test matrices in working notes/evidence receipts, not in the approval brief. Recommend routine implementation choices; ask only questions whose answers materially change the scope or behavior. Distinguish verified causes from hypotheses. Do not omit requirements to meet the limit: if the task cannot be specified completely within 6000 UTF-16 units, ask the owner to divide the scope. report.summary is a short status sentence (at most 400 UTF-16 units), not a second audit. Only report.plan becomes the complete approved scope; working notes do not authorize extra work."""
+
+
 class Report(Record):
     operation: Literal["report"]
     kind: Literal[
@@ -121,7 +129,13 @@ class Report(Record):
 
     def validate_text(self) -> None:
         if self.kind == "plan_ready" and not self.plan.strip():
-            raise ValueError("A complete requirement brief is required in plan")
+            raise PlanBriefRejected("A complete requirement brief is required in plan")
+        if self.kind == "plan_ready" and (
+            utf16_length(self.plan) > 6000 or utf16_length(self.summary) > 400
+        ):
+            raise PlanBriefRejected(
+                "Revise the proposal before reporting plan_ready: plan must be a concise, complete owner brief within 6000 UTF-16 units; summary must be within 400. Keep detailed findings in working notes. Preserve every requirement, scope boundary and acceptance check; do not truncate. If complete scope will not fit, use awaiting_input to propose dividing the task."
+            )
         text_bound(self.summary, 4000)
         text_bound(self.plan, 32000)
         text_bound(self.question, 2000)
@@ -459,6 +473,9 @@ async def coding_loop(
         and (t["name"] != "plan_read" or plan is not None)
         and (t["name"] != "logs_read" or logs is not None)
     ]
+    if mode == "plan":
+        report_tool = next(tool for tool in tools if tool["name"] == "report")
+        report_tool["description"] += " " + PLANNING_GUIDANCE
     if mode == "lead":
         tools += copy.deepcopy(LEADER_TOOLS)
     if memory is not None:
@@ -914,6 +931,8 @@ async def coding_loop(
                 result = (
                     {"error": error.hint, "code": error.code}
                     if isinstance(error, inspection.InspectionError)
+                    else {"error": str(error), "code": "plan_brief_revision_required"}
+                    if isinstance(error, PlanBriefRejected)
                     else {
                         "error": "File unavailable; discover an existing path with glob.",
                         "code": "file_not_found",

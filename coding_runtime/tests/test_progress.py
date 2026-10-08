@@ -56,6 +56,81 @@ class ProgressTests(unittest.IsolatedAsyncioTestCase):
             **kwargs,
         )
 
+    async def test_long_audit_is_revised_without_losing_notes_or_approved_scope(self):
+        findings = (
+            "Verified src/fixture.ts behavior. Alternative requires owner scope change."
+        )
+        brief = "**Scope**\nRepair the requested fixture behavior.\n\n**Acceptance**\nRun the existing checks and retain unrelated behavior."
+        model = ScriptedModel(
+            generation(
+                (
+                    "notes_update",
+                    {
+                        "subtask": "Prepare proposal",
+                        "findings": findings,
+                        "nextAction": "Report concise complete scope",
+                    },
+                )
+            ),
+            generation(
+                report("plan_ready", plan="Detailed evidence and alternatives. " * 390)
+            ),
+            generation(report("plan_ready", plan=brief)),
+        )
+        result = await self.run_loop(model)
+        self.assertEqual(result.plan, brief)
+        self.assertEqual(self.saved[-1].notes.findings, findings)
+        errors = [
+            json.loads(m["content"]) for m in model.inputs[-1] if m["role"] == "tool"
+        ]
+        rejected = next(
+            e for e in errors if e.get("code") == "plan_brief_revision_required"
+        )
+        self.assertIn("Preserve every requirement", rejected["error"])
+        self.assertIn("awaiting_input", rejected["error"])
+        self.assertEqual(self.memory.toolsUsed, 3)
+
+    async def test_brief_bounds_count_utf16_and_allow_clarification(self):
+        for plan, summary in [("😀" * 3001, "Status"), ("Complete scope", "😀" * 201)]:
+            with self.subTest(plan_length=len(plan), summary_length=len(summary)):
+                model = ScriptedModel(
+                    generation(
+                        (
+                            "report",
+                            {"kind": "plan_ready", "plan": plan, "summary": summary},
+                        )
+                    ),
+                    generation(
+                        (
+                            "report",
+                            {
+                                "kind": "awaiting_input",
+                                "summary": "Scope needs dividing",
+                                "question": "May we divide the work into independently approved tasks?",
+                            },
+                        )
+                    ),
+                )
+                result = await self.run_loop(model)
+                self.assertEqual(result.kind, "awaiting_input")
+                error = next(
+                    json.loads(m["content"])
+                    for m in model.inputs[-1]
+                    if m["role"] == "tool"
+                )
+                self.assertEqual(error["code"], "plan_brief_revision_required")
+        model = ScriptedModel(
+            generation(
+                (
+                    "report",
+                    {"kind": "plan_ready", "plan": "😀" * 3000, "summary": "😀" * 200},
+                )
+            )
+        )
+        result = await self.run_loop(model)
+        self.assertEqual(utf16_length(result.plan), 6000)
+        self.assertEqual(utf16_length(result.summary), 400)
+
     async def test_search_and_line_reads_are_safe_paginated_and_fingerprinted(self):
         (self.w.root / ".env").write_text("synthetic forbidden text")
         (self.w.root / ".gitignore").write_text("ignored.txt\n")

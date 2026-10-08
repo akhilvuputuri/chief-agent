@@ -1236,19 +1236,19 @@ export class CodingController {
           j.user_id,
           codingDestination(e.payload),
           [
-            `Coding job ${e.job_id}`,
-            typeof e.payload.summary === "string"
+            req
+              ? `**Coding plan — revision ${req.revision}**`
+              : `Coding job ${e.job_id}`,
+            !req && typeof e.payload.summary === "string"
               ? e.payload.summary.slice(0, 1500)
               : undefined,
             typeof e.payload.question === "string"
               ? e.payload.question.slice(0, 2000)
               : undefined,
             e.payload.url,
+            req ? req.plan : undefined,
             req
-              ? `Models: leader ${j.settings.leaderModel ?? j.settings.model}; coder ${j.settings.model}; reviewer ${j.settings.reviewerModel}. Publication: ${j.settings.autoMerge ? "ordinary changes may merge after exact-artifact review and GitHub checks; protected changes stop for explicit review" : "draft PR for owner review"}.`
-              : undefined,
-            req
-              ? `Requirements — revision ${req.revision}\n\n${req.plan}\n\nApprove these requirements, or reply directly to this message with yes. To revise them, tell Chief what to change. Confirmation expires in 15 minutes.`
+              ? `**Execution**\nLeader: ${j.settings.leaderModel ?? j.settings.model}\nCoder: ${j.settings.model}\nReviewer: ${j.settings.reviewerModel}\n${j.settings.autoMerge ? "Ordinary changes may merge after exact-artifact review and GitHub checks; protected changes stop for explicit review." : "Draft PR for owner review."}\n\nApprove this scope, or reply directly to this message with yes. To revise it, tell Chief what to change. Confirmation expires in 15 minutes.\nJob: ${e.job_id}`
               : undefined,
           ]
             .filter(Boolean)

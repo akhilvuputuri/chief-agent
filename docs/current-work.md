@@ -1,3 +1,7 @@
+# Coding approval brief — in progress, 8 October 2026
+
+Python 0.1.6 proposes a concise complete phone approval brief, actionable revision for oversized proposals and preserved detailed working notes. Chief avoids duplicate summaries while retaining complete delivered scope and model/publication policy. Synthetic tests and independent review/release are in progress; production remains on Python 0.1.5 until a verified image pin. The latest v2 planning job reached plan-ready, but full coding/review/PR acceptance is unmeasured. See [journal 72](journey/72-coding-approval-brief.md).
+
 Coding-agent learning record: [cumulative lessons](journey/coding-agent-lessons.md) connects the released iterations and distinguishes verified mechanisms from unmeasured quality/cost improvements. Future meaningful harness changes update it alongside the detailed journal.
 
 # Coding progress and recovery — released v0.3.51

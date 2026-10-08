@@ -78,6 +78,8 @@ For the latest verified release and open work, read [current work](../current-wo
 | 8 October | [70 — Coding allocations](70-coding-allocations.md): how can the squad use a realistic shared allocation? | Released v0.3.49; new-job allocation/image verified, old jobs retained, live coding acceptance pending |
 | 8 October | [71 — Coding progress and recovery](71-coding-progress-recovery.md): how can exploration survive context reduction and provider failure? | Released v0.3.51; foundation/pin reviews, source/image, 992 tests, exact releases and health verified; live quality pending |
 
+| 8 October | [72 — Coding approval brief](72-coding-approval-brief.md): can a completed audit become a usable complete owner scope? | In progress; proposal revision and delivery regressions, review/image activation pending |
+
 ## Coding-agent learning path
 
 Start with [coding-agent engineering: changes, failures and evidence](coding-agent-lessons.md). It connects the coding/runtime journals, separates reproduced fixes from unmeasured quality claims and defines the learning record to update with future harness changes.
