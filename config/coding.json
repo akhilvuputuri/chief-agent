@@ -1,14 +1,14 @@
 {
   "repository": "akhilvuputuri/chief-agent",
   "branch": "main",
-  "image": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:d4be34f01a98a82acf03635d3d44061c2488ed9ed0fbd9cda7b0c46b96f151c8",
+  "image": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:3179d1c59960d15c3fa7108f37b1d48295002b9b38f123d249d712ceb513a133",
   "model": "deepseek/deepseek-v4.1-flash",
   "reviewerModel": "openai/gpt-6.1-sol",
   "effort": "high",
   "limits": {
-    "ms": 900000,
-    "models": 40,
-    "tools": 100
+    "ms": 7200000,
+    "models": 400,
+    "tools": 1000
   },
   "runtime": "python",
   "squad": true,

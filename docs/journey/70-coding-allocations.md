@@ -1,6 +1,6 @@
 # 70 — Allocations sized for coding and visible to the squad
 
-Work date: 8 October 2026. Status: worker foundation implemented; review/image publication and default activation pending.
+Work date: 8 October 2026. Status: worker foundation merged and image verified; default activation under review.
 
 ## Problem and preceding iteration
 
@@ -33,4 +33,4 @@ Regressions cover both language validation boundaries, assignment/provisioning/d
 
 ## Outcome and next iteration
 
-Default activation and live acceptance are pending. This focused change does not add file search/list tools, broad progress telemetry, semantic completion grading or model-weight training. The offline [benchmark pack](66-coding-benchmarks.md) remains separate. A later owner-requested fresh planning job on the new image should validate whether it produces a usable brief, not merely whether startup and fixture tests pass.
+Default activation and live acceptance are pending. Foundation [PR #187](https://github.com/akhilvuputuri/chief-agent/pull/187) merged at `0f49d09b3684519227b7cacb2d4e71252e42ba5c` after final GPT-6 Astra approval of `2a783ad1876e483865b84b8731f156db95e96887` and passing PR CI. [Image publication](https://github.com/akhilvuputuri/chief-agent/actions/runs/37749204314) built that exact main. Anonymous verification matched the manifest digest, Linux/amd64 platform, worker user/isolated entrypoint, installed package 0.1.4 and all four changed module bytes against the reviewed source. The verified image is `sha256:3179d1c59960d15c3fa7108f37b1d48295002b9b38f123d249d712ceb513a133`; the selector changes image and all three defaults together. No paid sandbox was provisioned for verification. This focused change does not add file search/list tools, broad progress telemetry, semantic completion grading or model-weight training. The offline [benchmark pack](66-coding-benchmarks.md) remains separate. A later owner-requested fresh planning job on the new image should validate whether it produces a usable brief, not merely whether startup and fixture tests pass.
