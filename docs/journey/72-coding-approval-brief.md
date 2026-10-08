@@ -23,7 +23,7 @@ Python 0.1.6 gives planning reports audience guidance, a usual 200–400-word ta
 
 Chief's approval delivery shows the complete scope once with a visible title, preserves the model snapshot/publication policy and avoids repeating the status summary. Exact owner/message/revision/scope binding, uncertain delivery and expiry remain unchanged. Synthetic regressions cover long-audit revision with retained findings, UTF-16 boundaries/clarification, a formatted concise card and complete legacy long-plan delivery/confirmation.
 
-GPT-6 Astra independently approved `98e943bb37eca1587188c594ac009c8cba4789dc` in [PR #194](https://github.com/akhilvuputuri/chief-agent/pull/194), running all 55 Python tests, Ruff/format/strict mypy, 58 host coding tests and additional Unicode/non-planning boundary probes. A non-blocking journal-table formatting issue was corrected; fresh GPT-6 Astra approval covered `78b38691655051b93f781d9e5b2d65972f8358d8`. Deployment evidence will be appended after actual verification. The compatible host foundation deliberately retains the old image selector until a main-built immutable image is verified and pinned through a reviewed follow-up.
+GPT-6 Astra independently approved `98e943bb37eca1587188c594ac009c8cba4789dc` in [PR #194](https://github.com/akhilvuputuri/chief-agent/pull/194), running all 55 Python tests, Ruff/format/strict mypy, 58 host coding tests and additional Unicode/non-planning boundary probes. A non-blocking journal-table formatting issue was corrected; fresh GPT-6 Astra approval covered `78b38691655051b93f781d9e5b2d65972f8358d8`. At that pre-release checkpoint, deployment evidence remained pending; the final verification is recorded below. The compatible host foundation retained the old selector until the main-built immutable image was verified and pinned through the reviewed follow-up.
 
 ## Verification and outcome
 
@@ -35,7 +35,7 @@ The [cumulative guide](coding-agent-lessons.md) records the distinction between 
 
 ## Follow-up and next iteration
 
-After verified activation, the next separately authorized live checks are a fresh concise plan, a small bug/feature through actual verification and PR, and reviewer-requested rework. Do not resume or reapprove existing jobs automatically. The offline benchmark pack still needs a disposable inference adapter before model trials; its fixture validation is not an agent score. Cloud incident access should retain bounded private metadata, never public raw traces or copied production credentials.
+With activation verified, the next separately authorized live checks are a fresh concise plan, a small bug/feature through actual verification and PR, and reviewer-requested rework. Do not resume or reapprove existing jobs automatically. The offline benchmark pack still needs a disposable inference adapter before model trials; its fixture validation is not an agent score. Cloud incident access should retain bounded private metadata, never public raw traces or copied production credentials.
 
 ## Foundation and verified image — 9 October 2026
 
