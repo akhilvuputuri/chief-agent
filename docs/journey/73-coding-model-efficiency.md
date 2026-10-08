@@ -1,7 +1,7 @@
 # 73 — Which harness mechanisms justify their cost?
 
 Work date(s): 2026-10-09. Written/revised: 2026-10-09.
-Status: research and proposed experiments; no measured Chief coding-quality or cost advantage.
+Status: research independently reviewed and integrated in PR #195; proposed experiments remain unrun; no measured Chief coding-quality or cost advantage.
 
 ## User-visible problem and preceding iteration
 
@@ -21,4 +21,4 @@ Count all attempts and total cost, including failed/review/rework/compute work. 
 
 ## Review, outcome and follow-up
 
-Research claims, references and the proposed design are pending independent review with the associated PR. No paid provider, new sandbox, public benchmark environment or live inference trial was run. The document authorizes none of these. Complete the brief activation separately, then implement the disposable evaluation path and seek explicit live-trial authorization on a concrete task/cohort. The [cumulative guide](coding-agent-lessons.md) links this hypothesis without labeling it a demonstrated benefit.
+GPT-6 Astra independently approved the research claims, major primary-source measurements and qualifications in exact `7a880caa77481522a672ae252f84c8501281001a` of [PR #195](https://github.com/akhilvuputuri/chief-agent/pull/195). Both original research agents also checked their assigned synthesis claims; selected patch pools, extra computation, thinking reversal, oracle selection and unequal accounting remain explicit. The documentation integrated at `ad9e7553d897ec93c6708cf51e5598cc8ab0fd3d`; [journal 72](72-coding-approval-brief.md#release-closure--9-october-2026) records the verified release. No paid provider, new sandbox, public benchmark environment or live inference trial was run. The document authorizes none of these. Brief activation is verified separately in journal 72. Next implement the disposable evaluation path and seek explicit live-trial authorization on a concrete task/cohort. The [cumulative guide](coding-agent-lessons.md) links this hypothesis without labeling it a demonstrated benefit.
