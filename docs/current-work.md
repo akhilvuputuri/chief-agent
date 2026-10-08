@@ -1,6 +1,6 @@
-# Coding progress and recovery — implementation candidate
+# Coding progress and recovery — verified image activation candidate
 
-The owner requested all six improvements following the fresh planning stop: durable member notebooks, state-preserving compaction, targeted inspection, loop recovery, model streaming/failure handling and Chief status. Work starts from `7f2fa9c26eaa9d973d141e6cbf72b188ac48251b` on `codex/coding-progress-recovery`. Python 0.1.5 and compatible host support passed local full/focused checks; the production selector remains Python 0.1.4 until the new image is independently verified and pinned with `harnessVersion: 2`. Review, hosted checks and release are pending. Paused work is retained and not resumed. See [journal 71](journey/71-coding-progress-recovery.md).
+[PR #190](https://github.com/akhilvuputuri/chief-agent/pull/190) merged the compatible host/Python 0.1.5 foundation at `3fa44daff4fddc0c2dbe4aa5722abddad297c4cf`, after GPT-6 Astra approval of `12aaf0f` and passing PR checks. The main-only image publication and anonymous digest/platform/user/entrypoint/all-ten-module source verification passed. This candidate pins the verified image with `harnessVersion: 2`, enabling all six improvements for new jobs. Foundation exact release and independent pin review/checks/release remain pending. Existing jobs retain their pinned image/settings and are not resumed. See [journal 71](journey/71-coding-progress-recovery.md).
 
 # Coding allocations — released v0.3.49
 

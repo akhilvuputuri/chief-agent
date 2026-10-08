@@ -1,3 +1,7 @@
+# Candidate v0.3.51 — verified coding progress executor
+
+Pins the independently verified Python 0.1.5 image and enables `harnessVersion: 2` for new jobs, selecting durable notebooks/compaction/navigation/loop recovery/stream handling/status from the reviewed foundation. Models, effort, provider price filters, shared allocations and existing pinned jobs are unchanged. Independent pin review, checks and exact release remain pending. See [journal 71](journey/71-coding-progress-recovery.md).
+
 ## Candidate v0.3.50 — coding progress foundation
 
 Implements the six owner-requested coding reliability changes in Python 0.1.5 and compatible host support. The new executor requires a separately verified image/`harnessVersion: 2` activation. Review, final checks and release remain pending; no paid model evaluation or automatic paused-job resumption. See [journal 71](journey/71-coding-progress-recovery.md).
