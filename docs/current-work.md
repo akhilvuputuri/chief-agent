@@ -2,18 +2,22 @@
 
 A live planning job stopped after its first valid DeepSeek tool response because the next request retained provider tool-call `index` metadata that Chief’s strict API rejected. The host now accepts that optional integer field and exposes safe, attempt-scoped rejection categories in `coding_status`. The reported job remains paused pending explicit owner resume. No worker-image, model, allocation or permission change. Full local checks and independent implementation review passed. Final revision, hosted checks and exact release evidence are tracked in [PR #183](https://github.com/akhilvuputuri/chief-agent/pull/183). See [journal 68](journey/68-coding-tool-index.md).
 
-# Remote MCP connectors — released v0.3.45, off
+# Remote MCP connectors — v0.3.45; Reader activated, 8 October 2026
 
-[PR #181](https://github.com/akhilvuputuri/chief-agent/pull/181) ships reusable
-Streamable HTTP connections, reviewed owner-scoped grants, bounded schema workers
-and durable idempotent saves. Final independent review approved `411e3fa`; exact
-PR/main CI passed. Reviewed migration 030/Compose installation, [normal release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37717573236),
-receipt and separate server health verified `c1b72c7ce394d8cfb52870d5228568c195a3999d`.
-Public Reader discovery and a rolled-back deployed-module smoke passed. MCP stays
-**off** until a fresh credential is securely installed; authenticated saves,
-revocation and phone offline acceptance remain pending. OAuth/stdio/non-idempotent
-writes and paid picker eval are separate. See [contract](mcp.md), [rollout](mcp-deployment.md)
-and [journal 67](journey/67-mcp-connectors.md).
+Reader is **on** on verified deployed `ace4a33d956da1d427ac38b0104ebe6a0278d298`.
+The owner-authorized credential was installed directly in the private host environment
+through reviewed SSH-stdin operations, with idle/migration/uncertain-write checks
+and preserved unrelated settings. Health and owner binding passed. Authenticated
+discovery returned exactly the three grants; one public guide and one labelled test
+brief reached server `ready`. Cached and server-side retries returned the same
+submissions and duplicate receipts; zero pending writes remain. No model call or
+Telegram send was used for these acceptance checks. Phone **Available offline**,
+actual conversational selection and live revocation acceptance remain unverified.
+
+[PR #181](https://github.com/akhilvuputuri/chief-agent/pull/181) shipped the framework
+through reviewed migration 030/Compose and verified normal release. OAuth, stdio,
+non-idempotent writes and paid picker eval remain separate. See [contract](mcp.md),
+[rollout](mcp-deployment.md) and [activation evidence](journey/67-mcp-connectors.md#reader-activation--8-october-2026).
 
 # Coding benchmark pack — offline validation complete
 

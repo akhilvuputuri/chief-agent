@@ -1,16 +1,16 @@
 Coding incident, 8 October 2026: indexed tool-call continuation was reproduced and fixed; full local checks and independent implementation review passed. Failure categories are saved for owner-scoped status reads. [PR #183](https://github.com/akhilvuputuri/chief-agent/pull/183) records final review, checks and exact release evidence. The reported planning job stays paused. See [journal 68](docs/journey/68-coding-tool-index.md).
 
-## Remote MCP connectors — released v0.3.45, off, 8 October 2026
+## Remote MCP connectors — Reader on, 8 October 2026
 
-[PR #181](https://github.com/akhilvuputuri/chief-agent/pull/181) is verified at
-`c1b72c7ce394d8cfb52870d5228568c195a3999d`: exact-head independent review,
-PR/main CI, reviewed migration 030/Compose, normal release receipt and separate
-health/disabled flag/public discovery/deployed synthetic smoke all passed.
-MCP stays off; a fresh Reader credential, authenticated saves/revocation and phone
-Available offline acceptance remain separate. Existing credentials/data/paused
-work are preserved. OAuth, stdio and non-idempotent writes remain later work.
+Reader was activated on verified deployed `ace4a33d956da1d427ac38b0104ebe6a0278d298`
+through independently reviewed, owner-authorized credential installation on the
+host. Health/owner binding/discovery passed. One public guide and one labelled
+brief reached server ready; identical cached/server retries preserve submission
+identity and report duplicates, with zero pending writes. No secret was copied to
+source, artifacts, command arguments or output. Phone offline, conversational
+selection and live revocation acceptance remain separate. OAuth is later work.
 See [contract](docs/mcp.md), [rollout](docs/mcp-deployment.md) and
-[journal closure](docs/journey/67-mcp-connectors.md#release-closure--8-october-2026).
+[journal activation](docs/journey/67-mcp-connectors.md#reader-activation--8-october-2026).
 
 Coding benchmark work, 8 October 2026: [the offline pack](evals/coding/README.md) adds six Chief component repair fixtures and a four-instance public comparison lock. It does not run the live squad or paid models. Offline tests, real Docker grading and the full repository suite pass; independent implementation review approved. Final-head and integration/release evidence are linked from [journal 66](docs/journey/66-coding-benchmarks.md).
 

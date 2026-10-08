@@ -72,7 +72,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 4–7 October | [61 — Fixed coding squad](61-coding-squad.md): who coordinates coder/reviewer handoffs while code enforces approval? | v0.3.38 verified; coding enabled at 2273e8c with scoped auth/project/ingress checks, paid/live acceptance pending |
 | 3–4 October | [62 — Durable gathering](62-gathering-harness.md): how can source selection, private files and coverage survive long tasks? | Released v0.3.39, enabled; exact receipt, sandbox/PG proofs and preservation verified; provider acceptance pending |
 | 7–8 October | [66 — Coding benchmarks](66-coding-benchmarks.md): can repairs be graded independently of squad approval? | Offline pack validated/reviewed; PR 180 tracks integration; model success and live integration unmeasured |
-| 8 October | [67 — Remote MCP connectors](67-mcp-connectors.md): can external tools share the durable execution boundary? | Released v0.3.45 off; exact review/CI/migration/release/health and synthetic smoke pass; authenticated Reader acceptance pending |
+| 8 October | [67 — Remote MCP connectors](67-mcp-connectors.md): can external tools share the durable execution boundary? | v0.3.45; Reader on with authenticated saves/retries verified; phone, conversational and revocation acceptance pending |
 | 8 October | [68 — Coding tool-call index](68-coding-tool-index.md): why did planning stop after one valid response? | Protocol fix validated and independently reviewed; PR 183 tracks delivery |
 
 ## Connected case studies
