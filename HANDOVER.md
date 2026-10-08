@@ -1,4 +1,4 @@
-Coding allocation work, 8 October: Python 0.1.4 and the host support two hours / 400 model calls / 1,000 tool calls, with shared allocation hints and clear exhaustion reporting. Image publication/pin and default activation remain pending; old jobs stay pinned and paused. See [journal 70](docs/journey/70-coding-allocations.md).
+Coding allocation activation, 8 October: the compatible foundation is merged in [PR #187](https://github.com/akhilvuputuri/chief-agent/pull/187), and Python 0.1.4 image publication/anonymous content verification passed. The selector now pins that image and two hours / 400 model calls / 1,000 tool calls for new jobs; final pin review/checks/release remain pending. Old jobs are unchanged and not resumed. See [journal 70](docs/journey/70-coding-allocations.md).
 
 ## Link resolution — released v0.3.47, 8 October 2026
 

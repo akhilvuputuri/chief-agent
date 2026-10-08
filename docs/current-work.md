@@ -1,6 +1,6 @@
-# Coding allocations — worker foundation under review
+# Coding allocations — verified image/default activation candidate
 
-The requested two-hour / 400-model / 1,000-tool allocation is supported by Python 0.1.4 and matching host/checkpoint validation. Allocation hints, explicit read-only command forms and specific exhaustion summaries are implemented. The selector remains at 15 minutes / 40 / 100 until the new immutable worker image is published and independently pinned. Old paused jobs retain their settings and are not resumed. See [journal 70](journey/70-coding-allocations.md).
+[PR #187](https://github.com/akhilvuputuri/chief-agent/pull/187) merged the compatible host and Python 0.1.4 foundation. The main-only image publication passed; anonymous digest/platform/user/entrypoint and installed-source hashes were verified. This selector pins the verified image and enables two hours / 400 model calls / 1,000 tool calls for new jobs. Independent pin review, checks and release remain pending. Existing paused jobs keep their original settings and are not resumed. See [journal 70](journey/70-coding-allocations.md).
 
 # Public article-link resolution — released v0.3.47
 
