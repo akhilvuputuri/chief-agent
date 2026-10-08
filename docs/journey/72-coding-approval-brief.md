@@ -1,7 +1,7 @@
 # 72 — A completed plan still needs a usable approval brief
 
-Work date(s): 2026-10-08. Written/revised: 2026-10-08.
-Status: tested locally; independent review, hosted checks, trusted image publication/pin and exact release verification pending.
+Work date(s): 2026-10-08–09. Written/revised: 2026-10-09.
+Status: 996 offline tests passed; independent implementation review approved. Final documentation re-review, hosted checks, trusted image publication/pin and exact release verification pending.
 
 ## User-visible problem and preceding iteration
 
@@ -23,11 +23,11 @@ Python 0.1.6 gives planning reports audience guidance, a usual 200–400-word ta
 
 Chief's approval delivery shows the complete scope once with a visible title, preserves the model snapshot/publication policy and avoids repeating the status summary. Exact owner/message/revision/scope binding, uncertain delivery and expiry remain unchanged. Synthetic regressions cover long-audit revision with retained findings, UTF-16 boundaries/clarification, a formatted concise card and complete legacy long-plan delivery/confirmation.
 
-Independent review and deployment evidence will be appended after actual verification. The compatible host foundation deliberately retains the old image selector until a main-built immutable image is verified and pinned through a reviewed follow-up.
+GPT-6 Astra independently approved `98e943bb37eca1587188c594ac009c8cba4789dc` in [PR #194](https://github.com/akhilvuputuri/chief-agent/pull/194), running all 55 Python tests, Ruff/format/strict mypy, 58 host coding tests and additional Unicode/non-planning boundary probes. A non-blocking journal-table formatting issue was corrected; the updated exact head still requires fresh approval. Deployment evidence will be appended after actual verification. The compatible host foundation deliberately retains the old image selector until a main-built immutable image is verified and pinned through a reviewed follow-up.
 
 ## Verification and outcome
 
-Local checks are in progress. Scripted-model tests show actionable revision without copying notes into approval scope and without truncating the final plan. They do not establish semantic completeness or show the real provider obeys the new guidance. Existing operational tests cover actual commands/check failure, independent review/rework, uncertain checkpoints, cancellation and recovery with synthetic transports.
+The complete offline `npm run check` passed 996 tests (849 application, 50 script, 42 offline eval and 55 Python), plus build and formatting. Scripted-model tests show actionable revision without copying notes into approval scope and without truncating the final plan. They do not establish semantic completeness or show the real provider obeys the new guidance. Existing operational tests cover actual commands/check failure, independent review/rework, uncertain checkpoints, cancellation and recovery with synthetic transports.
 
 ## Coding-harness learning record
 
