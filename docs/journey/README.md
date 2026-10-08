@@ -74,7 +74,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 7–8 October | [66 — Coding benchmarks](66-coding-benchmarks.md): can repairs be graded independently of squad approval? | Offline pack validated/reviewed; PR 180 tracks integration; model success and live integration unmeasured |
 | 8 October | [67 — Remote MCP connectors](67-mcp-connectors.md): can external tools share the durable execution boundary? | v0.3.45; Reader on with authenticated saves/retries verified; phone, conversational and revocation acceptance pending |
 | 8 October | [68 — Coding tool-call index](68-coding-tool-index.md): why did planning stop after one valid response? | Protocol fix validated and independently reviewed; PR 183 tracks delivery |
-| 8 October | [69 — Shared article links](69-link-resolution.md): can a Reddit share preserve its publisher target? | Candidate; blocked production access measured; bounded resolver/retry tests in progress |
+| 8 October | [69 — Shared article links](69-link-resolution.md): can a Reddit share preserve its publisher target? | Released v0.3.47; release/health and one observed-target Reader ready/replay verified; anonymous Reddit blocked |
 
 ## Connected case studies
 
