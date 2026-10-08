@@ -2,13 +2,17 @@
 
 The requested two-hour / 400-model / 1,000-tool allocation is supported by Python 0.1.4 and matching host/checkpoint validation. Allocation hints, explicit read-only command forms and specific exhaustion summaries are implemented. The selector remains at 15 minutes / 40 / 100 until the new immutable worker image is published and independently pinned. Old paused jobs retain their settings and are not resumed. See [journal 70](journey/70-coding-allocations.md).
 
-# Public article-link resolution — implementation candidate
+# Public article-link resolution — released v0.3.47
 
-Shared resolution and Reader article/discussion targeting are implemented in a
-candidate branch. Production anonymous Reddit access was measured blocked; verified
-owner observations are explicit, scoped evidence, not guessed destinations.
-Migration 031/Compose and a browser-image update require reviewed installation.
-See [contract](link-resolution.md) and [journal 69](journey/69-link-resolution.md).
+[PR #185](https://github.com/akhilvuputuri/chief-agent/pull/185) shipped shared
+link resolution and Reader article/discussion targeting. Independent approval,
+full CI, reviewed migration 031/browser installation, the normal release receipt
+and separate health verified `df3c08848c268e23f83c82303ecc31615d096ad4`.
+One live observed-target save returned Reader ready with a duplicate receipt;
+original/publisher provenance and same-key replay passed. Anonymous Reddit access
+remains blocked in the measured case; new blocked links need a publisher URL or
+future authorized Reddit access. Phone offline/conversational acceptance remain
+separate. See [contract](link-resolution.md) and [journal closure](journey/69-link-resolution.md#release-closure--8-october-2026).
 
 # Coding planning continuation — validated fix, delivery tracked
 
@@ -16,7 +20,7 @@ A live planning job stopped after its first valid DeepSeek tool response because
 
 # Remote MCP connectors — v0.3.45; Reader activated, 8 October 2026
 
-Reader is **on** on verified deployed `ace4a33d956da1d427ac38b0104ebe6a0278d298`.
+Reader was activated on verified release `ace4a33d956da1d427ac38b0104ebe6a0278d298`.
 The owner-authorized credential was installed directly in the private host environment
 through reviewed SSH-stdin operations, with idle/migration/uncertain-write checks
 and preserved unrelated settings. Health and owner binding passed. Authenticated

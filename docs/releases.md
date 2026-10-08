@@ -1,3 +1,16 @@
+## Released v0.3.47 — article link resolution
+
+[PR #185](https://github.com/akhilvuputuri/chief-agent/pull/185) shipped selected-post
+publisher resolution, explicit discussion targeting and frozen Reader retry payloads.
+Exact-head independent review, PR/main CI, reviewed migration 031/browser installation,
+[normal release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37740955551),
+receipt and separate health verified `df3c08848c268e23f83c82303ecc31615d096ad4`.
+[v0.3.47](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.47) is immutable.
+One live owner-verified target returned Reader ready with a duplicate receipt and
+same-key replay; anonymous Reddit remained blocked. New blocked links need publisher
+URLs or future authorized access; phone offline/conversational acceptance is separate.
+See [journal closure](journey/69-link-resolution.md#release-closure--8-october-2026).
+
 ## v0.3.46 — coding tool-call continuation
 
 Fixes planning stops caused by provider tool-call `index` metadata in the Python worker’s next model request. Strict validation, exact arguments/reasoning, owner confirmation and allocations are preserved. Fixed host rejection categories become available through owner-scoped status and sanitized logs. No worker-image, schema, Compose, credential or model changes. The original paused job requires explicit owner resume. [PR #183](https://github.com/akhilvuputuri/chief-agent/pull/183) records the approved revision, exact deployment/startup-health receipt and immutable version tag; [journal 68](journey/68-coding-tool-index.md) records reproduction and validation.

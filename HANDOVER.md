@@ -1,12 +1,17 @@
 Coding allocation work, 8 October: Python 0.1.4 and the host support two hours / 400 model calls / 1,000 tool calls, with shared allocation hints and clear exhaustion reporting. Image publication/pin and default activation remain pending; old jobs stay pinned and paused. See [journal 70](docs/journey/70-coding-allocations.md).
 
-## Link-resolution candidate — 8 October 2026
+## Link resolution — released v0.3.47, 8 October 2026
 
-Reader saves can resolve verified publisher URLs while retaining original requests
-and frozen retry destinations. The public browser path is anonymous and separate
-from invoice sessions; measured Reddit HTTP 403s remain blocked. Migration 031/browser
-image installation, independent review, full checks and live acceptance remain
-pending. See [contract](docs/link-resolution.md) and [journal 69](docs/journey/69-link-resolution.md).
+[PR #185](https://github.com/akhilvuputuri/chief-agent/pull/185), exact-head
+independent review and full CI passed. Reviewed migration 031/browser installation,
+normal release receipt and separate health verified `df3c08848c268e23f83c82303ecc31615d096ad4`.
+The anonymous browser is isolated from invoice sessions and cancellation covers all
+setup/page awaits. One expiring owner-verified target returned Reader ready with a
+duplicate receipt; frozen original/publisher provenance and same-key replay passed.
+The measured server Reddit block remains; no universal automatic Reddit resolution
+or phone offline/conversational acceptance is claimed. Existing environment, proxy,
+browser isolation and paused data were preserved. See [contract](docs/link-resolution.md)
+and [journal closure](docs/journey/69-link-resolution.md#release-closure--8-october-2026).
 
 Coding incident, 8 October 2026: indexed tool-call continuation was reproduced and fixed; full local checks and independent implementation review passed. Failure categories are saved for owner-scoped status reads. [PR #183](https://github.com/akhilvuputuri/chief-agent/pull/183) records final review, checks and exact release evidence. The reported planning job stays paused. See [journal 68](docs/journey/68-coding-tool-index.md).
 
