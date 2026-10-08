@@ -1,3 +1,7 @@
+## v0.3.46 — coding tool-call continuation
+
+Fixes planning stops caused by provider tool-call `index` metadata in the Python worker’s next model request. Strict validation, exact arguments/reasoning, owner confirmation and allocations are preserved. Fixed host rejection categories become available through owner-scoped status and sanitized logs. No worker-image, schema, Compose, credential or model changes. The original paused job requires explicit owner resume. [PR #183](https://github.com/akhilvuputuri/chief-agent/pull/183) records the approved revision, exact deployment/startup-health receipt and immutable version tag; [journal 68](journey/68-coding-tool-index.md) records reproduction and validation.
+
 ## Released v0.3.45 — remote MCP connectors, off
 
 [PR #181](https://github.com/akhilvuputuri/chief-agent/pull/181) ships reusable

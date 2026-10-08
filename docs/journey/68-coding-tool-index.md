@@ -1,6 +1,6 @@
 # 68 — Planning stopped after a valid model tool response
 
-Work date: 8 October 2026. Status: reproduced and fixed locally; review and release pending.
+Work date: 8 October 2026. Status: reproduced, tested and independently reviewed. Final revision and release evidence are recorded on [PR #183](https://github.com/akhilvuputuri/chief-agent/pull/183).
 
 ## User-visible problem and preceding iteration
 
@@ -22,7 +22,7 @@ A second observability gap hid the error: worker exceptions become a generic pau
 
 The HTTP model schema accepts optional nonnegative integer tool-call `index`; the shared TypeScript type declares it. Unknown metadata and malformed indices still fail before model allocation. The existing Python reasoning-continuation regression now also verifies exact preservation of tool calls with this field; no Python runtime/image update is required.
 
-Synthetic tests cover indexed continuation, unchanged messages/arguments/reasoning and idempotent call accounting; strict invalid inputs; authenticated owner scope; attempt fencing; forged progress keys; and provider errors without secret text. Five focused host regressions passed initially. Full required checks and exact-head independent review are recorded below when complete.
+Synthetic tests cover indexed continuation, unchanged messages/arguments/reasoning and idempotent call accounting; strict invalid inputs; authenticated owner scope; attempt fencing; forged progress keys; and provider errors without secret text. Five focused host regressions passed initially. The full local check passed 817 application tests, 50 script tests, 42 Python evaluation tests and 32 Python runtime tests (941 total), plus TypeScript, Ruff and mypy. Separate build and formatting passed. Independent GPT-6 Astra review approved implementation head `c9e6f03e24016945eea2577f1b7bcfb98f870a58`, independently running all 49 host coding tests, all 32 Python runtime tests and two additional failure tests for context bounds, diagnostic storage failure, duplicate accounting and inactive attempts. No blocking findings; the journal table formatting nit was corrected. The final documentation revision, hosted checks, merge/deployed SHA, health and version/tag receipt are linked from [PR #183](https://github.com/akhilvuputuri/chief-agent/pull/183).
 
 ## Outcome and follow-up
 

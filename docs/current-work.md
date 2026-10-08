@@ -1,6 +1,6 @@
-# Coding planning continuation — reproduced fix, review pending
+# Coding planning continuation — validated fix, delivery tracked
 
-A live planning job stopped after its first valid DeepSeek tool response because the next request retained provider tool-call `index` metadata that Chief’s strict API rejected. The host now accepts that optional integer field and exposes safe, attempt-scoped rejection categories in `coding_status`. The reported job remains paused pending explicit owner resume. No worker-image, model, allocation or permission change. See [journal 68](journey/68-coding-tool-index.md).
+A live planning job stopped after its first valid DeepSeek tool response because the next request retained provider tool-call `index` metadata that Chief’s strict API rejected. The host now accepts that optional integer field and exposes safe, attempt-scoped rejection categories in `coding_status`. The reported job remains paused pending explicit owner resume. No worker-image, model, allocation or permission change. Full local checks and independent implementation review passed. Final revision, hosted checks and exact release evidence are tracked in [PR #183](https://github.com/akhilvuputuri/chief-agent/pull/183). See [journal 68](journey/68-coding-tool-index.md).
 
 # Remote MCP connectors — released v0.3.45, off
 

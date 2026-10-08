@@ -1,4 +1,4 @@
-Coding incident, 8 October 2026: indexed tool-call continuation was reproduced and fixed locally; failure categories are now saved for owner-scoped status reads. Review/release are pending, and the reported planning job stays paused. See [journal 68](docs/journey/68-coding-tool-index.md).
+Coding incident, 8 October 2026: indexed tool-call continuation was reproduced and fixed; full local checks and independent implementation review passed. Failure categories are saved for owner-scoped status reads. [PR #183](https://github.com/akhilvuputuri/chief-agent/pull/183) records final review, checks and exact release evidence. The reported planning job stays paused. See [journal 68](docs/journey/68-coding-tool-index.md).
 
 ## Remote MCP connectors — released v0.3.45, off, 8 October 2026
 
