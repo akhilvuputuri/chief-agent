@@ -6,6 +6,27 @@ const redditHost = (url: string) =>
   /^(?:www\.|old\.|new\.|m\.|np\.)?reddit\.com$|^redd\.it$/.test(
     new URL(url).hostname,
   );
+export class PublicBrowserCleanupFailure extends Error {}
+export async function publicAbortable<T>(
+  pending: Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  signal.throwIfAborted();
+  let abort: () => void = () => {};
+  try {
+    return await Promise.race([
+      pending,
+      new Promise<never>((_resolve, reject) => {
+        abort = () =>
+          reject(signal.reason ?? new Error("Public read cancelled"));
+        signal.addEventListener("abort", abort, { once: true });
+        if (signal.aborted) abort();
+      }),
+    ]);
+  } finally {
+    signal.removeEventListener("abort", abort);
+  }
+}
 export function publicPostUrl(input: string) {
   const url = new URL(publicHttps(input));
   if (
@@ -62,10 +83,27 @@ export async function readPublicPost(
   signal.throwIfAborted();
   const url = publicPostUrl(input);
   let context: BrowserContext | undefined;
+  let creating: Promise<BrowserContext> | undefined;
   let closing: Promise<void> | undefined;
   const close = () =>
     (closing ??= (async () => {
-      if (!context) return;
+      if (!context) {
+        // Context creation may finish after cancellation. Never reuse that browser.
+        void creating?.then((c) => c.close()).catch(() => {});
+        try {
+          await Promise.race([
+            browser.close(),
+            delay(2000).then(() => {
+              throw Error("Browser close timed out");
+            }),
+          ]);
+        } catch {
+          throw new PublicBrowserCleanupFailure(
+            "Public browser cleanup failed",
+          );
+        }
+        return;
+      }
       try {
         await Promise.race([
           context.close(),
@@ -76,12 +114,24 @@ export async function readPublicPost(
       } catch {
         // No invoice contexts coexist with public resolution. Retire the browser
         // if this anonymous context cannot be proven closed.
-        await Promise.race([browser.close(), delay(2000)]);
+        try {
+          await Promise.race([
+            browser.close(),
+            delay(2000).then(() => {
+              throw Error("Browser close timed out");
+            }),
+          ]);
+        } catch {
+          throw new PublicBrowserCleanupFailure(
+            "Public browser cleanup failed",
+          );
+        }
       }
     })());
   const abort = () => {
     void close().catch(() => {});
   };
+  signal.addEventListener("abort", abort, { once: true });
   const result = {
     pageUrl: url,
     postId: null as string | null,
@@ -90,11 +140,11 @@ export async function readPublicPost(
     blocked: true,
   };
   try {
-    context = await browser.newContext({
+    creating = browser.newContext({
       acceptDownloads: false,
       serviceWorkers: "block",
     });
-    signal.addEventListener("abort", abort, { once: true });
+    context = await publicAbortable(creating, signal);
     signal.throwIfAborted();
     let navigations = 0,
       requests = 0;

@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { BrowserManager, MissingBrowser } from "./manager.js";
+import { PublicBrowserCleanupFailure } from "./public-links.js";
 const key = process.env.BROWSER_CONTROL_KEY ?? "";
 if (!/^[0-9a-f]{64}$/.test(key))
   throw new Error("Browser control is not configured");
@@ -80,6 +81,10 @@ const app = createServer(async (req, res) => {
             : "browser_action_failed",
       }),
     );
+    // Fail closed when an anonymous context/browser cannot be proven retired.
+    // The existing container restart policy restores a clean process boundary.
+    if (error instanceof PublicBrowserCleanupFailure)
+      setImmediate(() => process.exit(1));
   }
 });
 app.requestTimeout = 50000;

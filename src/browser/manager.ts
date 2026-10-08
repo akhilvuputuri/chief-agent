@@ -11,7 +11,11 @@ import { datesIn, invoiceFacts, fileName } from "../gathering/facts.js";
 import { invoiceLink, readUrl, safeLabel } from "./policy.js";
 import { request as httpsRequest } from "node:https";
 import { HttpsProxyAgent } from "https-proxy-agent";
-import { readPublicPost } from "./public-links.js";
+import {
+  readPublicPost,
+  publicAbortable,
+  PublicBrowserCleanupFailure,
+} from "./public-links.js";
 export function browserEnvironment(
   env: NodeJS.ProcessEnv = process.env,
 ): Record<string, string> {
@@ -58,6 +62,7 @@ export class BrowserManager {
   private browser?: Browser;
   private queue = new SerialQueue();
   private lifecycle = new SerialQueue();
+  private publicQuarantined = false;
   constructor(
     private proxy: string,
     private launch = () =>
@@ -404,13 +409,17 @@ export class BrowserManager {
     return this.queue.run(id, async () => {
       const a = command.parse(input) as Record<string, any>;
       if (a.kind === "resolve_public") {
+        signal = AbortSignal.any([
+          ...(signal ? [signal] : []),
+          AbortSignal.timeout(45000),
+        ]);
         signal?.throwIfAborted();
         const url = z.string().max(2048).parse(a.url);
         return this.lifecycle.run("open", async () => {
           signal?.throwIfAborted();
-          await this.expireSessions();
-          signal?.throwIfAborted();
-          if (this.sessions.size)
+          if (this.publicQuarantined)
+            throw new PublicBrowserCleanupFailure("Public browser unavailable");
+          if (this.sessions.size || this.browser?.contexts().length)
             return {
               pageUrl: url,
               postId: null,
@@ -418,15 +427,30 @@ export class BrowserManager {
               self: false,
               blocked: true,
             };
-          this.browser ??= await this.launch();
+          if (!this.browser) {
+            const launched = this.launch();
+            try {
+              this.browser = await publicAbortable(launched, signal!);
+            } catch (error) {
+              void launched.then((b) => b.close()).catch(() => {});
+              throw error;
+            }
+          }
           try {
             signal?.throwIfAborted();
             return await readPublicPost(this.browser, url, signal);
+          } catch (error) {
+            if (error instanceof PublicBrowserCleanupFailure)
+              this.publicQuarantined = true;
+            throw error;
           } finally {
             if (!this.browser.isConnected()) this.browser = undefined;
           }
         });
       }
+      if (a.kind === "open" || a.kind === "restore")
+        if (this.publicQuarantined)
+          throw new PublicBrowserCleanupFailure("Browser unavailable");
       if (a.kind === "open" || a.kind === "restore")
         return this.lifecycle.run("open", () => this.newSession(user, id, a));
       const s = this.get(user, id);

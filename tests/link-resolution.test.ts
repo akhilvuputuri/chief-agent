@@ -8,7 +8,10 @@ import { LinkResolver, postEvidence } from "../src/link-resolution.js";
 import {
   publicPostRequest,
   publicPostUrl,
+  readPublicPost,
 } from "../src/browser/public-links.js";
+import { BrowserManager } from "../src/browser/manager.js";
+import type { Browser, BrowserContext } from "playwright-core";
 import { McpTools } from "../src/mcp.js";
 import { McpFailure } from "../src/mcp-client.js";
 import type { McpTransport as Transport } from "../src/mcp-client.js";
@@ -117,6 +120,24 @@ test("mobile Reddit and blocked shortener destinations cannot be saved as publis
       (await resolver.resolve("123", "https://short.example.com/a")).status,
       "blocked",
     );
+    const discussion = await resolver.resolve(
+      "123",
+      "https://short.example.com/a",
+      "discussion",
+    );
+    assert.equal(discussion.status, "discussion");
+    assert.equal(discussion.pageUrl, post);
+    assert.equal(discussion.articleUrl, null);
+    const accessible = new LinkResolver(f.db, {
+      get: async () => ({ body: html, finalUrl: post }),
+    });
+    const selected = await accessible.resolve(
+      "456",
+      "https://short.example.com/a",
+      "discussion",
+    );
+    assert.equal(selected.status, "discussion");
+    assert.equal(selected.articleUrl, null);
     for (const host of ["m.reddit.com", "np.reddit.com"]) {
       const blocked = new LinkResolver(f.db, {
         get: async () => {
@@ -176,6 +197,55 @@ test("redirect and error streams are cancelled before following or settling; des
   } finally {
     replacement.mock.restore();
   }
+});
+test("cancelled browser startup retires its browser and closes any late anonymous context", async () => {
+  let finish!: (context: BrowserContext) => void;
+  let closed = 0,
+    lateClosed = 0;
+  const browser = {
+    newContext: () =>
+      new Promise<BrowserContext>((resolve) => {
+        finish = resolve;
+      }),
+    close: async () => {
+      closed++;
+    },
+  } as unknown as Browser;
+  const controller = new AbortController();
+  const reading = readPublicPost(browser, post, controller.signal);
+  const rejected = assert.rejects(reading);
+  controller.abort();
+  await rejected;
+  assert.equal(closed, 1);
+  finish({
+    close: async () => {
+      lateClosed++;
+    },
+  } as unknown as BrowserContext);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(lateClosed, 1);
+  let finishLaunch!: (browser: Browser) => void;
+  const manager = new BrowserManager(
+    "http://127.0.0.1:9",
+    () =>
+      new Promise<Browser>((resolve) => {
+        finishLaunch = resolve;
+      }),
+  );
+  const launchAbort = new AbortController();
+  const pending = manager.call(
+    "123",
+    randomUUID(),
+    { kind: "resolve_public", url: post },
+    launchAbort.signal,
+  );
+  const launchRejected = assert.rejects(pending);
+  await new Promise((resolve) => setImmediate(resolve));
+  launchAbort.abort();
+  await launchRejected;
+  finishLaunch(browser);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(closed, 2);
 });
 test("resolution is owner-scoped, records provenance and never guesses blocked pages", async () => {
   const f = await fixture();

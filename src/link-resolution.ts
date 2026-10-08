@@ -203,6 +203,15 @@ export class LinkResolver {
           };
         else evidence = postEvidence(response.body, final);
       } catch {}
+      if (target === "discussion" && isReddit(destination)) {
+        result = {
+          ...result,
+          pageUrl: postPage(destination),
+          status: "discussion",
+          reason: "The owner explicitly selected the Reddit discussion.",
+        };
+        evidence = undefined;
+      }
       if (
         !isReddit(originalUrl) &&
         !isReddit(destination) &&
@@ -221,6 +230,7 @@ export class LinkResolver {
       }
       if (
         isReddit(destination) &&
+        result.status !== "discussion" &&
         (!evidence || evidence.blocked) &&
         this.browser &&
         !signal?.aborted

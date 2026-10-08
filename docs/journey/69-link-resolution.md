@@ -54,7 +54,10 @@ The initial full local checks/build/format and 27 focused tests passed. The firs
 Linux CI browser smoke exposed reuse of a closed synthetic browser; the smoke now
 uses a separate manager for the anonymous context and tests active/queued cancellation
 and conflicting metadata. Local Docker export failed with a storage I/O error; shared
-Docker state was preserved. The corrected 30 focused tests pass. Public production browser success remains unverified; the measured block is
+Docker state was preserved. The second review of `608cfa9` additionally found discussion intent lost through a
+shortener and context-creation cancellation ignored. The corrected 31 focused tests
+pass, including a stalled startup/late-context regression. Context cleanup failures
+retire the isolated browser process; cancelled launches cannot start page work. Public production browser success remains unverified; the measured block is
 explicitly retained as a limitation. No live save from this candidate was made.
 
 ## Follow-up
