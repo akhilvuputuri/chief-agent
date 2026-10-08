@@ -32,3 +32,9 @@ The initial full local check passed 983 tests (842 application, 50 script, 42 of
 ## Follow-up and next iteration
 
 Keep the frozen component/public benchmark pack, add realistic planning/navigation cases and compare harnesses with models/allocations held fixed. Measure completion, repeated evidence, context-summary recall, recovery, latency, actual usage and reviewer false approvals. Paid model inference requires its separate authorization. Scoped full private trace inspection from cloud tasks remains unfinished; new owner-scoped status/metadata improves diagnosis without exporting conversations or giving workers SSH access.
+
+## Reviewed foundation and image — 8 October 2026
+
+GPT-6 Astra approved exact `12aaf0f8242ed1c41be7215d43aba41b042f5f65` after all four review findings were corrected and independently reproduced. [PR #190](https://github.com/akhilvuputuri/chief-agent/pull/190) checks passed 992 tests (847 application, 50 script, 42 offline eval and 53 Python), with worker/browser/PostgreSQL container smoke; Devin marked its truncated-generation finding resolved. Merge source is `3fa44daff4fddc0c2dbe4aa5722abddad297c4cf`. Exact foundation release remains pending here.
+
+[Main-only image publication](https://github.com/akhilvuputuri/chief-agent/actions/runs/37776080436) succeeded from that source. Anonymous OCI/config hashes, Linux/amd64, worker user, isolated Python entrypoint, package 0.1.5 and byte equality of all ten installed modules were verified for `sha256:fc43b1a15c2daed76935eddb9d03ac8e4ff93439765b3b85c27d9f85a4058037`. No paid sandbox/model job was used. The follow-up selector pins the verified image and `harnessVersion: 2` together; independent pin review and exact deployment are pending.
