@@ -439,7 +439,14 @@ test("deadline expiry keeps an explicit reason even when the worker exits before
       await f.c.tick();
       const stopped = await f.row(job.id);
       assert.equal(stopped.state, "paused");
-      assert.match(stopped.summary, /Allocated coding time expired/);
+      if (terminal) {
+        assert.match(stopped.summary, /deadline has expired/);
+        assert.match(stopped.summary, /stopping cause is unconfirmed/);
+      } else
+        assert.match(
+          stopped.summary,
+          /Allocated coding time expired while the sandbox was still active/,
+        );
       assert.equal(f.creates(), 1);
       await assert.rejects(
         f.c.authenticate(j.id, f.c.token(j.id, j.attempt_id)),

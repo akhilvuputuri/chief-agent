@@ -943,7 +943,9 @@ export class CodingController {
         )
           await this.stopped(
             j,
-            "Allocated coding time expired before verified completion; saved work is retained",
+            state === "terminal"
+              ? "Sandbox exited without a result and its allocated deadline has expired; stopping cause is unconfirmed, saved work is retained"
+              : "Allocated coding time expired while the sandbox was still active; saved work is retained",
           );
         else if (state === "terminal")
           await this.stopped(
