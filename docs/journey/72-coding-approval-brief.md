@@ -1,7 +1,7 @@
 # 72 — A completed plan still needs a usable approval brief
 
 Work date(s): 2026-10-08–09. Written/revised: 2026-10-09.
-Status: 996 offline tests passed; independent implementation review approved. Final documentation re-review, hosted checks, trusted image publication/pin and exact release verification pending.
+Status: 996 offline tests passed; independent implementation review approved. Foundation PR checks/review passed and merged; trusted image verified. Activation review/checks and exact releases remain pending.
 
 ## User-visible problem and preceding iteration
 
@@ -23,7 +23,7 @@ Python 0.1.6 gives planning reports audience guidance, a usual 200–400-word ta
 
 Chief's approval delivery shows the complete scope once with a visible title, preserves the model snapshot/publication policy and avoids repeating the status summary. Exact owner/message/revision/scope binding, uncertain delivery and expiry remain unchanged. Synthetic regressions cover long-audit revision with retained findings, UTF-16 boundaries/clarification, a formatted concise card and complete legacy long-plan delivery/confirmation.
 
-GPT-6 Astra independently approved `98e943bb37eca1587188c594ac009c8cba4789dc` in [PR #194](https://github.com/akhilvuputuri/chief-agent/pull/194), running all 55 Python tests, Ruff/format/strict mypy, 58 host coding tests and additional Unicode/non-planning boundary probes. A non-blocking journal-table formatting issue was corrected; the updated exact head still requires fresh approval. Deployment evidence will be appended after actual verification. The compatible host foundation deliberately retains the old image selector until a main-built immutable image is verified and pinned through a reviewed follow-up.
+GPT-6 Astra independently approved `98e943bb37eca1587188c594ac009c8cba4789dc` in [PR #194](https://github.com/akhilvuputuri/chief-agent/pull/194), running all 55 Python tests, Ruff/format/strict mypy, 58 host coding tests and additional Unicode/non-planning boundary probes. A non-blocking journal-table formatting issue was corrected; fresh GPT-6 Astra approval covered `78b38691655051b93f781d9e5b2d65972f8358d8`. Deployment evidence will be appended after actual verification. The compatible host foundation deliberately retains the old image selector until a main-built immutable image is verified and pinned through a reviewed follow-up.
 
 ## Verification and outcome
 
@@ -36,3 +36,9 @@ The [cumulative guide](coding-agent-lessons.md) records the distinction between 
 ## Follow-up and next iteration
 
 After verified activation, the next separately authorized live checks are a fresh concise plan, a small bug/feature through actual verification and PR, and reviewer-requested rework. Do not resume or reapprove existing jobs automatically. The offline benchmark pack still needs a disposable inference adapter before model trials; its fixture validation is not an agent score. Cloud incident access should retain bounded private metadata, never public raw traces or copied production credentials.
+
+## Foundation and verified image — 9 October 2026
+
+[PR #194](https://github.com/akhilvuputuri/chief-agent/pull/194) merged at `dbf4c70e5a2b03982f79829d77cf3f5805504f4a`, after exact `78b3869` Astra approval and passing [PR checks](https://github.com/akhilvuputuri/chief-agent/actions/runs/37805791541). Devin passed with zero bugs/vulnerabilities and one informational flag: a near-limit 6,000-unit brief plus wrapper can still span Telegram parts. Astra independently maintained approval because concise complete scope, rather than a single-message guarantee, is the contract. Multipart content and final-message confirmation are preserved.
+
+[Main-only publication](https://github.com/akhilvuputuri/chief-agent/actions/runs/37807235580) succeeded from this source. Anonymous OCI/config hashes, Linux/amd64, non-root worker, isolated Python command/no entrypoint override, package 0.1.6 and byte equality of all ten installed source modules passed for `sha256:5e03b8cac3409188cffc94e8584bb76fefcc689e62b4bf367b2b883046b4a5c1`. The activation candidate changes only the image selector/app patch version, with technical research documentation; role models, effort, price filters, shared allocations and old job pins remain unchanged. Exact foundation/activation release verification is still pending.
