@@ -19,7 +19,14 @@ try {
     inlineRefs: false,
   });
   addFormats.default(ajv);
-  parentPort!.postMessage({ valid: !!ajv.compile(schema)(data) });
+  const validate = ajv.compile(schema);
+  // AJV's $async extension returns a Promise, which must never become a truthy success.
+  if ("$async" in validate && validate.$async)
+    throw new Error("Async schemas are unsupported");
+  const valid = validate(data);
+  if (typeof valid !== "boolean")
+    throw new Error("Unexpected validator result");
+  parentPort!.postMessage({ valid: valid === true });
 } catch {
   parentPort!.postMessage({ valid: false });
 }

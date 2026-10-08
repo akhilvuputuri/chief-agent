@@ -817,6 +817,35 @@ test("schema cancellation terminates the worker without accepting late validatio
   await assert.rejects(validation, ToolValidationError);
 });
 
+test("AJV async schemas cannot turn rejected promises into successful input or output validation", async () => {
+  await assert.rejects(
+    validateMcpSchema(
+      {
+        $async: true,
+        type: "object",
+        properties: { n: { type: "integer" } },
+        required: ["n"],
+      },
+      { n: "wrong" },
+    ),
+    ToolValidationError,
+  );
+  const f = await fixture();
+  try {
+    const schema = structuredClone(remote);
+    schema[0]!.inputSchema.$async = true;
+    f.setSchemas(schema);
+    await assert.rejects(f.tools.call("123", save()), ToolValidationError);
+    assert.equal(f.calls.length, 0);
+    assert.equal(
+      (await f.db.query("SELECT * FROM mcp_operations")).rows.length,
+      0,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
 test("SDK isolates output schemas too, including schemas of ungranted tools", async () => {
   const http: typeof fetch = async (_input, init) => {
     if (init?.method === "GET") return new Response(null, { status: 405 });

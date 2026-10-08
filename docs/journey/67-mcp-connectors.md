@@ -80,3 +80,10 @@ validation path. New executable tests use catastrophic patterns to verify deadli
 termination and main-thread responsiveness, cancellation and ungranted schemas.
 This updated source needs fresh exact-head independent review and CI; the earlier
 approval does not cover it. No production installation has occurred.
+
+Fresh independent review requested changes on `c792b89`: AJV's optional `$async`
+extension returns a Promise, which a boolean coercion wrongly accepted. The
+worker now rejects async validators and requires an actual boolean result before
+reporting success. An executable regression verifies invalid async data and that
+no save is submitted or intent created. Previous 19 tests passed independently;
+the new head requires fresh review and checks.

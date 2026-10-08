@@ -45,7 +45,7 @@ Server tools are addressed through these typed host operations, rather than
 adding arbitrary operation names to Chief's closed protocol. A compatible new
 server needs registry/credential configuration, not another transport adapter.
 Input and declared output schemas support draft-07 and 2020-12; unresolved
-external references fail closed. Compilation and validation run in a trusted
+external references and AJV async schemas fail closed. Compilation and validation run in a trusted
 worker with a two-second deadline, memory limits, empty environment and shared
 cancellation. Expensive patterns cannot stall the gateway event loop. SDK dynamic
 output validation is deferred to that worker; fixed MCP wire envelopes remain
