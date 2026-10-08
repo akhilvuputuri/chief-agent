@@ -78,6 +78,10 @@ For the latest verified release and open work, read [current work](../current-wo
 | 8 October | [70 — Coding allocations](70-coding-allocations.md): how can the squad use a realistic shared allocation? | Released v0.3.49; new-job allocation/image verified, old jobs retained, live coding acceptance pending |
 | 8 October | [71 — Coding progress and recovery](71-coding-progress-recovery.md): how can exploration survive context reduction and provider failure? | Released v0.3.51; foundation/pin reviews, source/image, 992 tests, exact releases and health verified; live quality pending |
 
+## Coding-agent learning path
+
+Start with [coding-agent engineering: changes, failures and evidence](coding-agent-lessons.md). It connects the coding/runtime journals, separates reproduced fixes from unmeasured quality claims and defines the learning record to update with future harness changes.
+
 ## Connected case studies
 
 **Context, cost and continuity.** The [lost-target incident](02-context-and-targets.md) and [cost investigation](03-token-cost.md) led to more selective context, compact observations and search reuse. As attachments and tool definitions grew, the [PDF failure and context-budget follow-up](07-attachments.md) exposed pressure from fixed instructions, schemas and state; the exact production size was not captured, so that diagnosis remains qualified. The v0.3.4 fix kept the current input and newest tool group viable, but the later [rolling-conversation incident](17-rolling-conversation.md) showed that bounds alone could still omit the immediately preceding exchange. That iteration protected recent conversation and source links, improved original-message retrieval, and separated foreground chat from explicitly selected jobs. [Checkpoint steering](18-checkpoint-steering.md) then changed when new input is adopted, preserving completed reasoning/tool results while fencing stale delivery. These are connected, evidence-backed iterations; the record does not establish one sole cause for every conversational failure or a measured cost reduction from the whole sequence.

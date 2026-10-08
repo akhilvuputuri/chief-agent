@@ -75,6 +75,8 @@ Label user/operator reports, synthetic tests, measured observations, hypotheses 
 
 Close the journal entry when review and deployment status changes: append dated evidence for the PR, approved head, exact deployed SHA, successful release and health/diagnostics, plus the published version/tag when present. Record separate operator migration/install verification when required. Update stale candidate status after verification while preserving dated failures and review/fix/re-review history. Merge, CI success or a prepared package version alone does not establish release. If work is deferred or release verification is unavailable, record the exact boundary and next step instead.
 
+For meaningful coding-harness changes, update [the cumulative coding-agent learning guide](docs/journey/coding-agent-lessons.md) alongside the detailed journal entry in the same PR. Record the observed failure, hypothesis, intervention, counterexample/review correction, measured or reproduced outcome, limitations and next falsifying test. Preserve negative/mixed results. Distinguish an implemented mechanism, a passing regression, verified deployment and a demonstrated real-task benefit; do not claim completion-rate, quality or cost gains without comparable evidence. This documentation rule does not authorize paid trials, job resumption or model changes.
+
 ## Portable checkout and concurrent development
 
 - GitHub main is the integrated source of truth; the latest successful release SHA identifies production. Fetch origin and inspect status before work. Preserve other people's uncommitted changes; use an isolated branch/worktree for unrelated tasks. Never reset or clean a shared checkout to make it convenient.
