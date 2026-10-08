@@ -78,6 +78,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 8 October | [70 — Coding allocations](70-coding-allocations.md): how can the squad use a realistic shared allocation? | Released v0.3.49; new-job allocation/image verified, old jobs retained, live coding acceptance pending |
 | 8 October | [71 — Coding progress and recovery](71-coding-progress-recovery.md): how can exploration survive context reduction and provider failure? | Released v0.3.51; foundation/pin reviews, source/image, 992 tests, exact releases and health verified; live quality pending |
 | 8 October | [72 — Coding approval brief](72-coding-approval-brief.md): can a completed audit become a usable complete owner scope? | 996 offline tests passed; foundation review approved, final review/image activation pending |
+| 9 October | [73 — Coding model efficiency](73-coding-model-efficiency.md): which tools, handoffs and review justify their cost for inexpensive models? | Primary-source research; controlled comparisons proposed, no Chief performance advantage measured |
 
 ## Coding-agent learning path
 

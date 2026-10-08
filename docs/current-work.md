@@ -1,6 +1,6 @@
-# Coding approval brief — in progress, 8 October 2026
+# Coding approval brief — activation candidate, 9 October 2026
 
-Python 0.1.6 proposes a concise complete phone approval brief, actionable revision for oversized proposals and preserved detailed working notes. Chief avoids duplicate summaries while retaining complete delivered scope and model/publication policy. 996 offline tests/build/format passed and independent implementation review approved; final review/image/release are pending; production remains on Python 0.1.5 until a verified image pin. The latest v2 planning job reached plan-ready, but full coding/review/PR acceptance is unmeasured. See [journal 72](journey/72-coding-approval-brief.md).
+The compatible foundation merged in [PR #194](https://github.com/akhilvuputuri/chief-agent/pull/194) after 996 offline tests, exact-head Astra approval, CI and readable Devin feedback. Python 0.1.6's main-built digest was verified against all ten installed source modules; the reviewed-pin candidate enables its concise complete approval contract for new jobs. Exact release/image-selector verification remains pending; old jobs keep their settings and plans. Near-limit briefs can span Telegram parts. See [journal 72](journey/72-coding-approval-brief.md). [Efficiency research](coding-model-efficiency.md) proposes controlled cheap-model/squad comparisons; no measured coding-cost or completion advantage is claimed.
 
 Coding-agent learning record: [cumulative lessons](journey/coding-agent-lessons.md) connects the released iterations and distinguishes verified mechanisms from unmeasured quality/cost improvements. Future meaningful harness changes update it alongside the detailed journal.
 
