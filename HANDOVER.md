@@ -1,3 +1,11 @@
+# Pi foundation release verified — 9 October 2026
+
+[v0.3.59](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.59) foundation at `5fa01cbeb2a8d54315f52c23d5a9ba5c35d98bef` has an exact successful release/startup health receipt and separate gateway-start log. Image pin [PR 205](https://github.com/akhilvuputuri/chief-agent/pull/205) remains a distinct step; default is legacy and old jobs are intact. No paid/live acceptance or switch yet. [Journal evidence](docs/journey/77-pi-runtime.md#foundation-release-closure--9-october-2026).
+
+# Pi foundation integrated; image pin under review — 9 October 2026
+
+[PR 204](https://github.com/akhilvuputuri/chief-agent/pull/204) merged the Astra-approved implementation at `5fa01cbeb2a8d54315f52c23d5a9ba5c35d98bef` after passing exact-head Linux checks and Devin. The public main-built Pi image was anonymously verified (SDK, compiled source, user/entrypoint/guard) and is pinned in this follow-up. Default remains legacy; old runtime/jobs are intact. Production receipt, pin release and live acceptance/cutover still require their own evidence. [Journal 77](docs/journey/77-pi-runtime.md).
+
 # Pi implementation candidate — 9 October 2026
 
 [Independent Pi runtime](docs/pi-coding-runtime.md) is implemented for review with a standalone package/CLI/RPC and a Chief bridge. New selection is disabled pending immutable-image verification and acceptance. The Python runtime source/image/default and stored jobs are preserved. Local synthetic/application/Python tests passed; hosted Linux tests, independent approval and release/activation evidence are still pending. [Journal 77](docs/journey/77-pi-runtime.md) records the evidence boundary.
