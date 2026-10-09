@@ -205,7 +205,7 @@ export class OpenRouter implements ModelAdapter {
       throw new ModelError(
         "The model provider returned an empty response. Please try again shortly.",
         !["length", "content_filter"].includes(choice?.finish_reason),
-        diagnostics,
+        { ...diagnostics, failureCode: "empty" },
       );
     if (
       m.tool_calls &&
