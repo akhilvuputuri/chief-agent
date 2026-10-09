@@ -1,7 +1,7 @@
 # 75 — Let a rejected context summary be corrected before pausing
 
 Work date(s): 2026-10-09. Written/revised: 2026-10-09.
-Status: compatible v0.3.54–56 foundations deployed; Python 0.1.8 scoped planning tested; global activation and semantic acceptance pending.
+Status: v0.3.54–56 foundations deployed; Python 0.1.8 global activation withdrawn after a live summary failure; Python 0.1.9 field-local repair under review.
 
 ## Problem and evidence
 
@@ -46,3 +46,15 @@ One owner-authorized, independently reviewed new-job-only candidate trial comple
 Root semantic grading rejected that proposal despite functional completion: it copied a ten-item briefing cap into a request for the actual pending checklist; the notebook incorrectly inferred no daily agent from the loader rather than inspecting the bundled plugin inventory; historical causal certainty exceeded the source-only evidence. A legitimate planning-only feedback revision is prepared to correct these points, inspect delivery limits and plugin pins, reconcile the complete brief and handoff, and retain the separate implementation/DB-operations confirmation boundaries. No manual rewrite of the model plan or approval is used. This adaptive test is not a controlled success-rate estimate.
 
 The activation candidate changes only the new-job default image and patch version. Models/effort/provider filtering, allocation, permissions, schema/Compose, approval requirements and existing paused jobs are unchanged. Exact review, checks, deployment and substantive live acceptance remain required.
+
+The first legitimate planning revision completed with 45 model calls, 80 tools and four compactions; one recorded empty provider response recovered before a 290-word / 2,247-unit plan was delivered. Independent Astra acceptance still requested changes: a new hidden cap contradicted the full inline-list requirement, existing long-message delivery creates interactive views rather than inline continuation, successful delivery clears `last_error`, and the skill-version target was missing. A second reviewed plan-only feedback revision addresses actual delivery/error-state files and requires matching complete brief and final notebook. No implementation approval or manual stored-plan change occurred. These adaptive revisions are separate from independent success-rate measurements. Immutable [v0.3.55](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.55) and [v0.3.56](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.56) identify their verified foundations.
+
+## A whole-notebook repair created another invalid action field — 9 October 2026
+
+The second feedback revision paused at 05:10:46Z with 29 calls, 62 tools, one acknowledged compaction, cleanup complete, no changed files and the old 290-word plan still retained (not a newly accepted plan). One empty summary generation recovered; the whole-notebook validation correction still returned `nextAction` of 1,163 UTF-16 units against 1,000, despite valid findings of 4,582. Original notes and checkpoint remained acknowledged. This failed live result withdraws the proposed global Python 0.1.8 activation in PR #200.
+
+Python 0.1.9 changes the repair operation for field-local validation failures: the next `notes_update` schema contains only the failing fields; feedback supplies their measured lengths and half-bound writing targets. The host merges only those generated replacements into the invalid candidate and preserves all already-valid fields byte-exact, then validates the complete notebook before acknowledgement or compaction. Extra fields, repeated invalid output, structural failures and uncertain writes still fail conservatively. Structurally invalid candidates use the existing whole-notebook repair. The summary generation also asks for comfortable headroom and a short next step rather than a test matrix in `nextAction`. There is still only one transient recovery and one validation repair, maximum three generations, within the same resource guards.
+
+Regression tests reproduce an oversized action with valid source/scope findings and verify that repairing just that action retains every valid field and original history; a counterexample trying to replace valid evidence is rejected without acknowledgement/compaction. This tests protocol preservation, not a model-compliance improvement. New independently verified image and live concise-plan/retained-understanding acceptance remain required. The original owner issue and old trial pins are not migrated or automatically resumed.
+
+Planning guidance now also requires a final brief/notebook reconciliation, inspected end-to-end delivery and actual plugin/tool inventory, explicit overflow/failure behavior and a post-confirmation next action. This responds to observed semantic counterexamples; instruction compliance is not mechanically guaranteed and remains part of live acceptance grading.

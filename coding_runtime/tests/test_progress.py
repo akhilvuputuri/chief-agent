@@ -158,9 +158,7 @@ class ProgressTests(unittest.IsolatedAsyncioTestCase):
                 (
                     "notes_update",
                     {
-                        "subtask": "Inspect",
                         "findings": "KEEP_SCOPE with evidence refs",
-                        "nextAction": "Report complete scope",
                     },
                 )
             ),
@@ -228,9 +226,7 @@ class ProgressTests(unittest.IsolatedAsyncioTestCase):
                         (
                             "notes_update",
                             {
-                                "subtask": "Inspect",
                                 "findings": "Complete scope/evidence retained",
-                                "nextAction": "Draft brief",
                             },
                         )
                     ),
@@ -246,6 +242,71 @@ class ProgressTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(self.memory.modelCalls, 4)
                 self.assertEqual(self.memory.toolsUsed, 2)
                 self.assertEqual(model.inputs[2][: len(original)], original)
+
+    async def test_next_action_repair_retains_valid_evidence_and_scope_exactly(self):
+        original = self.large_history()
+        candidate = {
+            "subtask": "Audit only; wait for owner approval before code",
+            "findings": "Verified source, error handling and complete acceptance matrix "
+            * 40,
+            "nextAction": "Detailed implementation instructions " * 33,
+            "questions": "No blocking questions",
+        }
+
+        class InspectRepairModel(ScriptedModel):
+            async def generate(inner, messages, tools):
+                if len(inner.inputs) == 1:
+                    schema = tools[0]["parameters"]
+                    self.assertEqual(set(schema["properties"]), {"nextAction"})
+                    self.assertEqual(schema["required"], ["nextAction"])
+                    self.assertFalse(schema["additionalProperties"])
+                return await super().generate(messages, tools)
+
+        model = InspectRepairModel(
+            generation(("notes_update", candidate)),
+            generation(
+                (
+                    "notes_update",
+                    {
+                        "nextAction": "Wait for owner scope confirmation; then implement verified design"
+                    },
+                )
+            ),
+            generation(report("plan_ready", plan="Complete scope and acceptance")),
+        )
+        result = await self.run_loop(model)
+        self.assertEqual(result.kind, "plan_ready")
+        for field in ("subtask", "findings", "questions"):
+            self.assertEqual(getattr(self.memory.notes, field), candidate[field])
+        self.assertEqual(model.inputs[1][: len(original)], original)
+        self.assertEqual(self.memory.compactions, 1)
+        self.assertEqual(self.memory.modelCalls, 3)
+        feedback = next(
+            json.loads(m["content"]) for m in model.inputs[1] if m["role"] == "tool"
+        )
+        self.assertEqual(feedback["repairOnly"], ["nextAction"])
+        self.assertEqual(feedback["targetUnits"], {"nextAction": 500})
+
+    async def test_partial_repair_cannot_replace_other_valid_fields(self):
+        original = self.large_history()
+        self.memory.notes = Notebook(findings="ACKNOWLEDGED")
+        model = ScriptedModel(
+            generation(
+                (
+                    "notes_update",
+                    {"subtask": "Audit", "findings": "KEEP", "nextAction": "x" * 1163},
+                )
+            ),
+            generation(
+                ("notes_update", {"nextAction": "Wait", "findings": "Changed scope"})
+            ),
+        )
+        with self.assertRaises(ContextRecoveryError):
+            await self.run_loop(model)
+        self.assertEqual(self.messages, original)
+        self.assertEqual(self.memory.notes.findings, "ACKNOWLEDGED")
+        self.assertEqual(self.memory.compactions, 0)
+        self.assertEqual(self.memory.toolsUsed, 0)
 
     async def test_two_invalid_summaries_pause_with_old_notebook_and_history(self):
         original = self.large_history()
