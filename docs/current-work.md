@@ -1,3 +1,13 @@
+# Independent Pi runtime — implementation candidate, 9 October 2026
+
+[Runtime contract](pi-coding-runtime.md) implements the standalone TypeScript/Pi package, learn/plan/approved-build API and CLI/RPC, signed task records, actual checks/artifacts, a Chief-side native model/session bridge and separate immutable worker path. The backend remains legacy; Python code/images/jobs are preserved. Local synthetic and application/Python checks passed; exact-head independent review, hosted Linux/extraction checks, image pin, real acceptance and new-task cutover remain pending. See [journal 77](journey/77-pi-runtime.md).
+
+# Independent Pi coding runtime — exploration, 9 October 2026
+
+[Implementation/cutover plan](pi-coding-runtime-plan.md): preserve the existing runtime unchanged; build an independent TypeScript/Pi package, then add a Chief adapter and switch new-task routing after acceptance. Existing jobs remain on their original backend and rollback changes only the default for future tasks.
+
+[Research and first-build plan](pi-coding-harness.md) proposes a standalone TypeScript/Pi package with learn, plan and approved build capabilities, a CLI and its own task/session contract. Owner clarification removes Python compatibility as a requirement and permits changing Chief's adapter; the package must be extractable into a new repository. Pi 1.1.0 synthetic SDK checks passed with no external model calls. Implementation, real-task acceptance, Chief integration and switching remain pending. Existing runtime settings/jobs are unchanged. See [journal 76](journey/76-pi-harness-exploration.md).
+
 # Coding recovery — released v0.3.58, 9 October 2026
 
 [PR #197–201](https://github.com/akhilvuputuri/chief-agent/pull/201) shipped provider classification, bounded summary correction/field-local repair and the independently verified Python 0.1.9 new-job pin. Exact-head Astra review, 1005-test hosted checks, [activation release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37891797838), separate current health/configuration reads and immutable [v0.3.58](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.58) verify `caa9ac51d7b1e72793cb77f3bac1bcd1ca4c23f8`. Coding is on, gateway/Postgres healthy, default digest `sha256:e7554fb19f010706e16f748f6fc4b433567a503069d603761d1bf76a965e7687`; models/effort/two-hour/400-call/1000-tool policy unchanged.

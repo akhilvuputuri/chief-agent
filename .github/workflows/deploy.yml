@@ -57,7 +57,7 @@ jobs:
         # Automatic releases already have a successful exact-SHA main check.
         # A manual release has no such upstream guarantee, so validate it here.
         if: github.event_name == 'workflow_dispatch'
-        with: { node-version: 22, cache: npm }
+        with: { node-version: "22.19.0", cache: npm }
       - uses: actions/setup-python@v5
         if: github.event_name == 'workflow_dispatch'
         with: { python-version: "3.12" }

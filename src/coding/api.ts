@@ -1,3 +1,4 @@
+import { piCompletion } from "./pi-proxy.js";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { CodingController } from "./controller.js";
@@ -66,7 +67,18 @@ export async function codingApi(
         ["POST", "finish"],
         ["POST", "model"],
         ["POST", "logs"],
+        ["POST", "pi-session"],
+        ["GET", "pi-session"],
+        ["POST", "pi/coder/v1/chat/completions"],
+        ["POST", "pi/reviewer/v1/chat/completions"],
       ] as const) {
+        const diagnosticPhase =
+          path === "pi-session"
+            ? "checkpoint"
+            : path === "pi/coder/v1/chat/completions" ||
+                path === "pi/reviewer/v1/chat/completions"
+              ? "model"
+              : path;
         api.route({
           method,
           url: `/:id/${path}`,
@@ -90,6 +102,27 @@ export async function codingApi(
                 .send({ error: "Invalid worker capability" });
             }
             try {
+              if (path === "pi-session") {
+                if (method === "POST")
+                  return await controller.piSessionAppend(job, req.body);
+                const query = req.query as { scope?: string; offset?: string };
+                return await controller.piSessionRead(
+                  job,
+                  query.scope ?? "",
+                  Number(query.offset ?? 0),
+                );
+              }
+              if (path.endsWith("chat/completions")) {
+                const response = await piCompletion(
+                  controller,
+                  job,
+                  path.includes("/reviewer/") ? "reviewer" : "coder",
+                  req.body,
+                );
+                return response.stream
+                  ? reply.type("text/event-stream").send(response.body)
+                  : response.body;
+              }
               if (path === "assignment") return controller.assignment(job);
               if (path === "heartbeat") return await controller.heartbeat(job);
               if (path === "progress")
@@ -103,7 +136,7 @@ export async function codingApi(
                 if (Buffer.byteLength(JSON.stringify(req.body)) > 180000) {
                   await controller
                     .recordRejection(job, {
-                      phase: path,
+                      phase: diagnosticPhase,
                       code: "model_context_limit",
                       httpStatus: 413,
                     })
@@ -129,7 +162,7 @@ export async function codingApi(
                       : "worker_request_rejected";
               await controller
                 .recordRejection(job, {
-                  phase: path,
+                  phase: diagnosticPhase,
                   code,
                   httpStatus: 409,
                   ...(error instanceof CodingModelFailure ? error.details : {}),

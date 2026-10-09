@@ -1,20 +1,20 @@
 {
   "name": "chief-agent",
-  "version": "0.3.58",
+  "version": "0.3.59",
   "private": true,
   "type": "module",
   "description": "A personal AI assistant with an owned TypeScript runtime, Telegram voice, memory, research and durable tasks",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.19.0"
   },
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",
-    "build": "tsc",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.evals.json",
+    "build": "npm run build:pi && tsc",
+    "typecheck": "npm run build:pi && tsc --noEmit && tsc -p tsconfig.evals.json",
     "test": "npm run build && tsx --test tests/*.test.ts && node --test scripts/*.test.mjs && python3 -m unittest discover -s evals/picker -p 'test_*.py' && python3 -m unittest discover -s evals/context -p 'test_*.py' && python3 -m unittest discover -s evals/decisions -p 'test_*.py' && python3 -m unittest discover -s evals/coding -p 'test_*.py'",
     "migrate": "tsx src/migrate.ts",
-    "check": "npm run typecheck && npm test && npm run check:coding",
+    "check": "npm run typecheck && npm test && npm run check:coding && npm run check:pi",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "setup": "node scripts/setup.mjs",
@@ -33,7 +33,9 @@
     "logs:cloudwatch": "node scripts/cloudwatch-logs.mjs",
     "context:inventory": "tsx scripts/context-inventory.ts",
     "check:coding": "python3 -m ruff check coding_runtime && python3 -m ruff format --check coding_runtime && python3 -m mypy coding_runtime/src --strict && PYTHONPATH=coding_runtime/src python3 -m unittest discover -s coding_runtime/tests -v",
-    "eval:coding": "python3 evals/coding/run.py"
+    "eval:coding": "python3 evals/coding/run.py",
+    "build:pi": "npm --prefix coding_runtime_pi run build",
+    "check:pi": "npm --prefix coding_runtime_pi run check"
   },
   "dependencies": {
     "@aws-sdk/client-codebuild": "3.1141.0",
@@ -61,7 +63,8 @@
     "@types/pg": "^8.11.11",
     "prettier": "^3.9.6",
     "tsx": "^4.19.3",
-    "typescript": "^5.8.2"
+    "typescript": "^5.8.2",
+    "@chief-agent/pi-runtime": "file:./coding_runtime_pi"
   },
   "license": "MIT"
 }
