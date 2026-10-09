@@ -140,17 +140,20 @@ class ProgressTests(unittest.IsolatedAsyncioTestCase):
         self.memory.notes = Notebook(
             subtask="Inspect", findings="KEEP_SCOPE", nextAction="Continue"
         )
-        model = ScriptedModel(
-            generation(
-                (
-                    "notes_update",
-                    {
-                        "subtask": "Inspect",
-                        "findings": "x" * 6511,
-                        "nextAction": "Continue",
-                    },
-                )
+        rejected = generation(
+            (
+                "notes_update",
+                {
+                    "subtask": "Inspect",
+                    "findings": "x" * 6511,
+                    "nextAction": "Continue",
+                },
             ),
+            reasoning=[{"type": "reasoning.encrypted", "data": "opaque summary"}],
+        )
+        rejected["message"].pop("content")
+        model = ScriptedModel(
+            rejected,
             generation(
                 (
                     "notes_update",
@@ -168,6 +171,13 @@ class ProgressTests(unittest.IsolatedAsyncioTestCase):
         result = await self.run_loop(model)
         self.assertEqual(result.kind, "plan_ready")
         self.assertEqual(model.inputs[1][: len(original)], original)
+        retry = next(m for m in model.inputs[1] if m["role"] == "assistant")
+        self.assertIn("content", retry)
+        self.assertIsNone(retry["content"])
+        self.assertEqual(retry["tool_calls"], rejected["message"]["tool_calls"])
+        self.assertEqual(
+            retry["reasoning_details"], rejected["message"]["reasoning_details"]
+        )
         error = next(
             json.loads(m["content"]) for m in model.inputs[1] if m["role"] == "tool"
         )

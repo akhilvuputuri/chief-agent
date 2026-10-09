@@ -17,7 +17,7 @@ Python 0.1.7 makes the limits explicit in the summary instruction and permits on
 
 ## Verification and release boundary
 
-Regressions reproduce the measured 6,511-unit failure followed by a valid correction, two invalid astral-Unicode summaries retaining old history/notes, and insufficient allocation denying repair. Existing acknowledgement/cancellation/replay/compaction tests remain relevant. Initial 58 Python tests, Ruff and strict mypy pass. Full checks and exact-head independent review remain pending.
+Regressions reproduce the measured 6,511-unit failure followed by a valid correction, two invalid astral-Unicode summaries retaining old history/notes, and insufficient allocation denying repair. Existing acknowledgement/cancellation/replay/compaction tests remain relevant. The initial full 1002-test suite passed, and GPT-6 Astra approved the foundation head `ab9db51a1ee6315b4ee54b20dd1396b4115461f4`. A persisted Devin flag then identified an accepted adapter response without content that would make the retry fail the host schema. Retry messages now use ordinary continuation's allowed-field projection and content:null default, preserving opaque reasoning and tool arguments. The corrected 58 Python tests/Ruff/mypy pass; updated exact-head review and hosted checks remain required.
 
 This is a compatible foundation: production retains Python 0.1.6 until a trusted main-built immutable image is independently verified and pinned in a reviewed follow-up. No model/effort/provider-filter/shared-allocation, database, Compose, permission, implementation approval or old-job migration is part of this change. The original failed job and failed live trial remain paused on their pins.
 

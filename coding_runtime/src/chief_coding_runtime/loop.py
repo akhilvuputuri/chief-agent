@@ -581,7 +581,14 @@ async def coding_loop(
             except (ValueError, TypeError, KeyError) as error:
                 if attempt == 1:
                     raise ContextRecoveryError() from error
-                summary_messages.append(copy.deepcopy(generation["message"]))
+                raw_summary = generation["message"]
+                retry_message = {
+                    key: copy.deepcopy(raw_summary[key])
+                    for key in ("role", "content", "tool_calls", "reasoning_details")
+                    if key in raw_summary
+                }
+                retry_message.setdefault("content", None)
+                summary_messages.append(retry_message)
                 for call in calls:
                     summary_messages.append(
                         {
