@@ -1,3 +1,7 @@
+# Pi image verified — pin candidate, 9 October 2026
+
+[PR 204](https://github.com/akhilvuputuri/chief-agent/pull/204) integrated the independently approved Pi runtime at `5fa01cbeb2a8d54315f52c23d5a9ba5c35d98bef`. Exact-head hosted checks/Devin and local 1,028-test checks passed; Linux verified the actual CLI and worker process boundary, plus extraction. The main-built public image was independently verified against 14 compiled files and installed Pi 1.1.0; this follow-up pins its immutable digest with default still legacy. Foundation release receipt, pin review/release and paid acceptance/default cutover remain separate. See [journal evidence](journey/77-pi-runtime.md#foundation-review-and-image-verification--9-october).
+
 # Independent Pi runtime — implementation candidate, 9 October 2026
 
 [Runtime contract](pi-coding-runtime.md) implements the standalone TypeScript/Pi package, learn/plan/approved-build API and CLI/RPC, signed task records, actual checks/artifacts, a Chief-side native model/session bridge and separate immutable worker path. The backend remains legacy; Python code/images/jobs are preserved. Local synthetic and application/Python checks passed; exact-head independent review, hosted Linux/extraction checks, image pin, real acceptance and new-task cutover remain pending. See [journal 77](journey/77-pi-runtime.md).
