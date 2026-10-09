@@ -1,3 +1,7 @@
+# Pi implementation candidate — 9 October 2026
+
+[Independent Pi runtime](docs/pi-coding-runtime.md) is implemented for review with a standalone package/CLI/RPC and a Chief bridge. New selection is disabled pending immutable-image verification and acceptance. The Python runtime source/image/default and stored jobs are preserved. Local synthetic/application/Python tests passed; hosted Linux tests, independent approval and release/activation evidence are still pending. [Journal 77](docs/journey/77-pi-runtime.md) records the evidence boundary.
+
 # Independent Pi runtime exploration — 9 October 2026
 
 [Actionable build plan](docs/pi-coding-runtime-plan.md) fixes the preservation/cutover boundary: old runtime untouched, independent package first, Chief adapter next, accepted new-task switch last. Keep legacy task status/cancel/cleanup and rollback available; no checkpoint migration.

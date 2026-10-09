@@ -1,3 +1,7 @@
+# Independent Pi runtime — implementation candidate, 9 October 2026
+
+[Runtime contract](pi-coding-runtime.md) implements the standalone TypeScript/Pi package, learn/plan/approved-build API and CLI/RPC, signed task records, actual checks/artifacts, a Chief-side native model/session bridge and separate immutable worker path. The backend remains legacy; Python code/images/jobs are preserved. Local synthetic and application/Python checks passed; exact-head independent review, hosted Linux/extraction checks, image pin, real acceptance and new-task cutover remain pending. See [journal 77](journey/77-pi-runtime.md).
+
 # Independent Pi coding runtime — exploration, 9 October 2026
 
 [Implementation/cutover plan](pi-coding-runtime-plan.md): preserve the existing runtime unchanged; build an independent TypeScript/Pi package, then add a Chief adapter and switch new-task routing after acceptance. Existing jobs remain on their original backend and rollback changes only the default for future tasks.

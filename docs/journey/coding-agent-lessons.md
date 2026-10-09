@@ -136,3 +136,9 @@ The published 1.1.0 SDK probe passed seven synthetic assertions with zero extern
 Next falsifying tests: copy the package outside Chief and run it; then complete a fixed small task with correct approved scope, durable findings and actual checks under the same model/allocations. Measure semantic correctness and accepted patches before claiming maintenance, quality or cost gains. A production switch and publication authority remain separate.
 
 The follow-up [implementation/cutover plan](../pi-coding-runtime-plan.md) makes coexistence explicit: leave the Python runtime intact, adapt Chief to the independent task contract, and change only new-task routing after acceptance. Stopping legacy dispatch cannot disable status, cancellation or cleanup for existing jobs. A rollback is a routing change, not a transcript migration. This preserves operational recovery without making Python internals part of the new runtime.
+
+## 9 October — verify the execution boundary around a dependency
+
+[Journal 77](77-pi-runtime.md) implements Pi as the inner engine of an independent package. Synthetic fixtures prove actual tool edits and check execution, not semantic task quality. Native protocol continuation preserved reasoning metadata and Unicode. The integration retains the host's exact owner approval/model policy and keeps Pi draft-only.
+
+Counterexamples required canonical path checks, private metadata signatures, serialized decisions, explicit interruption/cancellation handling, indexed UTF-8 identity and guarded Git operations: Git filters can execute source code during artifact capture too. Reusing a mature tool implementation does not remove these boundaries. The old Python code/images/jobs remain intact; only new-job routing changes after acceptance. Linux CI and independent review are pending; no completion-rate, cost or live quality benefit is claimed.

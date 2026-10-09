@@ -1,3 +1,4 @@
+import { PiSessions } from "./pi-sessions.js";
 import { reviewMetadata, completePlanDelivered } from "./review-proof.js";
 import { CodingAutomation } from "./automation.js";
 import { codingDiagnostics } from "./diagnostics.js";
@@ -91,9 +92,10 @@ export class CodingController {
     private clock: () => Date = () => new Date(),
     private catalog?: CodingCatalog,
     private priceFilters = { input: 2, output: 10 },
+    legacyAutomationEnabled = false,
   ) {
     this.requirements = new CodingRequirements(db, allowed, clock);
-    if (settings.autoMerge && publisher.automation)
+    if ((settings.autoMerge || legacyAutomationEnabled) && publisher.automation)
       this.automation = new CodingAutomation(
         db,
         publisher.automation(),
@@ -404,9 +406,10 @@ export class CodingController {
       const preferred = await modelPreferences(this.db, user, this.settings);
       const selected = {
         ...this.settings,
-        leaderModel: this.settings.squad
-          ? preferred.leader
-          : this.settings.leaderModel,
+        leaderModel:
+          this.settings.squad || this.settings.runtime === "pi"
+            ? preferred.leader
+            : this.settings.leaderModel,
         model: preferred.coder,
         reviewerModel: preferred.reviewer,
       };
@@ -570,7 +573,9 @@ export class CodingController {
   async assignment(job: CodingJob) {
     return {
       protocolVersion: 1,
-      ...(job.settings.squad ? { attemptId: job.attempt_id } : {}),
+      ...(job.settings.squad || job.settings.runtime === "pi"
+        ? { attemptId: job.attempt_id }
+        : {}),
       id: job.id,
       revision: job.revision,
       objective: job.objective,
@@ -582,6 +587,12 @@ export class CodingController {
       deadline: new Date(job.attempt_deadline).toISOString(),
       usedModels: job.used_models,
     };
+  }
+  piSessionAppend(job: CodingJob, raw: unknown) {
+    return new PiSessions(this.db, this.resultKey()).append(job, raw);
+  }
+  piSessionRead(job: CodingJob, scope: string, offset: number) {
+    return new PiSessions(this.db, this.resultKey()).read(job, scope, offset);
   }
   async heartbeat(job: CodingJob) {
     const feedback = (
@@ -636,6 +647,15 @@ export class CodingController {
         "Approved requirements are immutable; revise and confirm a new plan first",
       );
     validateFiles(c.files);
+    if (
+      job.settings.runtime === "pi" &&
+      (!c.piState ||
+        c.piState.toolsUsed < (job.checkpoint.piState?.toolsUsed ?? 0) ||
+        c.piState.toolsUsed > job.settings.limits.tools ||
+        c.squadState ||
+        c.runtimeMemory)
+    )
+      throw new Error("Pi checkpoint allocation/state is invalid");
     assertSquadCheckpoint(job, c);
     if (canonicalJson(c) === canonicalJson(job.checkpoint))
       return { saved: true };
@@ -748,7 +768,11 @@ export class CodingController {
       tools: ToolDefinition[];
     },
   ) {
-    if (input.role === "leader" && !job.settings.squad)
+    if (
+      input.role === "leader" &&
+      !job.settings.squad &&
+      job.settings.runtime !== "pi"
+    )
       throw new Error("Leader role requires the reviewed squad runtime");
     const prior = (
       await this.db.query("SELECT * FROM coding_model_calls WHERE id=$1", [

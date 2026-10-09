@@ -84,6 +84,8 @@ For the latest verified release and open work, read [current work](../current-wo
 
 | 9 October | [76 — Independent Pi runtime](76-pi-harness-exploration.md): can a dependency supply coding mechanics while the runtime remains portable? | Published SDK inspected; seven synthetic assertions pass; standalone implementation and live acceptance pending |
 
+| 9 October | [77 — Independent Pi implementation](77-pi-runtime.md): can a dependency replace coding mechanics while Chief remains a client? | Implementation candidate; synthetic checks pass, review/Linux/release/live acceptance pending |
+
 ## Coding-agent learning path
 
 Start with [coding-agent engineering: changes, failures and evidence](coding-agent-lessons.md). It connects the coding/runtime journals, separates reproduced fixes from unmeasured quality claims and defines the learning record to update with future harness changes.

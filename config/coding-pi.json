@@ -1,0 +1,13 @@
+{
+  "repository": "akhilvuputuri/chief-agent",
+  "branch": "main",
+  "image": "",
+  "model": "deepseek/deepseek-v4.1-flash",
+  "leaderModel": "deepseek/deepseek-v4.1-flash",
+  "reviewerModel": "openai/gpt-6.1-sol",
+  "effort": "high",
+  "limits": { "ms": 7200000, "models": 400, "tools": 1000 },
+  "runtime": "pi",
+  "squad": false,
+  "autoMerge": false
+}

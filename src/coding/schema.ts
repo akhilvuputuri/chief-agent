@@ -67,6 +67,13 @@ export const checkpoint = z
     summary: z.string().max(4000).default(""),
     squadState: squadState.optional(),
     runtimeMemory: runtimeMemory.optional(),
+    piState: z
+      .object({
+        version: z.literal(1),
+        toolsUsed: z.number().int().min(0).max(1000),
+      })
+      .strict()
+      .optional(),
     files: z
       .array(
         z
@@ -139,7 +146,7 @@ export const codingSettings = z
     leaderModel: z.string().min(1).max(120).optional(),
     squad: z.boolean().optional(),
     autoMerge: z.boolean().optional(),
-    runtime: z.enum(["node", "python"]).optional(),
+    runtime: z.enum(["node", "python", "pi"]).optional(),
     harnessVersion: z.literal(2).optional(),
     effort: z.enum(["low", "medium", "high"]),
     limits: z
@@ -152,6 +159,14 @@ export const codingSettings = z
   })
   .strict()
   .superRefine((value, ctx) => {
+    if (
+      value.runtime === "pi" &&
+      (value.squad || value.harnessVersion || value.autoMerge)
+    )
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Pi is a separate draft-only runtime profile",
+      });
     if (
       value.harnessVersion === 2 &&
       (value.runtime !== "python" || value.squad !== true)

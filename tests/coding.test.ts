@@ -2527,3 +2527,199 @@ test("decline advances the locked revision and a concurrent approve cannot overw
   await f.c.tick();
   assert.equal(f.creates(), 1);
 });
+
+test("Pi compatible model facade preserves role pins, journal replay and native framing", async (t) => {
+  const f = await fixture(t);
+  const started = await f.start("pi", "plan");
+  await f.c.tick();
+  let job = await f.row(started.id);
+  await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
+    job.id,
+    JSON.stringify({
+      ...settings,
+      runtime: "pi",
+      squad: false,
+      autoMerge: false,
+    }),
+  ]);
+  job = await f.row(job.id);
+  const app = server();
+  t.after(() => app.close());
+  await codingApi(app, f.c);
+  const headers = {
+    authorization: `Bearer ${f.c.token(job.id, job.attempt_id)}`,
+  };
+  const url = `/coding/worker/${job.id}/pi/coder/v1/chat/completions`;
+  const payload = {
+    runtime_call_id: randomUUID(),
+    model: settings.model,
+    messages: [{ role: "user", content: "Synthetic request" }],
+    tools: [],
+    stream: true,
+  };
+  assert.equal(
+    (await app.inject({ method: "POST", url, payload })).statusCode,
+    401,
+  );
+  const response = await app.inject({ method: "POST", url, headers, payload });
+  assert.equal(response.statusCode, 200);
+  assert(response.body.includes("fixture reply"));
+  assert(response.body.endsWith("data: [DONE]\n\n"));
+  assert.equal(
+    (await app.inject({ method: "POST", url, headers, payload })).statusCode,
+    200,
+  );
+  assert.equal(f.modelCalls(), 1);
+  assert.equal(
+    (
+      await app.inject({
+        method: "POST",
+        url,
+        headers,
+        payload: {
+          ...payload,
+          model: "unapproved/model",
+          runtime_call_id: randomUUID(),
+        },
+      })
+    ).statusCode,
+    409,
+  );
+  assert.equal(f.modelCalls(), 1);
+});
+test("Pi sessions append encrypted immutable entries and survive attempt changes", async (t) => {
+  const f = await fixture(t);
+  const started = await f.start("pi-session", "plan");
+  await f.c.tick();
+  let job = await f.row(started.id);
+  await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
+    job.id,
+    JSON.stringify({
+      ...settings,
+      runtime: "pi",
+      squad: false,
+      autoMerge: false,
+    }),
+  ]);
+  job = await f.row(job.id);
+  const scope = "e".repeat(64);
+  const entries = [
+    { type: "session", id: "synthetic" },
+    {
+      type: "message",
+      id: "m1",
+      message: { role: "user", content: "synthetic private transcript" },
+    },
+  ];
+  await f.c.piSessionAppend(job, { scope, after: 0, entries });
+  await f.c.piSessionAppend(job, { scope, after: 0, entries });
+  await assert.rejects(
+    f.c.piSessionAppend(job, {
+      scope,
+      after: 0,
+      entries: [{ type: "session", id: "forged" }],
+    }),
+  );
+  await assert.rejects(f.c.piSessionAppend(job, { scope, after: 99, entries }));
+  const data = await f.db.query(
+    "SELECT payload FROM coding_events WHERE job_id=$1 AND payload->>'kind'='pi_session'",
+    [job.id],
+  );
+  assert.equal(data.rows.length, 2);
+  assert(!JSON.stringify(data.rows).includes("synthetic private transcript"));
+  await f.db.query("UPDATE coding_jobs SET attempt_id=$2 WHERE id=$1", [
+    job.id,
+    randomUUID(),
+  ]);
+  job = await f.row(job.id);
+  const restored = await f.c.piSessionRead(job, scope, 0);
+  assert.deepEqual(restored.entries, entries);
+  await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
+    job.id,
+    JSON.stringify(settings),
+  ]);
+  await assert.rejects(f.c.piSessionRead(await f.row(job.id), scope, 0));
+});
+test("Pi profile rejects Python selectors and automatic merge; runtime launcher stays pinned per job", async () => {
+  assert(
+    codingSettings.safeParse({
+      ...settings,
+      runtime: "pi",
+      squad: false,
+      autoMerge: false,
+    }).success,
+  );
+  for (const changes of [
+    { squad: true },
+    { harnessVersion: 2 },
+    { autoMerge: true },
+  ])
+    assert(
+      !codingSettings.safeParse({ ...settings, runtime: "pi", ...changes })
+        .success,
+    );
+  const calls: any[] = [];
+  const provider = new CodeBuildSandbox(
+    {
+      send: async (c) => {
+        calls.push(c.input);
+        return { build: { id: "synthetic" } };
+      },
+    } as any,
+    "fixed-project",
+  );
+  const input = {
+    jobId: randomUUID(),
+    attemptId: randomUUID(),
+    token: "c".repeat(64),
+    origin: "https://example.invalid",
+    image: settings.image,
+    timeoutMinutes: 15,
+  };
+  await provider.create({ ...input, runtime: "pi" });
+  await provider.create({ ...input, runtime: "python" });
+  assert(calls[0].buildspecOverride.includes("dist/coding/pi-worker.js"));
+  assert(!calls[0].buildspecOverride.includes("chief_coding_runtime.worker"));
+  assert(
+    calls[1].buildspecOverride.includes(
+      "python -I -m chief_coding_runtime.worker",
+    ),
+  );
+});
+
+test("a Pi default retains legacy automation support without granting it to Pi jobs", async (t) => {
+  const f = await fixture(t);
+  let initialized = 0;
+  const pi = codingSettings.parse({
+    ...settings,
+    runtime: "pi",
+    squad: false,
+    autoMerge: false,
+  });
+  new CodingController(
+    f.db,
+    pi,
+    f.provider,
+    {
+      ...f.publisher,
+      automation: () => {
+        initialized++;
+        return {} as any;
+      },
+    },
+    "c".repeat(64),
+    "https://coding.example.com",
+    () => true,
+    () => ({
+      generate: async () => ({
+        message: { role: "assistant", content: "synthetic" },
+      }),
+    }),
+    undefined,
+    undefined,
+    { input: 2, output: 10 },
+    true,
+  );
+  assert.equal(initialized, 1);
+  assert.equal(pi.autoMerge, false);
+});

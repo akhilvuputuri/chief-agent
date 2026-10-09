@@ -24,3 +24,6 @@ eval-results/
 .ruff_cache/
 .mypy_cache/
 build/
+
+# Private standalone coding task/session state
+.pi-runtime/

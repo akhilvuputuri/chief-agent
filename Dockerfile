@@ -1,6 +1,7 @@
 FROM node:22-bookworm-slim AS build
 WORKDIR /app
 COPY package*.json ./
+COPY coding_runtime_pi ./coding_runtime_pi
 RUN npm ci
 COPY tsconfig.json ./
 COPY src ./src
@@ -11,7 +12,7 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
 COPY config/model-policy.json config/tool-picker.json config/decisions.json config/runtime.json ./config/
-COPY config/coding.json config/mcp.json ./config/
+COPY config/coding.json config/coding-pi.json config/coding-backend.json config/mcp.json ./config/
 COPY skills ./skills
 COPY plugins ./plugins
 COPY web ./web

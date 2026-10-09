@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm }
+        with: { node-version: "22.19.0", cache: npm }
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - name: Install repository search dependency
@@ -28,6 +28,16 @@ jobs:
           docker build -f Dockerfile.coding -t chief-coding:test .
           docker run --rm --entrypoint sh chief-coding:test -c 'test "$(id -u)" != 0 && node --version && git --version && rg --version && python3 --version'
           docker run --rm --user root --env CODING_TEST_SECRET=synthetic --entrypoint setpriv chief-coding:test --reuid=1000 --regid=1000 --clear-groups --no-new-privs --bounding-set=-all python -I -m chief_coding_runtime.security_smoke
+      - name: Verify Pi package independence and actual Linux worker boundary
+        run: |
+          npm --prefix coding_runtime_pi ci --ignore-scripts
+          npm --prefix coding_runtime_pi run check
+          docker build -f Dockerfile.coding-pi -t chief-pi:test .
+          docker run --rm --user root --env CODING_TEST_SECRET=synthetic --entrypoint setpriv chief-pi:test --reuid=1000 --regid=1000 --clear-groups --no-new-privs --bounding-set=-all node --disable-sigusr1 /opt/chief-worker/coding_runtime_pi/dist/security-smoke.js
+          cp -R coding_runtime_pi /tmp/pi-runtime-independent
+          cd /tmp/pi-runtime-independent
+          npm ci --ignore-scripts
+          npm run check
       - name: Verify isolated browser sandbox with synthetic pages
         run: |
           docker build -f Dockerfile.browser --target browser -t chief-browser:test .

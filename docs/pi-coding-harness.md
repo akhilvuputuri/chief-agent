@@ -1,6 +1,6 @@
 # Independent Pi coding runtime: exploration and first build plan
 
-Research date: 9 October 2026. Status: proposed architecture with a synthetic SDK probe. No runtime implementation, production switch or paid model trial.
+Research date: 9 October 2026. Status: research record; the subsequent [implementation candidate](pi-coding-runtime.md) is built for review. No production switch or paid model trial is claimed.
 
 The actionable next steps are in the [implementation and cutover plan](pi-coding-runtime-plan.md). The existing runtime remains untouched; Chief changes its connection for new tasks only after acceptance.
 

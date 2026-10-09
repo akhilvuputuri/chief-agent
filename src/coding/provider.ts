@@ -13,7 +13,7 @@ export type SandboxRequest = {
   token: string;
   origin: string;
   image: string;
-  runtime?: "node" | "python";
+  runtime?: "node" | "python" | "pi";
   timeoutMinutes: number;
 };
 export interface SandboxProvider {
@@ -58,7 +58,7 @@ export class CodeBuildSandbox implements SandboxProvider {
         autoRetryLimitOverride: 0,
         timeoutInMinutesOverride: r.timeoutMinutes,
         queuedTimeoutInMinutesOverride: 5,
-        buildspecOverride: `version: 0.2\nrun-as: root\nphases:\n  build:\n    commands:\n      - setpriv --reuid=1000 --regid=1000 --clear-groups --no-new-privs --bounding-set=-all ${r.runtime === "python" ? "python -I -m chief_coding_runtime.worker" : "node --disable-sigusr1 /opt/chief-worker/dist/coding/worker.js"}\n`,
+        buildspecOverride: `version: 0.2\nrun-as: root\nphases:\n  build:\n    commands:\n      - setpriv --reuid=1000 --regid=1000 --clear-groups --no-new-privs --bounding-set=-all ${r.runtime === "pi" ? "node --disable-sigusr1 /opt/chief-worker/dist/coding/pi-worker.js" : r.runtime === "python" ? "python -I -m chief_coding_runtime.worker" : "node --disable-sigusr1 /opt/chief-worker/dist/coding/worker.js"}\n`,
         logsConfigOverride: {
           cloudWatchLogs: { status: "DISABLED" },
           s3Logs: { status: "DISABLED" },

@@ -1,3 +1,4 @@
+import { selectCodingBackend } from "./coding/backend.js";
 import { randomUUID } from "node:crypto";
 import { LinkResolver, postEvidenceSchema } from "./link-resolution.js";
 import { McpTools, loadMcpRegistry, parseMcpCredentials } from "./mcp.js";
@@ -344,9 +345,26 @@ if (c.CODING_RUNTIME === "on") {
       "STARTUP_CODING_CONFIG",
       "Coding provider, GitHub App and model configuration are required",
     );
-  const settings = codingSettings.parse(
+  const legacySettings = codingSettings.parse(
     JSON.parse(
       readFileSync(new URL("../config/coding.json", import.meta.url), "utf8"),
+    ),
+  );
+  const settings = selectCodingBackend(
+    JSON.parse(
+      readFileSync(
+        new URL("../config/coding-backend.json", import.meta.url),
+        "utf8",
+      ),
+    ),
+    JSON.parse(
+      readFileSync(new URL("../config/coding.json", import.meta.url), "utf8"),
+    ),
+    JSON.parse(
+      readFileSync(
+        new URL("../config/coding-pi.json", import.meta.url),
+        "utf8",
+      ),
     ),
   );
   if (!settings.image)
@@ -355,7 +373,7 @@ if (c.CODING_RUNTIME === "on") {
       "Coding needs a reviewed immutable worker image digest",
     );
   if (
-    settings.squad &&
+    (settings.squad || settings.runtime === "pi" || legacySettings.squad) &&
     !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=27")).rows
       .length
   )
@@ -380,7 +398,7 @@ if (c.CODING_RUNTIME === "on") {
       c.CODING_GITHUB_PRIVATE_KEY,
       { name: c.CODING_COMMIT_NAME, email: c.CODING_COMMIT_EMAIL },
       undefined,
-      settings.autoMerge === true,
+      settings.autoMerge === true || legacySettings.autoMerge === true,
     ),
     c.CODING_AUTH_KEY,
     c.CODING_PUBLIC_ORIGIN,
@@ -418,6 +436,7 @@ if (c.CODING_RUNTIME === "on") {
       input: c.OPENROUTER_MAX_INPUT_PRICE,
       output: c.OPENROUTER_MAX_OUTPUT_PRICE,
     },
+    legacySettings.autoMerge === true,
   );
 }
 // Read-only IBKR holdings (issue #146): off unless explicitly enabled with its migration.
