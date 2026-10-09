@@ -188,6 +188,65 @@ class ProgressTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.memory.modelCalls, 3)
         self.assertEqual(self.memory.toolsUsed, 2)
 
+    async def test_transient_generation_and_invalid_summary_have_separate_bounded_repairs(
+        self,
+    ):
+        for transient_first in (True, False):
+            with self.subTest(transient_first=transient_first):
+                self.memory = LoopMemory()
+                self.messages = [
+                    {"role": "system", "content": "Synthetic rules"},
+                    {"role": "user", "content": "Immutable scope"},
+                ]
+                original = self.large_history()
+                self.budget = Budget(10, 10)
+
+                class MixedModel(ScriptedModel):
+                    def __init__(inner, *responses, failure_index=0):
+                        super().__init__(*responses)
+                        inner.failure_index = failure_index
+
+                    async def generate(inner, messages, tools):
+                        index = len(inner.inputs)
+                        if index == inner.failure_index:
+                            inner.inputs.append(copy.deepcopy(messages))
+                            raise GatewayError(409, "model_transient_failure")
+                        return await super().generate(messages, tools)
+
+                model = MixedModel(
+                    generation(
+                        (
+                            "notes_update",
+                            {
+                                "subtask": "Inspect",
+                                "findings": "x" * 6055,
+                                "nextAction": "Continue",
+                            },
+                        )
+                    ),
+                    generation(
+                        (
+                            "notes_update",
+                            {
+                                "subtask": "Inspect",
+                                "findings": "Complete scope/evidence retained",
+                                "nextAction": "Draft brief",
+                            },
+                        )
+                    ),
+                    generation(
+                        report("plan_ready", plan="Complete requested scope and checks")
+                    ),
+                )
+                model.failure_index = 0 if transient_first else 1
+                result = await self.run_loop(model)
+                self.assertEqual(result.kind, "plan_ready")
+                self.assertEqual(len(model.inputs), 4)
+                self.assertEqual(self.memory.compactions, 1)
+                self.assertEqual(self.memory.modelCalls, 4)
+                self.assertEqual(self.memory.toolsUsed, 2)
+                self.assertEqual(model.inputs[2][: len(original)], original)
+
     async def test_two_invalid_summaries_pause_with_old_notebook_and_history(self):
         original = self.large_history()
         self.memory.notes = Notebook(
