@@ -20,6 +20,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { ensureUser, type Database } from "../src/db.js";
 import { requirementScope } from "../src/coding/requirements.js";
 import { CodingController } from "../src/coding/controller.js";
+import { selectCodingBackend } from "../src/coding/backend.js";
 import { squadScope } from "../src/coding/squad-state.js";
 import { ModelError } from "../src/model.js";
 import { formatTelegram } from "../src/telegram-format.js";
@@ -3061,4 +3062,69 @@ test("replacement Pi worker retains acknowledged history across a new sandbox pa
     [started.id],
   );
   assert(entries.rows.length > 5);
+});
+
+test("bundled Pi cutover snapshots new jobs while duplicate legacy requests and rollback retain their backends", async (t) => {
+  const f = await fixture(t);
+  const config = async (name: string) =>
+    JSON.parse(
+      await readFile(
+        new URL(`../config/${name}.json`, import.meta.url),
+        "utf8",
+      ),
+    );
+  const legacy = await config("coding"),
+    pi = await config("coding-pi");
+  const selected = selectCodingBackend(
+    await config("coding-backend"),
+    legacy,
+    pi,
+  );
+  assert.equal(selected.runtime, "pi");
+  const controller = (profile: typeof settings) =>
+    new CodingController(
+      f.db,
+      profile,
+      f.provider,
+      f.publisher,
+      "c".repeat(64),
+      "https://coding.example.com",
+      (user) => user === "a",
+      () => {
+        throw new Error("This routing test must not make model calls");
+      },
+    );
+  const prior = controller(
+    selectCodingBackend({ default: "legacy" }, legacy, pi),
+  );
+  const current = controller(selected);
+  const start = (c: CodingController, requestKey: string) =>
+    c.call("a", f.run, {
+      operation: "coding_start",
+      requestKey,
+      objective: "Inspect a synthetic bug",
+      context: "Synthetic evidence",
+      mode: "plan",
+    }) as Promise<any>;
+  const old = await start(prior, "before-cutover");
+  const saved = (await f.row(old.id)).settings;
+  const retried = await start(current, "before-cutover");
+  assert.equal(retried.id, old.id);
+  assert.deepEqual((await f.row(old.id)).settings, saved);
+  assert.equal(saved.runtime, "python");
+  assert.equal(saved.image, legacy.image);
+  const fresh = await start(current, "after-cutover");
+  const record = await f.row(fresh.id);
+  assert.equal(record.settings.runtime, "pi");
+  assert.equal(record.settings.image, pi.image);
+  assert.equal(record.settings.autoMerge, false);
+  assert.deepEqual(record.settings.limits, saved.limits);
+  assert.equal(record.mode, "plan");
+  assert.equal(f.creates(), 0);
+  const rolledBack = await start(prior, "after-rollback");
+  assert.equal((await f.row(rolledBack.id)).settings.runtime, "python");
+  assert.deepEqual((await f.row(fresh.id)).settings, record.settings);
+  await current.call("a", f.run, { operation: "coding_cancel", id: old.id });
+  assert.equal((await f.row(old.id)).state, "cancelled");
+  assert.deepEqual((await f.row(old.id)).settings, saved);
 });

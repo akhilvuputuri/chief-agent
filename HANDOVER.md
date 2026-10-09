@@ -1,3 +1,7 @@
+# Pi new-task default candidate — 10 October 2026
+
+Owner explicitly authorizes switching new coding tasks to Pi before a paid trial. The v0.3.61 candidate changes only the default selector; legacy jobs/source/images stay intact, Pi is draft-only and normal Telegram implementation confirmation remains. Exact review/checks/deployment pending. [Journal 77](docs/journey/77-pi-runtime.md#owner-authorized-new-task-default--10-october-2026).
+
 # Pi runtime and image pin shipped — 9 October 2026
 
 [v0.3.60](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.60) at `e793a91f445947d6b6991905144b8876d12787e1` has a successful exact deployment/startup health receipt and separate gateway-start evidence. The independent package/CLI/RPC and Chief bridge are installed; the verified image is pinned. Chief's default is still legacy and old jobs retain their images/settings. No paid trial or cutover yet; obtain the separately requested acceptance authorization and preserve the real Telegram confirmation boundary. [Journal 77 closure](docs/journey/77-pi-runtime.md#verified-image-pin-release-closure--9-october-2026).

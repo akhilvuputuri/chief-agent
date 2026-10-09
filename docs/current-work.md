@@ -1,3 +1,7 @@
+# Pi new-task default candidate — 10 October 2026
+
+Owner-authorized v0.3.61 selector change uses the verified immutable Pi image for future requests. A synthetic controller regression checks duplicate legacy requests, saved settings, new-job routing, cancellation and future-only rollback. Existing jobs are preserved; real-model quality remains unmeasured. Exact review/CI/deployment pending. [Journal 77](journey/77-pi-runtime.md#owner-authorized-new-task-default--10-october-2026).
+
 # Independent Pi runtime shipped v0.3.60; legacy remains default — 9 October 2026
 
 [PR 204](https://github.com/akhilvuputuri/chief-agent/pull/204)/[PR 205](https://github.com/akhilvuputuri/chief-agent/pull/205) shipped the standalone TypeScript/Pi package, CLI/RPC, approval/build/check/recovery workflow and Chief bridge. The public worker was independently verified against 14 compiled files and Pi 1.1.0. Exact-head independent reviews, 1,028-test/Linux/extraction checks and [pin release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37927101507) verify `e793a91f445947d6b6991905144b8876d12787e1`, with startup health and separate gateway-start evidence. Default remains legacy; old Python source/images/jobs are intact. Paid real-model acceptance and new-task Pi selection await authorization. [Journal closure](journey/77-pi-runtime.md#verified-image-pin-release-closure--9-october-2026).
