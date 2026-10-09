@@ -256,8 +256,11 @@ test("the operational log never carries picker probabilities or domain names", (
   assert.equal(rejected.level, "error");
   assert.equal(rejected.httpStatus, 401);
   for (const line of lines) {
-    assert.ok(!line.includes("gmail") && !line.includes("library"), line);
-    assert.ok(!line.includes("0.91"), line);
+    const { ts: _timestamp, ...payload } = JSON.parse(line);
+    const encoded = JSON.stringify(payload);
+    assert.ok(!encoded.includes("gmail") && !encoded.includes("library"), line);
+    assert.ok(!encoded.includes("0.91"), line);
+    assert.ok(!("domains" in payload) && !("probabilities" in payload), line);
   }
 });
 
