@@ -1,3 +1,7 @@
+# Independent Pi runtime exploration — 9 October 2026
+
+[Pi runtime research](docs/pi-coding-harness.md) records the owner-directed standalone design: no Python compatibility requirement, Chief adapts to the new runtime, and the package can move to a separate repository. Published Pi 1.1.0 and seven synthetic SDK assertions were inspected/passed; no real inference or runtime implementation. Next: independent CLI/package for learn, plan and approved build, then actual acceptance and Chief integration. Current runtime selection and paused jobs are unchanged. [Journal 76](docs/journey/76-pi-harness-exploration.md).
+
 # Coding recovery — released v0.3.58, 9 October 2026
 
 [PR #197–201](https://github.com/akhilvuputuri/chief-agent/pull/201) shipped provider classification, bounded summary correction/field-local repair and the independently verified Python 0.1.9 new-job pin. Exact-head Astra review, 1005-test hosted checks, [activation release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37891797838), separate current health/configuration reads and immutable [v0.3.58](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.58) verify `caa9ac51d7b1e72793cb77f3bac1bcd1ca4c23f8`. Coding is on, gateway/Postgres healthy, default digest `sha256:e7554fb19f010706e16f748f6fc4b433567a503069d603761d1bf76a965e7687`; models/effort/two-hour/400-call/1000-tool policy unchanged.
