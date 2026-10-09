@@ -42,3 +42,7 @@ See the [dated learning entry](coding-agent-lessons.md#9-october--prefer-a-stand
 ## Follow-up and release boundary
 
 [The first-build plan](../pi-coding-harness.md#first-implementation-and-acceptance) defines the acceptance gates. No runtime image, production release, paid experiment, automatic resumption or new remote repository is part of this research. This candidate is for implementation planning; no release closure is asserted.
+
+## Follow-up — explicit preservation and cutover plan
+
+On 9 October the owner clarified that the existing runtime stays untouched and Chief should connect to the new runtime when ready. [The implementation plan](../pi-coding-runtime-plan.md) defines five milestones: independent package, read-only learn/plan, approved build/recovery, generic remote control/Chief adapter, and separately accepted new-task cutover. Existing jobs remain bound to their backend; rollback changes future routing only. Node upgrades are ordinary setup. This is a planning revision, with no application changes, new inference or deployment.

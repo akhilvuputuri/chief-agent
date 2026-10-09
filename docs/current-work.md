@@ -1,5 +1,7 @@
 # Independent Pi coding runtime — exploration, 9 October 2026
 
+[Implementation/cutover plan](pi-coding-runtime-plan.md): preserve the existing runtime unchanged; build an independent TypeScript/Pi package, then add a Chief adapter and switch new-task routing after acceptance. Existing jobs remain on their original backend and rollback changes only the default for future tasks.
+
 [Research and first-build plan](pi-coding-harness.md) proposes a standalone TypeScript/Pi package with learn, plan and approved build capabilities, a CLI and its own task/session contract. Owner clarification removes Python compatibility as a requirement and permits changing Chief's adapter; the package must be extractable into a new repository. Pi 1.1.0 synthetic SDK checks passed with no external model calls. Implementation, real-task acceptance, Chief integration and switching remain pending. Existing runtime settings/jobs are unchanged. See [journal 76](journey/76-pi-harness-exploration.md).
 
 # Coding recovery — released v0.3.58, 9 October 2026

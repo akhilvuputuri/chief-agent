@@ -2,11 +2,13 @@
 
 Research date: 9 October 2026. Status: proposed architecture with a synthetic SDK probe. No runtime implementation, production switch or paid model trial.
 
+The actionable next steps are in the [implementation and cutover plan](pi-coding-runtime-plan.md). The existing runtime remains untouched; Chief changes its connection for new tasks only after acceptance.
+
 ## Recommendation and owner direction
 
 Build a standalone TypeScript coding runtime using Pi as a pinned dependency. Give it its own package, task contract, workflow, sessions, CLI, tests and container. Chief becomes one client through a thin adapter. The runtime must work without Chief and be extractable into a new repository.
 
-Owner clarification during this exploration explicitly removes Python compatibility as a requirement and permits changing Chief's adapter. Do not reproduce the existing Python squad, checkpoint schema or model gateway inside the new runtime. The existing runtime can remain operational during development; preserving it does not require preserving its architecture in the replacement.
+Owner clarification during this exploration explicitly removes Python compatibility as a requirement and permits changing Chief's adapter. Do not reproduce the existing Python squad, checkpoint schema or model gateway inside the new runtime. The existing runtime must remain untouched and operational during development. Later, Chief routes new tasks to the accepted replacement while old jobs retain their original backend. Preserving the legacy implementation does not require reproducing its architecture in Pi.
 
 The first milestone is one agent that can understand a repository, propose a plan and implement approved work with actual checks. Pi owns the model/tool loop and normal context handling. Our code owns a small workflow, workspace execution boundary and task results. Do not start by building another agent framework around Pi.
 
@@ -22,7 +24,7 @@ The original `badlogic/pi-mono` project redirects to `earendil-works/pi`. npm ma
 
 The latest published release inspected is [`@earendil-works/pi-coding-agent@1.1.0`](https://github.com/earendil-works/pi/releases/tag/v1.1.0), published 7 October, tag commit `abe508e1b89912adde45528136c3221eb69acdd7`, MIT licensed. Its npm tarball integrity is `sha512-SeEi/4hdcHNgA9UWlefZl7ZZpm3dzi2OoxNjDHsBJ9o298LNOtbL4DGKgitlEj6uCTccvtw6f2hlCkTPVJ2RXg==`. Pin the release and the complete dependency lockfile when building; avoid examples written for older SDK versions.
 
-Pi requires Node >=22.19.0. This machine's default Node 22.15.0 produced engine warnings; the successful probe used Node 24.19.0. Choose and test a supported exact Node 22 patch for the initial runtime image; generic “Node 22” does not establish compatibility.
+Pi requires Node >=22.19.0. This machine's default Node 22.15.0 produced engine warnings; the successful probe used Node 24.19.0. Upgrading Node is routine setup, not a feasibility blocker. Choose and test a supported exact Node 22 patch for the initial runtime image; generic “Node 22” does not establish compatibility.
 
 ## Why Pi fits
 

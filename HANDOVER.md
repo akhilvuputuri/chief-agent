@@ -1,5 +1,7 @@
 # Independent Pi runtime exploration — 9 October 2026
 
+[Actionable build plan](docs/pi-coding-runtime-plan.md) fixes the preservation/cutover boundary: old runtime untouched, independent package first, Chief adapter next, accepted new-task switch last. Keep legacy task status/cancel/cleanup and rollback available; no checkpoint migration.
+
 [Pi runtime research](docs/pi-coding-harness.md) records the owner-directed standalone design: no Python compatibility requirement, Chief adapts to the new runtime, and the package can move to a separate repository. Published Pi 1.1.0 and seven synthetic SDK assertions were inspected/passed; no real inference or runtime implementation. Next: independent CLI/package for learn, plan and approved build, then actual acceptance and Chief integration. Current runtime selection and paused jobs are unchanged. [Journal 76](docs/journey/76-pi-harness-exploration.md).
 
 # Coding recovery — released v0.3.58, 9 October 2026
