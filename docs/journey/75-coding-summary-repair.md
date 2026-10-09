@@ -1,7 +1,7 @@
 # 75 — Let a rejected context summary be corrected before pausing
 
 Work date(s): 2026-10-09. Written/revised: 2026-10-09.
-Status: v0.3.54–56 foundations deployed; Python 0.1.8 global activation withdrawn after a live summary failure; Python 0.1.9 field-local repair under review.
+Status: v0.3.54–57 foundations deployed; Python 0.1.9 scoped brief/handoff accepted after feedback; global activation release pending.
 
 ## Problem and evidence
 
@@ -58,3 +58,19 @@ Python 0.1.9 changes the repair operation for field-local validation failures: t
 Regression tests reproduce an oversized action with valid source/scope findings and verify that repairing just that action retains every valid field and original history; a counterexample trying to replace valid evidence is rejected without acknowledgement/compaction. This tests protocol preservation, not a model-compliance improvement. New independently verified image and live concise-plan/retained-understanding acceptance remain required. The original owner issue and old trial pins are not migrated or automatically resumed.
 
 Planning guidance now also requires a final brief/notebook reconciliation, inspected end-to-end delivery and actual plugin/tool inventory, explicit overflow/failure behavior and a post-confirmation next action. This responds to observed semantic counterexamples; instruction compliance is not mechanically guaranteed and remains part of live acceptance grading.
+
+## Field-local foundation review and publication — 9 October 2026
+
+GPT-6 Astra approved final [PR #200](https://github.com/akhilvuputuri/chief-agent/pull/200) head `517382f843e716ed6ae2e99943b1c7df9c0307c8`. Independently passed 61 Python tests, Ruff/mypy/formatting and four extra probes for Unicode/missing fields, transient failure during partial repair, structural fallback and uncertain checkpoint acknowledgement; the expanded planning description fits the host envelope. Full local and [exact-head hosted checks](https://github.com/akhilvuputuri/chief-agent/actions/runs/37887851130) passed 1005 tests, build/format and container/transaction smoke checks. Main `a47e66a2cb9d9df5a24a1d50862d8ed386289c3d` [published Python 0.1.9](https://github.com/akhilvuputuri/chief-agent/actions/runs/37888498678), digest `sha256:e7554fb19f010706e16f748f6fc4b433567a503069d603761d1bf76a965e7687`; foundation release and substantive scoped acceptance remain separate pending gates.
+
+Before that new trial, the four owner-authorized verification jobs (including three revisions of the 0.1.8 job) accumulated 209 calls, 205 completed/costed and four uncertain with missing usage. Recorded model subtotal was $0.132266496; it excludes uncertain usage, infrastructure and unrelated runtime/reviewer calls. This is an adaptive incident workload on DeepSeek V4.1 Flash high, not a cost/completion comparison. The original reported job separately recorded $0.01907056 for 34 complete calls, with one uncertain call excluded.
+
+## Real Python 0.1.9 planning and accepted handoff — 9 October 2026
+
+Foundation [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37889221371) deployed exact `a47e66a2cb9d9df5a24a1d50862d8ed386289c3d` at 05:37:01Z; separate reads confirmed v0.3.57, healthy gateway/Postgres and unchanged Python 0.1.6 default/old pins. Immutable [v0.3.57](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.57) resolves to that source. The independently reviewed new-job-only launcher and actual CodeBuild read confirmed the trusted 0.1.9 digest on a nonprivileged medium worker.
+
+The scoped first attempt ran 05:29:26Z–05:35:01Z: 61 model calls, 108 tools, seven compactions and three real empty-summary generation recoveries. All seven acknowledged summaries stayed within the field bounds; metadata shows no field-local repair invocation in this trajectory. Thus targeted repair is regression-proven, while real shorter-summary compliance and provider recovery were observed; this adaptive workload does not isolate the cause. Functional planning/delivery passed, but root and independent semantic grading rejected the initial 317-word brief/final notes for missing API/version/pin/error-state contracts and incorrect test/skill evidence.
+
+A separately reviewed legitimate planning-feedback revision completed at 05:41:05Z: 32 calls, 60 tools, two compactions, no new provider rejection, cleanup complete and zero changed files/publication. The 309-word / 2,534-UTF-16-unit brief delivered normally to Main and matched the complete saved plan. Final notes agreed on all current owner-scoped open tasks inline, real scheduled-delivery changes, safe lookup warnings and retained failure evidence, incomplete/uncertain-send handling without automatic replay, ordinary reminder/briefing/subscription parity, concrete API/persistence/delivery/plugin pin/skill-version targets, tests and waiting for owner confirmation. GPT-6 Astra independently ACCEPTED the actual brief and handoff. It noted a routine future implementation clarification: consistent false-default/non-ambiguous-null persistence and preserving omitted update fields. This acceptance is not implementation approval or passing to-do feature tests.
+
+[PR #201](https://github.com/akhilvuputuri/chief-agent/pull/201) pins only the new-job worker default. Final-head independent review/checks, exact activation release/current health and closure remain required. Original paused jobs and their settings remain unchanged; no automatic resumption or migration, real record mutation, requirement approval or implementation occurred. One feedback-conditioned accepted planning result is not a general completion-rate, model-quality or cost-improvement measurement.
