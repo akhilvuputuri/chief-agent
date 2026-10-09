@@ -1,6 +1,6 @@
-# Coding field-local summary repair — candidate, 9 October 2026
+# Coding field-local repair activation — candidate, 9 October 2026
 
-PRs #197–199 shipped compatible provider/summary foundations through v0.3.56 (`63a37fea`), with exact receipt and current health verified. Python 0.1.8 completed scoped planning and recovered provider empties, but a later corrective revision paused after two invalid `nextAction` summaries. Global activation is withdrawn. Python 0.1.9 proposes repairing only invalid notebook fields while retaining valid evidence exactly, using the same bounded recovery/allocation. Review/checks/image/new live acceptance remain pending; default remains 0.1.6 and old jobs are unchanged. See [journal 75](journey/75-coding-summary-repair.md).
+[PR #200](https://github.com/akhilvuputuri/chief-agent/pull/200) passed exact-head GPT-6 Astra review and 1005-test hosted checks; main `a47e66a2` published Python 0.1.9 image `sha256:e7554fb19f010706e16f748f6fc4b433567a503069d603761d1bf76a965e7687`. Installed source/config and independent image/operator review precede a scoped real planning trial. This candidate pins that worker only for NEW jobs; live semantic acceptance, review/checks and exact release/current health remain required. Old jobs remain pinned/paused; model/effort/two-hour/400-call/1000-tool settings and approvals are unchanged. Negative attempts and actual source/overflow/failure-state grading are retained in [journal 75](journey/75-coding-summary-repair.md).
 
 # Coding approval brief — released v0.3.53, 9 October 2026
 
