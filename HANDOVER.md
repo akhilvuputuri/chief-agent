@@ -1,3 +1,7 @@
+# Coding recovery activation — candidate, 9 October 2026
+
+PRs #197–199 shipped compatible provider/summary recovery foundations through v0.3.56 (`63a37fea`), exact release receipt verified. Python 0.1.8 main-only image `sha256:67ae54cd8dd11308e48fbf08fe9f2895195c396e15c93a688260b96137ea4b4f` is independently verified. One scoped live plan completed (33 calls, 58 tools, two compactions; 303-word brief), but source/overflow defects in the plan require a planning-only revision before acceptance. This candidate pins the verified image for NEW jobs; review/checks/deployment and semantic acceptance remain pending. Old jobs remain pinned and paused. Models, effort, two-hour/400-call/1000-tool allocation and approvals are unchanged. See [journal 75](docs/journey/75-coding-summary-repair.md).
+
 # Coding combined-summary recovery — in progress, 9 October 2026
 
 Scoped Python 0.1.7 planning completed once and recovered a real empty provider answer, but presentation/final notes needed improvement. A feedback-conditioned second attempt exposed coupled transport/validation retry limits (empty answer then 6,055-unit findings). Python 0.1.8 separates the bounded opportunities, maximum three summary generations within existing allocation. Review/image/live acceptance pending; default remains 0.1.6, old jobs unchanged. See [journal 75](docs/journey/75-coding-summary-repair.md).

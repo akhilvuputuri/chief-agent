@@ -1,7 +1,7 @@
 # 75 — Let a rejected context summary be corrected before pausing
 
 Work date(s): 2026-10-09. Written/revised: 2026-10-09.
-Status: Python 0.1.7 candidate; tests/review/image publication and live acceptance pending.
+Status: compatible v0.3.54–56 foundations deployed; Python 0.1.8 scoped planning tested; global activation and semantic acceptance pending.
 
 ## Problem and evidence
 
@@ -36,3 +36,13 @@ A separately reviewed second attempt included presentation and finalized-noteboo
 Python 0.1.8 separates the two allowances: at most one recognized transient generation recovery and one validation repair, hard maximum three summary generations. Repeated failures of either kind still stop; original history/notes, continuation/wire/tool headroom, uncertainty and existing shared allocations are unchanged. New regression tests both error orders followed by correction. Source/image review and new owner-authorized acceptance trials remain pending; no global 0.1.7 pin or universal reliability claim.
 
 Hosted validation of the combined-recovery candidate caught an unrelated pre-existing privacy-test flake: a raw log-line substring assertion for `0.91` matched the permitted timestamp suffix `.910Z`. The test now inspects the serialized non-timestamp payload and explicitly rejects probability/domain fields. No logger behavior or disclosure boundary changed. The new revision requires fresh exact-head review and CI.
+
+## Python 0.1.8 verification and semantic counterexample — 9 October 2026
+
+[PR #199](https://github.com/akhilvuputuri/chief-agent/pull/199) received final GPT-6 Astra approval of `de77f1c1bc6ec94e8669759398161ed26dd57464` and passed 1003-test hosted checks. Main `63a37fea29a385d3289efce3c17a63119171f690` published [the main-only worker image](https://github.com/akhilvuputuri/chief-agent/actions/runs/37885435011), digest `sha256:67ae54cd8dd11308e48fbf08fe9f2895195c396e15c93a688260b96137ea4b4f`; anonymous manifest/config verification and all ten installed source/final-layer file ownership checks matched Python 0.1.8. The [exact foundation release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37886182696) succeeded at 2026-10-09T04:58:25Z; this receipt proves startup health, not semantic acceptance.
+
+One owner-authorized, independently reviewed new-job-only candidate trial completed from 04:50:40Z to 04:53:42Z: 33 model calls, 58 tools, two compactions, no provider rejection, cleanup complete, zero changed files and no publication. CodeBuild confirmed the exact candidate digest on a nonprivileged medium worker. Normal Main delivery matched the complete checkpoint plan (303 whitespace words / 2,183 UTF-16 units); detailed finalized notes were retained. The default and old jobs still used Python 0.1.6.
+
+Root semantic grading rejected that proposal despite functional completion: it copied a ten-item briefing cap into a request for the actual pending checklist; the notebook incorrectly inferred no daily agent from the loader rather than inspecting the bundled plugin inventory; historical causal certainty exceeded the source-only evidence. A legitimate planning-only feedback revision is prepared to correct these points, inspect delivery limits and plugin pins, reconcile the complete brief and handoff, and retain the separate implementation/DB-operations confirmation boundaries. No manual rewrite of the model plan or approval is used. This adaptive test is not a controlled success-rate estimate.
+
+The activation candidate changes only the new-job default image and patch version. Models/effort/provider filtering, allocation, permissions, schema/Compose, approval requirements and existing paused jobs are unchanged. Exact review, checks, deployment and substantive live acceptance remain required.
