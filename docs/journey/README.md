@@ -84,7 +84,7 @@ For the latest verified release and open work, read [current work](../current-wo
 
 | 9 October | [76 — Independent Pi runtime](76-pi-harness-exploration.md): can a dependency supply coding mechanics while the runtime remains portable? | Published SDK inspected; seven synthetic assertions pass; standalone implementation and live acceptance pending |
 
-| 9 October | [77 — Independent Pi implementation](77-pi-runtime.md): can a dependency replace coding mechanics while Chief remains a client? | Implementation candidate; synthetic checks pass, review/Linux/release/live acceptance pending |
+| 9–10 October | [77 — Independent Pi implementation](77-pi-runtime.md): can a dependency replace coding mechanics while Chief remains a client? | v0.3.61 Pi default released; exact review/Linux/release/health verified; real-model acceptance unmeasured |
 
 ## Coding-agent learning path
 
