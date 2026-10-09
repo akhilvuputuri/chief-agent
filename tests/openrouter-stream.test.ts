@@ -164,6 +164,41 @@ test("truncated or malformed tool batches never expose a complete first write", 
     );
 });
 
+test("invalid streamed content and delta containers cannot masquerade as recoverable empty output", async () => {
+  for (const delta of [
+    { content: { unexpected: "object" } },
+    { content: [] },
+    { content: false },
+    { role: false },
+    { role: "" },
+    "invalid delta",
+    { reasoning: [] },
+    { reasoning_details: {} },
+    { tool_calls: {} },
+  ]) {
+    const adapter = new OpenRouter(
+      "fixture-key",
+      "fixture/model",
+      2,
+      10,
+      async () => response([frame(chunk(delta, "stop")), frame("[DONE]")]),
+    );
+    await assert.rejects(
+      adapter.generate({
+        messages: [],
+        tools: [],
+        reasoning: "high",
+        signal: new AbortController().signal,
+        stream: true,
+      }),
+      (error: any) =>
+        error instanceof ModelError &&
+        !error.transient &&
+        error.diagnostics.failureCode === "malformed",
+    );
+  }
+});
+
 test("a complete reasoning-only stream is an empty transient generation, not a usable answer", async () => {
   const adapter = new OpenRouter(
     "fixture-key",
