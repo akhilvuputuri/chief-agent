@@ -1,3 +1,7 @@
+# Pi foundation released v0.3.59; image pin pending — 9 October 2026
+
+[PR 204](https://github.com/akhilvuputuri/chief-agent/pull/204) is deployed at `5fa01cbeb2a8d54315f52c23d5a9ba5c35d98bef`: exact [release receipt](https://github.com/akhilvuputuri/chief-agent/actions/runs/37923924614), startup health and separate new-gateway log passed. Independent exact-head Astra/Devin, 1,028 tests and Linux CLI/worker/extraction checks passed. [PR 205](https://github.com/akhilvuputuri/chief-agent/pull/205) pins the independently verified public Pi image while default stays legacy. Old Python runtime/jobs are preserved. Paid acceptance and default cutover remain pending explicit authorization. [Journal closure](journey/77-pi-runtime.md#foundation-release-closure--9-october-2026).
+
 # Pi image verified — pin candidate, 9 October 2026
 
 [PR 204](https://github.com/akhilvuputuri/chief-agent/pull/204) integrated the independently approved Pi runtime at `5fa01cbeb2a8d54315f52c23d5a9ba5c35d98bef`. Exact-head hosted checks/Devin and local 1,028-test checks passed; Linux verified the actual CLI and worker process boundary, plus extraction. The main-built public image was independently verified against 14 compiled files and installed Pi 1.1.0; this follow-up pins its immutable digest with default still legacy. Foundation release receipt, pin review/release and paid acceptance/default cutover remain separate. See [journal evidence](journey/77-pi-runtime.md#foundation-review-and-image-verification--9-october).
