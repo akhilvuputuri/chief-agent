@@ -49,6 +49,8 @@ export type Task = {
   checks: Check[];
   artifact?: Artifact;
   runnerPid?: number;
+  sessionFile?: string;
+  activeRun?: { startedAt: number; reservedMs: number };
   report?: Report;
   events: RuntimeEvent[];
 };

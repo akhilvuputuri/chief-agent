@@ -6,7 +6,7 @@ import { linuxProcessBoundary } from "./process-boundary.js";
 import { localExecutor } from "./workspace.js";
 const cleanup = linuxProcessBoundary("/opt/pi-runtime/process-boundary.node");
 const root = await mkdtemp(join(tmpdir(), "pi-isolation-"));
-const execute = localExecutor(root, join(root, "home"), cleanup);
+const execute = localExecutor(root, join(root, "home"));
 const signal = new AbortController().signal;
 const privateEnvironment = await execute(
   `test -z "$CODING_TEST_SECRET" && ! cat /proc/${process.pid}/environ >/dev/null 2>&1 && ! cat /proc/${process.pid}/mem >/dev/null 2>&1`,

@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomUUID, createHash } from "node:crypto";
-import { mkdir, realpath } from "node:fs/promises";
+import { mkdir, realpath, readdir } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import {
   createAgentSession,
@@ -228,7 +228,7 @@ export class CodingRuntime {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const stop = new AbortController();
     this.active = { id, stop, cancelled: false };
-    const started = Date.now();
+    const started = performance.now();
     const poll = setInterval(() => {
       void this.options.store
         .cancellation(id)
@@ -256,6 +256,10 @@ export class CodingRuntime {
         throw new Error(
           "Build requires exact approved requirements and configured checks",
         );
+      task.activeRun = {
+        startedAt: Date.now(),
+        reservedMs: Math.max(0, task.limits.ms - (task.used.ms ?? 0)),
+      };
       task.status = "running";
       task.runnerPid = process.pid;
       task.report = undefined;
@@ -314,7 +318,20 @@ export class CodingRuntime {
         `sessions-${task.revision}-${task.intent}`,
       );
       await mkdir(sessionDir, { recursive: true, mode: 0o700 });
-      const manager = SessionManager.continueRecent(task.workspace, sessionDir);
+      const sessionFiles = (await readdir(sessionDir)).filter((name) =>
+        name.endsWith(".jsonl"),
+      );
+      if (sessionFiles.length > 1)
+        throw new Error("Ambiguous session files; reconcile before continuing");
+      const manager = sessionFiles.length
+        ? SessionManager.open(
+            join(sessionDir, sessionFiles[0]!),
+            sessionDir,
+            task.workspace,
+          )
+        : SessionManager.create(task.workspace, sessionDir);
+      task.sessionFile = manager.getSessionFile();
+      await this.options.store.save(task);
       const settings = SettingsManager.inMemory({
         retry: { enabled: false, provider: { maxRetries: 0 } },
         cacheWarming: "off",
@@ -445,7 +462,9 @@ export class CodingRuntime {
       clearInterval(poll);
       if (timer) clearTimeout(timer);
       session?.dispose();
-      task.used.ms = (task.used.ms ?? 0) + Date.now() - started;
+      task.used.ms =
+        (task.used.ms ?? 0) + Math.ceil(performance.now() - started);
+      task.activeRun = undefined;
       try {
         await this.options.store.save(task);
       } finally {

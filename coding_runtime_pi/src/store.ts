@@ -64,9 +64,18 @@ export class TaskStore {
       throw new Error("Unsupported task record");
     // A process restart never restarts a model or repeats tools.
     if (task.status === "running" && !this.processAlive(task.runnerPid)) {
+      const old = task.used.ms ?? 0;
+      const active = task.activeRun;
+      const elapsed =
+        active && Date.now() >= active.startedAt
+          ? Math.min(active.reservedMs, Date.now() - active.startedAt)
+          : Math.max(0, task.limits.ms - old);
+      task.used.ms = old + Math.max(0, elapsed);
+      task.activeRun = undefined;
+      task.runnerPid = undefined;
       task.status = "paused";
       task.summary =
-        "Interrupted; inspect the workspace before explicit resume";
+        "Interrupted; inspect the workspace. Time is conservatively charged through recovery within the saved allowance.";
     }
     return task;
   }

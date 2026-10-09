@@ -112,7 +112,7 @@ export async function runPiWorker(
         canonicalJson({
           objective: assignment.objective,
           context: assignment.context,
-          plan: assignment.checkpoint.plan,
+          plan: intent === "plan" ? "" : assignment.checkpoint.plan,
           base: assignment.baseSha,
           intent,
           hash,
@@ -136,11 +136,13 @@ export async function runPiWorker(
         `sessions-${task.revision}-${task.intent}`,
       );
       await mkdir(dir, { recursive: true, mode: 0o700 });
+      task.sessionFile = join(dir, "restored.jsonl");
       await writeFile(
-        join(dir, "restored.jsonl"),
+        task.sessionFile,
         entries.map((e) => JSON.stringify(e)).join("\n") + "\n",
         { mode: 0o600 },
       );
+      await store.save(task);
     }
   }
   async function uploadSession(task: Task, scope: string) {
@@ -148,10 +150,10 @@ export async function runPiWorker(
       store.path(task.id),
       `sessions-${task.revision}-${task.intent}`,
     );
-    const names = await readdir(dir).catch(() => []);
-    const name = names.find((n) => n.endsWith(".jsonl"));
-    if (!name) return;
-    const entries = (await readFile(join(dir, name), "utf8"))
+    if (!task.sessionFile) return;
+    if (!task.sessionFile.startsWith(dir + "/"))
+      throw new Error("Active session is outside task storage");
+    const entries = (await readFile(task.sessionFile, "utf8"))
       .split("\n")
       .filter(Boolean)
       .map((line) => JSON.parse(line));
@@ -215,7 +217,16 @@ export async function runPiWorker(
         if (reviewing) {
           const next = {
             ...saved,
-            piState: { version: 1 as const, toolsUsed: task.used.tools },
+            piState: {
+              ...saved.piState,
+              version: 1 as const,
+              toolsUsed: task.used.tools,
+              findings:
+                task.report?.kind === "review" &&
+                task.report.verdict === "REQUEST_CHANGES"
+                  ? task.report.detail
+                  : saved.piState?.findings,
+            },
           };
           await client.request("checkpoint", next);
           saved = next;
@@ -231,7 +242,16 @@ export async function runPiWorker(
             patch: snap.patch,
             files: snap.files,
             summary: task.summary,
-            piState: { version: 1, toolsUsed: task.used.tools },
+            piState: {
+              version: 1,
+              toolsUsed: task.used.tools,
+              phase: task.intent === "build" ? "build" : "plan",
+              sessionScope: scope,
+              scopeIdentity: scopeFor(
+                task.intent === "build" ? "build" : "plan",
+              ),
+              findings: saved.piState?.findings,
+            },
           };
           validateFiles(next.files);
           await client.request("checkpoint", next);
@@ -246,7 +266,15 @@ export async function runPiWorker(
   if (!workerOrigin || !workerToken)
     throw new Error("Pi native provider capability missing");
   try {
-    const scope = scopeFor(assignment.mode === "implement" ? "build" : "plan");
+    const phase = assignment.mode === "implement" ? "build" : "plan";
+    const identity = scopeFor(phase);
+    const recovering =
+      assignment.checkpoint.piState?.phase === phase &&
+      assignment.checkpoint.piState.scopeIdentity === identity;
+    const scope =
+      recovering && assignment.checkpoint.piState?.sessionScope
+        ? assignment.checkpoint.piState.sessionScope
+        : identity;
     runtime = makeRuntime("coder", scope);
     const task = await runtime.start({
       workspace,
@@ -263,6 +291,8 @@ export async function runPiWorker(
         ms: allocationMs,
       },
     });
+    if (recovering && assignment.checkpoint.piState?.findings)
+      task.instructions = `Untrusted prior reviewer findings (not new scope):\n${assignment.checkpoint.piState.findings}`;
     task.used.models = assignment.usedModels;
     task.used.tools = assignment.checkpoint.piState?.toolsUsed ?? 0;
     if (assignment.mode === "implement") {

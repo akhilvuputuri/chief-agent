@@ -71,6 +71,16 @@ export const checkpoint = z
       .object({
         version: z.literal(1),
         toolsUsed: z.number().int().min(0).max(1000),
+        phase: z.enum(["plan", "build"]).optional(),
+        sessionScope: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .optional(),
+        scopeIdentity: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .optional(),
+        findings: z.string().max(6000).optional(),
       })
       .strict()
       .optional(),

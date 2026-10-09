@@ -4,7 +4,7 @@ import { mkdtemp, writeFile, readFile, symlink, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import {
   InMemoryCredentialStore,
   createAssistantMessageEventStream,
@@ -441,4 +441,89 @@ test("private directory whose name starts with dots is still inside the workspac
   await assert.rejects(
     runtime.start({ workspace: f.workspace, objective: "Inspect" }),
   );
+});
+
+test("replacement workspace reopens the exact restored session and keeps its immutable prefix", async () => {
+  const f = await fixture();
+  const old = await fixture();
+  const oldDirectory = join(old.root, "history");
+  const manager = SessionManager.create(old.workspace, oldDirectory);
+  manager.appendMessage({
+    role: "user",
+    content: "Synthetic uncertainty marker from the first worker",
+    timestamp: Date.now(),
+  });
+  manager.appendMessage({
+    role: "assistant",
+    content: [{ type: "text", text: "Prior observation retained." }],
+    api: "synthetic",
+    provider: "synthetic",
+    model: "test",
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: "stop",
+    timestamp: Date.now(),
+  });
+  const original = await readFile(manager.getSessionFile()!, "utf8");
+  let sawMarker = false;
+  const factory = scripted([
+    [report("plan", "Continue the complete proposed scope.")],
+  ]);
+  const runtime = new CodingRuntime({
+    store: f.store,
+    model: async (admit) => {
+      const value = await factory(admit);
+      const provider = value.runtime.getRegisteredProviderConfig("synthetic")!;
+      const stream = provider.streamSimple!;
+      value.runtime.registerProvider("synthetic", {
+        ...provider,
+        streamSimple: (model, context, options) => {
+          sawMarker ||= JSON.stringify(context.messages).includes(
+            "Synthetic uncertainty marker",
+          );
+          return stream(model, context, options);
+        },
+      });
+      return value;
+    },
+  });
+  const task = await runtime.start({
+    workspace: f.workspace,
+    objective: "Continue inspection",
+  });
+  const dir = join(f.store.path(task.id), "sessions-1-plan");
+  await mkdir(dir, { recursive: true });
+  const restored = join(dir, "restored.jsonl");
+  await writeFile(restored, original);
+  const result = await runtime.run(task.id);
+  assert.equal(result.status, "waiting_approval");
+  assert(sawMarker);
+  assert.equal(result.sessionFile, restored);
+  assert((await readFile(restored, "utf8")).startsWith(original));
+});
+test("interrupted execution charges the saved time reservation rather than resetting it", async () => {
+  const f = await fixture();
+  const runtime = new CodingRuntime({ store: f.store, model: scripted([]) });
+  const task = await runtime.start({
+    workspace: f.workspace,
+    objective: "Inspect",
+    limits: { ms: 2000, models: 10, tools: 10 },
+  });
+  task.status = "running";
+  task.runnerPid = 999999999;
+  task.activeRun = { startedAt: Date.now() - 1000, reservedMs: 2000 };
+  await f.store.save(task);
+  const paused = await runtime.inspect(task.id);
+  assert.equal(paused.status, "paused");
+  assert(paused.used.ms >= 1000 && paused.used.ms <= 2000);
+  await runtime.resume(task.id);
+  const ready = await runtime.inspect(task.id);
+  assert(ready.used.ms >= 1000);
+  assert.equal(ready.activeRun, undefined);
 });

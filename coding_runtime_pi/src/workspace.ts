@@ -1,3 +1,4 @@
+import { processCleanup } from "./process-boundary.js";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -36,7 +37,7 @@ export function artifactHash(patch: string, files: FileChange[]) {
 export function localExecutor(
   root: string,
   home: string,
-  cleanup?: () => void,
+  cleanup: (() => void) | undefined = processCleanup(),
 ): Executor {
   return async (command, signal, timeoutMs, maxOutput = 32000) => {
     await mkdir(home, { recursive: true, mode: 0o700 });

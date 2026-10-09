@@ -2926,3 +2926,139 @@ test("Pi bridge plans, accepts bound fixture confirmation, builds, reviews and p
   assert.equal((await f.row(started.id)).state, "pr_ready");
   assert.equal(f.publishes(), 1);
 });
+
+test("replacement Pi worker retains acknowledged history across a new sandbox path", async (t) => {
+  const f = await fixture(t);
+  const root = await mkdtemp(join(tmpdir(), "pi-worker-recovery-"));
+  const source = join(root, "source");
+  await mkdir(source);
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", source, ...args], { stdio: "pipe" });
+  git("init", "-q");
+  git("config", "user.name", "Synthetic");
+  git("config", "user.email", "synthetic@example.invalid");
+  await writeFile(
+    join(source, "marker.txt"),
+    "First-worker observation: synthetic uncertain-action marker.\n",
+  );
+  git("add", ".");
+  git("commit", "-qm", "Fixture");
+  const baseSha = git("rev-parse", "HEAD").toString().trim();
+  const started = await f.start("pi-replacement", "plan");
+  await f.db.query(
+    "UPDATE coding_jobs SET settings=$2::jsonb,base_sha=$3 WHERE id=$1",
+    [
+      started.id,
+      JSON.stringify({
+        ...settings,
+        runtime: "pi",
+        squad: false,
+        autoMerge: false,
+      }),
+      baseSha,
+    ],
+  );
+  let turn = 0;
+  f.setGeneration(() => {
+    if (turn++ === 0)
+      return {
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            {
+              id: "read-marker",
+              type: "function",
+              function: {
+                name: "read",
+                arguments: JSON.stringify({ path: "marker.txt" }),
+              },
+            },
+          ],
+        },
+      };
+    throw new Error("Synthetic interrupted generation");
+  });
+  const app = server();
+  t.after(() => app.close());
+  await codingApi(app, f.c);
+  const origin = await app.listen({ host: "127.0.0.1", port: 0 });
+  const directories: string[] = [];
+  const prepareRepository = async (directory: string, assignment: any) => {
+    directories.push(directory);
+    execFileSync("git", ["clone", "--no-hardlinks", source, directory], {
+      stdio: "pipe",
+    });
+    execFileSync(
+      "git",
+      ["-C", directory, "checkout", "--detach", assignment.baseSha],
+      { stdio: "pipe" },
+    );
+  };
+  const run = async () => {
+    const job = await f.row(started.id);
+    await runPiWorker(
+      new NativePiWorkerClient(
+        origin,
+        job.id,
+        f.c.token(job.id, job.attempt_id),
+        new AbortController().signal,
+      ),
+      () => {},
+      new AbortController().signal,
+      { prepareRepository },
+    );
+  };
+  await f.c.tick();
+  await run();
+  assert.equal((await f.row(started.id)).state, "paused");
+  await f.c.tick();
+  await f.c.tick();
+  const paused = await f.row(started.id);
+  await f.c.call("a", f.run, {
+    operation: "coding_resume",
+    id: paused.id,
+    baseRevision: paused.revision,
+    requestKey: "explicit-recovery",
+  });
+  let recovered = false;
+  let second = 0;
+  f.setGeneration((_model, input) => {
+    recovered ||= JSON.stringify(input.messages).includes(
+      "First-worker observation: synthetic uncertain-action marker",
+    );
+    return second++ === 0
+      ? {
+          message: {
+            role: "assistant",
+            content: null,
+            tool_calls: [
+              {
+                id: "report-recovered",
+                type: "function",
+                function: {
+                  name: "report",
+                  arguments: JSON.stringify({
+                    kind: "plan",
+                    summary: "Recovered inspection",
+                    detail:
+                      "Preserve the observed marker and implement only the requested scope after approval.",
+                  }),
+                },
+              },
+            ],
+          },
+        }
+      : { message: { role: "assistant", content: "Finished." } };
+  });
+  await f.c.tick();
+  await run();
+  assert.equal((await f.row(started.id)).state, "plan_ready");
+  assert(recovered);
+  assert.notEqual(directories[0], directories[1]);
+  const entries = await f.db.query(
+    "SELECT payload->>'index' AS index FROM coding_events WHERE job_id=$1 AND payload->>'kind'='pi_session'",
+    [started.id],
+  );
+  assert(entries.rows.length > 5);
+});
