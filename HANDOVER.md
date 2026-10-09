@@ -1,3 +1,7 @@
+# Pi default released v0.3.61 — 10 October 2026
+
+Pi is now the default for new coding tasks at `76792d9a51ca6069ba6dda18e94ef44dc3394441`. [Exact release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37978324102), independent review/Devin, 1,029 local tests and hosted Linux checks passed; separate running SHA/gateway/Postgres health observations verified installation. Existing jobs stay on their saved backend/image; old Python runtime is intact. No paid trial or live acceptance result is claimed. [Journal closure](docs/journey/77-pi-runtime.md#default-switch-release-closure--10-october-2026).
+
 # Pi new-task default candidate — 10 October 2026
 
 Owner explicitly authorizes switching new coding tasks to Pi before a paid trial. The v0.3.61 candidate changes only the default selector; legacy jobs/source/images stay intact, Pi is draft-only and normal Telegram implementation confirmation remains. Exact review/checks/deployment pending. [Journal 77](docs/journey/77-pi-runtime.md#owner-authorized-new-task-default--10-october-2026).

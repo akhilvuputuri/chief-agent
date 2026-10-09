@@ -1,6 +1,6 @@
 # 77 — Replace custom coding mechanics with an independent Pi package
 
-Work date: 9 October 2026. Status: implementation candidate; independent review, hosted Linux checks, image activation and live acceptance pending.
+Work dates: 9–10 October 2026. Current status: v0.3.61 Pi default released and healthy; real-model task acceptance remains unmeasured. Dated candidate observations below preserve the implementation/review history.
 
 ## User-visible problem and preceding iteration
 
@@ -72,3 +72,11 @@ The independent runtime, CLI/RPC, Chief bridge and verified immutable image refe
 The owner explicitly requests switching Chief's default to Pi now. This supersedes the earlier plan to wait for paid acceptance before changing selection; it does not establish a real-model result or authorize fabricating a Telegram approval. Baseline is freshly fetched main `9a20ee3a9e0b16a29d708c4fba21cc85b06f935f`. The app-only v0.3.61 candidate changes `config/coding-backend.json` to Pi and uses the already independently verified immutable worker image. Python source, Dockerfile, profile, stored jobs and uncertain-write handling remain intact. Models, effort, provider filters and allocations do not change. Pi remains draft-only with normal owner-bound implementation confirmation.
 
 A synthetic controller regression reads the bundled profiles, starts a legacy job, switches controllers, retries the original request and creates a new Pi planning job. It verifies immutable saved settings/image, unchanged allocations, no automatic sandbox/model invocation, legacy cancellation through the new controller, and rollback affecting only future tasks. Required checks and exact-head independent review/release remain pending at this candidate. No paid acceptance task is run; actual Pi task quality and provider behavior remain unmeasured. Cloud/local release parity uses the existing GitHub path; a first owner Telegram task remains the live behavioral check.
+
+## Default-switch release closure — 10 October 2026
+
+[PR 207](https://github.com/akhilvuputuri/chief-agent/pull/207) merged at `76792d9a51ca6069ba6dda18e94ef44dc3394441` after independent approval of exact head `397b6eaffda93fb45919af5c1c0cbae98c817613`, Devin and hosted checks. The independent reviewer was explicitly configured GPT-6 Astra, with precise serving identity unavailable in its session; it passed 95 targeted tests and an additional executable queued-legacy/uncertain-create/ownership/duplicate-request probe. Full local checks/build/format passed 1,029 tests; hosted Linux/extraction checks passed.
+
+[Exact release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37978324102) succeeded at 2026-10-09 19:13:13 UTC (10 October SGT), with deployment/startup health. Separate bounded diagnostics observed the same running SHA at 20:17:48 UTC and gateway/Postgres healthy at 20:18:14 UTC, with backup successful and exporter active. Immutable [v0.3.61](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.61) identifies the switch.
+
+Pi is the configured default for new coding requests, using the previously verified immutable image. Python source/profile/image and existing stored jobs are unchanged; old-request identity, legacy cleanup/cancellation, normal owner implementation approval and Pi draft-only publication remain intact. No old job was resumed, no paid trial or live Telegram acceptance was performed, and no quality/cost benefit is inferred. The first real owner task remains the behavioral acceptance boundary.

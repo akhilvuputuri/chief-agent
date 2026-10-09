@@ -1,3 +1,7 @@
+# Pi default released v0.3.61 — 10 October 2026
+
+[PR 207](https://github.com/akhilvuputuri/chief-agent/pull/207) selects Pi for new tasks at `76792d9a51ca6069ba6dda18e94ef44dc3394441`. Exact review, full checks and [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37978324102) passed, followed by separate healthy host/running SHA observations. Legacy jobs/source/images remain intact, Pi is draft-only and owner implementation confirmation remains. Real-model quality is unmeasured. [Journal closure](journey/77-pi-runtime.md#default-switch-release-closure--10-october-2026).
+
 # Pi new-task default candidate — 10 October 2026
 
 Owner-authorized v0.3.61 selector change uses the verified immutable Pi image for future requests. A synthetic controller regression checks duplicate legacy requests, saved settings, new-job routing, cancellation and future-only rollback. Existing jobs are preserved; real-model quality remains unmeasured. Exact review/CI/deployment pending. [Journal 77](journey/77-pi-runtime.md#owner-authorized-new-task-default--10-october-2026).
