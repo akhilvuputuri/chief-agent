@@ -1,6 +1,6 @@
 # Independent Pi runtime implementation plan
 
-Date: 9 October 2026. Status: standalone package and Chief bridge implemented as a review candidate; deployment/acceptance/cutover pending. Source baseline: freshly fetched Chief main `0547d4599ee6fd35666fabc9ebdf52b0fa04aec4`. See [exploration and SDK evidence](pi-coding-harness.md).
+Date: 9 October 2026. Status: standalone package, Chief bridge and verified image pin shipped as v0.3.60; real-model acceptance/cutover pending. See [release closure](journey/77-pi-runtime.md#verified-image-pin-release-closure--9-october-2026). Source baseline: freshly fetched Chief main `0547d4599ee6fd35666fabc9ebdf52b0fa04aec4`. See [exploration and SDK evidence](pi-coding-harness.md).
 
 ## Agreed boundary
 

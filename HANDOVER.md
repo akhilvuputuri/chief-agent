@@ -1,3 +1,7 @@
+# Pi runtime and image pin shipped — 9 October 2026
+
+[v0.3.60](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.60) at `e793a91f445947d6b6991905144b8876d12787e1` has a successful exact deployment/startup health receipt and separate gateway-start evidence. The independent package/CLI/RPC and Chief bridge are installed; the verified image is pinned. Chief's default is still legacy and old jobs retain their images/settings. No paid trial or cutover yet; obtain the separately requested acceptance authorization and preserve the real Telegram confirmation boundary. [Journal 77 closure](docs/journey/77-pi-runtime.md#verified-image-pin-release-closure--9-october-2026).
+
 # Pi foundation release verified — 9 October 2026
 
 [v0.3.59](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.59) foundation at `5fa01cbeb2a8d54315f52c23d5a9ba5c35d98bef` has an exact successful release/startup health receipt and separate gateway-start log. Image pin [PR 205](https://github.com/akhilvuputuri/chief-agent/pull/205) remains a distinct step; default is legacy and old jobs are intact. No paid/live acceptance or switch yet. [Journal evidence](docs/journey/77-pi-runtime.md#foundation-release-closure--9-october-2026).

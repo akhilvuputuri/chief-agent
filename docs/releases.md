@@ -1,3 +1,7 @@
+## Released v0.3.60 — verified independent Pi worker image pin
+
+[PR 205](https://github.com/akhilvuputuri/chief-agent/pull/205), exact-head independent review, Devin and hosted Linux checks passed. [Release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37927101507) verifies `e793a91f445947d6b6991905144b8876d12787e1` and startup health; a separate private log observed its gateway start. Immutable [v0.3.60](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.60) targets the pin release. Anonymous verification matched 14 compiled source files, SDK 1.1.0, non-root entrypoint and native guard. Default remains legacy; no paid acceptance/default switch or auto-merge permission change. [Journal 77](journey/77-pi-runtime.md).
+
 ## Released v0.3.59 — independent Pi coding-runtime foundation
 
 [PR 204](https://github.com/akhilvuputuri/chief-agent/pull/204), exact-head GPT-6 Astra approval, Devin and 1,028-test/Linux checks passed. [Release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37923924614) verified `5fa01cbeb2a8d54315f52c23d5a9ba5c35d98bef` and startup health; a separate private log confirmed the new gateway start. Immutable [v0.3.59](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.59) marks the foundation. The independent TypeScript/Pi package and Chief bridge are installed with default still legacy; Python source/images/jobs remain intact. Image pin, real-model acceptance and default cutover are separate. No quality/cost superiority is claimed. See [journal 77](journey/77-pi-runtime.md).
