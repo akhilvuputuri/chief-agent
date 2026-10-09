@@ -80,6 +80,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 8 October | [72 — Coding approval brief](72-coding-approval-brief.md): can a completed audit become a usable complete owner scope? | Released v0.3.53; exact reviews/checks/image/releases/current health verified, real-model brevity and coding quality unmeasured |
 | 9 October | [73 — Coding model efficiency](73-coding-model-efficiency.md): which tools, handoffs and review justify their cost for inexpensive models? | Research reviewed/integrated in PR 195; controlled comparisons proposed, no Chief performance advantage measured |
 | 9 October | [74 — Coding provider recovery](74-coding-provider-recovery.md): can a discarded reasoning-only answer recover without replaying tools, and does a real plan pass acceptance? | In progress; host regression/review/release and authorized live planning verification pending |
+| 9 October | [75 — Coding summary repair](75-coding-summary-repair.md): can an oversized model summary be revised without losing acknowledged context? | Live trial found the boundary; Python 0.1.7 foundation/image/trials pending |
 
 ## Coding-agent learning path
 

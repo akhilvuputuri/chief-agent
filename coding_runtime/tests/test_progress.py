@@ -16,7 +16,7 @@ from chief_coding_runtime.loop import (
     SquadExecutionError,
     coding_loop,
 )
-from chief_coding_runtime.memory import LoopStalled, observe
+from chief_coding_runtime.memory import ContextRecoveryError, LoopStalled, observe
 from chief_coding_runtime.model import GatewayError, InvalidGeneration
 from chief_coding_runtime.protocol import LoopMemory, Notebook, text_clip, utf16_length
 from chief_coding_runtime.workspace import Workspace
@@ -130,6 +130,105 @@ class ProgressTests(unittest.IsolatedAsyncioTestCase):
         result = await self.run_loop(model)
         self.assertEqual(utf16_length(result.plan), 6000)
         self.assertEqual(utf16_length(result.summary), 400)
+
+    def large_history(self):
+        self.messages.extend({"role": "user", "content": "x" * 11000} for _ in range(9))
+        return copy.deepcopy(self.messages)
+
+    async def test_oversized_summary_is_revised_before_history_is_compacted(self):
+        original = self.large_history()
+        self.memory.notes = Notebook(
+            subtask="Inspect", findings="KEEP_SCOPE", nextAction="Continue"
+        )
+        model = ScriptedModel(
+            generation(
+                (
+                    "notes_update",
+                    {
+                        "subtask": "Inspect",
+                        "findings": "x" * 6511,
+                        "nextAction": "Continue",
+                    },
+                )
+            ),
+            generation(
+                (
+                    "notes_update",
+                    {
+                        "subtask": "Inspect",
+                        "findings": "KEEP_SCOPE with evidence refs",
+                        "nextAction": "Report complete scope",
+                    },
+                )
+            ),
+            generation(
+                report("plan_ready", plan="Complete scope and acceptance checks")
+            ),
+        )
+        result = await self.run_loop(model)
+        self.assertEqual(result.kind, "plan_ready")
+        self.assertEqual(model.inputs[1][: len(original)], original)
+        error = next(
+            json.loads(m["content"]) for m in model.inputs[1] if m["role"] == "tool"
+        )
+        self.assertEqual(error["code"], "notebook_revision_required")
+        self.assertEqual(error["fieldUnits"]["findings"], 6511)
+        self.assertEqual(self.memory.compactions, 1)
+        self.assertEqual(self.memory.notes.findings, "KEEP_SCOPE with evidence refs")
+        self.assertEqual(self.memory.modelCalls, 3)
+        self.assertEqual(self.memory.toolsUsed, 2)
+
+    async def test_two_invalid_summaries_pause_with_old_notebook_and_history(self):
+        original = self.large_history()
+        self.memory.notes = Notebook(
+            subtask="Inspect", findings="ACKNOWLEDGED", nextAction="Continue"
+        )
+        model = ScriptedModel(
+            *[
+                generation(
+                    (
+                        "notes_update",
+                        {
+                            "subtask": "Inspect",
+                            "findings": "😀" * 3001,
+                            "nextAction": "Continue",
+                        },
+                    )
+                )
+                for _ in range(2)
+            ]
+        )
+        with self.assertRaises(ContextRecoveryError):
+            await self.run_loop(model)
+        self.assertEqual(len(model.inputs), 2)
+        self.assertEqual(self.messages, original)
+        self.assertEqual(self.memory.notes.findings, "ACKNOWLEDGED")
+        self.assertEqual(self.memory.compactions, 0)
+        self.assertEqual(self.memory.toolsUsed, 0)
+
+    async def test_summary_repair_cannot_consume_the_only_remaining_continuation_call(
+        self,
+    ):
+        original = self.large_history()
+        self.budget = Budget(2, 1)
+        model = ScriptedModel(
+            generation(
+                (
+                    "notes_update",
+                    {
+                        "subtask": "Inspect",
+                        "findings": "x" * 6511,
+                        "nextAction": "Continue",
+                    },
+                )
+            )
+        )
+        with self.assertRaises(AllocationExhausted):
+            await self.run_loop(model)
+        self.assertEqual(len(model.inputs), 1)
+        self.assertEqual(self.messages, original)
+        self.assertEqual(self.budget.models, 1)
+        self.assertEqual(self.budget.tools, 1)
 
     async def test_search_and_line_reads_are_safe_paginated_and_fingerprinted(self):
         (self.w.root / ".env").write_text("synthetic forbidden text")
