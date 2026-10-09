@@ -663,6 +663,68 @@ test("remaining job deadline aborts a stalled model and exposes its exact timeou
   assert.equal((await f.row(job.id)).model_busy, false);
 });
 
+test("empty provider answers permit a fresh generation but never replay the uncertain call", async (t) => {
+  const f = await fixture(t);
+  const job: any = await f.start("empty-model", "plan");
+  await f.c.tick();
+  await f.db.query(
+    'UPDATE coding_jobs SET settings=settings || \'{"harnessVersion":2,"squad":true}\'::jsonb WHERE id=$1',
+    [job.id],
+  );
+  const active = await f.row(job.id);
+  const token = (f.c as any).token(job.id, active.attempt_id);
+  f.failModel(
+    new ModelError("private upstream answer", true, {
+      failureCode: "empty",
+      finishReason: "stop",
+    }),
+  );
+  const app = await server({} as any);
+  t.after(() => app.close());
+  await codingApi(app, f.c);
+  const payload = {
+    callId: randomUUID(),
+    role: "leader",
+    messages: [{ role: "user", content: "Synthetic task" }],
+    tools: [],
+  };
+  const request = {
+    method: "POST" as const,
+    url: `/coding/worker/${job.id}/model`,
+    headers: { authorization: `Bearer ${token}` },
+  };
+  const failed = await app.inject({ ...request, payload });
+  assert.equal(failed.json().code, "model_transient_failure");
+  assert(!failed.body.includes("private upstream"));
+  const status: any = await f.c.status("a", job.id);
+  assert.equal(status.lastFailure.providerFailure, "empty");
+  assert.equal((await f.row(job.id)).model_busy, false);
+  const replay = await app.inject({ ...request, payload });
+  assert.equal(replay.json().code, "worker_request_rejected");
+  assert.equal(f.modelCalls(), 1);
+  const fresh = await app.inject({
+    ...request,
+    payload: { ...payload, callId: randomUUID() },
+  });
+  assert.equal(fresh.json().code, "model_transient_failure");
+  assert.equal(f.modelCalls(), 2);
+  assert.equal((await f.row(job.id)).used_models, 2);
+  f.failModel(
+    new ModelError("private malformed response", false, {
+      failureCode: "malformed",
+    }),
+  );
+  const malformed = await app.inject({
+    ...request,
+    payload: { ...payload, callId: randomUUID() },
+  });
+  assert.equal(malformed.json().code, "model_provider_failed");
+  assert.equal(
+    ((await f.c.status("a", job.id)) as any).lastFailure.providerFailure,
+    "malformed",
+  );
+});
+
 test("new harness exposes a bounded transient model category without provider error text", async (t) => {
   const f = await fixture(t);
   const job: any = await f.start("transient-model", "plan");

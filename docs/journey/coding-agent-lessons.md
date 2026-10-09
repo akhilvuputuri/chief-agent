@@ -80,6 +80,10 @@ After the v2 progress/recovery release, one real planning job reached `plan_read
 
 [Research and proposed comparisons](../coding-model-efficiency.md), recorded in [journal 73](73-coding-model-efficiency.md), identify grounded edit/test feedback, focused handoffs, context strategies and stronger review as candidates. Published benefits depend on model, task, extra inference and sometimes selected nonempty patch pools; they do not establish a cheap-model advantage for Chief. Compare cheap solo, stronger solo, coder/reviewer and the full squad with common requirements and independently graded outcomes. Include failed attempts, review/rework/compute cost and reviewer mistakes. The inference adapter and live comparisons remain unimplemented/unrun; no production policy or allocation change follows from the research.
 
+## 9 October — recovery classifications must survive every boundary
+
+A v0.3.53 plan paused after 34 completed calls and one uncertain generation. Provider metadata is consistent with a normal terminal response containing only reasoning; the original discarded wire is unavailable. Independently, the adapter-to-gateway path demonstrably turns a transient empty-answer error into a non-recoverable generic provider failure. [Journal 74](74-coding-provider-recovery.md) tracks a fixed subtype, existing bounded fresh-generation recovery and replay/permission safeguards. Independent review reproduced malformed content masquerading as empty; strict known-field admission and boundary regressions correct that counterexample. Synthetic reproduction supports the mechanism; updated review/exact release and owner-authorized live concise-plan/retained-understanding trials remain pending. A healthy container or a short proposal alone is not that acceptance result.
+
 ## What has not yet been shown to help
 
 The record does not establish that the squad beats one agent, summaries retain every important fact, v2 completes more real tasks, the latency profile is optimal, or RAG improves this workload. The 992-test suite checks contracts/failure behavior; image/startup checks validate installation and configuration.

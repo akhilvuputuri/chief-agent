@@ -17,6 +17,7 @@ export class CodingModelFailure extends Error {
       responseId?: string;
       finishReason?: "length" | "content_filter";
       providerStatus?: number;
+      providerFailure?: "empty" | "malformed";
     },
   ) {
     super(

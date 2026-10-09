@@ -164,6 +164,71 @@ test("truncated or malformed tool batches never expose a complete first write", 
     );
 });
 
+test("invalid streamed content and delta containers cannot masquerade as recoverable empty output", async () => {
+  for (const delta of [
+    { content: { unexpected: "object" } },
+    { content: [] },
+    { content: false },
+    { role: false },
+    { role: "" },
+    "invalid delta",
+    { reasoning: [] },
+    { reasoning_details: {} },
+    { tool_calls: {} },
+  ]) {
+    const adapter = new OpenRouter(
+      "fixture-key",
+      "fixture/model",
+      2,
+      10,
+      async () => response([frame(chunk(delta, "stop")), frame("[DONE]")]),
+    );
+    await assert.rejects(
+      adapter.generate({
+        messages: [],
+        tools: [],
+        reasoning: "high",
+        signal: new AbortController().signal,
+        stream: true,
+      }),
+      (error: any) =>
+        error instanceof ModelError &&
+        !error.transient &&
+        error.diagnostics.failureCode === "malformed",
+    );
+  }
+});
+
+test("a complete reasoning-only stream is an empty transient generation, not a usable answer", async () => {
+  const adapter = new OpenRouter(
+    "fixture-key",
+    "fixture/model",
+    2,
+    10,
+    async () =>
+      response([
+        frame(chunk({ reasoning: "synthetic private reasoning" })),
+        frame({ ...chunk({ content: "" }, "stop"), usage: { cost: 0.001 } }),
+        frame("[DONE]"),
+      ]),
+  );
+  await assert.rejects(
+    adapter.generate({
+      messages: [],
+      tools: [],
+      reasoning: "high",
+      signal: new AbortController().signal,
+      stream: true,
+    }),
+    (error: any) =>
+      error instanceof ModelError &&
+      error.transient &&
+      error.diagnostics.failureCode === "empty" &&
+      error.diagnostics.finishReason === "stop" &&
+      !error.message.includes("private reasoning"),
+  );
+});
+
 test("streamed authentication and request errors are not transient; rate limits and provider outages are", async () => {
   for (const [code, transient] of [
     [400, false],

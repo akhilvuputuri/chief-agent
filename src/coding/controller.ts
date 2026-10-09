@@ -310,6 +310,7 @@ export class CodingController {
       responseId?: string;
       finishReason?: "length" | "content_filter";
       providerStatus?: number;
+      providerFailure?: "empty" | "malformed";
     },
   ) {
     opsLog("coding.request_rejected", "warn", {
@@ -964,7 +965,9 @@ export class CodingController {
                   ? "model_disconnected"
                   : error.transient &&
                       (Number(error.diagnostics.httpStatus) >= 500 ||
-                        error.diagnostics.failureCode === "provider")
+                        ["provider", "empty"].includes(
+                          String(error.diagnostics.failureCode),
+                        ))
                     ? "model_transient_failure"
                     : "model_provider_failed";
         }
@@ -972,6 +975,11 @@ export class CodingController {
           throw new CodingModelFailure(code, {
             elapsedMs: Date.now() - started,
             callId: input.callId,
+            ...(error instanceof ModelError &&
+            (error.diagnostics.failureCode === "empty" ||
+              error.diagnostics.failureCode === "malformed")
+              ? { providerFailure: error.diagnostics.failureCode }
+              : {}),
             ...(code === "model_timeout" ? { timeoutKind } : {}),
             ...(responseId ? { responseId } : {}),
             ...(error instanceof ModelError &&

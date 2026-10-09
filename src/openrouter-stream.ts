@@ -106,10 +106,24 @@ export async function readGenerationStream(
       throw new StreamFailure("malformed");
     let advanced = false;
     for (const choice of chunk.choices ?? []) {
+      if (!choice || typeof choice !== "object" || Array.isArray(choice))
+        throw new StreamFailure("malformed");
       const alreadyFinished = !!finish;
       if ((choice.index ?? 0) !== 0) throw new StreamFailure("malformed");
       const delta = choice.delta ?? {};
-      if (delta.role && delta.role !== "assistant")
+      if (
+        typeof delta !== "object" ||
+        Array.isArray(delta) ||
+        (delta.content != null && typeof delta.content !== "string") ||
+        (delta.reasoning != null && typeof delta.reasoning !== "string") ||
+        (delta.reasoning_details != null &&
+          !Array.isArray(delta.reasoning_details)) ||
+        (delta.tool_calls != null && !Array.isArray(delta.tool_calls)) ||
+        (choice.finish_reason != null &&
+          typeof choice.finish_reason !== "string")
+      )
+        throw new StreamFailure("malformed");
+      if (delta.role != null && delta.role !== "assistant")
         throw new StreamFailure("malformed");
       if (typeof delta.content === "string" && delta.content) {
         message.content += delta.content;
@@ -135,6 +149,8 @@ export async function readGenerationStream(
         advanced = true;
       }
       for (const call of delta.tool_calls ?? []) {
+        if (!call || typeof call !== "object" || Array.isArray(call))
+          throw new StreamFailure("malformed");
         const index = call.index;
         if (!Number.isSafeInteger(index) || index < 0 || index >= 20)
           throw new StreamFailure("malformed");
