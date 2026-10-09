@@ -1,6 +1,6 @@
 # Independent Pi runtime implementation plan
 
-Date: 9 October 2026. Status: standalone package, Chief bridge and verified image pin shipped as v0.3.60; real-model acceptance/cutover pending. See [release closure](journey/77-pi-runtime.md#verified-image-pin-release-closure--9-october-2026). Source baseline: freshly fetched Chief main `0547d4599ee6fd35666fabc9ebdf52b0fa04aec4`. See [exploration and SDK evidence](pi-coding-harness.md).
+Date: 9 October 2026. Status: standalone package, Chief bridge and verified image pin shipped as v0.3.60; real-model acceptance unmeasured; the owner explicitly authorizes a new-task default switch on 10 October before a paid trial, with exact review/release pending. See [release closure](journey/77-pi-runtime.md#verified-image-pin-release-closure--9-october-2026). Source baseline: freshly fetched Chief main `0547d4599ee6fd35666fabc9ebdf52b0fa04aec4`. See [exploration and SDK evidence](pi-coding-harness.md).
 
 ## Agreed boundary
 
@@ -8,7 +8,7 @@ Build a new independent TypeScript runtime around Pi. Leave the existing coding 
 
 Preserve the existing runtime's code, immutable images, settings, checkpoints and stored jobs. Existing jobs retain their backend and remain inspectable/cancellable; cleanup and uncertain publication reconciliation must keep working. Do not resume paused jobs automatically or migrate their conversations. No old runtime code is copied into the new package merely for compatibility.
 
-During development Chief continues using the existing runtime. Cutover is a later, explicit release step after standalone and integration acceptance. This plan authorizes no immediate switch or paid trial.
+During development Chief continues using the existing runtime. Cutover is a later, explicit release step after standalone and integration acceptance. The original plan authorized no immediate switch or paid trial. The owner explicitly authorizes the new-task switch on 10 October; this supersedes the earlier acceptance-before-cutover order without authorizing a paid trial or granting implementation approval.
 
 ## Target structure
 

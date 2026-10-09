@@ -1,6 +1,6 @@
 # Independent Pi runtime and Chief bridge
 
-Shipped default-legacy foundation/image pin as v0.3.60, 9 October 2026. The Pi backend is not selected for production tasks. [Plan](pi-coding-runtime-plan.md), [dependency exploration](pi-coding-harness.md), [independent package](../coding_runtime_pi/README.md) and [journal](journey/77-pi-runtime.md).
+Shipped default-legacy foundation/image pin as v0.3.60, 9 October 2026. An owner-authorized v0.3.61 candidate selects Pi for new tasks; exact review/release is pending, and real-model acceptance remains unmeasured. [Plan](pi-coding-runtime-plan.md), [dependency exploration](pi-coding-harness.md), [independent package](../coding_runtime_pi/README.md) and [journal](journey/77-pi-runtime.md).
 
 ## Execution and portability
 
@@ -37,7 +37,7 @@ Scope keys bind original objective/context/base/approved plan and phase; reviewe
 1. Pass exact-head independent review, repository checks/build/format, external package extraction and actual Linux process-boundary tests. Merge the app-only foundation with backend default `legacy`. No database or Compose change is required.
 2. Dispatch the main-only `pi-coding-worker-image` workflow. It builds `Dockerfile.coding-pi` and publishes a unique `pi-<main SHA>` tag in the existing public coding package. Old Python tags/digests remain intact. Verify anonymous pull, linux/amd64, non-root user, fixed entrypoint, installed Pi version/source and native guard; pin the immutable digest rather than the tag.
 3. Review the image pin in `config/coding-pi.json`. Run a bounded separately authorized real acceptance task, keeping models, effort, price filters and allocations unchanged. Verify planning completeness, actual approved implementation/checks, independent exact-artifact review, draft publication and cleanup. Do not fabricate an owner Telegram approval or resume an old paused job for the trial.
-4. Change only the new-job default selector to `pi` in a reviewed release after acceptance. Verify the exact release receipt, running identity/health and a request using the intended worker. Startup health alone is not coding acceptance.
+4. Change only the new-job default selector to `pi` in a reviewed release after acceptance, or an explicit owner direction to switch earlier. On 10 October the owner requests the switch before a paid trial; this does not establish live acceptance. Verify the exact release receipt, running identity/health and a request using the intended worker. Startup health alone is not coding acceptance.
 
 The new worker uses the existing dedicated unprivileged sandbox project and authenticated ingress. No new paid infrastructure, account permission or production credential export is needed. Running a real inference/sandbox acceptance task still has usage cost and its own authorization/Telegram decision boundary. Public CI/model mocks never receive production data.
 
@@ -47,4 +47,4 @@ Rollback switches the default for future requests back to `legacy`. Pi tasks kee
 
 Synthetic local fixtures cover the actual Pi loop/edit tools, real check commands, plan approval, stale/concurrent decisions, failed checks, metadata tampering, signed cancellation, budget exhaustion, UTF-8 artifacts and the native protocol round trip. Chief regressions cover role pins, replay, encrypted session restoration and launcher/profile isolation. The existing Python suite passes unchanged.
 
-Local Docker verification is unavailable while the Mac is locked and Docker Desktop cannot finish startup. Hosted Linux CI is the verification path. Exact-head independent review, image publication/pin and deployment are verified in [journal 77](journey/77-pi-runtime.md#verified-image-pin-release-closure--9-october-2026). Real-model acceptance and production selection remain pending; synthetic/health evidence does not establish them.
+Local Docker verification is unavailable while the Mac is locked and Docker Desktop cannot finish startup. Hosted Linux CI is the verification path. Exact-head independent review, image publication/pin and deployment are verified in [journal 77](journey/77-pi-runtime.md#verified-image-pin-release-closure--9-october-2026). Real-model acceptance remains unmeasured. The owner-authorized new-task selection candidate and its review/release evidence are recorded in [journal 77](journey/77-pi-runtime.md#owner-authorized-new-task-default--10-october-2026); synthetic/health evidence does not establish coding quality.
