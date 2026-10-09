@@ -84,6 +84,10 @@ After the v2 progress/recovery release, one real planning job reached `plan_read
 
 A v0.3.53 plan paused after 34 completed calls and one uncertain generation. Provider metadata is consistent with a normal terminal response containing only reasoning; the original discarded wire is unavailable. Independently, the adapter-to-gateway path demonstrably turns a transient empty-answer error into a non-recoverable generic provider failure. [Journal 74](74-coding-provider-recovery.md) tracks a fixed subtype, existing bounded fresh-generation recovery and replay/permission safeguards. Independent review reproduced malformed content masquerading as empty; strict known-field admission and boundary regressions correct that counterexample. Synthetic reproduction supports the mechanism; updated review/exact release and owner-authorized live concise-plan/retained-understanding trials remain pending. A healthy container or a short proposal alone is not that acceptance result.
 
+## 9 October — live validation exposed a second stopping boundary
+
+After the v0.3.54 provider recovery release, the first owner-authorized real planning trial failed with 33 completed calls: a correct-shaped summary exceeded its 6,000-unit findings bound by 511 units. Prior notes survived but no owner brief was produced. [Journal 75](75-coding-summary-repair.md) proposes one constrained correction and no truncation, with allocation, wire and acknowledgement guards. Synthetic tests retain old history/notes on repeated invalid output and deny repair without continuation headroom. Activation and actual concise-plan/task-understanding acceptance remain pending; this failed trial is not removed from the record or relabelled a success.
+
 ## What has not yet been shown to help
 
 The record does not establish that the squad beats one agent, summaries retain every important fact, v2 completes more real tasks, the latency profile is optimal, or RAG improves this workload. The 992-test suite checks contracts/failure behavior; image/startup checks validate installation and configuration.

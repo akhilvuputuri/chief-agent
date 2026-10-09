@@ -530,34 +530,104 @@ async def coding_loop(
         summary_messages.append(
             {
                 "role": "user",
-                "content": "Summarize working progress using exactly one notes_update call. Retain current subtask, important evidence references, unresolved questions, rejected hypotheses and next action. Do not execute repository actions, change approved scope or invent verification. This notebook replaces older conversational detail.\n"
+                "content": "Summarize working progress using exactly one notes_update call. Retain current subtask, important evidence references, unresolved questions, rejected hypotheses and next action. Use string fields only: subtask at most 1000 UTF-16 units, findings 6000, nextAction 1000, questions 2000. Preserve task constraints and evidence references concisely. Do not execute repository actions, change approved scope or invent verification. This notebook replaces older conversational detail.\n"
                 + wire_json(memory_context(memory)),
             }
         )
-        if (
-            wire_size({"messages": summary_messages, "tools": [MEMORY_TOOLS[2]]})
-            > 170000
-            or len(summary_messages) > 120
-        ):
-            raise ContextRecoveryError()
-        budget.models -= 1
-        memory.modelCalls += 1
-        generation = validate_generation(
-            await model.generate(summary_messages, [MEMORY_TOOLS[2]])
-        )
-        calls = generation["message"].get("tool_calls", [])
-        try:
-            if len(calls) != 1 or calls[0]["function"]["name"] != "notes_update":
-                raise ValueError("A notebook is required")
-            arguments = json.loads(calls[0]["function"]["arguments"])
-            notes = NotesUpdate.model_validate(
-                {**arguments, "operation": "notes_update"}
-            )
-            memory.notes = Notebook.model_validate(
-                notes.model_dump(exclude={"operation"})
-            )
-        except (ValueError, TypeError, KeyError) as error:
-            raise ContextRecoveryError() from error
+        for attempt in range(2):
+            if budget.models <= 1:
+                raise AllocationExhausted(
+                    "model calls",
+                    "Remaining model allocation cannot summarize context and continue safely",
+                )
+            if budget.tools <= 0:
+                raise AllocationExhausted("tool calls")
+            if (
+                wire_size({"messages": summary_messages, "tools": [MEMORY_TOOLS[2]]})
+                > 170000
+                or len(summary_messages) > 120
+            ):
+                raise ContextRecoveryError()
+            budget.models -= 1
+            memory.modelCalls += 1
+            try:
+                generation = validate_generation(
+                    await model.generate(summary_messages, [MEMORY_TOOLS[2]])
+                )
+            except GatewayError as error:
+                if not error.recoverable or attempt == 1:
+                    raise
+                summary_messages.append(
+                    {
+                        "role": "user",
+                        "content": "The summary generation failed before any tool action. Make one fresh generation with exactly one notes_update call; do not replay repository actions. Preserve the existing notebook and task constraints.",
+                    }
+                )
+                await save_memory()
+                await cancellable(asyncio.sleep(3), stop)
+                continue
+            calls = generation["message"].get("tool_calls", [])
+            arguments = {}
+            try:
+                if len(calls) != 1 or calls[0]["function"]["name"] != "notes_update":
+                    raise ValueError("A notebook is required")
+                arguments = json.loads(calls[0]["function"]["arguments"])
+                notes = NotesUpdate.model_validate(
+                    {**arguments, "operation": "notes_update"}
+                )
+                replacement = Notebook.model_validate(
+                    notes.model_dump(exclude={"operation"})
+                )
+            except (ValueError, TypeError, KeyError) as error:
+                if attempt == 1:
+                    raise ContextRecoveryError() from error
+                raw_summary = generation["message"]
+                retry_message = {
+                    key: copy.deepcopy(raw_summary[key])
+                    for key in ("role", "content", "tool_calls", "reasoning_details")
+                    if key in raw_summary
+                }
+                retry_message.setdefault("content", None)
+                summary_messages.append(retry_message)
+                for call in calls:
+                    summary_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call["id"],
+                            "content": wire_json(
+                                {
+                                    "error": "Summary not saved. Return exactly one notes_update with only valid-Unicode string fields: subtask (1–1000 UTF-16 units), findings (0–6000), nextAction (1–1000), questions (0–2000). Revise within these limits, preserving task constraints, key evidence references, decisions, unresolved failures and next action. Do not truncate or execute repository actions.",
+                                    "code": "notebook_revision_required",
+                                    "fieldUnits": {
+                                        key: len(
+                                            value.encode(
+                                                "utf-16-le", errors="surrogatepass"
+                                            )
+                                        )
+                                        // 2
+                                        for key in (
+                                            "subtask",
+                                            "findings",
+                                            "nextAction",
+                                            "questions",
+                                        )
+                                        if isinstance(arguments, dict)
+                                        and isinstance(value := arguments.get(key), str)
+                                    },
+                                }
+                            ),
+                        }
+                    )
+                summary_messages.append(
+                    {
+                        "role": "user",
+                        "content": "The invalid summary was not saved and no actions were executed. Revise the complete notebook using exactly one notes_update call.",
+                    }
+                )
+                await save_memory()
+                continue
+            memory.notes = replacement
+            break
         memory.compactions += 1
         budget.tools -= 1
         memory.toolsUsed += 1

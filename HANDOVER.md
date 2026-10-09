@@ -1,3 +1,7 @@
+# Coding summary repair — in progress, 9 October 2026
+
+Provider recovery shipped v0.3.54 after exact review/checks/release and current health. The first real plan trial exposed a second stop: a 6,511-unit context-summary field exceeded its 6,000-unit bound. Python 0.1.7 proposes bounded revision while preserving history/notes until acknowledgement. Foundation review/checks and verified-image activation remain pending; no successful concise-plan/retained-understanding acceptance is claimed. See [journal 75](docs/journey/75-coding-summary-repair.md) and the failed trial in [journal 74](docs/journey/74-coding-provider-recovery.md).
+
 # Coding provider recovery — in progress, 9 October 2026
 
 A fresh v0.3.53 planner paused after 34 complete calls. A verified host classification gap drops the adapter's empty-response transient status. The candidate preserves it through existing bounded fresh-generation recovery and exposes safe empty/malformed diagnostics. Review/release and explicitly owner-authorized real planning/brief-understanding acceptance are pending. Existing jobs remain untouched; implementation still requires owner confirmation. See [journal 74](docs/journey/74-coding-provider-recovery.md).

@@ -28,3 +28,9 @@ Verify the delivered brief against requested behavior, complete scope, regressio
 ## Review, outcome and follow-up
 
 Code review, exact release/current health and live trial results will be appended after measurement. No completed coding/review/PR workflow or universal provider reliability is implied by a successful planning trial. Unknown failure usage stays separate from completed-call cost. See [coding-agent lessons](coding-agent-lessons.md) and [research](73-coding-model-efficiency.md) for the distinction between a mechanism and a measured result.
+
+## Deployed recovery and failed first live acceptance — 9 October 2026
+
+GPT-6 Astra approved corrected exact `2f38fbfabdaf7be808b4796d12b1c5e7ccdd8be0` in [PR #197](https://github.com/akhilvuputuri/chief-agent/pull/197). Required PR/main checks passed 999 tests and container smoke. Exact `6d59c4d069ebfb46951c03fdf042324003c7ee7b` [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37878710996) succeeded at 2026-10-09T03:21:40Z; separate production reads confirmed v0.3.54, healthy gateway/Postgres and unchanged Python 0.1.6/models/effort/limits/pins.
+
+The separately reviewed private operator artifact queued a new plan-only audit through the real controller. It reached 33 complete model calls then paused before a plan: a correct-shaped context summary exceeded the findings bound (6,511 versus 6,000 UTF-16 units). No provider rejection occurred. Cleanup completed and no files changed or PR was published. This is a failed end-to-end planning acceptance, not a passing trial. [Journal 75](75-coding-summary-repair.md) records the next correction and pending new-image trials.
