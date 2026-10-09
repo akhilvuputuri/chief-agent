@@ -223,6 +223,7 @@ export function tools(
   });
   return list.map((tool) => ({
     ...tool,
+    executionMode: "sequential" as const,
     execute: async (
       ...args: Parameters<ToolDefinition<any, any>["execute"]>
     ) => {

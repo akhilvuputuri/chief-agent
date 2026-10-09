@@ -44,6 +44,12 @@ export async function runPiWorker(
   client: PiWorkerClient,
   cleanup: () => void,
   stop: AbortSignal,
+  hooks?: {
+    prepareRepository: (
+      directory: string,
+      assignment: Assignment,
+    ) => Promise<void>;
+  },
 ) {
   let assignment = assignmentSchema.parse(await client.request("assignment"));
   if (
@@ -52,7 +58,7 @@ export async function runPiWorker(
     assignment.settings.autoMerge
   )
     throw new Error("Pi worker requires its own reviewed profile");
-  await client.request("heartbeat");
+  await client.request("heartbeat", {});
   assignment = assignmentSchema.parse(await client.request("assignment"));
   const root = await mkdtemp(join(tmpdir(), "pi-coding-"));
   const workspace = join(root, "workspace");
@@ -64,16 +70,23 @@ export async function runPiWorker(
       throw new Error("Pinned repository preparation failed");
   };
   // Host configuration and assignment schemas restrict every interpolated value.
-  await command(
-    `git clone --no-hardlinks https://github.com/${assignment.settings.repository}.git .`,
-  );
-  await command(`git checkout --detach ${assignment.baseSha}`);
+  if (hooks) await hooks.prepareRepository(workspace, assignment);
+  else {
+    await command(
+      `git clone --no-hardlinks https://github.com/${assignment.settings.repository}.git .`,
+    );
+    await command(`git checkout --detach ${assignment.baseSha}`);
+  }
   const tree = await new PiWorkspace(workspace).initialize();
   await tree.restore(assignment.checkpoint.files);
   const stateKey = createHmac("sha256", client.token)
     .update(`local:${assignment.id}:${assignment.attemptId}`)
     .digest("hex");
   const store = new TaskStore(join(root, "state"), stateKey);
+  const allocationMs = Math.max(
+    1,
+    Date.parse(assignment.deadline) - Date.now(),
+  );
   let runtime: CodingRuntime | undefined;
   const deadline = setTimeout(
     () => {
@@ -88,7 +101,7 @@ export async function runPiWorker(
   };
   stop.addEventListener("abort", abort, { once: true });
   const heartbeat = setInterval(() => {
-    void client.request("heartbeat").catch(abort);
+    void client.request("heartbeat", {}).catch(abort);
   }, 20000);
   heartbeat.unref();
   let saved = assignment.checkpoint;
@@ -247,7 +260,7 @@ export async function runPiWorker(
       ],
       limits: {
         ...assignment.settings.limits,
-        ms: Math.max(1, Date.parse(assignment.deadline) - Date.now()),
+        ms: allocationMs,
       },
     });
     task.used.models = assignment.usedModels;
@@ -302,12 +315,15 @@ export async function runPiWorker(
         join(root, "tool-home"),
         cleanup,
       );
-      for (const value of [
-        `git clone --no-hardlinks https://github.com/${assignment.settings.repository}.git .`,
-        `git checkout --detach ${assignment.baseSha}`,
-      ]) {
-        if ((await reviewExec(value, stop, 120000)).exitCode !== 0)
-          throw new Error("Review checkout preparation failed");
+      if (hooks) await hooks.prepareRepository(reviewRoot, assignment);
+      else {
+        for (const value of [
+          `git clone --no-hardlinks https://github.com/${assignment.settings.repository}.git .`,
+          `git checkout --detach ${assignment.baseSha}`,
+        ]) {
+          if ((await reviewExec(value, stop, 120000)).exitCode !== 0)
+            throw new Error("Review checkout preparation failed");
+        }
       }
       await new PiWorkspace(reviewRoot)
         .initialize()
@@ -317,10 +333,10 @@ export async function runPiWorker(
       const review = await runtime.start({
         workspace: reviewRoot,
         objective: assignment.objective,
-        instructions: `Independently review this exact candidate: ${candidateHash}. Complete approved requirements:\n${assignment.checkpoint.plan}\nOriginal context:\n${assignment.context}\nPassing check receipts:\n${JSON.stringify(result.checks)}\nInspect actual source. Return report kind review with APPROVE or REQUEST_CHANGES. Do not implement findings.`,
+        instructions: `Independently review this exact candidate: ${candidateHash}. Complete approved requirements:\n${assignment.checkpoint.plan}\nOriginal context:\n${assignment.context}\nPassing check receipts:\n${JSON.stringify(result.checks.map((c) => ({ command: c.command, exitCode: c.exitCode, output: c.output.slice(-1000) })))}\nInspect actual source. Return report kind review with APPROVE or REQUEST_CHANGES. Do not implement findings.`,
         limits: {
           ...assignment.settings.limits,
-          ms: Math.max(1, Date.parse(assignment.deadline) - Date.now()),
+          ms: allocationMs,
         },
       });
       review.intent = "review";

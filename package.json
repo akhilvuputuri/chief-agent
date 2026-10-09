@@ -11,7 +11,7 @@
     "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",
     "build": "npm run build:pi && tsc",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.evals.json",
+    "typecheck": "npm run build:pi && tsc --noEmit && tsc -p tsconfig.evals.json",
     "test": "npm run build && tsx --test tests/*.test.ts && node --test scripts/*.test.mjs && python3 -m unittest discover -s evals/picker -p 'test_*.py' && python3 -m unittest discover -s evals/context -p 'test_*.py' && python3 -m unittest discover -s evals/decisions -p 'test_*.py' && python3 -m unittest discover -s evals/coding -p 'test_*.py'",
     "migrate": "tsx src/migrate.ts",
     "check": "npm run typecheck && npm test && npm run check:coding && npm run check:pi",

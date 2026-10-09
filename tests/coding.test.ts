@@ -1,3 +1,5 @@
+import { execFileSync } from "node:child_process";
+import { runPiWorker, NativePiWorkerClient } from "../src/coding/pi-worker.js";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID, generateKeyPairSync } from "node:crypto";
@@ -138,6 +140,7 @@ async function fixture(t: TestContext) {
   let failModelError = new Error("private model error");
   let published = false;
   let modelReply = "fixture reply";
+  let generationReply: ((model: string, input: any) => any) | undefined;
   const publisher = {
     resolve: async () => base,
     publish: async () => {
@@ -160,7 +163,7 @@ async function fixture(t: TestContext) {
     "c".repeat(64),
     "https://coding.example.com",
     (u) => u === "a" && permitted,
-    () => ({
+    (selectedModel) => ({
       generate: async (input) => {
         modelCalls++;
         if (stallModel) {
@@ -174,7 +177,9 @@ async function fixture(t: TestContext) {
           );
         }
         if (failModel) throw failModelError;
-        return { message: { role: "assistant", content: modelReply } };
+        return generationReply
+          ? generationReply(selectedModel, input)
+          : { message: { role: "assistant", content: modelReply } };
       },
     }),
     () => now,
@@ -256,6 +261,9 @@ async function fixture(t: TestContext) {
     },
     stallModel: () => {
       stallModel = true;
+    },
+    setGeneration: (reply: (model: string, input: any) => any) => {
+      generationReply = reply;
     },
     setReply: (text: string) => {
       modelReply = text;
@@ -2722,4 +2730,199 @@ test("a Pi default retains legacy automation support without granting it to Pi j
   );
   assert.equal(initialized, 1);
   assert.equal(pi.autoMerge, false);
+});
+
+test("Pi bridge plans, accepts bound fixture confirmation, builds, reviews and publishes a checked artifact", async (t) => {
+  const f = await fixture(t);
+  const root = await mkdtemp(join(tmpdir(), "pi-bridge-fixture-"));
+  const source = join(root, "source");
+  await mkdir(source);
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", source, ...args], { stdio: "pipe" });
+  git("init", "-q");
+  git("config", "user.name", "Synthetic");
+  git("config", "user.email", "synthetic@example.invalid");
+  await writeFile(
+    join(source, "sum.js"),
+    "export const sum = (a, b) => a - b;\n",
+  );
+  await writeFile(
+    join(source, "test.mjs"),
+    "import assert from 'node:assert/strict';import {sum} from './sum.js';assert.equal(sum(2,3),5);\n",
+  );
+  await writeFile(
+    join(source, "package.json"),
+    JSON.stringify({
+      name: "synthetic-pi-workspace",
+      version: "1.0.0",
+      type: "module",
+      scripts: {
+        check: "node test.mjs",
+        build: "node --check sum.js",
+        "format:check": "node --check test.mjs",
+      },
+    }),
+  );
+  await writeFile(
+    join(source, "package-lock.json"),
+    JSON.stringify({
+      name: "synthetic-pi-workspace",
+      version: "1.0.0",
+      lockfileVersion: 3,
+      requires: true,
+      packages: { "": { name: "synthetic-pi-workspace", version: "1.0.0" } },
+    }),
+  );
+  git("add", ".");
+  git("commit", "-qm", "Fixture");
+  const commit = git("rev-parse", "HEAD").toString().trim();
+  const started = await f.start("pi-e2e", "plan");
+  const profile = {
+    ...settings,
+    runtime: "pi",
+    squad: false,
+    autoMerge: false,
+  };
+  await f.db.query(
+    "UPDATE coding_jobs SET settings=$2::jsonb,base_sha=$3 WHERE id=$1",
+    [started.id, JSON.stringify(profile), commit],
+  );
+  const turns = new Map<string, number>();
+  f.setGeneration((selected, input) => {
+    const system =
+      input.messages.find((m: any) => m.role === "system")?.content ?? "";
+    const phase =
+      selected === settings.reviewerModel
+        ? "review"
+        : system.includes("Current intent: build")
+          ? "build"
+          : "plan";
+    const count = turns.get(phase) ?? 0;
+    turns.set(phase, count + 1);
+    let tool: { name: string; arguments: any } | undefined;
+    if (phase === "plan" && count === 0)
+      tool = { name: "read", arguments: { path: "sum.js" } };
+    if (phase === "plan" && count === 1)
+      tool = {
+        name: "report",
+        arguments: {
+          kind: "plan",
+          summary: "Fix addition",
+          detail:
+            "Change sum.js subtraction to addition; preserve exported API; run check/build/format checks.",
+        },
+      };
+    if (phase === "build" && count === 0)
+      tool = {
+        name: "edit",
+        arguments: {
+          path: "sum.js",
+          edits: [{ oldText: "a - b", newText: "a + b" }],
+        },
+      };
+    if (phase === "build" && count === 1)
+      tool = {
+        name: "report",
+        arguments: {
+          kind: "done",
+          summary: "Addition fixed",
+          detail: "Implemented approved behavior; actual checks follow.",
+        },
+      };
+    if (phase === "review" && count === 0)
+      tool = { name: "read", arguments: { path: "sum.js" } };
+    if (phase === "review" && count === 1)
+      tool = {
+        name: "report",
+        arguments: {
+          kind: "review",
+          summary: "Reviewed",
+          detail:
+            "The checked fixture implements addition and preserves the API.",
+          verdict: "APPROVE",
+        },
+      };
+    return {
+      message: {
+        role: "assistant",
+        content: tool ? null : "Finished.",
+        ...(tool
+          ? {
+              tool_calls: [
+                {
+                  id: `${phase}-${count}`,
+                  type: "function",
+                  function: {
+                    name: tool.name,
+                    arguments: JSON.stringify(tool.arguments),
+                  },
+                },
+              ],
+            }
+          : {}),
+      },
+    };
+  });
+  const app = server();
+  t.after(() => app.close());
+  await codingApi(app, f.c);
+  const origin = await app.listen({ host: "127.0.0.1", port: 0 });
+  const prepareRepository = async (directory: string, assignment: any) => {
+    execFileSync("git", ["clone", "--no-hardlinks", source, directory], {
+      stdio: "pipe",
+    });
+    execFileSync(
+      "git",
+      ["-C", directory, "checkout", "--detach", assignment.baseSha],
+      { stdio: "pipe" },
+    );
+  };
+  const run = async () => {
+    const job = await f.row(started.id);
+    await runPiWorker(
+      new NativePiWorkerClient(
+        origin,
+        job.id,
+        f.c.token(job.id, job.attempt_id),
+        new AbortController().signal,
+      ),
+      () => {},
+      new AbortController().signal,
+      { prepareRepository },
+    );
+  };
+  await f.c.tick();
+  await run();
+  assert.equal((await f.row(started.id)).state, "plan_ready");
+  await f.c.tick();
+  await f.c.tick();
+  let receipt = 100;
+  let approvalId = "";
+  let approvedMessage = 0;
+  for (let i = 0; i < 10 && !approvalId; i++)
+    await f.c.deliver(async (_owner, _target, _text, id) => {
+      const message_id = ++receipt;
+      if (id) {
+        approvalId = id;
+        approvedMessage = message_id;
+      }
+      return { message_id };
+    });
+  assert(approvalId);
+  await f.c.requirements.confirm("a", approvalId, true, "a", approvedMessage);
+  await f.c.tick();
+  await run();
+  const result = await f.row(started.id);
+  assert.equal(result.state, "publishing");
+  assert.equal(result.result.review.verdict, "APPROVE");
+  assert(result.result.checks.every((c: any) => c.exitCode === 0));
+  assert(
+    result.checkpoint.files.some(
+      (c: any) => c.path === "sum.js" && c.content.includes("a + b"),
+    ),
+  );
+  await f.c.tick();
+  await f.c.tick();
+  assert.equal((await f.row(started.id)).state, "pr_ready");
+  assert.equal(f.publishes(), 1);
 });

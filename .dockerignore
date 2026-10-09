@@ -10,3 +10,6 @@ __pycache__
 .mypy_cache
 .ruff_cache
 **/*.egg-info
+
+.pi-runtime
+**/.pi-runtime

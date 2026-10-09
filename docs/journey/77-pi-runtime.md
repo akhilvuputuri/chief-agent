@@ -38,3 +38,9 @@ See [the cumulative learning record](coding-agent-lessons.md). The next falsifyi
 ## Follow-up and release boundary
 
 Complete the independent reviewer loop and hosted Linux/extraction checks; release the default-legacy foundation; publish and verify the main-built immutable Pi image; then perform authorized acceptance and a separately reviewed selector change. Preserve old jobs and uncertain writes. No paid trial, owner-button forgery, automatic old-job resumption, new remote repository or deployment claim has occurred at this checkpoint.
+
+## Integration counterexamples and corrections — 9 October
+
+The complete local mock Chief-to-Pi trajectory exposed a GET heartbeat sent to a POST-only endpoint and an extra command-output truncation field rejected by the strict finish schema. Correcting the method and exporting only canonical check fields allowed planning, bound fixture approval, an actual edit/test/check run, a fresh read-only review and draft publication to complete. These are synthetic fixture records, not a real owner Telegram interaction or paid acceptance.
+
+Hosted CI initially failed because a fresh checkout typechecked the Chief bridge before building the independent package declarations. The typecheck command now builds the package first. Tool execution is explicitly serialized to avoid process cleanup interfering with another tool. Reviewer handoffs bound output receipts without omitting approved requirements, and all phases use the same remaining attempt allocation. A fresh exact-head CI/review is still required.

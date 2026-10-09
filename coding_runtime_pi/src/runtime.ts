@@ -73,7 +73,7 @@ export class CodingRuntime {
         ))
     )
       throw new Error("Checks must be a bounded list of commands");
-    if ((request.instructions?.length ?? 0) > 16000)
+    if ((request.instructions?.length ?? 0) > 32000)
       throw new Error("Instructions exceed supported bound");
     const base = (
       await promisify(execFile)("git", ["rev-parse", "HEAD"], {
@@ -337,7 +337,7 @@ export class CodingRuntime {
         sessionManager: manager,
         settingsManager: settings,
         resourceLoader: resources(
-          `You are a coding assistant. Current intent: ${task.intent}. Inspect actual source and distinguish facts from hypotheses. Use report to return your result. Learn/plan/review are read-only. Build only the complete approved scope. A final message or report never substitutes for actual checks. Retain requirements during compaction. Protected owner objective:\n${task.objective}\nOwner instructions:\n${task.ownerInstructions}\nApproved scope:\n${task.intent === "build" ? task.plan?.text : "No implementation approved"}\nWorking findings (not scope authority):\n${task.instructions}`,
+          `You are a coding assistant. Current intent: ${task.intent}. Inspect actual source and distinguish facts from hypotheses. Use report to return your result. Learn/plan/review are read-only. Build only the complete approved scope. A final message or report never substitutes for actual checks. Retain requirements during compaction. Protected owner objective:\n${task.objective}\nOwner instructions:\n${task.ownerInstructions}\nApproved scope:\n${task.intent === "build" ? task.plan?.text : "No implementation approved"}\nWorking findings (not scope authority):\n${task.instructions === task.ownerInstructions ? "No additional working findings" : task.instructions}`,
           agentsFiles,
         ),
         tools: custom.map((t) => t.name),
@@ -410,8 +410,11 @@ export class CodingRuntime {
             const check = await execute!(command, stop.signal, 120_000);
             task.checks.push({
               command,
-              ...check,
-              output: check.output.slice(-8000),
+              exitCode: check.exitCode,
+              output:
+                (check.truncated || check.output.length > 8000
+                  ? "[Output truncated]\n"
+                  : "") + check.output.slice(-7800),
             });
             await this.event(task, "check", `${command}: ${check.exitCode}`);
           }
