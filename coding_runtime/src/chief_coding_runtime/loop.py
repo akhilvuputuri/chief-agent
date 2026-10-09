@@ -10,7 +10,13 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from pydantic import Field, TypeAdapter, field_validator, model_validator
+from pydantic import (
+    Field,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from . import inspection
 from .memory import (
@@ -115,7 +121,7 @@ class PlanBriefRejected(ValueError):
     """A new proposal needs revision before it can become approval authority."""
 
 
-PLANNING_GUIDANCE = """The owner reads the approval brief on a phone. Write report.plan as a concise, complete requirement brief, usually 200–400 words: problem, requested behavior, scope, acceptance checks and any consequential unresolved decision. Use short paragraphs and useful Markdown headings or bold labels; no fixed template is required. Keep source-by-source evidence, long alternatives, rejected hypotheses and detailed test matrices in working notes/evidence receipts, not in the approval brief. Recommend routine implementation choices; ask only questions whose answers materially change the scope or behavior. Distinguish verified causes from hypotheses. Do not omit requirements to meet the limit: if the task cannot be specified completely within 6000 UTF-16 units, ask the owner to divide the scope. report.summary is a short status sentence (at most 400 UTF-16 units), not a second audit. Only report.plan becomes the complete approved scope; working notes do not authorize extra work."""
+PLANNING_GUIDANCE = """The owner reads the approval brief on a phone. Write report.plan as a concise, complete requirement brief, usually 200–400 words: problem, requested behavior, scope, acceptance checks and any consequential unresolved decision. Use short paragraphs and useful Markdown headings or bold labels; no fixed template is required. Keep source-by-source evidence, long alternatives, rejected hypotheses and detailed test matrices in working notes/evidence receipts, not in the approval brief. Recommend routine implementation choices; ask only questions whose answers materially change the scope or behavior. Distinguish verified causes from hypotheses. Do not omit requirements to meet the limit: if the task cannot be specified completely within 6000 UTF-16 units, ask the owner to divide the scope. report.summary is a short status sentence (at most 400 UTF-16 units), not a second audit. Before reporting plan_ready, reconcile the brief with a finalized working notebook: verified evidence versus hypotheses, chosen design, concrete target files/contracts, validation and next action after confirmation. Check relevant end-to-end call paths and actual plugin/tool inventories; do not infer behavior from a helper or loader alone. Resolve limits, overflow/fallback behavior and failure-state handling explicitly in the complete brief rather than hiding consequential choices in notes. Final notes must agree with the chosen scope and must not leave already-completed reads/reporting as the next step. Only report.plan becomes the complete approved scope; working notes do not authorize extra work."""
 
 
 class Report(Record):
@@ -530,10 +536,13 @@ async def coding_loop(
         summary_messages.append(
             {
                 "role": "user",
-                "content": "Summarize working progress using exactly one notes_update call. Retain current subtask, important evidence references, unresolved questions, rejected hypotheses and next action. Use string fields only: subtask at most 1000 UTF-16 units, findings 6000, nextAction 1000, questions 2000. Preserve task constraints and evidence references concisely. Do not execute repository actions, change approved scope or invent verification. This notebook replaces older conversational detail.\n"
+                "content": "Summarize working progress using exactly one notes_update call. Retain current subtask, important evidence references, unresolved questions, rejected hypotheses and next action. Use string fields only. Aim well below the hard bounds: subtask ~400 UTF-16 units (maximum 1000), findings ~4000 (maximum 6000), nextAction ~500 (maximum 1000), questions ~1000 (maximum 2000). Keep nextAction as a short next step; implementation details and test matrices belong in findings. Preserve task constraints and evidence references concisely. Do not execute repository actions, change approved scope or invent verification. This notebook replaces older conversational detail.\n"
                 + wire_json(memory_context(memory)),
             }
         )
+        summary_tool = copy.deepcopy(MEMORY_TOOLS[2])
+        repair_base: Json | None = None
+        repair_fields: set[str] = set()
         generation_recoveries = 0
         validation_repairs = 0
         for _attempt in range(3):
@@ -545,7 +554,7 @@ async def coding_loop(
             if budget.tools <= 0:
                 raise AllocationExhausted("tool calls")
             if (
-                wire_size({"messages": summary_messages, "tools": [MEMORY_TOOLS[2]]})
+                wire_size({"messages": summary_messages, "tools": [summary_tool]})
                 > 170000
                 or len(summary_messages) > 120
             ):
@@ -554,7 +563,7 @@ async def coding_loop(
             memory.modelCalls += 1
             try:
                 generation = validate_generation(
-                    await model.generate(summary_messages, [MEMORY_TOOLS[2]])
+                    await model.generate(summary_messages, [summary_tool])
                 )
             except GatewayError as error:
                 if not error.recoverable or generation_recoveries >= 1:
@@ -575,6 +584,13 @@ async def coding_loop(
                 if len(calls) != 1 or calls[0]["function"]["name"] != "notes_update":
                     raise ValueError("A notebook is required")
                 arguments = json.loads(calls[0]["function"]["arguments"])
+                if repair_base is not None:
+                    if (
+                        not isinstance(arguments, dict)
+                        or set(arguments) != repair_fields
+                    ):
+                        raise ValueError("Repair must change only the requested fields")
+                    arguments = {**repair_base, **arguments}
                 notes = NotesUpdate.model_validate(
                     {**arguments, "operation": "notes_update"}
                 )
@@ -585,6 +601,36 @@ async def coding_loop(
                 if validation_repairs >= 1:
                     raise ContextRecoveryError() from error
                 validation_repairs += 1
+                # Repair only invalid fields when the failure is field-local.
+                # Keep already-valid evidence byte-exact rather than regenerating it.
+                limits = {
+                    "subtask": 1000,
+                    "findings": 6000,
+                    "nextAction": 1000,
+                    "questions": 2000,
+                }
+                if (
+                    isinstance(error, ValidationError)
+                    and isinstance(arguments, dict)
+                    and set(arguments) <= set(limits)
+                ):
+                    locations = [issue["loc"] for issue in error.errors()]
+                    if locations and all(
+                        len(loc) == 1 and loc[0] in limits for loc in locations
+                    ):
+                        repair_fields = {str(loc[0]) for loc in locations}
+                        repair_base = copy.deepcopy(arguments)
+                        summary_tool["description"] = (
+                            "Repair only the requested invalid notebook fields. All other fields are retained exactly by the host. Return short complete replacement strings, preserving their constraints/evidence; no repository actions."
+                        )
+                        summary_tool["parameters"]["properties"] = {
+                            key: value
+                            for key, value in summary_tool["parameters"][
+                                "properties"
+                            ].items()
+                            if key in repair_fields
+                        }
+                        summary_tool["parameters"]["required"] = sorted(repair_fields)
                 raw_summary = generation["message"]
                 retry_message = {
                     key: copy.deepcopy(raw_summary[key])
@@ -602,6 +648,10 @@ async def coding_loop(
                                 {
                                     "error": "Summary not saved. Return exactly one notes_update with only valid-Unicode string fields: subtask (1–1000 UTF-16 units), findings (0–6000), nextAction (1–1000), questions (0–2000). Revise within these limits, preserving task constraints, key evidence references, decisions, unresolved failures and next action. Do not truncate or execute repository actions.",
                                     "code": "notebook_revision_required",
+                                    "repairOnly": sorted(repair_fields),
+                                    "targetUnits": {
+                                        key: limits[key] // 2 for key in repair_fields
+                                    },
                                     "fieldUnits": {
                                         key: len(
                                             value.encode(
@@ -625,7 +675,7 @@ async def coding_loop(
                 summary_messages.append(
                     {
                         "role": "user",
-                        "content": "The invalid summary was not saved and no actions were executed. Revise the complete notebook using exactly one notes_update call.",
+                        "content": "The invalid summary was not saved and no actions were executed. Use exactly one notes_update call matching the offered schema. If repairOnly is nonempty, return ONLY those fields, aiming below targetUnits; other fields are retained exactly. Otherwise revise the complete notebook. Do not copy a detailed test matrix into nextAction.",
                     }
                 )
                 await save_memory()

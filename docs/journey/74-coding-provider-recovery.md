@@ -1,7 +1,7 @@
 # 74 — Recover a reasoning-only provider response and verify a real plan
 
 Work date(s): 2026-10-09. Written/revised: 2026-10-09.
-Status: in progress; host recovery fix, review/release and owner-authorized live planning acceptance pending.
+Status: host recovery shipped and verified v0.3.54; subsequent summary/semantic acceptance tracked in journal 75.
 
 ## User-visible problem and preceding iteration
 
@@ -34,3 +34,5 @@ Code review, exact release/current health and live trial results will be appende
 GPT-6 Astra approved corrected exact `2f38fbfabdaf7be808b4796d12b1c5e7ccdd8be0` in [PR #197](https://github.com/akhilvuputuri/chief-agent/pull/197). Required PR/main checks passed 999 tests and container smoke. Exact `6d59c4d069ebfb46951c03fdf042324003c7ee7b` [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37878710996) succeeded at 2026-10-09T03:21:40Z; separate production reads confirmed v0.3.54, healthy gateway/Postgres and unchanged Python 0.1.6/models/effort/limits/pins.
 
 The separately reviewed private operator artifact queued a new plan-only audit through the real controller. It reached 33 complete model calls then paused before a plan: a correct-shaped context summary exceeded the findings bound (6,511 versus 6,000 UTF-16 units). No provider rejection occurred. Cleanup completed and no files changed or PR was published. This is a failed end-to-end planning acceptance, not a passing trial. [Journal 75](75-coding-summary-repair.md) records the next correction and pending new-image trials.
+
+Immutable [v0.3.54](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.54) targets the verified deployed recovery commit. Later Python 0.1.8 planning feedback reproduced a real empty-answer transient and continued to a delivered plan; substantive acceptance still requires brief/handoff grading, documented in journal 75.
