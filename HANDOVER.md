@@ -1,3 +1,7 @@
+# Coding combined-summary recovery — in progress, 9 October 2026
+
+Scoped Python 0.1.7 planning completed once and recovered a real empty provider answer, but presentation/final notes needed improvement. A feedback-conditioned second attempt exposed coupled transport/validation retry limits (empty answer then 6,055-unit findings). Python 0.1.8 separates the bounded opportunities, maximum three summary generations within existing allocation. Review/image/live acceptance pending; default remains 0.1.6, old jobs unchanged. See [journal 75](docs/journey/75-coding-summary-repair.md).
+
 # Coding summary repair — in progress, 9 October 2026
 
 Provider recovery shipped v0.3.54 after exact review/checks/release and current health. The first real plan trial exposed a second stop: a 6,511-unit context-summary field exceeded its 6,000-unit bound. Python 0.1.7 proposes bounded revision while preserving history/notes until acknowledgement. Foundation review/checks and verified-image activation remain pending; no successful concise-plan/retained-understanding acceptance is claimed. See [journal 75](docs/journey/75-coding-summary-repair.md) and the failed trial in [journal 74](docs/journey/74-coding-provider-recovery.md).

@@ -534,7 +534,9 @@ async def coding_loop(
                 + wire_json(memory_context(memory)),
             }
         )
-        for attempt in range(2):
+        generation_recoveries = 0
+        validation_repairs = 0
+        for _attempt in range(3):
             if budget.models <= 1:
                 raise AllocationExhausted(
                     "model calls",
@@ -555,8 +557,9 @@ async def coding_loop(
                     await model.generate(summary_messages, [MEMORY_TOOLS[2]])
                 )
             except GatewayError as error:
-                if not error.recoverable or attempt == 1:
+                if not error.recoverable or generation_recoveries >= 1:
                     raise
+                generation_recoveries += 1
                 summary_messages.append(
                     {
                         "role": "user",
@@ -579,8 +582,9 @@ async def coding_loop(
                     notes.model_dump(exclude={"operation"})
                 )
             except (ValueError, TypeError, KeyError) as error:
-                if attempt == 1:
+                if validation_repairs >= 1:
                     raise ContextRecoveryError() from error
+                validation_repairs += 1
                 raw_summary = generation["message"]
                 retry_message = {
                     key: copy.deepcopy(raw_summary[key])

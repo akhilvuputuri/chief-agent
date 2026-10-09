@@ -88,6 +88,10 @@ A v0.3.53 plan paused after 34 completed calls and one uncertain generation. Pro
 
 After the v0.3.54 provider recovery release, the first owner-authorized real planning trial failed with 33 completed calls: a correct-shaped summary exceeded its 6,000-unit findings bound by 511 units. Prior notes survived but no owner brief was produced. [Journal 75](75-coding-summary-repair.md) proposes one constrained correction and no truncation, with allocation, wire and acknowledgement guards. Synthetic tests retain old history/notes on repeated invalid output and deny repair without continuation headroom. Activation and actual concise-plan/task-understanding acceptance remain pending; this failed trial is not removed from the record or relabelled a success.
 
+## 9 October — independent failure kinds need separate bounded opportunities
+
+The scoped Python 0.1.7 trial produced a 420-word plan, survived two compactions and recovered a real empty provider answer. Presentation and final-notebook quality remained short of acceptance. A feedback-conditioned second trial failed when an empty summary generation consumed the same retry allowance needed to correct a subsequently oversized 6,055-unit summary. [Journal 75](75-coding-summary-repair.md) records both outcomes. Python 0.1.8 proposes one provider recovery plus one validation correction, bounded to three summary generations with unchanged allocation/acknowledgement guards. This is a measured failure mechanism and tested proposal, not established production reliability; new image and live acceptance remain pending.
+
 ## What has not yet been shown to help
 
 The record does not establish that the squad beats one agent, summaries retain every important fact, v2 completes more real tasks, the latency profile is optimal, or RAG improves this workload. The 992-test suite checks contracts/failure behavior; image/startup checks validate installation and configuration.
