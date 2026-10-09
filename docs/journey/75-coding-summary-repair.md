@@ -1,7 +1,7 @@
 # 75 — Let a rejected context summary be corrected before pausing
 
 Work date(s): 2026-10-09. Written/revised: 2026-10-09.
-Status: v0.3.54–57 foundations deployed; Python 0.1.9 scoped brief/handoff accepted after feedback; global activation release pending.
+Status: released and verified v0.3.58; Python 0.1.9 default activated, guided live brief/handoff accepted; implementation awaits owner confirmation.
 
 ## Problem and evidence
 
@@ -74,3 +74,15 @@ The scoped first attempt ran 05:29:26Z–05:35:01Z: 61 model calls, 108 tools, s
 A separately reviewed legitimate planning-feedback revision completed at 05:41:05Z: 32 calls, 60 tools, two compactions, no new provider rejection, cleanup complete and zero changed files/publication. The 309-word / 2,534-UTF-16-unit brief delivered normally to Main and matched the complete saved plan. Final notes agreed on all current owner-scoped open tasks inline, real scheduled-delivery changes, safe lookup warnings and retained failure evidence, incomplete/uncertain-send handling without automatic replay, ordinary reminder/briefing/subscription parity, concrete API/persistence/delivery/plugin pin/skill-version targets, tests and waiting for owner confirmation. GPT-6 Astra independently ACCEPTED the actual brief and handoff. It noted a routine future implementation clarification: consistent false-default/non-ambiguous-null persistence and preserving omitted update fields. This acceptance is not implementation approval or passing to-do feature tests.
 
 [PR #201](https://github.com/akhilvuputuri/chief-agent/pull/201) pins only the new-job worker default. Final-head independent review/checks, exact activation release/current health and closure remain required. Original paused jobs and their settings remain unchanged; no automatic resumption or migration, real record mutation, requirement approval or implementation occurred. One feedback-conditioned accepted planning result is not a general completion-rate, model-quality or cost-improvement measurement.
+
+## Final incident-trial accounting — 9 October 2026
+
+After the accepted planning revision, the five operator verification jobs across eight attempts/revisions accumulated 302 model calls: 295 completed/costed and seven uncertain with missing usage. Recorded model subtotal was $0.17595788. The Python 0.1.9 job's two attempts alone accounted for 93 calls, 90 costed and three uncertain, subtotal $0.043691384. These figures exclude sandbox/infrastructure, uncertain usage and unrelated runtime/reviewer calls. The workload combined different worker versions and explicit corrective feedback; it is not a controlled cost or completion comparison. No further paid trial was run after the accepted plan.
+
+## Activation release closure — 9 October 2026
+
+[PR #201](https://github.com/akhilvuputuri/chief-agent/pull/201) received final GPT-6 Astra APPROVE at `eeba109061726ee45940553bf7aa504f4095ad28`; [current-head checks](https://github.com/akhilvuputuri/chief-agent/actions/runs/37890129655), [main checks](https://github.com/akhilvuputuri/chief-agent/actions/runs/37890965079), 1005 tests/build/format and worker/browser/Postgres checks passed. Exact `caa9ac51d7b1e72793cb77f3bac1bcd1ca4c23f8` [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37891797838) succeeded at 06:11:38Z. Separate current production reads confirmed that SHA, v0.3.58, healthy gateway/Postgres, coding on and the verified Python 0.1.9 digest. Existing paused-job snapshots, models/effort/provider filters, shared allocation, squad/approval controls and permissions were preserved. No DB/Compose change, old-job migration/resumption or implementation approval occurred. Immutable [v0.3.58](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.58) resolves to the verified activation.
+
+The requested planning checkpoint is achieved: normal Main delivery contains the independently accepted complete 309-word plan, and its final notebook records the source-grounded design/contracts/tests and waiting-for-confirmation handoff. Confirmation-card expiry is handled by the ordinary plan-ready resume path; it does not queue implementation or alter the scope. The live target feature and coder/reviewer/publishing loop were not exercised by these plan-only trials. Future changes still need actual checks and independent exact-candidate review after owner confirmation.
+
+Next falsifying test: a separate owner-authorized coding task should demonstrate code checks and review-feedback handling, with first-pass versus feedback-assisted results recorded. A broader controlled benchmark remains separate; the adaptive incident series cannot establish universal reliability or cost savings.
