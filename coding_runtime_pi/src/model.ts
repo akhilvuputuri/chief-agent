@@ -4,9 +4,7 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { InMemoryCredentialStore, type Model } from "@earendil-works/pi-ai";
 import type { ModelConfig } from "./types.js";
 
-export type ModelFactory = (
-  admit: () => Promise<void>,
-) => Promise<{
+export type ModelFactory = (admit: () => Promise<void>) => Promise<{
   runtime: ModelRuntime;
   model: Model<any>;
   reasoning?: ModelConfig["reasoning"];
