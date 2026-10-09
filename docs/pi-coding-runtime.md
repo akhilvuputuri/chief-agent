@@ -1,6 +1,6 @@
 # Independent Pi runtime and Chief bridge
 
-Implementation candidate, 9 October 2026. Not selected for production at this checkpoint. [Plan](pi-coding-runtime-plan.md), [dependency exploration](pi-coding-harness.md), [independent package](../coding_runtime_pi/README.md) and [journal](journey/77-pi-runtime.md).
+Shipped default-legacy foundation/image pin as v0.3.60, 9 October 2026. The Pi backend is not selected for production tasks. [Plan](pi-coding-runtime-plan.md), [dependency exploration](pi-coding-harness.md), [independent package](../coding_runtime_pi/README.md) and [journal](journey/77-pi-runtime.md).
 
 ## Execution and portability
 
@@ -47,4 +47,4 @@ Rollback switches the default for future requests back to `legacy`. Pi tasks kee
 
 Synthetic local fixtures cover the actual Pi loop/edit tools, real check commands, plan approval, stale/concurrent decisions, failed checks, metadata tampering, signed cancellation, budget exhaustion, UTF-8 artifacts and the native protocol round trip. Chief regressions cover role pins, replay, encrypted session restoration and launcher/profile isolation. The existing Python suite passes unchanged.
 
-Local Docker verification is unavailable while the Mac is locked and Docker Desktop cannot finish startup. Hosted Linux CI is the verification path. Exact-head independent review, image publication/pin, real-model acceptance and production selection remain pending at this checkpoint; do not treat this document as a release receipt.
+Local Docker verification is unavailable while the Mac is locked and Docker Desktop cannot finish startup. Hosted Linux CI is the verification path. Exact-head independent review, image publication/pin and deployment are verified in [journal 77](journey/77-pi-runtime.md#verified-image-pin-release-closure--9-october-2026). Real-model acceptance and production selection remain pending; synthetic/health evidence does not establish them.
