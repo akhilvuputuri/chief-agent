@@ -16,11 +16,32 @@ export type SandboxRequest = {
   runtime?: "node" | "python" | "pi";
   timeoutMinutes: number;
 };
+export class SandboxAcknowledgementPending extends Error {
+  constructor() {
+    super("Sandbox launch acknowledgement is pending");
+    this.name = "SandboxAcknowledgementPending";
+  }
+}
+export class SandboxTimeoutMismatch extends Error {
+  constructor(
+    readonly sandboxId: string,
+    readonly requestedMinutes: number,
+    readonly actualMinutes?: number,
+  ) {
+    super(
+      actualMinutes === undefined
+        ? "Sandbox provider did not confirm its timeout; launch is paused before work proceeds"
+        : `Sandbox provider accepted ${actualMinutes} minutes, below the requested ${requestedMinutes} minutes; launch is paused before work proceeds`,
+    );
+    this.name = "SandboxTimeoutMismatch";
+  }
+}
 export interface SandboxProvider {
   create(request: SandboxRequest): Promise<string>;
-  find(attemptId: string): Promise<string | undefined>;
+  find(attemptId: string, timeoutMinutes?: number): Promise<string | undefined>;
   inspect(id: string): Promise<"running" | "terminal">;
   terminate(id: string): Promise<void>;
+  terminalReason?(id: string): Promise<string | undefined>;
 }
 
 /** Reviewed NO_SOURCE project. Repository code never selects buildspec, role or image. */
@@ -75,9 +96,33 @@ export class CodeBuildSandbox implements SandboxProvider {
       throw new Error(
         "Sandbox creation returned no identity; reconcile before retrying",
       );
+    this.confirmTimeout(
+      result.build.id,
+      result.build.timeoutInMinutes,
+      r.timeoutMinutes,
+    );
     return result.build.id;
   }
-  async find(attemptId: string) {
+  private confirmTimeout(
+    id: string,
+    actual: number | undefined,
+    requested: number,
+  ) {
+    if (
+      !Number.isInteger(actual) ||
+      actual! < 5 ||
+      actual! > 2160 ||
+      actual! < requested
+    )
+      throw new SandboxTimeoutMismatch(
+        id,
+        requested,
+        Number.isInteger(actual) && actual! >= 5 && actual! <= 2160
+          ? actual
+          : undefined,
+      );
+  }
+  async find(attemptId: string, timeoutMinutes?: number) {
     let token: string | undefined;
     // Bounded reconciliation. A missing result does not authorize a new StartBuild.
     for (let page = 0; page < 5; page++) {
@@ -96,7 +141,11 @@ export class CodeBuildSandbox implements SandboxProvider {
           (v) => v.name === "CODING_ATTEMPT_ID" && v.value === attemptId,
         ),
       );
-      if (match?.id) return match.id;
+      if (match?.id) {
+        if (timeoutMinutes !== undefined)
+          this.confirmTimeout(match.id, match.timeoutInMinutes, timeoutMinutes);
+        return match.id;
+      }
       token = list.nextToken;
       if (!token) return undefined;
     }
@@ -118,6 +167,26 @@ export class CodeBuildSandbox implements SandboxProvider {
       return "terminal" as const;
     throw new Error("Unknown sandbox state; cleanup requires inspection");
   }
+  async terminalReason(id: string) {
+    const build = (
+      await this.client.send(new BatchGetBuildsCommand({ ids: [id] }))
+    ).builds?.[0];
+    if (!build || ["IN_PROGRESS", "QUEUED"].includes(String(build.buildStatus)))
+      return undefined;
+    const timedOut =
+      build.phases?.filter((p) => p.phaseStatus === "TIMED_OUT") ?? [];
+    if (build.buildStatus !== "TIMED_OUT" && !timedOut.length) return undefined;
+    if (timedOut.some((p) => p.phaseType === "QUEUED"))
+      return "Sandbox provider queue timed out before execution; saved work is retained";
+    const minutes = build.timeoutInMinutes;
+    return timedOut.some((p) => p.phaseType === "BUILD") &&
+      Number.isInteger(minutes) &&
+      minutes! >= 5 &&
+      minutes! <= 2160
+      ? `Sandbox provider hit its ${minutes}-minute build timeout before a result was recorded; saved work is retained`
+      : "Sandbox provider timed out before a result was recorded; saved work is retained";
+  }
+
   async terminate(id: string) {
     await this.client.send(new StopBuildCommand({ id }));
   }

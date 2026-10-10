@@ -1,3 +1,4 @@
+import { SandboxAcknowledgementPending } from "./provider.js";
 import { piCompletion } from "./pi-proxy.js";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -90,16 +91,40 @@ export async function codingApi(
                 .code(401)
                 .send({ error: "Invalid worker capability" });
             let job;
-            try {
-              job = await controller.authenticate(
-                id,
-                req.headers.authorization?.replace(/^Bearer /, "") ?? "",
-                path === "finish",
-              );
-            } catch {
-              return reply
-                .code(401)
-                .send({ error: "Invalid worker capability" });
+            const acknowledgementUntil = Date.now() + 120000;
+            while (true) {
+              try {
+                job = await controller.authenticate(
+                  id,
+                  req.headers.authorization?.replace(/^Bearer /, "") ?? "",
+                  path === "finish",
+                );
+                break;
+              } catch (error) {
+                if (error instanceof SandboxAcknowledgementPending) {
+                  // The immutable Pi client does not retry HTTP errors. Hold only
+                  // its valid bootstrap read while the launch receipt is pending.
+                  if (
+                    path === "assignment" &&
+                    !reply.raw.destroyed &&
+                    Date.now() < acknowledgementUntil
+                  ) {
+                    await new Promise((resolve) =>
+                      setTimeout(
+                        resolve,
+                        Math.min(250, acknowledgementUntil - Date.now()),
+                      ),
+                    );
+                    continue;
+                  }
+                  return reply.code(503).send({
+                    error: "Sandbox launch acknowledgement is pending",
+                  });
+                }
+                return reply
+                  .code(401)
+                  .send({ error: "Invalid worker capability" });
+              }
             }
             try {
               if (path === "pi-session") {

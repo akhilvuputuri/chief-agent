@@ -1,0 +1,43 @@
+# 80 — Why did the sandbox stop before its coding allocation expired?
+
+Work date: 10 October 2026. Status: stopping cause confirmed; effective timeout mismatch reproduced; application hardening implemented/tested candidate v0.3.65; provider restriction resolution remains pending.
+
+## User-visible problem and preceding iteration
+
+The owner reported that the Pi sandbox stopped earlier. [Model compatibility](79-coding-model-compatibility.md) verified short real-model fixtures and role commands, followed by worker activation as v0.3.64. Those fixtures did not exercise the provider's long-running timeout boundary. [Allocation work](70-coding-allocations.md) requests two active hours and a 125-minute CodeBuild timeout, including provisioning allowance; source-level tests do not establish the actual timeout accepted by the service.
+
+## Evidence
+
+Fresh main and verified deployed release: `c2954a8d56656590a65a69c4d4f3bf4090d78771`, v0.3.64. Bounded owner-scoped metadata and CodeBuild phase reads on 10 October confirmed one resumed Pi planning attempt: the build started at 07:54:16 UTC, BUILD ran for 2,705 seconds, and it ended at 08:39:57 UTC. Overall status was FAILED; BUILD status was TIMED_OUT with `BUILD_TIMED_OUT`. The service reported a 45-minute timeout. The host deadline remained 09:54:53 UTC, so this was not exhaustion of the saved two-hour host allocation. The job paused with cleanup complete, 203 model calls and no completed plan. No private objective, conversation, environment values, credentials or job identifiers are retained here.
+
+The original attempt used the older worker pin. However, one separate zero-model launch probe using the new default Pi image reproduced the mismatch: requested 125 minutes, StartBuild response and BatchGetBuilds both reported 45 minutes. It was immediately stopped and the StopBuild response reported STOPPED. No owner job, preference or approval was changed. This was an owner-authorized paid experiment; compute billing was not reconciled and is not claimed zero.
+
+Additional read-only measurements: the project configured 20 minutes, Linux-container medium compute and disabled logs. A mocked request-handler probe against the deployed SDK confirmed the actual serialized request contained 125 minutes and used the regional AWS CodeBuild endpoint, with no endpoint override. No build was started by that serializer probe. CloudTrail LookupEvents access was denied; launch audit records and account restrictions could not be inspected.
+
+## Diagnosis and alternatives
+
+The immediate stopping cause is verified provider timeout, independent of the earlier native-model field rejection. The deployed controller and provider already request 125 minutes; repeating that code edit would not establish a correction. AWS returned a lower effective value even for the new isolated probe. An account restriction is a hypothesis, not a verified quota diagnosis. Ordinary published API documentation permits this override, but does not prove this account's effective limits: [StartBuild](https://docs.aws.amazon.com/codebuild/latest/APIReference/API_StartBuild.html), [CodeBuild quotas](https://docs.aws.amazon.com/codebuild/latest/userguide/limits.html).
+
+## Implementation and review
+
+The v0.3.65 candidate validates the effective StartBuild timeout receipt, rejects missing/insufficient confirmation, and atomically retains the created sandbox identity while pausing/revoking model dispatch. Worker requests wait for acknowledged sandbox identity through a retryable response for valid pending bootstrap capabilities. Cleanup continues through the existing tracked controller path, without starting another build. Confirmed terminal BUILD timeouts get a specific pause cause; unavailable optional diagnostic reads fall back to the existing generic cause and cannot block cleanup. No model, price filter, host allocation, project, IAM, database, Compose or worker image was changed. No paused job was resumed. The source fixture already asserts a 125-minute launch request for a two-hour allocation; the new evidence shows why checking only a mocked request is insufficient.
+
+Regressions cover insufficient/unconfirmed/invalid receipts, adequate receipts, atomic rejected-launch cleanup identity, blocked worker authentication before acknowledgement, no inference/relaunch on rejection, terminal FAILED/BUILD TIMED_OUT diagnosis and diagnostic-read failure fallback. Source already requested 125; repeated launch-parameter edits would not fix the service response. The operator AWS profile was found expired when account-level read access was attempted; reauthentication is requested. Independent review, required checks and deployment remain pending. Provider acceptance must be verified before claiming the two-hour allocation is available end to end.
+
+## Verification and outcome
+
+Measured stopping cause and one isolated reproduction are complete. The probe is terminal/STOPPED, with zero model calls and no owner-data mutations. The original job remains paused. The v0.3.64 model/report/review fixes are still deployed; this is a separate unresolved provider boundary that also affects new launches. Next: inspect the account-level limit or AWS audit/support evidence with authorized access, resolve the provider restriction, and independently verify an accepted 125-minute launch receipt. Neither this investigation nor short fixtures establish long-running completion reliability.
+
+### Independent review correction — 10 October 2026
+
+Review of `e8cd7d0e43177e084401cc42f602c81baf10c57a` requested changes after 75 passing coding tests and two independent failing lifecycle probes. P1: restart during creation acknowledgement could recover a short sandbox through `find()` and enable authentication without checking its allocation. P2: cancellation during creation could discard the subsequently known mismatch ID. The revision validates recovered receipts before admitting active work; cleanup lookups can still recover a short sandbox. A known ID is retained for the same pending-cleanup cancelled/paused attempt without changing its state or summary or issuing a false pause event. New lifecycle regressions cover both findings. An intermediate SQL revision failed 13 cases because PostgreSQL required explicit typing for the nullable ID parameter; the casts were corrected, and all 78 focused coding tests/build passed. Full revised-head checks and fresh independent approval remain pending.
+
+### Bootstrap and phase-evidence review — 10 October 2026
+
+A fresh independent review of `81ea41c129e3254b8fbd372b9e1826aaa4f8f8f5` confirmed the earlier lifecycle corrections, then requested changes on two additional P2 boundaries. A valid worker reaching assignment before a delayed creation receipt received fatal 401. The revised gate returns 503 only for an otherwise valid provisioning capability; existing immutable worker clients already retry that status within their bounded 120-second request window. Work and premature finish remain blocked until acknowledgement; invalid capabilities still get 401. An actual API/WorkerClient regression confirms retry then assignment with zero model calls.
+
+The review also reproduced a five-minute QUEUED timeout being labelled with the 125-minute build allocation. Revised diagnostics distinguish queue and build phases; only confirmed BUILD timeout evidence includes the reported build limit, and phase-unknown cases omit a duration claim. All 80 focused coding tests/build pass at this correction checkpoint; exact revised-head review/full checks remain required. AWS operator access and an accepted 125-minute live receipt remain outstanding.
+
+### Immutable Pi bootstrap correction — 10 October 2026
+
+Re-review of `896cae00e2bf515583fc9eef1f6e4d4d86a8dc97` found the pending-ack gap persisted for Pi: unlike the legacy client exercised by the new test, NativePiWorkerClient does not retry 503. The independent actual-Pi/API probe failed while four prior probes passed. The final correction holds only a valid bootstrap assignment on the host for up to 120 seconds, repeatedly rechecking capability/state, before returning assignment after verified receipt or a bounded failure. Non-bootstrap work remains blocked; invalid capabilities remain rejected. Both actual immutable Node and Pi clients pass a delayed-receipt regression with one HTTP request and zero model calls. No worker rebuild or Python modification is required. Focused 82 tests/build pass at this checkpoint; revised-head full checks/review and account restriction resolution remain pending.
