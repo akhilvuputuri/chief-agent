@@ -290,7 +290,7 @@ export class CodingRuntime {
         task.used.models++;
         await this.options.store.save(task);
       };
-      const { runtime, model, reasoning } =
+      const { runtime, model, reasoning, didRejectContextLocally } =
         await this.options.model(admitModel);
       const workspace = await new Workspace(task.workspace).initialize();
       const agentsFiles: Array<{ path: string; content: string }> = [];
@@ -380,13 +380,24 @@ export class CodingRuntime {
       session = created.session;
       const finishTurn = session.agent.finishTurn;
       session.agent.finishTurn = async (turn, signal) => {
+        const localContextOnly =
+          !finalizing &&
+          !stop.signal.aborted &&
+          turn.message.stopReason === "error" &&
+          didRejectContextLocally?.();
         // Pi's outer session can recover a length/error response through
         // compaction even when its ordinary retry setting is disabled.
-        if (["error", "aborted", "length"].includes(turn.message.stopReason))
+        if (
+          !localContextOnly &&
+          ["error", "aborted", "length"].includes(turn.message.stopReason)
+        )
           settings.setCompactionEnabled(false);
         const decision = await finishTurn?.(turn, signal);
         await pending;
-        if (["error", "aborted", "length"].includes(turn.message.stopReason))
+        if (
+          !localContextOnly &&
+          ["error", "aborted", "length"].includes(turn.message.stopReason)
+        )
           return { action: "end" };
         if (finalizing && task.intent === "plan") {
           finalTurns++;
