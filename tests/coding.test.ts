@@ -1,5 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { runPiWorker, NativePiWorkerClient } from "../src/coding/pi-worker.js";
+import {
+  runPiWorker,
+  NativePiWorkerClient,
+  piReviewInstructions,
+} from "../src/coding/pi-worker.js";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID, generateKeyPairSync } from "node:crypto";
@@ -2801,6 +2805,33 @@ test("a Pi default retains legacy automation support without granting it to Pi j
   );
   assert.equal(initialized, 1);
   assert.equal(pi.autoMerge, false);
+});
+
+test("Pi review prompt preserves maximum approved context within runtime instructions bound", () => {
+  const plan = "p".repeat(6000);
+  const context = "c".repeat(16000);
+  const instructions = piReviewInstructions({
+    candidateHash: "a".repeat(64),
+    plan,
+    baseSha: base,
+    fileCount: 100,
+    context,
+    checks: [
+      "npm ci",
+      "npm run check",
+      "npm run build",
+      "npm run format:check",
+    ].map((command) => ({ command, exitCode: 0, output: "r".repeat(32000) })),
+  });
+  assert(
+    instructions.length <= 32000,
+    `Review instructions: ${instructions.length}`,
+  );
+  assert(instructions.includes(plan));
+  assert(instructions.includes(context));
+  assert(instructions.includes("Changed artifact file count: 100"));
+  assert(instructions.includes(base));
+  assert.equal((instructions.match(/r{1000}/g) ?? []).length, 4);
 });
 
 test("Pi bridge plans, accepts bound fixture confirmation, builds, reviews and publishes a checked artifact", async (t) => {
