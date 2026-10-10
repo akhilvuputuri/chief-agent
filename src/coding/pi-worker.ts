@@ -208,7 +208,7 @@ export async function runPiWorker(
         baseUrl: `${workerOrigin}/coding/worker/${assignment.id}/pi/${role}/v1`,
         apiKey: workerToken,
         contextWindow: 40000,
-        maxTokens: 8000,
+        maxTokens: config.maxOutputTokens ?? 8000,
         reasoning: config.effort,
         requestIdField: "runtime_call_id",
         maxRequestBytes: 179000,

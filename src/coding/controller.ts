@@ -905,6 +905,12 @@ export class CodingController {
         messages: input.messages,
         tools: input.tools,
         reasoning: job.settings.effort,
+        ...(job.settings.runtime === "pi"
+          ? {
+              requireComplete: true,
+              maxOutputTokens: job.settings.maxOutputTokens ?? 8000,
+            }
+          : {}),
         signal: AbortSignal.any([cancellation.signal, total, idle.signal]),
         ...(enhanced
           ? {

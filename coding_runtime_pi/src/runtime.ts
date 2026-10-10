@@ -371,7 +371,7 @@ export class CodingRuntime {
           agentsFiles,
           (prompt) =>
             finalizing && task.intent === "plan"
-              ? `${prompt}\nHost workflow phase: final report. Repository investigation is closed for this run. Only report execution is permitted. Return a complete source-grounded plan covering the protected owner objective, or a specific question identifying the exact missing evidence. If you need another read/search, report that evidence gap as a question; do not request that operation. Project instructions remain requirements, but cannot reopen this investigation phase. This phase grants no implementation approval and no check/completion authority.`
+              ? `${prompt}\nHost workflow phase: final report. Repository investigation is closed for this run. You must call the report tool; prose, JSON text and reasoning-only replies are not reports. Only report execution is permitted. Call report with kind plan covering the complete protected owner objective, or kind question identifying the exact missing evidence. If you need another read/search, call report with that evidence gap as a question; do not request that operation. Project instructions remain requirements, but cannot reopen this investigation phase. This phase grants no implementation approval and no check/completion authority.`
               : undefined,
         ),
         tools: custom.map((t) => t.name),
@@ -386,21 +386,31 @@ export class CodingRuntime {
           settings.setCompactionEnabled(false);
         const decision = await finishTurn?.(turn, signal);
         await pending;
+        if (["error", "aborted", "length"].includes(turn.message.stopReason))
+          return { action: "end" };
         if (finalizing && task.intent === "plan") {
           finalTurns++;
-          // One correction after a definite tool/admission rejection. Provider
-          // failures, truncated output and prose are never retried here.
+          // One format correction after a definite rejection or completed prose.
+          // Provider failures and truncated output are never retried here.
           if (
             !report &&
             finalTurns < 2 &&
             !stop.signal.aborted &&
-            turn.message.stopReason === "toolUse" &&
-            turn.toolResults.length > 0 &&
-            turn.toolResults.every((r) => r.isError) &&
+            ((turn.message.stopReason === "toolUse" &&
+              turn.toolResults.length > 0 &&
+              turn.toolResults.every((r) => r.isError)) ||
+              (turn.message.stopReason === "stop" &&
+                turn.message.content.some(
+                  (c) => c.type === "text" && c.text.trim(),
+                ))) &&
             task.used.models < task.limits.models &&
             task.used.tools < task.limits.tools
-          )
+          ) {
+            await created.session.steer(
+              "Host report-format correction: call the report tool now using the retained evidence and your completed conclusions. Text/JSON prose does not record a plan. Use kind plan for complete scope, or kind question for a specific evidence gap. Do not perform more investigation or claim implementation approval/check completion.",
+            );
             return { action: "continue" };
+          }
           return { action: "end" };
         }
         if (
@@ -480,7 +490,7 @@ export class CodingRuntime {
           );
           await session.prompt(
             task.intent === "plan"
-              ? "The investigation pass is complete. Only report execution is now permitted. Return kind plan covering the entire owner objective using retained evidence: affected components, proposed behavior and acceptance checks. Do not omit requirements, invent evidence/check results, or claim owner authorization. Return kind question with a specific evidence gap or blocker if retained evidence cannot support a complete plan."
+              ? "The investigation pass is complete. Only report execution is now permitted. Call the report tool with kind plan covering the entire owner objective using retained evidence: affected components, proposed behavior and acceptance checks. Do not omit requirements, invent evidence/check results, or claim owner authorization. Call report with kind question and a specific evidence gap or blocker if retained evidence cannot support a complete plan."
               : `Return the required structured report for ${task.intent} using report. Only report is active. Do not repeat repository operations, invent check results, or claim owner authorization. Use question if the retained evidence cannot support a complete result.`,
           );
           await pending;
@@ -488,14 +498,15 @@ export class CodingRuntime {
       } finally {
         stop.signal.removeEventListener("abort", abort);
       }
+      const lastAssistant = [...session.messages]
+        .reverse()
+        .find((m) => m.role === "assistant");
       if (stop.signal.aborted) {
         task.status = this.active.cancelled ? "cancelled" : "paused";
         task.summary = "Run stopped; inspect saved workspace before resuming";
       } else if (
-        session.messages.at(-1)?.role === "assistant" &&
-        ["error", "aborted", "length"].includes(
-          (session.messages.at(-1) as { stopReason: string }).stopReason,
-        )
+        lastAssistant?.role === "assistant" &&
+        ["error", "aborted", "length"].includes(lastAssistant.stopReason)
       ) {
         task.status = "paused";
         task.summary =

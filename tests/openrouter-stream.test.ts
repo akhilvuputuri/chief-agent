@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { OpenRouter, ModelError } from "../src/model.js";
+import { piCompletion } from "../src/coding/pi-proxy.js";
+import { randomUUID } from "node:crypto";
 import {
   readGenerationStream,
   StreamFailure,
@@ -25,6 +27,164 @@ const chunk = (delta: unknown, finish: string | null = null) => ({
   model: "fixture/model",
   provider: "fixture/provider",
   choices: [{ index: 0, delta, finish_reason: finish }],
+});
+
+test("Pi complete-response policy rejects nonempty incomplete upstream choices before native framing", async () => {
+  for (const finish of [
+    "length",
+    "content_filter",
+    "error",
+    "unexpected",
+    null,
+    undefined,
+  ]) {
+    for (const message of [
+      { role: "assistant", content: "Partial prose" },
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: "partial-report",
+            type: "function",
+            function: {
+              name: "report",
+              arguments: JSON.stringify({
+                kind: "plan",
+                summary: "Incomplete",
+                detail: "Parseable but incomplete scope",
+              }),
+            },
+          },
+        ],
+      },
+    ]) {
+      const adapter = new OpenRouter(
+        "fixture-key",
+        "fixture/model",
+        2,
+        10,
+        async (_url, options) => {
+          const body = JSON.parse(String(options?.body));
+          assert.equal(body.max_tokens, 8000);
+          assert.equal(body.requireComplete, undefined);
+          assert.deepEqual(body.provider.max_price, {
+            prompt: 2,
+            completion: 10,
+          });
+          return Response.json({
+            choices: [{ message, finish_reason: finish }],
+            usage: { cost: 0 },
+          });
+        },
+      );
+      const controller = {
+        generate: (_job: unknown, input: any) =>
+          adapter.generate({
+            messages: input.messages,
+            tools: input.tools,
+            reasoning: "high",
+            signal: new AbortController().signal,
+            requireComplete: true,
+          }),
+      };
+      await assert.rejects(
+        piCompletion(
+          controller as any,
+          {
+            mode: "plan",
+            settings: { runtime: "pi", model: "fixture/model" },
+          } as any,
+          "coder",
+          {
+            runtime_call_id: randomUUID(),
+            model: "fixture/model",
+            messages: [{ role: "user", content: "fixture" }],
+            tools: [],
+          },
+        ),
+        (error: any) =>
+          error instanceof ModelError &&
+          error.diagnostics.failureCode === "incomplete" &&
+          error.diagnostics.finishReason === (finish ?? null),
+      );
+    }
+  }
+});
+
+test("complete-response opt-in retains clean generations and leaves ordinary nonstream behavior unchanged", async () => {
+  for (const finish of ["stop", "tool_calls", "length"]) {
+    const adapter = new OpenRouter(
+      "fixture-key",
+      "fixture/model",
+      2,
+      10,
+      async () =>
+        Response.json({
+          choices: [
+            {
+              message: { role: "assistant", content: "Fixture" },
+              finish_reason: finish,
+            },
+          ],
+        }),
+    );
+    const input = {
+      messages: [],
+      tools: [],
+      reasoning: "high" as const,
+      signal: new AbortController().signal,
+    };
+    const ordinary = await adapter.generate(input);
+    assert.equal(ordinary.message.content, "Fixture");
+    if (finish !== "length")
+      assert.equal(
+        (await adapter.generate({ ...input, requireComplete: true })).message
+          .content,
+        "Fixture",
+      );
+  }
+});
+
+test("trusted output allowance supports Pi reasoning headroom without changing ordinary limits or price filters", async () => {
+  const requests: any[] = [];
+  const adapter = new OpenRouter(
+    "fixture-key",
+    "fixture/model",
+    2,
+    10,
+    async (_url, options) => {
+      requests.push(JSON.parse(String(options?.body)));
+      return Response.json({
+        choices: [
+          {
+            message: { role: "assistant", content: "Complete" },
+            finish_reason: "stop",
+          },
+        ],
+      });
+    },
+  );
+  const input = {
+    messages: [],
+    tools: [],
+    reasoning: "high" as const,
+    signal: new AbortController().signal,
+  };
+  await adapter.generate(input);
+  await adapter.generate({
+    ...input,
+    requireComplete: true,
+    maxOutputTokens: 16000,
+  });
+  assert.deepEqual(
+    requests.map((r) => r.max_tokens),
+    [8000, 16000],
+  );
+  assert.deepEqual(requests[0].provider, requests[1].provider);
+  for (const maxOutputTokens of [0, 16001, Infinity, 1.5])
+    await assert.rejects(adapter.generate({ ...input, maxOutputTokens }));
+  assert.equal(requests.length, 2);
 });
 
 test("coding streaming assembles fragmented tools, reasoning and duplicate terminal usage frames", async () => {

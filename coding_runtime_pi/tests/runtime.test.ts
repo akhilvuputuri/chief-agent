@@ -421,20 +421,26 @@ test("cancellation from another client stops the active command and preserves te
   assert.equal(stopped.checks.length, 0);
 });
 test("truncated model output cannot promote its unexecuted report", async () => {
-  const f = await fixture();
-  const runtime = new CodingRuntime({
-    store: f.store,
-    model: scripted([[report("plan", "Proposed plan")]], "length"),
-  });
-  const task = await runtime.start({
-    workspace: f.workspace,
-    objective: "Plan",
-    limits: { ms: 10000, models: 1, tools: 10 },
-  });
-  const result = await runtime.run(task.id);
-  assert.equal(result.status, "paused");
-  assert.equal(result.plan, undefined);
-  assert.equal(result.used.models, 1);
+  for (const first of [
+    [report("plan", "Proposed plan")],
+    [{ name: "read", arguments: { path: "sum.js" } }],
+  ]) {
+    const f = await fixture();
+    const runtime = new CodingRuntime({
+      store: f.store,
+      model: scripted([first, [report("plan", "Must never be requested")]], 1),
+    });
+    const task = await runtime.start({
+      workspace: f.workspace,
+      objective: "Plan",
+      limits: { ms: 10000, models: 10, tools: 10 },
+    });
+    const result = await runtime.run(task.id);
+    assert.equal(result.status, "paused");
+    assert.equal(result.plan, undefined);
+    assert.equal(result.used.models, 1);
+    assert.equal(result.used.tools, 0);
+  }
 });
 
 test("a valid plan with other reads in its batch ends after that settled batch", async () => {
@@ -700,6 +706,42 @@ test("one rejected navigation attempt can be corrected into a report without exe
   assert.equal(result.plan, undefined);
 });
 
+test("one completed prose conclusion can be formatted into a plan without reopening investigation", async () => {
+  const f = await fixture();
+  const runtime = new CodingRuntime({
+    store: f.store,
+    model: scripted([
+      ...Array.from({ length: 32 }, () => [
+        { name: "read", arguments: { path: "sum.js" } },
+      ]),
+      [],
+      [report("plan", "Fix sum.js and verify addition using test.mjs.")],
+    ]),
+  });
+  const task = await runtime.start({
+    workspace: f.workspace,
+    objective: "Plan the fixture repair",
+  });
+  const result = await runtime.run(task.id);
+  assert.equal(result.status, "waiting_approval");
+  assert.equal(result.used.models, 34);
+  assert.equal(result.used.tools, 33);
+  assert.equal(result.approved, undefined);
+  const entries = (await readFile(result.sessionFile!, "utf8"))
+    .split("\n")
+    .filter(Boolean)
+    .map((s) => JSON.parse(s));
+  assert(
+    entries.some(
+      (e) =>
+        e.message?.role === "user" &&
+        JSON.stringify(e.message.content).includes(
+          "Host report-format correction",
+        ),
+    ),
+  );
+});
+
 test("planning finalization cannot keep reading or invent a plan when evidence is missing", async () => {
   for (const final of [
     [
@@ -805,7 +847,7 @@ test("repeated prose-only endings pause after one finalization without granting 
   const f = await fixture();
   const runtime = new CodingRuntime({
     store: f.store,
-    model: scripted([[], [], [report("plan", "Unreachable report")], []]),
+    model: scripted([[], [], [], [report("plan", "Unreachable report")], []]),
   });
   const task = await runtime.start({
     workspace: f.workspace,
@@ -813,7 +855,7 @@ test("repeated prose-only endings pause after one finalization without granting 
   });
   const result = await runtime.run(task.id);
   assert.equal(result.status, "paused");
-  assert.equal(result.used.models, 2);
+  assert.equal(result.used.models, 3);
   assert.equal(result.plan, undefined);
   assert.equal(result.approved, undefined);
 });
