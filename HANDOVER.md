@@ -1,3 +1,7 @@
+# Pi continuation incident — 10 October 2026
+
+One new Pi planning job paused after its first model call because the facade rejected DeepSeek’s native `reasoning_content` field. Cleanup completed; the job remains paused with retained context. The v0.3.62 candidate adds bounded compatibility support and actual-model-profile regressions. Direct server real-model fixture passed learn/plan/approved build/checks/read-only review/cleanup; 1,030 local tests pass. Exact independent review/CI/release remain pending. No owner job was resumed. [Journal 78](docs/journey/78-pi-native-continuation.md).
+
 # Pi default released v0.3.61 — 10 October 2026
 
 Pi is now the default for new coding tasks at `76792d9a51ca6069ba6dda18e94ef44dc3394441`. [Exact release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37978324102), independent review/Devin, 1,029 local tests and hosted Linux checks passed; separate running SHA/gateway/Postgres health observations verified installation. Existing jobs stay on their saved backend/image; old Python runtime is intact. No paid trial or live acceptance result is claimed. [Journal closure](docs/journey/77-pi-runtime.md#default-switch-release-closure--10-october-2026).

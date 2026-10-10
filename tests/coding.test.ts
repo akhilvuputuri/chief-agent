@@ -2562,10 +2562,46 @@ test("Pi compatible model facade preserves role pins, journal replay and native 
   const payload = {
     runtime_call_id: randomUUID(),
     model: settings.model,
-    messages: [{ role: "user", content: "Synthetic request" }],
+    messages: [
+      { role: "user", content: "Synthetic request" },
+      {
+        role: "assistant",
+        content: null,
+        reasoning_content: "",
+        reasoning_details: [
+          {
+            type: "reasoning.text",
+            text: "Synthetic retained reasoning",
+            format: "deepseek",
+            index: 0,
+          },
+        ],
+        tool_calls: [
+          {
+            id: "synthetic-read",
+            type: "function",
+            function: { name: "read", arguments: "{}" },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: "Synthetic source result",
+        tool_call_id: "synthetic-read",
+      },
+    ],
     tools: [],
     stream: true,
   };
+  f.setGeneration((_model, input) => {
+    assert.equal(input.messages[1].reasoning_content, "");
+    assert.deepEqual(
+      input.messages[1].reasoning_details,
+      payload.messages[1].reasoning_details,
+    );
+    assert.equal(input.messages[2].tool_call_id, "synthetic-read");
+    return { message: { role: "assistant", content: "fixture reply" } };
+  });
   assert.equal(
     (await app.inject({ method: "POST", url, payload })).statusCode,
     401,
@@ -2594,6 +2630,40 @@ test("Pi compatible model facade preserves role pins, journal replay and native 
     ).statusCode,
     409,
   );
+  assert.equal(f.modelCalls(), 1);
+  for (const value of [42, "x".repeat(120001)]) {
+    const rejected = await app.inject({
+      method: "POST",
+      url,
+      headers,
+      payload: {
+        ...payload,
+        runtime_call_id: randomUUID(),
+        messages: [
+          { role: "assistant", content: null, reasoning_content: value },
+        ],
+      },
+    });
+    assert.equal(rejected.statusCode, 409);
+    assert.equal(f.modelCalls(), 1);
+  }
+  const unsupported = await app.inject({
+    method: "POST",
+    url,
+    headers,
+    payload: {
+      ...payload,
+      runtime_call_id: randomUUID(),
+      messages: [
+        {
+          role: "assistant",
+          content: null,
+          unknown_compatibility_field: "unsupported",
+        },
+      ],
+    },
+  });
+  assert.equal(unsupported.statusCode, 409);
   assert.equal(f.modelCalls(), 1);
 });
 test("Pi sessions append encrypted immutable entries and survive attempt changes", async (t) => {

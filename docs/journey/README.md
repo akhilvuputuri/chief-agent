@@ -86,6 +86,8 @@ For the latest verified release and open work, read [current work](../current-wo
 
 | 9–10 October | [77 — Independent Pi implementation](77-pi-runtime.md): can a dependency replace coding mechanics while Chief remains a client? | v0.3.61 Pi default released; exact review/Linux/release/health verified; real-model acceptance unmeasured |
 
+| 10 October | [78 — Pi native continuation](78-pi-native-continuation.md): does the facade accept the actual model compatibility profile? | One live planning failure reproduced; bounded schema fix/regressions pass; direct live trial/review/release pending |
+
 ## Coding-agent learning path
 
 Start with [coding-agent engineering: changes, failures and evidence](coding-agent-lessons.md). It connects the coding/runtime journals, separates reproduced fixes from unmeasured quality claims and defines the learning record to update with future harness changes.

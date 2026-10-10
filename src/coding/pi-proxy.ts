@@ -34,6 +34,8 @@ const nativeMessage = z
       .max(20)
       .optional(),
     reasoning_details: z.array(z.record(z.unknown())).optional(),
+    // Pi replays this DeepSeek compatibility field even when structured reasoning is present.
+    reasoning_content: z.string().max(120000).optional(),
   })
   .strict();
 export const piCompletionRequest = z
