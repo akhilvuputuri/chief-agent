@@ -1,3 +1,7 @@
+# Pi continuation fix released v0.3.62 — 10 October 2026
+
+[PR 209](https://github.com/akhilvuputuri/chief-agent/pull/209) and [exact release](https://github.com/akhilvuputuri/chief-agent/actions/runs/38026894859) verify `1c196c168710e776d1a513bb357a323bf851529b`. DeepSeek’s valid native field is accepted, strict malformed/unknown-field rejection remains, and a deployed-module smoke plus separate gateway-start observation passed. 1,030 local tests, exact-head independent review/Devin and hosted Linux checks passed. Direct server real-model fixture completed learn/plan/approved build/checks/read-only review/cleanup with 18 calls; original owner job remains paused with cleanup complete. [Journal closure](docs/journey/78-pi-native-continuation.md#release-closure--10-october-2026).
+
 # Pi continuation incident — 10 October 2026
 
 One new Pi planning job paused after its first model call because the facade rejected DeepSeek’s native `reasoning_content` field. Cleanup completed; the job remains paused with retained context. The v0.3.62 candidate adds bounded compatibility support and actual-model-profile regressions. Direct server real-model fixture passed learn/plan/approved build/checks/read-only review/cleanup; 1,030 local tests pass. Exact independent review/CI/release remain pending. No owner job was resumed. [Journal 78](docs/journey/78-pi-native-continuation.md).
