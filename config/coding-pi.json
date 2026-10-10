@@ -1,7 +1,7 @@
 {
   "repository": "akhilvuputuri/chief-agent",
   "branch": "main",
-  "image": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:7939ffdc9cde73d428ed0b74e79f8122d380f6fb99b7fdd5f9956ec9de9ddfe1",
+  "image": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:a4352644c7eec50e8549460e20963d6ba2214134bcf262ee38c65e3b41835b2a",
   "model": "deepseek/deepseek-v4.1-flash",
   "leaderModel": "deepseek/deepseek-v4.1-flash",
   "reviewerModel": "openai/gpt-6.1-sol",
