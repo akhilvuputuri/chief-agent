@@ -32,7 +32,7 @@ export class SandboxTimeoutMismatch extends Error {
 }
 export interface SandboxProvider {
   create(request: SandboxRequest): Promise<string>;
-  find(attemptId: string): Promise<string | undefined>;
+  find(attemptId: string, timeoutMinutes?: number): Promise<string | undefined>;
   inspect(id: string): Promise<"running" | "terminal">;
   terminate(id: string): Promise<void>;
   terminalReason?(id: string): Promise<string | undefined>;
@@ -90,23 +90,33 @@ export class CodeBuildSandbox implements SandboxProvider {
       throw new Error(
         "Sandbox creation returned no identity; reconcile before retrying",
       );
-    const actual = result.build.timeoutInMinutes;
+    this.confirmTimeout(
+      result.build.id,
+      result.build.timeoutInMinutes,
+      r.timeoutMinutes,
+    );
+    return result.build.id;
+  }
+  private confirmTimeout(
+    id: string,
+    actual: number | undefined,
+    requested: number,
+  ) {
     if (
       !Number.isInteger(actual) ||
       actual! < 5 ||
       actual! > 2160 ||
-      actual! < r.timeoutMinutes
+      actual! < requested
     )
       throw new SandboxTimeoutMismatch(
-        result.build.id,
-        r.timeoutMinutes,
+        id,
+        requested,
         Number.isInteger(actual) && actual! >= 5 && actual! <= 2160
           ? actual
           : undefined,
       );
-    return result.build.id;
   }
-  async find(attemptId: string) {
+  async find(attemptId: string, timeoutMinutes?: number) {
     let token: string | undefined;
     // Bounded reconciliation. A missing result does not authorize a new StartBuild.
     for (let page = 0; page < 5; page++) {
@@ -125,7 +135,11 @@ export class CodeBuildSandbox implements SandboxProvider {
           (v) => v.name === "CODING_ATTEMPT_ID" && v.value === attemptId,
         ),
       );
-      if (match?.id) return match.id;
+      if (match?.id) {
+        if (timeoutMinutes !== undefined)
+          this.confirmTimeout(match.id, match.timeoutInMinutes, timeoutMinutes);
+        return match.id;
+      }
       token = list.nextToken;
       if (!token) return undefined;
     }

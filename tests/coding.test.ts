@@ -134,7 +134,8 @@ async function fixture(t: TestContext) {
       if (uncertainCreate) throw new Error("private provider error");
       return id;
     },
-    find: async (attempt: string) => sandboxes.get(attempt)?.id,
+    find: async (attempt: string, _timeoutMinutes?: number) =>
+      sandboxes.get(attempt)?.id,
     inspect: async (id: string) => {
       const s = [...sandboxes.values()].find((v) => v.id === id);
       if (!s) throw new Error("missing");
@@ -1104,6 +1105,118 @@ test("CodeBuild refuses an insufficient or unconfirmed timeout while retaining t
     );
     assert.equal(calls, 1);
   }
+});
+
+test("cancelled launch retains its rejected receipt identity without changing cancellation or relaunching", async (t) => {
+  const f = await fixture(t),
+    job = await f.start("cancelled-timeout-receipt", "plan");
+  let rejectReceipt!: () => void;
+  const receipt = new Promise<string>((_resolve, reject) => {
+    rejectReceipt = () =>
+      reject(new SandboxTimeoutMismatch("fixture:cancelled-short", 125, 45));
+  });
+  f.provider.create = async () => receipt;
+  const dispatch = f.c.tick();
+  let launching;
+  for (let i = 0; i < 30; i++) {
+    launching = await f.row(job.id);
+    if (launching.state === "provisioning") break;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(launching.state, "provisioning");
+  await f.c.call("a", f.run, { operation: "coding_cancel", id: job.id });
+  rejectReceipt();
+  await dispatch;
+  const cancelled = await f.row(job.id);
+  assert.equal(cancelled.state, "cancelled");
+  assert.equal(cancelled.summary, "Cancelled by the owner");
+  assert.equal(cancelled.sandbox_id, "fixture:cancelled-short");
+  assert.equal(cancelled.cleanup, "pending");
+  assert.equal(
+    (
+      await f.db.query(
+        "SELECT 1 FROM coding_events WHERE job_id=$1 AND event_key=$2",
+        [job.id, `${cancelled.attempt_id}:paused`],
+      )
+    ).rows.length,
+    0,
+  );
+  f.provider.find = async () => {
+    throw new Error("reconciliation must not discard a known receipt");
+  };
+  let stopped = false;
+  f.provider.inspect = async () => (stopped ? "terminal" : "running");
+  f.provider.terminate = async (id) => {
+    assert.equal(id, "fixture:cancelled-short");
+    stopped = true;
+  };
+  await f.c.tick();
+  await f.c.tick();
+  assert.equal((await f.row(job.id)).cleanup, "complete");
+  assert.equal(f.modelCalls(), 0);
+});
+
+test("restart reconciliation verifies active allocation before allowing worker authentication", async (t) => {
+  const f = await fixture(t),
+    job = await f.start("recovered-short-timeout", "plan");
+  await f.db.query(
+    "UPDATE coding_jobs SET settings=jsonb_set(settings,'{limits}', $2::jsonb) WHERE id=$1",
+    [job.id, JSON.stringify({ ms: 7200000, models: 400, tools: 1000 })],
+  );
+  await f.c.tick();
+  await f.db.query("UPDATE coding_jobs SET sandbox_id=NULL WHERE id=$1", [
+    job.id,
+  ]);
+  f.provider.find = async (_id: string, required?: number) => {
+    assert.equal(required, 125);
+    throw new SandboxTimeoutMismatch("fixture:recovered-short", 125, 45);
+  };
+  await f.c.tick();
+  const paused = await f.row(job.id);
+  assert.equal(paused.state, "paused");
+  assert.equal(paused.sandbox_id, "fixture:recovered-short");
+  assert.match(paused.summary, /accepted 45 minutes/);
+  await assert.rejects(
+    f.c.authenticate(job.id, f.c.token(job.id, paused.attempt_id)),
+    /Invalid worker capability/,
+  );
+  let stopped = false;
+  f.provider.inspect = async () => (stopped ? "terminal" : "running");
+  f.provider.terminate = async () => {
+    stopped = true;
+  };
+  await f.c.tick();
+  await f.c.tick();
+  assert.equal((await f.row(job.id)).cleanup, "complete");
+  assert.equal(f.creates(), 1);
+  assert.equal(f.modelCalls(), 0);
+});
+
+test("CodeBuild reconciliation validates active receipts while permitting cleanup lookup of a short sandbox", async () => {
+  const attempt = randomUUID();
+  const p = new CodeBuildSandbox(
+    {
+      send: async (command) =>
+        command.constructor.name === "ListBuildsForProjectCommand"
+          ? { ids: ["fixture:recovered"] }
+          : {
+              builds: [
+                {
+                  id: "fixture:recovered",
+                  timeoutInMinutes: 45,
+                  environment: {
+                    environmentVariables: [
+                      { name: "CODING_ATTEMPT_ID", value: attempt },
+                    ],
+                  },
+                },
+              ],
+            },
+    } as any,
+    "fixture-project",
+  );
+  await assert.rejects(p.find(attempt, 125), SandboxTimeoutMismatch);
+  assert.equal(await p.find(attempt), "fixture:recovered");
 });
 
 test("CodeBuild accepts a confirmed sufficient timeout", async () => {

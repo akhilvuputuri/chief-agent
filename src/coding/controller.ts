@@ -1050,8 +1050,8 @@ export class CodingController {
   ) {
     this.abortModels(j.id);
     await this.db.query(
-      `WITH changed AS (UPDATE coding_jobs SET state='paused',summary=$3,sandbox_id=COALESCE($6,sandbox_id),cleanup=CASE WHEN $5 THEN 'pending' ELSE 'none' END,model_busy=false,updated_at=now() WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') RETURNING id)
-      INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$4,jsonb_build_object('summary',$3::text) FROM changed ON CONFLICT DO NOTHING`,
+      `WITH changed AS (UPDATE coding_jobs SET state=CASE WHEN state IN ('provisioning','running') THEN 'paused' ELSE state END,summary=CASE WHEN state IN ('provisioning','running') THEN $3 ELSE summary END,sandbox_id=COALESCE($6::text,sandbox_id),cleanup=CASE WHEN state IN ('provisioning','running') THEN CASE WHEN $5 THEN 'pending' ELSE 'none' END ELSE cleanup END,model_busy=false,updated_at=now() WHERE id=$1 AND attempt_id=$2 AND (state IN ('provisioning','running') OR ($6::text IS NOT NULL AND state IN ('paused','cancelled') AND cleanup='pending')) RETURNING id,state)
+      INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$4,jsonb_build_object('summary',$3::text) FROM changed WHERE state='paused' ON CONFLICT DO NOTHING`,
       [
         j.id,
         j.attempt_id,
@@ -1138,7 +1138,24 @@ export class CodingController {
         return;
       }
       if (!j.sandbox_id) {
-        const found = await this.provider.find(j.attempt_id);
+        let found: string | undefined;
+        try {
+          found = await this.provider.find(
+            j.attempt_id,
+            active.includes(j.state)
+              ? Math.max(5, Math.ceil(j.settings.limits.ms / 60000) + 5)
+              : undefined,
+          );
+        } catch (error) {
+          if (
+            error instanceof SandboxTimeoutMismatch &&
+            active.includes(j.state)
+          ) {
+            await this.stopped(j, error.message, true, error.sandboxId);
+            return;
+          }
+          throw error;
+        }
         if (found) {
           await this.db.query(
             "UPDATE coding_jobs SET sandbox_id=$3 WHERE id=$1 AND attempt_id=$2",
