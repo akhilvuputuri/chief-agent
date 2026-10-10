@@ -35,6 +35,24 @@ const assignmentSchema = z.object({
   usedModels: z.number().int(),
 });
 type Assignment = z.infer<typeof assignmentSchema>;
+export function piReviewInstructions({
+  candidateHash,
+  plan,
+  baseSha,
+  fileCount,
+  context,
+  checks,
+}: {
+  candidateHash: string;
+  plan: string;
+  baseSha: string;
+  fileCount: number;
+  context: string;
+  checks: { command: string; exitCode: number; output: string }[];
+}): string {
+  return `Independently review this exact candidate: ${candidateHash}. Approved plan (historical starting state and desired change, not claims about the completed candidate):\n${plan}\nThe host validated owner approval before this implementation. This separate reviewer is read-only; its tool permissions do not revoke that approval. Judge whether the current candidate implements the plan; finding the requested fix already present is expected, not a reason to reject it. Base commit: ${baseSha}. Changed artifact file count: ${fileCount}.\nOriginal context:\n${context}\nPassing check receipts:\n${JSON.stringify(checks.map((c) => ({ command: c.command, exitCode: c.exitCode, output: c.output.slice(-1000) })))}\nInspect actual source. Return report kind review with APPROVE or REQUEST_CHANGES. Do not implement findings.`;
+}
+
 export interface PiWorkerClient {
   origin: string;
   token: string;
@@ -363,7 +381,14 @@ export async function runPiWorker(
       const review = await runtime.start({
         workspace: reviewRoot,
         objective: assignment.objective,
-        instructions: `Independently review this exact candidate: ${candidateHash}. Complete approved requirements:\n${assignment.checkpoint.plan}\nOriginal context:\n${assignment.context}\nPassing check receipts:\n${JSON.stringify(result.checks.map((c) => ({ command: c.command, exitCode: c.exitCode, output: c.output.slice(-1000) })))}\nInspect actual source. Return report kind review with APPROVE or REQUEST_CHANGES. Do not implement findings.`,
+        instructions: piReviewInstructions({
+          candidateHash,
+          plan: assignment.checkpoint.plan,
+          baseSha: assignment.baseSha,
+          fileCount: saved.files.length,
+          context: assignment.context,
+          checks: result.checks,
+        }),
         limits: {
           ...assignment.settings.limits,
           ms: allocationMs,

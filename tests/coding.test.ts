@@ -1,5 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { runPiWorker, NativePiWorkerClient } from "../src/coding/pi-worker.js";
+import {
+  runPiWorker,
+  NativePiWorkerClient,
+  piReviewInstructions,
+} from "../src/coding/pi-worker.js";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID, generateKeyPairSync } from "node:crypto";
@@ -2803,6 +2807,33 @@ test("a Pi default retains legacy automation support without granting it to Pi j
   assert.equal(pi.autoMerge, false);
 });
 
+test("Pi review prompt preserves maximum approved context within runtime instructions bound", () => {
+  const plan = "p".repeat(6000);
+  const context = "c".repeat(16000);
+  const instructions = piReviewInstructions({
+    candidateHash: "a".repeat(64),
+    plan,
+    baseSha: base,
+    fileCount: 100,
+    context,
+    checks: [
+      "npm ci",
+      "npm run check",
+      "npm run build",
+      "npm run format:check",
+    ].map((command) => ({ command, exitCode: 0, output: "r".repeat(32000) })),
+  });
+  assert(
+    instructions.length <= 32000,
+    `Review instructions: ${instructions.length}`,
+  );
+  assert(instructions.includes(plan));
+  assert(instructions.includes(context));
+  assert(instructions.includes("Changed artifact file count: 100"));
+  assert(instructions.includes(base));
+  assert.equal((instructions.match(/r{1000}/g) ?? []).length, 4);
+});
+
 test("Pi bridge plans, accepts bound fixture confirmation, builds, reviews and publishes a checked artifact", async (t) => {
   const f = await fixture(t);
   const root = await mkdtemp(join(tmpdir(), "pi-bridge-fixture-"));
@@ -2900,8 +2931,14 @@ test("Pi bridge plans, accepts bound fixture confirmation, builds, reviews and p
           detail: "Implemented approved behavior; actual checks follow.",
         },
       };
-    if (phase === "review" && count === 0)
+    if (phase === "review" && count === 0) {
+      assert(system.includes("historical starting state and desired change"));
+      assert(!system.includes("No implementation approved"));
+      assert(system.includes("host validated owner approval"));
+      assert(system.includes(commit));
+      assert(system.includes("Change sum.js subtraction to addition"));
       tool = { name: "read", arguments: { path: "sum.js" } };
+    }
     if (phase === "review" && count === 1)
       tool = {
         name: "report",
@@ -3197,4 +3234,146 @@ test("bundled Pi cutover snapshots new jobs while duplicate legacy requests and 
   await current.call("a", f.run, { operation: "coding_cancel", id: old.id });
   assert.equal((await f.row(old.id)).state, "cancelled");
   assert.deepEqual((await f.row(old.id)).settings, saved);
+});
+
+test("coding model-role commands snapshot new Pi jobs without changing existing jobs or other roles", async (t) => {
+  const f = await fixture(t);
+  const selected = codingSettings.parse({
+    ...settings,
+    runtime: "pi",
+    squad: false,
+    autoMerge: false,
+  });
+  const catalog = [
+    "openai/gpt-6.1-sol",
+    "anthropic/claude-sonnet-5.5",
+    "anthropic/claude-haiku-5.5",
+    "google/gemini-3.8-flash",
+    "deepseek/deepseek-v4.1-flash",
+    "qwen/qwen3.8-max-0902",
+    "z-ai/glm-5.3-flash",
+    "mistralai/mistral-large-4-0",
+  ].map((id) => ({ id, inputPrice: 1, outputPrice: 5, tools: true }));
+  const controller = new CodingController(
+    f.db,
+    selected,
+    f.provider,
+    f.publisher,
+    "c".repeat(64),
+    "https://coding.example.com",
+    (user) => user === "a",
+    () => {
+      throw new Error("Model selection does not dispatch inference");
+    },
+    undefined,
+    async () => catalog,
+  );
+  const start = async (requestKey: string) =>
+    (await controller.call("a", f.run, {
+      operation: "coding_start",
+      requestKey,
+      objective: "Plan a synthetic fix",
+      context: "Fixture",
+      mode: "plan",
+    })) as any;
+  const original = await start("original-pi-models");
+  const saved = (await f.row(original.id)).settings;
+  for (const [index, choice] of catalog.entries()) {
+    for (const role of ["leader", "coder", "reviewer"] as const) {
+      const prior = (await controller.call("a", f.run, {
+        operation: "coding_models",
+      })) as any;
+      const result = (await controller.call("a", f.run, {
+        operation: "coding_model_set",
+        role,
+        model: choice.id,
+      })) as any;
+      assert.equal(result[role], choice.id);
+      assert.equal(result.appliesTo, "new jobs only");
+      for (const other of ["leader", "coder", "reviewer"].filter(
+        (r) => r !== role,
+      ))
+        assert.equal(result[other], prior.preferences[other]);
+    }
+    const fresh = await start(`model-${index}`);
+    const snapshot = (await f.row(fresh.id)).settings;
+    assert.equal(snapshot.leaderModel, choice.id);
+    assert.equal(snapshot.model, choice.id);
+    assert.equal(snapshot.reviewerModel, choice.id);
+    assert.equal(snapshot.runtime, "pi");
+    assert.equal(snapshot.autoMerge, false);
+    assert.deepEqual((await f.row(original.id)).settings, saved);
+  }
+  await assert.rejects(
+    controller.call("b", f.run, {
+      operation: "coding_model_set",
+      role: "coder",
+      model: catalog[0].id,
+    }),
+  );
+  assert.equal(f.creates(), 0);
+  assert.equal(f.modelCalls(), 0);
+});
+
+test("Pi provider failures expose typed diagnostics without retrying uncertain model calls", async (t) => {
+  for (const [failure, code] of [
+    [
+      new ModelError("Synthetic empty provider response", true, {
+        failureCode: "empty",
+        finishReason: "stop",
+      }),
+      "model_transient_failure",
+    ],
+    [
+      new ModelError("Synthetic reasoning exhausted output", false, {
+        failureCode: "empty",
+        finishReason: "length",
+      }),
+      "model_incomplete",
+    ],
+  ] as const) {
+    const f = await fixture(t);
+    const started = await f.start(randomUUID(), "plan");
+    await f.c.tick();
+    let job = await f.row(started.id);
+    await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
+      job.id,
+      JSON.stringify({
+        ...settings,
+        runtime: "pi",
+        squad: false,
+        autoMerge: false,
+      }),
+    ]);
+    job = await f.row(job.id);
+    f.failModel(failure);
+    const app = server();
+    t.after(() => app.close());
+    await codingApi(app, f.c);
+    const callId = randomUUID();
+    const request = {
+      method: "POST" as const,
+      url: `/coding/worker/${job.id}/pi/coder/v1/chat/completions`,
+      headers: { authorization: `Bearer ${f.c.token(job.id, job.attempt_id)}` },
+      payload: {
+        runtime_call_id: callId,
+        model: settings.model,
+        messages: [{ role: "user", content: "Synthetic failure probe" }],
+        tools: [],
+      },
+    };
+    const response = await app.inject(request);
+    assert.equal(response.statusCode, 409);
+    assert.equal(response.json().code, code);
+    const saved = (
+      await f.db.query("SELECT state FROM coding_model_calls WHERE id=$1", [
+        callId,
+      ])
+    ).rows[0];
+    assert.equal(saved.state, "uncertain");
+    const status = (await f.c.status("a", job.id)) as any;
+    assert.equal(status.lastFailure.code, code);
+    await app.inject(request);
+    assert.equal(f.modelCalls(), 1);
+  }
 });
