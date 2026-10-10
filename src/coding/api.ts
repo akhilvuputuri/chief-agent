@@ -117,11 +117,9 @@ export async function codingApi(
                     );
                     continue;
                   }
-                  return reply
-                    .code(503)
-                    .send({
-                      error: "Sandbox launch acknowledgement is pending",
-                    });
+                  return reply.code(503).send({
+                    error: "Sandbox launch acknowledgement is pending",
+                  });
                 }
                 return reply
                   .code(401)
