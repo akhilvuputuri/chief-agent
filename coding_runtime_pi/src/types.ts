@@ -79,7 +79,7 @@ export type ModelConfig = {
   maxRequestBytes?: number;
 };
 export const defaultLimits: Limits = {
-  ms: 7_200_000,
+  ms: 2_400_000,
   models: 400,
   tools: 1000,
 };

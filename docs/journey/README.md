@@ -90,6 +90,7 @@ For the latest verified release and open work, read [current work](../current-wo
 
 | 10 October | [79 — Coding model compatibility](79-coding-model-compatibility.md): can coding roles switch model families without protocol pauses? | Eight-model/seven-family profile and paid command/control experiments; report-contract candidate tested, final matrix/review/image activation pending |
 | 10 October | [80 — CodeBuild timeout mismatch](80-codebuild-timeout-mismatch.md): why did a sandbox end before its saved allocation? | v0.3.65 application protection verified; provider 45-minute restriction remains unresolved |
+| 11 October | [81 — Pi planning progress](81-pi-planning-progress.md): why did 203 calls produce no plan? | Candidate bounded investigation/40-minute attempts; exact review/image/acceptance pending |
 
 ## Coding-agent learning path
 

@@ -544,7 +544,7 @@ test("a clean prose-only ending gets one report-only finalization and an exact p
   });
   const result = await runtime.run(task.id);
   assert.equal(result.status, "waiting_approval");
-  assert.equal(result.used.models, 3);
+  assert.equal(result.used.models, 2);
   assert(result.plan?.hash);
   assert.equal(
     result.events.filter(
@@ -552,6 +552,146 @@ test("a clean prose-only ending gets one report-only finalization and an exact p
     ).length,
     1,
   );
+});
+
+test("planning stops sustained exploration at a settled boundary and reports from retained evidence", async () => {
+  const f = await fixture();
+  const reads = Array.from({ length: 32 }, () => [
+    { name: "read", arguments: { path: "sum.js" } },
+  ]);
+  const runtime = new CodingRuntime({
+    store: f.store,
+    model: scripted([
+      ...reads,
+      [report("plan", "Fix sum.js and check addition in test.mjs.")],
+    ]),
+  });
+  const task = await runtime.start({
+    workspace: f.workspace,
+    objective: "Plan the entire fixture repair",
+  });
+  const result = await runtime.run(task.id);
+  assert.equal(result.status, "waiting_approval");
+  assert.equal(result.used.models, 33);
+  assert.equal(result.used.tools, 33);
+  assert.equal(result.approved, undefined);
+  const session = (await readFile(result.sessionFile!, "utf8"))
+    .split("\n")
+    .filter(Boolean)
+    .map((s) => JSON.parse(s));
+  const messages = session.map((e) => e.message).filter(Boolean);
+  assert.equal(
+    messages.filter((m) => m.role === "toolResult" && m.toolName === "read")
+      .length,
+    32,
+  );
+  assert(
+    messages.some(
+      (m) =>
+        m.role === "user" &&
+        JSON.stringify(m.content).includes("specific evidence gap"),
+    ),
+  );
+});
+
+test("planning finalization cannot keep reading or invent a plan when evidence is missing", async () => {
+  for (const final of [
+    [
+      report(
+        "question",
+        "Which behavior should the addition API implement for non-numeric input?",
+      ),
+    ],
+    [{ name: "read", arguments: { path: "sum.js" } }],
+  ]) {
+    const f = await fixture();
+    const runtime = new CodingRuntime({
+      store: f.store,
+      model: scripted([
+        ...Array.from({ length: 32 }, () => [
+          { name: "read", arguments: { path: "sum.js" } },
+        ]),
+        final,
+        [report("plan", "Must never run")],
+      ]),
+    });
+    const task = await runtime.start({
+      workspace: f.workspace,
+      objective: "Plan with missing requirements",
+    });
+    const result = await runtime.run(task.id);
+    assert.equal(result.used.models, 33);
+    assert.equal(
+      result.status,
+      final[0]?.name === "report" ? "waiting_input" : "paused",
+    );
+    assert.equal(result.plan, undefined);
+    assert.equal(result.approved, undefined);
+    assert.equal(
+      result.events.filter((e) => e.text === "tool_execution_end: read").length,
+      final[0]?.name === "report" ? 32 : 33,
+    );
+  }
+});
+
+test("planning reserves time for reporting and saves the completed investigation before handoff", async () => {
+  const f = await fixture();
+  let delayed = false;
+  let observedCheckpoint = false;
+  const runtime = new CodingRuntime({
+    store: f.store,
+    model: scripted([
+      [{ name: "read", arguments: { path: "sum.js" } }],
+      [report("question", "Which additional input semantics are required?")],
+    ]),
+    onCheckpoint: async (task) => {
+      if (!delayed && task.events.at(-1)?.text === "tool_execution_end: read") {
+        delayed = true;
+        await new Promise((resolve) => setTimeout(resolve, 7600));
+        observedCheckpoint = true;
+      }
+    },
+    onEvent: async (_task, event) => {
+      if (event.text === "Requesting one structured final report")
+        assert(observedCheckpoint);
+    },
+  });
+  const task = await runtime.start({
+    workspace: f.workspace,
+    objective: "Plan under a short allocation",
+    limits: { ms: 10000, models: 40, tools: 100 },
+  });
+  const result = await runtime.run(task.id);
+  assert.equal(result.status, "waiting_input");
+  assert.equal(result.used.models, 2);
+  assert.equal(result.used.tools, 2);
+  assert(result.used.ms < 10000);
+  assert.equal(result.plan, undefined);
+});
+
+test("owner cancellation at the planning handoff prevents any reporting call", async () => {
+  const f = await fixture();
+  const runtime = new CodingRuntime({
+    store: f.store,
+    model: scripted([
+      ...Array.from({ length: 32 }, () => [
+        { name: "read", arguments: { path: "sum.js" } },
+      ]),
+      [report("plan", "Unreachable")],
+    ]),
+    onEvent: async (task, event) => {
+      if (event.text === "Requesting one structured final report")
+        await runtime.cancel(task.id);
+    },
+  });
+  const task = await runtime.start({
+    workspace: f.workspace,
+    objective: "Plan then cancel",
+  });
+  const result = await runtime.run(task.id);
+  assert.equal(result.status, "cancelled");
+  assert.equal(result.used.models, 32);
+  assert.equal(result.plan, undefined);
 });
 
 test("repeated prose-only endings pause after one finalization without granting approval", async () => {

@@ -2,6 +2,8 @@
 
 A TypeScript library and CLI for repository learning, planning and explicitly approved builds. Pi 1.1.0 supplies the agent/tool loop, native model protocol implementation, sessions and compaction. This package has no Chief, Telegram, database, GitHub account or AWS dependency. Copy this directory to another repository and run the same install/build/check commands.
 
+Planning uses a focused investigation pass: after 32 navigation operations or ten minutes, at the next settled turn boundary (three quarters of a shorter remaining time allocation). Then one report-only generation returns a complete source-grounded plan or a specific question about missing evidence. Checkpoints settle before the handoff. Invalid/ignored reporting pauses without authorizing implementation. The standalone default active allocation is 40 minutes; model/tool allocations remain 400/1,000. Clients may supply their own allocations.
+
 ## Setup
 
 Use Node 22.19.0 or newer. The worker and CI pin 22.19.0. Install without dependency lifecycle scripts:

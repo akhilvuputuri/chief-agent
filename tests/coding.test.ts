@@ -281,6 +281,40 @@ async function fixture(t: TestContext) {
   };
 }
 
+test("historical two-hour Pi settings use a 40-minute active attempt and a verified 45-minute sandbox", async (t) => {
+  const f = await fixture(t),
+    job = await f.start("pi-bounded-attempt", "plan");
+  const historical = {
+    ...settings,
+    runtime: "pi",
+    squad: false,
+    autoMerge: false,
+    limits: { ms: 7200000, models: 400, tools: 1000 },
+  };
+  await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
+    job.id,
+    JSON.stringify(historical),
+  ]);
+  await f.c.tick();
+  let current = await f.row(job.id);
+  assert.equal(f.sandboxRequests()[0].timeoutMinutes, 45);
+  assert.deepEqual((await f.c.assignment(current)).settings, historical);
+  await f.c.heartbeat(current);
+  current = await f.row(job.id);
+  assert.equal(
+    new Date(current.attempt_deadline).getTime() -
+      new Date(current.heartbeat_at).getTime(),
+    2400000,
+  );
+  const deadline = new Date(current.attempt_deadline).getTime();
+  await f.c.heartbeat(current);
+  assert.equal(
+    new Date((await f.row(job.id)).attempt_deadline).getTime(),
+    deadline,
+  );
+  assert.deepEqual((await f.c.status("a", job.id)).limits, historical.limits);
+});
+
 test("expanded coding allocations survive assignment, provisioning, status and checkpoint validation", async (t) => {
   const limits = { ms: 7200000, models: 400, tools: 1000 };
   const expanded = codingSettings.parse({
@@ -3642,7 +3676,7 @@ test("bundled Pi cutover snapshots new jobs while duplicate legacy requests and 
   assert.equal(record.settings.runtime, "pi");
   assert.equal(record.settings.image, pi.image);
   assert.equal(record.settings.autoMerge, false);
-  assert.deepEqual(record.settings.limits, saved.limits);
+  assert.deepEqual(record.settings.limits, { ...saved.limits, ms: 2400000 });
   assert.equal(record.mode, "plan");
   assert.equal(f.creates(), 0);
   const rolledBack = await start(prior, "after-rollback");

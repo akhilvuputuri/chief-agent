@@ -75,6 +75,14 @@ export class CodingController {
   readonly requirements: CodingRequirements;
   private ticking = false;
   private delivering = false;
+  private activeMs(job: CodingJob) {
+    // Per-attempt operational ceiling; preserve historical settings and require
+    // explicit owner resumption. Legacy runtimes retain their original allocation.
+    return Math.min(
+      job.settings.limits.ms,
+      job.settings.runtime === "pi" ? 2_400_000 : job.settings.limits.ms,
+    );
+  }
   private automation?: CodingAutomation;
   private inFlightModels = new Map<
     string,
@@ -610,7 +618,10 @@ export class CodingController {
         [job.id, `feedback:${job.revision}`],
       )
     ).rows[0]?.payload;
-    const activeMs = feedback?.remainingMs ?? job.settings.limits.ms;
+    const activeMs = Math.min(
+      feedback?.remainingMs ?? job.settings.limits.ms,
+      this.activeMs(job),
+    );
     const update = await this.db.query(
       "UPDATE coding_jobs SET heartbeat_at=$3,attempt_deadline=CASE WHEN state='provisioning' THEN $3::timestamptz + ($4::bigint * interval '1 millisecond') ELSE attempt_deadline END,state='running',updated_at=now() WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') RETURNING id",
       [job.id, job.attempt_id, this.clock(), activeMs],
@@ -1125,7 +1136,7 @@ export class CodingController {
             runtime: j.settings.runtime ?? "node",
             timeoutMinutes: Math.max(
               5,
-              Math.ceil(j.settings.limits.ms / 60000) + 5,
+              Math.ceil(this.activeMs(j) / 60000) + 5,
             ),
           });
           await this.db.query(
@@ -1151,7 +1162,7 @@ export class CodingController {
           found = await this.provider.find(
             j.attempt_id,
             active.includes(j.state)
-              ? Math.max(5, Math.ceil(j.settings.limits.ms / 60000) + 5)
+              ? Math.max(5, Math.ceil(this.activeMs(j) / 60000) + 5)
               : undefined,
           );
         } catch (error) {

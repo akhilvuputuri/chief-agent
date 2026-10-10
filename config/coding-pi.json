@@ -7,7 +7,7 @@
   "reviewerModel": "openai/gpt-6.1-sol",
   "effort": "high",
   "limits": {
-    "ms": 7200000,
+    "ms": 2400000,
     "models": 400,
     "tools": 1000
   },
