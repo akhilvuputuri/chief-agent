@@ -1,6 +1,6 @@
 # 78 — Does the native adapter accept the real Pi tool continuation?
 
-Work date: 10 October 2026. Status: live failure reproduced, candidate regression fix and direct real-model fixture pass; exact review/release pending.
+Work date: 10 October 2026. Status: released v0.3.62; deployed schema and startup health verified, direct real-model fixture passes. Original owner job remains paused; its task outcome is unmeasured.
 
 ## User-visible problem and preceding iteration
 
@@ -40,3 +40,11 @@ Ship the reviewed correction and verify the exact deployed SHA/health. Preserve 
 ### Live accounting and limits — 10 October 2026
 
 The synthetic fixture succeeded once using the candidate adapter, not the deployed production endpoint. Across all 18 reported calls, OpenRouter reported 44,832 prompt tokens, 6,220 completion tokens and USD 0.0174043129 model cost. Prompt accounting does not distinguish cached tokens in the retained aggregate; host/container and networking costs are excluded. These are provider-reported values, not a measured saving or a dollar allocation cap. Its host-side facade supplied the real configured OpenRouter models and price filters, without Chief chat, production job changes, Telegram delivery/approval records, durable host model-call journalling or PR publication. It is standalone/provider/adapter acceptance, not acceptance of the owner's repository task or the complete Chief lifecycle. The original owner job remains paused with completed cleanup. The next live check is an explicitly resumed/new owner task after the reviewed release.
+
+### Release closure — 10 October 2026
+
+[PR 209](https://github.com/akhilvuputuri/chief-agent/pull/209) received independent APPROVE of exact head `4ac10a6aefa033eec695092ff35a59cdc7be2180` and passing Devin/hosted checks. The reviewer was explicitly configured GPT-6 Astra; exact serving identity was not exposed in its session. Independent validation covered all 66 coding tests (two localhost-restricted tests passed on permitted rerun), both native fixtures and nonempty/type/length/Unicode/reviewer/model-pin counterexamples. Full local required checks/build/format passed 1,030 tests; hosted Linux/extraction checks passed.
+
+[Exact release](https://github.com/akhilvuputuri/chief-agent/actions/runs/38026894859) succeeded at 05:19:14 UTC, deploying `1c196c168710e776d1a513bb357a323bf851529b` with startup health. A separate bounded private observation recorded the new gateway starting at 05:18:50 UTC. A zero-inference deployed-module smoke reported v0.3.62/default Pi, accepted the DeepSeek compatibility field, and rejected unknown/malformed fields. Its owner-scoped read confirmed the original planning job remained paused with one completed model call and cleanup complete. No job or approval row was changed. Immutable [v0.3.62](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.62) identifies this fix; the worker image did not change.
+
+The direct real-model fixture demonstrates standalone harness/native facade/provider behavior on one seeded bug. Deployment/schema acceptance does not establish completion of the owner's repository task, Chief delivery or a generally improved coding-quality/cost result. No paused job was automatically resumed.

@@ -86,7 +86,7 @@ For the latest verified release and open work, read [current work](../current-wo
 
 | 9–10 October | [77 — Independent Pi implementation](77-pi-runtime.md): can a dependency replace coding mechanics while Chief remains a client? | v0.3.61 Pi default released; exact review/Linux/release/health verified; real-model acceptance unmeasured |
 
-| 10 October | [78 — Pi native continuation](78-pi-native-continuation.md): does the facade accept the actual model compatibility profile? | One live planning failure reproduced; bounded schema fix/regressions pass; direct live trial/review/release pending |
+| 10 October | [78 — Pi native continuation](78-pi-native-continuation.md): does the facade accept the actual model compatibility profile? | v0.3.62 fix released; actual-profile regressions, real-model fixture, exact review/release/deployed schema pass; original owner job paused |
 
 ## Coding-agent learning path
 
