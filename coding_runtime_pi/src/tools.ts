@@ -21,7 +21,7 @@ export function tools(
   intent: Intent,
   execute: Executor | undefined,
   report: (r: Report) => void,
-  admit: () => Promise<void>,
+  admit: (name: string) => Promise<void>,
 ): ToolDefinition<any, any>[] {
   const cwd = workspace.requestedRoot;
   const read = async (path: string) => {
@@ -225,7 +225,7 @@ export function tools(
     execute: async (
       ...args: Parameters<ToolDefinition<any, any>["execute"]>
     ) => {
-      await admit();
+      await admit(tool.name);
       return tool.execute(...args);
     },
   }));

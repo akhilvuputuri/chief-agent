@@ -9,6 +9,7 @@ import { CodingRuntime, TaskStore, compatibleModel } from "../src/index.js";
 
 for (const choice of [
   { provider: "synthetic", model: "synthetic/model", deepseek: false },
+  { provider: "synthetic", model: "synthetic/handoff", deepseek: false },
   {
     provider: "openrouter",
     model: "deepseek/deepseek-v4.1-flash",
@@ -26,45 +27,48 @@ for (const choice of [
 ])
   test(`native Pi ${choice.model} protocol performs tool continuation, request identity and Unicode without paid inference`, async (t) => {
     const bodies: any[] = [];
+    const investigationTurns = choice.model === "synthetic/handoff" ? 32 : 1;
     const server = createServer(async (req, res) => {
       assert.equal(req.headers.authorization, "Bearer synthetic-capability");
       let text = "";
       for await (const chunk of req) text += chunk;
       const body = JSON.parse(text);
       bodies.push(body);
-      const tool = bodies.length === 1;
-      const message = tool
-        ? {
-            role: "assistant",
-            content: null,
-            reasoning_details: [
-              { type: "reasoning.text", text: "Synthetic reasoning", id: "r1" },
-              {
-                type: "reasoning.encrypted",
-                data: "synthetic-opaque-signature",
-                id: "signature1",
-                format: "unknown",
-                index: 1,
-              },
-            ],
-            tool_calls: [
-              {
-                index: 0,
-                id: "report-call",
-                type: "function",
-                function: {
-                  name: "report",
-                  arguments: JSON.stringify({
-                    kind: "plan",
-                    summary: "Fix café sum",
-                    detail:
-                      "Use addition in sum.js. Check Unicode café and sum(2,3)=5.",
-                  }),
-                },
-              },
-            ],
-          }
-        : { role: "assistant", content: "Finished café." };
+      const tool = bodies.length <= investigationTurns;
+      const message = {
+        role: "assistant",
+        content: null,
+        reasoning_details: [
+          { type: "reasoning.text", text: "Synthetic reasoning", id: "r1" },
+          {
+            type: "reasoning.encrypted",
+            data: "synthetic-opaque-signature",
+            id: "signature1",
+            format: "unknown",
+            index: 1,
+          },
+        ],
+        tool_calls: [
+          {
+            index: 0,
+            id: tool ? "read-call" : "report-call",
+            type: "function",
+            function: {
+              name: tool ? "read" : "report",
+              arguments: JSON.stringify(
+                tool
+                  ? { path: "sum.js" }
+                  : {
+                      kind: "plan",
+                      summary: "Fix café sum",
+                      detail:
+                        "Use addition in sum.js. Check Unicode café and sum(2,3)=5.",
+                    },
+              ),
+            },
+          },
+        ],
+      };
       const chunk = {
         id: "synthetic",
         object: "chat.completion.chunk",
@@ -74,9 +78,7 @@ for (const choice of [
       };
       const end = {
         ...chunk,
-        choices: [
-          { index: 0, delta: {}, finish_reason: tool ? "tool_calls" : "stop" },
-        ],
+        choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
         usage: { prompt_tokens: 50, completion_tokens: 20, total_tokens: 70 },
       };
       res.writeHead(200, { "content-type": "text/event-stream" });
@@ -104,6 +106,10 @@ for (const choice of [
       "synthetic@example.invalid",
     ]);
     await writeFile(join(workspace, "sum.js"), "// synthetic\n");
+    await writeFile(
+      join(workspace, "AGENTS.md"),
+      "Synthetic project rule: preserve the owner-selected objective.\n",
+    );
     execFileSync("git", ["-C", workspace, "add", "."]);
     execFileSync("git", ["-C", workspace, "commit", "-qm", "Fixture"]);
     const runtime = new CodingRuntime({
@@ -128,11 +134,32 @@ for (const choice of [
     const result = await runtime.run(task.id);
     assert.equal(result.status, "waiting_approval");
     assert(result.plan?.text.includes("café"));
-    assert.equal(bodies.length, 2);
+    assert.equal(bodies.length, investigationTurns + 1);
+    if (investigationTurns === 32) {
+      const final = bodies.at(-1);
+      assert.equal(final.messages[0].role, "system");
+      assert(
+        final.messages[0].content.includes("Host workflow phase: final report"),
+      );
+      assert(final.messages[0].content.includes("Plan the synthetic fix"));
+      assert(
+        final.messages[0].content.includes(
+          "preserve the owner-selected objective",
+        ),
+      );
+      assert.equal(
+        final.messages.filter((m: any) => m.role === "system").length,
+        1,
+      );
+      assert.deepEqual(
+        final.tools.map((t: any) => t.function.name),
+        bodies[0].tools.map((t: any) => t.function.name),
+      );
+    }
     assert.notEqual(bodies[0].runtime_call_id, bodies[1].runtime_call_id);
     assert(
       bodies[1].messages.some(
-        (m: any) => m.role === "tool" && m.tool_call_id === "report-call",
+        (m: any) => m.role === "tool" && m.tool_call_id === "read-call",
       ),
     );
     assert(
@@ -155,5 +182,5 @@ for (const choice of [
       continued.reasoning_details.find((r: any) => r.id === "signature1").data,
       "synthetic-opaque-signature",
     );
-    assert.equal(result.used.models, 2);
+    assert.equal(result.used.models, investigationTurns + 1);
   });

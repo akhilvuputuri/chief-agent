@@ -19,6 +19,7 @@ import {
 
 function scripted(
   replies: Array<Array<{ name: string; arguments: Record<string, unknown> }>>,
+  stopReason?: string | number,
 ): ModelFactory {
   return async (admit) => {
     const runtime = await ModelRuntime.create({
@@ -74,7 +75,14 @@ function scripted(
                 total: 0,
               },
             },
-            stopReason: calls.length ? "toolUse" : "stop",
+            stopReason:
+              typeof stopReason === "string"
+                ? stopReason
+                : index === stopReason
+                  ? "length"
+                  : calls.length
+                    ? "toolUse"
+                    : "stop",
             timestamp: Date.now(),
           };
           stream.push({ type: "start", partial: message });
@@ -412,11 +420,11 @@ test("cancellation from another client stops the active command and preserves te
   assert(Date.now() - started < 5000);
   assert.equal(stopped.checks.length, 0);
 });
-test("allocation exhaustion cannot promote a report from an unfinished model run", async () => {
+test("truncated model output cannot promote its unexecuted report", async () => {
   const f = await fixture();
   const runtime = new CodingRuntime({
     store: f.store,
-    model: scripted([[report("plan", "Proposed plan")]]),
+    model: scripted([[report("plan", "Proposed plan")]], "length"),
   });
   const task = await runtime.start({
     workspace: f.workspace,
@@ -427,6 +435,32 @@ test("allocation exhaustion cannot promote a report from an unfinished model run
   assert.equal(result.status, "paused");
   assert.equal(result.plan, undefined);
   assert.equal(result.used.models, 1);
+});
+
+test("a valid plan with other reads in its batch ends after that settled batch", async () => {
+  const f = await fixture();
+  const runtime = new CodingRuntime({
+    store: f.store,
+    model: scripted([
+      [
+        report("plan", "Fix sum.js and check it."),
+        { name: "read", arguments: { path: "sum.js" } },
+      ],
+      ...Array.from({ length: 40 }, () => [
+        { name: "read", arguments: { path: "sum.js" } },
+      ]),
+    ]),
+  });
+  const task = await runtime.start({
+    workspace: f.workspace,
+    objective: "Plan",
+    limits: { ms: 10000, models: 1, tools: 100 },
+  });
+  const result = await runtime.run(task.id);
+  assert.equal(result.status, "waiting_approval");
+  assert.equal(result.used.models, 1);
+  assert.equal(result.used.tools, 2);
+  assert.equal(result.approved, undefined);
 });
 
 test("private directory whose name starts with dots is still inside the workspace", async () => {
@@ -594,6 +628,78 @@ test("planning stops sustained exploration at a settled boundary and reports fro
   );
 });
 
+test("a truncated report pauses even when retained history allows native compaction recovery", async () => {
+  const f = await fixture();
+  await writeFile(
+    join(f.workspace, "sum.js"),
+    "// retained source evidence\n".repeat(150),
+  );
+  const runtime = new CodingRuntime({
+    store: f.store,
+    model: scripted(
+      [
+        ...Array.from({ length: 32 }, () => [
+          { name: "read", arguments: { path: "sum.js" } },
+        ]),
+        [report("plan", "Truncated report")],
+        [report("plan", "Must never recover automatically")],
+      ],
+      33,
+    ),
+  });
+  const task = await runtime.start({
+    workspace: f.workspace,
+    objective: "Plan from substantial source history",
+  });
+  const result = await runtime.run(task.id);
+  assert.equal(result.status, "paused");
+  assert.equal(result.used.models, 33);
+  assert.equal(result.plan, undefined);
+  const entries = (await readFile(result.sessionFile!, "utf8"))
+    .split("\n")
+    .filter(Boolean)
+    .map((s) => JSON.parse(s));
+  assert.equal(entries.filter((e) => e.type === "compaction").length, 0);
+});
+
+test("one rejected navigation attempt can be corrected into a report without executing more source reads", async () => {
+  const f = await fixture();
+  const runtime = new CodingRuntime({
+    store: f.store,
+    model: scripted([
+      ...Array.from({ length: 32 }, () => [
+        { name: "read", arguments: { path: "sum.js" } },
+      ]),
+      [{ name: "read", arguments: { path: "sum.js" } }],
+      [
+        report(
+          "question",
+          "What non-numeric input behavior should be retained?",
+        ),
+      ],
+    ]),
+  });
+  const task = await runtime.start({
+    workspace: f.workspace,
+    objective: "Plan from bounded investigation",
+  });
+  const result = await runtime.run(task.id);
+  assert.equal(result.status, "waiting_input");
+  assert.equal(result.used.models, 34);
+  assert.equal(result.used.tools, 33);
+  const entries = (await readFile(result.sessionFile!, "utf8"))
+    .split("\n")
+    .filter(Boolean)
+    .map((s) => JSON.parse(s));
+  const reads = entries
+    .map((e) => e.message)
+    .filter((m) => m?.role === "toolResult" && m.toolName === "read");
+  assert.equal(reads.length, 33);
+  assert.equal(reads.filter((m) => !m.isError).length, 32);
+  assert(reads.at(-1).isError);
+  assert.equal(result.plan, undefined);
+});
+
 test("planning finalization cannot keep reading or invent a plan when evidence is missing", async () => {
   for (const final of [
     [
@@ -612,6 +718,7 @@ test("planning finalization cannot keep reading or invent a plan when evidence i
           { name: "read", arguments: { path: "sum.js" } },
         ]),
         final,
+        [{ name: "read", arguments: { path: "sum.js" } }],
         [report("plan", "Must never run")],
       ]),
     });
@@ -620,7 +727,7 @@ test("planning finalization cannot keep reading or invent a plan when evidence i
       objective: "Plan with missing requirements",
     });
     const result = await runtime.run(task.id);
-    assert.equal(result.used.models, 33);
+    assert.equal(result.used.models, final[0]?.name === "report" ? 33 : 34);
     assert.equal(
       result.status,
       final[0]?.name === "report" ? "waiting_input" : "paused",
@@ -629,7 +736,7 @@ test("planning finalization cannot keep reading or invent a plan when evidence i
     assert.equal(result.approved, undefined);
     assert.equal(
       result.events.filter((e) => e.text === "tool_execution_end: read").length,
-      final[0]?.name === "report" ? 32 : 33,
+      final[0]?.name === "report" ? 32 : 34,
     );
   }
 });
