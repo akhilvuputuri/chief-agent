@@ -1,7 +1,7 @@
 {
   "repository": "akhilvuputuri/chief-agent",
   "branch": "main",
-  "image": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:a4352644c7eec50e8549460e20963d6ba2214134bcf262ee38c65e3b41835b2a",
+  "image": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:5cfe2415d9df069f91623deeea6fb35fa4762089403e3242bfbe86d96ffda6a8",
   "model": "deepseek/deepseek-v4.1-flash",
   "leaderModel": "deepseek/deepseek-v4.1-flash",
   "reviewerModel": "openai/gpt-6.1-sol",
@@ -13,5 +13,6 @@
   },
   "runtime": "pi",
   "squad": false,
-  "autoMerge": false
+  "autoMerge": false,
+  "maxOutputTokens": 16000
 }
