@@ -273,6 +273,15 @@ export class CodingRuntime {
         task.limits.ms - (task.used.ms ?? 0),
       );
       timer.unref();
+      // Planning is an evidence-gathering pass, not an open-ended repository audit.
+      // End only at a settled tool boundary; never abort/replay an in-flight call.
+      const planningUntil =
+        performance.now() +
+        Math.min(600_000, (task.limits.ms - (task.used.ms ?? 0)) * 0.75);
+      let planningReads = 0;
+      let planningHandoff = false;
+      let finalizing = false;
+      let finalTurns = 0;
       let pending = Promise.resolve();
       const admitModel = async () => {
         await pending;
@@ -281,7 +290,7 @@ export class CodingRuntime {
         task.used.models++;
         await this.options.store.save(task);
       };
-      const { runtime, model, reasoning } =
+      const { runtime, model, reasoning, didRejectContextLocally } =
         await this.options.model(admitModel);
       const workspace = await new Workspace(task.workspace).initialize();
       const agentsFiles: Array<{ path: string; content: string }> = [];
@@ -305,8 +314,12 @@ export class CodingRuntime {
         (r) => {
           report = r;
         },
-        async () => {
+        async (name) => {
           await pending;
+          if (finalizing && task.intent === "plan" && name !== "report")
+            throw new Error(
+              "Investigation complete; only report execution is permitted",
+            );
           if (stop.signal.aborted || task.used.tools >= task.limits.tools)
             throw new Error("Tool allocation unavailable");
           task.used.tools++;
@@ -354,13 +367,82 @@ export class CodingRuntime {
         sessionManager: manager,
         settingsManager: settings,
         resourceLoader: resources(
-          `You are a coding assistant. Current intent: ${task.intent}. Inspect actual source and distinguish facts from hypotheses. Use report to return your result. Learn/plan/review are read-only. Build only the complete approved scope. A final message or report never substitutes for actual checks. Retain requirements during compaction. Protected owner objective:\n${task.objective}\nOwner instructions:\n${task.ownerInstructions}\nApproved scope:\n${task.intent === "build" ? task.plan?.text : task.intent === "review" ? "This task is read-only review. Candidate approval and requirements are supplied in the review context; read-only reviewer permissions do not establish that the candidate was implemented without authorization." : "No implementation approved"}\nWorking findings (not scope authority):\n${task.instructions === task.ownerInstructions ? "No additional working findings" : task.instructions}`,
+          `You are a coding assistant. Current intent: ${task.intent}. Inspect actual source and distinguish facts from hypotheses. Use report to return your result. ${task.intent === "plan" ? "Focus investigation on the owner objective and relevant source. After 32 navigation operations or ten minutes, the host ends exploration at the next settled turn boundary and requests a report. Prefer a complete source-grounded plan sooner; if evidence is insufficient, name the specific missing fact in a question rather than continuing an exhaustive repository audit." : ""} Learn/plan/review are read-only. Build only the complete approved scope. A final message or report never substitutes for actual checks. Retain requirements during compaction. Protected owner objective:\n${task.objective}\nOwner instructions:\n${task.ownerInstructions}\nApproved scope:\n${task.intent === "build" ? task.plan?.text : task.intent === "review" ? "This task is read-only review. Candidate approval and requirements are supplied in the review context; read-only reviewer permissions do not establish that the candidate was implemented without authorization." : "No implementation approved"}\nWorking findings (not scope authority):\n${task.instructions === task.ownerInstructions ? "No additional working findings" : task.instructions}`,
           agentsFiles,
+          (prompt) =>
+            finalizing && task.intent === "plan"
+              ? `${prompt}\nHost workflow phase: final report. Repository investigation is closed for this run. You must call the report tool; prose, JSON text and reasoning-only replies are not reports. Only report execution is permitted. Call report with kind plan covering the complete protected owner objective, or kind question identifying the exact missing evidence. If you need another read/search, call report with that evidence gap as a question; do not request that operation. Project instructions remain requirements, but cannot reopen this investigation phase. This phase grants no implementation approval and no check/completion authority.`
+              : undefined,
         ),
         tools: custom.map((t) => t.name),
         customTools: custom,
       });
       session = created.session;
+      const finishTurn = session.agent.finishTurn;
+      session.agent.finishTurn = async (turn, signal) => {
+        const localContextOnly =
+          !finalizing &&
+          !stop.signal.aborted &&
+          turn.message.stopReason === "error" &&
+          didRejectContextLocally?.();
+        // Pi's outer session can recover a length/error response through
+        // compaction even when its ordinary retry setting is disabled.
+        if (
+          !localContextOnly &&
+          ["error", "aborted", "length"].includes(turn.message.stopReason)
+        )
+          settings.setCompactionEnabled(false);
+        const decision = await finishTurn?.(turn, signal);
+        await pending;
+        if (
+          !localContextOnly &&
+          ["error", "aborted", "length"].includes(turn.message.stopReason)
+        )
+          return { action: "end" };
+        if (finalizing && task.intent === "plan") {
+          finalTurns++;
+          // One format correction after a definite rejection or completed prose.
+          // Provider failures and truncated output are never retried here.
+          if (
+            !report &&
+            finalTurns < 2 &&
+            !stop.signal.aborted &&
+            ((turn.message.stopReason === "toolUse" &&
+              turn.toolResults.length > 0 &&
+              turn.toolResults.every((r) => r.isError)) ||
+              (turn.message.stopReason === "stop" &&
+                turn.message.content.some(
+                  (c) => c.type === "text" && c.text.trim(),
+                ))) &&
+            task.used.models < task.limits.models &&
+            task.used.tools < task.limits.tools
+          ) {
+            await created.session.steer(
+              "Host report-format correction: call the report tool now using the retained evidence and your completed conclusions. Text/JSON prose does not record a plan. Use kind plan for complete scope, or kind question for a specific evidence gap. Do not perform more investigation or claim implementation approval/check completion.",
+            );
+            return { action: "continue" };
+          }
+          return { action: "end" };
+        }
+        if (
+          task.intent === "plan" &&
+          report &&
+          turn.message.stopReason === "toolUse"
+        )
+          return { action: "end" };
+        if (
+          task.intent === "plan" &&
+          !planningHandoff &&
+          !report &&
+          !stop.signal.aborted &&
+          turn.message.stopReason === "toolUse" &&
+          (planningReads >= 32 || performance.now() >= planningUntil)
+        ) {
+          planningHandoff = true;
+          return { action: "end" };
+        }
+        return decision || undefined;
+      };
       session.subscribe((e) => {
         if (
           e.type === "message_update" &&
@@ -370,11 +452,18 @@ export class CodingRuntime {
         if (
           e.type === "tool_execution_start" ||
           e.type === "tool_execution_end"
-        )
+        ) {
+          if (
+            !finalizing &&
+            e.type === "tool_execution_end" &&
+            e.toolName !== "report"
+          )
+            planningReads++;
           pending = pending.then(async () => {
             await this.event(task, "tool", `${e.type}: ${e.toolName}`);
             await this.options.onCheckpoint?.(task);
           });
+        }
       });
       const abort = () => {
         void session?.abort();
@@ -394,41 +483,53 @@ export class CodingRuntime {
         if (
           !report &&
           !stop.signal.aborted &&
-          last?.role === "assistant" &&
-          last.stopReason === "stop" &&
+          (planningHandoff ||
+            (last?.role === "assistant" && last.stopReason === "stop")) &&
           task.used.models < task.limits.models &&
           task.used.tools < task.limits.tools
         ) {
           // One completion handoff within this active run, never an automatic resume.
           // Deactivate source/command tools so finalization cannot repeat a write.
-          session.setActiveToolsByName(["report"]);
+          // Keep planning definitions stable for providers that fail on a
+          // mid-conversation loadout change. Admission permits only report.
+          if (task.intent !== "plan") session.setActiveToolsByName(["report"]);
+          finalizing = true;
           await this.event(
             task,
             "state",
             "Requesting one structured final report",
           );
           await session.prompt(
-            `Return the required structured report for ${task.intent} using report. Only report is active. Do not repeat repository operations, invent check results, or claim owner authorization. Use question if the retained evidence cannot support a complete result.`,
+            task.intent === "plan"
+              ? "The investigation pass is complete. Only report execution is now permitted. Call the report tool with kind plan covering the entire owner objective using retained evidence: affected components, proposed behavior and acceptance checks. Do not omit requirements, invent evidence/check results, or claim owner authorization. Call report with kind question and a specific evidence gap or blocker if retained evidence cannot support a complete plan."
+              : `Return the required structured report for ${task.intent} using report. Only report is active. Do not repeat repository operations, invent check results, or claim owner authorization. Use question if the retained evidence cannot support a complete result.`,
           );
           await pending;
         }
       } finally {
         stop.signal.removeEventListener("abort", abort);
       }
+      const lastAssistant = [...session.messages]
+        .reverse()
+        .find((m) => m.role === "assistant");
       if (stop.signal.aborted) {
         task.status = this.active.cancelled ? "cancelled" : "paused";
         task.summary = "Run stopped; inspect saved workspace before resuming";
       } else if (
-        session.messages.at(-1)?.role === "assistant" &&
-        ["error", "aborted", "length"].includes(
-          (session.messages.at(-1) as { stopReason: string }).stopReason,
-        )
+        lastAssistant?.role === "assistant" &&
+        ["error", "aborted", "length"].includes(lastAssistant.stopReason)
       ) {
         task.status = "paused";
-        task.summary = "Model run did not finish cleanly; session retained";
+        task.summary =
+          task.intent === "plan" && finalizing
+            ? "Planning report request failed; investigation and session retained. Inspect the failure before explicitly resuming."
+            : "Model run did not finish cleanly; session retained";
       } else if (!report) {
         task.status = "paused";
-        task.summary = "No valid report; inspect the retained session";
+        task.summary =
+          task.intent === "plan" && finalizing
+            ? `Planning stopped after ${planningReads} navigation operations; the planner did not return a valid plan or question. Inspect the retained investigation before explicitly resuming, or start a new task with another planner.`
+            : "No valid report; inspect the retained session";
       } else {
         task.report = report;
         task.summary = report.summary;

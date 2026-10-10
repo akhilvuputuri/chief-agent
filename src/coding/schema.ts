@@ -159,6 +159,7 @@ export const codingSettings = z
     runtime: z.enum(["node", "python", "pi"]).optional(),
     harnessVersion: z.literal(2).optional(),
     effort: z.enum(["low", "medium", "high"]),
+    maxOutputTokens: z.number().int().positive().max(16000).optional(),
     limits: z
       .object({
         ms: z.number().int().positive().max(7200000),
@@ -169,6 +170,11 @@ export const codingSettings = z
   })
   .strict()
   .superRefine((value, ctx) => {
+    if (value.maxOutputTokens !== undefined && value.runtime !== "pi")
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Explicit output allowance belongs to the Pi profile",
+      });
     if (
       value.runtime === "pi" &&
       (value.squad || value.harnessVersion || value.autoMerge)

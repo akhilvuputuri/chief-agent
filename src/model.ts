@@ -60,6 +60,10 @@ export interface ModelAdapter {
     sessionId?: string;
     /** Sent as OpenRouter session_id instead of sessionId; prompt caches are partitioned by it. */
     cacheKey?: string;
+    /** Coding opt-in: accept only confirmed complete provider responses. */
+    requireComplete?: boolean;
+    /** Trusted per-request output allowance; ordinary callers retain 8,000. */
+    maxOutputTokens?: number;
     /** Coding-only opt-in. Ordinary assistant requests keep their existing path. */
     stream?: boolean;
     onProgress?: (value: StreamProgress) => Promise<void> | void;
@@ -88,6 +92,13 @@ export class OpenRouter implements ModelAdapter {
   async generate(
     input: Parameters<ModelAdapter["generate"]>[0],
   ): Promise<Generation> {
+    const maxOutputTokens = input.maxOutputTokens ?? 8000;
+    if (
+      !Number.isSafeInteger(maxOutputTokens) ||
+      maxOutputTokens < 1 ||
+      maxOutputTokens > 16000
+    )
+      throw new Error("Invalid model output allowance");
     const ledger = spending.getStore();
     const estimate =
       ((estimateInputBytes(input.messages) +
@@ -96,7 +107,7 @@ export class OpenRouter implements ModelAdapter {
         this.inputPrice *
         1.25) /
         1e6 +
-      (8000 * this.outputPrice) / 1e6;
+      (maxOutputTokens * this.outputPrice) / 1e6;
     const charge = await ledger?.begin("openrouter-main", estimate);
     let response: Response;
     try {
@@ -125,7 +136,7 @@ export class OpenRouter implements ModelAdapter {
               },
               require_parameters: true,
             },
-            max_tokens: 8000,
+            max_tokens: maxOutputTokens,
             stream: input.stream ?? false,
           }),
         },
@@ -198,6 +209,15 @@ export class OpenRouter implements ModelAdapter {
         diagnostics,
       );
     }
+    if (
+      input.requireComplete &&
+      !["stop", "tool_calls"].includes(choice?.finish_reason)
+    )
+      throw new ModelError(
+        "The model response did not finish completely; no output was accepted.",
+        false,
+        { ...diagnostics, failureCode: "incomplete" },
+      );
     const hasText =
       typeof m?.content === "string" && m.content.trim().length > 0;
     const hasTools = Array.isArray(m?.tool_calls) && m.tool_calls.length > 0;

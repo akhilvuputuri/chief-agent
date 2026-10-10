@@ -281,6 +281,83 @@ async function fixture(t: TestContext) {
   };
 }
 
+test("historical two-hour Pi settings use a 40-minute active attempt and a verified 45-minute sandbox", async (t) => {
+  const f = await fixture(t),
+    job = await f.start("pi-bounded-attempt", "plan");
+  const historical = {
+    ...settings,
+    runtime: "pi",
+    squad: false,
+    autoMerge: false,
+    limits: { ms: 7200000, models: 400, tools: 1000 },
+  };
+  await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
+    job.id,
+    JSON.stringify(historical),
+  ]);
+  await f.c.tick();
+  let current = await f.row(job.id);
+  assert.equal(f.sandboxRequests()[0].timeoutMinutes, 45);
+  assert.deepEqual((await f.c.assignment(current)).settings, historical);
+  await f.c.heartbeat(current);
+  current = await f.row(job.id);
+  assert.equal(
+    new Date(current.attempt_deadline).getTime() -
+      new Date(current.heartbeat_at).getTime(),
+    2400000,
+  );
+  const deadline = new Date(current.attempt_deadline).getTime();
+  await f.c.heartbeat(current);
+  assert.equal(
+    new Date((await f.row(job.id)).attempt_deadline).getTime(),
+    deadline,
+  );
+  assert.deepEqual((await f.c.status("a", job.id)).limits, historical.limits);
+});
+
+test("Pi output allowance is captured per job and cannot be changed by caller hints", async (t) => {
+  const f = await fixture(t),
+    started = await f.start("pi-output-snapshot", "plan");
+  const current = {
+    ...settings,
+    runtime: "pi",
+    squad: false,
+    autoMerge: false,
+    maxOutputTokens: 16000,
+  };
+  await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
+    started.id,
+    JSON.stringify(current),
+  ]);
+  await f.c.tick();
+  const job = await f.row(started.id);
+  assert.equal((await f.c.assignment(job)).settings.maxOutputTokens, 16000);
+  f.setGeneration((_model, input) => {
+    assert.equal(input.maxOutputTokens, 16000);
+    assert.equal(input.requireComplete, true);
+    return { message: { role: "assistant", content: "Complete" } };
+  });
+  const app = server();
+  t.after(() => app.close());
+  await codingApi(app, f.c);
+  const response = await app.inject({
+    method: "POST",
+    url: `/coding/worker/${job.id}/pi/coder/v1/chat/completions`,
+    headers: { authorization: `Bearer ${f.c.token(job.id, job.attempt_id)}` },
+    payload: {
+      runtime_call_id: randomUUID(),
+      model: settings.model,
+      messages: [{ role: "user", content: "Fixture" }],
+      tools: [],
+      max_tokens: 50000,
+      requireComplete: false,
+    },
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(f.modelCalls(), 1);
+  assert.equal((await f.row(job.id)).settings.maxOutputTokens, 16000);
+});
+
 test("expanded coding allocations survive assignment, provisioning, status and checkpoint validation", async (t) => {
   const limits = { ms: 7200000, models: 400, tools: 1000 };
   const expanded = codingSettings.parse({
@@ -3015,6 +3092,8 @@ test("Pi compatible model facade preserves role pins, journal replay and native 
     stream: true,
   };
   f.setGeneration((_model, input) => {
+    assert.equal(input.requireComplete, true);
+    assert.equal(input.maxOutputTokens, 8000);
     assert.equal(input.messages[1].reasoning_content, "");
     assert.deepEqual(
       input.messages[1].reasoning_details,
@@ -3141,6 +3220,33 @@ test("Pi sessions append encrypted immutable entries and survive attempt changes
   await assert.rejects(f.c.piSessionRead(await f.row(job.id), scope, 0));
 });
 test("Pi profile rejects Python selectors and automatic merge; runtime launcher stays pinned per job", async () => {
+  assert(
+    codingSettings.safeParse({
+      ...settings,
+      runtime: "pi",
+      maxOutputTokens: 16000,
+    }).success,
+  );
+  assert.equal(
+    codingSettings.parse({ ...settings, runtime: "pi" }).maxOutputTokens,
+    undefined,
+  );
+  for (const changes of [
+    { maxOutputTokens: 16001 },
+    { maxOutputTokens: 0 },
+    { maxOutputTokens: 1.5 },
+  ])
+    assert(
+      !codingSettings.safeParse({ ...settings, runtime: "pi", ...changes })
+        .success,
+    );
+  assert(
+    !codingSettings.safeParse({
+      ...settings,
+      runtime: "python",
+      maxOutputTokens: 16000,
+    }).success,
+  );
   assert(
     codingSettings.safeParse({
       ...settings,
@@ -3642,7 +3748,7 @@ test("bundled Pi cutover snapshots new jobs while duplicate legacy requests and 
   assert.equal(record.settings.runtime, "pi");
   assert.equal(record.settings.image, pi.image);
   assert.equal(record.settings.autoMerge, false);
-  assert.deepEqual(record.settings.limits, saved.limits);
+  assert.deepEqual(record.settings.limits, { ...saved.limits, ms: 2400000 });
   assert.equal(record.mode, "plan");
   assert.equal(f.creates(), 0);
   const rolledBack = await start(prior, "after-rollback");

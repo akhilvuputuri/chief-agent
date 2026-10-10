@@ -8,10 +8,13 @@ export type ModelFactory = (admit: () => Promise<void>) => Promise<{
   runtime: ModelRuntime;
   model: Model<any>;
   reasoning?: ModelConfig["reasoning"];
+  /** Trusted provenance: envelope rejection before any provider transport. */
+  didRejectContextLocally?: () => boolean;
 }>;
 /** Native Pi OpenAI-compatible implementation; no custom transcript conversion. */
 export function compatibleModel(config: ModelConfig): ModelFactory {
   return async (admit) => {
+    let localContextRejected = false;
     const runtime = await ModelRuntime.create({
       credentials: new InMemoryCredentialStore(),
       modelsPath: null,
@@ -45,6 +48,7 @@ export function compatibleModel(config: ModelConfig): ModelFactory {
         },
       ],
       streamSimple: (model, context, options) => {
+        localContextRejected = false;
         const stream = openAICompletionsApi().streamSimple;
         // Admission is awaited before provider I/O, including compaction calls.
         const resultStream = new DeferredAdmissionStream(async () => {
@@ -58,8 +62,10 @@ export function compatibleModel(config: ModelConfig): ModelFactory {
                 config.maxRequestBytes &&
                 Buffer.byteLength(JSON.stringify(request)) >
                   config.maxRequestBytes
-              )
+              ) {
+                localContextRejected = true;
                 throw new Error("context_length_exceeded");
+              }
               return config.requestIdField
                 ? {
                     ...(request as Record<string, unknown>),
@@ -77,6 +83,11 @@ export function compatibleModel(config: ModelConfig): ModelFactory {
       runtime,
       model: runtime.getModel(provider, config.model)!,
       reasoning: config.reasoning ?? "high",
+      didRejectContextLocally: () => {
+        const rejected = localContextRejected;
+        localContextRejected = false;
+        return rejected;
+      },
     };
   };
 }
