@@ -1,6 +1,6 @@
 # 80 — Why did the sandbox stop before its coding allocation expired?
 
-Work date: 10 October 2026. Status: stopping cause confirmed; effective timeout mismatch reproduced; application hardening implemented/tested candidate v0.3.65; provider restriction resolution remains pending.
+Work date: 10 October 2026. Status: application hardening shipped v0.3.65 with exact release/current health verification; actual provider restriction remains unresolved, pending operator reauthentication and an accepted 125-minute receipt.
 
 ## User-visible problem and preceding iteration
 
@@ -41,3 +41,11 @@ The review also reproduced a five-minute QUEUED timeout being labelled with the 
 ### Immutable Pi bootstrap correction — 10 October 2026
 
 Re-review of `896cae00e2bf515583fc9eef1f6e4d4d86a8dc97` found the pending-ack gap persisted for Pi: unlike the legacy client exercised by the new test, NativePiWorkerClient does not retry 503. The independent actual-Pi/API probe failed while four prior probes passed. The final correction holds only a valid bootstrap assignment on the host for up to 120 seconds, repeatedly rechecking capability/state, before returning assignment after verified receipt or a bounded failure. Non-bootstrap work remains blocked; invalid capabilities remain rejected. Both actual immutable Node and Pi clients pass a delayed-receipt regression with one HTTP request and zero model calls. No worker rebuild or Python modification is required. Focused 82 tests/build pass at this checkpoint; revised-head full checks/review and account restriction resolution remain pending.
+
+### Application protection release closure — 10 October 2026
+
+[PR 214](https://github.com/akhilvuputuri/chief-agent/pull/214) merged as `599695cb355236799461b2eb16299609119c7bb4`. Fresh independent review, explicitly configured as GPT-6 Astra, approved exact head `134b13806bbb679e4090787f269decd60bb5bed4` after the retained lifecycle/bootstrap/phase findings. Specific serving model identifier was not exposed. Ten independent failure/disconnect probes passed; all 1,057 local tests/build/typecheck/format, Devin and [exact-head hosted checks](https://github.com/akhilvuputuri/chief-agent/actions/runs/38053025807) passed. One formatting-only revision corrected failed CI formatting and received exact-head reapproval; no semantic change was claimed.
+
+[Exact release](https://github.com/akhilvuputuri/chief-agent/actions/runs/38054577579) verified `599695cb355236799461b2eb16299609119c7bb4` at 13:11:52 UTC with startup health. Separate current gateway probe confirmed matching RELEASE, healthy gateway, v0.3.65, unchanged Pi worker digest/models/effort/allocations and original paused job/image preservation. Installed receipt logic rejected a synthetic 45-minute receipt and accepted a synthetic 125-minute receipt; all three deployed controller/provider/API module hashes matched a fresh build of integrated main. These post-release probes started no real builds, made no model calls and wrote no owner data. Immutable [v0.3.65](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.65) marks application protection. No migration, Compose, worker-image or operator permission change was required.
+
+This closes only application hardening. Operator `chief` authentication remained expired on the final quota-read attempt. CodeBuild's real 45-minute reduction has not been lifted or explained conclusively, and no accepted 125-minute live launch exists in this evidence. New two-hour attempts now pause visibly before work against an insufficient receipt. The whole incident remains unresolved until authorized account inspection/remediation and a verified accepted receipt. No original task is automatically resumed; no AWS support communication, account upgrade or new permission grant was performed.
