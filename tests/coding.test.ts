@@ -1075,43 +1075,35 @@ test("worker dispatch waits for confirmed sandbox acknowledgement", async (t) =>
   await f.c.authenticate(job.id, f.c.token(job.id, acknowledged.attempt_id));
 });
 
-test("current immutable worker retries a pending valid acknowledgement and receives its assignment", async (t) => {
-  const f = await fixture(t),
-    job = await f.start("delayed-valid-receipt", "plan");
-  const create = f.provider.create;
-  let release!: () => void;
-  const receipt = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  f.provider.create = async (r) => {
-    await receipt;
-    return create(r);
-  };
-  const dispatch = f.c.tick();
-  let launching;
-  for (let i = 0; i < 30; i++) {
-    launching = await f.row(job.id);
-    if (launching.state === "provisioning") break;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  const app = server();
-  t.after(() => app.close());
-  await codingApi(app, f.c);
-  let requests = 0;
-  const transport: typeof fetch = async (url, options) => {
-    const reply = await app.inject({
-      method: options?.method as any,
-      url: new URL(String(url)).pathname,
-      headers: options?.headers as any,
-      payload: options?.body as string | undefined,
-    });
-    requests++;
-    if (requests === 1) {
-      assert.equal(reply.statusCode, 503);
+test("immutable Node and Pi workers receive a delayed valid launch assignment without premature work", async (t) => {
+  for (const runtime of ["node", "pi"] as const) {
+    await t.test(runtime, async (t) => {
+      const f = await fixture(t),
+        job = await f.start(`delayed-${runtime}-receipt`, "plan");
+      const create = f.provider.create;
+      let release!: () => void;
+      const receipt = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      f.provider.create = async (r) => {
+        await receipt;
+        return create(r);
+      };
+      const dispatch = f.c.tick();
+      let launching;
+      for (let i = 0; i < 30; i++) {
+        launching = await f.row(job.id);
+        if (launching.state === "provisioning") break;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      const token = f.c.token(job.id, launching.attempt_id),
+        app = server();
+      t.after(() => app.close());
+      await codingApi(app, f.c);
       const prematureFinish = await app.inject({
         method: "POST",
         url: `/coding/worker/${job.id}/finish`,
-        headers: options?.headers as any,
+        headers: { authorization: `Bearer ${token}` },
         payload: {},
       });
       assert.equal(prematureFinish.statusCode, 503);
@@ -1121,27 +1113,61 @@ test("current immutable worker retries a pending valid acknowledgement and recei
         headers: { authorization: `Bearer ${"d".repeat(64)}` },
       });
       assert.equal(invalid.statusCode, 401);
+      const authenticate = f.c.authenticate.bind(f.c);
+      let pendingReads = 0;
+      f.c.authenticate = async (...args) => {
+        try {
+          return await authenticate(...args);
+        } catch (error) {
+          if (error instanceof SandboxAcknowledgementPending) {
+            pendingReads++;
+            release();
+            await dispatch;
+          }
+          throw error;
+        }
+      };
+      let requests = 0;
+      const transport: typeof fetch = async (url, options) => {
+        requests++;
+        const reply = await app.inject({
+          method: options?.method as any,
+          url: new URL(String(url)).pathname,
+          headers: options?.headers as any,
+          payload: options?.body as string | undefined,
+        });
+        return new Response(reply.body, { status: reply.statusCode });
+      };
+      const originalFetch = globalThis.fetch;
+      const signal = AbortSignal.timeout(10000);
+      const client =
+        runtime === "pi"
+          ? new NativePiWorkerClient(
+              "https://coding.example.com",
+              job.id,
+              token,
+              signal,
+            )
+          : new WorkerClient(
+              "https://coding.example.com",
+              job.id,
+              token,
+              signal,
+              transport,
+            );
+      if (runtime === "pi") globalThis.fetch = transport;
+      try {
+        assert.equal((await client.request("assignment")).id, job.id);
+      } finally {
+        globalThis.fetch = originalFetch;
+        release();
+        await dispatch;
+      }
+      assert.equal(pendingReads, 1);
+      assert.equal(requests, 1);
       assert.equal(f.modelCalls(), 0);
-      release();
-      await dispatch;
-    }
-    return new Response(reply.body, { status: reply.statusCode });
-  };
-  const client = new WorkerClient(
-    "https://coding.example.com",
-    job.id,
-    f.c.token(job.id, launching.attempt_id),
-    AbortSignal.timeout(10000),
-    transport,
-  );
-  try {
-    assert.equal((await client.request("assignment")).id, job.id);
-  } finally {
-    release();
-    await dispatch;
+    });
   }
-  assert.equal(requests, 2);
-  assert.equal(f.modelCalls(), 0);
 });
 
 test("CodeBuild refuses an insufficient or unconfirmed timeout while retaining the created sandbox identity", async () => {
