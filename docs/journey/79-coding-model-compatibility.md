@@ -1,6 +1,6 @@
 # 79 — Can coding roles switch model families without a protocol pause?
 
-Work date: 10 October 2026. Status: cross-provider/control experiments and candidate report-contract correction tested; final matrix, exact review/CI/image activation pending.
+Work date: 10 October 2026. Status: paid experiments complete; implementation merged after exact review/CI; worker anonymously verified; image-pin activation pending.
 
 ## User-visible problem and preceding iteration
 
@@ -45,3 +45,9 @@ The natural-language successes used the existing command/control code; no change
 ### Independent review correction — 10 October 2026
 
 Review of `8f246ca0325960bea7842d5d3649c50982aa71b3` requested changes: embedding all changed paths could exceed the runtime's 32,000-character instruction bound for valid artifacts. The independent probe measured 44,917 candidate characters versus 21,575 before the manifest addition, with valid context/plan and 100 long paths. The bridge now includes a bounded file count; the reviewer still has the complete restored candidate checkout, candidate hash, pinned base, complete approved scope/context and bounded check receipts. A maximum-context/plan/four-receipt regression keeps the actual prompt assembly under 32,000 without truncating approved requirements. Updated-head approval remains required.
+
+### Reviewed implementation and image verification — 10 October 2026
+
+[PR 211](https://github.com/akhilvuputuri/chief-agent/pull/211) merged as `949bfbe25dad112ae5f2984e62afb5c46309b87f`. Explicitly configured GPT-6 Astra independently approved exact head `5ec1e33807774b8b0f5de629e77da4b3238bb2f0` after the prompt-size correction; specific serving model identity was unavailable to the reviewer. Independent 98-test Pi/coding suite and 26,956-character boundary probe passed. Local full checks/build/format passed 1,044 tests; Devin and [exact-head Linux checks](https://github.com/akhilvuputuri/chief-agent/actions/runs/38041364495) passed, including package extraction/process boundary. Application release receipt/health remains a separate observation.
+
+[Main-only image publication](https://github.com/akhilvuputuri/chief-agent/actions/runs/38041970967) produced `ghcr.io/akhilvuputuri/chief-agent-coding@sha256:a4352644c7eec50e8549460e20963d6ba2214134bcf262ee38c65e3b41835b2a`, linux/amd64 platform manifest `sha256:e63ec8f5fb4e11dddd1007ae8f41a58e2307747c5f155ef26d308a80b171b6e6`. Independent anonymous layer/config verification matched all 14 compiled runtime/bridge files against merged main, Pi1.1.0/runtime package0.1.1, non-root `worker`, `node --disable-sigusr1` fixed entrypoint and root-owned non-writable native guard. The separate v0.3.64 pin requires exact review/CI/release/health; old jobs keep their previous image. No production owner preference was changed or paused work resumed.
