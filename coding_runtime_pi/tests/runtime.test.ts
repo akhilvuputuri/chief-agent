@@ -527,3 +527,119 @@ test("interrupted execution charges the saved time reservation rather than reset
   assert(ready.used.ms >= 1000);
   assert.equal(ready.activeRun, undefined);
 });
+
+test("a clean prose-only ending gets one report-only finalization and an exact plan", async () => {
+  const f = await fixture();
+  const runtime = new CodingRuntime({
+    store: f.store,
+    model: scripted([
+      [],
+      [report("plan", "Fix sum.js and run the configured assertion.")],
+      [],
+    ]),
+  });
+  const task = await runtime.start({
+    workspace: f.workspace,
+    objective: "Plan a fixture fix",
+  });
+  const result = await runtime.run(task.id);
+  assert.equal(result.status, "waiting_approval");
+  assert.equal(result.used.models, 3);
+  assert(result.plan?.hash);
+  assert.equal(
+    result.events.filter(
+      (e) => e.text === "Requesting one structured final report",
+    ).length,
+    1,
+  );
+});
+
+test("repeated prose-only endings pause after one finalization without granting approval", async () => {
+  const f = await fixture();
+  const runtime = new CodingRuntime({
+    store: f.store,
+    model: scripted([[], [], [report("plan", "Unreachable report")], []]),
+  });
+  const task = await runtime.start({
+    workspace: f.workspace,
+    objective: "Plan a fixture fix",
+  });
+  const result = await runtime.run(task.id);
+  assert.equal(result.status, "paused");
+  assert.equal(result.used.models, 2);
+  assert.equal(result.plan, undefined);
+  assert.equal(result.approved, undefined);
+});
+
+test("exhausted model or tool allocations do not initiate a finalization call", async () => {
+  for (const limits of [
+    { models: 1, tools: 10 },
+    { models: 10, tools: 1 },
+  ]) {
+    const f = await fixture();
+    const runtime = new CodingRuntime({
+      store: f.store,
+      model: scripted(
+        limits.models === 1
+          ? [[]]
+          : [[{ name: "read", arguments: { path: "sum.js" } }], []],
+      ),
+    });
+    const task = await runtime.start({
+      workspace: f.workspace,
+      objective: "Plan a fixture fix",
+      limits,
+    });
+    const result = await runtime.run(task.id);
+    assert.equal(result.status, "paused");
+    assert(
+      !result.events.some(
+        (e) => e.text === "Requesting one structured final report",
+      ),
+    );
+  }
+});
+
+test("build finalization cannot dispatch a repeated write and cannot substitute for failing checks", async () => {
+  const f = await fixture();
+  const planning = new CodingRuntime({
+    store: f.store,
+    model: scripted([[report("plan", "Fix the fixture and verify it.")], []]),
+  });
+  const task = await planning.start({
+    workspace: f.workspace,
+    objective: "Fix a fixture",
+    checks: ["node test.mjs"],
+  });
+  const plan = await planning.run(task.id);
+  await planning.approve(task.id, plan.plan!.revision, plan.plan!.hash);
+  const before = await readFile(join(f.workspace, "sum.js"), "utf8");
+  const runtime = new CodingRuntime({
+    store: f.store,
+    model: scripted([
+      [],
+      [
+        {
+          name: "write",
+          arguments: {
+            path: "sum.js",
+            content: "export const sum = (a,b) => a+b;\n",
+          },
+        },
+      ],
+      [report("done", "A prose claim")],
+      [],
+    ]),
+    executor: (t) => localExecutor(t.workspace, join(f.root, "tool-home")),
+  });
+  const result = await runtime.run(task.id);
+  assert.equal(await readFile(join(f.workspace, "sum.js"), "utf8"), before);
+  assert.equal(result.status, "paused");
+  assert.equal(result.checks[0]?.exitCode, 1);
+  assert.equal(
+    result.events.filter(
+      (e) => e.text === "Requesting one structured final report",
+    ).length,
+    1,
+  );
+});

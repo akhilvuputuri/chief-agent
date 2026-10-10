@@ -977,9 +977,13 @@ export class CodingController {
         else if (total.aborted || idle.signal.aborted) {
           code = "model_timeout";
           if (total.aborted) timeoutKind = "total";
-        } else if (enhanced && error instanceof ModelError) {
+        } else if (
+          (enhanced || job.settings.runtime === "pi") &&
+          error instanceof ModelError
+        ) {
           code =
-            error.diagnostics.failureCode === "incomplete"
+            error.diagnostics.failureCode === "incomplete" ||
+            error.diagnostics.finishReason === "length"
               ? "model_incomplete"
               : error.diagnostics.httpStatus === 429
                 ? "model_rate_limited"

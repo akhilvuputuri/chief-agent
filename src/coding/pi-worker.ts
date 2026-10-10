@@ -363,7 +363,7 @@ export async function runPiWorker(
       const review = await runtime.start({
         workspace: reviewRoot,
         objective: assignment.objective,
-        instructions: `Independently review this exact candidate: ${candidateHash}. Complete approved requirements:\n${assignment.checkpoint.plan}\nOriginal context:\n${assignment.context}\nPassing check receipts:\n${JSON.stringify(result.checks.map((c) => ({ command: c.command, exitCode: c.exitCode, output: c.output.slice(-1000) })))}\nInspect actual source. Return report kind review with APPROVE or REQUEST_CHANGES. Do not implement findings.`,
+        instructions: `Independently review this exact candidate: ${candidateHash}. Approved plan (historical starting state and desired change, not claims about the completed candidate):\n${assignment.checkpoint.plan}\nThe host validated owner approval before this implementation. This separate reviewer is read-only; its tool permissions do not revoke that approval. Judge whether the current candidate implements the plan; finding the requested fix already present is expected, not a reason to reject it. Base commit: ${assignment.baseSha}. Changed artifact paths: ${JSON.stringify(saved.files.map((file) => file.path))}.\nOriginal context:\n${assignment.context}\nPassing check receipts:\n${JSON.stringify(result.checks.map((c) => ({ command: c.command, exitCode: c.exitCode, output: c.output.slice(-1000) })))}\nInspect actual source. Return report kind review with APPROVE or REQUEST_CHANGES. Do not implement findings.`,
         limits: {
           ...assignment.settings.limits,
           ms: allocationMs,

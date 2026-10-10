@@ -14,6 +14,15 @@ for (const choice of [
     model: "deepseek/deepseek-v4.1-flash",
     deepseek: true,
   },
+  ...[
+    "openai/gpt-6.1-sol",
+    "anthropic/claude-sonnet-5.5",
+    "anthropic/claude-haiku-5.5",
+    "google/gemini-3.8-flash",
+    "qwen/qwen3.8-max-0902",
+    "z-ai/glm-5.3-flash",
+    "mistralai/mistral-large-4-0",
+  ].map((model) => ({ provider: "openrouter", model, deepseek: false })),
 ])
   test(`native Pi ${choice.model} protocol performs tool continuation, request identity and Unicode without paid inference`, async (t) => {
     const bodies: any[] = [];
@@ -30,6 +39,13 @@ for (const choice of [
             content: null,
             reasoning_details: [
               { type: "reasoning.text", text: "Synthetic reasoning", id: "r1" },
+              {
+                type: "reasoning.encrypted",
+                data: "synthetic-opaque-signature",
+                id: "signature1",
+                format: "unknown",
+                index: 1,
+              },
             ],
             tool_calls: [
               {
@@ -132,5 +148,12 @@ for (const choice of [
       assert.equal(replay.reasoning_content, "");
       assert.equal(replay.reasoning_details[0].id, "r1");
     }
+    const continued = bodies[1].messages.find(
+      (m: any) => m.role === "assistant",
+    );
+    assert.equal(
+      continued.reasoning_details.find((r: any) => r.id === "signature1").data,
+      "synthetic-opaque-signature",
+    );
     assert.equal(result.used.models, 2);
   });

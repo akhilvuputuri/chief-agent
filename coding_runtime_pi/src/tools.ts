@@ -170,18 +170,24 @@ export function tools(
       }),
     );
   }
+  const reportKinds =
+    intent === "learn"
+      ? ["learned", "question"]
+      : intent === "plan"
+        ? ["plan", "question"]
+        : intent === "review"
+          ? ["review", "question"]
+          : ["done", "question"];
   list.push({
     name: "report",
     label: "Report",
-    description:
-      "Return grounded findings, a complete proposed plan, a necessary question, a build result, or an independent review verdict. Reporting does not approve work or mark checks passed.",
+    description: `Required final result for ${intent}: use kind ${reportKinds[0]}, or question if blocked. Review reports require verdict APPROVE or REQUEST_CHANGES. Questions fit within 2000 characters. Reporting does not approve work or mark checks passed.`,
     parameters: Type.Object({
-      kind: Type.Union(
-        ["learned", "plan", "question", "done", "review"].map((v) =>
-          Type.Literal(v),
-        ),
-      ),
-      summary: Type.String({ minLength: 1, maxLength: 4000 }),
+      kind: Type.Union(reportKinds.map((v) => Type.Literal(v))),
+      summary: Type.String({
+        minLength: 1,
+        maxLength: intent === "plan" ? 400 : 4000,
+      }),
       detail: Type.String({ minLength: 1, maxLength: 6000 }),
       verdict: Type.Optional(
         Type.Union([Type.Literal("APPROVE"), Type.Literal("REQUEST_CHANGES")]),
@@ -189,15 +195,7 @@ export function tools(
     }),
     execute: async (_id, input) => {
       const r = input as Report;
-      const allowed =
-        intent === "learn"
-          ? ["learned", "question"]
-          : intent === "plan"
-            ? ["plan", "question"]
-            : intent === "review"
-              ? ["review", "question"]
-              : ["done", "question"];
-      if (!allowed.includes(r.kind) || (r.kind === "review" && !r.verdict))
+      if (!reportKinds.includes(r.kind) || (r.kind === "review" && !r.verdict))
         throw new Error("Report does not match this task intent");
       if (r.kind === "question" && r.detail.length > 2000)
         throw new Error(

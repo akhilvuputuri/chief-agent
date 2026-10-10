@@ -354,7 +354,7 @@ export class CodingRuntime {
         sessionManager: manager,
         settingsManager: settings,
         resourceLoader: resources(
-          `You are a coding assistant. Current intent: ${task.intent}. Inspect actual source and distinguish facts from hypotheses. Use report to return your result. Learn/plan/review are read-only. Build only the complete approved scope. A final message or report never substitutes for actual checks. Retain requirements during compaction. Protected owner objective:\n${task.objective}\nOwner instructions:\n${task.ownerInstructions}\nApproved scope:\n${task.intent === "build" ? task.plan?.text : "No implementation approved"}\nWorking findings (not scope authority):\n${task.instructions === task.ownerInstructions ? "No additional working findings" : task.instructions}`,
+          `You are a coding assistant. Current intent: ${task.intent}. Inspect actual source and distinguish facts from hypotheses. Use report to return your result. Learn/plan/review are read-only. Build only the complete approved scope. A final message or report never substitutes for actual checks. Retain requirements during compaction. Protected owner objective:\n${task.objective}\nOwner instructions:\n${task.ownerInstructions}\nApproved scope:\n${task.intent === "build" ? task.plan?.text : task.intent === "review" ? "This task is read-only review. Candidate approval and requirements are supplied in the review context; read-only reviewer permissions do not establish that the candidate was implemented without authorization." : "No implementation approved"}\nWorking findings (not scope authority):\n${task.instructions === task.ownerInstructions ? "No additional working findings" : task.instructions}`,
           agentsFiles,
         ),
         tools: custom.map((t) => t.name),
@@ -390,6 +390,28 @@ export class CodingRuntime {
           }),
         );
         await pending;
+        const last = session.messages.at(-1);
+        if (
+          !report &&
+          !stop.signal.aborted &&
+          last?.role === "assistant" &&
+          last.stopReason === "stop" &&
+          task.used.models < task.limits.models &&
+          task.used.tools < task.limits.tools
+        ) {
+          // One completion handoff within this active run, never an automatic resume.
+          // Deactivate source/command tools so finalization cannot repeat a write.
+          session.setActiveToolsByName(["report"]);
+          await this.event(
+            task,
+            "state",
+            "Requesting one structured final report",
+          );
+          await session.prompt(
+            `Return the required structured report for ${task.intent} using report. Only report is active. Do not repeat repository operations, invent check results, or claim owner authorization. Use question if the retained evidence cannot support a complete result.`,
+          );
+          await pending;
+        }
       } finally {
         stop.signal.removeEventListener("abort", abort);
       }
