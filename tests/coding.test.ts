@@ -40,7 +40,10 @@ import {
   validateFiles,
   canonicalJson,
 } from "../src/coding/github.js";
-import { CodeBuildSandbox } from "../src/coding/provider.js";
+import {
+  CodeBuildSandbox,
+  SandboxTimeoutMismatch,
+} from "../src/coding/provider.js";
 import { Workspace } from "../src/coding/workspace.js";
 import { codingLoop } from "../src/coding/loop.js";
 import {
@@ -979,7 +982,7 @@ test("the CodeBuild request uses a trusted worker image and fixed buildspec, no 
     {
       send: async (command: any) => {
         commands.push(command);
-        return { build: { id: "fixture:one" } };
+        return { build: { id: "fixture:one", timeoutInMinutes: 20 } };
       },
     } as any,
     "fixture-project",
@@ -1001,6 +1004,184 @@ test("the CodeBuild request uses a trusted worker image and fixed buildspec, no 
   assert(!req.buildspecOverride.includes("npm"));
   assert.equal(req.logsConfigOverride.cloudWatchLogs.status, "DISABLED");
 });
+test("timeout rejection atomically pauses dispatch and retains the sandbox for cleanup without relaunch", async (t) => {
+  const f = await fixture(t),
+    job = await f.start("timeout-rejected", "plan");
+  let launches = 0,
+    stopped = 0;
+  f.provider.create = async () => {
+    launches++;
+    throw new SandboxTimeoutMismatch("fixture:short", 125, 45);
+  };
+  f.provider.inspect = async () => (stopped ? "terminal" : "running");
+  f.provider.terminate = async (id) => {
+    assert.equal(id, "fixture:short");
+    stopped++;
+  };
+  await f.c.tick();
+  const rejected = await f.row(job.id);
+  assert.equal(rejected.state, "paused");
+  assert.equal(rejected.sandbox_id, "fixture:short");
+  assert.equal(rejected.cleanup, "pending");
+  assert.match(rejected.summary, /accepted 45 minutes/);
+  await assert.rejects(
+    f.c.authenticate(job.id, f.c.token(job.id, rejected.attempt_id)),
+    /Invalid worker capability/,
+  );
+  await f.c.tick();
+  await f.c.tick();
+  assert.equal((await f.row(job.id)).cleanup, "complete");
+  assert.equal(launches, 1);
+  assert.equal(stopped, 1);
+  assert.equal(f.modelCalls(), 0);
+});
+
+test("worker dispatch waits for confirmed sandbox acknowledgement", async (t) => {
+  const f = await fixture(t),
+    job = await f.start("pending-timeout-receipt", "plan");
+  const create = f.provider.create;
+  let release!: () => void;
+  const receipt = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  f.provider.create = async (r) => {
+    const id = await create(r);
+    await receipt;
+    return id;
+  };
+  const dispatch = f.c.tick();
+  let launching;
+  for (let i = 0; i < 20; i++) {
+    launching = await f.row(job.id);
+    if (launching.state === "provisioning") break;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(launching.state, "provisioning");
+  assert.equal(launching.sandbox_id, null);
+  try {
+    await assert.rejects(
+      f.c.authenticate(job.id, f.c.token(job.id, launching.attempt_id)),
+      /Invalid worker capability/,
+    );
+    assert.equal(f.modelCalls(), 0);
+  } finally {
+    release();
+    await dispatch;
+  }
+  const acknowledged = await f.row(job.id);
+  assert(acknowledged.sandbox_id);
+  await f.c.authenticate(job.id, f.c.token(job.id, acknowledged.attempt_id));
+});
+
+test("CodeBuild refuses an insufficient or unconfirmed timeout while retaining the created sandbox identity", async () => {
+  for (const actual of [45, undefined, NaN, 1, 2161]) {
+    let calls = 0;
+    const p = new CodeBuildSandbox(
+      {
+        send: async () => {
+          calls++;
+          return { build: { id: "fixture:short", timeoutInMinutes: actual } };
+        },
+      } as any,
+      "fixture-project",
+    );
+    await assert.rejects(
+      p.create({
+        jobId: randomUUID(),
+        attemptId: randomUUID(),
+        token: "synthetic",
+        origin: "https://example.invalid",
+        image: settings.image,
+        timeoutMinutes: 125,
+      }),
+      (error: unknown) => {
+        assert(error instanceof SandboxTimeoutMismatch);
+        assert.equal(error.sandboxId, "fixture:short");
+        assert.equal(error.requestedMinutes, 125);
+        assert.equal(error.actualMinutes, actual === 45 ? 45 : undefined);
+        return true;
+      },
+    );
+    assert.equal(calls, 1);
+  }
+});
+
+test("CodeBuild accepts a confirmed sufficient timeout", async () => {
+  for (const actual of [125, 130]) {
+    const p = new CodeBuildSandbox(
+      {
+        send: async () => ({
+          build: { id: "fixture:accepted", timeoutInMinutes: actual },
+        }),
+      } as any,
+      "fixture-project",
+    );
+    assert.equal(
+      await p.create({
+        jobId: randomUUID(),
+        attemptId: randomUUID(),
+        token: "synthetic",
+        origin: "https://example.invalid",
+        image: settings.image,
+        timeoutMinutes: 125,
+      }),
+      "fixture:accepted",
+    );
+  }
+});
+
+test("terminal provider metadata explains timeout and falls back safely if the diagnostic read fails", async (t) => {
+  for (const diagnosticReadFails of [false, true]) {
+    const f = await fixture(t),
+      job = await f.start(`terminal-diagnostic-${diagnosticReadFails}`, "plan");
+    await f.c.tick();
+    f.provider.inspect = async () => "terminal";
+    Object.assign(f.provider, {
+      terminalReason: async () => {
+        if (diagnosticReadFails)
+          throw new Error("private provider diagnostic error");
+        return "Sandbox provider timed out after 45 minutes before a result was recorded; saved work is retained";
+      },
+    });
+    await f.c.tick();
+    const paused = await f.row(job.id);
+    assert.equal(paused.state, "paused");
+    assert.equal(paused.cleanup, "pending");
+    assert.match(
+      paused.summary,
+      diagnosticReadFails
+        ? /stopped before a result/
+        : /timed out after 45 minutes/,
+    );
+    assert(!paused.summary.includes("private"));
+    await f.c.tick();
+    assert.equal((await f.row(job.id)).cleanup, "complete");
+    assert.equal(f.creates(), 1);
+    assert.equal(f.modelCalls(), 0);
+  }
+});
+
+test("CodeBuild identifies a timed-out BUILD even when the overall build status is FAILED", async () => {
+  const p = new CodeBuildSandbox(
+    {
+      send: async () => ({
+        builds: [
+          {
+            buildStatus: "FAILED",
+            timeoutInMinutes: 45,
+            phases: [{ phaseType: "BUILD", phaseStatus: "TIMED_OUT" }],
+          },
+        ],
+      }),
+    } as any,
+    "fixture-project",
+  );
+  assert.match(
+    (await p.terminalReason("fixture:timedout"))!,
+    /timed out after 45 minutes/,
+  );
+});
+
 test("workspace rejects traversal and symlinks, captures new/deleted files and kills commands on cancellation", async () => {
   const root = await mkdtemp(join(tmpdir(), "chief-workspace-test-"));
   const stop = new AbortController(),
@@ -2147,7 +2328,7 @@ test("Python launcher is host-selected and drops capabilities before executing t
     {
       send: async (command: any) => {
         commands.push(command);
-        return { build: { id: "fixture:python" } };
+        return { build: { id: "fixture:python", timeoutInMinutes: 20 } };
       },
     } as any,
     "fixture-project",
@@ -2746,7 +2927,7 @@ test("Pi profile rejects Python selectors and automatic merge; runtime launcher 
     {
       send: async (c) => {
         calls.push(c.input);
-        return { build: { id: "synthetic" } };
+        return { build: { id: "synthetic", timeoutInMinutes: 15 } };
       },
     } as any,
     "fixed-project",

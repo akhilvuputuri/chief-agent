@@ -1,6 +1,6 @@
 # 80 — Why did the sandbox stop before its coding allocation expired?
 
-Work date: 10 October 2026. Status: stopping cause confirmed; effective provider-timeout mismatch reproduced; resolution remains pending. No runtime or infrastructure change is implemented.
+Work date: 10 October 2026. Status: stopping cause confirmed; effective timeout mismatch reproduced; application hardening implemented/tested candidate v0.3.65; provider restriction resolution remains pending.
 
 ## User-visible problem and preceding iteration
 
@@ -20,9 +20,9 @@ The immediate stopping cause is verified provider timeout, independent of the ea
 
 ## Implementation and review
 
-Documentation records the incident and the missed verification boundary. No model, price filter, host allocation, project, IAM, database, Compose or worker image was changed. No paused job was resumed. The source fixture already asserts a 125-minute launch request for a two-hour allocation; the new evidence shows why checking only a mocked request is insufficient.
+The v0.3.65 candidate validates the effective StartBuild timeout receipt, rejects missing/insufficient confirmation, and atomically retains the created sandbox identity while pausing/revoking model dispatch. Worker authentication requires the acknowledged sandbox identity. Cleanup continues through the existing tracked controller path, without starting another build. Confirmed terminal BUILD timeouts get a specific pause cause; unavailable optional diagnostic reads fall back to the existing generic cause and cannot block cleanup. No model, price filter, host allocation, project, IAM, database, Compose or worker image was changed. No paused job was resumed. The source fixture already asserts a 125-minute launch request for a two-hour allocation; the new evidence shows why checking only a mocked request is insufficient.
 
-Potential hardening remains proposed: compare the effective launch receipt with the requested timeout and preserve the mismatch diagnosis, and include bounded provider terminal-phase metadata in pause reporting. Provider acceptance must be verified before claiming the two-hour allocation is available end to end. This entry does not claim those mechanisms are implemented.
+Regressions cover insufficient/unconfirmed/invalid receipts, adequate receipts, atomic rejected-launch cleanup identity, blocked worker authentication before acknowledgement, no inference/relaunch on rejection, terminal FAILED/BUILD TIMED_OUT diagnosis and diagnostic-read failure fallback. Source already requested 125; repeated launch-parameter edits would not fix the service response. The operator AWS profile was found expired when account-level read access was attempted; reauthentication is requested. Independent review, required checks and deployment remain pending. Provider acceptance must be verified before claiming the two-hour allocation is available end to end.
 
 ## Verification and outcome
 

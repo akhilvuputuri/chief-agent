@@ -16,11 +16,26 @@ export type SandboxRequest = {
   runtime?: "node" | "python" | "pi";
   timeoutMinutes: number;
 };
+export class SandboxTimeoutMismatch extends Error {
+  constructor(
+    readonly sandboxId: string,
+    readonly requestedMinutes: number,
+    readonly actualMinutes?: number,
+  ) {
+    super(
+      actualMinutes === undefined
+        ? "Sandbox provider did not confirm its timeout; launch is paused before work proceeds"
+        : `Sandbox provider accepted ${actualMinutes} minutes, below the requested ${requestedMinutes} minutes; launch is paused before work proceeds`,
+    );
+    this.name = "SandboxTimeoutMismatch";
+  }
+}
 export interface SandboxProvider {
   create(request: SandboxRequest): Promise<string>;
   find(attemptId: string): Promise<string | undefined>;
   inspect(id: string): Promise<"running" | "terminal">;
   terminate(id: string): Promise<void>;
+  terminalReason?(id: string): Promise<string | undefined>;
 }
 
 /** Reviewed NO_SOURCE project. Repository code never selects buildspec, role or image. */
@@ -75,6 +90,20 @@ export class CodeBuildSandbox implements SandboxProvider {
       throw new Error(
         "Sandbox creation returned no identity; reconcile before retrying",
       );
+    const actual = result.build.timeoutInMinutes;
+    if (
+      !Number.isInteger(actual) ||
+      actual! < 5 ||
+      actual! > 2160 ||
+      actual! < r.timeoutMinutes
+    )
+      throw new SandboxTimeoutMismatch(
+        result.build.id,
+        r.timeoutMinutes,
+        Number.isInteger(actual) && actual! >= 5 && actual! <= 2160
+          ? actual
+          : undefined,
+      );
     return result.build.id;
   }
   async find(attemptId: string) {
@@ -117,6 +146,22 @@ export class CodeBuildSandbox implements SandboxProvider {
     )
       return "terminal" as const;
     throw new Error("Unknown sandbox state; cleanup requires inspection");
+  }
+  async terminalReason(id: string) {
+    const build = (
+      await this.client.send(new BatchGetBuildsCommand({ ids: [id] }))
+    ).builds?.[0];
+    if (!build || ["IN_PROGRESS", "QUEUED"].includes(String(build.buildStatus)))
+      return undefined;
+    if (
+      build.buildStatus !== "TIMED_OUT" &&
+      !build.phases?.some((p) => p.phaseStatus === "TIMED_OUT")
+    )
+      return undefined;
+    const minutes = build.timeoutInMinutes;
+    return Number.isInteger(minutes) && minutes! >= 5 && minutes! <= 2160
+      ? `Sandbox provider timed out after ${minutes} minutes before a result was recorded; saved work is retained`
+      : "Sandbox provider timed out before a result was recorded; saved work is retained";
   }
   async terminate(id: string) {
     await this.client.send(new StopBuildCommand({ id }));

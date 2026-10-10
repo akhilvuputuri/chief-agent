@@ -34,7 +34,7 @@ import {
   validateFiles,
   type RepositoryPublisher,
 } from "./github.js";
-import type { SandboxProvider } from "./provider.js";
+import { SandboxTimeoutMismatch, type SandboxProvider } from "./provider.js";
 import { scrubTrace } from "../trace-scrub.js";
 import { seal, open } from "../secret-box.js";
 import { opsLog } from "../ops-log.js";
@@ -562,7 +562,8 @@ export class CodingController {
     if (
       !timingSafeEqual(Buffer.from(token), Buffer.from(expected)) ||
       (!includeFinished &&
-        (!active.includes(job.state) ||
+        (!job.sandbox_id ||
+          !active.includes(job.state) ||
           new Date(job.attempt_deadline).getTime() <= this.clock().getTime()))
     )
       throw new Error("Invalid worker capability");
@@ -1041,12 +1042,24 @@ export class CodingController {
         );
     }
   }
-  private async stopped(j: CodingJob, summary: string, attempted = true) {
+  private async stopped(
+    j: CodingJob,
+    summary: string,
+    attempted = true,
+    sandboxId?: string,
+  ) {
     this.abortModels(j.id);
     await this.db.query(
-      `WITH changed AS (UPDATE coding_jobs SET state='paused',summary=$3,cleanup=CASE WHEN $5 THEN 'pending' ELSE 'none' END,model_busy=false,updated_at=now() WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') RETURNING id)
+      `WITH changed AS (UPDATE coding_jobs SET state='paused',summary=$3,sandbox_id=COALESCE($6,sandbox_id),cleanup=CASE WHEN $5 THEN 'pending' ELSE 'none' END,model_busy=false,updated_at=now() WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') RETURNING id)
       INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$4,jsonb_build_object('summary',$3::text) FROM changed ON CONFLICT DO NOTHING`,
-      [j.id, j.attempt_id, summary, `${j.attempt_id}:paused`, attempted],
+      [
+        j.id,
+        j.attempt_id,
+        summary,
+        `${j.attempt_id}:paused`,
+        attempted,
+        sandboxId ?? null,
+      ],
     );
   }
   async tick() {
@@ -1111,11 +1124,16 @@ export class CodingController {
             "UPDATE coding_jobs SET sandbox_id=$3 WHERE id=$1 AND attempt_id=$2",
             [j.id, j.attempt_id, id],
           );
-        } catch {
-          await this.stopped(
-            j,
-            "Sandbox provisioning acknowledgement is uncertain; reconciling before any new attempt",
-          );
+        } catch (error) {
+          if (error instanceof SandboxTimeoutMismatch) {
+            // Preserve the created identity and revoke dispatch atomically.
+            await this.stopped(j, error.message, true, error.sandboxId);
+          } else {
+            await this.stopped(
+              j,
+              "Sandbox provisioning acknowledgement is uncertain; reconciling before any new attempt",
+            );
+          }
         }
         return;
       }
@@ -1139,7 +1157,18 @@ export class CodingController {
       if (active.includes(j.state)) {
         if (!this.allowed(j.user_id))
           await this.stopped(j, "Owner access revoked; saved work is retained");
-        else if (
+        else if (state === "terminal" && this.provider.terminalReason) {
+          const reason = await this.provider
+            .terminalReason(j.sandbox_id)
+            .catch(() => undefined);
+          await this.stopped(
+            j,
+            reason ??
+              (new Date(j.attempt_deadline).getTime() <= this.clock().getTime()
+                ? "Sandbox exited without a result and its allocated deadline has expired; stopping cause is unconfirmed, saved work is retained"
+                : "Sandbox stopped before a result was recorded; saved work is retained"),
+          );
+        } else if (
           new Date(j.attempt_deadline).getTime() <= this.clock().getTime()
         )
           await this.stopped(

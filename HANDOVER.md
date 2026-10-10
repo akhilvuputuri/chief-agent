@@ -1,6 +1,6 @@
 # CodeBuild timeout incident — 10 October 2026
 
-A production Pi build timed out after 45 minutes while its saved host allocation was two hours. A separate zero-model new-image launch requested 125 minutes but CodeBuild again reported 45; the probe was stopped. Source already requests 125. Effective provider restriction/audit resolution remains pending; v0.3.64 model compatibility remains deployed. Original work stays paused, with no automatic resume or preference/approval change. [Incident evidence](docs/journey/80-codebuild-timeout-mismatch.md).
+A production Pi build timed out after 45 minutes while its saved host allocation was two hours. A separate zero-model new-image launch requested 125 minutes but CodeBuild again reported 45; the probe was stopped. Source already requests 125. Candidate v0.3.65 validates the effective launch timeout, atomically pauses rejected launches with tracked cleanup, gates worker authentication on acknowledgement, and diagnoses confirmed provider timeouts. Effective provider restriction/audit resolution and exact candidate review/checks/deployment remain pending; v0.3.64 model compatibility remains deployed. Original work stays paused, with no automatic resume or preference/approval change. [Incident evidence](docs/journey/80-codebuild-timeout-mismatch.md).
 
 # Coding model compatibility shipped v0.3.64 — 10 October 2026
 
