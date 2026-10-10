@@ -1,6 +1,6 @@
 # 81 — Planning must converge before the sandbox ends
 
-Work date: 11 October 2026. Status: implementation candidate; exact review, worker image activation and release remain pending.
+Work date: 11 October 2026. Status: foundation integrated; verified worker activation candidate, deployment and owner acceptance remain separate.
 
 ## Problem and preceding iteration
 
@@ -51,3 +51,11 @@ Ten separately started paid trials on one public-repository objective used 191 s
 ## Next falsifying test
 
 Use the published worker on a separately authorized full task: verify the plan covers every requirement or asks a specific useful question, then verify approved implementation, actual checks and fresh review. Larger tasks may need explicit follow-up planning passes. A report boundary is a convergence mechanism, not proof of correctness.
+
+### Verified worker activation candidate — 11 October 2026
+
+Independent GPT-6 Astra approved exact foundation head `9128fd61166def12d9f73467b6160d4ce93305dd` after 56 focused repository tests and 11 independent probes. The outdated Devin context-recovery thread was resolved with the implemented fix and actual native-wire evidence. [PR 216](https://github.com/akhilvuputuri/chief-agent/pull/216) merged at `00d0c26bd9a1b9a544dfc8b39721ada9f5a3fbdc` after hosted check 38076662524 passed, including Linux worker/extraction gates. Foundation deployment is tracked independently from integration.
+
+[Main worker publication](https://github.com/akhilvuputuri/chief-agent/actions/runs/38077571559) produced immutable `sha256:5cfe2415d9df069f91623deeea6fb35fa4762089403e3242bfbe86d96ffda6a8`. Anonymous OCI/layer verification matched all 14 compiled runtime/bridge files to that main source, package 0.1.2, SDK 1.1.0, linux/amd64, user worker, inspector-disabled entrypoint and root-owned native guard. The v0.3.67 activation candidate selects this image and adds `maxOutputTokens: 16000` only now that its strict bridge supports the field. Previous snapshots keep 8,000 tokens and their saved images/models; no automatic resume/migration or owner preference/approval write occurs. Exact pin approval, hosted checks, release receipt and separate current health remain pending. Structural paid trials do not establish semantic plan quality or full owner-task acceptance.
+
+A network-disabled, read-only disposable container on the existing server verified Node 22.19.0, uid 1000, runtime 0.1.2 and successful loading of the root-owned native guard. Three focused configuration/snapshot tests and effective-profile parsing passed. A zero-model disposable CodeBuild launch with the new image requested 45 minutes; both the launch response and subsequent read reported 45. It was immediately stopped and returned STOPPED. This measures admission compatibility, not a full coding-job execution; zero owner jobs, preferences or approvals were changed. Host compute is excluded from model-cost totals.
