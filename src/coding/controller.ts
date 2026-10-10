@@ -34,7 +34,11 @@ import {
   validateFiles,
   type RepositoryPublisher,
 } from "./github.js";
-import { SandboxTimeoutMismatch, type SandboxProvider } from "./provider.js";
+import {
+  SandboxAcknowledgementPending,
+  SandboxTimeoutMismatch,
+  type SandboxProvider,
+} from "./provider.js";
 import { scrubTrace } from "../trace-scrub.js";
 import { seal, open } from "../secret-box.js";
 import { opsLog } from "../ops-log.js";
@@ -562,13 +566,17 @@ export class CodingController {
     if (
       !timingSafeEqual(Buffer.from(token), Buffer.from(expected)) ||
       (!includeFinished &&
-        (!job.sandbox_id ||
-          !active.includes(job.state) ||
+        (!active.includes(job.state) ||
           new Date(job.attempt_deadline).getTime() <= this.clock().getTime()))
     )
       throw new Error("Invalid worker capability");
     if (job.mode === "implement" && !(await this.requirements.approved(job)))
       throw new Error("Requirements are not approved");
+    if (!job.sandbox_id && (!includeFinished || active.includes(job.state))) {
+      if (job.state === "provisioning")
+        throw new SandboxAcknowledgementPending();
+      throw new Error("Invalid worker capability");
+    }
     return job;
   }
   async assignment(job: CodingJob) {

@@ -1,3 +1,4 @@
+import { SandboxAcknowledgementPending } from "./provider.js";
 import { piCompletion } from "./pi-proxy.js";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -96,7 +97,11 @@ export async function codingApi(
                 req.headers.authorization?.replace(/^Bearer /, "") ?? "",
                 path === "finish",
               );
-            } catch {
+            } catch (error) {
+              if (error instanceof SandboxAcknowledgementPending)
+                return reply
+                  .code(503)
+                  .send({ error: "Sandbox launch acknowledgement is pending" });
               return reply
                 .code(401)
                 .send({ error: "Invalid worker capability" });

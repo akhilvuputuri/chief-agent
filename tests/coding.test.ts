@@ -43,6 +43,7 @@ import {
 import {
   CodeBuildSandbox,
   SandboxTimeoutMismatch,
+  SandboxAcknowledgementPending,
 } from "../src/coding/provider.js";
 import { Workspace } from "../src/coding/workspace.js";
 import { codingLoop } from "../src/coding/loop.js";
@@ -1062,7 +1063,7 @@ test("worker dispatch waits for confirmed sandbox acknowledgement", async (t) =>
   try {
     await assert.rejects(
       f.c.authenticate(job.id, f.c.token(job.id, launching.attempt_id)),
-      /Invalid worker capability/,
+      SandboxAcknowledgementPending,
     );
     assert.equal(f.modelCalls(), 0);
   } finally {
@@ -1072,6 +1073,75 @@ test("worker dispatch waits for confirmed sandbox acknowledgement", async (t) =>
   const acknowledged = await f.row(job.id);
   assert(acknowledged.sandbox_id);
   await f.c.authenticate(job.id, f.c.token(job.id, acknowledged.attempt_id));
+});
+
+test("current immutable worker retries a pending valid acknowledgement and receives its assignment", async (t) => {
+  const f = await fixture(t),
+    job = await f.start("delayed-valid-receipt", "plan");
+  const create = f.provider.create;
+  let release!: () => void;
+  const receipt = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  f.provider.create = async (r) => {
+    await receipt;
+    return create(r);
+  };
+  const dispatch = f.c.tick();
+  let launching;
+  for (let i = 0; i < 30; i++) {
+    launching = await f.row(job.id);
+    if (launching.state === "provisioning") break;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  const app = server();
+  t.after(() => app.close());
+  await codingApi(app, f.c);
+  let requests = 0;
+  const transport: typeof fetch = async (url, options) => {
+    const reply = await app.inject({
+      method: options?.method as any,
+      url: new URL(String(url)).pathname,
+      headers: options?.headers as any,
+      payload: options?.body as string | undefined,
+    });
+    requests++;
+    if (requests === 1) {
+      assert.equal(reply.statusCode, 503);
+      const prematureFinish = await app.inject({
+        method: "POST",
+        url: `/coding/worker/${job.id}/finish`,
+        headers: options?.headers as any,
+        payload: {},
+      });
+      assert.equal(prematureFinish.statusCode, 503);
+      const invalid = await app.inject({
+        method: "GET",
+        url: `/coding/worker/${job.id}/assignment`,
+        headers: { authorization: `Bearer ${"d".repeat(64)}` },
+      });
+      assert.equal(invalid.statusCode, 401);
+      assert.equal(f.modelCalls(), 0);
+      release();
+      await dispatch;
+    }
+    return new Response(reply.body, { status: reply.statusCode });
+  };
+  const client = new WorkerClient(
+    "https://coding.example.com",
+    job.id,
+    f.c.token(job.id, launching.attempt_id),
+    AbortSignal.timeout(10000),
+    transport,
+  );
+  try {
+    assert.equal((await client.request("assignment")).id, job.id);
+  } finally {
+    release();
+    await dispatch;
+  }
+  assert.equal(requests, 2);
+  assert.equal(f.modelCalls(), 0);
 });
 
 test("CodeBuild refuses an insufficient or unconfirmed timeout while retaining the created sandbox identity", async () => {
@@ -1253,7 +1323,7 @@ test("terminal provider metadata explains timeout and falls back safely if the d
       terminalReason: async () => {
         if (diagnosticReadFails)
           throw new Error("private provider diagnostic error");
-        return "Sandbox provider timed out after 45 minutes before a result was recorded; saved work is retained";
+        return "Sandbox provider hit its 45-minute build timeout before a result was recorded; saved work is retained";
       },
     });
     await f.c.tick();
@@ -1264,7 +1334,7 @@ test("terminal provider metadata explains timeout and falls back safely if the d
       paused.summary,
       diagnosticReadFails
         ? /stopped before a result/
-        : /timed out after 45 minutes/,
+        : /45-minute build timeout/,
     );
     assert(!paused.summary.includes("private"));
     await f.c.tick();
@@ -1291,8 +1361,35 @@ test("CodeBuild identifies a timed-out BUILD even when the overall build status 
   );
   assert.match(
     (await p.terminalReason("fixture:timedout"))!,
-    /timed out after 45 minutes/,
+    /45-minute build timeout/,
   );
+});
+
+test("provider queue or phase-unknown timeouts do not claim the build allocation elapsed", async () => {
+  for (const phases of [
+    [{ phaseType: "QUEUED", phaseStatus: "TIMED_OUT" }],
+    undefined,
+  ]) {
+    const p = new CodeBuildSandbox(
+      {
+        send: async () => ({
+          builds: [
+            {
+              buildStatus: "TIMED_OUT",
+              timeoutInMinutes: 125,
+              queuedTimeoutInMinutes: 5,
+              phases,
+            },
+          ],
+        }),
+      } as any,
+      "fixture-project",
+    );
+    const reason = await p.terminalReason("fixture:queue");
+    assert(reason?.includes("timed out"));
+    assert(!reason.includes("125"));
+    if (phases) assert(reason.includes("queue"));
+  }
 });
 
 test("workspace rejects traversal and symlinks, captures new/deleted files and kills commands on cancellation", async () => {

@@ -16,6 +16,12 @@ export type SandboxRequest = {
   runtime?: "node" | "python" | "pi";
   timeoutMinutes: number;
 };
+export class SandboxAcknowledgementPending extends Error {
+  constructor() {
+    super("Sandbox launch acknowledgement is pending");
+    this.name = "SandboxAcknowledgementPending";
+  }
+}
 export class SandboxTimeoutMismatch extends Error {
   constructor(
     readonly sandboxId: string,
@@ -167,16 +173,20 @@ export class CodeBuildSandbox implements SandboxProvider {
     ).builds?.[0];
     if (!build || ["IN_PROGRESS", "QUEUED"].includes(String(build.buildStatus)))
       return undefined;
-    if (
-      build.buildStatus !== "TIMED_OUT" &&
-      !build.phases?.some((p) => p.phaseStatus === "TIMED_OUT")
-    )
-      return undefined;
+    const timedOut =
+      build.phases?.filter((p) => p.phaseStatus === "TIMED_OUT") ?? [];
+    if (build.buildStatus !== "TIMED_OUT" && !timedOut.length) return undefined;
+    if (timedOut.some((p) => p.phaseType === "QUEUED"))
+      return "Sandbox provider queue timed out before execution; saved work is retained";
     const minutes = build.timeoutInMinutes;
-    return Number.isInteger(minutes) && minutes! >= 5 && minutes! <= 2160
-      ? `Sandbox provider timed out after ${minutes} minutes before a result was recorded; saved work is retained`
+    return timedOut.some((p) => p.phaseType === "BUILD") &&
+      Number.isInteger(minutes) &&
+      minutes! >= 5 &&
+      minutes! <= 2160
+      ? `Sandbox provider hit its ${minutes}-minute build timeout before a result was recorded; saved work is retained`
       : "Sandbox provider timed out before a result was recorded; saved work is retained";
   }
+
   async terminate(id: string) {
     await this.client.send(new StopBuildCommand({ id }));
   }
