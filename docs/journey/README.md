@@ -89,7 +89,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 10 October | [78 — Pi native continuation](78-pi-native-continuation.md): does the facade accept the actual model compatibility profile? | v0.3.62 fix released; actual-profile regressions, real-model fixture, exact review/release/deployed schema pass; original owner job paused |
 
 | 10 October | [79 — Coding model compatibility](79-coding-model-compatibility.md): can coding roles switch model families without protocol pauses? | Eight-model/seven-family profile and paid command/control experiments; report-contract candidate tested, final matrix/review/image activation pending |
-| 10 October | [80 — CodeBuild timeout mismatch](80-codebuild-timeout-mismatch.md): why did a sandbox end before its saved allocation? | Provider timeout confirmed; 125-minute request returned 45 in a zero-model probe; resolution pending |
+| 10 October | [80 — CodeBuild timeout mismatch](80-codebuild-timeout-mismatch.md): why did a sandbox end before its saved allocation? | v0.3.65 application protection verified; provider 45-minute restriction remains unresolved |
 
 ## Coding-agent learning path
 
