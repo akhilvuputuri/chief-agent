@@ -1,3 +1,5 @@
+import { InputFile } from "grammy";
+import { sendCodingDelivery } from "./coding/delivery.js";
 import { selectCodingBackend } from "./coding/backend.js";
 import { randomUUID } from "node:crypto";
 import { LinkResolver, postEvidenceSchema } from "./link-resolution.js";
@@ -1062,38 +1064,32 @@ const routineTimer = setInterval(() => {
       opsLog("coding.tick_failed", "error", errorFields(error)),
     );
   void coding
-    ?.deliver(async (user, target, text, approvalId) => {
-      const parts = formatTelegram(text);
-      let last;
-      for (const [index, part] of parts.entries()) {
-        last = await topics.deliver(user, target, (extra) =>
-          bot.api.sendMessage(user, part.text, {
-            ...extra,
-            entities: part.entities,
-            link_preview_options: { is_disabled: true },
-            ...(approvalId && index === parts.length - 1
-              ? {
-                  reply_markup: {
-                    inline_keyboard: [
-                      [
-                        {
-                          text: "Approve requirements",
-                          callback_data: `cod:yes:${approvalId}`,
-                        },
-                        {
-                          text: "Request changes",
-                          callback_data: `cod:no:${approvalId}`,
-                        },
-                      ],
-                    ],
-                  },
-                }
-              : {}),
-          }),
-        );
-      }
-      return last;
-    })
+    ?.deliver(async (user, target, text, approvalId, document) =>
+      sendCodingDelivery(text, approvalId, document, {
+        text: (part, keyboard) =>
+          topics.deliver(user, target, (extra) =>
+            bot.api.sendMessage(user, part.text, {
+              ...extra,
+              entities: part.entities,
+              link_preview_options: { is_disabled: true },
+              ...(keyboard ? { reply_markup: keyboard } : {}),
+            }),
+          ),
+        document: (file, caption, keyboard) =>
+          topics.deliver(user, target, (extra) =>
+            bot.api.sendDocument(
+              user,
+              new InputFile(Buffer.from(file.content, "utf8"), file.filename),
+              {
+                ...extra,
+                caption: caption.text,
+                caption_entities: caption.entities,
+                ...(keyboard ? { reply_markup: keyboard } : {}),
+              },
+            ),
+          ),
+      }),
+    )
     .catch((error) =>
       opsLog("coding.delivery_failed", "error", errorFields(error)),
     );

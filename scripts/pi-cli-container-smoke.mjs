@@ -144,7 +144,10 @@ try {
   const completed = JSON.parse(result.stdout);
   assert.equal(completed.status, "completed", completed.summary);
   assert.equal(completed.checks[0].exitCode, 0);
-  assert.equal(calls, 3);
+  assert.equal(completed.report.kind, "done");
+  assert.equal(completed.report.version, 1);
+  // A settled valid report completes without an extra model continuation.
+  assert.equal(calls, 2);
   console.log(
     "Actual standalone guarded CLI: detached process reaped before real check; zero external model calls.",
   );

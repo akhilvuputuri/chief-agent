@@ -588,3 +588,253 @@ test("OpenRouter streaming preserves routing ceilings and returns the ordinary c
       !error.message.includes("private"),
   );
 });
+
+test("independent: valid long report survives ordinary fragmented SSE within selected token allowance", async () => {
+  const args = JSON.stringify({
+    kind: "plan",
+    summary: "Complete synthetic plan",
+    detail: "x ".repeat(14000),
+  });
+  const frames: string[] = [];
+  const chunk = (delta: any, finish: any = null, usage?: any) =>
+    "data: " +
+    JSON.stringify({
+      id: "gen-synthetic",
+      object: "chat.completion.chunk",
+      created: 1,
+      model: "deepseek/deepseek-v4.1-flash",
+      choices: [{ index: 0, delta, finish_reason: finish }],
+      ...(usage ? { usage } : {}),
+    }) +
+    "\n\n";
+  frames.push(
+    chunk({
+      role: "assistant",
+      tool_calls: [
+        {
+          index: 0,
+          id: "report1",
+          type: "function",
+          function: { name: "report", arguments: "" },
+        },
+      ],
+    }),
+  );
+  for (let i = 0; i < args.length; i += 2)
+    frames.push(
+      chunk({
+        tool_calls: [
+          { index: 0, function: { arguments: args.slice(i, i + 2) } },
+        ],
+      }),
+    );
+  frames.push(
+    chunk({}, "tool_calls", {
+      prompt_tokens: 100,
+      completion_tokens: 14050,
+      total_tokens: 14150,
+    }),
+  );
+  frames.push("data: [DONE]\n\n");
+  const bytes = Buffer.byteLength(frames.join(""));
+  console.log({
+    reportCharacters: 28000,
+    completionTokens: 14050,
+    wireBytes: bytes,
+    frames: frames.length,
+  });
+  const encoder = new TextEncoder();
+  const adapter = new OpenRouter(
+    "fixture-key",
+    "fixture/model",
+    2,
+    10,
+    async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            for (const frame of frames)
+              controller.enqueue(encoder.encode(frame));
+            controller.close();
+          },
+        }),
+        { headers: { "content-type": "text/event-stream" } },
+      ),
+  );
+  const result = await adapter.generate({
+    messages: [],
+    tools: [],
+    reasoning: "high",
+    stream: true,
+    requireComplete: true,
+    maxOutputTokens: 16000,
+    signal: new AbortController().signal,
+  });
+  assert.equal(result.message.tool_calls?.[0]?.function.arguments, args);
+});
+
+test("expanded Pi framing allowance preserves legacy and absolute wire bounds", async () => {
+  const adapter = (bytes: number) =>
+    new OpenRouter("fixture-key", "fixture/model", 2, 10, async () =>
+      response([":" + " ".repeat(bytes) + "\n\n"]),
+    );
+  for (const input of [
+    { requireComplete: false, bytes: 1600001 },
+    { requireComplete: true, bytes: 16000 * 1024 + 1 },
+  ])
+    await assert.rejects(
+      adapter(input.bytes).generate({
+        messages: [],
+        tools: [],
+        reasoning: "high",
+        stream: true,
+        requireComplete: input.requireComplete,
+        maxOutputTokens: 16000,
+        signal: new AbortController().signal,
+      }),
+      (error: unknown) =>
+        error instanceof ModelError &&
+        error.diagnostics.failureCode === "malformed",
+    );
+});
+
+test("Gemini text and encrypted reasoning with the same index survive streamed tool continuation", async () => {
+  const parts = [
+    frame(
+      chunk({
+        role: "assistant",
+        content: "",
+        reasoning: "Synthetic rationale.",
+        reasoning_details: [
+          {
+            type: "reasoning.text",
+            text: "Synthetic rationale.",
+            format: "google-gemini-v1",
+            index: 0,
+          },
+        ],
+      }),
+    ),
+    frame(
+      chunk({
+        role: "assistant",
+        content: "",
+        reasoning: null,
+        reasoning_details: [
+          {
+            type: "reasoning.encrypted",
+            data: "synthetic-signature",
+            format: "google-gemini-v1",
+            id: "call_fixture",
+            index: 0,
+          },
+        ],
+      }),
+    ),
+    frame(
+      chunk({
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            index: 0,
+            id: "call_fixture",
+            type: "function",
+            function: { name: "ls", arguments: "" },
+          },
+        ],
+      }),
+    ),
+    frame(
+      chunk(
+        { tool_calls: [{ index: 0, function: { arguments: '{"path":"."}' } }] },
+        "tool_calls",
+      ),
+    ),
+    frame("[DONE]"),
+  ];
+  let calls = 0;
+  const adapter = new OpenRouter(
+    "fixture-key",
+    "google/gemini-3.8-flash",
+    2,
+    10,
+    async (_url, init) => {
+      if (calls++) {
+        const request = JSON.parse(String(init?.body));
+        assert.deepEqual(request.messages[0].reasoning_details, [
+          {
+            type: "reasoning.text",
+            text: "Synthetic rationale.",
+            format: "google-gemini-v1",
+            index: 0,
+          },
+          {
+            type: "reasoning.encrypted",
+            data: "synthetic-signature",
+            format: "google-gemini-v1",
+            id: "call_fixture",
+            index: 0,
+          },
+        ]);
+        return response([
+          frame(chunk({ content: "Complete" }, "stop")),
+          frame("[DONE]"),
+        ]);
+      }
+      return response(parts);
+    },
+  );
+  const input = {
+    messages: [],
+    tools: [],
+    reasoning: "high" as const,
+    stream: true,
+    requireComplete: true,
+    maxOutputTokens: 16000,
+    signal: new AbortController().signal,
+  };
+  const first = await adapter.generate(input);
+  assert.equal(first.message.tool_calls?.[0]?.function.name, "ls");
+  const second = await adapter.generate({
+    ...input,
+    messages: [
+      first.message,
+      {
+        role: "tool",
+        tool_call_id: "call_fixture",
+        content: "Synthetic listing",
+      },
+    ],
+  });
+  assert.equal(second.message.content, "Complete");
+  await assert.rejects(
+    readGenerationStream(
+      response([
+        frame(
+          chunk({
+            reasoning_details: [
+              { type: "reasoning.encrypted", index: 0, id: "first", data: "a" },
+            ],
+          }),
+        ),
+        frame(
+          chunk({
+            reasoning_details: [
+              {
+                type: "reasoning.encrypted",
+                index: 0,
+                id: "changed",
+                data: "b",
+              },
+            ],
+          }),
+        ),
+        frame(chunk({ content: "Invalid identity mutation" }, "stop")),
+        frame("[DONE]"),
+      ]),
+      new AbortController().signal,
+    ),
+    StreamFailure,
+  );
+});

@@ -9,3 +9,11 @@ export {
 export { compatibleModel, type ModelFactory } from "./model.js";
 export type * from "./types.js";
 export { serveRpc } from "./rpc.js";
+
+export {
+  reportLimits,
+  reportDocument,
+  documentHash,
+  type ReportDocument,
+  type ReferenceDocument,
+} from "./report.js";

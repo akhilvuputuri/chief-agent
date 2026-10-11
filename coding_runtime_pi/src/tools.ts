@@ -14,6 +14,7 @@ import {
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Workspace, type Executor } from "./workspace.js";
+import { reportLimits, reportDocument } from "./report.js";
 import type { Report, Intent } from "./types.js";
 
 export function tools(
@@ -181,14 +182,14 @@ export function tools(
   list.push({
     name: "report",
     label: "Report",
-    description: `Required final result for ${intent}: use kind ${reportKinds[0]}, or question if blocked. Review reports require verdict APPROVE or REQUEST_CHANGES. Questions fit within 2000 characters. Reporting does not approve work or mark checks passed.`,
+    description: `Required final result for ${intent}: use kind ${reportKinds[0]}, or question if blocked. Review reports require verdict APPROVE or REQUEST_CHANGES. Full plan/review documents fit within ${reportLimits.document} characters; summary is a separate status field of at most ${reportLimits.summary} characters. Questions fit within ${reportLimits.question} characters. Reporting does not approve work or mark checks passed.`,
     parameters: Type.Object({
       kind: Type.Union(reportKinds.map((v) => Type.Literal(v))),
       summary: Type.String({
         minLength: 1,
-        maxLength: intent === "plan" ? 400 : 4000,
+        maxLength: reportLimits.summary,
       }),
-      detail: Type.String({ minLength: 1, maxLength: 6000 }),
+      detail: Type.String({ minLength: 1, maxLength: reportLimits.document }),
       verdict: Type.Optional(
         Type.Union([Type.Literal("APPROVE"), Type.Literal("REQUEST_CHANGES")]),
       ),
@@ -197,17 +198,8 @@ export function tools(
       const r = input as Report;
       if (!reportKinds.includes(r.kind) || (r.kind === "review" && !r.verdict))
         throw new Error("Report does not match this task intent");
-      if (r.kind === "question" && r.detail.length > 2000)
-        throw new Error(
-          "Return a complete question within 2000 characters; do not omit necessary context",
-        );
-      if (r.kind === "plan" && r.summary.length > 400)
-        throw new Error(
-          "Return a concise status summary within 400 characters; keep complete scope in detail",
-        );
-      if (!r.summary.trim() || !r.detail.trim() || r.detail.length > 6000)
-        throw new Error("Return a complete bounded report");
-      report(r);
+      const document = reportDocument(r);
+      report(document);
       return {
         content: [
           {

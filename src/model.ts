@@ -159,7 +159,16 @@ export class OpenRouter implements ModelAdapter {
     let data: any;
     try {
       data = input.stream
-        ? await readGenerationStream(response, input.signal, input.onProgress)
+        ? await readGenerationStream(
+            response,
+            input.signal,
+            input.onProgress,
+            // Pi complete-response requests may contain one SSE envelope per
+            // token. Bound transport overhead separately from report content.
+            input.requireComplete
+              ? Math.max(1600000, maxOutputTokens * 1024)
+              : undefined,
+          )
         : await response.json();
     } catch (error) {
       if (!input.stream) throw error;

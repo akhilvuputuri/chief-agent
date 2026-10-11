@@ -51,7 +51,9 @@ export type Task = {
   runnerPid?: number;
   sessionFile?: string;
   activeRun?: { startedAt: number; reservedMs: number };
-  report?: Report;
+  report?: import("./report.js").ReportDocument;
+  referenceDocuments?: import("./report.js").ReferenceDocument[];
+  reportFailure?: string;
   events: RuntimeEvent[];
 };
 export type RuntimeEvent = {
@@ -66,6 +68,7 @@ export type StartRequest = {
   instructions?: string;
   limits?: Limits;
   checks?: string[];
+  referenceDocuments?: import("./report.js").ReferenceDocument[];
 };
 export type ModelConfig = {
   provider: string;
