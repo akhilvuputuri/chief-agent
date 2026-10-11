@@ -1,6 +1,6 @@
 # 82 — Complete coding reports must survive every handoff
 
-Work date: 11 October 2026. Status: corrected runtime independently approved; final paid matrix and CodeBuild verification passed; hosted smoke expectation correction and release gates pending.
+Work date: 11 October 2026. Status: reviewed foundation integrated; paid matrix, CodeBuild and published-image verification passed. Live activation requires exact release and current-health receipts.
 
 ## Problem and evidence
 
@@ -78,3 +78,19 @@ All test containers/proxies/public candidate files were removed. No owner jobs, 
 The same exact runtime revision passed CodeBuild `chief-coding:f92e6626-3e72-4b2a-af66-a92a85912d32` (72-second BUILD, 45-minute allocation), including Pi tests, model-stream regressions, full-document bridge/reviewer recovery and native process isolation. Local full checks passed 1,099 tests plus build/type checks and formatting. GPT-6 Astra approved the exact runtime revision after 17 stream tests and three further independent identity/capacity probes, extending its earlier complete review.
 
 Hosted CI reached the actual standalone Linux CLI and confirmed task completion and real descendant-cleanup checks, then failed the old `calls === 3` assertion: accepted reports now correctly stop at two calls. The smoke expectation now asserts two calls and a versioned done report, with runtime source unchanged. Passing replacement CI, verified image publication/activation and exact deployment/current health remain required; the acceptance evidence alone is not a deployed release.
+
+### Verified worker image selection
+
+[PR220](https://github.com/akhilvuputuri/chief-agent/pull/220) integrated the approved foundation at `26a9f622cf3dc6fa34f92195f30751eab88c04a2`; all hosted checks, including the corrected actual CLI smoke, passed. [Main-only image publication](https://github.com/akhilvuputuri/chief-agent/actions/runs/38122374045) produced worker 0.1.3/Pi 1.1.0 at `sha256:7c0ab4236340a6d50c0f0ef9675bb9e71e8f5780bb9d0e8d6af57155a0a843e8`. Anonymous OCI verification matched all 16 compiled runtime/bridge files to main, linux/amd64, the non-root worker, fixed inspector-disabled entrypoint and root-owned native guard. An offline run of that exact published image confirmed Node 22.19.0, private-process isolation and detached-descendant cleanup.
+
+Application v0.3.69 selects that immutable image for new jobs. This is a selector/version/documentation change; runtime source matches the accepted foundation. The 40-minute attempt, 400-model/1,000-tool limits, selected role models/high effort, price filters, 16,000-token output and existing job/image snapshots are preserved. Both incident jobs were independently observed paused, cleanup complete, with unchanged 203/23 model counters before rollout.
+
+Image verification and source selection are distinct from deployment. Activation requires exact-head review/checks, immutable release receipts and separate current-health verification. Consult [foundation PR220](https://github.com/akhilvuputuri/chief-agent/pull/220) and [activation PR221](https://github.com/akhilvuputuri/chief-agent/pull/221) for completed operational evidence. Use those operational receipts to establish the live release; no paused job is automatically resumed or migrated. New jobs use the selected image after successful activation.
+
+### Production package closure failure and correction
+
+The foundation release attempt [38122998397](https://github.com/akhilvuputuri/chief-agent/actions/runs/38122998397) failed startup health and automatically restored healthy v0.3.67. Private error-log lookup returned no application error rows. An offline import of `dist/coding/schema.js` from the exact failed image deterministically returned `ERR_MODULE_NOT_FOUND` for `@chief-agent/pi-runtime`: the new shared report contract had remained a development dependency, and the production Docker image pruned it without copying its local file-dependency target. Passing source tests and image builds had not established production import closure.
+
+The activation change now also declares the existing Pi package as a production dependency and copies its package metadata/compiled output into the final gateway image. Dependency versions, resolutions and integrity values are unchanged. CI now imports the production coding schema/controller/API and constructs a full report in the actual pruned, read-only, network-disabled gateway image without credentials. This directly exercises the boundary missed by the prior build-only checks.
+
+PR221 therefore includes the reviewed production packaging correction and the already verified worker pin in one v0.3.69 release; the failed v0.3.68 attempt is not tagged as a shipped milestone. Runtime/model/worker source remains unchanged from accepted revision `adc0e3b5b598c9c3d9ae3f1d2ebfa760fe77ba54`. Fresh exact-head review, production-image import verification, hosted checks and successful release/current health are required before claiming activation. No deployment guard is bypassed and paused jobs remain preserved.

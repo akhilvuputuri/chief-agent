@@ -48,6 +48,7 @@ jobs:
       - name: Verify PostgreSQL gathering revocation interleaving
         run: |
           docker build -t chief-gathering-app:test .
+          docker run --rm --network=none --read-only --cap-drop=ALL --security-opt=no-new-privileges --entrypoint node chief-gathering-app:test --input-type=module -e 'await import("./dist/coding/schema.js"); await import("./dist/coding/controller.js"); await import("./dist/coding/api.js"); const {reportDocument}=await import("@chief-agent/pi-runtime/report"); if(reportDocument({kind:"plan",summary:"Synthetic production dependency check",detail:"x".repeat(9357)}).version!==1)throw Error("Report contract unavailable"); console.log("Pruned production coding modules and report contract loaded");'
           docker run -d --name gathering-pg-proof --network=none --user postgres --read-only --tmpfs /tmp:size=256m,mode=1777 --tmpfs /var/run/postgresql:mode=1777 --memory=384m --pids-limit=96 --env PGDATA=/tmp/pgdata --env POSTGRES_USER=synthetic --env POSTGRES_PASSWORD=synthetic-only --env POSTGRES_DB=gathering_test postgres:17-alpine
           trap 'docker rm -f gathering-pg-proof >/dev/null' EXIT
           pg_ready=false

@@ -1,5 +1,7 @@
 # Independent Pi runtime and Chief bridge
 
+The selected worker is Pi runtime 0.1.3, built from the independently reviewed complete-report foundation. It preserves full plan/review documents, delivers plans as a single approval attachment, restores the correct workflow phase and supports the verified provider streaming shapes. Four full synthetic provider workflows and CodeBuild/native isolation passed; these do not establish arbitrary-task reliability. [Journal82](journey/82-pi-report-contract.md) records negative results, exact source/image identities and operational release evidence. Historical jobs retain their saved images; a new job is required to use a newly activated worker without an explicitly authorized migration.
+
 Shipped Pi default for new tasks as v0.3.61, followed by model-compatibility worker 0.1.1 activation as v0.3.64 on10 October 2026. Exact review/release and independent host health/default image are verified. Paid small-fixture tests cover eight models/seven families through OpenRouter and Chief role commands; full owner-task acceptance and general reliability remain unmeasured. See [model compatibility](coding-model-compatibility.md) and [release evidence](journey/79-coding-model-compatibility.md#verified-release-closure--10-october-2026). [Plan](pi-coding-runtime-plan.md), [dependency exploration](pi-coding-harness.md), [independent package](../coding_runtime_pi/README.md) and [journal](journey/77-pi-runtime.md).
 
 ## Execution and portability
