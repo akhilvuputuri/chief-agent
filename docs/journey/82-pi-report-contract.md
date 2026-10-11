@@ -1,6 +1,6 @@
 # 82 — Complete coding reports must survive every handoff
 
-Work date: 11 October 2026. Status: corrected runtime independently approved; final paid matrix and CodeBuild verification passed; hosted smoke expectation correction and release gates pending.
+Work date: 11 October 2026. Status: reviewed foundation integrated; paid matrix, CodeBuild and published-image verification passed. Live activation requires exact release and current-health receipts.
 
 ## Problem and evidence
 
@@ -85,4 +85,4 @@ Hosted CI reached the actual standalone Linux CLI and confirmed task completion 
 
 Application v0.3.69 selects that immutable image for new jobs. This is a selector/version/documentation change; runtime source matches the accepted foundation. The 40-minute attempt, 400-model/1,000-tool limits, selected role models/high effort, price filters, 16,000-token output and existing job/image snapshots are preserved. Both incident jobs were independently observed paused, cleanup complete, with unchanged 203/23 model counters before rollout.
 
-Image verification and source selection are distinct from deployment. The foundation and image-selection PRs record their exact-head reviews/checks, immutable release receipts and separate current-health verification. Use those operational receipts to establish the live release; no paused job is automatically resumed or migrated. New jobs use the selected image after successful activation.
+Image verification and source selection are distinct from deployment. Activation requires exact-head review/checks, immutable release receipts and separate current-health verification. Consult the foundation and image-selection PRs for completed operational evidence. Use those operational receipts to establish the live release; no paused job is automatically resumed or migrated. New jobs use the selected image after successful activation.
