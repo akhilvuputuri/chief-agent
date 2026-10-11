@@ -20,6 +20,7 @@ import {
 function scripted(
   replies: Array<Array<{ name: string; arguments: Record<string, unknown> }>>,
   stopReason?: string | number,
+  inspectPrompt?: (prompt: string) => void,
 ): ModelFactory {
   return async (admit) => {
     const runtime = await ModelRuntime.create({
@@ -47,6 +48,14 @@ function scripted(
         const stream = createAssistantMessageEventStream();
         void (async () => {
           await admit();
+          inspectPrompt?.(
+            _context.systemPrompt ??
+              JSON.stringify(
+                _context.messages.filter(
+                  (message) => message.role === "system",
+                ),
+              ),
+          );
           const calls = replies[index++] ?? [];
           const message: any = {
             role: "assistant",
@@ -1083,20 +1092,35 @@ test("independent long-plan formatting recovery permits reference rereads and fi
   const failed = await builder.run(task.id);
   assert.equal(failed.status, "paused");
   assert(failed.reportFailure);
+  const recoveryPrompts: string[] = [];
   const resumed = new CodingRuntime({
     store: f.store,
-    model: scripted([
-      [docread(0)],
-      [docread(1)],
-      [docread(2)],
-      [report("done", "Complete retained result")],
-    ]),
+    model: scripted(
+      [
+        [docread(0)],
+        [docread(1)],
+        [docread(2)],
+        [report("done", "Complete retained result")],
+      ],
+      undefined,
+      (prompt) => {
+        recoveryPrompts.push(prompt);
+      },
+    ),
     executor: (t) => localExecutor(t.workspace, join(f.root, "home")),
   });
   await resumed.resume(task.id);
   const result = await resumed.run(task.id);
   assert.equal(result.status, "completed");
   assert.equal(result.checks[0]?.exitCode, 0);
+  assert(
+    recoveryPrompts.every((prompt) =>
+      prompt.includes(
+        "reading required immutable task documents with read_document are permitted",
+      ),
+    ),
+    recoveryPrompts.map((p) => p.slice(-3000)).join("\n---\n"),
+  );
 });
 test("independent truncated report is not classified as a definite formatting failure", async () => {
   const f = await fixture();

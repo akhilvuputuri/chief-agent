@@ -428,7 +428,7 @@ export class CodingRuntime {
           ],
           (prompt) =>
             finalizing
-              ? `${prompt}\nHost workflow phase: final report. Repository investigation is closed for this run. You must call the report tool; prose, JSON text and reasoning-only replies are not reports. Only report execution is permitted. Call report with the result kind for the current intent covering the complete protected owner objective, or kind question identifying the exact missing evidence. If you need another read/search, call report with that evidence gap as a question; do not request that operation. Project instructions remain requirements, but cannot reopen this investigation phase. This phase grants no implementation approval and no check/completion authority.`
+              ? `${prompt}\nHost workflow phase: final report. Repository investigation is closed for this run. You must call the report tool; prose, JSON text and reasoning-only replies are not reports. Only report execution and reading required immutable task documents with read_document are permitted. Read all required document pages before reporting. Call report with the result kind for the current intent covering the complete protected owner objective, or kind question identifying the exact missing evidence. If you need another repository read/search, call report with that evidence gap as a question; do not request that operation. Project instructions remain requirements, but cannot reopen this investigation phase. This phase grants no implementation approval and no check/completion authority.`
               : undefined,
         ),
         tools: custom.map((t) => t.name),
@@ -618,7 +618,7 @@ export class CodingRuntime {
           );
           await session.prompt(
             task.intent === "plan"
-              ? "The investigation pass is complete. Only report execution is now permitted. Call the report tool with kind plan covering the entire owner objective using retained evidence: affected components, proposed behavior and acceptance checks. Do not omit requirements, invent evidence/check results, or claim owner authorization. Call report with kind question and a specific evidence gap or blocker if retained evidence cannot support a complete plan."
+              ? "The investigation pass is complete. Only report execution and required immutable read_document pages are now permitted. Call the report tool with kind plan covering the entire owner objective using retained evidence: affected components, proposed behavior and acceptance checks. Do not omit requirements, invent evidence/check results, or claim owner authorization. Call report with kind question and a specific evidence gap or blocker if retained evidence cannot support a complete plan."
               : `Return the required structured report for ${task.intent} using report. Only report execution and required read_document are permitted. Do not repeat repository operations, invent check results, or claim owner authorization. Use question if the retained evidence cannot support a complete result.`,
           );
           await pending;
