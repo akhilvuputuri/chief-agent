@@ -16,6 +16,7 @@ export function documents(input: ReferenceDocument[]) {
       !d.title.trim() ||
       d.title.length > 200 ||
       !d.text.trim() ||
+      Buffer.from(d.text).toString() !== d.text ||
       d.text.length > reportLimits.document
     )
       throw new Error("Invalid reference document");
@@ -85,5 +86,10 @@ export function documents(input: ReferenceDocument[]) {
       };
     },
   };
-  return { tool, description, unread };
+  return {
+    tool,
+    description,
+    unread,
+    pagesRead: () => [...read.values()].reduce((n, pages) => n + pages.size, 0),
+  };
 }

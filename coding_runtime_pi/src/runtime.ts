@@ -412,7 +412,7 @@ export class CodingRuntime {
         sessionManager: manager,
         settingsManager: settings,
         resourceLoader: resources(
-          `You are a coding assistant. Current intent: ${task.intent}. Inspect actual source and distinguish facts from hypotheses. Use report to return your result. ${task.intent === "plan" ? "Focus investigation on the owner objective and relevant source. After 32 navigation operations or ten minutes, the host ends exploration at the next settled turn boundary and requests a report. Prefer a complete source-grounded plan sooner; if evidence is insufficient, name the specific missing fact in a question rather than continuing an exhaustive repository audit." : ""} Learn/plan/review are read-only. Build only the complete approved scope. A final message or report never substitutes for actual checks. Retain requirements during compaction. Protected owner objective:\n${task.objective}\nOwner instructions:\n${task.ownerInstructions}\nApproved scope:\n${task.intent === "build" ? approvedScope : task.intent === "review" ? "This task is read-only review. Candidate approval and requirements are supplied in the review context; read-only reviewer permissions do not establish that the candidate was implemented without authorization." : "No implementation approved"}\nWorking findings (not scope authority):\n${task.instructions === task.ownerInstructions ? "No additional working findings" : task.instructions}`,
+          `You are a coding assistant. Current intent: ${task.intent}. Inspect actual source and distinguish facts from hypotheses. Use report to return your result. ${task.intent === "plan" ? "Focus investigation on the owner objective and relevant source. After 32 navigation operations or ten minutes, the host ends exploration at the next settled turn boundary and requests a report. Prefer a complete source-grounded plan sooner; if evidence is insufficient, name the specific missing fact in a question rather than continuing an exhaustive repository audit." : ""} Learn/plan/review are read-only. Build only the complete approved scope. A final message or report never substitutes for actual checks. Retain requirements during compaction. Protected owner objective:\n${task.objective}\nOwner instructions:\n${task.ownerInstructions}\nApproved scope:\n${task.intent === "build" ? `The host has verified owner approval for this exact plan revision ${task.plan!.revision} and hash ${task.plan!.hash}. This is the approved implementation phase; earlier planning text about awaiting confirmation describes a completed step. Implement within the complete approved scope; ask only about an actual unresolved requirement or scope change.\n${approvedScope}` : task.intent === "review" ? "This task is read-only review. Candidate approval and requirements are supplied in the review context; read-only reviewer permissions do not establish that the candidate was implemented without authorization." : "No implementation approved"}\nWorking findings (not scope authority):\n${task.instructions === task.ownerInstructions ? "No additional working findings" : task.instructions}`,
           [
             ...agentsFiles,
             ...(references.description
@@ -433,13 +433,18 @@ export class CodingRuntime {
         customTools: custom,
       });
       session = created.session;
+      let documentPagesAtLastTurn = 0;
       const finishTurn = session.agent.finishTurn;
       session.agent.finishTurn = async (turn, signal) => {
+        const documentProgress =
+          references.pagesRead() > documentPagesAtLastTurn;
+        documentPagesAtLastTurn = references.pagesRead();
         for (const call of turn.message.content) {
           if (
+            turn.message.stopReason === "toolUse" &&
             call.type === "toolCall" &&
             call.name === "report" &&
-            turn.toolResults.some((r) => r.isError)
+            turn.toolResults.some((r) => r.toolCallId === call.id && r.isError)
           ) {
             const a = call.arguments as Record<string, unknown>;
             let reason = "Report kind does not match the current task intent";
@@ -461,8 +466,8 @@ export class CodingRuntime {
             task.reportFailure =
               typeof a.detail === "string" &&
               a.detail.length > reportLimits.document
-                ? `Report document has ${a.detail.length} characters; supported bound is ${reportLimits.document}. Complete draft retained in the session.`
-                : `${reason} Complete draft and validation feedback retained in the session.`;
+                ? `Report document has ${a.detail.length} characters; supported bound is ${reportLimits.document}. Submitted report retained in the session.`
+                : `${reason} Submitted report and validation feedback retained in the session.`;
           }
         }
         const localContextOnly =
@@ -494,6 +499,19 @@ export class CodingRuntime {
           return { action: "end" };
         }
         if (finalizing) {
+          // Immutable prerequisite pages are not report attempts. Sequential reads
+          // must finish before the bounded report correction can be evaluated.
+          const calls = turn.message.content.filter(
+            (c) => c.type === "toolCall",
+          );
+          if (
+            turn.message.stopReason === "toolUse" &&
+            documentProgress &&
+            calls.length &&
+            calls.every((c) => c.name === "read_document") &&
+            turn.toolResults.every((r) => !r.isError)
+          )
+            return decision || undefined;
           finalTurns++;
           // One format correction after a definite rejection or completed prose.
           // Provider failures and truncated output are never retried here.

@@ -21,9 +21,14 @@ try {
     messages: q.messages,
     tools: q.tools,
     reasoning: "high",
+    cacheKey: q.cacheKey,
     requireComplete: true,
     maxOutputTokens: 16000,
-    signal: AbortSignal.timeout(120000),
+    signal: AbortSignal.timeout(q.stream ? 300000 : 120000),
+    stream: q.stream === true,
+    onProgress: q.stream
+      ? (progress) => console.log(JSON.stringify({ progress }))
+      : undefined,
   });
   console.log(
     JSON.stringify({

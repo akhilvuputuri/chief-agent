@@ -680,6 +680,50 @@ export class CodingController {
         (c.piState?.findings?.length ?? 0) > 6000)
     )
       throw new Error("Pi report state requires the Pi runtime");
+    if (c.piState?.phase === "review") {
+      const candidate = c.piState.reviewCandidate;
+      if (
+        job.settings.runtime !== "pi" ||
+        job.mode !== "implement" ||
+        !c.files.length ||
+        !c.piState.reviewRound ||
+        !candidate ||
+        candidate.hash !== artifactHash(c) ||
+        ["npm run check", "npm run build", "npm run format:check"].some(
+          (command) =>
+            !candidate.checks.some(
+              (check) => check.command === command && check.exitCode === 0,
+            ),
+        )
+      )
+        throw new Error(
+          "Review recovery requires the exact checked Pi candidate",
+        );
+      const identity = (intent: string, value: string) =>
+        createHash("sha256")
+          .update(
+            canonicalJson({
+              objective: job.objective,
+              context: job.context,
+              plan: c.plan,
+              base: job.base_sha,
+              intent,
+              hash: value,
+            }),
+          )
+          .digest("hex");
+      if (
+        c.piState.scopeIdentity !== identity("review", candidate.hash) ||
+        c.piState.sessionScope !==
+          identity(
+            "review-session",
+            `${candidate.hash}:${c.piState.reviewRound}`,
+          )
+      )
+        throw new Error(
+          "Review session must match the candidate, scope and round",
+        );
+    }
     if (document?.kind === "plan" && document.detail !== c.plan)
       throw new Error("Plan document must match the complete saved plan");
     if (
@@ -743,6 +787,17 @@ export class CodingController {
     )
       throw new Error("Legacy review findings exceed the supported bound");
     validateFiles(r.checkpoint.files);
+    const reported = r.checkpoint.piState?.reportDocument;
+    if (
+      r.kind === "candidate" &&
+      reported &&
+      (reported.kind !== "review" ||
+        reported.verdict !== "APPROVE" ||
+        reported.detail !== r.review?.findings)
+    )
+      throw new Error(
+        "Candidate verdict must match the acknowledged complete review document",
+      );
     if (job.settings.squad && r.kind === "candidate") {
       const state = r.checkpoint.squadState;
       if (
@@ -872,7 +927,8 @@ export class CodingController {
     let admitted = false;
     let received = false;
     const started = Date.now();
-    const enhanced = job.settings.harnessVersion === 2;
+    const enhanced =
+      job.settings.harnessVersion === 2 || job.settings.runtime === "pi";
     const total = AbortSignal.timeout(
       Math.max(
         1,
@@ -1343,6 +1399,7 @@ export class CodingController {
       target: import("../delivery-routing.js").Destination,
       text: string,
       approvalId?: string,
+      document?: import("./delivery.js").CodingDocument,
     ) => Promise<unknown>,
   ) {
     if (this.delivering) return;
@@ -1378,29 +1435,44 @@ export class CodingController {
           );
           return;
         }
+        const attachment =
+          req && j.settings.runtime === "pi"
+            ? {
+                filename: `coding-plan-r${req.revision}.md`,
+                content: `# Coding requirements — revision ${req.revision}\n\n## Original request\n${j.objective}\n\n## Context\n${j.context}\n\n## Complete plan\n${req.plan}\n\n## Execution\nPlanner: ${j.settings.leaderModel ?? j.settings.model}\nCoder: ${j.settings.model}\nReviewer: ${j.settings.reviewerModel}\nDraft PR for owner review.\n\nScope: ${req.scope}\nJob: ${e.job_id}\n`,
+              }
+            : undefined;
+        const summaryPreview = Array.from(String(j.summary ?? ""))
+          .slice(0, 180)
+          .join("");
+        const caption = attachment
+          ? `**Coding plan — revision ${req.revision}**\n\n${summaryPreview}\n\nThe complete plan and original request are attached. Review the document, then approve the requirements or request changes. You can also reply yes directly to this message. Confirmation expires in 15 minutes.\n\nJob: ${e.job_id}`
+          : undefined;
         attempted = true;
         const sent = await send(
           j.user_id,
           codingDestination(e.payload),
-          [
-            req
-              ? `**Coding plan — revision ${req.revision}**`
-              : `Coding job ${e.job_id}`,
-            !req && typeof e.payload.summary === "string"
-              ? e.payload.summary.slice(0, 1500)
-              : undefined,
-            typeof e.payload.question === "string"
-              ? e.payload.question.slice(0, 2000)
-              : undefined,
-            e.payload.url,
-            req ? req.plan : undefined,
-            req
-              ? `**Execution**\nLeader: ${j.settings.leaderModel ?? j.settings.model}\nCoder: ${j.settings.model}\nReviewer: ${j.settings.reviewerModel}\n${j.settings.autoMerge ? "Ordinary changes may merge after exact-artifact review and GitHub checks; protected changes stop for explicit review." : "Draft PR for owner review."}\n\nApprove this scope, or reply directly to this message with yes. To revise it, tell Chief what to change. Confirmation expires in 15 minutes.\nJob: ${e.job_id}`
-              : undefined,
-          ]
-            .filter(Boolean)
-            .join("\n\n"),
+          caption ??
+            [
+              req
+                ? `**Coding plan — revision ${req.revision}**`
+                : `Coding job ${e.job_id}`,
+              !req && typeof e.payload.summary === "string"
+                ? e.payload.summary.slice(0, 1500)
+                : undefined,
+              typeof e.payload.question === "string"
+                ? e.payload.question.slice(0, 2000)
+                : undefined,
+              e.payload.url,
+              req ? req.plan : undefined,
+              req
+                ? `**Execution**\nLeader: ${j.settings.leaderModel ?? j.settings.model}\nCoder: ${j.settings.model}\nReviewer: ${j.settings.reviewerModel}\n${j.settings.autoMerge ? "Ordinary changes may merge after exact-artifact review and GitHub checks; protected changes stop for explicit review." : "Draft PR for owner review."}\n\nApprove this scope, or reply directly to this message with yes. To revise it, tell Chief what to change. Confirmation expires in 15 minutes.\nJob: ${e.job_id}`
+                : undefined,
+            ]
+              .filter(Boolean)
+              .join("\n\n"),
           req ? e.id : undefined,
+          attachment,
         );
         if (req) {
           const receipt = sent as { message_id?: number } | undefined;

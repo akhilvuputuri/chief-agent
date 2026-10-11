@@ -17,6 +17,11 @@ export function reportDocument(report: Report): ReportDocument {
       !["APPROVE", "REQUEST_CHANGES"].includes(report.verdict ?? ""))
   )
     throw new Error("Invalid report kind, text or review verdict");
+  if (
+    Buffer.from(report.detail).toString() !== report.detail ||
+    Buffer.from(report.summary).toString() !== report.summary
+  )
+    throw new Error("Report text must contain well-formed Unicode");
   if (!report.detail.trim() || report.detail.length > reportLimits.document)
     throw new Error(
       `Report document must contain 1–${reportLimits.document} characters; preserve the complete scope.`,

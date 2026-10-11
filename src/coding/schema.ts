@@ -72,7 +72,29 @@ export const checkpoint = z
       .object({
         version: z.literal(1),
         toolsUsed: z.number().int().min(0).max(1000),
-        phase: z.enum(["plan", "build"]).optional(),
+        phase: z.enum(["plan", "build", "review"]).optional(),
+        reviewRound: z.number().int().min(1).max(1000).optional(),
+        rejectedCandidate: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .optional(),
+        reviewCandidate: z
+          .object({
+            hash: z.string().regex(/^[a-f0-9]{64}$/),
+            checks: z
+              .array(
+                z
+                  .object({
+                    command: z.string().max(100),
+                    exitCode: z.literal(0),
+                    output: z.string().max(8000),
+                  })
+                  .strict(),
+              )
+              .max(4),
+          })
+          .strict()
+          .optional(),
         sessionScope: z
           .string()
           .regex(/^[a-f0-9]{64}$/)

@@ -87,6 +87,23 @@ export async function codingApi(
           // Worst-case JSON escaping of every allowed string fits within 5 MB.
           bodyLimit:
             path === "checkpoint" || path === "finish" ? 5_000_000 : 800000,
+          // Authenticate the larger artifact routes before parsing their bodies.
+          onRequest: async (req, reply) => {
+            if (path !== "checkpoint" && path !== "finish") return;
+            try {
+              await controller.authenticate(
+                (req.params as { id: string }).id,
+                req.headers.authorization?.replace(/^Bearer /, "") ?? "",
+                path === "finish",
+              );
+            } catch (error) {
+              return reply
+                .code(
+                  error instanceof SandboxAcknowledgementPending ? 503 : 401,
+                )
+                .send({ error: "Worker capability unavailable" });
+            }
+          },
           handler: async (req, reply) => {
             const id = (req.params as { id: string }).id;
             if (!z.string().uuid().safeParse(id).success)

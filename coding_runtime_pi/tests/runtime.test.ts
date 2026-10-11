@@ -1054,3 +1054,71 @@ test("approved long scope must be read completely before edits or completion", a
   );
   assert.equal(result.plan!.text, detail);
 });
+
+// Regressions adapted from independent review counterexamples.
+const docread = (page: number) => ({
+  name: "read_document",
+  arguments: { id: "approved_plan", page },
+});
+test("independent long-plan formatting recovery permits reference rereads and final report", async () => {
+  const f = await fixture();
+  const plan = "Repair sum only. ".padEnd(9357, "scope ");
+  const planner = new CodingRuntime({
+    store: f.store,
+    model: scripted([[report("plan", plan)]]),
+  });
+  const task = await planner.start({
+    workspace: f.workspace,
+    objective: "Repair sum",
+    checks: ["node --check sum.js"],
+  });
+  const p = await planner.run(task.id);
+  await planner.approve(task.id, p.plan!.revision, p.plan!.hash);
+  const bad = report("done", "x".repeat(32001));
+  const builder = new CodingRuntime({
+    store: f.store,
+    model: scripted([[docread(0)], [docread(1)], [docread(2)], [bad], [bad]]),
+    executor: (t) => localExecutor(t.workspace, join(f.root, "home")),
+  });
+  const failed = await builder.run(task.id);
+  assert.equal(failed.status, "paused");
+  assert(failed.reportFailure);
+  const resumed = new CodingRuntime({
+    store: f.store,
+    model: scripted([
+      [docread(0)],
+      [docread(1)],
+      [docread(2)],
+      [report("done", "Complete retained result")],
+    ]),
+    executor: (t) => localExecutor(t.workspace, join(f.root, "home")),
+  });
+  await resumed.resume(task.id);
+  const result = await resumed.run(task.id);
+  assert.equal(result.status, "completed");
+  assert.equal(result.checks[0]?.exitCode, 0);
+});
+test("independent truncated report is not classified as a definite formatting failure", async () => {
+  const f = await fixture();
+  const runtime = new CodingRuntime({
+    store: f.store,
+    model: scripted(
+      [
+        [
+          {
+            name: "report",
+            arguments: { kind: "plan", summary: "incomplete" },
+          },
+        ],
+      ],
+      "length",
+    ),
+  });
+  const task = await runtime.start({
+    workspace: f.workspace,
+    objective: "Repair sum",
+  });
+  const result = await runtime.run(task.id);
+  assert.equal(result.status, "paused");
+  assert.equal(result.reportFailure, undefined);
+});

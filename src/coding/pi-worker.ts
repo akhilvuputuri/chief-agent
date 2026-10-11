@@ -191,11 +191,87 @@ export async function runPiWorker(
       uploaded.set(scope, index + 1);
     }
   }
+  async function saveReview(
+    task: Task,
+    scope: string,
+    identity: string,
+    candidate: NonNullable<
+      NonNullable<Checkpoint["piState"]>["reviewCandidate"]
+    >,
+    round: number,
+  ) {
+    await uploadSession(task, scope);
+    const next: Checkpoint = {
+      ...saved,
+      piState: {
+        ...saved.piState,
+        version: 1,
+        toolsUsed: task.used.tools,
+        phase: "review",
+        sessionScope: scope,
+        scopeIdentity: identity,
+        reviewCandidate: candidate,
+        reviewRound: round,
+        reportDocument: task.report ?? saved.piState?.reportDocument,
+        reportFailure: task.reportFailure,
+        rejectedCandidate:
+          task.report?.kind === "review"
+            ? task.report.verdict === "REQUEST_CHANGES"
+              ? candidate.hash
+              : undefined
+            : saved.piState?.rejectedCandidate,
+        findings:
+          task.report?.kind === "review" &&
+          task.report.verdict === "REQUEST_CHANGES"
+            ? task.report.detail
+            : saved.piState?.findings,
+      },
+    };
+    await client.request("checkpoint", next);
+    saved = next;
+  }
+  async function saveBuild(task: Task, working: string, scope: string) {
+    await uploadSession(task, scope);
+    const snap = await new PiWorkspace(working)
+      .initialize()
+      .then((w) => w.snapshot(initial, stop));
+    const next: Checkpoint = {
+      plan:
+        assignment.mode === "implement"
+          ? assignment.checkpoint.plan
+          : (task.plan?.text ?? saved.plan),
+      patch: snap.patch,
+      files: snap.files,
+      summary: task.summary,
+      piState: {
+        version: 1,
+        toolsUsed: task.used.tools,
+        phase: task.intent === "build" ? "build" : "plan",
+        sessionScope: scope,
+        scopeIdentity: scopeFor(task.intent === "build" ? "build" : "plan"),
+        findings: task.intent === "plan" ? undefined : saved.piState?.findings,
+        reviewRound:
+          task.intent === "plan" ? undefined : saved.piState?.reviewRound,
+        rejectedCandidate:
+          task.intent === "plan" ? undefined : saved.piState?.rejectedCandidate,
+        reportDocument:
+          task.report ??
+          (task.intent === "plan" ? undefined : saved.piState?.reportDocument),
+        reportFailure: task.reportFailure,
+      },
+    };
+    validateFiles(next.files);
+    await client.request("checkpoint", next);
+    saved = next;
+  }
   function makeRuntime(
     role: "coder" | "reviewer",
     scope: string,
     working = workspace,
     reviewing = false,
+    reviewCandidate?: NonNullable<Checkpoint["piState"]>["reviewCandidate"],
+    reviewIdentity = "",
+    reviewRound = 0,
   ) {
     const config = assignment.settings;
     return new CodingRuntime({
@@ -234,53 +310,16 @@ export async function runPiWorker(
           });
       },
       onCheckpoint: async (task) => {
-        await uploadSession(task, scope);
         if (reviewing) {
-          const next = {
-            ...saved,
-            piState: {
-              ...saved.piState,
-              version: 1 as const,
-              toolsUsed: task.used.tools,
-              reportDocument: task.report ?? saved.piState?.reportDocument,
-              reportFailure: task.reportFailure,
-              findings:
-                task.report?.kind === "review" &&
-                task.report.verdict === "REQUEST_CHANGES"
-                  ? task.report.detail
-                  : saved.piState?.findings,
-            },
-          };
-          await client.request("checkpoint", next);
-          saved = next;
+          await saveReview(
+            task,
+            scope,
+            reviewIdentity,
+            reviewCandidate!,
+            reviewRound,
+          );
         } else {
-          const snap = await new PiWorkspace(working)
-            .initialize()
-            .then((w) => w.snapshot(initial, stop));
-          const next: Checkpoint = {
-            plan:
-              assignment.mode === "implement"
-                ? assignment.checkpoint.plan
-                : (task.plan?.text ?? saved.plan),
-            patch: snap.patch,
-            files: snap.files,
-            summary: task.summary,
-            piState: {
-              version: 1,
-              toolsUsed: task.used.tools,
-              phase: task.intent === "build" ? "build" : "plan",
-              sessionScope: scope,
-              scopeIdentity: scopeFor(
-                task.intent === "build" ? "build" : "plan",
-              ),
-              findings: saved.piState?.findings,
-              reportDocument: task.report ?? saved.piState?.reportDocument,
-              reportFailure: task.reportFailure,
-            },
-          };
-          validateFiles(next.files);
-          await client.request("checkpoint", next);
-          saved = next;
+          await saveBuild(task, working, scope);
         }
       },
     });
@@ -291,13 +330,40 @@ export async function runPiWorker(
   if (!workerOrigin || !workerToken)
     throw new Error("Pi native provider capability missing");
   try {
+    const retainedReview = assignment.checkpoint.piState?.reportDocument;
+    const repairRecovery =
+      assignment.mode === "implement" &&
+      assignment.checkpoint.piState?.phase === "review" &&
+      retainedReview?.kind === "review" &&
+      retainedReview.verdict === "REQUEST_CHANGES";
+    const reviewRecovery =
+      assignment.mode === "implement" &&
+      assignment.checkpoint.piState?.phase === "review" &&
+      !repairRecovery;
+    const retainedCandidate = assignment.checkpoint.piState?.reviewCandidate;
+    if (
+      (reviewRecovery || repairRecovery) &&
+      (!retainedCandidate ||
+        !assignment.checkpoint.piState?.reviewRound ||
+        !assignment.checkpoint.piState?.sessionScope ||
+        retainedCandidate.hash !== artifactHash(assignment.checkpoint) ||
+        assignment.checkpoint.piState?.scopeIdentity !==
+          scopeFor("review", retainedCandidate.hash))
+    )
+      throw new Error(
+        "Retained reviewer identity does not match the approved candidate",
+      );
     const phase = assignment.mode === "implement" ? "build" : "plan";
     const identity = scopeFor(phase);
     const recovering =
       assignment.checkpoint.piState?.phase === phase &&
       assignment.checkpoint.piState.scopeIdentity === identity;
-    const scope =
-      recovering && assignment.checkpoint.piState?.sessionScope
+    const scope = repairRecovery
+      ? scopeFor(
+          "build",
+          `repair-${assignment.checkpoint.piState!.reviewRound}`,
+        )
+      : recovering && assignment.checkpoint.piState?.sessionScope
         ? assignment.checkpoint.piState.sessionScope
         : identity;
     runtime = makeRuntime("coder", scope);
@@ -316,7 +382,10 @@ export async function runPiWorker(
         ms: allocationMs,
       },
     });
-    if (recovering && assignment.checkpoint.piState?.findings) {
+    if (
+      (recovering || repairRecovery) &&
+      assignment.checkpoint.piState?.findings
+    ) {
       task.referenceDocuments = [
         {
           id: "review_findings",
@@ -341,8 +410,24 @@ export async function runPiWorker(
     }
     await store.save(task);
     currentTask = task.id;
-    await restoreSession(task, scope);
-    let result = await runtime.run(task.id);
+    let result: Task;
+    if (reviewRecovery) {
+      // Rehydrate the acknowledged checked candidate; never rerun the coder just
+      // to repair a reviewer report. The owner-approved plan remains unchanged.
+      task.status = "completed";
+      task.checks = retainedCandidate!.checks;
+      task.artifact = {
+        base: assignment.baseSha,
+        hash: retainedCandidate!.hash,
+        patch: saved.patch,
+        files: saved.files,
+      };
+      result = task;
+    } else {
+      await restoreSession(task, scope);
+      await saveBuild(task, workspace, scope);
+      result = await runtime.run(task.id);
+    }
     if (result.status === "waiting_approval") {
       await client.request("finish", {
         kind: "plan_ready",
@@ -373,7 +458,20 @@ export async function runPiWorker(
           "Implementation artifact is empty or based on an unexpected commit",
         );
       const candidateHash = artifactHash(saved);
-      const reviewRoot = join(root, `review-${candidateHash}`);
+      if (saved.piState?.rejectedCandidate === candidateHash) {
+        result.status = "paused";
+        result.summary =
+          "Reviewer requested changes but the candidate is unchanged; inspect retained findings before resuming.";
+        break;
+      }
+      const reviewIdentity = scopeFor("review", candidateHash);
+      const restoreReview =
+        saved.piState?.phase === "review" &&
+        saved.piState.scopeIdentity === reviewIdentity;
+      const round = restoreReview
+        ? saved.piState!.reviewRound!
+        : (saved.piState?.reviewRound ?? 0) + 1;
+      const reviewRoot = join(root, `review-${candidateHash}-${round}`);
       await mkdir(reviewRoot);
       const reviewExec = localExecutor(
         reviewRoot,
@@ -393,8 +491,26 @@ export async function runPiWorker(
       await new PiWorkspace(reviewRoot)
         .initialize()
         .then((w) => w.restore(saved.files));
-      const reviewScope = scopeFor("review", candidateHash);
-      runtime = makeRuntime("reviewer", reviewScope, reviewRoot, true);
+      const reviewScope = restoreReview
+        ? saved.piState!.sessionScope!
+        : scopeFor("review-session", `${candidateHash}:${round}`);
+      const checkedCandidate = {
+        hash: candidateHash,
+        checks: result.checks.map((c) => {
+          if (c.exitCode !== 0)
+            throw new Error("Review requires passing checks");
+          return { ...c, exitCode: c.exitCode as 0 };
+        }),
+      };
+      runtime = makeRuntime(
+        "reviewer",
+        reviewScope,
+        reviewRoot,
+        true,
+        checkedCandidate,
+        reviewIdentity,
+        round,
+      );
       const references: ReferenceDocument[] =
         assignment.checkpoint.plan.length > 6000
           ? [
@@ -426,8 +542,20 @@ export async function runPiWorker(
       });
       review.intent = "review";
       review.used = { ...result.used };
+      if (restoreReview) {
+        review.reportFailure = saved.piState?.reportFailure;
+        await restoreSession(review, reviewScope);
+      }
       await store.save(review);
       currentTask = review.id;
+      // Persist the phase/candidate before the first reviewer model call.
+      await saveReview(
+        review,
+        reviewScope,
+        reviewIdentity,
+        checkedCandidate,
+        round,
+      );
       const verdict = await runtime.run(review.id);
       await uploadSession(verdict, reviewScope);
       if (verdict.status !== "completed" || verdict.report?.kind !== "review") {
@@ -455,6 +583,7 @@ export async function runPiWorker(
       result.used = { ...verdict.used };
       result.status = "ready";
       result.revision++;
+      result.sessionFile = undefined;
       result.referenceDocuments = [
         {
           id: "review_findings",
@@ -464,15 +593,13 @@ export async function runPiWorker(
       ];
       result.instructions = `${assignment.context}\nRead all pages of review_findings with read_document before repairs.`;
       await store.save(result);
-      runtime = makeRuntime(
-        "coder",
-        scopeFor("build", `repair-${result.revision}`),
-      );
+      runtime = makeRuntime("coder", scopeFor("build", `repair-${round}`));
       currentTask = result.id;
+      await saveBuild(result, workspace, scopeFor("build", `repair-${round}`));
       result = await runtime.run(result.id);
     }
     await client.request("finish", {
-      kind: "paused",
+      kind: result.status === "waiting_input" ? "awaiting_input" : "paused",
       summary: result.summary || "Pi work paused; inspect retained state",
       question: "",
       checkpoint: saved,

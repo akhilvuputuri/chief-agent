@@ -336,6 +336,8 @@ test("Pi output allowance is captured per job and cannot be changed by caller hi
   f.setGeneration((_model, input) => {
     assert.equal(input.maxOutputTokens, 16000);
     assert.equal(input.requireComplete, true);
+    assert.equal(input.stream, true);
+    assert.equal(typeof input.onProgress, "function");
     return { message: { role: "assistant", content: "Complete" } };
   });
   const app = server();
@@ -721,43 +723,52 @@ test("coding continuation accepts indexed tool calls and keeps strict payload va
   assert.equal(f.modelCalls(), 1);
 });
 
-test("remaining job deadline aborts a stalled model and exposes its exact timeout category", async (t) => {
-  const f = await fixture(t);
-  const job: any = await f.start("deadline-stream", "plan");
-  await f.c.tick();
-  const row = await f.row(job.id);
-  // The fixture host clock is stable, so the remaining allocation is deterministic.
-  const allocationStart = new Date(row.heartbeat_at).getTime();
-  await f.db.query(
-    'UPDATE coding_jobs SET attempt_deadline=$2,settings=settings || \'{"harnessVersion":2,"squad":true}\'::jsonb WHERE id=$1',
-    [job.id, new Date(allocationStart + 100)],
-  );
-  f.stallModel();
-  const current = await f.row(job.id);
-  const token = (f.c as any).token(job.id, current.attempt_id);
-  const app = await server({} as any);
-  t.after(() => app.close());
-  await codingApi(app, f.c);
-  const keepAlive = setTimeout(() => {}, 2000);
-  t.after(() => clearTimeout(keepAlive));
-  const response = await app.inject({
-    method: "POST",
-    url: `/coding/worker/${job.id}/model`,
-    headers: { authorization: `Bearer ${token}` },
-    payload: {
-      callId: randomUUID(),
-      role: "leader",
-      messages: [{ role: "user", content: "Synthetic task" }],
-      tools: [],
-    },
+for (const runtime of ["python", "pi"])
+  test(`${runtime} remaining job deadline aborts a stalled model and exposes its exact timeout category`, async (t) => {
+    const f = await fixture(t);
+    const job: any = await f.start("deadline-stream", "plan");
+    await f.c.tick();
+    const row = await f.row(job.id);
+    // The fixture host clock is stable, so the remaining allocation is deterministic.
+    const allocationStart = new Date(row.heartbeat_at).getTime();
+    await f.db.query(
+      "UPDATE coding_jobs SET attempt_deadline=$2,settings=$3::jsonb WHERE id=$1",
+      [
+        job.id,
+        new Date(allocationStart + 100),
+        JSON.stringify(
+          runtime === "pi"
+            ? { ...settings, runtime: "pi", squad: false, autoMerge: false }
+            : { ...settings, harnessVersion: 2, squad: true },
+        ),
+      ],
+    );
+    f.stallModel();
+    const current = await f.row(job.id);
+    const token = (f.c as any).token(job.id, current.attempt_id);
+    const app = await server({} as any);
+    t.after(() => app.close());
+    await codingApi(app, f.c);
+    const keepAlive = setTimeout(() => {}, 2000);
+    t.after(() => clearTimeout(keepAlive));
+    const response = await app.inject({
+      method: "POST",
+      url: `/coding/worker/${job.id}/model`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        callId: randomUUID(),
+        role: "leader",
+        messages: [{ role: "user", content: "Synthetic task" }],
+        tools: [],
+      },
+    });
+    assert.equal(response.json().code, "model_timeout");
+    const status: any = await f.c.status("a", job.id);
+    assert.equal(status.lastFailure.timeoutKind, "total");
+    assert.equal(status.lastFailure.phase, "model");
+    assert.ok(status.lastFailure.elapsedMs >= 50);
+    assert.equal((await f.row(job.id)).model_busy, false);
   });
-  assert.equal(response.json().code, "model_timeout");
-  const status: any = await f.c.status("a", job.id);
-  assert.equal(status.lastFailure.timeoutKind, "total");
-  assert.equal(status.lastFailure.phase, "model");
-  assert.ok(status.lastFailure.elapsedMs >= 50);
-  assert.equal((await f.row(job.id)).model_busy, false);
-});
 
 test("empty provider answers permit a fresh generation but never replay the uncertain call", async (t) => {
   const f = await fixture(t);
@@ -3430,6 +3441,7 @@ for (const documentLength of [0, 9357, 32000, -32000])
         .slice(0, Math.abs(documentLength) || 62);
     const pages = documentLength ? Math.ceil(fullPlan.length / 4000) : 0;
     const turns = new Map<string, number>();
+    const reviewed = new Map<string, number>();
     f.setGeneration((selected, input) => {
       const system =
         input.messages.find((m: any) => m.role === "system")?.content ?? "";
@@ -3437,12 +3449,23 @@ for (const documentLength of [0, 9357, 32000, -32000])
         selected === settings.reviewerModel
           ? "review"
           : system.includes("Current intent: build")
-            ? "build"
+            ? system.includes("review_findings:")
+              ? "repair"
+              : "build"
             : "plan";
-      const rawCount = turns.get(phase) ?? 0;
-      turns.set(phase, rawCount + 1);
-      const reading = phase !== "plan" && rawCount < pages;
-      const count = phase === "plan" ? rawCount : rawCount - pages;
+      const reviewKey =
+        phase === "review"
+          ? (system.match(/exact candidate: ([a-f0-9]{64})/)?.[1] ?? "review")
+          : phase;
+      if (phase === "review" && !reviewed.has(reviewKey))
+        reviewed.set(reviewKey, reviewed.size + 1);
+      const rawCount = turns.get(reviewKey) ?? 0;
+      turns.set(reviewKey, rawCount + 1);
+      const requiredPages = phase === "repair" ? pages * 2 : pages;
+      const reading = phase !== "plan" && rawCount < requiredPages;
+      if (phase === "build" || phase === "repair")
+        assert(system.includes("host has verified owner approval"));
+      const count = phase === "plan" ? rawCount : rawCount - requiredPages;
       let tool: { name: string; arguments: any } | undefined;
       if (phase === "plan" && count === 0)
         tool = { name: "read", arguments: { path: "sum.js" } };
@@ -3460,10 +3483,23 @@ for (const documentLength of [0, 9357, 32000, -32000])
           name: "edit",
           arguments: {
             path: "sum.js",
-            edits: [{ oldText: "a - b", newText: "a + b" }],
+            edits: [
+              {
+                oldText: "a - b",
+                newText: documentLength === 9357 ? "(a + b) || 0" : "a + b",
+              },
+            ],
           },
         };
-      if (phase === "build" && count === 1)
+      if (phase === "repair" && count === 0)
+        tool = {
+          name: "edit",
+          arguments: {
+            path: "sum.js",
+            edits: [{ oldText: "(a + b) || 0", newText: "a + b" }],
+          },
+        };
+      if ((phase === "build" || phase === "repair") && count === 1)
         tool = {
           name: "report",
           arguments: {
@@ -3492,14 +3528,32 @@ for (const documentLength of [0, 9357, 32000, -32000])
           arguments: {
             kind: "review",
             summary: "Reviewed",
-            detail: fullReview,
-            verdict: "APPROVE",
+            detail:
+              documentLength === 9357 && reviewed.get(reviewKey) === 1
+                ? "Remove the || 0 fallback; preserve normal addition including NaN. ".padEnd(
+                    9357,
+                    "Keep complete approved scope. ",
+                  )
+                : fullReview,
+            verdict:
+              documentLength === 9357 && reviewed.get(reviewKey) === 1
+                ? "REQUEST_CHANGES"
+                : "APPROVE",
           },
         };
       if (reading)
         tool = {
           name: "read_document",
-          arguments: { id: "approved_plan", page: rawCount },
+          arguments: {
+            id:
+              phase === "repair" && rawCount >= pages
+                ? "review_findings"
+                : "approved_plan",
+            page:
+              phase === "repair" && rawCount >= pages
+                ? rawCount - pages
+                : rawCount,
+          },
         };
       if (phase !== "plan" && !reading && pages) {
         const delivered = input.messages
@@ -3576,11 +3630,12 @@ for (const documentLength of [0, 9357, 32000, -32000])
     let approvalId = "";
     let approvedMessage = 0;
     for (let i = 0; i < 10 && !approvalId; i++)
-      await f.c.deliver(async (_owner, _target, text, id) => {
+      await f.c.deliver(async (_owner, _target, text, id, document) => {
         const message_id = ++receipt;
         if (id) {
-          assert(text.includes(fullPlan));
-          assert(formatTelegram(text).length >= (documentLength ? 3 : 1));
+          assert(document?.content.includes(fullPlan));
+          assert.equal(formatTelegram(text, 1024).length, 1);
+          assert(document?.content.includes("Original request"));
           approvalId = id;
           approvedMessage = message_id;
         }
@@ -3597,6 +3652,12 @@ for (const documentLength of [0, 9357, 32000, -32000])
     assert.equal(result.result.review.findings, fullReview);
     assert.equal(result.checkpoint.piState.reportDocument.detail, fullReview);
     assert.equal(result.checkpoint.piState.reportDocument.version, 1);
+    assert.equal(
+      result.checkpoint.piState.reviewRound,
+      documentLength === 9357 ? 2 : 1,
+    );
+    if (documentLength === 9357)
+      assert(!result.checkpoint.files[0].content.includes("|| 0"));
     assert(result.result.checks.every((c: any) => c.exitCode === 0));
     assert(
       result.checkpoint.files.some(
@@ -4033,3 +4094,318 @@ test("Pi report documents bind checkpoint content and support the full escaped t
     [entry],
   );
 });
+
+// Regression adapted from independent reviewer API/session counterexample.
+for (const { documentLength, firstCallFailure } of [
+  { documentLength: 0, firstCallFailure: false },
+  { documentLength: 9357, firstCallFailure: false },
+  { documentLength: 9357, firstCallFailure: true },
+])
+  test(`independent reviewer recovery preserves ${documentLength || "short"}-character documents (${firstCallFailure ? "before first tool" : "format"})`, async (t) => {
+    const f = await fixture(t);
+    const root = await mkdtemp(join(tmpdir(), "pi-bridge-fixture-"));
+    const source = join(root, "source");
+    await mkdir(source);
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-C", source, ...args], { stdio: "pipe" });
+    git("init", "-q");
+    git("config", "user.name", "Synthetic");
+    git("config", "user.email", "synthetic@example.invalid");
+    await writeFile(
+      join(source, "sum.js"),
+      "export const sum = (a, b) => a - b;\n",
+    );
+    await writeFile(
+      join(source, "test.mjs"),
+      "import assert from 'node:assert/strict';import {sum} from './sum.js';assert.equal(sum(2,3),5);\n",
+    );
+    await writeFile(
+      join(source, "package.json"),
+      JSON.stringify({
+        name: "synthetic-pi-workspace",
+        version: "1.0.0",
+        type: "module",
+        scripts: {
+          check: "node test.mjs",
+          build: "node --check sum.js",
+          "format:check": "node --check test.mjs",
+        },
+      }),
+    );
+    await writeFile(
+      join(source, "package-lock.json"),
+      JSON.stringify({
+        name: "synthetic-pi-workspace",
+        version: "1.0.0",
+        lockfileVersion: 3,
+        requires: true,
+        packages: { "": { name: "synthetic-pi-workspace", version: "1.0.0" } },
+      }),
+    );
+    git("add", ".");
+    git("commit", "-qm", "Fixture");
+    const commit = git("rev-parse", "HEAD").toString().trim();
+    const started = await f.start("pi-e2e", "plan");
+    const profile = {
+      ...settings,
+      runtime: "pi",
+      squad: false,
+      autoMerge: false,
+    };
+    await f.db.query(
+      "UPDATE coding_jobs SET settings=$2::jsonb,base_sha=$3 WHERE id=$1",
+      [started.id, JSON.stringify(profile), commit],
+    );
+    const fullPlan =
+      "Change sum.js subtraction to addition; preserve exported API; run check/build/format checks."
+        .padEnd(
+          Math.abs(documentLength) || 90,
+          documentLength < 0 ? "字\n" : " Scope retained.",
+        )
+        .slice(0, Math.abs(documentLength) || 90);
+    const fullReview =
+      "The checked fixture implements addition and preserves the API."
+        .padEnd(
+          Math.abs(documentLength) || 62,
+          documentLength < 0 ? "界\n" : " Evidence retained.",
+        )
+        .slice(0, Math.abs(documentLength) || 62);
+    const pages = documentLength ? Math.ceil(fullPlan.length / 4000) : 0;
+    let recovered = false;
+    const turns = new Map<string, number>();
+    f.setGeneration((selected, input) => {
+      const system =
+        input.messages.find((m: any) => m.role === "system")?.content ?? "";
+      const phase =
+        selected === settings.reviewerModel
+          ? "review"
+          : system.includes("Current intent: build")
+            ? "build"
+            : "plan";
+      const rawCount = turns.get(phase) ?? 0;
+      turns.set(phase, rawCount + 1);
+      const reading = phase !== "plan" && rawCount < pages;
+      if (phase === "build")
+        assert(system.includes("host has verified owner approval"));
+      let count = phase === "plan" ? rawCount : rawCount - pages;
+      if (recovered && phase === "review" && !reading && !firstCallFailure)
+        count++;
+      if (
+        firstCallFailure &&
+        !recovered &&
+        phase === "review" &&
+        rawCount === 0
+      )
+        throw new ModelError("Synthetic provider failure before tools", true, {
+          httpStatus: 503,
+        });
+      let tool: { name: string; arguments: any } | undefined;
+      if (phase === "plan" && count === 0)
+        tool = { name: "read", arguments: { path: "sum.js" } };
+      if (phase === "plan" && count === 1)
+        tool = {
+          name: "report",
+          arguments: {
+            kind: "plan",
+            summary: "Fix addition",
+            detail: fullPlan,
+          },
+        };
+      if (phase === "build" && count === 0)
+        tool = {
+          name: "edit",
+          arguments: {
+            path: "sum.js",
+            edits: [{ oldText: "a - b", newText: "a + b" }],
+          },
+        };
+      if (phase === "build" && count === 1)
+        tool = {
+          name: "report",
+          arguments: {
+            kind: "done",
+            summary: "Addition fixed",
+            detail: "Implemented approved behavior; actual checks follow.",
+          },
+        };
+      if (phase === "review" && count === 0) {
+        assert(system.includes("historical starting state and desired change"));
+        assert(!system.includes("No implementation approved"));
+        assert(system.includes("host validated owner approval"));
+        assert(system.includes(commit));
+        assert(
+          system.includes(
+            documentLength
+              ? "approved_plan"
+              : "Change sum.js subtraction to addition",
+          ),
+        );
+        tool = { name: "read", arguments: { path: "sum.js" } };
+      }
+      if (phase === "review" && count === 1)
+        tool = {
+          name: "report",
+          arguments: {
+            kind: "review",
+            summary: "Reviewed",
+            detail: recovered ? fullReview : "x".repeat(32001),
+            verdict: "APPROVE",
+          },
+        };
+      if (reading)
+        tool = {
+          name: "read_document",
+          arguments: { id: "approved_plan", page: rawCount },
+        };
+      if (phase !== "plan" && !reading && pages) {
+        const delivered = input.messages
+          .filter((m: any) => m.role === "tool")
+          .map((m: any) => m.content)
+          .filter(
+            (c: any) =>
+              typeof c === "string" && c.includes('"id":"approved_plan"'),
+          )
+          .map((c: any) => JSON.parse(c));
+        assert.equal(
+          delivered
+            .slice(-pages)
+            .map((d: any) => d.text)
+            .join(""),
+          fullPlan,
+        );
+      }
+      return {
+        message: {
+          role: "assistant",
+          content: tool ? null : "Finished.",
+          ...(tool
+            ? {
+                tool_calls: [
+                  {
+                    id: `${phase}-${count}`,
+                    type: "function",
+                    function: {
+                      name: tool.name,
+                      arguments: JSON.stringify(tool.arguments),
+                    },
+                  },
+                ],
+              }
+            : {}),
+        },
+      };
+    });
+    const app = server();
+    t.after(() => app.close());
+    await codingApi(app, f.c);
+    const origin = await app.listen({ host: "127.0.0.1", port: 0 });
+    const prepareRepository = async (directory: string, assignment: any) => {
+      execFileSync("git", ["clone", "--no-hardlinks", source, directory], {
+        stdio: "pipe",
+      });
+      execFileSync(
+        "git",
+        ["-C", directory, "checkout", "--detach", assignment.baseSha],
+        { stdio: "pipe" },
+      );
+    };
+    const run = async () => {
+      const job = await f.row(started.id);
+      await runPiWorker(
+        new NativePiWorkerClient(
+          origin,
+          job.id,
+          f.c.token(job.id, job.attempt_id),
+          new AbortController().signal,
+        ),
+        () => {},
+        new AbortController().signal,
+        { prepareRepository },
+      );
+    };
+    await f.c.tick();
+    await run();
+    assert.equal((await f.row(started.id)).state, "plan_ready");
+    await f.c.tick();
+    await f.c.tick();
+    let receipt = 100;
+    let approvalId = "";
+    let approvedMessage = 0;
+    for (let i = 0; i < 10 && !approvalId; i++)
+      await f.c.deliver(async (_owner, _target, text, id, document) => {
+        const message_id = ++receipt;
+        if (id) {
+          assert(document?.content.includes(fullPlan));
+          assert.equal(formatTelegram(text, 1024).length, 1);
+          assert(document?.content.includes("Original request"));
+          approvalId = id;
+          approvedMessage = message_id;
+        }
+        return { message_id };
+      });
+    assert(approvalId);
+    await f.c.requirements.confirm("a", approvalId, true, "a", approvedMessage);
+    await f.c.tick();
+    await run();
+    let paused = await f.row(started.id);
+    assert.equal(paused.checkpoint.piState.phase, "review");
+    assert.equal(
+      paused.checkpoint.piState.reviewCandidate.hash,
+      artifactHash(paused.checkpoint),
+    );
+    const coderCallsBeforeRecovery = turns.get("build");
+    assert.equal(paused.state, "paused");
+    await f.c.tick();
+    await f.c.tick();
+    paused = await f.row(started.id);
+    await f.c.call("a", f.run, {
+      operation: "coding_resume",
+      id: paused.id,
+      baseRevision: paused.revision,
+      requestKey: "explicit-review-format-recovery",
+    });
+    recovered = true;
+    turns.set("review", 0);
+    await f.c.tick();
+    const resuming = await f.row(paused.id);
+    const retained = resuming.checkpoint;
+    await assert.rejects(
+      f.c.save(resuming, {
+        ...retained,
+        piState: { ...retained.piState, sessionScope: "f".repeat(64) },
+      }),
+      /session/,
+    );
+    await assert.rejects(
+      f.c.save(resuming, {
+        ...retained,
+        piState: {
+          ...retained.piState,
+          reviewCandidate: {
+            ...retained.piState.reviewCandidate,
+            hash: "f".repeat(64),
+          },
+        },
+      }),
+      /candidate/,
+    );
+    await run();
+    assert.equal(turns.get("build"), coderCallsBeforeRecovery);
+    const result = await f.row(started.id);
+    assert.equal(result.state, "publishing");
+    assert.equal(result.result.review.verdict, "APPROVE");
+    assert.equal(result.checkpoint.plan, fullPlan);
+    assert.equal(result.result.review.findings, fullReview);
+    assert.equal(result.checkpoint.piState.reportDocument.detail, fullReview);
+    assert.equal(result.checkpoint.piState.reportDocument.version, 1);
+    assert(result.result.checks.every((c: any) => c.exitCode === 0));
+    assert(
+      result.checkpoint.files.some(
+        (c: any) => c.path === "sum.js" && c.content.includes("a + b"),
+      ),
+    );
+    await f.c.tick();
+    await f.c.tick();
+    assert.equal((await f.row(started.id)).state, "pr_ready");
+    assert.equal(f.publishes(), 1);
+  });

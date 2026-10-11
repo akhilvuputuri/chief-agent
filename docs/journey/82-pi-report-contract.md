@@ -1,6 +1,6 @@
 # 82 — Complete coding reports must survive every handoff
 
-Work date: 11 October 2026. Status: implementation and offline verification; independent review, paid acceptance and release pending.
+Work date: 11 October 2026. Status: implementation with independent counterexamples corrected; final re-review, paid acceptance and release pending.
 
 ## Problem and evidence
 
@@ -29,3 +29,15 @@ An initial remote launch was rejected by automatic approval review because a bro
 ## Follow-up
 
 Architecture/service ownership and a potential EC2 provider remain exploration in [issue 219](https://github.com/akhilvuputuri/chief-agent/issues/219), outside this fix. Release only after the agreed report/workflow checks and paid model acceptance are assessed; retain negative outcomes and separate real infrastructure/model evidence from synthetic delivery/publication and full owner-task acceptance.
+
+### Independent review and paid counterexamples — 11 October 2026
+
+GPT-6 Astra requested changes on `099b2028720dbcd2a950c23220236d4b3c727c9e`: report-only recovery stopped after the first prerequisite document page; truncated output could be mislabeled as a definite report-format failure; and a paused reviewer was recovered through the coder, then collided with its existing immutable session prefix. These failed independently despite 35 runtime/document and seven adapter/session checks passing. Regressions now reproduce each case, including short/long reviewer recovery. Successful prerequisite reads no longer consume a report attempt; only complete tool-use responses with matching rejected-report receipts can enter format repair. Reviewer checkpoints retain phase, exact candidate identity and real passing check receipts; explicit recovery restores that reviewer session and does not rerun the coder. Candidate verdicts must match the acknowledged full review document.
+
+The safer paid runner fetched the verified public revision rather than uploading local repository/database payloads. Two baseline multi-file options fixtures used DeepSeek V4.1 Flash/high with GPT-6.1 Sol reviewer configured and 16,000 output tokens. Plans of 9,048 and 8,316 characters were accepted. Neither completed the workflow: the first stopped awaiting input (the question text was not captured), and the second hit the real 120-second model-call timeout during implementation. There were 16 successful generations across 17 admitted calls, with USD 0.01725615584 reported model cost; the failed request's billing and host compute are excluded. No production owner job, preference, approval or PR was changed. These are retained negative acceptance results, not a completion-rate comparison.
+
+Source inspection showed Pi still used buffered 120-second model requests while the existing Python enhanced path supported streaming progress. The candidate reuses that progress-aware path for Pi: 120 seconds to first output, 90 seconds idle and 300 seconds total, all bounded by the existing 40-minute attempt deadline. Total attempt/model/tool allocations, selected models and price filters are unchanged. The acceptance proxy now forwards real provider progress rather than synthetic keepalives. Tests verify Pi opts into the policy and still aborts at its remaining job deadline. Machine-verified exact approval is projected explicitly in the build instructions; planning text about awaiting confirmation remains historical. Fixture assumptions were clarified before further paid runs, so later outcomes must be identified by revision/workload rather than pooled as a success-rate claim.
+
+The approval presentation now sends one private Markdown document containing the complete plan, original request/context and execution scope, with a bounded summary caption and approval buttons on that same message. This prevents document size from becoming a Telegram message-splitting problem. Confirmation remains bound to the exact full plan and document-message receipt; failed/uncertain delivery cannot grant approval. The shared document contract rejects malformed Unicode so content identity and delivered UTF-8 cannot disagree.
+
+Additional phase tests cover a saved review rejection followed by a real code repair and a fresh review round, reviewer interruption before its first tool, and tampered candidate/session metadata. Phase/candidate/check receipts are saved before model dispatch. Each review/repair round has a distinct session scope; explicit recovery restores the matching phase. An unchanged rejected candidate stops with retained findings instead of looping or colliding with an old review session. Large artifact routes authenticate before parsing their expanded bodies. Exact re-review and paid acceptance still remain pending.

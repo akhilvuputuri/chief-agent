@@ -26,7 +26,7 @@ test("paid full Pi report workflow on a multi-file options fixture", async (t) =
  const base={model:'coder-a',reviewerModel:'reviewer-a',effort:'high',limits:{models:40,tools:100}}; const before=JSON.stringify(base);
  const a=resolveOptions(base,{model:'coder-b',limits:{tools:200}});assert.deepEqual(a,{model:'coder-b',reviewerModel:'reviewer-a',effort:'high',limits:{models:40,tools:200}});assert.equal(describe(a),'coder-b/reviewer-a/high');
  assert.deepEqual(resolveOptions(base),base);assert.deepEqual(resolveOptions(base,{effort:'low'}).limits,base.limits);
- for(const invalid of [{model:''},{reviewerModel:2},{effort:'ultra'},{unknown:1},{limits:{bad:2}},{limits:{models:0}},{limits:{tools:1.5}},{limits:{tools:Infinity}},{limits:null},null])assert.throws(()=>resolveOptions(base,invalid));
+ for(const invalid of [{model:''},{reviewerModel:2},{effort:'ultra'},{unknown:1},{limits:{bad:2}},{limits:{models:0}},{limits:{tools:1.5}},{limits:{tools:Infinity}},{limits:null},{limits:[]},[],null])assert.throws(()=>resolveOptions(base,invalid));
  a.limits.models=999;assert.equal(JSON.stringify(base),before);const ov={limits:{models:55}};const c=resolveOptions(base,ov);c.limits.models=99;assert.equal(ov.limits.models,55);assert.equal(JSON.stringify(base),before);
  `;
   await writeFile(join(source, "test.mjs"), assertions);
@@ -57,7 +57,7 @@ test("paid full Pi report workflow on a multi-file options fixture", async (t) =
   git("commit", "-qm", "Fixture");
   const commit = git("rev-parse", "HEAD").toString().trim();
   const objective =
-    "Fix resolveOptions in src/options.js. Preserve the API and src/format.js. Merge model, reviewerModel and effort overrides with defaults; merge nested limits per field. Accept effort low/medium/high, nonempty string model IDs, and positive finite integer model/tool limits. Reject unknown top-level/nested keys, malformed values and null overrides or limits. Return independent objects without mutating or retaining mutable references to base or overrides. Modify only src/options.js. All existing npm check/build/format checks must genuinely pass; do not change tests or scripts. This is an isolated, explicitly authorized acceptance fixture. First inspect and plan; the fixture caller will confirm the exact returned plan before implementation. The reviewer independently checks the completed candidate.";
+    "Fix resolveOptions in src/options.js. Preserve the API and src/format.js. Merge model, reviewerModel and effort overrides with defaults; merge nested limits per field. Accept effort low/medium/high, nonempty string model IDs, and positive finite integer model/tool limits. Reject unknown top-level/nested keys, malformed values and null overrides or limits. Return independent objects without mutating or retaining mutable references to base or overrides. Base is guaranteed valid and contains exactly the documented fields. Overrides and limits must be non-null, non-array plain JSON-like objects; absent fields inherit defaults, while explicitly present fields must have valid values. Model IDs must contain a non-whitespace character and valid strings are preserved exactly. No base validation or behavior beyond these requirements is requested. Modify only src/options.js. All existing npm check/build/format checks must genuinely pass; do not change tests or scripts. This is an isolated, explicitly authorized acceptance fixture. First inspect and plan; the fixture caller will confirm the exact returned plan before implementation. The reviewer independently checks the completed candidate.";
   const started = await f.start("pi-report-paid", "plan");
   const profile = {
     ...settings,
@@ -91,12 +91,41 @@ test("paid full Pi report workflow on a multi-file options fixture", async (t) =
         model,
         messages: input.messages,
         tools: input.tools,
+        stream: input.stream === true,
+        cacheKey: input.cacheKey,
       }),
       signal: input.signal,
     });
     if (!response.ok)
       throw Error("Acceptance model proxy failed: " + response.status);
-    return response.json();
+    if (!response.body) throw Error("Acceptance proxy response unavailable");
+    const reader = response.body.getReader(),
+      decoder = new TextDecoder();
+    let pending = "",
+      generation;
+    while (true) {
+      const chunk = await reader.read();
+      pending += decoder.decode(chunk.value, { stream: !chunk.done });
+      let newline;
+      while ((newline = pending.indexOf("\n")) >= 0) {
+        const line = pending.slice(0, newline);
+        pending = pending.slice(newline + 1);
+        if (!line.trim()) continue;
+        const message = JSON.parse(line);
+        if (message.progress) await input.onProgress?.(message.progress);
+        if (message.generation) generation = message.generation;
+        if (message.failed)
+          throw new ModelError(
+            "Acceptance provider failed",
+            false,
+            message.diagnostics ?? {},
+          );
+      }
+      if (chunk.done) break;
+    }
+    if (!generation)
+      throw Error("Acceptance proxy did not return a complete generation");
+    return generation;
   });
   const app = server();
   t.after(() => app.close());
@@ -137,7 +166,10 @@ test("paid full Pi report workflow on a multi-file options fixture", async (t) =
       calls: f.modelCalls(),
       planCharacters: job.checkpoint.plan.length,
       reportVersion: job.checkpoint.piState?.reportDocument?.version,
-      summary: job.state === "paused" ? job.summary : undefined,
+      summary: ["paused", "awaiting_input"].includes(job.state)
+        ? job.summary
+        : undefined,
+      question: job.state === "awaiting_input" ? job.question : undefined,
     }),
   );
   assert.equal(job.state, "plan_ready");
@@ -150,10 +182,11 @@ test("paid full Pi report workflow on a multi-file options fixture", async (t) =
     messageId = 0,
     sequence = 0;
   for (let i = 0; i < 100 && !approval; i++)
-    await f.c.deliver(async (_u, _target, text, id) => {
+    await f.c.deliver(async (_u, _target, text, id, document) => {
       const message_id = ++sequence;
       if (id) {
-        assert(text.includes(completePlan));
+        assert(document?.content.includes(completePlan));
+        assert(document?.content.includes(objective));
         approval = id;
         messageId = message_id;
       }
@@ -172,7 +205,10 @@ test("paid full Pi report workflow on a multi-file options fixture", async (t) =
       phase: "build-review",
       state: job.state,
       calls: f.modelCalls(),
-      summary: job.state === "paused" ? job.summary : undefined,
+      summary: ["paused", "awaiting_input"].includes(job.state)
+        ? job.summary
+        : undefined,
+      question: job.state === "awaiting_input" ? job.question : undefined,
       checks: job.result?.checks?.map((c: any) => ({
         command: c.command,
         exitCode: c.exitCode,
