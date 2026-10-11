@@ -19,6 +19,7 @@ export async function readGenerationStream(
   response: Response,
   signal: AbortSignal,
   progress?: (value: StreamProgress) => Promise<void> | void,
+  maxWireBytes = 1600000,
 ): Promise<any> {
   if (!response.body) throw new StreamFailure("disconnected");
   const reader = response.body.getReader();
@@ -193,7 +194,7 @@ export async function readGenerationStream(
       const next = await reader.read();
       if (next.done) break;
       bytes += next.value.byteLength;
-      if (bytes > 1600000) throw new StreamFailure("malformed");
+      if (bytes > maxWireBytes) throw new StreamFailure("malformed");
       buffer += decoder.decode(next.value, { stream: true });
       let index: number;
       while ((index = buffer.search(/[\r\n]/)) >= 0) {
