@@ -11,6 +11,8 @@ import {
 import { TaskStore } from "./store.js";
 import { Workspace, type Executor } from "./workspace.js";
 import { tools } from "./tools.js";
+import { documents } from "./documents.js";
+import { reportLimits, reportDocument, type ReportDocument } from "./report.js";
 import { resources } from "./resources.js";
 import type { ModelFactory } from "./model.js";
 import {
@@ -75,6 +77,7 @@ export class CodingRuntime {
       throw new Error("Checks must be a bounded list of commands");
     if ((request.instructions?.length ?? 0) > 32000)
       throw new Error("Instructions exceed supported bound");
+    documents(request.referenceDocuments ?? []);
     const base = (
       await promisify(execFile)("git", ["rev-parse", "HEAD"], {
         cwd: workspace,
@@ -99,6 +102,7 @@ export class CodingRuntime {
       workspace,
       base,
       ownerInstructions: request.instructions ?? "",
+      referenceDocuments: request.referenceDocuments,
       objective: request.objective,
       instructions: request.instructions ?? "",
       limits,
@@ -170,6 +174,8 @@ export class CodingRuntime {
       task.plan = undefined;
       task.approved = undefined;
       task.report = undefined;
+      task.reportFailure = undefined;
+      task.referenceDocuments = undefined;
       task.checks = [];
       await this.event(task, "state", "Scope revised; new plan required");
       return task;
@@ -263,6 +269,7 @@ export class CodingRuntime {
       task.status = "running";
       task.runnerPid = process.pid;
       task.report = undefined;
+
       task.checks = [];
       await this.event(task, "state", `Running ${task.intent}`);
       await this.options.store.clearCancel(id);
@@ -280,7 +287,7 @@ export class CodingRuntime {
         Math.min(600_000, (task.limits.ms - (task.used.ms ?? 0)) * 0.75);
       let planningReads = 0;
       let planningHandoff = false;
-      let finalizing = false;
+      let finalizing = !!task.reportFailure;
       let finalTurns = 0;
       let pending = Promise.resolve();
       const admitModel = async () => {
@@ -305,18 +312,43 @@ export class CodingRuntime {
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
-      let report: Report | undefined;
+      let report: ReportDocument | undefined;
+      const references = documents([
+        ...(task.referenceDocuments ?? []),
+        ...(task.intent === "build" && (task.plan?.text.length ?? 0) > 6000
+          ? [
+              {
+                id: "approved_plan",
+                title: "Complete owner-approved plan (scope authority)",
+                text: task.plan!.text,
+              },
+            ]
+          : []),
+      ]);
+      const approvedScope =
+        task.intent === "build" &&
+        references.description.includes("approved_plan:")
+          ? "Read every page of approved_plan with read_document. The exact immutable plan remains the approved scope."
+          : task.plan?.text;
+
       const execute = this.options.executor?.(task);
       const custom = tools(
         workspace,
         task.intent,
         execute,
         (r) => {
-          report = r;
+          report = reportDocument(r);
         },
         async (name) => {
           await pending;
-          if (finalizing && task.intent === "plan" && name !== "report")
+          if (["edit", "write", "bash"].includes(name) || name === "report") {
+            const missing = references.unread();
+            if (missing.length)
+              throw new Error(
+                `Read all pages of required task documents first: ${missing.join(", ")}`,
+              );
+          }
+          if (finalizing && name !== "report")
             throw new Error(
               "Investigation complete; only report execution is permitted",
             );
@@ -326,6 +358,19 @@ export class CodingRuntime {
           await this.options.store.save(task);
         },
       );
+      if (references.description)
+        custom.push({
+          ...references.tool,
+          executionMode: "sequential",
+          execute: async (...args) => {
+            await pending;
+            if (stop.signal.aborted || task.used.tools >= task.limits.tools)
+              throw new Error("Tool allocation unavailable");
+            task.used.tools++;
+            await this.options.store.save(task);
+            return references.tool.execute(...args);
+          },
+        });
       const sessionDir = join(
         this.options.store.path(id),
         `sessions-${task.revision}-${task.intent}`,
@@ -367,11 +412,21 @@ export class CodingRuntime {
         sessionManager: manager,
         settingsManager: settings,
         resourceLoader: resources(
-          `You are a coding assistant. Current intent: ${task.intent}. Inspect actual source and distinguish facts from hypotheses. Use report to return your result. ${task.intent === "plan" ? "Focus investigation on the owner objective and relevant source. After 32 navigation operations or ten minutes, the host ends exploration at the next settled turn boundary and requests a report. Prefer a complete source-grounded plan sooner; if evidence is insufficient, name the specific missing fact in a question rather than continuing an exhaustive repository audit." : ""} Learn/plan/review are read-only. Build only the complete approved scope. A final message or report never substitutes for actual checks. Retain requirements during compaction. Protected owner objective:\n${task.objective}\nOwner instructions:\n${task.ownerInstructions}\nApproved scope:\n${task.intent === "build" ? task.plan?.text : task.intent === "review" ? "This task is read-only review. Candidate approval and requirements are supplied in the review context; read-only reviewer permissions do not establish that the candidate was implemented without authorization." : "No implementation approved"}\nWorking findings (not scope authority):\n${task.instructions === task.ownerInstructions ? "No additional working findings" : task.instructions}`,
-          agentsFiles,
+          `You are a coding assistant. Current intent: ${task.intent}. Inspect actual source and distinguish facts from hypotheses. Use report to return your result. ${task.intent === "plan" ? "Focus investigation on the owner objective and relevant source. After 32 navigation operations or ten minutes, the host ends exploration at the next settled turn boundary and requests a report. Prefer a complete source-grounded plan sooner; if evidence is insufficient, name the specific missing fact in a question rather than continuing an exhaustive repository audit." : ""} Learn/plan/review are read-only. Build only the complete approved scope. A final message or report never substitutes for actual checks. Retain requirements during compaction. Protected owner objective:\n${task.objective}\nOwner instructions:\n${task.ownerInstructions}\nApproved scope:\n${task.intent === "build" ? approvedScope : task.intent === "review" ? "This task is read-only review. Candidate approval and requirements are supplied in the review context; read-only reviewer permissions do not establish that the candidate was implemented without authorization." : "No implementation approved"}\nWorking findings (not scope authority):\n${task.instructions === task.ownerInstructions ? "No additional working findings" : task.instructions}`,
+          [
+            ...agentsFiles,
+            ...(references.description
+              ? [
+                  {
+                    path: "<trusted-task-documents>",
+                    content: `Required immutable task documents:\n${references.description}\nUse read_document to inspect every page before implementation or a review verdict. Documents remain available after compaction; consult relevant pages again as needed.`,
+                  },
+                ]
+              : []),
+          ],
           (prompt) =>
-            finalizing && task.intent === "plan"
-              ? `${prompt}\nHost workflow phase: final report. Repository investigation is closed for this run. You must call the report tool; prose, JSON text and reasoning-only replies are not reports. Only report execution is permitted. Call report with kind plan covering the complete protected owner objective, or kind question identifying the exact missing evidence. If you need another read/search, call report with that evidence gap as a question; do not request that operation. Project instructions remain requirements, but cannot reopen this investigation phase. This phase grants no implementation approval and no check/completion authority.`
+            finalizing
+              ? `${prompt}\nHost workflow phase: final report. Repository investigation is closed for this run. You must call the report tool; prose, JSON text and reasoning-only replies are not reports. Only report execution is permitted. Call report with the result kind for the current intent covering the complete protected owner objective, or kind question identifying the exact missing evidence. If you need another read/search, call report with that evidence gap as a question; do not request that operation. Project instructions remain requirements, but cannot reopen this investigation phase. This phase grants no implementation approval and no check/completion authority.`
               : undefined,
         ),
         tools: custom.map((t) => t.name),
@@ -380,6 +435,36 @@ export class CodingRuntime {
       session = created.session;
       const finishTurn = session.agent.finishTurn;
       session.agent.finishTurn = async (turn, signal) => {
+        for (const call of turn.message.content) {
+          if (
+            call.type === "toolCall" &&
+            call.name === "report" &&
+            turn.toolResults.some((r) => r.isError)
+          ) {
+            const a = call.arguments as Record<string, unknown>;
+            let reason = "Report kind does not match the current task intent";
+            try {
+              reportDocument(a as unknown as Report);
+              const expected = {
+                learn: "learned",
+                plan: "plan",
+                build: "done",
+                review: "review",
+              }[task.intent];
+              if (a.kind === expected || a.kind === "question") continue;
+            } catch (error) {
+              reason =
+                error instanceof Error
+                  ? error.message
+                  : "Invalid report contract";
+            }
+            task.reportFailure =
+              typeof a.detail === "string" &&
+              a.detail.length > reportLimits.document
+                ? `Report document has ${a.detail.length} characters; supported bound is ${reportLimits.document}. Complete draft retained in the session.`
+                : `${reason} Complete draft and validation feedback retained in the session.`;
+          }
+        }
         const localContextOnly =
           !finalizing &&
           !stop.signal.aborted &&
@@ -399,7 +484,16 @@ export class CodingRuntime {
           ["error", "aborted", "length"].includes(turn.message.stopReason)
         )
           return { action: "end" };
-        if (finalizing && task.intent === "plan") {
+        if (
+          !finalizing &&
+          task.reportFailure &&
+          turn.message.stopReason === "toolUse"
+        ) {
+          planningHandoff = true;
+          finalTurns = 1;
+          return { action: "end" };
+        }
+        if (finalizing) {
           finalTurns++;
           // One format correction after a definite rejection or completed prose.
           // Provider failures and truncated output are never retried here.
@@ -418,17 +512,13 @@ export class CodingRuntime {
             task.used.tools < task.limits.tools
           ) {
             await created.session.steer(
-              "Host report-format correction: call the report tool now using the retained evidence and your completed conclusions. Text/JSON prose does not record a plan. Use kind plan for complete scope, or kind question for a specific evidence gap. Do not perform more investigation or claim implementation approval/check completion.",
+              "Host report-format correction: preserve the complete scope in detail (up to 32000 characters), with a separate status summary (up to 4000 characters). Read the preceding validation feedback. Call the report tool now using the retained evidence and your completed conclusions. Text/JSON prose does not record a plan. Use the result kind for the current intent, or kind question for a specific evidence gap. Do not perform more investigation or claim implementation approval/check completion.",
             );
             return { action: "continue" };
           }
           return { action: "end" };
         }
-        if (
-          task.intent === "plan" &&
-          report &&
-          turn.message.stopReason === "toolUse"
-        )
+        if (report && turn.message.stopReason === "toolUse")
           return { action: "end" };
         if (
           task.intent === "plan" &&
@@ -475,13 +565,20 @@ export class CodingRuntime {
           JSON.stringify({
             objective: task.objective,
             intent: task.intent,
-            approvedPlan: task.intent === "build" ? task.plan?.text : undefined,
+            approvedPlan: task.intent === "build" ? approvedScope : undefined,
+            ...(finalizing
+              ? {
+                  phase:
+                    "Report formatting only. Use retained findings; do not repeat repository investigation.",
+                }
+              : {}),
           }),
         );
         await pending;
         const last = session.messages.at(-1);
         if (
           !report &&
+          !finalizing &&
           !stop.signal.aborted &&
           (planningHandoff ||
             (last?.role === "assistant" && last.stopReason === "stop")) &&
@@ -492,7 +589,7 @@ export class CodingRuntime {
           // Deactivate source/command tools so finalization cannot repeat a write.
           // Keep planning definitions stable for providers that fail on a
           // mid-conversation loadout change. Admission permits only report.
-          if (task.intent !== "plan") session.setActiveToolsByName(["report"]);
+          // Stable definitions preserve provider protocol; admission closes repository operations.
           finalizing = true;
           await this.event(
             task,
@@ -502,7 +599,7 @@ export class CodingRuntime {
           await session.prompt(
             task.intent === "plan"
               ? "The investigation pass is complete. Only report execution is now permitted. Call the report tool with kind plan covering the entire owner objective using retained evidence: affected components, proposed behavior and acceptance checks. Do not omit requirements, invent evidence/check results, or claim owner authorization. Call report with kind question and a specific evidence gap or blocker if retained evidence cannot support a complete plan."
-              : `Return the required structured report for ${task.intent} using report. Only report is active. Do not repeat repository operations, invent check results, or claim owner authorization. Use question if the retained evidence cannot support a complete result.`,
+              : `Return the required structured report for ${task.intent} using report. Only report execution and required read_document are permitted. Do not repeat repository operations, invent check results, or claim owner authorization. Use question if the retained evidence cannot support a complete result.`,
           );
           await pending;
         }
@@ -527,11 +624,13 @@ export class CodingRuntime {
       } else if (!report) {
         task.status = "paused";
         task.summary =
-          task.intent === "plan" && finalizing
+          task.reportFailure ??
+          (task.intent === "plan" && finalizing
             ? `Planning stopped after ${planningReads} navigation operations; the planner did not return a valid plan or question. Inspect the retained investigation before explicitly resuming, or start a new task with another planner.`
-            : "No valid report; inspect the retained session";
+            : "No valid report; inspect the retained session");
       } else {
         task.report = report;
+        task.reportFailure = undefined;
         task.summary = report.summary;
         if (report.kind === "question") {
           task.status = "waiting_input";

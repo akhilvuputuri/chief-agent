@@ -54,3 +54,7 @@ The bridge uploads immutable encrypted Pi session entries separately from artifa
 ## Evidence boundary
 
 Synthetic tests exercise Pi's real tool execution, actual fixture checks, approval/state boundaries and host-adapter behavior. Linux CI exercises process privacy and detached descendant cleanup. A correct real-model task, production selection and independently accepted published changes require separate release/acceptance evidence; installing Pi alone does not establish quality or cost gains.
+
+### Complete report documents
+
+Reports have a versioned content identity and a shared 32,000-character document bound, separate from a 4,000-character status summary (questions: 2,000). Full accepted documents are retained; approval binds the exact complete plan. Long approved plans and reviewer findings are read with `read_document` in 4,000-code-unit pages, preserving Unicode boundaries and original offsets. Every required page must be read in each fresh attempt before edits/commands/final reports. Documents remain available after compaction. Definite invalid reports receive a bounded formatting correction and precise retained-draft failure feedback; explicit recovery continues reporting without repeating repository investigation. Provider failures and uncertain writes are not replayed.

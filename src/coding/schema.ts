@@ -1,6 +1,7 @@
 import { squadState } from "./squad-schema.js";
 import { runtimeMemory } from "./memory-schema.js";
 import { z } from "zod";
+import { reportLimits, reportDocument } from "@chief-agent/pi-runtime/report";
 
 const id = z.string().uuid();
 export const codingStart = z
@@ -62,7 +63,7 @@ export type CodingAction = z.infer<typeof codingAction>;
 
 export const checkpoint = z
   .object({
-    plan: z.string().max(32000).default(""),
+    plan: z.string().max(reportLimits.document).default(""),
     patch: z.string().max(500000).default(""),
     summary: z.string().max(4000).default(""),
     squadState: squadState.optional(),
@@ -80,7 +81,26 @@ export const checkpoint = z
           .string()
           .regex(/^[a-f0-9]{64}$/)
           .optional(),
-        findings: z.string().max(6000).optional(),
+        findings: z.string().max(reportLimits.document).optional(),
+        reportFailure: z.string().max(500).optional(),
+        reportDocument: z
+          .object({
+            version: z.literal(1),
+            hash: z.string().regex(/^[a-f0-9]{64}$/),
+            kind: z.enum(["learned", "plan", "question", "done", "review"]),
+            summary: z.string().max(reportLimits.summary),
+            detail: z.string().max(reportLimits.document),
+            verdict: z.enum(["APPROVE", "REQUEST_CHANGES"]).optional(),
+          })
+          .strict()
+          .refine((d) => {
+            try {
+              return reportDocument(d).hash === d.hash;
+            } catch {
+              return false;
+            }
+          }, "Report document identity/content invalid")
+          .optional(),
       })
       .strict()
       .optional(),
@@ -125,7 +145,7 @@ export const outcome = z
     review: z
       .object({
         verdict: z.enum(["APPROVE", "REQUEST_CHANGES"]),
-        findings: z.string().max(8000),
+        findings: z.string().max(reportLimits.document),
         model: z.string().max(120),
         patchHash: z.string().regex(/^[a-f0-9]{64}$/),
       })

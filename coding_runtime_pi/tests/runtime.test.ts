@@ -932,3 +932,125 @@ test("build finalization cannot dispatch a repeated write and cannot substitute 
     1,
   );
 });
+
+for (const length of [7426, 9357, 32000])
+  test(`full ${length}-character plan is durably accepted without a formatting retry`, async () => {
+    const f = await fixture();
+    const detail =
+      "Complete required change: fix sum. ".padEnd(length - 20, "x") +
+      "END OF COMPLETE PLAN";
+    const runtime = new CodingRuntime({
+      store: f.store,
+      model: scripted([
+        [
+          {
+            name: "report",
+            arguments: { kind: "plan", summary: "s".repeat(401), detail },
+          },
+        ],
+      ]),
+    });
+    const task = await runtime.start({
+      workspace: f.workspace,
+      objective: "Fix sum",
+    });
+    const result = await runtime.run(task.id);
+    assert.equal(result.status, "waiting_approval");
+    assert.equal(result.used.models, 1);
+    assert.equal(result.plan?.text, detail);
+    assert.equal(result.report?.version, 1);
+    assert.match(result.report!.hash, /^[a-f0-9]{64}$/);
+    assert.equal((await runtime.inspect(task.id)).report?.detail, detail);
+    assert.equal(result.approved, undefined);
+  });
+test("oversize report failure is precise, retained, bounded and explicitly resumes formatting only", async () => {
+  const f = await fixture();
+  const tooLong = report("plan", "x".repeat(32001));
+  const first = new CodingRuntime({
+    store: f.store,
+    model: scripted([[tooLong], [tooLong]]),
+  });
+  const task = await first.start({
+    workspace: f.workspace,
+    objective: "Fix sum",
+  });
+  const paused = await first.run(task.id);
+  assert.equal(paused.status, "paused");
+  assert.match(paused.summary, /32001.*32000/);
+  assert.equal(paused.used.models, 2);
+  assert.equal(paused.plan, undefined);
+  const replacement = new CodingRuntime({
+    store: f.store,
+    model: scripted([
+      [{ name: "read", arguments: { path: "sum.js" } }],
+      [
+        report(
+          "plan",
+          "Retained complete scope: fix sum and verify the existing test.",
+        ),
+      ],
+    ]),
+  });
+  await replacement.resume(task.id);
+  const recovered = await replacement.run(task.id);
+  assert.equal(recovered.status, "waiting_approval");
+  assert.equal(recovered.used.models, 4);
+  assert.equal(recovered.reportFailure, undefined);
+  assert.equal(recovered.approved, undefined);
+});
+
+test("approved long scope must be read completely before edits or completion", async () => {
+  const f = await fixture();
+  const detail = "Fix sum and pass the real test. ".padEnd(
+    9357,
+    "Complete owner requirement. ",
+  );
+  const planner = new CodingRuntime({
+    store: f.store,
+    model: scripted([[report("plan", detail)]]),
+  });
+  const task = await planner.start({
+    workspace: f.workspace,
+    objective: "Fix sum",
+    checks: ["node test.mjs"],
+  });
+  const planned = await planner.run(task.id);
+  await planner.approve(task.id, 1, planned.plan!.hash);
+  const edit = {
+    name: "edit",
+    arguments: {
+      path: "sum.js",
+      edits: [{ oldText: "a - b", newText: "a + b" }],
+    },
+  };
+  const builder = new CodingRuntime({
+    store: f.store,
+    model: scripted([
+      [edit],
+      [{ name: "read_document", arguments: { id: "approved_plan", page: 0 } }],
+      [report("done", "Premature completion")],
+      [{ name: "read_document", arguments: { id: "approved_plan", page: 1 } }],
+      [{ name: "read_document", arguments: { id: "approved_plan", page: 2 } }],
+      [edit],
+      [report("done", "Complete approved change implemented.")],
+    ]),
+    executor: (t) => localExecutor(t.workspace, join(f.root, "home")),
+  });
+  const result = await builder.run(task.id);
+  assert.equal(result.status, "completed");
+  assert.equal(result.checks[0]?.exitCode, 0);
+  const session = (await readFile(result.sessionFile!, "utf8"))
+    .split("\n")
+    .filter(Boolean)
+    .map((s) => JSON.parse(s));
+  const denied = session.filter(
+    (e) => e.message?.role === "toolResult" && e.message.isError,
+  );
+  assert.equal(denied.length, 2);
+  assert(
+    denied.every((e) =>
+      JSON.stringify(e.message.content).includes("Read all pages"),
+    ),
+  );
+  assert.equal(result.plan!.text, detail);
+});

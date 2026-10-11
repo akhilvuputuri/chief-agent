@@ -50,7 +50,7 @@ export class PiSessions {
     for (const [offset, entry] of input.entries.entries()) {
       const index = input.after + offset;
       const body = JSON.stringify(entry);
-      if (Buffer.byteLength(body) > 160000)
+      if (Buffer.byteLength(body) > 512000)
         throw new Error("Session entry exceeds supported size");
       const hash = createHash("sha256").update(body).digest("hex");
       if (
