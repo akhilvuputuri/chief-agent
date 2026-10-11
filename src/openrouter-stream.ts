@@ -46,9 +46,9 @@ export async function readGenerationStream(
       throw new StreamFailure("malformed");
     const key =
       index !== undefined
-        ? `index:${index}`
+        ? `type:${block.type}:index:${index}`
         : typeof block.id === "string"
-          ? `id:${block.id}`
+          ? `type:${block.type}:id:${block.id}`
           : `type:${block.type}:${position}`;
     const current = reasoning.get(key)?.value ?? Object.create(null);
     for (const [key, value] of Object.entries(block)) {
