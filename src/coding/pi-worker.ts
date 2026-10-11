@@ -601,7 +601,8 @@ export async function runPiWorker(
     await client.request("finish", {
       kind: result.status === "waiting_input" ? "awaiting_input" : "paused",
       summary: result.summary || "Pi work paused; inspect retained state",
-      question: "",
+      question:
+        result.status === "waiting_input" ? (result.question ?? "") : "",
       checkpoint: saved,
       checks: result.checks.slice(0, 4),
     });

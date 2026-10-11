@@ -4096,12 +4096,13 @@ test("Pi report documents bind checkpoint content and support the full escaped t
 });
 
 // Regression adapted from independent reviewer API/session counterexample.
-for (const { documentLength, firstCallFailure } of [
+for (const { documentLength, firstCallFailure, reviewerQuestion = false } of [
   { documentLength: 0, firstCallFailure: false },
   { documentLength: 9357, firstCallFailure: false },
   { documentLength: 9357, firstCallFailure: true },
+  { documentLength: 9357, firstCallFailure: false, reviewerQuestion: true },
 ])
-  test(`independent reviewer recovery preserves ${documentLength || "short"}-character documents (${firstCallFailure ? "before first tool" : "format"})`, async (t) => {
+  test(`independent reviewer recovery preserves ${documentLength || "short"}-character documents (${reviewerQuestion ? "question" : firstCallFailure ? "before first tool" : "format"})`, async (t) => {
     const f = await fixture(t);
     const root = await mkdtemp(join(tmpdir(), "pi-bridge-fixture-"));
     const source = join(root, "source");
@@ -4246,10 +4247,14 @@ for (const { documentLength, firstCallFailure } of [
         tool = {
           name: "report",
           arguments: {
-            kind: "review",
-            summary: "Reviewed",
-            detail: recovered ? fullReview : "x".repeat(32001),
-            verdict: "APPROVE",
+            kind: reviewerQuestion ? "question" : "review",
+            summary: reviewerQuestion ? "Clarification required" : "Reviewed",
+            detail: reviewerQuestion
+              ? "Should zero inputs return zero?"
+              : recovered
+                ? fullReview
+                : "x".repeat(32001),
+            ...(reviewerQuestion ? {} : { verdict: "APPROVE" }),
           },
         };
       if (reading)
@@ -4353,6 +4358,23 @@ for (const { documentLength, firstCallFailure } of [
       paused.checkpoint.piState.reviewCandidate.hash,
       artifactHash(paused.checkpoint),
     );
+    if (reviewerQuestion) {
+      assert.equal(paused.state, "awaiting_input");
+      assert.equal(paused.result.question, "Should zero inputs return zero?");
+      await f.c.tick();
+      const delivered: string[] = [];
+      for (let i = 0; i < 10; i++)
+        await f.c.deliver(async (_owner, _target, text) => {
+          delivered.push(text);
+          return { message_id: ++receipt };
+        });
+      assert(
+        delivered.some((text) =>
+          text.includes("Should zero inputs return zero?"),
+        ),
+      );
+      return;
+    }
     const coderCallsBeforeRecovery = turns.get("build");
     assert.equal(paused.state, "paused");
     await f.c.tick();

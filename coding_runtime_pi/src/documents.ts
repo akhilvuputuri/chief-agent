@@ -7,9 +7,13 @@ import {
 } from "./report.js";
 
 /** Host-supplied, signed task evidence. It never comes from workspace files. */
-export function documents(input: ReferenceDocument[]) {
+export function documents(
+  input: ReferenceDocument[],
+  approvedPlan?: ReferenceDocument,
+) {
+  if (input.length > 4) throw new Error("Too many reference documents");
   const entries = new Map<string, ReferenceDocument>();
-  for (const d of input) {
+  for (const d of [...input, ...(approvedPlan ? [approvedPlan] : [])]) {
     if (
       !/^[a-z][a-z0-9_-]{0,63}$/.test(d.id) ||
       entries.has(d.id) ||
@@ -22,7 +26,6 @@ export function documents(input: ReferenceDocument[]) {
       throw new Error("Invalid reference document");
     entries.set(d.id, { ...d });
   }
-  if (entries.size > 4) throw new Error("Too many reference documents");
   const read = new Map<string, Set<number>>();
   const unread = () =>
     [...entries.values()]

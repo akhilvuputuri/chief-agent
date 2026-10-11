@@ -175,7 +175,6 @@ export class CodingRuntime {
       task.approved = undefined;
       task.report = undefined;
       task.reportFailure = undefined;
-      task.referenceDocuments = undefined;
       task.checks = [];
       await this.event(task, "state", "Scope revised; new plan required");
       return task;
@@ -313,23 +312,26 @@ export class CodingRuntime {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
       let report: ReportDocument | undefined;
-      const references = documents([
-        ...(task.referenceDocuments ?? []),
-        ...(task.intent === "build" && (task.plan?.text.length ?? 0) > 6000
-          ? [
-              {
-                id: "approved_plan",
-                title: "Complete owner-approved plan (scope authority)",
-                text: task.plan!.text,
-              },
-            ]
-          : []),
-      ]);
-      const approvedScope =
-        task.intent === "build" &&
-        references.description.includes("approved_plan:")
-          ? "Read every page of approved_plan with read_document. The exact immutable plan remains the approved scope."
-          : task.plan?.text;
+      const callerReferences = task.referenceDocuments ?? [];
+      let planDocumentId = "approved_plan";
+      for (
+        let suffix = 1;
+        callerReferences.some((d) => d.id === planDocumentId);
+        suffix++
+      )
+        planDocumentId = `approved_plan_${suffix}`;
+      const planDocument =
+        task.intent === "build" && (task.plan?.text.length ?? 0) > 6000
+          ? {
+              id: planDocumentId,
+              title: "Complete owner-approved plan (scope authority)",
+              text: task.plan!.text,
+            }
+          : undefined;
+      const references = documents(callerReferences, planDocument);
+      const approvedScope = planDocument
+        ? `Read every page of ${planDocument.id} with read_document. The exact immutable plan remains the approved scope.`
+        : task.plan?.text;
 
       const execute = this.options.executor?.(task);
       const custom = tools(

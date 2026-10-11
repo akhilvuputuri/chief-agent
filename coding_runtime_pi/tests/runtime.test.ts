@@ -1122,3 +1122,70 @@ test("independent truncated report is not classified as a definite formatting fa
   assert.equal(result.status, "paused");
   assert.equal(result.reportFailure, undefined);
 });
+
+test("caller evidence survives clarification and four references coexist with an approved long plan", async () => {
+  const f = await fixture();
+  const referenceDocuments = [
+    "approved_plan",
+    "evidence_b",
+    "evidence_c",
+    "evidence_d",
+  ].map((id) => ({ id, title: id, text: `Original evidence for ${id}` }));
+  const reads = referenceDocuments.map(({ id }) => [
+    { name: "read_document", arguments: { id, page: 0 } },
+  ]);
+  const first = new CodingRuntime({
+    store: f.store,
+    model: scripted([
+      ...reads,
+      [report("question", "Should sum handle zero?")],
+    ]),
+  });
+  const task = await first.start({
+    workspace: f.workspace,
+    objective: "Fix sum",
+    referenceDocuments,
+    checks: ["node test.mjs"],
+  });
+  assert.equal((await first.run(task.id)).status, "waiting_input");
+  const revised = await first.reply(task.id, 1, "Yes, sum must handle zero.");
+  assert.deepEqual(revised.referenceDocuments, referenceDocuments);
+  const detail = "Fix sum including zero. ".padEnd(9357, "Approved scope. ");
+  const planner = new CodingRuntime({
+    store: f.store,
+    model: scripted([...reads, [report("plan", detail)]]),
+  });
+  const planned = await planner.run(task.id);
+  assert.equal(planned.status, "waiting_approval");
+  await planner.approve(task.id, planned.revision, planned.plan!.hash);
+  const builder = new CodingRuntime({
+    store: f.store,
+    model: scripted([
+      ...reads,
+      ...[0, 1, 2].map((page) => [
+        { name: "read_document", arguments: { id: "approved_plan_1", page } },
+      ]),
+      [
+        {
+          name: "edit",
+          arguments: {
+            path: "sum.js",
+            edits: [{ oldText: "a - b", newText: "a + b" }],
+          },
+        },
+      ],
+      [
+        report(
+          "done",
+          "Fixed sum against all original evidence and approved scope",
+        ),
+      ],
+    ]),
+    executor: (t) => localExecutor(t.workspace, join(f.root, "home")),
+  });
+  const result = await builder.run(task.id);
+  assert.equal(result.status, "completed");
+  assert.equal(result.checks[0]?.exitCode, 0);
+  assert.deepEqual(result.referenceDocuments, referenceDocuments);
+  assert.equal(result.plan!.text, detail);
+});
