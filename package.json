@@ -40,6 +40,7 @@
   "dependencies": {
     "@aws-sdk/client-codebuild": "3.1141.0",
     "@aws-sdk/client-sts": "3.1141.0",
+    "@chief-agent/pi-runtime": "file:./coding_runtime_pi",
     "@fastify/websocket": "11.3.2",
     "@grammyjs/runner": "^2.0.3",
     "@modelcontextprotocol/sdk": "1.32.1",
@@ -63,8 +64,7 @@
     "@types/pg": "^8.11.11",
     "prettier": "^3.9.6",
     "tsx": "^4.19.3",
-    "typescript": "^5.8.2",
-    "@chief-agent/pi-runtime": "file:./coding_runtime_pi"
+    "typescript": "^5.8.2"
   },
   "license": "MIT"
 }
