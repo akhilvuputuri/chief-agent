@@ -1,3 +1,7 @@
+# Verified Pi report worker selection — 11 October 2026
+
+v0.3.69 selects the immutable Pi 0.1.3 image built from integrated foundation `26a9f622cf3dc6fa34f92195f30751eab88c04a2`. Anonymous verification matched all 16 compiled files and the published image passed Node/native-isolation checks. Four paid provider workflows, 1,099 local tests and the foundation hosted Linux/extraction/Devin gates passed. Exact live release and separate health evidence are recorded on the foundation/image-selection PRs; selecting an image in source alone is not deployment. Existing paused jobs and Python remain intact. [Evidence and operational boundaries](docs/journey/82-pi-report-contract.md#verified-worker-image-selection).
+
 # Pi report/workflow acceptance verified; release pending — 11 October 2026
 
 Candidate v0.3.68 / worker 0.1.3 preserves full reports, approval documents, phase-aware recovery and provider streaming. Four paid full synthetic workflows (DeepSeek/GPT/Claude/Gemini), 1,099 local tests, exact Astra review and final CodeBuild checks passed. Earlier negatives remain recorded. Hosted standalone CLI passed completion/cleanup but exposed an obsolete three-call assertion; its two-call/versioned-report correction is the remaining CI gate. Image publication/pin and deployment remain pending; v0.3.67 remains live and paused owner jobs retain their original images. [PR220](https://github.com/akhilvuputuri/chief-agent/pull/220), [evidence and limits](docs/journey/82-pi-report-contract.md).
