@@ -83,7 +83,10 @@ export async function codingApi(
         api.route({
           method,
           url: `/:id/${path}`,
-          bodyLimit: 800000,
+          // Pi report/checkpoint documents plus the existing bounded patch/files.
+          // Worst-case JSON escaping of every allowed string fits within 5 MB.
+          bodyLimit:
+            path === "checkpoint" || path === "finish" ? 5_000_000 : 800000,
           handler: async (req, reply) => {
             const id = (req.params as { id: string }).id;
             if (!z.string().uuid().safeParse(id).success)
@@ -127,6 +130,14 @@ export async function codingApi(
               }
             }
             try {
+              if (
+                job.settings.runtime !== "pi" &&
+                req.body !== undefined &&
+                Buffer.byteLength(JSON.stringify(req.body)) > 800000
+              )
+                return reply.code(413).send({
+                  error: "Legacy worker request exceeds supported size",
+                });
               if (path === "pi-session") {
                 if (method === "POST")
                   return await controller.piSessionAppend(job, req.body);

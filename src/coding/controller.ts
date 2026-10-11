@@ -26,6 +26,7 @@ import {
   assertCodingBrief,
   type CodingAction,
   type CodingSettings,
+  type Checkpoint,
   type Outcome,
 } from "./schema.js";
 import {
@@ -268,6 +269,20 @@ export class CodingController {
     return {
       ...job,
       plan: stored.checkpoint.plan,
+      ...(stored.checkpoint.piState?.reportDocument
+        ? {
+            reportDocument: {
+              version: 1,
+              hash: stored.checkpoint.piState.reportDocument.hash,
+              kind: stored.checkpoint.piState.reportDocument.kind,
+              characters:
+                stored.checkpoint.piState.reportDocument.detail.length,
+            },
+          }
+        : {}),
+      ...(stored.checkpoint.piState?.reportFailure
+        ? { reportFailure: stored.checkpoint.piState.reportFailure }
+        : {}),
       ...(modelProgress
         ? {
             modelProgress: {
@@ -656,8 +671,27 @@ export class CodingController {
     );
     return { accepted: !!update.rows.length };
   }
+  private validateReportCheckpoint(job: CodingJob, c: Checkpoint) {
+    const document = c.piState?.reportDocument;
+    if (
+      job.settings.runtime !== "pi" &&
+      (document ||
+        c.piState?.reportFailure ||
+        (c.piState?.findings?.length ?? 0) > 6000)
+    )
+      throw new Error("Pi report state requires the Pi runtime");
+    if (document?.kind === "plan" && document.detail !== c.plan)
+      throw new Error("Plan document must match the complete saved plan");
+    if (
+      document?.kind === "review" &&
+      document.verdict === "REQUEST_CHANGES" &&
+      document.detail !== c.piState?.findings
+    )
+      throw new Error("Review document must match the saved findings");
+  }
   async save(job: CodingJob, raw: unknown) {
     const c = checkpoint.parse(raw);
+    this.validateReportCheckpoint(job, c);
     if (
       job.mode === "implement" &&
       (c.plan !== job.checkpoint.plan ||
@@ -702,6 +736,12 @@ export class CodingController {
   }
   async finish(job: CodingJob, raw: unknown) {
     const r = outcome.parse(raw);
+    this.validateReportCheckpoint(job, r.checkpoint);
+    if (
+      job.settings.runtime !== "pi" &&
+      (r.review?.findings.length ?? 0) > 8000
+    )
+      throw new Error("Legacy review findings exceed the supported bound");
     validateFiles(r.checkpoint.files);
     if (job.settings.squad && r.kind === "candidate") {
       const state = r.checkpoint.squadState;

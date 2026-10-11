@@ -7,6 +7,7 @@ import { z } from "zod";
 import {
   CodingRuntime,
   planHash,
+  type ReferenceDocument,
   TaskStore,
   Workspace as PiWorkspace,
   compatibleModel,
@@ -42,7 +43,9 @@ export function piReviewInstructions({
   fileCount,
   context,
   checks,
+  planReference,
 }: {
+  planReference?: string;
   candidateHash: string;
   plan: string;
   baseSha: string;
@@ -50,7 +53,7 @@ export function piReviewInstructions({
   context: string;
   checks: { command: string; exitCode: number; output: string }[];
 }): string {
-  return `Independently review this exact candidate: ${candidateHash}. Approved plan (historical starting state and desired change, not claims about the completed candidate):\n${plan}\nThe host validated owner approval before this implementation. This separate reviewer is read-only; its tool permissions do not revoke that approval. Judge whether the current candidate implements the plan; finding the requested fix already present is expected, not a reason to reject it. Base commit: ${baseSha}. Changed artifact file count: ${fileCount}.\nOriginal context:\n${context}\nPassing check receipts:\n${JSON.stringify(checks.map((c) => ({ command: c.command, exitCode: c.exitCode, output: c.output.slice(-1000) })))}\nInspect actual source. Return report kind review with APPROVE or REQUEST_CHANGES. Do not implement findings.`;
+  return `Independently review this exact candidate: ${candidateHash}. Approved plan (historical starting state and desired change, not claims about the completed candidate):\n${planReference ? `Read all pages of ${planReference} with read_document for the complete approved scope.` : plan}\nThe host validated owner approval before this implementation. This separate reviewer is read-only; its tool permissions do not revoke that approval. Judge whether the current candidate implements the plan; finding the requested fix already present is expected, not a reason to reject it. Base commit: ${baseSha}. Changed artifact file count: ${fileCount}.\nOriginal context:\n${context}\nPassing check receipts:\n${JSON.stringify(checks.map((c) => ({ command: c.command, exitCode: c.exitCode, output: c.output.slice(-1000) })))}\nInspect actual source. Return report kind review with APPROVE or REQUEST_CHANGES. Do not implement findings.`;
 }
 
 export interface PiWorkerClient {
@@ -239,6 +242,8 @@ export async function runPiWorker(
               ...saved.piState,
               version: 1 as const,
               toolsUsed: task.used.tools,
+              reportDocument: task.report ?? saved.piState?.reportDocument,
+              reportFailure: task.reportFailure,
               findings:
                 task.report?.kind === "review" &&
                 task.report.verdict === "REQUEST_CHANGES"
@@ -269,6 +274,8 @@ export async function runPiWorker(
                 task.intent === "build" ? "build" : "plan",
               ),
               findings: saved.piState?.findings,
+              reportDocument: task.report ?? saved.piState?.reportDocument,
+              reportFailure: task.reportFailure,
             },
           };
           validateFiles(next.files);
@@ -309,8 +316,18 @@ export async function runPiWorker(
         ms: allocationMs,
       },
     });
-    if (recovering && assignment.checkpoint.piState?.findings)
-      task.instructions = `Untrusted prior reviewer findings (not new scope):\n${assignment.checkpoint.piState.findings}`;
+    if (recovering && assignment.checkpoint.piState?.findings) {
+      task.referenceDocuments = [
+        {
+          id: "review_findings",
+          title: "Untrusted prior reviewer findings; not new scope",
+          text: assignment.checkpoint.piState.findings,
+        },
+      ];
+      task.instructions = `${assignment.context}\nRead all pages of review_findings with read_document before repairs.`;
+    }
+    if (recovering)
+      task.reportFailure = assignment.checkpoint.piState?.reportFailure;
     task.used.models = assignment.usedModels;
     task.used.tools = assignment.checkpoint.piState?.toolsUsed ?? 0;
     if (assignment.mode === "implement") {
@@ -378,6 +395,17 @@ export async function runPiWorker(
         .then((w) => w.restore(saved.files));
       const reviewScope = scopeFor("review", candidateHash);
       runtime = makeRuntime("reviewer", reviewScope, reviewRoot, true);
+      const references: ReferenceDocument[] =
+        assignment.checkpoint.plan.length > 6000
+          ? [
+              {
+                id: "approved_plan",
+                title:
+                  "Complete approved plan (historical starting state and desired change)",
+                text: assignment.checkpoint.plan,
+              },
+            ]
+          : [];
       const review = await runtime.start({
         workspace: reviewRoot,
         objective: assignment.objective,
@@ -388,7 +416,9 @@ export async function runPiWorker(
           fileCount: saved.files.length,
           context: assignment.context,
           checks: result.checks,
+          planReference: references.length ? "approved_plan" : undefined,
         }),
+        referenceDocuments: references,
         limits: {
           ...assignment.settings.limits,
           ms: allocationMs,
@@ -425,7 +455,14 @@ export async function runPiWorker(
       result.used = { ...verdict.used };
       result.status = "ready";
       result.revision++;
-      result.instructions = `${assignment.context}\nIndependent reviewer findings for ${candidateHash}:\n${verdict.report.detail}`;
+      result.referenceDocuments = [
+        {
+          id: "review_findings",
+          title: `Independent reviewer findings for ${candidateHash}; not new scope`,
+          text: verdict.report.detail,
+        },
+      ];
+      result.instructions = `${assignment.context}\nRead all pages of review_findings with read_document before repairs.`;
       await store.save(result);
       runtime = makeRuntime(
         "coder",
