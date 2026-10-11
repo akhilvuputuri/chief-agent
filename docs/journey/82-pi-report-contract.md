@@ -1,6 +1,6 @@
 # 82 — Complete coding reports must survive every handoff
 
-Work date: 11 October 2026. Status: implementation with independent counterexamples corrected; final re-review, paid acceptance and release pending.
+Work date: 11 October 2026. Status: corrected runtime independently approved; final paid matrix and CodeBuild verification passed; hosted smoke expectation correction and release gates pending.
 
 ## Problem and evidence
 
@@ -61,3 +61,20 @@ On public revision `364da73c954f2e0ae4b0b166f952468b8d447145`, full synthetic wo
 Bounded stream-shape diagnostics showed Gemini emitting `reasoning.text` and then `reasoning.encrypted` at index 0 before a tool call. Grouping reasoning by index alone incorrectly combined two distinct types. The parser now keys indexed reasoning by type and index; the continuation regression preserves both blocks and the synthetic tool signature, while same-type identity mutation still fails. [OpenRouter's reasoning contract](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens#reasoning-details-api-shape) documents these distinct types and preserving reasoning during tool continuation; the repeated index is an observed provider shape. No raw model reasoning or credentials are recorded here. The correction requires fresh review and a successful paid Gemini workflow before release.
 
 The full finalization candidate passed 1,098 local tests, build/type checks and formatting before this provider-specific parser correction. Exact review of `ce3946001b8cafaff88b2b899ec4021651c520b6` was APPROVE. Acceptance-runner preflight failures (candidate dependency mount and read-only container copy) made no model calls; the corrected runner loads the public candidate adapter in memory without changing production files or credentials.
+
+### Final candidate acceptance — 11 October 2026
+
+Exact runtime revision `adc0e3b5b598c9c3d9ae3f1d2ebfa760fe77ba54` passed all four paid synthetic workflows with real checks, separate model review, full scope preservation and external correctness assertions:
+
+| Planner/coder       | Reviewer          | Successful calls | Seconds | Reported model USD |
+| ------------------- | ----------------- | ---------------: | ------: | -----------------: |
+| Gemini 3.8 Flash    | GPT-6.1 Sol       |               41 |  287.56 |         0.32779395 |
+| DeepSeek V4.1 Flash | GPT-6.1 Sol       |               12 |  193.88 |     0.025833010064 |
+| GPT-6.1 Sol         | Claude Sonnet 5.5 |               11 |  116.65 |          0.1075501 |
+| Claude Sonnet 5.5   | GPT-6.1 Sol       |               10 |   84.82 |          0.1473214 |
+
+All test containers/proxies/public candidate files were removed. No owner jobs, preferences, approvals or real PRs changed. These are bounded synthetic acceptance cases, not arbitrary-task reliability, cost comparisons or a success-rate estimate across revisions. Earlier failures remain above; failed-request billing and host/sandbox compute are excluded from reported model costs.
+
+The same exact runtime revision passed CodeBuild `chief-coding:f92e6626-3e72-4b2a-af66-a92a85912d32` (72-second BUILD, 45-minute allocation), including Pi tests, model-stream regressions, full-document bridge/reviewer recovery and native process isolation. Local full checks passed 1,099 tests plus build/type checks and formatting. GPT-6 Astra approved the exact runtime revision after 17 stream tests and three further independent identity/capacity probes, extending its earlier complete review.
+
+Hosted CI reached the actual standalone Linux CLI and confirmed task completion and real descendant-cleanup checks, then failed the old `calls === 3` assertion: accepted reports now correctly stop at two calls. The smoke expectation now asserts two calls and a versioned done report, with runtime source unchanged. Passing replacement CI, verified image publication/activation and exact deployment/current health remain required; the acceptance evidence alone is not a deployed release.

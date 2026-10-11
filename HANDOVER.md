@@ -1,3 +1,7 @@
+# Pi report/workflow acceptance verified; release pending — 11 October 2026
+
+Candidate v0.3.68 / worker 0.1.3 preserves full reports, approval documents, phase-aware recovery and provider streaming. Four paid full synthetic workflows (DeepSeek/GPT/Claude/Gemini), 1,099 local tests, exact Astra review and final CodeBuild checks passed. Earlier negatives remain recorded. Hosted standalone CLI passed completion/cleanup but exposed an obsolete three-call assertion; its two-call/versioned-report correction is the remaining CI gate. Image publication/pin and deployment remain pending; v0.3.67 remains live and paused owner jobs retain their original images. [PR220](https://github.com/akhilvuputuri/chief-agent/pull/220), [evidence and limits](docs/journey/82-pi-report-contract.md).
+
 # Pi report contract candidate — 11 October 2026
 
 Candidate app v0.3.68/runtime 0.1.3 addresses a real plan rejected twice for report length. Versioned full documents, shared bounds, immutable paged plan/review references, precise format-only recovery and compatible transport sizing are implemented. Long-plan/Unicode approval → implementation → checks → review → fixture-publication tests pass; final review, paid acceptance and new worker image/release remain pending. CodeBuild remains the provider; architecture exploration is issue 219. No paused job is resumed or migrated. [Evidence](docs/journey/82-pi-report-contract.md).
