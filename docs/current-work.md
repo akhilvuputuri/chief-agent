@@ -1,3 +1,7 @@
+# Sustained Pi runtime verification in progress — 13 October 2026
+
+Branch `fix/pi-context-verification` starts from deployed v0.3.69/e4b71ad. Native provider-wire tests reproduce dropped per-call budgets; actual Pi compaction tests reproduce continued calls and a lost failure cause. The new execution contract requires real-repository baseline checks, long context/recovery coverage and 24 frozen paid workload attempts before release claims. AWS now acknowledges a 125-minute override in a stopped zero-model probe; current runtime allocations and paused owner jobs remain unchanged. [Evidence](journey/83-pi-context-verification.md), [execution gates](pi-runtime-verification.md).
+
 # Pi activation includes production packaging correction — 11 October 2026
 
 The v0.3.68 foundation failed startup and rolled back to healthy v0.3.67: production pruning removed the newly required report-contract package. [PR221](https://github.com/akhilvuputuri/chief-agent/pull/221) combines the production dependency/compiled-file correction with the verified Pi 0.1.3 image selector for v0.3.69. Runtime source still matches the four-provider accepted revision. CI gains an actual pruned-image import smoke; exact review/checks and successful release/current health are required. The failed foundation is not a shipped milestone. [Incident and evidence](journey/82-pi-report-contract.md#production-package-closure-failure-and-correction).

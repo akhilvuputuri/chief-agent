@@ -168,3 +168,5 @@ Python execution: [56 — Coding work](56-coding-runtime.md) → [57 — Python 
 MCP integrations: [67 — Remote MCP connectors](67-mcp-connectors.md), [15 — Portable plugins](15-portable-plugins.md).
 
 Article targets: [67 — Reader MCP](67-mcp-connectors.md) → [69 — Shared link resolution](69-link-resolution.md).
+
+- 13 October 2026: [83 — Sustained Pi context verification](83-pi-context-verification.md) — failing native budget/compaction reproductions and representative acceptance gates; execution in progress.

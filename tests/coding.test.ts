@@ -27,7 +27,7 @@ import { requirementScope } from "../src/coding/requirements.js";
 import { CodingController } from "../src/coding/controller.js";
 import { selectCodingBackend } from "../src/coding/backend.js";
 import { squadScope } from "../src/coding/squad-state.js";
-import { ModelError } from "../src/model.js";
+import { ModelError, OpenRouter } from "../src/model.js";
 import { formatTelegram } from "../src/telegram-format.js";
 import {
   codingSettings,
@@ -4430,4 +4430,73 @@ for (const { documentLength, firstCallFailure, reviewerQuestion = false } of [
     await f.c.tick();
     assert.equal((await f.row(started.id)).state, "pr_ready");
     assert.equal(f.publishes(), 1);
+  });
+
+// Incident regression: Pi's native summary budget must reach the provider wire.
+for (const field of ["max_tokens", "max_completion_tokens"] as const)
+  test(`Pi forwards native ${field} through the authenticated facade to the provider`, async (t) => {
+    const f = await fixture(t);
+    const started = await f.start("pi-summary-budget", "plan");
+    await f.c.tick();
+    await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
+      started.id,
+      JSON.stringify({
+        ...settings,
+        runtime: "pi",
+        squad: false,
+        autoMerge: false,
+        maxOutputTokens: 16000,
+      }),
+    ]);
+    const job = await f.row(started.id);
+    const requests: any[] = [];
+    f.setGeneration((model, input) =>
+      new OpenRouter("synthetic-key", model, 2, 10, async (_url, init) => {
+        requests.push(JSON.parse(String(init?.body)));
+        const frame = {
+          id: "synthetic-summary",
+          model,
+          choices: [
+            {
+              index: 0,
+              delta: {
+                role: "assistant",
+                content: "Compact retained task state",
+              },
+              finish_reason: "stop",
+            },
+          ],
+        };
+        return new Response(
+          `data: ${JSON.stringify(frame)}\n\ndata: [DONE]\n\n`,
+          { headers: { "content-type": "text/event-stream" } },
+        );
+      }).generate(input),
+    );
+    const app = server();
+    t.after(() => app.close());
+    await codingApi(app, f.c);
+    const response = await app.inject({
+      method: "POST",
+      url: `/coding/worker/${job.id}/pi/coder/v1/chat/completions`,
+      headers: { authorization: `Bearer ${f.c.token(job.id, job.attempt_id)}` },
+      payload: {
+        runtime_call_id: randomUUID(),
+        model: settings.model,
+        messages: [
+          { role: "system", content: "Summarize retained task state." },
+          { role: "user", content: "Synthetic conversation only" },
+        ],
+        tools: [],
+        stream: true,
+        [field]: 4096,
+      },
+    });
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(requests.length, 1);
+    assert.equal(
+      requests[0].max_tokens,
+      4096,
+      "Pi summary budget was replaced by the job-wide maximum",
+    );
   });
