@@ -8,6 +8,7 @@ const sizeFields = [
   "projectedTokens",
   "projectedBytes",
   "summaryCharacters",
+  "retainedMessages",
 ];
 const canonical = (value) =>
   Array.isArray(value)

@@ -57,6 +57,7 @@ test("only numeric maintained-context evidence leaves native entries", () => {
               projectedTokens: 8000,
               projectedBytes: 40000,
               summaryCharacters: 2000,
+              retainedMessages: 0,
               secret: "private sentinel",
             },
           },
@@ -89,6 +90,7 @@ test("only numeric maintained-context evidence leaves native entries", () => {
       projectedTokens: 8000,
       projectedBytes: 40000,
       summaryCharacters: 2000,
+      retainedMessages: 0,
     },
     {},
   ]);

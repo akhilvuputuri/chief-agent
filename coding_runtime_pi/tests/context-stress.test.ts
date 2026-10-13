@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
   CodingRuntime,
   TaskStore,
@@ -20,9 +21,13 @@ for (const scenario of [
   "small-progress",
   "small-stagnant",
   "atomic-read-group",
+  "atomic-truncated",
+  "atomic-oversized",
 ] as const) {
   test(`native long-context lifecycle: ${scenario}`, async (t) => {
-    const atomic = scenario === "atomic-read-group";
+    const atomic = scenario.startsWith("atomic-");
+    const atomicFailure =
+      scenario === "atomic-truncated" || scenario === "atomic-oversized";
     const stagnant = scenario.endsWith("stagnant");
     const small = scenario.startsWith("small-");
     const rules = Array.from(
@@ -35,6 +40,8 @@ for (const scenario of [
       (scenario === "large-scope" ? "\n" + rules : "");
     const pages =
       scenario === "large-scope" ? Math.ceil(planText.length / 4000) : 0;
+    let oversizedGroupSummarized = false,
+      orphanToolResult = false;
     let documentReads = 0,
       submitted = false,
       summariesAfterReport = 0;
@@ -52,11 +59,25 @@ for (const scenario of [
       let page: number | undefined;
       if (compact) {
         summaries++;
+        if (atomic)
+          oversizedGroupSummarized ||=
+            raw.includes("source-copy.js") &&
+            raw.includes("source.js") &&
+            raw.includes("evidence_0");
         if (submitted) summariesAfterReport++;
       } else if (phase === "build") {
         if (documentReads < pages) page = documentReads++;
         else ordinary++;
         const prompt = JSON.stringify(body.messages);
+        if (atomic) {
+          missingScope ||= !prompt.includes("R279:");
+          const calls = new Set<string>();
+          for (const message of body.messages) {
+            for (const call of message.tool_calls ?? []) calls.add(call.id);
+            if (message.role === "tool" && !calls.has(message.tool_call_id))
+              orphanToolResult = true;
+          }
+        }
         missingScope ||=
           !prompt.includes("REQUIREMENT_A") ||
           !prompt.includes("REQUIREMENT_B");
@@ -109,6 +130,9 @@ for (const scenario of [
         ? {
             role: "assistant",
             content:
+              (scenario === "atomic-oversized"
+                ? "Oversized summary evidence. ".repeat(5000)
+                : "") +
               `Working state: preserve REQUIREMENT_A and REQUIREMENT_B. Source evidence inspected. Latest controlled work step ${ordinary}. Continue the remaining scoped edits, then submit the candidate for checks. Never claim checks passed without a receipt.` +
               (atomic
                 ? "\n" +
@@ -147,7 +171,7 @@ for (const scenario of [
           : Math.ceil(Buffer.byteLength(raw) / 4);
       res.writeHead(200, { "content-type": "text/event-stream" });
       res.end(
-        `data: ${JSON.stringify({ ...header, choices: [{ index: 0, delta, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ ...header, choices: [{ index: 0, delta: {}, finish_reason: compact ? "stop" : "tool_calls" }], usage: { prompt_tokens: promptTokens, completion_tokens: Math.ceil(Buffer.byteLength(JSON.stringify(delta)) / 4), total_tokens: promptTokens + Math.ceil(Buffer.byteLength(JSON.stringify(delta)) / 4) } })}\n\ndata: [DONE]\n\n`,
+        `data: ${JSON.stringify({ ...header, choices: [{ index: 0, delta, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ ...header, choices: [{ index: 0, delta: {}, finish_reason: compact ? (scenario === "atomic-truncated" ? "length" : "stop") : "tool_calls" }], usage: { prompt_tokens: promptTokens, completion_tokens: Math.ceil(Buffer.byteLength(JSON.stringify(delta)) / 4), total_tokens: promptTokens + Math.ceil(Buffer.byteLength(JSON.stringify(delta)) / 4) } })}\n\ndata: [DONE]\n\n`,
       );
     });
     await new Promise<void>((resolve) =>
@@ -228,7 +252,24 @@ for (const scenario of [
     );
     assert.equal(missingScope, false);
     assert(wireSizes.every((n) => n <= 179000));
-    if (stagnant) {
+    if (atomicFailure) {
+      assert.equal(result.status, "paused");
+      assert.match(result.summary, /compaction|summari[sz]/i);
+      assert.equal(ordinary, 1);
+      assert.equal(summaries, 1);
+      assert.equal(result.checks.length, 0);
+      assert.equal(oversizedGroupSummarized, true);
+      const entries = SessionManager.open(result.sessionFile!).getBranch();
+      assert(
+        !entries.some(
+          (e) =>
+            e.type === "compaction" ||
+            (e.type === "custom" &&
+              e.customType === "runtime_compaction_boundary"),
+        ),
+      );
+      assert(JSON.stringify(entries).includes("export const evidence_0"));
+    } else if (stagnant) {
       assert.equal(result.status, "paused");
       assert.match(result.summary, /stalled|no workspace progress/i);
       assert(ordinary <= 32);
@@ -260,6 +301,30 @@ for (const scenario of [
       assert(
         small ? compacted.length === 0 : compacted.length >= (atomic ? 1 : 20),
       );
+      if (atomic) {
+        assert.equal(oversizedGroupSummarized, true);
+        assert.equal(orphanToolResult, false);
+        assert(JSON.stringify(entries).includes("export const evidence_0"));
+        const restored = SessionManager.open(result.sessionFile!);
+        assert(
+          !JSON.stringify(restored.buildSessionProjection().messages).includes(
+            "export const evidence_0",
+          ),
+        );
+        assert(
+          compacted.some(
+            (e) => e.details.contextMaintenance.retainedMessages === 0,
+          ),
+        );
+        for (const e of compacted) {
+          const boundary = entries.find(
+            (candidate) => candidate.id === e.firstKeptEntryId,
+          );
+          assert.equal(boundary?.type, "custom");
+          assert.equal(boundary.customType, "runtime_compaction_boundary");
+          assert(e.details.readFiles.includes("source-copy.js"));
+        }
+      }
       for (const e of compacted) {
         const c = e.details.contextMaintenance;
         assert(c.afterTokens < c.beforeTokens);

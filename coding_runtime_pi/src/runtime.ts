@@ -481,6 +481,16 @@ export class CodingRuntime {
                   description,
                   parameters,
                 })),
+                () => {
+                  if (manager.getLeafId() !== event.branchEntries.at(-1)?.id)
+                    throw new ContextMaintenanceFailure(
+                      "Session changed during context compaction",
+                    );
+                  return manager.appendCustomEntry(
+                    "runtime_compaction_boundary",
+                    { version: 1 },
+                  );
+                },
                 requestByteLimit,
               );
               return { compaction: result };
