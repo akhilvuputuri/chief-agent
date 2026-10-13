@@ -1,3 +1,4 @@
+import { reviewDocumentReader } from "./helpers/pi-review-documents.js";
 import { reportDocument } from "@chief-agent/pi-runtime/report";
 import { execFileSync } from "node:child_process";
 import {
@@ -364,6 +365,7 @@ for (const { documentLength, firstCallFailure, reviewerQuestion = false } of [
         .slice(0, Math.abs(documentLength) || 62);
     const pages = documentLength ? Math.ceil(fullPlan.length / 4000) : 0;
     let recovered = false;
+    const readEvidence = reviewDocumentReader();
     const turns = new Map<string, number>();
     f.setGeneration((selected, input) => {
       const system =
@@ -391,6 +393,13 @@ for (const { documentLength, firstCallFailure, reviewerQuestion = false } of [
         throw new ModelError("Synthetic provider failure before tools", true, {
           httpStatus: 503,
         });
+      if (phase === "review") {
+        const evidence = readEvidence(input, `review-${recovered}`);
+        if (evidence) {
+          turns.set(phase, rawCount);
+          return evidence;
+        }
+      }
       let tool: { name: string; arguments: any } | undefined;
       if (phase === "plan" && count === 0)
         tool = { name: "read", arguments: { path: "sum.js" } };

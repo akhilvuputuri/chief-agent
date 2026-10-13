@@ -1,3 +1,4 @@
+import { reviewDocumentReader } from "./helpers/pi-review-documents.js";
 import { reportDocument } from "@chief-agent/pi-runtime/report";
 import { execFileSync } from "node:child_process";
 import {
@@ -274,6 +275,7 @@ for (const documentLength of [0, 9357, 32000, -32000])
     const pages = documentLength ? Math.ceil(fullPlan.length / 4000) : 0;
     const turns = new Map<string, number>();
     const reviewed = new Map<string, number>();
+    const readEvidence = reviewDocumentReader();
     f.setGeneration((selected, input) => {
       const system =
         input.messages.find((m: any) => m.role === "system")?.content ?? "";
@@ -291,6 +293,10 @@ for (const documentLength of [0, 9357, 32000, -32000])
           : phase;
       if (phase === "review" && !reviewed.has(reviewKey))
         reviewed.set(reviewKey, reviewed.size + 1);
+      if (phase === "review") {
+        const evidence = readEvidence(input, reviewKey);
+        if (evidence) return evidence;
+      }
       const rawCount = turns.get(reviewKey) ?? 0;
       turns.set(reviewKey, rawCount + 1);
       const requiredPages = phase === "repair" ? pages * 2 : pages;

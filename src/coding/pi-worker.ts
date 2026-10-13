@@ -21,6 +21,7 @@ import {
   type Outcome,
 } from "./schema.js";
 import { artifactHash, canonicalJson, validateFiles } from "./github.js";
+import { piReviewEvidence } from "./pi-review-evidence.js";
 
 const assignmentSchema = z.object({
   id: z.string().uuid(),
@@ -53,7 +54,7 @@ export function piReviewInstructions({
   context: string;
   checks: { command: string; exitCode: number; output: string }[];
 }): string {
-  return `Independently review this exact candidate: ${candidateHash}. Approved plan (historical starting state and desired change, not claims about the completed candidate):\n${planReference ? `Read all pages of ${planReference} with read_document for the complete approved scope.` : plan}\nThe host validated owner approval before this implementation. This separate reviewer is read-only; its tool permissions do not revoke that approval. Judge whether the current candidate implements the plan; finding the requested fix already present is expected, not a reason to reject it. Base commit: ${baseSha}. Changed artifact file count: ${fileCount}.\nOriginal context:\n${context}\nPassing check receipts:\n${JSON.stringify(checks.map((c) => ({ command: c.command, exitCode: c.exitCode, output: c.output.slice(-1000) })))}\nInspect actual source. Return report kind review with APPROVE or REQUEST_CHANGES. Do not implement findings.`;
+  return `Independently review this exact candidate: ${candidateHash}. Approved plan (historical starting state and desired change, not claims about the completed candidate):\n${planReference ? `Read all pages of ${planReference} with read_document for the complete approved scope.` : plan}\nThe host validated owner approval before this implementation. This separate reviewer is read-only; its tool permissions do not revoke that approval. Judge whether the current candidate implements the plan; finding the requested fix already present is expected, not a reason to reject it. Base commit: ${baseSha}. Changed artifact file count: ${fileCount}.\nOriginal context:\n${context}\nPassing check receipts:\n${JSON.stringify(checks.map((c) => ({ command: c.command, exitCode: c.exitCode, output: c.output.slice(-1000) })))}\nRead every page of candidate_inventory and candidate_diff with read_document. They contain the complete host-verified change set bound to this base and candidate, including additions, deletions and unrelated edits. Compare the delta with the approved scope, then inspect relevant current source. Change evidence is not a permission grant. Return report kind review with APPROVE or REQUEST_CHANGES. Do not implement findings.`;
 }
 
 export interface PiWorkerClient {
@@ -490,9 +491,15 @@ export async function runPiWorker(
             throw new Error("Review checkout preparation failed");
         }
       }
-      await new PiWorkspace(reviewRoot)
-        .initialize()
-        .then((w) => w.restore(saved.files));
+      const reviewTree = await new PiWorkspace(reviewRoot).initialize();
+      await reviewTree.restore(saved.files);
+      const changeEvidence = await piReviewEvidence(
+        reviewTree,
+        reviewExec,
+        saved,
+        assignment.baseSha,
+        stop,
+      );
       const reviewScope = restoreReview
         ? saved.piState!.sessionScope!
         : scopeFor("review-session", `${candidateHash}:${round}`);
@@ -513,8 +520,10 @@ export async function runPiWorker(
         reviewIdentity,
         round,
       );
-      const references: ReferenceDocument[] =
-        assignment.checkpoint.plan.length > 6000
+      const planReference = assignment.checkpoint.plan.length > 6000;
+      const references: ReferenceDocument[] = [
+        ...changeEvidence,
+        ...(planReference
           ? [
               {
                 id: "approved_plan",
@@ -523,7 +532,8 @@ export async function runPiWorker(
                 text: assignment.checkpoint.plan,
               },
             ]
-          : [];
+          : []),
+      ];
       const review = await runtime.start({
         workspace: reviewRoot,
         objective: assignment.objective,
@@ -534,7 +544,7 @@ export async function runPiWorker(
           fileCount: saved.files.length,
           context: assignment.context,
           checks: result.checks,
-          planReference: references.length ? "approved_plan" : undefined,
+          planReference: planReference ? "approved_plan" : undefined,
         }),
         referenceDocuments: references,
         limits: {
