@@ -20,12 +20,20 @@ if (workload === 'runtime-neutral-approval') test('external oracle: runtime-neut
 });
 if (workload === 'pinned-execution-status') test('external oracle: execution profile comes from the owned job', async t => {
  const f=await fixture(t), job=await f.start('profile','plan');
+ const description=runtimeContext({coding:true},null,undefined,new Set(['work'])).tools.find(t=>t.name==='coding_status')!.description;
+ assert.match(description,/pinned/i);assert.match(description,/execution|backend|runtime/i);assert.match(description,/not.*completion/i);
+ const notes={subtask:'Retained subtask',findings:'Observed finding',nextAction:'Remaining work',questions:''},stamp='2026-10-13T00:00:00.000Z';
+ await f.db.query("UPDATE coding_jobs SET checkpoint=checkpoint || $2::jsonb WHERE id=$1",[job.id,JSON.stringify({runtimeMemory:{scopeHash:'a'.repeat(64),leader:{notes,receipts:[{key:'b'.repeat(64),tool:'read'}],modelCalls:7,toolsUsed:12,compactions:2,nudges:1,resets:0,lastProgressAt:stamp}}})]);
  for (const runtime of ['pi','python',undefined]) {
-  const pinned={...settings,runtime,model:'oracle/coder',leaderModel:'oracle/leader',reviewerModel:'oracle/reviewer',effort:'medium'};
+  const pinned={...settings,runtime,model:'oracle/coder',leaderModel:'oracle/leader',reviewerModel:'oracle/reviewer',effort:'medium',privateSentinel:'NOT_FOR_STATUS_PRIVATE_MARKER'};
   await f.db.query('UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1',[job.id,JSON.stringify(pinned)]);
   const expected={runtime:runtime??'node',image:pinned.image,models:{leader:pinned.leaderModel,coder:pinned.model,reviewer:pinned.reviewerModel},effort:'medium'};
   const detail=await f.c.status('a',job.id), list=await f.c.status('a');
   assert.deepEqual(detail.execution,expected);assert.deepEqual(list.find((r:any)=>r.id===job.id).execution,expected);
+  assert(!JSON.stringify([detail,list]).includes('NOT_FOR_STATUS_PRIVATE_MARKER'));
+  for(const entry of [detail,list.find((r:any)=>r.id===job.id)]) {
+   assert.deepEqual(entry.runtime.notebook,notes);assert.equal(entry.runtime.member,'leader');assert.equal(entry.runtime.lastProgressAt,stamp);assert.equal(entry.runtime.workerModelCalls,7);assert.equal(entry.runtime.workerToolsUsed,12);assert.equal(entry.runtime.compactions,2);assert.equal(entry.runtime.nudges,1);assert.equal(entry.runtime.resets,0);assert.equal(entry.runtime.evidenceCount,1);assert.match(entry.runtime.notice,/not verified completion/i);
+  }
   assert.equal(detail.settings,undefined);assert.equal(detail.used_models,0);assert.equal(detail.state,'queued');
  }
  await f.db.query("UPDATE coding_jobs SET settings=settings-'leaderModel' WHERE id=$1",[job.id]);
