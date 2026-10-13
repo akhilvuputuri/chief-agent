@@ -19,12 +19,14 @@ for (const scenario of [
   "stagnant",
   "small-progress",
   "small-stagnant",
+  "atomic-read-group",
 ] as const) {
   test(`native long-context lifecycle: ${scenario}`, async (t) => {
+    const atomic = scenario === "atomic-read-group";
     const stagnant = scenario.endsWith("stagnant");
     const small = scenario.startsWith("small-");
     const rules = Array.from(
-      { length: 220 },
+      { length: atomic ? 280 : 220 },
       (_, i) =>
         `R${i}: evidence_${i} retains id ${i}, retained=true and exact rule text. Record progress only in progress.json.`,
     ).join("\n");
@@ -74,7 +76,7 @@ for (const scenario of [
                 name: "read_document",
                 arguments: { id: "approved_plan", page },
               }
-            : ordinary > 100
+            : ordinary > (atomic ? 2 : 100)
               ? {
                   name: "report",
                   arguments: {
@@ -85,14 +87,17 @@ for (const scenario of [
                       planText,
                   },
                 }
-              : !stagnant && (ordinary % 3 === 0 || ordinary === 100)
+              : !stagnant &&
+                  ((atomic && ordinary === 2) ||
+                    ordinary % 3 === 0 ||
+                    ordinary === 100)
                 ? {
                     name: "write",
                     arguments: {
                       path: "progress.json",
                       content:
                         JSON.stringify({
-                          step: ordinary,
+                          step: atomic ? 100 : ordinary,
                           preserved: ["REQUIREMENT_A", "REQUIREMENT_B"],
                         }) + "\n",
                     },
@@ -103,22 +108,32 @@ for (const scenario of [
       const delta = compact
         ? {
             role: "assistant",
-            content: `Working state: preserve REQUIREMENT_A and REQUIREMENT_B. Source evidence inspected. Latest controlled work step ${ordinary}. Continue the remaining scoped edits, then submit the candidate for checks. Never claim checks passed without a receipt.`,
+            content:
+              `Working state: preserve REQUIREMENT_A and REQUIREMENT_B. Source evidence inspected. Latest controlled work step ${ordinary}. Continue the remaining scoped edits, then submit the candidate for checks. Never claim checks passed without a receipt.` +
+              (atomic
+                ? "\n" +
+                  Array.from(
+                    { length: 30 },
+                    (_, i) =>
+                      `Observation ${i}: source evidence_${i} retains its identifier and validation rule. No implementation has been saved; update progress.json next.`,
+                  ).join("\n")
+                : ""),
           }
         : {
             role: "assistant",
             content: null,
-            tool_calls: [
-              {
-                index: 0,
-                id: `step-${phase}-${ordinary}`,
-                type: "function",
-                function: {
-                  name: tool.name,
-                  arguments: JSON.stringify(tool.arguments),
-                },
+            tool_calls: (atomic && phase === "build" && ordinary === 1
+              ? [tool, { name: "read", arguments: { path: "source-copy.js" } }]
+              : [tool]
+            ).map((selected, index) => ({
+              index,
+              id: `step-${phase}-${ordinary}-${index}`,
+              type: "function",
+              function: {
+                name: selected.name,
+                arguments: JSON.stringify(selected.arguments),
               },
-            ],
+            })),
           };
       const header = {
         id: `stress-${ordinary}-${summaries}`,
@@ -151,6 +166,7 @@ for (const scenario of [
           `export const evidence_${i} = ${JSON.stringify({ id: i, retained: true, rule: "The public source remains unchanged while progress records advance and immutable original requirements remain available throughout context maintenance." })};`,
       ).join("\n") + "\n";
     await writeFile(join(workspace, "source.js"), source);
+    if (atomic) await writeFile(join(workspace, "source-copy.js"), source);
     const sourceHash = createHash("sha256").update(source).digest("hex");
     await writeFile(
       join(workspace, "verify.mjs"),
@@ -189,7 +205,7 @@ for (const scenario of [
       workspace,
       objective:
         "Preserve REQUIREMENT_A and REQUIREMENT_B and source.js. Perform the controlled work and record final step 100 in progress.json.",
-      instructions: scenario === "large-scope" ? rules : undefined,
+      instructions: scenario === "large-scope" || atomic ? rules : undefined,
       checks: [!stagnant ? "node verify.mjs" : "node --check source.js"],
       limits: { ms: 90000, models: 400, tools: 1000 },
     });
@@ -219,7 +235,7 @@ for (const scenario of [
       assert.equal(result.checks.length, 0);
     } else {
       assert.equal(result.status, "completed", result.summary);
-      assert.equal(ordinary, 101);
+      assert.equal(ordinary, atomic ? 3 : 101);
       assert.equal(documentReads, pages);
       assert.equal(result.plan!.text, planText);
       assert.equal(
@@ -228,8 +244,8 @@ for (const scenario of [
         "Accepted reports must not start another automatic summary",
       );
       assert(
-        small ? summaries === 0 : summaries >= 20,
-        "Must actually exercise at least twenty native compactions",
+        small ? summaries === 0 : summaries >= (atomic ? 1 : 20),
+        "Must actually exercise native compaction for this context shape",
       );
       assert.equal(result.checks[0]?.exitCode, 0);
       assert.deepEqual(
@@ -241,7 +257,9 @@ for (const scenario of [
         .filter(Boolean)
         .map((x) => JSON.parse(x));
       const compacted = entries.filter((e) => e.type === "compaction");
-      assert(small ? compacted.length === 0 : compacted.length >= 20);
+      assert(
+        small ? compacted.length === 0 : compacted.length >= (atomic ? 1 : 20),
+      );
       for (const e of compacted) {
         const c = e.details.contextMaintenance;
         assert(c.afterTokens < c.beforeTokens);

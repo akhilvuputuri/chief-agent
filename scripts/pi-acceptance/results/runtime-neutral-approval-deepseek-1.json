@@ -1,0 +1,62 @@
+{
+  "case": "runtime-neutral-approval-deepseek-1",
+  "source": "9abd9d0b0d5042a89e773db463cf78f00e52539b",
+  "harness": "c64e90adb77117824c157f0f5d63b9c5fa779e24",
+  "build": "chief-coding:6402ebef-fdef-4826-9041-f7f3d31bc556",
+  "outcome": "accepted-candidate",
+  "oraclePassed": true,
+  "roles": {
+    "leader": 17,
+    "coder": 10,
+    "reviewer": 6
+  },
+  "purposes": {
+    "agent": 32,
+    "compaction": 1
+  },
+  "providerDispatches": 33,
+  "reportedCostUsd": 0.0946806322,
+  "billingUnknown": 0,
+  "checks": [
+    {
+      "command": "npm ci",
+      "exitCode": 0
+    },
+    {
+      "command": "npm run check",
+      "exitCode": 0
+    },
+    {
+      "command": "npm run build",
+      "exitCode": 0
+    },
+    {
+      "command": "npm run format:check",
+      "exitCode": 0
+    }
+  ],
+  "verdict": "APPROVE",
+  "scopePreserved": true,
+  "finalToolsUsed": 61,
+  "publication": {
+    "case": "runtime-neutral-approval-deepseek-1",
+    "url": "https://github.com/akhilvuputuri/chief-agent/pull/223",
+    "head": "8d5c9195127ade75fc26ca67070a3547eb68a04c",
+    "tree": "fbe3558a52b8684da04564af612c460a8c8ced53",
+    "base": "9abd9d0b0d5042a89e773db463cf78f00e52539b",
+    "artifactHash": "2695943ee1072887b04f48a61d527b974ba5dd4b7f0f6182f21633c702484b7e",
+    "draft": true,
+    "productionJobWrites": 0
+  },
+  "publicationReopenMatched": true,
+  "nativeSizeAndFirstCheckpointMetrics": "not exported in this runner revision",
+  "productionJobWrites": 0,
+  "routeRemoved": true,
+  "date": "2026-10-13",
+  "seconds": 1445,
+  "workloadRevision": 2,
+  "execution": "compiled candidate overlay on verified Pi 0.1.3 base image",
+  "approval": "synthetic exact-brief confirmation",
+  "delivery": "synthetic callback receipts",
+  "codeBuildStatus": "SUCCEEDED"
+}
