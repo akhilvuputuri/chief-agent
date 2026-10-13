@@ -1,3 +1,7 @@
+# Shared a-stack workflow adoption in review — 14 October 2026
+
+Chief now pins the a-stack `workflow@a-stack` plugin (`workflow--v0.1.0`). AGENTS.md carries the shared workflow block plus Chief's bindings, and the duplicated generic workflow text was removed from AGENTS.md, CLAUDE.md and the workflow docs. REVIEW.md stays complete for the sandboxed coding reviewers. This is documentation and configuration only; plugin loading in authenticated and cloud sessions is unverified. See [journal 84](journey/84-shared-agent-workflow.md).
+
 # Pi activation includes production packaging correction — 11 October 2026
 
 The v0.3.68 foundation failed startup and rolled back to healthy v0.3.67: production pruning removed the newly required report-contract package. [PR221](https://github.com/akhilvuputuri/chief-agent/pull/221) combines the production dependency/compiled-file correction with the verified Pi 0.1.3 image selector for v0.3.69. Runtime source still matches the four-provider accepted revision. CI gains an actual pruned-image import smoke; exact review/checks and successful release/current health are required. The failed foundation is not a shipped milestone. [Incident and evidence](journey/82-pi-report-contract.md#production-package-closure-failure-and-correction).

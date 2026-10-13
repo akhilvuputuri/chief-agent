@@ -23,10 +23,9 @@ Create a feature branch from current main for new work. For unfinished memory wo
 
 ## Refresh before each task
 
-This applies to local and cloud agents, including research, feature exploration and planning that will not edit code. Before assessing current capabilities:
+Follow the a-stack `preflight` skill (CORE rule 1). This applies to research and planning as well as implementation. Read these from the freshly fetched ref, not from the checkout:
 
 ```sh
-git status --short --branch
 git fetch origin
 git rev-parse origin/main
 git show origin/main:AGENTS.md
@@ -36,11 +35,7 @@ git show origin/main:docs/portable-development.md
 git show origin/main:docs/cloud-development.md
 ```
 
-Read relevant source from the same fetched ref (`git show origin/main:src/<file>`) or an isolated worktree based on it. Record the main SHA used for the assessment. An old checkout or conversation summary is not evidence that a feature is absent from integrated main. For deliberately resumed checkpoint work, compare its behavior with current main and label the difference.
-
-Repeat the preflight after an idle period or context handoff, when switching features, after another task merges relevant work, or whenever freshness is uncertain. Reconcile new upstream facts before proposing work. A successful fetch updates remote-tracking refs; it does not update the checked-out files. Never reset, clean or overwrite shared/uncommitted work to synchronize it. Start new edits in an isolated branch/worktree based on current main.
-
-If the fetch fails, disclose the failure and last known SHA; treat the remote state as unverified and qualify any capability assessment. GitHub main is the integrated source of truth, while an exact successful release receipt and production diagnostics establish deployment.
+In Chief, deployment is established by an exact successful release receipt (`npm run release:status -- SHA`) and production diagnostics, not by main. For deliberately resumed checkpoint work, compare its behavior with current main and label the difference.
 
 ## Credentials and optional local integration tests
 
@@ -52,12 +47,13 @@ Production credentials stay on the production host (AWS Lightsail) in /opt/herme
 
 ## Develop, merge, verify
 
-1. Make the smallest complete change, with relevant regression coverage and documentation.
-2. Run check, build and formatting. Push the branch and open a PR. Mark unfinished work as draft and describe remaining issues.
-3. Review the exact diff and check current main for conflicting changes. Merge a passing requested ordinary change using the owner's standing authorization. Never merge another agent's unfinished candidate as a shortcut.
-4. Observe main checks and release. The workflow rechecks the exact current-main SHA, builds on the production host, waits for idle runtime work and checks health. A successful release prints deployed SHA and healthy status.
-5. If it fails due to active work, retry when idle; do not cancel user work. If superseded by newer main, verify the newer release instead. For DB/Compose changes, follow a reviewed operator migration procedure. Do not bypass the guard.
-6. Record release status and any remaining limits. For shipped milestones, follow releases.md for tags and notes.
+Follow the a-stack `independent-review` and `ship` skills with the AGENTS.md bindings. Chief's release path, specifically:
+
+- The release workflow rechecks the exact current-main SHA, builds on the production host, waits for idle runtime work, and checks health. A successful release prints the deployed SHA and a healthy status.
+- If the release fails because of active work, retry when the runtime is idle. Do not cancel user work.
+- If a newer main superseded it, verify the newer release instead.
+- For database or Compose changes, follow a reviewed operator migration procedure. Do not bypass the guard.
+- For shipped milestones, follow releases.md for tags and notes.
 
 Any machine or cloud task with the private log-reader identity can read sanitized production logs with `npm run logs:cloudwatch` ([lightsail.md](lightsail.md#reading-logs)). The bounded production-diagnostics workflow runs only while the repository is private. Full private trace inspection is still unfinished. Run doctor:cloud in the actual environment; a local success does not prove another agent has permission.
 

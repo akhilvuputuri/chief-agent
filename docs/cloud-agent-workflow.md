@@ -12,9 +12,13 @@ Define concrete acceptance scenarios and a short list of likely failure modes. F
 
 ## Implementation and independent review
 
-Run focused regressions, then required checks/build/format. Create a PR describing behavior, validation and deployment prerequisites. Spawn a fresh independent reviewer with the strongest model actually available in this environment. Supply requirements, base/head SHAs, PR link and REVIEW.md; let it inspect code independently. Do not claim another vendor's model was used when unavailable. Fix findings, rerun affected checks and obtain explicit approval of the new exact head. Record the reviewer identity, head and limitations on the PR. Automatic Devin Review on pushes is a second signal; it does not replace this loop.
+Follow the a-stack `independent-review` and `ship` skills, with the reviewer and merge bindings in AGENTS.md and [REVIEW.md](../REVIEW.md). Chief specifics:
 
-The owner authorizes merging passing requested ordinary changes. Merge only the exact reviewed head, for example `gh pr merge NUMBER --squash --match-head-commit FULL_HEAD_SHA`. Never use admin bypass. If merge fails, report the concrete GitHub error and inspect policy/permissions. Do not add tokens to source, weaken protection, or silently stop at “ready to merge.”
+- Run focused regressions, then `npm run check`, `npm run build` and `npm run format:check`.
+- The PR must name its deployment prerequisites.
+- Do not claim another vendor's model was used when it was unavailable.
+- Automatic Devin Review on pushes is a second signal only.
+- Merge with `gh pr merge NUMBER --squash --match-head-commit FULL_HEAD_SHA`. Never use an admin bypass. Never stop silently at "ready to merge": report the exact GitHub error, or that the PR needs merging.
 
 ## Release is part of the task
 
