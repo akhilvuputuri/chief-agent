@@ -1,11 +1,13 @@
 import {createHash, randomBytes} from 'node:crypto';
 import {createRequire} from 'node:module';
 import {Workspace as PiWorkspace} from '@chief-agent/pi-runtime';
-import {spawnSync} from 'node:child_process';
+import {spawn,spawnSync,type ChildProcess} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {summarizeSessions} from '../scripts/pi-acceptance/metrics.mjs';
 const manifest=JSON.parse(await readFile(new URL('../scripts/pi-acceptance/workloads.json',import.meta.url),'utf8'));
 const mode=process.env.PI_ACCEPTANCE_MODE;
+const restartProbe=process.env.PI_ACCEPTANCE_RESTART==='1';
+if(restartProbe&&mode!=='synthetic')throw Error('Worker crash probe requires zero-model synthetic mode');
 if(!['synthetic','paid'].includes(mode??''))throw Error('Explicit synthetic or paid acceptance mode required');
 const workload=manifest.workloads.find((w:any)=>w.id===process.env.PI_ACCEPTANCE_WORKLOAD);
 if(!workload)throw Error('Exact frozen workload ID required');
@@ -25,6 +27,8 @@ test('isolated real-repository Pi workflow and independent artifact oracle', {ti
  const profile={...settings,image:manifest.baseImage,runtime:'pi',squad:false,autoMerge:false,model:bootstrap.model,leaderModel:bootstrap.model,reviewerModel:bootstrap.reviewer,effort:'high',maxOutputTokens:16000,limits:{ms:2400000,models:400,tools:1000}};
  await f.db.query('UPDATE coding_jobs SET settings=$2::jsonb,base_sha=$3,objective=$4,context=$5 WHERE id=$1',[started.id,JSON.stringify(profile),manifest.source,workload.objective,context]);
  let syntheticBuild=0, missingScope=false, oraclePassed=false, firstSavedChangeSeconds:number|null=null;
+ let worker:ChildProcess|undefined, killedPid:number|undefined, crashArmed=false, crashed=false, explicitlyResumed=false, historyRestored=false;
+ t.after(()=>{worker?.kill('SIGKILL');});
  f.setGeneration(async(model,input)=>{
   const claim=(await f.db.query("SELECT id,role,input FROM coding_model_calls WHERE job_id=$1 AND state='pending' ORDER BY created_at DESC LIMIT 1",[started.id])).rows[0];
   assert(claim);assert(['agent','compaction'].includes(claim.input.purpose));
@@ -32,7 +36,21 @@ test('isolated real-repository Pi workflow and independent artifact oracle', {ti
   if(claim.input.purpose==='agent')missingScope ||= !JSON.stringify(input.messages).includes(JSON.stringify(workload.objective).slice(1,-1));
   if(mode==='synthetic'){
    if(workload.id!=='runtime-neutral-approval')throw Error('Synthetic preflight is defined only for wording workload');
-   const calls=claim.role==='leader'?[{name:'report',arguments:{kind:'plan',summary:'Synthetic contract preflight',detail:workload.objective}}]:claim.role==='reviewer'?[{name:'report',arguments:{kind:'review',summary:'Synthetic review preflight only',detail:'This scripted verdict validates transport, not model review quality.',verdict:'APPROVE'}}]:syntheticBuild++===0?['src/runtime.ts','src/telegram.ts'].map(path=>({name:'edit',arguments:{path,edits:[{oldText:'Python implementation',newText:'coding implementation'}]}})):[{name:'report',arguments:{kind:'done',summary:'Synthetic candidate ready',detail:'The controlled edits are ready for actual host checks.'}}];
+   const edit=(path:string)=>({name:'edit',arguments:{path,edits:[{oldText:'Python implementation',newText:'coding implementation'}]}});
+   let calls:any[];
+   if(claim.role==='leader')calls=[{name:'report',arguments:{kind:'plan',summary:'Synthetic contract preflight',detail:workload.objective}}];
+   else if(claim.role==='reviewer')calls=[{name:'report',arguments:{kind:'review',summary:'Synthetic review preflight only',detail:'This scripted verdict validates transport, not model review quality.',verdict:'APPROVE'}}];
+   else {
+    const step=syntheticBuild++;
+    if(step===0)calls=(restartProbe?['src/runtime.ts']:['src/runtime.ts','src/telegram.ts']).map(edit);
+    else if(restartProbe&&step===1){
+     assert(crashed&&explicitlyResumed);
+     const prior=input.messages.flatMap((m:any)=>m.role==='assistant'?(m.tool_calls??[]):[]).find((c:any)=>c.function?.name==='edit'&&JSON.parse(c.function.arguments).path==='src/runtime.ts');
+     historyRestored=!!prior&&input.messages.some((m:any)=>m.role==='tool'&&m.tool_call_id===prior.id);
+     assert(historyRestored,'Replacement worker did not restore the completed edit observation');
+     calls=[edit('src/telegram.ts')];
+    } else calls=[{name:'report',arguments:{kind:'done',summary:'Synthetic candidate ready',detail:'The controlled edits are ready for actual host checks.'}}];
+   }
    return {message:{role:'assistant',content:null,tool_calls:calls.map((call,i)=>({id:'controlled-'+claim.id+'-'+i,type:'function',function:{name:call.name,arguments:JSON.stringify(call.arguments)}}))}};
   }
   const response=await fetch(bootstrap.proxy+'/generate',{method:'POST',headers:{Authorization:'Bearer '+bootstrap.token,'Content-Type':'application/json'},body:JSON.stringify({callId:claim.id,model,messages:input.messages,tools:input.tools,maxOutputTokens:input.maxOutputTokens,purpose:claim.input.purpose,stream:input.stream,cacheKey:input.cacheKey}),signal:input.signal});
@@ -44,19 +62,34 @@ test('isolated real-repository Pi workflow and independent artifact oracle', {ti
  });
  const app=server();t.after(()=>app.close());app.addHook('onRequest',async()=>sync());
  app.addHook('onResponse',async(request,reply)=>{if(firstSavedChangeSeconds===null&&request.method==='POST'&&request.url.endsWith('/checkpoint')&&reply.statusCode===200&&Array.isArray((request.body as any)?.files)&&(request.body as any).files.length)firstSavedChangeSeconds=Math.round((Date.now()-clockBase)/1000);});
+ app.addHook('onSend',async(request,reply,payload)=>{
+  if(restartProbe&&crashArmed&&!crashed&&request.method==='POST'&&request.url.endsWith('/checkpoint')&&reply.statusCode===200&&(request.body as any)?.files?.length===1){
+   assert(worker?.pid);killedPid=worker.pid;crashed=true;assert(worker.kill('SIGKILL'));
+  }
+  return payload;
+ });
  await codingApi(app,f.c);
  const origin=await app.listen({host:'127.0.0.1',port:0});
  const tick=async()=>{sync();await f.c.tick();};
- const run=async()=>{const job=await f.row(started.id);await runPiWorker(new NativePiWorkerClient(origin,job.id,f.c.token(job.id,job.attempt_id),new AbortController().signal),guard.cleanup,new AbortController().signal);};
+ const run=async()=>{
+  const job=await f.row(started.id);
+  if(!restartProbe){await runPiWorker(new NativePiWorkerClient(origin,job.id,f.c.token(job.id,job.attempt_id),new AbortController().signal),guard.cleanup,new AbortController().signal);return;}
+  await new Promise<void>((resolve,reject)=>{
+   const child=spawn(process.execPath,['--disable-sigusr1',join(controlRoot,'dist/coding/pi-worker.js')],{cwd:controlRoot,env:{PATH:process.env.PATH,HOME:'/home/worker',CODING_ORIGIN:origin,CODING_JOB_ID:job.id,CODING_JOB_TOKEN:f.c.token(job.id,job.attempt_id)},stdio:['ignore','pipe','pipe']});
+   worker=child;child.stdout?.resume();child.stderr?.resume();
+   child.once('error',reject);child.once('close',(code,signal)=>{worker=undefined;if(code===0||(signal==='SIGKILL'&&child.pid===killedPid))resolve();else reject(Error('Isolated worker process exited without a verified result'));});
+  });
+ };
  const save=async(phase:string)=>{
   const job=await f.row(started.id),calls=(await f.db.query("SELECT id,attempt_id,role,state,input->>'purpose' AS purpose,input->'maxOutputTokens' AS requested_output,created_at FROM coding_model_calls WHERE job_id=$1 ORDER BY created_at,id",[job.id])).rows;
   const scopes=(await f.db.query("SELECT DISTINCT split_part(event_key,':',2) AS scope FROM coding_events WHERE job_id=$1 AND payload->>'kind'='pi_session'",[job.id])).rows;
   const sessions=[];
   for(const {scope} of scopes){const entries:any[]=[];for(let offset=0;;){const page=await f.c.piSessionRead(job,scope,offset);entries.push(...page.entries);if(page.next===null)break;offset=page.next;}sessions.push({entries});}
   const nativeEvidence={...summarizeSessions(sessions),firstSavedChangeSeconds};
-  const artifact={case:bootstrap.case,source:manifest.source,compiledDigests,approval:'synthetic confirmation of complete delivered brief',delivery:'synthetic callback receipts',mode,phase,job,calls,nativeEvidence,oraclePassed,missingScope,publication:'not performed',productionJobWrites:0};
+  if(restartProbe&&phase==='accepted-candidate'){assert.equal(nativeEvidence.tools.edit,2,'A saved edit was replayed');assert.equal(nativeEvidence.failedTools,0);assert.equal(calls.length,5);assert.equal(new Set(calls.map((c:any)=>c.id)).size,calls.length);}
+  const artifact={case:bootstrap.case,source:manifest.source,compiledDigests,approval:'synthetic confirmation of complete delivered brief',delivery:'synthetic callback receipts',mode,phase,job,calls,nativeEvidence,restart:restartProbe?{crashed,explicitlyResumed,historyRestored,sandboxExit:'simulated fixture receipt; worker process SIGKILL is real'}:undefined,oraclePassed,missingScope,publication:'not performed',productionJobWrites:0};
   if(bootstrap.proxy&&bootstrap.token){const wire=JSON.stringify(artifact);assert(Buffer.byteLength(wire)<=5000000);const response=await fetch(bootstrap.proxy+'/result',{method:'POST',headers:{Authorization:'Bearer '+bootstrap.token,'Content-Type':'application/json'},body:wire,signal:AbortSignal.timeout(30000)});assert.equal(response.status,200);assert.equal((await response.json()).receipt,createHash('sha256').update(wire).digest('hex'));}
-  const metrics={case:bootstrap.case,source:manifest.source,image:manifest.baseImage,execution:'candidate source overlay on verified base image',compiledDigests,approval:'synthetic exact-brief confirmation',delivery:'synthetic callback receipts',mode,workload:workload.id,state:job.state,debugSummary:mode==='synthetic'?job.summary:undefined,phase,models:{leader:profile.leaderModel,coder:profile.model,reviewer:profile.reviewerModel},hostModelCalls:calls.length,native:{compactions:nativeEvidence.compactions.length,tools:nativeEvidence.tools,uniqueReads:nativeEvidence.uniqueReads,repeatedReads:nativeEvidence.repeatedReads,documentReads:nativeEvidence.documentReads,repeatedDocumentReads:nativeEvidence.repeatedDocumentReads,firstSavedChangeSeconds},paidProviderDispatches:mode==='synthetic'?0:null,accounting:'Reconcile provider dispatches and reported cost with the broker ledger',callsByPurpose:calls.reduce((a:any,c:any)=>(a[c.purpose]=(a[c.purpose]??0)+1,a),{}),checks:job.result?.checks?.map((c:any)=>({command:c.command,exitCode:c.exitCode})),review:job.result?.review?.verdict,files:job.checkpoint.files?.map((file:any)=>({path:file.path,mode:file.mode,sha256:file.content===null?null:createHash('sha256').update(file.content).digest('hex')})),artifactHash:artifactHash(job.checkpoint),oraclePassed,originalScopePresent:!missingScope,seconds:Math.round((Date.now()-clockBase)/1000),productionJobWrites:0,publication:'not performed'};
+  const metrics={case:bootstrap.case,source:manifest.source,image:manifest.baseImage,execution:'candidate source overlay on verified base image',compiledDigests,approval:'synthetic exact-brief confirmation',delivery:'synthetic callback receipts',mode,workload:workload.id,state:job.state,debugSummary:mode==='synthetic'?job.summary:undefined,phase,models:{leader:profile.leaderModel,coder:profile.model,reviewer:profile.reviewerModel},hostModelCalls:calls.length,restart:restartProbe?{crashed,explicitlyResumed,historyRestored}:undefined,native:{compactions:nativeEvidence.compactions.length,tools:nativeEvidence.tools,uniqueReads:nativeEvidence.uniqueReads,repeatedReads:nativeEvidence.repeatedReads,documentReads:nativeEvidence.documentReads,repeatedDocumentReads:nativeEvidence.repeatedDocumentReads,firstSavedChangeSeconds},paidProviderDispatches:mode==='synthetic'?0:null,accounting:'Reconcile provider dispatches and reported cost with the broker ledger',callsByPurpose:calls.reduce((a:any,c:any)=>(a[c.purpose]=(a[c.purpose]??0)+1,a),{}),checks:job.result?.checks?.map((c:any)=>({command:c.command,exitCode:c.exitCode})),review:job.result?.review?.verdict,files:job.checkpoint.files?.map((file:any)=>({path:file.path,mode:file.mode,sha256:file.content===null?null:createHash('sha256').update(file.content).digest('hex')})),artifactHash:artifactHash(job.checkpoint),oraclePassed,originalScopePresent:!missingScope,seconds:Math.round((Date.now()-clockBase)/1000),productionJobWrites:0,publication:'not performed'};
   await writeFile('/tmp/pi-acceptance-report.json',JSON.stringify(metrics),{mode:0o600});
   return job;
  };
@@ -66,7 +99,16 @@ test('isolated real-repository Pi workflow and independent artifact oracle', {ti
   await tick();await tick();let approval='',messageId=0,sequence=0;
   for(let i=0;i<100&&!approval;i++)await f.c.deliver(async(_user,_target,_text,id,document)=>{const receipt=++sequence;if(id){assert(document?.content.includes(completePlan));assert(document.content.includes(workload.objective));approval=id;messageId=receipt;}return {message_id:receipt};});
   assert(approval);sync();await assert.rejects(f.c.requirements.confirm('b',approval,true,'b',messageId));await f.c.requirements.confirm('a',approval,true,'a',messageId);
-  await tick();await run();job=await f.row(started.id);
+  await tick();crashArmed=restartProbe;await run();job=await f.row(started.id);
+  if(restartProbe){
+   assert(crashed);assert.equal(job.checkpoint.files.length,1);const retainedHash=artifactHash(job.checkpoint),oldToken=f.c.token(job.id,job.attempt_id);
+   assert.equal((await f.db.query("SELECT count(*)::int AS count FROM coding_model_calls WHERE job_id=$1 AND state!='complete'",[job.id])).rows[0].count,0);
+   await f.provider.terminate(job.sandbox_id);await tick();await tick();job=await f.row(job.id);assert.equal(job.state,'paused');assert.equal(job.cleanup,'complete');
+   const callsBefore=f.modelCalls(),createsBefore=f.creates();await tick();await tick();assert.equal(f.modelCalls(),callsBefore);assert.equal(f.creates(),createsBefore);
+   await f.c.call('a',f.run,{operation:'coding_resume',id:job.id,baseRevision:job.revision,requestKey:'synthetic-worker-process-restart'});explicitlyResumed=true;await tick();job=await f.row(job.id);
+   assert.equal(artifactHash(job.checkpoint),retainedHash);assert.equal(job.checkpoint.plan,completePlan);await assert.rejects(f.c.authenticate(job.id,oldToken));
+   await run();job=await f.row(job.id);assert(historyRestored);assert.equal(syntheticBuild,3);
+  }
   assert.equal(job.state,'publishing','Implementation/check/review did not produce a candidate');
   assert.equal(job.base_sha,manifest.source);assert.equal(job.checkpoint.plan,completePlan);assert.equal(missingScope,false);
   assert.equal(job.result.review.verdict,'APPROVE');assert.equal(job.result.review.patchHash,artifactHash(job.checkpoint));
