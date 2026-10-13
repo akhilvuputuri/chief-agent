@@ -1,3 +1,7 @@
+# Terminal provider recovery policy assessment — 13 October 2026
+
+The first status workload passed with OpenAI/Claude, Claude/OpenAI and DeepSeek/OpenAI. Gemini failed a terminal HTTP 504 after 101 completed generations; its two-file candidate did not reach checks/review. All results remain recorded. Both temporary relays are removed and verified; no paid job is active and repeat cases have not started. The matrix is held while a narrowly bounded recovery policy is implemented and independently reviewed: one new generation only after a trusted terminal HTTP failure, fresh worker/host admissions, unchanged scope/budgets and no tool replay, paused-job resumption or unknown-transport retry. This changes the intentional stop policy; observed 504s do not prove retry success. An actual native-SDK regression currently fails with paused versus an expected recovered plan. Production remains v0.3.69/e4b71ad. [Evidence](journey/83-pi-context-verification.md).
+
 # Sustained Pi runtime verification in progress — 13 October 2026
 
 [Draft PR222](https://github.com/akhilvuputuri/chief-agent/pull/222) remains unreleased. Runtime candidate `9229c38` passes 1,124 local tests, build/format, hosted Linux checks and independent GPT-6 Astra review. It corrects native per-call budgets, append-only compaction/headroom failures and the bridge's artificial 40k model window while preserving output/byte/time/price limits. Integrated/deployed main remains v0.3.69/e4b71ad.
