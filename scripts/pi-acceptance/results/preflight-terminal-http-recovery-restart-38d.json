@@ -1,0 +1,70 @@
+{
+  "date": "2026-10-13",
+  "mode": "synthetic",
+  "harness": "38d62bbbb5158f1e7383223117b0ec03ddf92703",
+  "paidModelCalls": 0,
+  "productionJobWrites": 0,
+  "observation": {
+    "id": "chief-coding:e94cc14a-2c21-4658-b5c4-1271017c5a9f",
+    "status": "FAILED",
+    "phase": "COMPLETED",
+    "start": "2026-10-13T15:08:47.939Z",
+    "end": "2026-10-13T15:12:29.534Z",
+    "metrics": {
+      "case": "preflight-terminal-http-recovery-restart",
+      "recoveryAttempts": 2,
+      "injectedTerminalFailures": true,
+      "workloadRevision": 3,
+      "restart": {
+        "crashed": true,
+        "explicitlyResumed": false,
+        "historyRestored": false
+      },
+      "state": "running",
+      "phase": "incomplete",
+      "hostModelCalls": 4,
+      "native": {
+        "compactions": 0,
+        "tools": {
+          "edit": 1,
+          "report": 1
+        },
+        "uniqueReads": 0,
+        "repeatedReads": 0,
+        "documentReads": 0,
+        "repeatedDocumentReads": 0,
+        "firstSavedChangeSeconds": 7
+      },
+      "callsByPurpose": {
+        "agent": 4
+      },
+      "files": [
+        {
+          "path": "src/runtime.ts",
+          "mode": "100644",
+          "sha256": "b25997b67fc57b6fb2d93ab12914dd39fe04783de4792135a6b320efeb2742b9"
+        }
+      ],
+      "oraclePassed": false,
+      "originalScopePresent": true,
+      "seconds": 7,
+      "artifactHash": "35df7f551d9daea07462ceb1fc78f1f741731b8e1a06f0f7b96afbeccbdd83ed",
+      "approval": "synthetic exact-brief confirmation",
+      "delivery": "synthetic callback receipts",
+      "compiledDigests": {
+        "coding_runtime_pi/dist/runtime.js": "069c0ee2d0c4266165ec00404d0675d384e5f7f6f91ad807be0f2dd66718a65c",
+        "coding_runtime_pi/dist/documents.js": "d5faa72e5736546d3340cc175b18c4b0bf56ff1de15ad2265732e8a6bf13ce15",
+        "coding_runtime_pi/dist/report.js": "ff29693fd3e12bc04758627d959a709f58f215ff64a786f9e9b49cc6545d4741",
+        "dist/coding/pi-worker.js": "d37cd71547757466ba167371a47ae086deef8e22bc33703a5609399901823272",
+        "dist/coding/pi-review-evidence.js": "4b53ce8b753d4559ceb6cea019c054b840dd6f92f341ffa8fb369c68402dae8b",
+        "dist/coding/controller.js": "8947093c1a88c5438cbf4b59ec605f1489200528706d077e2d661b3dcae47e1a",
+        "coding_runtime_pi/dist/model.js": "7937dbe5ec87bcbe5158dbd0a283d97711ed8ecc2452f3f92011b48dafe88ff9",
+        "coding_runtime_pi/dist/terminal-http-recovery.js": "6c3658ad28cb4cdeb0ac693587ba4a0a50caba7e73e2a45ba1a63f2715a0f02a",
+        "dist/coding/api.js": "8597ce02e8293ccc3ba2700da06818032238002e8451cab51b4ae3c5792fbf0a",
+        "dist/coding/pi-proxy.js": "f7433e1b5ca9a2e4b78b81a2327d476c8a52683ef7d1b23e7402b8c4d8cd7a75"
+      }
+    }
+  },
+  "knownControlIssue": "Pre-resume assertion required zero non-complete calls despite deliberately retained failed parents. Exact stop is inferred from the completed crash/save and unreached resume stage; this export did not include an assertion diagnostic. Corrected control requires completed recovery children and no pending calls.",
+  "rerunRequired": true
+}
