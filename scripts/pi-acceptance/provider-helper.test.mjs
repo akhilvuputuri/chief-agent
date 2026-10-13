@@ -42,7 +42,7 @@ async function fixture(t) {
   );
   await writeFile(
     join(root, "dist/model.js"),
-    `import fs from 'node:fs';export class ModelError extends Error{constructor(){super('controlled');this.diagnostics={failureCode:'controlled_abort'};}}export class OpenRouter{constructor(key,model,input,output){if(key!=='synthetic'||input!==.5||output!==.9)throw Error('Policy changed');this.model=model;fs.writeFileSync('constructed','yes');}async generate(q){if(q.maxOutputTokens!==4096||q.reasoning!=='high'||!q.requireComplete||!q.stream||q.cacheKey!=='coding:fixture:1:leader')throw Error('Per-call contract changed');if(q.messages[0]?.content==='wait'){process.stderr.write('started\\n');await new Promise((resolve,reject)=>{if(q.signal.aborted)reject(new ModelError());else q.signal.addEventListener('abort',()=>reject(new ModelError()),{once:true});});}await q.onProgress({bytes:37,provider:'synthetic',responseId:'controlled'});return {message:{role:'assistant',content:'Controlled summary'},model:this.model,usage:{cost:0}};}}`,
+    `import fs from 'node:fs';export class ModelError extends Error{constructor(diagnostics={failureCode:'controlled_abort'}){super('controlled');this.diagnostics=diagnostics;}}export class OpenRouter{constructor(key,model,input,output,transport){if(key!=='synthetic'||input!==.5||output!==.9)throw Error('Policy changed');this.model=model;this.transport=transport;fs.writeFileSync('constructed','yes');}async generate(q){if(q.maxOutputTokens!==4096||q.reasoning!=='high'||!q.requireComplete||!q.stream||q.cacheKey!=='coding:fixture:1:leader')throw Error('Per-call contract changed');if(['incomplete','transport'].includes(q.messages[0]?.content)){await this.transport('data:application/json,{}');throw new ModelError({failureCode:q.messages[0].content,...(q.messages[0].content==='incomplete'?{finishReason:'length'}:{})});}if(q.messages[0]?.content==='wait'){process.stderr.write('started\\n');await new Promise((resolve,reject)=>{if(q.signal.aborted)reject(new ModelError());else q.signal.addEventListener('abort',()=>reject(new ModelError()),{once:true});});}await q.onProgress({bytes:37,provider:'synthetic',responseId:'controlled'});return {message:{role:'assistant',content:'Controlled summary'},model:this.model,usage:{cost:0}};}}`,
   );
   return {
     root,
@@ -104,3 +104,18 @@ test("provider helper rejects unselected models before constructing a provider",
   assert.equal(r.code, 1);
   await assert.rejects(access(join(f.root, "constructed")));
 });
+
+for (const failure of ["incomplete", "transport"]) {
+  test(`provider helper separates ${failure} outcome from missing billing`, async (t) => {
+    const f = await fixture(t),
+      r = await f.run({
+        ...input,
+        messages: [{ role: "user", content: failure }],
+      });
+    assert.equal(r.code, 1);
+    assert.equal(r.result.dispatchAttempted, true);
+    assert.equal(r.result.billingUnknown, true);
+    assert.equal(r.result.outcomeKnown, failure === "incomplete");
+    assert.equal(r.result.diagnostics.failureCode, failure);
+  });
+}

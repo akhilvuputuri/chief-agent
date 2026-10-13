@@ -1,0 +1,49 @@
+{
+  "date": "2026-10-13",
+  "case": "owner-scoped-model-call-audit-deepseek-1",
+  "harness": "2754536666bf71018ecdd4a95dcefb8c79804c15",
+  "source": "9abd9d0b0d5042a89e773db463cf78f00e52539b",
+  "workloadRevision": 2,
+  "build": "chief-coding:1ccc5a08-9c92-4993-8e78-5f8207cbe1d1",
+  "codeBuildStatus": "FAILED",
+  "outcome": "paused during final planning report",
+  "seconds": 511,
+  "providerDispatches": 19,
+  "completeGenerations": 18,
+  "reportedCostUsd": 0.0110046033,
+  "billingUnknown": 1,
+  "originalRelayOutcome": "unresolved; incomplete adapter error was misclassified",
+  "observedProviderTermination": "length",
+  "requestedFinalOutputTokens": 3599,
+  "profileOutputCeiling": 16000,
+  "finalRequestBytes": 136345,
+  "finalRequestSeconds": 168.146,
+  "roles": {
+    "leader": 19
+  },
+  "purposes": {
+    "agent": 19
+  },
+  "models": {
+    "leader": "deepseek/deepseek-v4.1-flash",
+    "coder": "deepseek/deepseek-v4.1-flash",
+    "reviewer": "openai/gpt-6.1-sol"
+  },
+  "nativeEvidence": {
+    "successfulReads": 32,
+    "uniqueReads": 31,
+    "repeatedReads": 1,
+    "compactions": [],
+    "firstSavedChangeSeconds": null
+  },
+  "checks": [],
+  "savedFiles": 0,
+  "oraclePassed": false,
+  "approval": "not reached",
+  "delivery": "not reached",
+  "publication": "not performed",
+  "productionJobWrites": 0,
+  "routeRemoved": true,
+  "unusedWaveCasesStarted": false,
+  "execution": "compiled candidate overlay on verified Pi 0.1.3 base image"
+}

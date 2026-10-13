@@ -20,6 +20,7 @@ for (const scenario of [
   "stagnant",
   "small-progress",
   "small-stagnant",
+  "large-provider-window",
   "atomic-read-group",
   "atomic-truncated",
   "atomic-oversized",
@@ -219,7 +220,7 @@ for (const scenario of [
         model: "fixture/context-stress",
         apiKey: "synthetic",
         baseUrl: `http://127.0.0.1:${(server.address() as any).port}/v1`,
-        contextWindow: 40000,
+        contextWindow: scenario === "large-provider-window" ? 1000000 : 40000,
         maxTokens: 16000,
         maxRequestBytes: 179000,
       }),
@@ -277,6 +278,11 @@ for (const scenario of [
     } else {
       assert.equal(result.status, "completed", result.summary);
       assert.equal(ordinary, atomic ? 3 : 101);
+      if (scenario === "large-provider-window")
+        assert(
+          result.used.models > ordinary + summaries + 1,
+          "Exercise repeated local byte-envelope recovery, not model-window compaction",
+        );
       assert.equal(documentReads, pages);
       assert.equal(result.plan!.text, planText);
       assert.equal(
