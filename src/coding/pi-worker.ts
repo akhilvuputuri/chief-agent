@@ -294,6 +294,7 @@ export async function runPiWorker(
         requestIdField: "runtime_call_id",
         requestPurposeField: "runtime_purpose",
         maxRequestBytes: 179000,
+        terminalHttpRecovery: { attemptId: assignment.attemptId },
       }),
       executor: (task) =>
         localExecutor(task.workspace, join(root, "tool-home"), cleanup),

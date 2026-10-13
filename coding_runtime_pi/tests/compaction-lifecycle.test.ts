@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
@@ -19,8 +20,13 @@ for (const failure of [
   "oversized",
   "disconnect",
   "cancel",
+  "terminal-recovered",
+  "terminal-second-failure",
+  "terminal-cancel",
 ] as const) {
-  test(`automatic ${failure} compaction cannot silently continue a build`, async (t) => {
+  test(`automatic ${failure} compaction preserves recovery boundaries`, async (t) => {
+    const terminal = failure.startsWith("terminal-"),
+      attemptId = randomUUID();
     let cancelRun: (() => Promise<unknown>) | undefined;
     let phase: "plan" | "build" = "plan",
       ordinary = 0,
@@ -34,6 +40,29 @@ for (const failure of [
       if (compact) {
         summaries++;
         if (summaries === 1) ordinaryAtFirstCompaction = ordinary;
+        if (
+          terminal &&
+          (summaries === 1 || failure === "terminal-second-failure")
+        ) {
+          res.writeHead(409, { "content-type": "application/json" });
+          res.end(
+            JSON.stringify({
+              code: "model_transient_failure",
+              recovery: {
+                version: 1,
+                kind: "terminal-provider-http",
+                callId: request.runtime_call_id,
+                attemptId,
+                providerStatus: 504,
+              },
+            }),
+          );
+          if (failure === "terminal-cancel")
+            setTimeout(() => {
+              void cancelRun!();
+            }, 10);
+          return;
+        }
         if (failure === "disconnect") {
           req.socket.destroy();
           return;
@@ -68,7 +97,8 @@ for (const failure of [
                   "Inspect source evidence and preserve the public API; report whether work can be completed. Only actual checks may establish completion.",
               },
             }
-          : ordinary <= 20
+          : ordinary <= 20 &&
+              !(failure === "terminal-recovered" && summaries >= 2)
             ? { name: "read", arguments: { path: "source.js" } }
             : {
                 name: "report",
@@ -83,7 +113,7 @@ for (const failure of [
         ? {
             role: "assistant",
             content: "Retained requirement and investigation state. ".repeat(
-              5000,
+              terminal ? 12 : 5000,
             ),
           }
         : {
@@ -154,6 +184,13 @@ for (const failure of [
         contextWindow: 40000,
         maxTokens: 16000,
         maxRequestBytes: 179000,
+        ...(terminal
+          ? {
+              requestIdField: "runtime_call_id",
+              requestPurposeField: "runtime_purpose",
+              terminalHttpRecovery: { attemptId },
+            }
+          : {}),
       }),
       executor: (task) => localExecutor(task.workspace, join(root, "home")),
     });
@@ -181,7 +218,11 @@ for (const failure of [
     assert(summaries > 0, "Fixture must reach native automatic compaction");
     assert.equal(
       result.status,
-      failure === "cancel" ? "cancelled" : "paused",
+      failure === "terminal-recovered"
+        ? "completed"
+        : failure === "cancel" || failure === "terminal-cancel"
+          ? "cancelled"
+          : "paused",
       JSON.stringify({
         status: result.status,
         summary: result.summary,
@@ -189,11 +230,14 @@ for (const failure of [
         summaries,
       }),
     );
-    assert.match(
-      result.summary,
-      failure === "cancel" ? /stopped/i : /compaction|summari[sz]/i,
-      "Compaction failure must retain its actual cause",
-    );
+    if (failure !== "terminal-recovered")
+      assert.match(
+        result.summary,
+        failure === "cancel" || failure === "terminal-cancel"
+          ? /stopped/i
+          : /compaction|summari[sz]/i,
+        "Compaction failure must retain its actual cause",
+      );
     const retainedStore = new TaskStore(
       join(root, "state"),
       "synthetic-compaction-state-key-at-least32",
@@ -206,13 +250,31 @@ for (const failure of [
     assert.equal(restored.sessionFile, result.sessionFile);
     assert.equal(
       summaries,
-      1,
+      failure === "terminal-recovered" || failure === "terminal-second-failure"
+        ? 2
+        : 1,
       "A failed compaction must not be retried implicitly after each subsequent tool turn",
     );
-    assert.equal(
-      ordinary,
-      ordinaryAtFirstCompaction,
-      "No new investigation should run after unrecovered compaction failure",
-    );
+    if (terminal) {
+      const entries = (await readFile(result.sessionFile!, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      assert.equal(
+        entries.filter((entry) => entry.type === "compaction").length,
+        failure === "terminal-recovered" ? 1 : 0,
+      );
+      assert.equal(
+        result.used.models,
+        1 + ordinary + summaries,
+        "Every inference, including failed summary, is admitted",
+      );
+    }
+    if (failure !== "terminal-recovered")
+      assert.equal(
+        ordinary,
+        ordinaryAtFirstCompaction,
+        "No new investigation should run after unrecovered compaction failure",
+      );
   });
 }

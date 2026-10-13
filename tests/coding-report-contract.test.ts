@@ -202,8 +202,14 @@ test("Pi review prompt preserves maximum approved context within runtime instruc
   assert(instructions.includes(base));
   assert.equal((instructions.match(/r{1000}/g) ?? []).length, 4);
 });
-for (const documentLength of [0, 9357, 32000, -32000])
-  test(`Pi bridge complete approved workflow preserves ${documentLength || "short"}-character documents`, async (t) => {
+for (const { documentLength, terminalRecovery } of [
+  ...[0, 9357, 32000, -32000].map((documentLength) => ({
+    documentLength,
+    terminalRecovery: false,
+  })),
+  { documentLength: 0, terminalRecovery: true },
+])
+  test(`Pi bridge complete approved workflow preserves ${documentLength || "short"}-character documents${terminalRecovery ? " with terminal HTTP recovery" : ""}`, async (t) => {
     const f = await fixture(t);
     const root = await mkdtemp(join(tmpdir(), "pi-bridge-fixture-"));
     const source = join(root, "source");
@@ -276,6 +282,7 @@ for (const documentLength of [0, 9357, 32000, -32000])
     const turns = new Map<string, number>();
     const reviewed = new Map<string, number>();
     const readEvidence = reviewDocumentReader();
+    const recoveredPhases = new Set<string>();
     f.setGeneration((selected, input) => {
       const system =
         input.messages.find((m: any) => m.role === "system")?.content ?? "";
@@ -287,6 +294,12 @@ for (const documentLength of [0, 9357, 32000, -32000])
               ? "repair"
               : "build"
             : "plan";
+      if (terminalRecovery && !recoveredPhases.has(phase)) {
+        recoveredPhases.add(phase);
+        throw new ModelError("Synthetic terminal provider failure", true, {
+          httpStatus: 504,
+        });
+      }
       const reviewKey =
         phase === "review"
           ? (system.match(/exact candidate: ([a-f0-9]{64})/)?.[1] ?? "review")
@@ -506,6 +519,37 @@ for (const documentLength of [0, 9357, 32000, -32000])
     await f.c.tick();
     assert.equal((await f.row(started.id)).state, "pr_ready");
     assert.equal(f.publishes(), 1);
+    if (terminalRecovery) {
+      assert.deepEqual([...recoveredPhases].sort(), [
+        "build",
+        "plan",
+        "review",
+      ]);
+      const calls = (
+        await f.db.query(
+          "SELECT id,attempt_id,role,state,input FROM coding_model_calls WHERE job_id=$1",
+          [started.id],
+        )
+      ).rows;
+      const children = calls.filter((call) => call.input.retryOf);
+      assert.equal(children.length, 3);
+      for (const child of children) {
+        const parent = calls.find((call) => call.id === child.input.retryOf);
+        assert.equal(parent.state, "uncertain");
+        assert.equal(child.state, "complete");
+        assert.equal(child.attempt_id, parent.attempt_id);
+        assert.equal(child.role, parent.role);
+      }
+      assert.equal(
+        result.used_models,
+        calls.filter((call) => call.attempt_id === result.attempt_id).length,
+      );
+      assert.equal(
+        turns.get("build"),
+        2,
+        "One edit response and one done response; no tool-loop replay",
+      );
+    }
   });
 test("replacement Pi worker retains acknowledged history across a new sandbox path", async (t) => {
   const f = await fixture(t);

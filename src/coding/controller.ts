@@ -1,4 +1,5 @@
 import { PiSessions } from "./pi-sessions.js";
+import { z } from "zod";
 import { reviewMetadata, completePlanDelivered } from "./review-proof.js";
 import { CodingAutomation } from "./automation.js";
 import { codingDiagnostics } from "./diagnostics.js";
@@ -348,11 +349,11 @@ export class CodingController {
       errorCode: failure.code,
       httpStatus: failure.httpStatus,
     });
-    await this.db.query(
+    const recorded = await this.db.query(
       `INSERT INTO coding_events(job_id,event_key,payload,delivery)
        SELECT id,$3,$4::jsonb,'suppressed' FROM coding_jobs
        WHERE id=$1 AND attempt_id=$2
-       AND (state IN ('provisioning','running') OR ($5='finish' AND state!='queued'))`,
+       AND (state IN ('provisioning','running') OR ($5='finish' AND state!='queued')) RETURNING id`,
       [
         job.id,
         job.attempt_id,
@@ -361,6 +362,7 @@ export class CodingController {
         failure.phase,
       ],
     );
+    return recorded.rows.length === 1;
   }
   async call(user: string, run: string, raw: CodingAction) {
     const a = codingAction.parse(raw);
@@ -883,8 +885,15 @@ export class CodingController {
       tools: ToolDefinition[];
       maxOutputTokens?: number;
       purpose?: "agent" | "compaction";
+      retryOf?: string;
     },
   ) {
+    if (
+      input.retryOf !== undefined &&
+      (job.settings.runtime !== "pi" ||
+        !z.string().uuid().safeParse(input.retryOf).success)
+    )
+      throw new Error("Invalid generation recovery parent");
     if (
       input.maxOutputTokens !== undefined &&
       (job.settings.runtime !== "pi" ||
@@ -932,6 +941,24 @@ export class CodingController {
         ),
       );
     }
+    if (input.retryOf) {
+      const parent = (
+        await this.db.query(
+          `SELECT p.* FROM coding_model_calls p WHERE p.id=$1 AND p.job_id=$2 AND p.attempt_id=$3 AND p.state='uncertain'
+         AND NOT (p.input ? 'retryOf') AND EXISTS (
+           SELECT 1 FROM coding_events e WHERE e.job_id=p.job_id
+           AND e.payload->>'kind'='worker_request_rejected' AND e.payload->>'callId'=p.id::text
+           AND ((e.payload->>'code'='model_rate_limited' AND e.payload->>'providerStatus'='429')
+             OR (e.payload->>'code'='model_transient_failure' AND e.payload->>'providerStatus' IN ('500','502','503','504')))
+           AND NOT (e.payload ? 'timeoutKind' OR e.payload ? 'finishReason' OR e.payload ? 'providerFailure'))`,
+          [input.retryOf, job.id, job.attempt_id],
+        )
+      ).rows[0];
+      const original = { ...input, callId: input.retryOf };
+      delete original.retryOf;
+      if (!parent || parent.request_hash !== hash(original))
+        throw new Error("Generation recovery parent or payload does not match");
+    }
     const cancellation = new AbortController();
     if (this.inFlightModels.has(input.callId))
       throw new Error("Model call is already in flight");
@@ -966,7 +993,8 @@ export class CodingController {
     if (enhanced) arm(120000);
     try {
       const claimed = await this.db.query(
-        `WITH claimed AS (UPDATE coding_jobs SET used_models=used_models+1,model_busy=true WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') AND NOT model_busy AND used_models<$3 AND attempt_deadline>$4 RETURNING id)
+        `WITH claimed AS (UPDATE coding_jobs SET used_models=used_models+1,model_busy=true WHERE id=$1 AND attempt_id=$2 AND state IN ('provisioning','running') AND NOT model_busy AND used_models<$3 AND attempt_deadline>$4
+         AND ($9::text IS NULL OR NOT EXISTS (SELECT 1 FROM coding_model_calls WHERE job_id=$1 AND attempt_id=$2 AND input->>'retryOf'=$9)) RETURNING id)
       INSERT INTO coding_model_calls(id,job_id,attempt_id,role,request_hash,input) SELECT $5,id,$2,$6,$7,$8::jsonb FROM claimed RETURNING id`,
         [
           job.id,
@@ -985,6 +1013,7 @@ export class CodingController {
                   ? (job.settings.leaderModel ?? job.settings.model)
                   : job.settings.model,
           }),
+          input.retryOf ?? null,
         ],
       );
       if (!claimed.rows.length)

@@ -3,6 +3,7 @@ import { openAICompletionsApi } from "@earendil-works/pi-ai/compat";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { InMemoryCredentialStore, type Model } from "@earendil-works/pi-ai";
 import type { ModelConfig } from "./types.js";
+import { terminalHttpRecoveryFetch } from "./terminal-http-recovery.js";
 
 export type ModelFactory = (admit: () => Promise<void>) => Promise<{
   runtime: ModelRuntime;
@@ -59,6 +60,20 @@ export function compatibleModel(config: ModelConfig): ModelFactory {
           await admit();
           return stream(model, context, {
             ...options,
+            maxRetries: 0,
+            ...(config.terminalHttpRecovery &&
+            config.baseUrl &&
+            config.requestIdField
+              ? {
+                  fetch: terminalHttpRecoveryFetch({
+                    ...config.terminalHttpRecovery,
+                    baseUrl: config.baseUrl,
+                    requestIdField: config.requestIdField,
+                    admit,
+                    fetch: options?.fetch ?? globalThis.fetch,
+                  }),
+                }
+              : {}),
             onPayload: async (payload, selected) => {
               const original = await options?.onPayload?.(payload, selected);
               const request = original ?? payload;

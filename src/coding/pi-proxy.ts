@@ -86,6 +86,7 @@ export async function piCompletion(
   job: CodingJob,
   role: "coder" | "reviewer",
   raw: unknown,
+  retryParent?: unknown,
 ) {
   if (job.settings.runtime !== "pi")
     throw new Error("Native Pi endpoint requires a Pi job");
@@ -94,6 +95,10 @@ export async function piCompletion(
       failureCode: "context_limit",
     });
   const input = piCompletionRequest.parse(raw);
+  const retryOf =
+    retryParent === undefined
+      ? undefined
+      : z.string().uuid().parse(retryParent);
   if (
     input.max_tokens !== undefined &&
     input.max_completion_tokens !== undefined &&
@@ -116,6 +121,7 @@ export async function piCompletion(
   const result = await controller.generate(job, {
     callId: input.runtime_call_id,
     role: effectiveRole,
+    ...(retryOf ? { retryOf } : {}),
     ...(requestedOutput !== undefined
       ? { maxOutputTokens: requestedOutput }
       : {}),

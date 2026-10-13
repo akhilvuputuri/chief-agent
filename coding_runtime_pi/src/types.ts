@@ -81,6 +81,8 @@ export type ModelConfig = {
   requestIdField?: string;
   requestPurposeField?: string;
   maxRequestBytes?: number;
+  /** Opt-in authenticated host receipt protocol; direct providers stay disabled. */
+  terminalHttpRecovery?: { attemptId: string };
 };
 export const defaultLimits: Limits = {
   ms: 2_400_000,

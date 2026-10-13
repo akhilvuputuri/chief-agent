@@ -9,7 +9,8 @@
   },
   "exports": {
     ".": "./dist/index.js",
-    "./report": "./dist/report.js"
+    "./report": "./dist/report.js",
+    "./terminal-http-recovery": "./dist/terminal-http-recovery.js"
   },
   "bin": {
     "pi-runtime": "./dist/cli.js"
