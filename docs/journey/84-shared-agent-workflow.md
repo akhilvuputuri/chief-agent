@@ -18,7 +18,7 @@ Another repository (a-stack) had already copied a reduced version of the review 
   - A `--plugin-dir` debug log shows the hook running and returning the full core text.
   - Mutation checks fail as intended.
 - **Tested** (14 October 2026, Claude Code 2.1.283, isolated `CLAUDE_CONFIG_DIR`): `claude plugin marketplace add 'akhilvuputuri/a-stack#workflow--v0.1.0'`, followed by `claude plugin install workflow@a-stack`, installed version 0.1.0 from GitHub with 7 skills and 1 SessionStart hook. The cached `CORE.md` is byte-identical to the tagged source.
-- **Measured:** Chief's AGENTS.md shrank from 18,802 to about 14,000 bytes. The plugin's core text is 5,286 characters and is loaded once per Claude Code session.
+- **Measured:** Chief's AGENTS.md shrank from 18,802 bytes to about 14,000. The plugin's core text is 5,286 characters. Per the Claude Code hook documentation, it is injected at session start and again after resume, `/clear` and compaction; this is documented behavior, not measured.
 - **Not verified:**
   - that the model reads the hook output in an authenticated turn
   - that cloud sessions (claude.ai/code) install project-pinned plugins and run their hooks
@@ -71,7 +71,21 @@ Local checks on this branch (14 October 2026):
 - `evals/coding/test_benchmark.py` fails because the `chief-protocol-*` fixtures exit 1 in every phase. It fails identically on unchanged `origin/main` `e4b71ad` on this Mac, because system Python 3.14 lacks the locked Pydantic development environment. That makes it a local environment limitation, not a regression.
 - `check:coding` (ruff/mypy) was not reached locally. CI runs the full check.
 
-Independent review and merge are pending. This is a documentation and configuration change with no runtime code, so a release redeploys the same application behavior.
+Independent review of `895002d` (Opus 5.5): REQUEST CHANGES.
+
+- **Blocking — two Chief rules not covered by the shared workflow were lost:**
+  - "A supplied memory is not proof that the model used it" (from the journal README).
+  - Stopping to ask when the git identity is unset or shows an agent.
+- **Non-blocking:**
+  - The "whenever freshness is uncertain" refetch trigger was dropped.
+  - Sandboxed coding runtimes were told to fetch CORE.md, which they cannot do.
+  - A new docs-only review relaxation was added that the owner had not approved.
+  - This entry mislabelled hook loading as measured.
+  - "Inspect policy and permissions" and "never weaken branch protection" were dropped from the merge guidance.
+
+All of these were restored or corrected in the follow-up commit. Re-review is pending.
+
+The lost identity and freshness rules are stricter than a-stack `workflow--v0.1.0`. They are candidates to upstream into the next plugin version. This is a documentation and configuration change with no runtime code, so a release redeploys the same application behavior.
 
 Remaining acceptance: a fresh authenticated Claude Code session in this repository registers the a-stack marketplace on folder trust, installs `workflow@a-stack`, and shows the core rules. The same check is needed in a Claude cloud session.
 

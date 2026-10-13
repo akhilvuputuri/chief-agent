@@ -18,7 +18,8 @@ Follow the a-stack `independent-review` and `ship` skills, with the reviewer and
 - The PR must name its deployment prerequisites.
 - Do not claim another vendor's model was used when it was unavailable.
 - Automatic Devin Review on pushes is a second signal only.
-- Merge with `gh pr merge NUMBER --squash --match-head-commit FULL_HEAD_SHA`. Never use an admin bypass. Never stop silently at "ready to merge": report the exact GitHub error, or that the PR needs merging.
+- Merge with `gh pr merge NUMBER --squash --match-head-commit FULL_HEAD_SHA`. Never use an admin bypass. If the merge fails, report the exact GitHub error and inspect policy and permissions. Never stop silently at "ready to merge".
+- Never add tokens to source or weaken branch protection to get a merge through.
 
 ## Release is part of the task
 

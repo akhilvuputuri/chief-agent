@@ -6,11 +6,11 @@ This repository follows the [a-stack engineering workflow](https://github.com/ak
 
 Non-negotiable even without the plugin:
 
-- Fetch origin and read from `origin/main` before exploring or changing anything. Never reset or clean a shared or dirty checkout. Work on a branch or worktree.
-- Every change gets an independent reviewer that did not write it (documentation-only changes may get a focused review), with an explicit APPROVE or REQUEST CHANGES for the exact head SHA. Re-review after every fix.
+- Fetch origin and read from `origin/main` before exploring or changing anything, and again whenever you cannot establish that the last fetch is still current. Never reset or clean a shared or dirty checkout. Work on a branch or worktree.
+- Every change gets an independent reviewer that did not write it, with an explicit APPROVE or REQUEST CHANGES for the exact head SHA. Re-review after every fix.
 - A task ends at verified delivery (exact deployed SHA and evidence) or a named blocker.
 - Label claims as reported, tested, measured, hypothesis or deferred. Never invent results.
-- Commit as the human developer's git identity, with no agent author or `Co-Authored-By` trailer. Keep secrets and private data out of the repository, PRs and logs.
+- Commit as the human developer's git identity, with no agent author or `Co-Authored-By` trailer. If `git config user.name`/`user.email` is unset or shows an agent (common in cloud sessions), stop and ask the developer; never set an identity yourself. Keep secrets and private data out of the repository, PRs and logs.
 
 ### Workflow bindings
 
@@ -38,6 +38,7 @@ Non-negotiable even without the plugin:
   - For runtime failures, first read the sanitized production logs with `npm run logs:cloudwatch`, using the private log-reader identity from your environment ([docs/lightsail.md](docs/lightsail.md#reading-logs)). Never run it in GitHub Actions, because this repository is public.
   - The `production-diagnostics` workflow is guarded to private repositories.
   - Cloud tasks do not inherit local browser sessions or SSH credentials. See [the cloud-agent workflow](docs/cloud-agent-workflow.md).
+- **Chief's sandboxed coding runtimes** (Pi and the Python squad) follow their host instructions, which take precedence over the general rules in this file where they differ (pinned base, no publication, merge or deploy). They do not need to fetch CORE.md or load workflow skills. The inline rules above, REVIEW.md and the repository docs are sufficient for them.
 - **Exceptions:**
   - **Owned coding squad:** the owned, fixed Python coding squad accepts its configured owner-selected reviewer (see below).
   - **Stricter documentation scope:** see below.

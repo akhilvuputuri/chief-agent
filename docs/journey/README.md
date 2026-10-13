@@ -130,6 +130,7 @@ Follow the a-stack `journal` skill and its evidence rules: label claims as repor
 - Use [the template](TEMPLATE.md).
 - Update this timeline and the relevant topic path without renumbering older files.
 - Link architecture guides and runbooks rather than copying their procedures.
+- A supplied memory or context item is not proof that the model used it. A health check is not a semantic evaluation. Do not claim benchmark wins, production scale or savings without measurements.
 - Keep private conversations, credentials, raw traces, user records and personal motivations out of the journal.
 
 Python execution: [56 — Coding work](56-coding-runtime.md) → [57 — Python runtime](57-python-coding-runtime.md) → [58 — Requirement confirmation](58-coding-requirements.md) → [61 — Fixed squad](61-coding-squad.md).
