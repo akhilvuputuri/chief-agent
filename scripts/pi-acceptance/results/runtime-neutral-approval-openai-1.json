@@ -36,5 +36,14 @@
   "publication": "not performed",
   "productionJobWrites": 0,
   "routeRemoved": true,
-  "unusedWaveCasesStarted": false
+  "unusedWaveCasesStarted": false,
+  "baseImage": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:7c0ab4236340a6d50c0f0ef9675bb9e71e8f5780bb9d0e8d6af57155a0a843e8",
+  "execution": "compiled candidate overlay on verified Pi 0.1.3 base image",
+  "approval": "synthetic exact-brief confirmation",
+  "delivery": "synthetic callback receipts",
+  "models": {
+    "leader": "openai/gpt-6.1-sol",
+    "coder": "openai/gpt-6.1-sol",
+    "reviewer": "anthropic/claude-sonnet-5.5"
+  }
 }
