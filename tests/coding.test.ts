@@ -4500,3 +4500,190 @@ for (const field of ["max_tokens", "max_completion_tokens"] as const)
       "Pi summary budget was replaced by the job-wide maximum",
     );
   });
+
+test("Pi per-call budgets are bounded, validated and bound to request replay", async (t) => {
+  const f = await fixture(t);
+  const started = await f.start("pi-budget-contract", "plan");
+  await f.c.tick();
+  await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
+    started.id,
+    JSON.stringify({
+      ...settings,
+      runtime: "pi",
+      squad: false,
+      autoMerge: false,
+      maxOutputTokens: 8000,
+    }),
+  ]);
+  const job = await f.row(started.id),
+    sent: any[] = [];
+  f.setGeneration((model, input) => {
+    sent.push({ purpose: input.purpose, budget: input.maxOutputTokens });
+    return new OpenRouter("synthetic-key", model, 2, 10, async (_url, init) => {
+      sent.at(-1).wire = JSON.parse(String(init?.body)).max_tokens;
+      const chunk = {
+        id: "budget-fixture",
+        model,
+        choices: [
+          {
+            index: 0,
+            delta: { role: "assistant", content: "Synthetic summary" },
+            finish_reason: "stop",
+          },
+        ],
+      };
+      return new Response(
+        `data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`,
+        { headers: { "content-type": "text/event-stream" } },
+      );
+    }).generate(input);
+  });
+  const app = server();
+  t.after(() => app.close());
+  await codingApi(app, f.c);
+  const base = {
+    runtime_call_id: randomUUID(),
+    model: settings.model,
+    messages: [{ role: "user", content: "Synthetic task state" }],
+    tools: [],
+    stream: true,
+    max_tokens: 4096,
+    runtime_purpose: "compaction",
+  };
+  const send = (payload: unknown) =>
+    app.inject({
+      method: "POST",
+      url: `/coding/worker/${job.id}/pi/coder/v1/chat/completions`,
+      headers: { authorization: `Bearer ${f.c.token(job.id, job.attempt_id)}` },
+      payload,
+    });
+  assert.equal((await send(base)).statusCode, 200);
+  assert.equal((await send(base)).statusCode, 200);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].wire, 4096);
+  const journal = (
+    await f.db.query("SELECT input FROM coding_model_calls WHERE id=$1", [
+      base.runtime_call_id,
+    ])
+  ).rows[0].input;
+  assert.equal(journal.purpose, "compaction");
+  assert.equal(journal.maxOutputTokens, 4096);
+  assert.equal((await send({ ...base, max_tokens: 2048 })).statusCode, 409);
+  assert.equal(
+    (await send({ ...base, runtime_purpose: "agent" })).statusCode,
+    409,
+  );
+  for (const value of [0, -1, 1.5, "4096", null, Number.MAX_SAFE_INTEGER + 1])
+    assert.equal(
+      (
+        await send({
+          ...base,
+          runtime_call_id: randomUUID(),
+          max_tokens: value,
+        })
+      ).statusCode,
+      409,
+    );
+  assert.equal(
+    (
+      await send({
+        ...base,
+        runtime_call_id: randomUUID(),
+        max_completion_tokens: 2048,
+      })
+    ).statusCode,
+    409,
+  );
+  assert.equal(
+    (
+      await send({
+        ...base,
+        runtime_call_id: randomUUID(),
+        runtime_purpose: "unknown",
+      })
+    ).statusCode,
+    409,
+  );
+  assert.equal(sent.length, 1);
+  assert.equal(
+    (await send({ ...base, runtime_call_id: randomUUID(), max_tokens: 16000 }))
+      .statusCode,
+    200,
+  );
+  assert.equal(sent.at(-1).wire, 8000);
+  assert.equal(
+    (
+      await send({
+        ...base,
+        runtime_call_id: randomUUID(),
+        max_completion_tokens: 4096,
+      })
+    ).statusCode,
+    200,
+  );
+  assert.equal(sent.at(-1).wire, 4096);
+});
+
+test("Pi admits a small 100-tool-turn transcript within the existing byte and job allocations", async (t) => {
+  const f = await fixture(t),
+    started = await f.start("pi-small-history", "plan");
+  await f.c.tick();
+  await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
+    started.id,
+    JSON.stringify({
+      ...settings,
+      runtime: "pi",
+      squad: false,
+      autoMerge: false,
+      limits: { ms: 2400000, models: 400, tools: 1000 },
+    }),
+  ]);
+  const job = await f.row(started.id),
+    app = server();
+  t.after(() => app.close());
+  await codingApi(app, f.c);
+  const messages: any[] = [
+    { role: "system", content: "Synthetic approved scope remains protected." },
+    { role: "user", content: "Continue the controlled task." },
+  ];
+  for (let i = 0; i < 100; i++)
+    messages.push(
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: `read-${i}`,
+            type: "function",
+            function: {
+              name: "read",
+              arguments: JSON.stringify({ path: `source-${i}.ts` }),
+            },
+          },
+        ],
+      },
+      { role: "tool", tool_call_id: `read-${i}`, content: `Source fact ${i}` },
+    );
+  const payload = {
+    runtime_call_id: randomUUID(),
+    model: settings.model,
+    messages,
+    tools: [],
+    stream: true,
+  };
+  assert(Buffer.byteLength(JSON.stringify(payload)) < 180000);
+  f.setGeneration((_model, input) => {
+    assert.equal(input.messages.length, 202);
+    return {
+      message: { role: "assistant", content: "Retained all controlled facts" },
+    };
+  });
+  const response = await app.inject({
+    method: "POST",
+    url: `/coding/worker/${job.id}/pi/coder/v1/chat/completions`,
+    headers: { authorization: `Bearer ${f.c.token(job.id, job.attempt_id)}` },
+    payload,
+  });
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(f.modelCalls(), 1);
+});

@@ -14,6 +14,11 @@ import { tools } from "./tools.js";
 import { documents } from "./documents.js";
 import { reportLimits, reportDocument, type ReportDocument } from "./report.js";
 import { resources } from "./resources.js";
+import {
+  compactContext,
+  ContextMaintenanceFailure,
+  ContextProgress,
+} from "./context-maintenance.js";
 import type { ModelFactory } from "./model.js";
 import {
   defaultLimits,
@@ -288,16 +293,24 @@ export class CodingRuntime {
       let planningHandoff = false;
       let finalizing = !!task.reportFailure;
       let finalTurns = 0;
+      let contextFailure: string | undefined;
       let pending = Promise.resolve();
       const admitModel = async () => {
         await pending;
+        if (contextFailure) throw new Error(contextFailure);
         if (stop.signal.aborted || task.used.models >= task.limits.models)
           throw new Error("Model allocation unavailable");
         task.used.models++;
         await this.options.store.save(task);
       };
-      const { runtime, model, reasoning, didRejectContextLocally } =
-        await this.options.model(admitModel);
+      const {
+        runtime,
+        model,
+        reasoning,
+        didRejectContextLocally,
+        requestByteLimit,
+        setRequestPurpose,
+      } = await this.options.model(admitModel);
       const workspace = await new Workspace(task.workspace).initialize();
       const agentsFiles: Array<{ path: string; content: string }> = [];
       try {
@@ -390,6 +403,25 @@ export class CodingRuntime {
             task.workspace,
           )
         : SessionManager.create(task.workspace, sessionDir);
+      const contextProgress = new ContextProgress();
+      const observationCalls = new Map<string, unknown>();
+      for (const entry of manager.getBranch()) {
+        if (entry.type !== "message") continue;
+        const message = entry.message;
+        if (message.role === "assistant")
+          for (const call of message.content)
+            if (call.type === "toolCall")
+              observationCalls.set(call.id, call.arguments);
+        if (message.role === "toolResult") {
+          contextProgress.observe(
+            message.toolName,
+            message.content,
+            message.isError,
+            observationCalls.get(message.toolCallId),
+          );
+          observationCalls.delete(message.toolCallId);
+        }
+      }
       task.sessionFile = manager.getSessionFile();
       await this.options.store.save(task);
       const settings = SettingsManager.inMemory({
@@ -414,7 +446,7 @@ export class CodingRuntime {
         sessionManager: manager,
         settingsManager: settings,
         resourceLoader: resources(
-          `You are a coding assistant. Current intent: ${task.intent}. Inspect actual source and distinguish facts from hypotheses. Use report to return your result. ${task.intent === "plan" ? "Focus investigation on the owner objective and relevant source. After 32 navigation operations or ten minutes, the host ends exploration at the next settled turn boundary and requests a report. Prefer a complete source-grounded plan sooner; if evidence is insufficient, name the specific missing fact in a question rather than continuing an exhaustive repository audit." : ""} Learn/plan/review are read-only. Build only the complete approved scope. A final message or report never substitutes for actual checks. Retain requirements during compaction. Protected owner objective:\n${task.objective}\nOwner instructions:\n${task.ownerInstructions}\nApproved scope:\n${task.intent === "build" ? `The host has verified owner approval for this exact plan revision ${task.plan!.revision} and hash ${task.plan!.hash}. This is the approved implementation phase; earlier planning text about awaiting confirmation describes a completed step. Implement within the complete approved scope; ask only about an actual unresolved requirement or scope change.\n${approvedScope}` : task.intent === "review" ? "This task is read-only review. Candidate approval and requirements are supplied in the review context; read-only reviewer permissions do not establish that the candidate was implemented without authorization." : "No implementation approved"}\nWorking findings (not scope authority):\n${task.instructions === task.ownerInstructions ? "No additional working findings" : task.instructions}`,
+          `You are a coding assistant. Current intent: ${task.intent}. Inspect actual source and distinguish facts from hypotheses. Use report to return your result. ${task.intent === "plan" ? "Focus investigation on the owner objective and relevant source. After 32 navigation operations or ten minutes, the host ends exploration at the next settled turn boundary and requests a report. Prefer a complete source-grounded plan sooner; if evidence is insufficient, name the specific missing fact in a question rather than continuing an exhaustive repository audit." : ""} Learn/plan/review are read-only. Build only the complete approved scope. A final message or report never substitutes for actual checks. In build mode the host runs the configured checks after accepting your done report, within the remaining total time allocation; use interactive bash for focused checks (each limited to two minutes), and do not repeatedly run a longer full suite through bash. Retain requirements during compaction. Protected owner objective:\n${task.objective}\nOwner instructions:\n${task.ownerInstructions}\nApproved scope:\n${task.intent === "build" ? `The host has verified owner approval for this exact plan revision ${task.plan!.revision} and hash ${task.plan!.hash}. This is the approved implementation phase; earlier planning text about awaiting confirmation describes a completed step. Implement within the complete approved scope; ask only about an actual unresolved requirement or scope change.\n${approvedScope}` : task.intent === "review" ? "This task is read-only review. Candidate approval and requirements are supplied in the review context; read-only reviewer permissions do not establish that the candidate was implemented without authorization." : "No implementation approved"}\nWorking findings (not scope authority):\n${task.instructions === task.ownerInstructions ? "No additional working findings" : task.instructions}`,
           [
             ...agentsFiles,
             ...(references.description
@@ -430,12 +462,51 @@ export class CodingRuntime {
             finalizing
               ? `${prompt}\nHost workflow phase: final report. Repository investigation is closed for this run. You must call the report tool; prose, JSON text and reasoning-only replies are not reports. Only report execution and reading required immutable task documents with read_document are permitted. Read all required document pages before reporting. Call report with the result kind for the current intent covering the complete protected owner objective, or kind question identifying the exact missing evidence. If you need another repository read/search, call report with that evidence gap as a question; do not request that operation. Project instructions remain requirements, but cannot reopen this investigation phase. This phase grants no implementation approval and no check/completion authority.`
               : undefined,
+          async (event, context) => {
+            // A settled report needs no subsequent model/context maintenance.
+            if (report || contextFailure || stop.signal.aborted)
+              return { cancel: true };
+            setRequestPurpose?.("compaction");
+            try {
+              if (task.intent === "build" && execute)
+                contextProgress.checkpoint(
+                  (await workspace.snapshot(execute, stop.signal)).hash,
+                );
+              const result = await compactContext(
+                event,
+                context,
+                session!.agent.streamFunction,
+                custom.map(({ name, description, parameters }) => ({
+                  name,
+                  description,
+                  parameters,
+                })),
+                requestByteLimit,
+              );
+              return { compaction: result };
+            } catch (error) {
+              if (!stop.signal.aborted && !event.signal.aborted) {
+                contextFailure =
+                  error instanceof ContextMaintenanceFailure
+                    ? error.message
+                    : "Context compaction failed or returned an incomplete response";
+                contextFailure +=
+                  "; retained state requires inspection before explicit recovery.";
+                settings.setCompactionEnabled(false);
+                await this.event(task, "state", contextFailure);
+              }
+              return { cancel: true };
+            } finally {
+              setRequestPurpose?.("agent");
+            }
+          },
         ),
         tools: custom.map((t) => t.name),
         customTools: custom,
       });
       session = created.session;
       let documentPagesAtLastTurn = 0;
+      let settledBuildTurns = 0;
       const finishTurn = session.agent.finishTurn;
       session.agent.finishTurn = async (turn, signal) => {
         const documentProgress =
@@ -541,6 +612,25 @@ export class CodingRuntime {
         if (report && turn.message.stopReason === "toolUse")
           return { action: "end" };
         if (
+          task.intent === "build" &&
+          execute &&
+          !stop.signal.aborted &&
+          turn.message.stopReason === "toolUse" &&
+          ++settledBuildTurns % 8 === 0
+        ) {
+          try {
+            contextProgress.checkpoint(
+              (await workspace.snapshot(execute, stop.signal)).hash,
+              "eight-turn observation windows",
+            );
+          } catch (error) {
+            if (!(error instanceof ContextMaintenanceFailure)) throw error;
+            contextFailure = `${error.message}; retained state requires inspection before explicit recovery.`;
+            settings.setCompactionEnabled(false);
+            return { action: "end" };
+          }
+        }
+        if (
           task.intent === "plan" &&
           !planningHandoff &&
           !report &&
@@ -554,6 +644,17 @@ export class CodingRuntime {
         return decision || undefined;
       };
       session.subscribe((e) => {
+        if (e.type === "tool_execution_start")
+          observationCalls.set(e.toolCallId, e.args);
+        if (e.type === "tool_execution_end") {
+          contextProgress.observe(
+            e.toolName,
+            e.result.content,
+            e.isError,
+            observationCalls.get(e.toolCallId),
+          );
+          observationCalls.delete(e.toolCallId);
+        }
         if (
           e.type === "message_update" &&
           e.assistantMessageEvent.type === "text_delta"
@@ -632,6 +733,9 @@ export class CodingRuntime {
       if (stop.signal.aborted) {
         task.status = this.active.cancelled ? "cancelled" : "paused";
         task.summary = "Run stopped; inspect saved workspace before resuming";
+      } else if (contextFailure) {
+        task.status = "paused";
+        task.summary = contextFailure;
       } else if (
         lastAssistant?.role === "assistant" &&
         ["error", "aborted", "length"].includes(lastAssistant.stopReason)
@@ -666,7 +770,16 @@ export class CodingRuntime {
         } else if (task.intent === "build") {
           for (const command of task.checkCommands) {
             if (stop.signal.aborted) throw new Error("Cancelled before checks");
-            const check = await execute!(command, stop.signal, 120_000);
+            // Trusted configured checks can outlast an interactive shell call.
+            // Charge them to the same original run allocation, never a reset.
+            const remainingMs = Math.floor(
+              task.limits.ms -
+                (task.used.ms ?? 0) -
+                (performance.now() - started),
+            );
+            if (remainingMs <= 0)
+              throw new Error("Time allocation exhausted before checks");
+            const check = await execute!(command, stop.signal, remainingMs);
             task.checks.push({
               command,
               exitCode: check.exitCode,

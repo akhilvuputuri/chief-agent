@@ -881,8 +881,23 @@ export class CodingController {
       role: "leader" | "coder" | "reviewer";
       messages: ModelMessage[];
       tools: ToolDefinition[];
+      maxOutputTokens?: number;
+      purpose?: "agent" | "compaction";
     },
   ) {
+    if (
+      input.maxOutputTokens !== undefined &&
+      (job.settings.runtime !== "pi" ||
+        !Number.isSafeInteger(input.maxOutputTokens) ||
+        input.maxOutputTokens < 1)
+    )
+      throw new Error("Invalid per-call output allowance");
+    if (
+      input.purpose !== undefined &&
+      (job.settings.runtime !== "pi" ||
+        !["agent", "compaction"].includes(input.purpose))
+    )
+      throw new Error("Invalid model request purpose");
     if (
       input.role === "leader" &&
       !job.settings.squad &&
@@ -1004,7 +1019,10 @@ export class CodingController {
         ...(job.settings.runtime === "pi"
           ? {
               requireComplete: true,
-              maxOutputTokens: job.settings.maxOutputTokens ?? 8000,
+              maxOutputTokens: Math.min(
+                input.maxOutputTokens ?? job.settings.maxOutputTokens ?? 8000,
+                job.settings.maxOutputTokens ?? 8000,
+              ),
             }
           : {}),
         signal: AbortSignal.any([cancellation.signal, total, idle.signal]),
@@ -1081,6 +1099,7 @@ export class CodingController {
           JSON.stringify({
             kind: "model_usage",
             role: input.role,
+            ...(input.purpose ? { purpose: input.purpose } : {}),
             model: result.model,
             usage: result.usage,
             provider: result.provider,

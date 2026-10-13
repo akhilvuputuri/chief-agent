@@ -79,6 +79,7 @@ export type ModelConfig = {
   contextWindow?: number;
   maxTokens?: number;
   requestIdField?: string;
+  requestPurposeField?: string;
   maxRequestBytes?: number;
 };
 export const defaultLimits: Limits = {

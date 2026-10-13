@@ -21,3 +21,19 @@ AWS Support's 12 October reply says the service team investigated and asks for n
 ## Current execution
 
 A zero-model CodeBuild baseline is measuring the full public repository's real install/check/build/format commands at the pinned deployed source. Production credentials and owner job state are untouched. Concrete representative workload oracles, context repair, stress/recovery tests, the paid matrix, exact review and release remain outstanding. No passing acceptance or new deployment is claimed.
+
+## Candidate correction and deterministic checks — 13 October
+
+The unshipped candidate preserves native per-call output budgets and purpose through the authenticated facade, binds both to replay identity, and clamps requests to the existing role maximum. Pi now uses its native pre-compaction extension to create one replacement summary, checks projected size/shrinkage/headroom before persistence, and stops with a retained cause when compaction fails. It also checks workspace/observation progress at settled boundaries. Neither a successful report nor a failed maintenance request permits another implicit maintenance cycle.
+
+A second baseline reproduced rejection of a 202-message transcript representing 100 small tool steps, despite fitting the 180,000-byte envelope. The Pi-only message bound is now 2,048; legacy validation and byte/model/tool allocations remain intact. Small-transcript and budget/replay facade regressions pass.
+
+The package suite passes 62 tests. Actual native-session synthetic stress completed 100 tool steps with 32 compactions; the long immutable scope variant completed with 65. Small observations completed 100 steps without compaction. Unchanging observations paused after nine calls with context pressure or 32 without it. Truncated/oversized/disconnected compaction paused without subsequent investigation; cancellation remained cancelled, and reopening retained storage preserved the outcome, plan identity and counters. These controlled responses establish lifecycle mechanisms, not paid-model task quality. A post-report compaction regression first reproduced an unnecessary extra summary and now verifies none is admitted.
+
+Trusted configured checks now receive decreasing remaining task time rather than the interactive shell's two-minute ceiling. A real subprocess test confirms checks share prior elapsed allocation; global runtime limits and interactive shell limits are unchanged. A first version of that regression used an invalid test-store method and failed; correcting the test to the actual store API produced the passing result above.
+
+## Real-repository sandbox baseline remains unresolved
+
+All these experiments use public v0.3.69 source and the published Pi 0.1.3 image, zero model calls and no owner-job writes. Install/build/format passed, while combined checks did not. Initial medium-sandbox runs lost whole test files to SIGKILL. CPU-affinity controls and a 1,024-MiB Node heap control still reached the approximately 7.25-GB cgroup memory limit and failed three workspace tests. An isolated Git/workspace control passed. A large-compute control likewise reached its approximately 15-GB cgroup limit and failed seven tests. Larger compute alone is not an accepted fix. One intermediate wrapper had a quoting/setup error and was discarded as infrastructure setup evidence, not a test result.
+
+A medium-sandbox control with explicit serial test-file execution and a 768-MiB Node heap is in progress. It retains all assertions; its transient package-script change must be recorded separately from the unmodified baseline. No production compute configuration has changed. The paid matrix remains unstarted because an unresolved baseline invalidates representative model acceptance. Full local checks, workload oracles, real-gateway paid runs, independent review and release remain outstanding.

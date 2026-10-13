@@ -14,8 +14,14 @@ import {
 
 // Actual Pi session/automatic compaction, with a deterministic HTTP provider.
 // This is a lifecycle regression, not a model-quality acceptance workload.
-for (const failure of ["truncated", "oversized"] as const) {
+for (const failure of [
+  "truncated",
+  "oversized",
+  "disconnect",
+  "cancel",
+] as const) {
   test(`automatic ${failure} compaction cannot silently continue a build`, async (t) => {
+    let cancelRun: (() => Promise<unknown>) | undefined;
     let phase: "plan" | "build" = "plan",
       ordinary = 0,
       summaries = 0,
@@ -28,6 +34,15 @@ for (const failure of ["truncated", "oversized"] as const) {
       if (compact) {
         summaries++;
         if (summaries === 1) ordinaryAtFirstCompaction = ordinary;
+        if (failure === "disconnect") {
+          req.socket.destroy();
+          return;
+        }
+        if (failure === "cancel") {
+          await cancelRun!();
+          res.destroy();
+          return;
+        }
         if (failure === "truncated") {
           res.writeHead(409, { "content-type": "application/json" });
           res.end(
@@ -152,6 +167,7 @@ for (const failure of ["truncated", "oversized"] as const) {
     assert.equal(plan.status, "waiting_approval");
     await runtime.approve(task.id, plan.plan!.revision, plan.plan!.hash);
     phase = "build";
+    cancelRun = () => runtime.cancel(task.id);
     const result = await runtime.run(task.id);
     console.log(
       JSON.stringify({
@@ -165,7 +181,7 @@ for (const failure of ["truncated", "oversized"] as const) {
     assert(summaries > 0, "Fixture must reach native automatic compaction");
     assert.equal(
       result.status,
-      "paused",
+      failure === "cancel" ? "cancelled" : "paused",
       JSON.stringify({
         status: result.status,
         summary: result.summary,
@@ -175,9 +191,19 @@ for (const failure of ["truncated", "oversized"] as const) {
     );
     assert.match(
       result.summary,
-      /compaction|summari[sz]/i,
+      failure === "cancel" ? /stopped/i : /compaction|summari[sz]/i,
       "Compaction failure must retain its actual cause",
     );
+    const retainedStore = new TaskStore(
+      join(root, "state"),
+      "synthetic-compaction-state-key-at-least32",
+    );
+    const restored = await retainedStore.get(task.id);
+    assert.equal(restored.status, result.status);
+    assert.equal(restored.summary, result.summary);
+    assert.equal(restored.plan!.hash, plan.plan!.hash);
+    assert.equal(restored.used.models, result.used.models);
+    assert.equal(restored.sessionFile, result.sessionFile);
     assert.equal(
       summaries,
       1,

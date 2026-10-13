@@ -42,7 +42,9 @@ export const piCompletionRequest = z
   .object({
     runtime_call_id: z.string().uuid(),
     model: z.string().max(120),
-    messages: z.array(nativeMessage).max(120),
+    // Small tool results can legitimately outnumber 120 messages before token
+    // compaction. The byte envelope and durable job allocations remain binding.
+    messages: z.array(nativeMessage).max(2048),
     tools: z
       .array(
         z
@@ -62,6 +64,19 @@ export const piCompletionRequest = z
       .max(12)
       .optional(),
     stream: z.boolean().optional(),
+    max_tokens: z
+      .number()
+      .int()
+      .positive()
+      .max(Number.MAX_SAFE_INTEGER)
+      .optional(),
+    max_completion_tokens: z
+      .number()
+      .int()
+      .positive()
+      .max(Number.MAX_SAFE_INTEGER)
+      .optional(),
+    runtime_purpose: z.enum(["agent", "compaction"]).optional(),
   })
   .passthrough();
 
@@ -79,6 +94,13 @@ export async function piCompletion(
       failureCode: "context_limit",
     });
   const input = piCompletionRequest.parse(raw);
+  if (
+    input.max_tokens !== undefined &&
+    input.max_completion_tokens !== undefined &&
+    input.max_tokens !== input.max_completion_tokens
+  )
+    throw new Error("Conflicting native output limits");
+  const requestedOutput = input.max_tokens ?? input.max_completion_tokens;
   if (role === "reviewer" && job.mode !== "implement")
     throw new Error("Reviewer model requires approved implementation");
   const effectiveRole =
@@ -94,6 +116,10 @@ export async function piCompletion(
   const result = await controller.generate(job, {
     callId: input.runtime_call_id,
     role: effectiveRole,
+    ...(requestedOutput !== undefined
+      ? { maxOutputTokens: requestedOutput }
+      : {}),
+    ...(input.runtime_purpose ? { purpose: input.runtime_purpose } : {}),
     messages: input.messages,
     tools: (input.tools ?? []).map((t) => ({
       name: t.function.name,

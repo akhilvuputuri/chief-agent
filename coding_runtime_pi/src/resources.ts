@@ -3,6 +3,9 @@ import {
   type Extension,
   type BeforeAgentStartEvent,
   type ResourceLoader,
+  type SessionBeforeCompactEvent,
+  type SessionBeforeCompactResult,
+  type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 
 /** Host-owned text/resources only. No project/global executable discovery. */
@@ -10,6 +13,10 @@ export function resources(
   prompt: string,
   agentsFiles: Array<{ path: string; content: string }> = [],
   beforeStart?: (prompt: string) => string | undefined,
+  beforeCompact?: (
+    event: SessionBeforeCompactEvent,
+    context: ExtensionContext,
+  ) => Promise<SessionBeforeCompactResult>,
 ): ResourceLoader {
   const phase: Extension = {
     path: "<inline:host-phase>",
@@ -38,9 +45,17 @@ export function resources(
     flags: new Map(),
     shortcuts: new Map(),
   };
+  if (beforeCompact)
+    phase.handlers.set("session_before_compact", [
+      async (event, context) =>
+        beforeCompact(
+          event as SessionBeforeCompactEvent,
+          context as ExtensionContext,
+        ),
+    ]);
   return {
     getExtensions: () => ({
-      extensions: beforeStart ? [phase] : [],
+      extensions: beforeStart || beforeCompact ? [phase] : [],
       errors: [],
       runtime: createExtensionRuntime(),
     }),

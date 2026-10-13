@@ -290,6 +290,7 @@ export async function runPiWorker(
         maxTokens: config.maxOutputTokens ?? 8000,
         reasoning: config.effort,
         requestIdField: "runtime_call_id",
+        requestPurposeField: "runtime_purpose",
         maxRequestBytes: 179000,
       }),
       executor: (task) =>

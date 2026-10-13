@@ -10,11 +10,14 @@ export type ModelFactory = (admit: () => Promise<void>) => Promise<{
   reasoning?: ModelConfig["reasoning"];
   /** Trusted provenance: envelope rejection before any provider transport. */
   didRejectContextLocally?: () => boolean;
+  requestByteLimit?: number;
+  setRequestPurpose?: (purpose: "agent" | "compaction") => void;
 }>;
 /** Native Pi OpenAI-compatible implementation; no custom transcript conversion. */
 export function compatibleModel(config: ModelConfig): ModelFactory {
   return async (admit) => {
     let localContextRejected = false;
+    let requestPurpose: "agent" | "compaction" = "agent";
     const runtime = await ModelRuntime.create({
       credentials: new InMemoryCredentialStore(),
       modelsPath: null,
@@ -48,6 +51,7 @@ export function compatibleModel(config: ModelConfig): ModelFactory {
         },
       ],
       streamSimple: (model, context, options) => {
+        const purpose = requestPurpose;
         localContextRejected = false;
         const stream = openAICompletionsApi().streamSimple;
         // Admission is awaited before provider I/O, including compaction calls.
@@ -66,10 +70,15 @@ export function compatibleModel(config: ModelConfig): ModelFactory {
                 localContextRejected = true;
                 throw new Error("context_length_exceeded");
               }
-              return config.requestIdField
+              return config.requestIdField || config.requestPurposeField
                 ? {
                     ...(request as Record<string, unknown>),
-                    [config.requestIdField]: randomUUID(),
+                    ...(config.requestIdField
+                      ? { [config.requestIdField]: randomUUID() }
+                      : {}),
+                    ...(config.requestPurposeField
+                      ? { [config.requestPurposeField]: purpose }
+                      : {}),
                   }
                 : request;
             },
@@ -83,8 +92,13 @@ export function compatibleModel(config: ModelConfig): ModelFactory {
       runtime,
       model: runtime.getModel(provider, config.model)!,
       reasoning: config.reasoning ?? "high",
+      requestByteLimit: config.maxRequestBytes,
+      setRequestPurpose: (purpose) => {
+        requestPurpose = purpose;
+      },
       didRejectContextLocally: () => {
         const rejected = localContextRejected;
+        const purpose = requestPurpose;
         localContextRejected = false;
         return rejected;
       },
