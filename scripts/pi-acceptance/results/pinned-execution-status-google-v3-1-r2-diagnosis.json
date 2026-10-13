@@ -1,0 +1,71 @@
+{
+  "dateUtc": "2026-10-14",
+  "case": "pinned-execution-status-google-v3-1-r2",
+  "harness": "7b250479461e8832ad4fdf43cf3f8ef47d2551d6",
+  "source": "9abd9d0b0d5042a89e773db463cf78f00e52539b",
+  "workloadRevision": 3,
+  "method": "Read-only structural pass over the retained host relay trace. Only counts, tool names, command prefixes and file paths of the public target repository were extracted; no prompts, generations, source text or summaries were exported.",
+  "scope": "Generations after the leader's planning report (index 34 onward). Includes compaction generations separately. No reviewer was reached.",
+  "postPlanOrdinaryGenerations": 243,
+  "postPlanCompactions": 7,
+  "toolCalls": 243,
+  "meanToolCallsPerGeneration": 1.0,
+  "generationsBeforeFirstEdit": 175,
+  "editCalls": 4,
+  "editFailures": 0,
+  "tools": {
+    "read": 82,
+    "grep": 78,
+    "bash": 57,
+    "read_document": 16,
+    "find": 6,
+    "edit": 4
+  },
+  "testRunsTotal": 22,
+  "bashAfterLastEdit": 16,
+  "checkRunsAfterLastEdit": 8,
+  "coderReportCalls": 0,
+  "reportToolOffered": true,
+  "observedCheckResults": "Every observed targeted test run after the edits reported zero failures; one format check failed and the model fixed it with Prettier; a later full format check and typecheck completed.",
+  "navigationNoveltyPerSegment": [
+    { "segment": 0, "navigation": 26, "repeatOfEarlier": 2 },
+    { "segment": 1, "navigation": 29, "repeatOfEarlier": 6 },
+    { "segment": 2, "navigation": 33, "repeatOfEarlier": 9 },
+    { "segment": 3, "navigation": 31, "repeatOfEarlier": 15 },
+    { "segment": 4, "navigation": 18, "repeatOfEarlier": 9 },
+    { "segment": 5, "navigation": 21, "repeatOfEarlier": 7 },
+    { "segment": 6, "navigation": 13, "repeatOfEarlier": 4 },
+    { "segment": 7, "navigation": 5, "repeatOfEarlier": 5 }
+  ],
+  "comparison": [
+    {
+      "case": "pinned-execution-status-openai-v3-1",
+      "postPlanOrdinaryGenerations": 36,
+      "meanToolCallsPerGeneration": 3.0,
+      "generationsBeforeFirstEdit": 11,
+      "reportCalls": 2,
+      "note": "Includes the three reviewer generations."
+    },
+    {
+      "case": "pinned-execution-status-deepseek-v3-1",
+      "postPlanOrdinaryGenerations": 53,
+      "meanToolCallsPerGeneration": 1.64,
+      "generationsBeforeFirstEdit": 20,
+      "reportCalls": 3,
+      "note": "Includes reviewer generations."
+    },
+    {
+      "case": "pinned-execution-status-google-v3-1",
+      "postPlanOrdinaryGenerations": 68,
+      "meanToolCallsPerGeneration": 0.99,
+      "generationsBeforeFirstEdit": 61,
+      "reportCalls": 0,
+      "note": "Ended on a terminal HTTP 504 before any check or report."
+    }
+  ],
+  "harnessErrorsObserved": "None: no tool errors, no rejected report, no provider failure and no unparseable tool arguments.",
+  "runtimeObservation": "The checkpoint snapshot runs git add -A, so after a checkpoint the agent's git diff is empty while git diff --cached shows the change. The model ran git status/diff repeatedly and once unstaged the index; the next snapshot re-stages everything, so the saved artifact is unaffected. Recorded as a follow-up, not changed in this release.",
+  "classification": "observed model behavior in one interrupted run; not a reliability estimate",
+  "conclusion": "Gemini 3.8 Flash as coder issued one tool call per generation, investigated for 175 generations before editing, then repeatedly re-verified passing checks without submitting the available done report. No harness defect was identified. Gemini is not recommended for the coder role; owners may still select it.",
+  "limits": "Single interrupted run; final implementation artifact was not exported; check outcomes are classified from bounded tool-result patterns. Causal attribution to model behavior is a hypothesis supported by the absence of harness errors and the comparison runs, not a controlled experiment."
+}
