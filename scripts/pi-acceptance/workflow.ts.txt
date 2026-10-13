@@ -1,0 +1,83 @@
+import {createHash, randomBytes} from 'node:crypto';
+import {createRequire} from 'node:module';
+import {Workspace as PiWorkspace} from '@chief-agent/pi-runtime';
+import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+const manifest=JSON.parse(await readFile(new URL('../scripts/pi-acceptance/workloads.json',import.meta.url),'utf8'));
+const mode=process.env.PI_ACCEPTANCE_MODE;
+if(!['synthetic','paid'].includes(mode??''))throw Error('Explicit synthetic or paid acceptance mode required');
+const workload=manifest.workloads.find((w:any)=>w.id===process.env.PI_ACCEPTANCE_WORKLOAD);
+if(!workload)throw Error('Exact frozen workload ID required');
+const bootstrap={case:process.env.PI_ACCEPTANCE_CASE??'synthetic-preflight',model:process.env.PI_ACCEPTANCE_MODEL??'deepseek/deepseek-v4.1-flash',reviewer:process.env.PI_ACCEPTANCE_REVIEWER??'openai/gpt-6.1-sol',proxy:process.env.PI_ACCEPTANCE_PROXY,token:process.env.PI_ACCEPTANCE_TOKEN};
+if(mode==='paid'&&(!bootstrap.proxy?.startsWith('https://')||!bootstrap.token))throw Error('Paid mode requires its scoped HTTPS broker capability');
+const acceptanceKey=createHash('sha256').update('isolated-acceptance-controller:'+(bootstrap.token??randomBytes(32).toString('hex'))).digest('hex');
+delete process.env.PI_ACCEPTANCE_TOKEN;
+const guard=createRequire(import.meta.url)('/opt/pi-runtime/process-boundary.node');
+if(!guard.lockdown())throw Error('Actual Linux native boundary required');
+const controlRoot=fileURLToPath(new URL('../',import.meta.url));
+const compiledDigests=Object.fromEntries(await Promise.all(['coding_runtime_pi/dist/runtime.js','dist/coding/pi-worker.js','dist/coding/controller.js'].map(async path=>[path,createHash('sha256').update(await readFile(join(controlRoot,path))).digest('hex')])));
+const context='This is an isolated owner-authorized acceptance workload, not a production owner job. This checkout is already isolated and its exact pinned source is intentional; preserve that baseline. Only implement the objective and allowed paths. Do not commit, publish, deploy, alter dependencies/check scripts or create journal/PR artifacts for this disposable case; the test operator maintains the experiment journal. The configured host review is the required separate independent review for this test; do not seek another reviewer. The fixture caller will confirm the exact complete plan before build. Return a done report when the candidate is ready for the host-configured real checks; the host executes the full npm checks and supplies their actual receipts to the reviewer. Scope and source evidence remain authoritative.';
+test('isolated real-repository Pi workflow and independent artifact oracle', {timeout:5_400_000}, async t=>{
+ const f=await fixture(t), clockBase=Date.now();let advanced=0;
+ const sync=()=>{const elapsed=Date.now()-clockBase;f.advance(elapsed-advanced);advanced=elapsed;};
+ const started=await f.start('acceptance-'+bootstrap.case,'plan');
+ const profile={...settings,image:manifest.baseImage,runtime:'pi',squad:false,autoMerge:false,model:bootstrap.model,leaderModel:bootstrap.model,reviewerModel:bootstrap.reviewer,effort:'high',maxOutputTokens:16000,limits:{ms:2400000,models:400,tools:1000}};
+ await f.db.query('UPDATE coding_jobs SET settings=$2::jsonb,base_sha=$3,objective=$4,context=$5 WHERE id=$1',[started.id,JSON.stringify(profile),manifest.source,workload.objective,context]);
+ let syntheticBuild=0, missingScope=false, oraclePassed=false;
+ f.setGeneration(async(model,input)=>{
+  const claim=(await f.db.query("SELECT id,role,input FROM coding_model_calls WHERE job_id=$1 AND state='pending' ORDER BY created_at DESC LIMIT 1",[started.id])).rows[0];
+  assert(claim);assert(['agent','compaction'].includes(claim.input.purpose));
+  assert.equal(input.maxOutputTokens,Math.min(claim.input.maxOutputTokens??16000,16000));
+  if(claim.input.purpose==='agent')missingScope ||= !JSON.stringify(input.messages).includes(JSON.stringify(workload.objective).slice(1,-1));
+  if(mode==='synthetic'){
+   if(workload.id!=='runtime-neutral-approval')throw Error('Synthetic preflight is defined only for wording workload');
+   const calls=claim.role==='leader'?[{name:'report',arguments:{kind:'plan',summary:'Synthetic contract preflight',detail:workload.objective}}]:claim.role==='reviewer'?[{name:'report',arguments:{kind:'review',summary:'Synthetic review preflight only',detail:'This scripted verdict validates transport, not model review quality.',verdict:'APPROVE'}}]:syntheticBuild++===0?['src/runtime.ts','src/telegram.ts'].map(path=>({name:'edit',arguments:{path,edits:[{oldText:'Python implementation',newText:'coding implementation'}]}})):[{name:'report',arguments:{kind:'done',summary:'Synthetic candidate ready',detail:'The controlled edits are ready for actual host checks.'}}];
+   return {message:{role:'assistant',content:null,tool_calls:calls.map((call,i)=>({id:'controlled-'+claim.id+'-'+i,type:'function',function:{name:call.name,arguments:JSON.stringify(call.arguments)}}))}};
+  }
+  const response=await fetch(bootstrap.proxy+'/generate',{method:'POST',headers:{Authorization:'Bearer '+bootstrap.token,'Content-Type':'application/json'},body:JSON.stringify({callId:claim.id,model,messages:input.messages,tools:input.tools,maxOutputTokens:input.maxOutputTokens,purpose:claim.input.purpose,stream:input.stream,cacheKey:input.cacheKey}),signal:input.signal});
+  if(!response.ok||!response.body)throw new ModelError('Acceptance broker rejected the request',false,{});
+  const reader=response.body.getReader(),decoder=new TextDecoder();let pending='',data:any;
+  while(true){const next=await reader.read();pending+=decoder.decode(next.value??new Uint8Array(),{stream:!next.done});if(pending.length>2000000)throw Error('Acceptance response bound');let newline;while((newline=pending.indexOf('\n'))>=0){const line=pending.slice(0,newline);pending=pending.slice(newline+1);if(!line)continue;const frame=JSON.parse(line);if(frame.type==='progress')await input.onProgress?.(frame.value);else if(frame.type==='result')data=frame.value;else throw Error('Unknown acceptance response frame');}if(next.done)break;}
+  if(!data||data.failed)throw new ModelError('Acceptance provider request failed; inspect its journal',false,data?.diagnostics??{});
+  return data.generation;
+ });
+ const app=server();t.after(()=>app.close());app.addHook('onRequest',async()=>sync());await codingApi(app,f.c);
+ const origin=await app.listen({host:'127.0.0.1',port:0});
+ const tick=async()=>{sync();await f.c.tick();};
+ const run=async()=>{const job=await f.row(started.id);await runPiWorker(new NativePiWorkerClient(origin,job.id,f.c.token(job.id,job.attempt_id),new AbortController().signal),guard.cleanup,new AbortController().signal);};
+ const save=async(phase:string)=>{
+  const job=await f.row(started.id),calls=(await f.db.query("SELECT id,attempt_id,role,state,input->>'purpose' AS purpose,input->'maxOutputTokens' AS requested_output,created_at FROM coding_model_calls WHERE job_id=$1 ORDER BY created_at,id",[job.id])).rows;
+  const artifact={case:bootstrap.case,source:manifest.source,compiledDigests,approval:'synthetic confirmation of complete delivered brief',delivery:'synthetic callback receipts',mode,phase,job,calls,oraclePassed,missingScope,publication:'not performed',productionJobWrites:0};
+  if(bootstrap.proxy&&bootstrap.token){const wire=JSON.stringify(artifact);assert(Buffer.byteLength(wire)<=5000000);const response=await fetch(bootstrap.proxy+'/result',{method:'POST',headers:{Authorization:'Bearer '+bootstrap.token,'Content-Type':'application/json'},body:wire,signal:AbortSignal.timeout(30000)});assert.equal(response.status,200);assert.equal((await response.json()).receipt,createHash('sha256').update(wire).digest('hex'));}
+  const metrics={case:bootstrap.case,source:manifest.source,image:manifest.baseImage,execution:'candidate source overlay on verified base image',compiledDigests,approval:'synthetic exact-brief confirmation',delivery:'synthetic callback receipts',mode,workload:workload.id,state:job.state,debugSummary:mode==='synthetic'?job.summary:undefined,phase,models:{leader:profile.leaderModel,coder:profile.model,reviewer:profile.reviewerModel},hostModelCalls:calls.length,paidProviderDispatches:mode==='synthetic'?0:null,accounting:'Reconcile provider dispatches and reported cost with the broker ledger',callsByPurpose:calls.reduce((a:any,c:any)=>(a[c.purpose]=(a[c.purpose]??0)+1,a),{}),checks:job.result?.checks?.map((c:any)=>({command:c.command,exitCode:c.exitCode})),review:job.result?.review?.verdict,files:job.checkpoint.files?.map((file:any)=>({path:file.path,mode:file.mode,sha256:file.content===null?null:createHash('sha256').update(file.content).digest('hex')})),artifactHash:artifactHash(job.checkpoint),oraclePassed,originalScopePresent:!missingScope,seconds:Math.round((Date.now()-clockBase)/1000),productionJobWrites:0,publication:'not performed'};
+  await writeFile('/tmp/pi-acceptance-report.json',JSON.stringify(metrics),{mode:0o600});
+  return job;
+ };
+ try{
+  await tick();await run();let job=await save('plan');assert.equal(job.state,'plan_ready','Planning did not produce an approvable complete plan');
+  const completePlan=job.checkpoint.plan;assert.equal(job.checkpoint.piState.reportDocument.detail,completePlan);
+  await tick();await tick();let approval='',messageId=0,sequence=0;
+  for(let i=0;i<100&&!approval;i++)await f.c.deliver(async(_user,_target,_text,id,document)=>{const receipt=++sequence;if(id){assert(document?.content.includes(completePlan));assert(document.content.includes(workload.objective));approval=id;messageId=receipt;}return {message_id:receipt};});
+  assert(approval);sync();await assert.rejects(f.c.requirements.confirm('b',approval,true,'b',messageId));await f.c.requirements.confirm('a',approval,true,'a',messageId);
+  await tick();await run();job=await f.row(started.id);
+  assert.equal(job.state,'publishing','Implementation/check/review did not produce a candidate');
+  assert.equal(job.base_sha,manifest.source);assert.equal(job.checkpoint.plan,completePlan);assert.equal(missingScope,false);
+  assert.equal(job.result.review.verdict,'APPROVE');assert.equal(job.result.review.patchHash,artifactHash(job.checkpoint));
+  assert.equal(job.result.checks.length,4);assert(job.result.checks.every((c:any)=>c.exitCode===0));
+  assert(job.checkpoint.files.length>0);
+  for(const file of job.checkpoint.files){assert(workload.paths.some((path:string)=>path.endsWith('/')?file.path.startsWith(path):file.path===path),'Candidate changed a forbidden path');assert(!['package.json','package-lock.json'].includes(file.path));}
+  guard.cleanup();
+  const verify=await mkdtemp(join(tmpdir(),'pi-independent-grade-'));
+  execFileSync('git',['clone','--no-hardlinks','https://github.com/akhilvuputuri/chief-agent.git',verify],{stdio:'pipe'});
+  execFileSync('git',['-C',verify,'checkout','--detach',manifest.source],{stdio:'pipe'});
+  await new PiWorkspace(verify).initialize().then(w=>w.restore(job.checkpoint.files));
+  await symlink(join(controlRoot,'node_modules'),join(verify,'node_modules'),'dir');
+  const oracleRoot=await mkdtemp(join(tmpdir(),'pi-external-oracle-'));
+  execFileSync(process.execPath,[join(controlRoot,'scripts/pi-acceptance/prepare-oracle.mjs'),verify,oracleRoot],{stdio:'pipe'});
+  const graded=spawnSync(process.execPath,['--import','tsx','--test',join(oracleRoot,'oracle.test.ts')],{cwd:controlRoot,env:{PATH:process.env.PATH,HOME:'/home/worker',PI_ACCEPTANCE_WORKLOAD:workload.id},encoding:'utf8',timeout:120000});
+  oraclePassed=graded.status===0;assert(oraclePassed,'Independent oracle rejected the exact saved candidate');
+  guard.cleanup();await save('accepted-candidate');
+ }finally{
+  guard.cleanup();if(!oraclePassed)await save('incomplete');
+ }
+});

@@ -31,7 +31,12 @@ if (!within.startsWith("../") && within !== "..")
 const manifest = JSON.parse(readFileSync(join(here, "workloads.json"), "utf8"));
 const source = execFileSync(
   "git",
-  ["show", `${manifest.source}:tests/coding.test.ts`],
+  [
+    "-c",
+    `safe.directory=${repository}`,
+    "show",
+    `${manifest.fixtureSource ?? manifest.source}:tests/coding.test.ts`,
+  ],
   { cwd: repository, encoding: "utf8" },
 );
 const ast = ts.createSourceFile(

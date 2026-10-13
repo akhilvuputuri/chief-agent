@@ -27,3 +27,6 @@ build/
 
 # Private standalone coding task/session state
 .pi-runtime/
+
+# Generated manual acceptance workflow; source template is versioned.
+tests/pi-acceptance.manual.ts

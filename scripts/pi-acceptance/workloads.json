@@ -1,6 +1,6 @@
 {
-  "version": 1,
-  "source": "e4b71ad71d92a4de974c7f75943499cbc6725491",
+  "version": 2,
+  "source": "9abd9d0b0d5042a89e773db463cf78f00e52539b",
   "scope": "Disposable acceptance candidates only; these benchmark changes are not authorized for merging into the product by this manifest.",
   "checks": ["npm run check", "npm run build", "npm run format:check"],
   "workloads": [
@@ -26,5 +26,7 @@
         "src/tool-domains.ts"
       ]
     }
-  ]
+  ],
+  "fixtureSource": "e4b71ad71d92a4de974c7f75943499cbc6725491",
+  "baseImage": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:7c0ab4236340a6d50c0f0ef9675bb9e71e8f5780bb9d0e8d6af57155a0a843e8"
 }
