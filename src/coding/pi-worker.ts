@@ -286,7 +286,8 @@ export async function runPiWorker(
               : config.model,
         baseUrl: `${workerOrigin}/coding/worker/${assignment.id}/pi/${role}/v1`,
         apiKey: workerToken,
-        contextWindow: 40000,
+        // Pi supplies the selected model's capacity. The request byte envelope
+        // below is a separate transport bound, not an artificial model window.
         maxTokens: config.maxOutputTokens ?? 8000,
         reasoning: config.effort,
         requestIdField: "runtime_call_id",

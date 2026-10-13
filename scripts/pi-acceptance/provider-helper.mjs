@@ -105,7 +105,7 @@ try {
       !dispatchAttempted ||
       (error instanceof ModelError &&
         (Number.isInteger(error.diagnostics.httpStatus) ||
-          error.diagnostics.failureCode === "model_incomplete")),
+          error.diagnostics.failureCode === "incomplete")),
     billingUnknown: dispatchAttempted,
   };
 }
