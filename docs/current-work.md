@@ -2,6 +2,10 @@
 
 The owner chose to release [PR222](https://github.com/akhilvuputuri/chief-agent/pull/222) on existing evidence instead of completing the 24-attempt matrix. One status attempt each passed with OpenAI/Claude, Claude/OpenAI and DeepSeek/OpenAI. The interrupted Gemini rerun was diagnosed from its retained trace: one tool call per generation, 175 generations before the first edit, successful edits and checks, then repeated re-verification without a done report. No harness error was found, so no runtime change is made for it; Gemini is not recommended as coder. Remaining steps: exact-head independent review, merge/release with verified SHA and health, immutable worker image verification, a reviewed image-pin release, and one released-artifact canary with a passing pairing. No repeated-trial, completion-rate or paid recovery-benefit claim. Production remains v0.3.69/e4b71ad until release is verified. Paused owner jobs stay unchanged. [Evidence](journey/83-pi-context-verification.md#gemini-convergence-diagnosis-and-owner-selected-lean-release--14-october-2026).
 
+# Shared a-stack workflow adoption in review — 14 October 2026
+
+Chief now pins the a-stack `workflow@a-stack` plugin (`workflow--v0.1.0`). AGENTS.md carries the shared workflow block plus Chief's bindings, and the duplicated generic workflow text was removed from AGENTS.md, CLAUDE.md and the workflow docs. REVIEW.md stays complete for the sandboxed coding reviewers. This is documentation and configuration only; plugin loading in authenticated and cloud sessions is unverified. See [journal 84](journey/84-shared-agent-workflow.md).
+
 # Owner-requested verification checkpoint — 14 October 2026
 
 Work is checkpointed at the owner's request. PR222 remains a draft, with no deployment: production is v0.3.69/e4b71ad. Product recovery source `38d62bb` and corrected control `7b25047` have independent approval, 1,175 local checks/build/format, hosted Linux/image checks and the passing actual worker-restart/recovery control. The paid matrix, immutable worker publication/activation and released-artifact canary remain incomplete.

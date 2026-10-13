@@ -1,0 +1,12 @@
+{
+  "extraKnownMarketplaces": {
+    "a-stack": {
+      "source": {
+        "source": "github",
+        "repo": "akhilvuputuri/a-stack",
+        "ref": "workflow--v0.1.0"
+      }
+    }
+  },
+  "enabledPlugins": { "workflow@a-stack": true }
+}

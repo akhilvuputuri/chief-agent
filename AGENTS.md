@@ -1,18 +1,47 @@
 # Chief development
 
-Read `docs/current-work.md`, `HANDOVER.md`, `docs/portable-development.md`, `docs/cloud-development.md`, and the relevant source before modifying behavior. For an incident, begin with `docs/troubleshooting.md`. Historical incident reports and deferred candidates describe earlier states; current code, exact release evidence and verified production diagnostics take precedence.
+## Workflow
 
-## Freshness before exploration or implementation
+This repository follows the [a-stack engineering workflow](https://github.com/akhilvuputuri/a-stack/blob/workflow--v0.1.0/plugins/workflow/CORE.md), pinned to marketplace ref `workflow--v0.1.0`. Claude Code loads it through the `workflow@a-stack` plugin pinned in `.claude/settings.json`. Its core rules cover freshness, capabilities, independent review, delivery, evidence, records and hygiene, and its skills cover `preflight`, `independent-review`, `ship`, `journal`, `incident` and `experiment`. Other agents should read the linked CORE.md at that tag before starting work. The bindings below supply this repository's specifics and win where they are more specific.
 
-Before starting any new feature exploration, feasibility research, planning or implementation, run `git status --short --branch` and `git fetch origin`, then record `git rev-parse origin/main`. Use that freshly fetched `origin/main` as the source of truth for integrated capabilities, architecture and work status, even when no code changes are planned. Read its current instructions, handover, work index and relevant source with `git show origin/main:<path>` or in an isolated worktree based on that ref; the existing local branch, checkout documents and earlier chat summaries may be stale.
+Non-negotiable even without the plugin:
 
-Repeat this check when resuming after an idle period or context handoff, switching to a different feature, learning that another task merged changes, or whenever you cannot establish that the last fetch is still current. Reconcile relevant upstream changes before making recommendations or declaring a capability missing. Explicitly distinguish integrated main, intentional branch-only work and the verified deployed release; main alone does not prove production state.
+- Fetch origin and read from `origin/main` before exploring or changing anything, and again whenever you cannot establish that the last fetch is still current. Never reset or clean a shared or dirty checkout. Work on a branch or worktree.
+- Every change gets an independent reviewer that did not write it, with an explicit APPROVE or REQUEST CHANGES for the exact head SHA. Re-review after every fix.
+- A task ends at verified delivery (exact deployed SHA and evidence) or a named blocker.
+- Label claims as reported, tested, measured, hypothesis or deferred. Never invent results.
+- Commit as the human developer's git identity, with no agent author or `Co-Authored-By` trailer. If `git config user.name`/`user.email` is unset or shows an agent (common in cloud sessions), stop and ask the developer; never set an identity yourself. Keep secrets and private data out of the repository, PRs and logs.
 
-Fetching does not authorize resetting, cleaning, pulling into or overwriting a dirty/shared checkout. Preserve local work and use an isolated branch/worktree for new changes. If fetching fails, report that remote freshness is unverified, identify the last known SHA when available, and qualify conclusions rather than silently treating local files as current. See [portable development](docs/portable-development.md#refresh-before-each-task).
+### Workflow bindings
 
-## Commands
-
-Node 22. `npm ci`, `npm run check`, `npm run build`, `npm run format:check`. Tests use PGlite and mocked integrations; production credentials are unnecessary. Use Prettier on changed files. `npm run smoke:runtime` is paid and must not be run as a routine test. Paid evals remain deferred, except `npm run eval:picker` (about $0.04, run by hand after changing `config/tool-picker.json`; record results in the journal).
+- **Read first, from `origin/main`:** `docs/current-work.md`, `HANDOVER.md`, `docs/portable-development.md`, `docs/cloud-development.md` and the relevant source. For an incident, start with `docs/troubleshooting.md`. Historical incident reports and deferred candidates describe earlier states. Current code, exact release evidence and verified production diagnostics take precedence.
+- **Checks:** Node 22. `npm ci`, `npm run check`, `npm run build`, `npm run format:check`. Use Prettier on changed files. Tests use PGlite and mocked integrations, so production credentials are unnecessary.
+  - Do not run routinely: `npm run smoke:runtime` (paid) and other paid evals, which remain deferred.
+  - Exception: run `npm run eval:picker` (about $0.04) by hand after changing `config/tool-picker.json`, and record the result in the journal.
+- **Reviewer:** the most capable model available. That is GPT-6 Astra where available; Opus 5.5 is accepted in Claude sessions. Select it explicitly.
+  - Devin Review runs automatically when a PR is ready and on each push. It is a second signal only.
+  - The reviewer contract is [REVIEW.md](REVIEW.md).
+  - Related foundation fixes must be incorporated and reviewed before a dependent feature is released.
+- **Merge authority:** the owner permits merging passing, requested, ordinary changes once the current head is independently approved, via `gh pr merge N --squash --match-head-commit SHA`.
+  - Never merge the deferred `feature/runtime-evaluations` branch incidentally.
+  - If GitHub mutation credentials are unavailable, open the PR through the cloud task UI and report that it needs merging.
+- **Release:** a push or merge to `main` triggers `checks`, then `release`. A pushed feature branch is not live.
+  - Verify with `npm run release:status -- FULL_MERGE_SHA` and the watched release run. Report the deployed SHA, health, tests and limitations.
+  - Production releases refuse to run during active runtime work, and refuse database or Compose changes. Those need the reviewed operator procedure in [docs/cloud-development.md](docs/cloud-development.md). Never bypass the guard. Retry a busy release when the runtime is idle, and never cancel user runtime work.
+  - Versioning: patch component only, including features, unless the owner changes the policy. Tags are immutable and do not trigger deployment. See [docs/releases.md](docs/releases.md).
+- **Records:**
+  - Journal: [docs/journey](docs/journey/README.md), using its [template](docs/journey/TEMPLATE.md). Keep the chronological index and the topic paths current.
+  - Work index: `docs/current-work.md`. Handover: `HANDOVER.md`. Release notes: `docs/releases.md`.
+  - Meaningful coding-harness changes also update [the coding-agent learning guide](docs/journey/coding-agent-lessons.md) in the same PR.
+- **Diagnostics:**
+  - Run `npm run doctor:cloud` early whenever a task needs GitHub or production access.
+  - For runtime failures, first read the sanitized production logs with `npm run logs:cloudwatch`, using the private log-reader identity from your environment ([docs/lightsail.md](docs/lightsail.md#reading-logs)). Never run it in GitHub Actions, because this repository is public.
+  - The `production-diagnostics` workflow is guarded to private repositories.
+  - Cloud tasks do not inherit local browser sessions or SSH credentials. See [the cloud-agent workflow](docs/cloud-agent-workflow.md).
+- **Chief's sandboxed coding runtimes** (Pi and the Python squad) follow their host instructions, which take precedence over the general rules in this file where they differ (pinned base, no publication, merge or deploy). They do not need to fetch CORE.md or load workflow skills. The inline rules above, REVIEW.md and the repository docs are sufficient for them.
+- **Exceptions:**
+  - **Owned coding squad:** the owned, fixed Python coding squad accepts its configured owner-selected reviewer (see below).
+  - **Stricter documentation scope:** see below.
 
 ## Architecture
 
@@ -37,55 +66,19 @@ Transport routing lives in `delivery-routing.ts` and `telegram-topics.ts`; `tele
 - No secrets in source, examples, logs, artifacts or PRs. Production runs on one AWS Lightsail VM in Singapore; its `.env` stays on that host. See [Lightsail host and private logs](docs/lightsail.md).
 - Change the main OpenRouter model through `config/model-policy.json` and the normal reviewed PR/release path; do not ask the owner to edit production `.env` for an ordinary model switch. Keep provider price ceilings intact and verify the effective model from a post-release run. See [model selection](docs/deployment.md#changing-the-production-model-through-a-release).
 
-## Cloud work and release
-
-Follow [the shared cloud-agent workflow](docs/cloud-agent-workflow.md) and [independent review contract](REVIEW.md). Check actual session capabilities early; classify deployment prerequisites before coding. After merging, use `npm run release:status -- FULL_MERGE_SHA` and watch the exact release. A sleeping agent's promise to watch later is not completion.
+## Cloud parity
 
 Cloud/local capability parity is a standing owner priority. Cloud tasks should progressively gain the ability to inspect useful private traces, reproduce incidents, implement and evaluate fixes, and ship verified releases without the Mac. Treat current access gaps as engineering work to close where practical, not permanent product restrictions. Prefer shared tooling usable from both environments, scoped authenticated access and explicit release controls; do not copy unrestricted production credentials into cloud tasks. When proposing work, identify relevant remaining gaps and opportunities to close them.
 
-The user permits merging passing ordinary changes and deploying them. Keep changes reviewable in a PR, wait for checks, and merge when the requested task is complete. Never merge the deferred `feature/runtime-evaluations` branch incidentally. If GitHub mutation credentials are unavailable, open the PR through the cloud task UI and clearly report that it needs merging.
-
-A push/merge to `main` triggers `checks`, then `release`. A pushed feature branch is NOT live. Watch the release result and report deployed SHA, health, tests and limitations. Production releases refuse active runtime work and database/Compose changes. Follow `docs/cloud-development.md` for these cases; never bypass the restriction or claim deployment succeeded from CI alone.
-
-Run `npm run doctor:cloud` early when a task needs GitHub or production access; report missing capabilities rather than discovering them only after implementation.
-
-For runtime failures, first read the sanitized production logs with `npm run logs:cloudwatch` using the private log-reader identity from your environment (see [docs/lightsail.md](docs/lightsail.md#reading-logs)). Never run it in GitHub Actions, because this repository is public. The `production-diagnostics` workflow is guarded to private repositories and does not run while the repository is public. Never invent production findings when access is unavailable. Local browser sessions and SSH credentials are not inherited by cloud tasks.
-
-## Required independent review loop
-
-For each implemented feature or runtime behavior change:
-
-1. Complete the implementation and relevant tests, push a reviewable branch, and open a pull/merge request.
-2. Spawn an independent reviewer subagent using the most capable model family available in the current environment (currently GPT-6 Astra when available). Explicitly select that model when the tooling allows it. Give the reviewer the requirements, MR URL, base and exact head SHA, repository instructions and relevant checks. The reviewer must inspect the actual diff and may run tests; it must not implement the change it is reviewing.
-3. Require an explicit APPROVE or REQUEST CHANGES verdict with concrete findings and validation limits. Record the model, reviewed SHA and outcome on the MR. CI success alone is not reviewer approval.
-4. If changes are required, fix them, rerun affected checks, push, and ask the independent reviewer to review the updated head. Repeat until approval. Do not bypass unresolved findings or treat a review of an older revision as approval of changed code.
-5. Merge only when the current head has independent approval and required checks pass. Then follow the normal release workflow and verify the exact deployed SHA and health. Related foundation fixes must be incorporated and reviewed before releasing a dependent feature.
+## Owned coding squad review exception
 
 For the owned fixed Python coding squad, the owner-authorized automatic workflow accepts the configured, owner-selected reviewer as its independent review. This exception requires separate coder/reviewer contexts, read-only review tools, complete approved requirements, actual passing sandbox checks, a matching encrypted host reviewer-call journal and exact reviewed-artifact/published Git-tree identity. The approval is bound to the published head; any changed candidate receives fresh squad review. Trusted exact-head CI and Devin plus readable MR feedback remain separate gates. There is no additional final model review for an unchanged artifact. Protected infrastructure, credential, permission and runtime-control paths require explicit review/operations and cannot auto-merge. This exception does not change the most-capable independent reviewer requirement for development outside that owned runtime. See [coding automation](docs/coding-automation.md).
 
-The reviewer should remain independent of implementation. Findings can be discussed with evidence; approval must reflect the final code rather than a promise to fix it later. If subagent tools or a suitable reviewer model are unavailable, report the limitation and leave the MR ready for independent review; do not silently self-approve. This workflow does not authorize merging unrelated checkpoints, changing production permissions, or running paid model evaluations.
+## Local and concurrent development
 
-## Development journal
-
-All future versioned releases increment only the patch component (including new features), unless the owner explicitly changes this policy. Preserve existing immutable tags. See docs/releases.md.
-
-For every meaningful application change, integration, incident, architectural decision or experiment, add or update `docs/journey` in the same work using [its template](docs/journey/TEMPLATE.md). Small related changes can be dated follow-ups. Explain the preceding iteration, the new observation/requirement, the change and remaining limitations; link related entries so the record shows how decisions evolved. Keep the chronological index and relevant topic paths in [the journal README](docs/journey/README.md) current; preserve existing filenames and order the index by work dates, not entry numbers.
-
-Label user/operator reports, synthetic tests, measured observations, hypotheses and deferred work explicitly. Measurements need dates/windows, units, sample sizes/denominators, workload/model/configuration and missing-accounting limits where relevant. Do not infer API savings from storage measurements, semantic quality from passing tests, or production acceptance from startup health. Link architecture/runbooks rather than duplicating procedures. Never copy private conversations, production traces, user records, credentials or personal motivations into the journal.
-
-Close the journal entry when review and deployment status changes: append dated evidence for the PR, approved head, exact deployed SHA, successful release and health/diagnostics, plus the published version/tag when present. Record separate operator migration/install verification when required. Update stale candidate status after verification while preserving dated failures and review/fix/re-review history. Merge, CI success or a prepared package version alone does not establish release. If work is deferred or release verification is unavailable, record the exact boundary and next step instead.
-
-For meaningful coding-harness changes, update [the cumulative coding-agent learning guide](docs/journey/coding-agent-lessons.md) alongside the detailed journal entry in the same PR. Record the observed failure, hypothesis, intervention, counterexample/review correction, measured or reproduced outcome, limitations and next falsifying test. Preserve negative/mixed results. Distinguish an implemented mechanism, a passing regression, verified deployment and a demonstrated real-task benefit; do not claim completion-rate, quality or cost gains without comparable evidence. This documentation rule does not authorize paid trials, job resumption or model changes.
-
-## Portable checkout and concurrent development
-
-- GitHub main is the integrated source of truth; the latest successful release SHA identifies production. Fetch origin and inspect status before work. Preserve other people's uncommitted changes; use an isolated branch/worktree for unrelated tasks. Never reset or clean a shared checkout to make it convenient.
-- Current work and checkpoint branches are indexed in docs/current-work.md. Claim a bounded task in a GitHub issue/PR when collaboration requires it; use draft PRs for work in progress. A checkpoint is not a tested release. Push resumable work with exact remaining checks instead of leaving the only copy on one laptop.
 - Mocked tests need no .env or external account. Optional local integration credentials belong in an ignored .env with owner-only permissions. Never copy production tokens or the deployment key into a development checkout. Use a distinct test bot to avoid competing production polling.
-- Commit with the human developer's own git identity, as configured on their machine. Coding agents never author commits as themselves and add no `Co-Authored-By` trailers. In a cloud session, check `git config user.name` and `user.email` before the first commit, and ask the developer if they are unset or show an agent.
-- Each new machine needs its own authorized GitHub login. Run doctor:cloud to inspect capabilities; repository read access alone does not prove merge or Actions permission. Use the shared GitHub deployment path from local and cloud tasks alike.
-- Before merging, incorporate relevant main changes, rerun affected checks and verify the PR's current head. Serialize releases and retry a skipped/stale or busy release through the documented workflow; do not cancel user runtime work.
-- Update docs/current-work.md, the relevant handover and docs/journey when status changes. Put release notes and immutable semantic-version tags on verified shipped milestones per docs/releases.md. Tags do not trigger deployment and must never be moved to disguise a failed release.
+- Each new machine needs its own authorized GitHub login. Repository read access alone does not prove merge or Actions permission. Use the shared GitHub deployment path from local and cloud tasks alike.
+- Current work and checkpoint branches are indexed in docs/current-work.md. Use draft PRs for work in progress; a checkpoint is not a tested release. Push resumable work with exact remaining checks instead of leaving the only copy on one laptop.
 
 ## Documentation scope
 

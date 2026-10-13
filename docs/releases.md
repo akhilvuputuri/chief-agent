@@ -275,12 +275,9 @@ Use immutable semantic-version tags for meaningful, verified shipped milestones.
 
 ## Publish a verified release
 
-1. Merge the reviewed PR after checks. Observe the release job for the exact SHA and confirm healthy deployment. Check current diagnostics if later changes may have deployed.
-2. Write notes identifying that exact SHA and the successful workflow link. Include user-visible changes, relevant fixes, validation, migrations, rollback constraints and known limitations. Keep private data out.
-3. Create an immutable vX.Y.Z tag/GitHub Release at that verified SHA. Use gh release create with an explicit --target SHA and a --notes-file, or the GitHub UI. Never rely on the default branch head while another task may be merging.
-4. Confirm the release target and report it. A GitHub Release is a historical shipped milestone, not evidence that production still runs that version forever.
+Follow the a-stack `ship` skill: verify the exact deployed SHA and its successful release run, write notes, then `gh release create vX.Y.Z --target <SHA> --notes-file <notes>`. Never target the moving default-branch head while another task may be merging. A GitHub Release records a shipped milestone, not proof that production still runs that version.
 
-Release publishing is currently a documented manual agent/operator step; there is no automatic tag or note generation workflow. Future automation should run only after successful deployment with narrow contents-write permission. Keep deploy credentials separate from publication permissions.
+In Chief, release publishing is a documented manual agent or operator step. There is no automatic tag or notes workflow. Future automation should run only after a successful deployment, with narrow contents-write permission, and keep deploy credentials separate from publication permissions.
 
 ## Notes template
 
