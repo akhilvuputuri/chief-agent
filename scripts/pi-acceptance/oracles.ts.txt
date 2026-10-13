@@ -1,3 +1,4 @@
+import { Execution as OracleExecution, recoverRuntime as oracleRecoverRuntime, readOperations as oracleReadOperations } from '../src/execution.js';
 import { action as globalAction } from '../src/protocol.js';
 import { codingAction as domainAction } from '../src/coding/schema.js';
 import ts from 'typescript';
@@ -64,4 +65,14 @@ if (workload === 'owner-scoped-model-call-audit') test('external oracle: strict 
  await assert.rejects(f.c.call('a',randomUUID(),{...request,id:randomUUID()} as any));
  f.revoke();await assert.rejects(f.c.call('a',randomUUID(),request as any));
  assert.equal(f.creates(),0);assert.equal(f.modelCalls(),0);assert.equal(f.publishes(),0);
+});
+
+if (workload === 'owner-scoped-model-call-audit') test('external oracle: usage audit is journaled and recovered as a read', async t => {
+ const f=await fixture(t);
+ assert(oracleReadOperations.has('coding_model_usage'),'Audit must be classified as a read by host execution');
+ const ex=new OracleExecution(f.db,'a',f.run,new AbortController().signal);await ex.start();
+ const id=await ex.beginCall('oracle-read-classification','coding_model_usage',{operation:'coding_model_usage',id:randomUUID()});
+ assert.deepEqual((await f.db.query('SELECT operation,is_write,state FROM runtime_calls WHERE id=$1',[id])).rows,[{operation:'coding_model_usage',is_write:false,state:'started'}]);
+ await oracleRecoverRuntime(f.db);
+ assert.deepEqual((await f.db.query('SELECT operation,is_write,state FROM runtime_calls WHERE id=$1',[id])).rows,[{operation:'coding_model_usage',is_write:false,state:'interrupted'}]);
 });
