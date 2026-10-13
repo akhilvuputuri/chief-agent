@@ -81,7 +81,10 @@ class Broker:
                 if event["event"] == "admitted":
                     self.in_flight.add(event["case"])
                 elif event["event"] == "result":
-                    self.in_flight.discard(event["case"])
+                    if event.get("outcome") in ("complete", "failed_known"):
+                        self.in_flight.discard(event["case"])
+                    else:
+                        self.in_flight.add(event["case"])
 
     def append(self, event, path=None):
         path = path or self.config["ledger"]
@@ -130,8 +133,19 @@ class Broker:
     def record(self, case_id, body, result, seconds):
         # Allowlisted accounting only; never copy response or request bodies.
         accounting = result.get("accounting", {})
+        complete = isinstance(result.get("generation"), dict) and isinstance(
+            result["generation"].get("message"), dict
+        )
+        outcome = (
+            "complete"
+            if complete
+            else "failed_known"
+            if result.get("failed") and result.get("outcomeKnown") is True
+            else "unresolved"
+        )
         event = {
             "event": "result",
+            "outcome": outcome,
             "case": case_id,
             "callId": body["callId"],
             "seconds": seconds,
@@ -163,7 +177,8 @@ class Broker:
                 )
             self.append(json.loads(trace), self.config["trace"])
             self.append(event)
-            self.in_flight.discard(case_id)
+            if outcome != "unresolved":
+                self.in_flight.discard(case_id)
 
     def save_artifact(self, case, body, raw):
         if (

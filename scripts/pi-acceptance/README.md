@@ -18,3 +18,5 @@ python3 -m unittest discover -s scripts/pi-acceptance -p 'test_*.py' -v
 ```
 
 These checks use fake providers/processes. They are not paid-model, public-route, artifact-publication or production-release evidence.
+
+For the CodeBuild workflow preflight, prepare the control checkout, dependencies, compiled modules and generated manual workflow as root, leaving them read-only to the worker. Execute the generated file directly with the worker UID, no new privileges/capabilities and `node --disable-sigusr1 --import tsx tests/pi-acceptance.manual.ts`. Do not wrap the live-capability process in `node --test`: that would leave another same-UID parent holding the original environment outside the native guard. Synthetic mode needs no broker or provider credential. Paid mode requires explicit configuration and the reviewed HTTPS capability; native output budgets, real streaming progress, cache IDs and policy are forwarded unchanged.

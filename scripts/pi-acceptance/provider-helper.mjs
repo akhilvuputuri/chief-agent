@@ -76,6 +76,7 @@ try {
   });
   result = {
     generation,
+    outcomeKnown: true,
     dispatchAttempted,
     billingUnknown: typeof generation.usage?.cost !== "number",
     accounting: {
@@ -100,6 +101,11 @@ try {
     category: error instanceof ModelError ? "provider" : "adapter",
     diagnostics: error instanceof ModelError ? error.diagnostics : undefined,
     dispatchAttempted,
+    outcomeKnown:
+      !dispatchAttempted ||
+      (error instanceof ModelError &&
+        (Number.isInteger(error.diagnostics.httpStatus) ||
+          error.diagnostics.failureCode === "model_incomplete")),
     billingUnknown: dispatchAttempted,
   };
 }

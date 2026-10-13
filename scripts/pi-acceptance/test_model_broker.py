@@ -85,7 +85,17 @@ class BrokerTests(unittest.TestCase):
             recovered.admit(
                 self.authorization, {**self.body, "callId": str(uuid.uuid4())}
             )
-        broker.record("fixture", self.body, {"accounting": {}}, 0)
+        broker.record(
+            "fixture",
+            self.body,
+            {
+                "generation": {
+                    "message": {"role": "assistant", "content": "controlled"}
+                },
+                "accounting": {},
+            },
+            0,
+        )
         complete = module.Broker(self.config)
         with self.assertRaises(ValueError):
             complete.admit(self.authorization, self.body)
@@ -155,6 +165,44 @@ class BrokerTests(unittest.TestCase):
         self.assertEqual(
             send("/fixture/result", artifact, self.authorization)[1], saved
         )
+
+    def test_lost_helper_output_stays_fenced_in_memory_and_after_restart(self):
+        self.fake_docker(False)
+        (self.root / "docker").write_text(
+            "#!/usr/bin/env python3\nimport sys\nsys.stdin.readline()\n"
+        )
+        broker = module.Broker(self.config)
+        case, _ = broker.admit(self.authorization, self.body)
+        parent, peer = socket.socketpair()
+        self.addCleanup(parent.close)
+        self.addCleanup(peer.close)
+        result = broker.generate(case, self.body, parent)
+        self.assertTrue(result["billingUnknown"])
+        for inspected in (broker, module.Broker(self.config)):
+            with self.assertRaises(ValueError):
+                inspected.admit(
+                    self.authorization, {**self.body, "callId": str(uuid.uuid4())}
+                )
+        self.assertEqual(
+            json.loads(Path(self.config["ledger"]).read_text().splitlines()[-1])[
+                "outcome"
+            ],
+            "unresolved",
+        )
+
+    def test_known_failure_is_distinct_from_missing_billing(self):
+        broker = module.Broker(self.config)
+        broker.admit(self.authorization, self.body)
+        broker.record(
+            "fixture",
+            self.body,
+            {"failed": True, "outcomeKnown": True, "billingUnknown": True},
+            0,
+        )
+        recovered = module.Broker(self.config)
+        with self.assertRaises(ValueError):
+            recovered.admit(self.authorization, self.body)
+        recovered.admit(self.authorization, {**self.body, "callId": str(uuid.uuid4())})
 
     def fake_docker(self, wait_for_disconnect):
         fake = self.root / "docker"
