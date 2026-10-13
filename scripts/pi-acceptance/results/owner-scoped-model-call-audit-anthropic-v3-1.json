@@ -1,0 +1,245 @@
+{
+  "date": "2026-10-13",
+  "case": "owner-scoped-model-call-audit-anthropic-v3-1",
+  "harness": "beb5729ef063566cd9af792edf9b84c8bd684ffc",
+  "source": "9abd9d0b0d5042a89e773db463cf78f00e52539b",
+  "workloadRevision": 3,
+  "build": "chief-coding:72f1e2eb-895c-4173-adfd-d27a3099f8fd",
+  "codeBuildStatus": "FAILED",
+  "codeBuildSeconds": 2511,
+  "runtimeSeconds": 2483,
+  "state": "running",
+  "phase": "incomplete",
+  "knownPauseReason": null,
+  "models": {
+    "leader": "anthropic/claude-sonnet-5.5",
+    "coder": "anthropic/claude-sonnet-5.5",
+    "reviewer": "openai/gpt-6.1-sol"
+  },
+  "providerAdmissions": 119,
+  "providerDispatches": 119,
+  "completeGenerations": 119,
+  "providerOutcomes": {
+    "complete": 119
+  },
+  "reportedCostUsd": 4.6566289,
+  "billingUnknown": 0,
+  "hostModelCalls": 119,
+  "roles": {
+    "leader": 14,
+    "coder": 21,
+    "reviewer": 84
+  },
+  "purposes": {
+    "agent": 104,
+    "compaction": 15
+  },
+  "nativeEvidence": {
+    "sessionCount": 3,
+    "failedTools": 5,
+    "successfulReads": 405,
+    "uniqueReads": 333,
+    "repeatedReads": 72,
+    "documentReads": 48,
+    "repeatedDocumentReads": 45,
+    "firstSavedChangeSeconds": 105,
+    "tools": {
+      "read_document": 48,
+      "ls": 16,
+      "read": 269,
+      "grep": 76,
+      "find": 1,
+      "report": 2,
+      "bash": 20
+    },
+    "compactions": [
+      {
+        "beforeTokens": 33900,
+        "afterTokens": 9540,
+        "projectedTokens": 16952,
+        "projectedBytes": 73982,
+        "summaryCharacters": 5399,
+        "retainedMessages": 8
+      },
+      {
+        "beforeTokens": 41871,
+        "afterTokens": 11678,
+        "projectedTokens": 19090,
+        "projectedBytes": 82471,
+        "summaryCharacters": 5991,
+        "retainedMessages": 6
+      },
+      {
+        "beforeTokens": 35930,
+        "afterTokens": 13510,
+        "projectedTokens": 20922,
+        "projectedBytes": 91001,
+        "summaryCharacters": 6086,
+        "retainedMessages": 9
+      },
+      {
+        "beforeTokens": 33779,
+        "afterTokens": 13026,
+        "projectedTokens": 20438,
+        "projectedBytes": 96409,
+        "summaryCharacters": 6380,
+        "retainedMessages": 14
+      },
+      {
+        "beforeTokens": 36629,
+        "afterTokens": 11380,
+        "projectedTokens": 18792,
+        "projectedBytes": 83569,
+        "summaryCharacters": 6521,
+        "retainedMessages": 8
+      },
+      {
+        "beforeTokens": 35404,
+        "afterTokens": 12108,
+        "projectedTokens": 19520,
+        "projectedBytes": 92596,
+        "summaryCharacters": 6268,
+        "retainedMessages": 16
+      },
+      {
+        "beforeTokens": 33926,
+        "afterTokens": 11626,
+        "projectedTokens": 19038,
+        "projectedBytes": 84524,
+        "summaryCharacters": 6751,
+        "retainedMessages": 8
+      },
+      {
+        "beforeTokens": 33122,
+        "afterTokens": 11113,
+        "projectedTokens": 18525,
+        "projectedBytes": 88798,
+        "summaryCharacters": 6707,
+        "retainedMessages": 16
+      },
+      {
+        "beforeTokens": 32138,
+        "afterTokens": 7466,
+        "projectedTokens": 14878,
+        "projectedBytes": 68040,
+        "summaryCharacters": 6526,
+        "retainedMessages": 8
+      },
+      {
+        "beforeTokens": 30560,
+        "afterTokens": 9980,
+        "projectedTokens": 17392,
+        "projectedBytes": 78769,
+        "summaryCharacters": 6571,
+        "retainedMessages": 10
+      },
+      {
+        "beforeTokens": 30739,
+        "afterTokens": 11699,
+        "projectedTokens": 19111,
+        "projectedBytes": 90879,
+        "summaryCharacters": 6687,
+        "retainedMessages": 18
+      },
+      {
+        "beforeTokens": 30113,
+        "afterTokens": 5432,
+        "projectedTokens": 12844,
+        "projectedBytes": 59715,
+        "summaryCharacters": 6522,
+        "retainedMessages": 9
+      },
+      {
+        "beforeTokens": 33132,
+        "afterTokens": 7909,
+        "projectedTokens": 15321,
+        "projectedBytes": 69187,
+        "summaryCharacters": 6750,
+        "retainedMessages": 7
+      },
+      {
+        "beforeTokens": 32778,
+        "afterTokens": 10588,
+        "projectedTokens": 18000,
+        "projectedBytes": 87422,
+        "summaryCharacters": 6805,
+        "retainedMessages": 14
+      }
+    ]
+  },
+  "checks": [],
+  "review": null,
+  "files": [
+    {
+      "path": "src/coding/controller.ts",
+      "mode": "100644",
+      "sha256": "e8eb5547feceb54bf9344486a43c2cc0618c72e24c489b8dcf226df6818b86b5"
+    },
+    {
+      "path": "src/coding/schema.ts",
+      "mode": "100644",
+      "sha256": "acb0a8777cd5514e7880bd306ed74cc00b3d28fdff1977f5e705531121544880"
+    },
+    {
+      "path": "src/execution.ts",
+      "mode": "100644",
+      "sha256": "d28159ed0bb57b95b746aeeb1db3fa1bf2a200cc2b14903346af4f594f94fd3b"
+    },
+    {
+      "path": "src/protocol.ts",
+      "mode": "100644",
+      "sha256": "33356bdfc946e5609b20e49e83cfbe862f41e06e712b80b97d7589d8476e5fb2"
+    },
+    {
+      "path": "src/runtime.ts",
+      "mode": "100644",
+      "sha256": "b2f07166974412be4226ea34aeed898cfa8412a5e30f3840374e3b73be9afa33"
+    },
+    {
+      "path": "src/tools.ts",
+      "mode": "100644",
+      "sha256": "3cb1c8662ad4721e172686cc4846e6b73ef87d58fcf2519faaa6e361828dcb77"
+    },
+    {
+      "path": "tests/coding-model-usage.test.ts",
+      "mode": "100644",
+      "sha256": "8814437b93b3248474142d7b5023caf4fce02e47b6c7a493059d02cff1b7b7f3"
+    }
+  ],
+  "oraclePassed": false,
+  "originalScopePresent": true,
+  "approval": "synthetic exact-brief confirmation",
+  "delivery": "synthetic callback receipts",
+  "artifactHash": "30008a3bca7cf2f5c6701337ddcfc1e879d80b1bcd4d5e2d4faefee61158929d",
+  "compiledDigests": {
+    "coding_runtime_pi/dist/runtime.js": "069c0ee2d0c4266165ec00404d0675d384e5f7f6f91ad807be0f2dd66718a65c",
+    "dist/coding/pi-worker.js": "69dbe5e3e912e194c224489e5fd7aa7a28c99a29ccbf6f4c94c5ff8292c93494",
+    "dist/coding/controller.js": "54860527721df13c422f129bccb0c55732a4a65501fbf6f7e7261aba0884207c"
+  },
+  "publication": "not performed",
+  "productionJobWrites": 0,
+  "execution": "candidate source overlay on verified base image",
+  "routeRemoved": true,
+  "attemptDeadline": "2026-10-13T10:42:26.316Z",
+  "checkedCandidateHash": "30008a3bca7cf2f5c6701337ddcfc1e879d80b1bcd4d5e2d4faefee61158929d",
+  "passedChecksFromReviewCheckpoint": [
+    {
+      "command": "npm ci",
+      "exitCode": 0
+    },
+    {
+      "command": "npm run check",
+      "exitCode": 0
+    },
+    {
+      "command": "npm run build",
+      "exitCode": 0
+    },
+    {
+      "command": "npm run format:check",
+      "exitCode": 0
+    }
+  ],
+  "outcome": "Failed at attempt deadline during review; no verdict or external oracle. Disposable fixture row remained running; this is not a production owner-job state.",
+  "reviewEvidenceGap": "Confirmed by independent source review: reviewer had current tree but no supported changed-path inventory or base-to-candidate diff. Causal performance effect unproven."
+}
