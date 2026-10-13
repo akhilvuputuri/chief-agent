@@ -13,7 +13,7 @@ import {
   documentHash,
 } from "../src/index.js";
 
-test("complete large review evidence survives native compaction and explicit process replacement", async (t) => {
+test("complete large review evidence survives native compaction and explicit runtime/store replacement", async (t) => {
   const text = Array.from(
     { length: 6000 },
     (_, i) => `+Immutable changed line ${i}: preserve exact evidence.\n`,
