@@ -42,7 +42,7 @@ async function fixture(t) {
   );
   await writeFile(
     join(root, "dist/model.js"),
-    `import fs from 'node:fs';export class ModelError extends Error{constructor(diagnostics={failureCode:'controlled_abort'}){super('controlled');this.diagnostics=diagnostics;}}export class OpenRouter{constructor(key,model,input,output,transport){if(key!=='synthetic'||input!==.5||output!==.9)throw Error('Policy changed');this.model=model;this.transport=transport;fs.writeFileSync('constructed','yes');}async generate(q){if(q.maxOutputTokens!==4096||q.reasoning!=='high'||!q.requireComplete||!q.stream||q.cacheKey!=='coding:fixture:1:leader')throw Error('Per-call contract changed');if(['incomplete','transport'].includes(q.messages[0]?.content)){await this.transport('data:application/json,{}');throw new ModelError({failureCode:q.messages[0].content,...(q.messages[0].content==='incomplete'?{finishReason:'length'}:{})});}if(q.messages[0]?.content==='wait'){process.stderr.write('started\\n');await new Promise((resolve,reject)=>{if(q.signal.aborted)reject(new ModelError());else q.signal.addEventListener('abort',()=>reject(new ModelError()),{once:true});});}await q.onProgress({bytes:37,provider:'synthetic',responseId:'controlled'});return {message:{role:'assistant',content:'Controlled summary'},model:this.model,usage:{cost:0}};}}`,
+    `import fs from 'node:fs';export class ModelError extends Error{constructor(diagnostics={failureCode:'controlled_abort'}){super('controlled');this.diagnostics=diagnostics;this.transient=diagnostics.httpStatus>=500||diagnostics.failureCode==='transport';}}export class OpenRouter{constructor(key,model,input,output,transport){if(key!=='synthetic'||input!==.5||output!==.9)throw Error('Policy changed');this.model=model;this.transport=transport;fs.writeFileSync('constructed','yes');}async generate(q){fs.appendFileSync('generations','1');if(q.maxOutputTokens!==4096||q.reasoning!=='high'||!q.requireComplete||!q.stream||q.cacheKey!=='coding:fixture:1:leader')throw Error('Per-call contract changed');if(['http400','http504'].includes(q.messages[0]?.content)){await this.transport('data:application/json,{}');throw new ModelError({failureCode:'provider',httpStatus:Number(q.messages[0].content.slice(4))});}if(['incomplete','transport'].includes(q.messages[0]?.content)){await this.transport('data:application/json,{}');throw new ModelError({failureCode:q.messages[0].content,...(q.messages[0].content==='incomplete'?{finishReason:'length'}:{})});}if(q.messages[0]?.content==='wait'){await this.transport('data:application/json,{}');process.stderr.write('started\\n');await new Promise((resolve,reject)=>{if(q.signal.aborted)reject(new ModelError());else q.signal.addEventListener('abort',()=>reject(new ModelError()),{once:true});});}await q.onProgress({bytes:37,provider:'synthetic',responseId:'controlled'});return {message:{role:'assistant',content:'Controlled summary'},model:this.model,usage:{cost:0}};}}`,
   );
   return {
     root,
@@ -97,6 +97,9 @@ test("provider helper aborts dispatched work on cancellation-channel EOF", async
   assert.equal(r.code, 1);
   assert.equal(r.result.failed, true);
   assert.equal(r.result.diagnostics.failureCode, "controlled_abort");
+  assert.equal(r.result.dispatchAttempted, true);
+  assert.equal(r.result.outcomeKnown, false);
+  assert.equal(r.result.billingUnknown, true);
 });
 test("provider helper rejects unselected models before constructing a provider", async (t) => {
   const f = await fixture(t),
@@ -117,5 +120,22 @@ for (const failure of ["incomplete", "transport"]) {
     assert.equal(r.result.billingUnknown, true);
     assert.equal(r.result.outcomeKnown, failure === "incomplete");
     assert.equal(r.result.diagnostics.failureCode, failure);
+  });
+}
+
+for (const status of [400, 504]) {
+  test(`provider helper retains HTTP ${status} transience without retrying`, async (t) => {
+    const f = await fixture(t);
+    const r = await f.run({
+      ...input,
+      messages: [{ role: "user", content: `http${status}` }],
+    });
+    assert.equal(r.code, 1);
+    assert.equal(r.result.diagnostics.httpStatus, status);
+    assert.equal(r.result.transient, status === 504);
+    assert.equal(r.result.outcomeKnown, true);
+    assert.equal(r.result.billingUnknown, true);
+    assert.equal(r.frames.length, 1);
+    assert.equal(await readFile(join(f.root, "generations"), "utf8"), "1");
   });
 }

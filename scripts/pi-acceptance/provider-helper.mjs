@@ -101,6 +101,7 @@ try {
     category: error instanceof ModelError ? "provider" : "adapter",
     diagnostics: error instanceof ModelError ? error.diagnostics : undefined,
     dispatchAttempted,
+    transient: error instanceof ModelError && error.transient,
     outcomeKnown:
       !dispatchAttempted ||
       (error instanceof ModelError &&

@@ -127,5 +127,5 @@
   "publication": "not performed",
   "productionJobWrites": 0,
   "execution": "candidate source overlay on verified base image",
-  "routeRemoved": false
+  "routeRemoved": true
 }

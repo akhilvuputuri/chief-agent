@@ -1,0 +1,185 @@
+{
+  "date": "2026-10-13",
+  "case": "owner-scoped-model-call-audit-openai-v3-1",
+  "harness": "9229c38f236a37c330d8f4cb55ec9fa71621a726",
+  "source": "9abd9d0b0d5042a89e773db463cf78f00e52539b",
+  "workloadRevision": 3,
+  "build": "chief-coding:85bcce59-b46b-4f80-a683-1737abf3e7c0",
+  "codeBuildStatus": "FAILED",
+  "codeBuildSeconds": 875,
+  "runtimeSeconds": 843,
+  "state": "paused",
+  "phase": "incomplete",
+  "knownPauseReason": "Model run did not finish cleanly; session retained",
+  "models": {
+    "leader": "openai/gpt-6.1-sol",
+    "coder": "openai/gpt-6.1-sol",
+    "reviewer": "anthropic/claude-sonnet-5.5"
+  },
+  "providerAdmissions": 48,
+  "providerDispatches": 48,
+  "completeGenerations": 47,
+  "providerOutcomes": {
+    "complete": 47,
+    "failed_known": 1
+  },
+  "reportedCostUsd": 1.088816,
+  "billingUnknown": 1,
+  "hostModelCalls": 48,
+  "roles": {
+    "leader": 8,
+    "coder": 40
+  },
+  "purposes": {
+    "agent": 41,
+    "compaction": 7
+  },
+  "nativeEvidence": {
+    "sessionCount": 2,
+    "failedTools": 2,
+    "successfulReads": 71,
+    "uniqueReads": 50,
+    "repeatedReads": 21,
+    "documentReads": 24,
+    "repeatedDocumentReads": 20,
+    "firstSavedChangeSeconds": 420,
+    "tools": {
+      "read_document": 24,
+      "bash": 26,
+      "read": 30,
+      "grep": 14,
+      "edit": 9,
+      "ls": 1,
+      "find": 2,
+      "report": 1
+    },
+    "compactions": [
+      {
+        "beforeTokens": 35177,
+        "afterTokens": 12418,
+        "projectedTokens": 19712,
+        "projectedBytes": 82477,
+        "summaryCharacters": 6411,
+        "retainedMessages": 4
+      },
+      {
+        "beforeTokens": 36840,
+        "afterTokens": 5800,
+        "projectedTokens": 13094,
+        "projectedBytes": 53860,
+        "summaryCharacters": 6469,
+        "retainedMessages": 2
+      },
+      {
+        "beforeTokens": 34360,
+        "afterTokens": 4036,
+        "projectedTokens": 11330,
+        "projectedBytes": 63139,
+        "summaryCharacters": 5894,
+        "retainedMessages": 10
+      },
+      {
+        "beforeTokens": 32698,
+        "afterTokens": 10610,
+        "projectedTokens": 17904,
+        "projectedBytes": 78705,
+        "summaryCharacters": 6378,
+        "retainedMessages": 6
+      },
+      {
+        "beforeTokens": 33906,
+        "afterTokens": 18682,
+        "projectedTokens": 25976,
+        "projectedBytes": 109412,
+        "summaryCharacters": 6321,
+        "retainedMessages": 4
+      },
+      {
+        "beforeTokens": 34167,
+        "afterTokens": 13441,
+        "projectedTokens": 20735,
+        "projectedBytes": 91093,
+        "summaryCharacters": 6281,
+        "retainedMessages": 6
+      },
+      {
+        "beforeTokens": 43698,
+        "afterTokens": 16198,
+        "projectedTokens": 22749,
+        "projectedBytes": 97598,
+        "summaryCharacters": 5885,
+        "retainedMessages": 7
+      }
+    ]
+  },
+  "checks": [],
+  "review": null,
+  "files": [
+    {
+      "path": "src/coding/controller.ts",
+      "mode": "100644",
+      "sha256": "159cadc8ddb408da877f3fd6f24c9f694a1633358f052cfd4707a0916966a8f7"
+    },
+    {
+      "path": "src/coding/schema.ts",
+      "mode": "100644",
+      "sha256": "0abf54d70133393e24097b6fba9273f4388d19e1546b42842e37d8efe82a3dc9"
+    },
+    {
+      "path": "src/execution.ts",
+      "mode": "100644",
+      "sha256": "d28159ed0bb57b95b746aeeb1db3fa1bf2a200cc2b14903346af4f594f94fd3b"
+    },
+    {
+      "path": "src/protocol.ts",
+      "mode": "100644",
+      "sha256": "3c10154570cb534acd5d5b65d06b913e8a2e55d6712014917e0fd13ca6d60be9"
+    },
+    {
+      "path": "src/runtime.ts",
+      "mode": "100644",
+      "sha256": "e579124b62ed8bc8f230111de0686c311f8c9f0362b6b552d4dfb160cff60ff6"
+    },
+    {
+      "path": "src/tool-domains.ts",
+      "mode": "100644",
+      "sha256": "8fbd8c5c30276eebd9ab3f5aafad0c46947307957538161d195356046a220757"
+    },
+    {
+      "path": "src/tools.ts",
+      "mode": "100644",
+      "sha256": "5f70966a3cd21d9529fe7a334521918d646e64a503166db36b56f83e69f47980"
+    },
+    {
+      "path": "tests/coding.test.ts",
+      "mode": "100644",
+      "sha256": "7b3e2c8e9799c9d501ee0c5e3ab3ba3b10379acde8f5d9dc2cda63987619012c"
+    }
+  ],
+  "oraclePassed": false,
+  "originalScopePresent": true,
+  "approval": "synthetic exact-brief confirmation",
+  "delivery": "synthetic callback receipts",
+  "artifactHash": "ac3919686e7f14d4c7b266e17649ac35c692e951924f971c97915801bb2d7772",
+  "compiledDigests": {
+    "coding_runtime_pi/dist/runtime.js": "069c0ee2d0c4266165ec00404d0675d384e5f7f6f91ad807be0f2dd66718a65c",
+    "coding_runtime_pi/dist/documents.js": "d5faa72e5736546d3340cc175b18c4b0bf56ff1de15ad2265732e8a6bf13ce15",
+    "coding_runtime_pi/dist/report.js": "ff29693fd3e12bc04758627d959a709f58f215ff64a786f9e9b49cc6545d4741",
+    "dist/coding/pi-worker.js": "0734af64f9fe2f2a287f2165e72969708628d472a9e475633781fb41959b6dea",
+    "dist/coding/pi-review-evidence.js": "4b53ce8b753d4559ceb6cea019c054b840dd6f92f341ffa8fb369c68402dae8b",
+    "dist/coding/controller.js": "54860527721df13c422f129bccb0c55732a4a65501fbf6f7e7261aba0884207c"
+  },
+  "publication": "not performed",
+  "productionJobWrites": 0,
+  "execution": "candidate source overlay on verified base image",
+  "routeRemoved": true,
+  "terminalProviderFailure": {
+    "httpStatus": 504,
+    "purpose": "agent",
+    "requestedOutputTokens": 16000,
+    "requestBytes": 90394,
+    "messages": 8,
+    "outcomeKnown": true,
+    "billingUnknown": true
+  }
+}

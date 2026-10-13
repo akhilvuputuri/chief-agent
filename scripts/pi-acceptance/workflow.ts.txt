@@ -62,7 +62,7 @@ test('isolated real-repository Pi workflow and independent artifact oracle', {ti
   if(!response.ok||!response.body)throw new ModelError('Acceptance broker rejected the request',false,{});
   const reader=response.body.getReader(),decoder=new TextDecoder();let pending='',data:any;
   while(true){const next=await reader.read();pending+=decoder.decode(next.value??new Uint8Array(),{stream:!next.done});if(pending.length>2000000)throw Error('Acceptance response bound');let newline;while((newline=pending.indexOf('\n'))>=0){const line=pending.slice(0,newline);pending=pending.slice(newline+1);if(!line)continue;const frame=JSON.parse(line);if(frame.type==='progress')await input.onProgress?.(frame.value);else if(frame.type==='result')data=frame.value;else throw Error('Unknown acceptance response frame');}if(next.done)break;}
-  if(!data||data.failed)throw new ModelError('Acceptance provider request failed; inspect its journal',false,data?.diagnostics??{});
+  if(!data||data.failed)throw new ModelError('Acceptance provider request failed; inspect its journal',data?.transient===true,data?.diagnostics??{});
   return data.generation;
  });
  const app=server();t.after(()=>app.close());app.addHook('onRequest',async()=>sync());
