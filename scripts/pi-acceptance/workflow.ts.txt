@@ -3,6 +3,7 @@ import {createRequire} from 'node:module';
 import {Workspace as PiWorkspace} from '@chief-agent/pi-runtime';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {summarizeSessions} from '../scripts/pi-acceptance/metrics.mjs';
 const manifest=JSON.parse(await readFile(new URL('../scripts/pi-acceptance/workloads.json',import.meta.url),'utf8'));
 const mode=process.env.PI_ACCEPTANCE_MODE;
 if(!['synthetic','paid'].includes(mode??''))throw Error('Explicit synthetic or paid acceptance mode required');
@@ -23,7 +24,7 @@ test('isolated real-repository Pi workflow and independent artifact oracle', {ti
  const started=await f.start('acceptance-'+bootstrap.case,'plan');
  const profile={...settings,image:manifest.baseImage,runtime:'pi',squad:false,autoMerge:false,model:bootstrap.model,leaderModel:bootstrap.model,reviewerModel:bootstrap.reviewer,effort:'high',maxOutputTokens:16000,limits:{ms:2400000,models:400,tools:1000}};
  await f.db.query('UPDATE coding_jobs SET settings=$2::jsonb,base_sha=$3,objective=$4,context=$5 WHERE id=$1',[started.id,JSON.stringify(profile),manifest.source,workload.objective,context]);
- let syntheticBuild=0, missingScope=false, oraclePassed=false;
+ let syntheticBuild=0, missingScope=false, oraclePassed=false, firstSavedChangeSeconds:number|null=null;
  f.setGeneration(async(model,input)=>{
   const claim=(await f.db.query("SELECT id,role,input FROM coding_model_calls WHERE job_id=$1 AND state='pending' ORDER BY created_at DESC LIMIT 1",[started.id])).rows[0];
   assert(claim);assert(['agent','compaction'].includes(claim.input.purpose));
@@ -41,15 +42,21 @@ test('isolated real-repository Pi workflow and independent artifact oracle', {ti
   if(!data||data.failed)throw new ModelError('Acceptance provider request failed; inspect its journal',false,data?.diagnostics??{});
   return data.generation;
  });
- const app=server();t.after(()=>app.close());app.addHook('onRequest',async()=>sync());await codingApi(app,f.c);
+ const app=server();t.after(()=>app.close());app.addHook('onRequest',async()=>sync());
+ app.addHook('onResponse',async(request,reply)=>{if(firstSavedChangeSeconds===null&&request.method==='POST'&&request.url.endsWith('/checkpoint')&&reply.statusCode===200&&Array.isArray((request.body as any)?.files)&&(request.body as any).files.length)firstSavedChangeSeconds=Math.round((Date.now()-clockBase)/1000);});
+ await codingApi(app,f.c);
  const origin=await app.listen({host:'127.0.0.1',port:0});
  const tick=async()=>{sync();await f.c.tick();};
  const run=async()=>{const job=await f.row(started.id);await runPiWorker(new NativePiWorkerClient(origin,job.id,f.c.token(job.id,job.attempt_id),new AbortController().signal),guard.cleanup,new AbortController().signal);};
  const save=async(phase:string)=>{
   const job=await f.row(started.id),calls=(await f.db.query("SELECT id,attempt_id,role,state,input->>'purpose' AS purpose,input->'maxOutputTokens' AS requested_output,created_at FROM coding_model_calls WHERE job_id=$1 ORDER BY created_at,id",[job.id])).rows;
-  const artifact={case:bootstrap.case,source:manifest.source,compiledDigests,approval:'synthetic confirmation of complete delivered brief',delivery:'synthetic callback receipts',mode,phase,job,calls,oraclePassed,missingScope,publication:'not performed',productionJobWrites:0};
+  const scopes=(await f.db.query("SELECT DISTINCT split_part(event_key,':',2) AS scope FROM coding_events WHERE job_id=$1 AND payload->>'kind'='pi_session'",[job.id])).rows;
+  const sessions=[];
+  for(const {scope} of scopes){const entries:any[]=[];for(let offset=0;;){const page=await f.c.piSessionRead(job,scope,offset);entries.push(...page.entries);if(page.next===null)break;offset=page.next;}sessions.push({entries});}
+  const nativeEvidence={...summarizeSessions(sessions),firstSavedChangeSeconds};
+  const artifact={case:bootstrap.case,source:manifest.source,compiledDigests,approval:'synthetic confirmation of complete delivered brief',delivery:'synthetic callback receipts',mode,phase,job,calls,nativeEvidence,oraclePassed,missingScope,publication:'not performed',productionJobWrites:0};
   if(bootstrap.proxy&&bootstrap.token){const wire=JSON.stringify(artifact);assert(Buffer.byteLength(wire)<=5000000);const response=await fetch(bootstrap.proxy+'/result',{method:'POST',headers:{Authorization:'Bearer '+bootstrap.token,'Content-Type':'application/json'},body:wire,signal:AbortSignal.timeout(30000)});assert.equal(response.status,200);assert.equal((await response.json()).receipt,createHash('sha256').update(wire).digest('hex'));}
-  const metrics={case:bootstrap.case,source:manifest.source,image:manifest.baseImage,execution:'candidate source overlay on verified base image',compiledDigests,approval:'synthetic exact-brief confirmation',delivery:'synthetic callback receipts',mode,workload:workload.id,state:job.state,debugSummary:mode==='synthetic'?job.summary:undefined,phase,models:{leader:profile.leaderModel,coder:profile.model,reviewer:profile.reviewerModel},hostModelCalls:calls.length,paidProviderDispatches:mode==='synthetic'?0:null,accounting:'Reconcile provider dispatches and reported cost with the broker ledger',callsByPurpose:calls.reduce((a:any,c:any)=>(a[c.purpose]=(a[c.purpose]??0)+1,a),{}),checks:job.result?.checks?.map((c:any)=>({command:c.command,exitCode:c.exitCode})),review:job.result?.review?.verdict,files:job.checkpoint.files?.map((file:any)=>({path:file.path,mode:file.mode,sha256:file.content===null?null:createHash('sha256').update(file.content).digest('hex')})),artifactHash:artifactHash(job.checkpoint),oraclePassed,originalScopePresent:!missingScope,seconds:Math.round((Date.now()-clockBase)/1000),productionJobWrites:0,publication:'not performed'};
+  const metrics={case:bootstrap.case,source:manifest.source,image:manifest.baseImage,execution:'candidate source overlay on verified base image',compiledDigests,approval:'synthetic exact-brief confirmation',delivery:'synthetic callback receipts',mode,workload:workload.id,state:job.state,debugSummary:mode==='synthetic'?job.summary:undefined,phase,models:{leader:profile.leaderModel,coder:profile.model,reviewer:profile.reviewerModel},hostModelCalls:calls.length,native:{compactions:nativeEvidence.compactions.length,tools:nativeEvidence.tools,uniqueReads:nativeEvidence.uniqueReads,repeatedReads:nativeEvidence.repeatedReads,documentReads:nativeEvidence.documentReads,repeatedDocumentReads:nativeEvidence.repeatedDocumentReads,firstSavedChangeSeconds},paidProviderDispatches:mode==='synthetic'?0:null,accounting:'Reconcile provider dispatches and reported cost with the broker ledger',callsByPurpose:calls.reduce((a:any,c:any)=>(a[c.purpose]=(a[c.purpose]??0)+1,a),{}),checks:job.result?.checks?.map((c:any)=>({command:c.command,exitCode:c.exitCode})),review:job.result?.review?.verdict,files:job.checkpoint.files?.map((file:any)=>({path:file.path,mode:file.mode,sha256:file.content===null?null:createHash('sha256').update(file.content).digest('hex')})),artifactHash:artifactHash(job.checkpoint),oraclePassed,originalScopePresent:!missingScope,seconds:Math.round((Date.now()-clockBase)/1000),productionJobWrites:0,publication:'not performed'};
   await writeFile('/tmp/pi-acceptance-report.json',JSON.stringify(metrics),{mode:0o600});
   return job;
  };
