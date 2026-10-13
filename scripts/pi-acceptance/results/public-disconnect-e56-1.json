@@ -1,0 +1,15 @@
+{
+  "date": "2026-10-13",
+  "case": "public-disconnect-e56-1",
+  "harness": "e56a3c8cb21d388b76fadc7113dd3f5e2e85df37",
+  "route": "temporary authenticated HTTPS through production Caddy; isolated acceptance broker",
+  "publicAccepted": true,
+  "clientDisconnected": true,
+  "secondsAfterDisconnect": 6.62,
+  "providerDispatches": 1,
+  "outcome": "unresolved",
+  "billingUnknown": 1,
+  "newCallStatus": 409,
+  "productionJobWrites": 0,
+  "limitations": "Upstream generation and billing outcome unknown; no completion/cost claim. This is a disposable broker transport control, not cancellation of an owner coding job."
+}
