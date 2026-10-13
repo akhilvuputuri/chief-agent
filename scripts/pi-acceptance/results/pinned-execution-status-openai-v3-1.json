@@ -1,0 +1,155 @@
+{
+  "date": "2026-10-13",
+  "case": "pinned-execution-status-openai-v3-1",
+  "harness": "9229c38f236a37c330d8f4cb55ec9fa71621a726",
+  "source": "9abd9d0b0d5042a89e773db463cf78f00e52539b",
+  "workloadRevision": 3,
+  "build": "chief-coding:d115ce46-aefa-49d2-9d8a-6f4a5434ecc6",
+  "codeBuildStatus": "SUCCEEDED",
+  "codeBuildSeconds": 1759,
+  "runtimeSeconds": 1729,
+  "state": "publishing",
+  "phase": "accepted-candidate",
+  "knownPauseReason": null,
+  "models": {
+    "leader": "openai/gpt-6.1-sol",
+    "coder": "openai/gpt-6.1-sol",
+    "reviewer": "anthropic/claude-sonnet-5.5"
+  },
+  "providerAdmissions": 49,
+  "providerDispatches": 49,
+  "completeGenerations": 49,
+  "providerOutcomes": {
+    "complete": 49
+  },
+  "reportedCostUsd": 0.9681237,
+  "billingUnknown": 0,
+  "hostModelCalls": 49,
+  "roles": {
+    "leader": 9,
+    "coder": 37,
+    "reviewer": 3
+  },
+  "purposes": {
+    "agent": 44,
+    "compaction": 5
+  },
+  "nativeEvidence": {
+    "sessionCount": 3,
+    "failedTools": 6,
+    "successfulReads": 104,
+    "uniqueReads": 89,
+    "repeatedReads": 15,
+    "documentReads": 18,
+    "repeatedDocumentReads": 10,
+    "firstSavedChangeSeconds": 451,
+    "tools": {
+      "read": 72,
+      "grep": 16,
+      "report": 3,
+      "read_document": 18,
+      "bash": 20,
+      "edit": 5
+    },
+    "compactions": [
+      {
+        "beforeTokens": 38292,
+        "afterTokens": 10892,
+        "projectedTokens": 17220,
+        "projectedBytes": 73781,
+        "summaryCharacters": 4428,
+        "retainedMessages": 6
+      },
+      {
+        "beforeTokens": 48819,
+        "afterTokens": 1193,
+        "projectedTokens": 8264,
+        "projectedBytes": 33211,
+        "summaryCharacters": 4771,
+        "retainedMessages": 0
+      },
+      {
+        "beforeTokens": 35358,
+        "afterTokens": 5209,
+        "projectedTokens": 12280,
+        "projectedBytes": 53313,
+        "summaryCharacters": 5868,
+        "retainedMessages": 5
+      },
+      {
+        "beforeTokens": 30964,
+        "afterTokens": 7995,
+        "projectedTokens": 15066,
+        "projectedBytes": 99032,
+        "summaryCharacters": 6082,
+        "retainedMessages": 19
+      },
+      {
+        "beforeTokens": 30407,
+        "afterTokens": 1498,
+        "projectedTokens": 8569,
+        "projectedBytes": 34437,
+        "summaryCharacters": 5990,
+        "retainedMessages": 0
+      }
+    ]
+  },
+  "checks": [
+    {
+      "command": "npm ci",
+      "exitCode": 0
+    },
+    {
+      "command": "npm run check",
+      "exitCode": 0
+    },
+    {
+      "command": "npm run build",
+      "exitCode": 0
+    },
+    {
+      "command": "npm run format:check",
+      "exitCode": 0
+    }
+  ],
+  "review": "APPROVE",
+  "files": [
+    {
+      "path": "src/coding/controller.ts",
+      "mode": "100644",
+      "sha256": "0d451972b589382c5fcd5e636383cf71f4910d6bae3dfe447f3ad55c3dd97eb3"
+    },
+    {
+      "path": "src/runtime.ts",
+      "mode": "100644",
+      "sha256": "c9fc31e12c92ea29e3f624c3893b5592458b64f75ebf9f9a07dda6b2293ede2c"
+    },
+    {
+      "path": "tests/coding-squad.test.ts",
+      "mode": "100644",
+      "sha256": "d3288019460445210ec317d38f8d5c438e92ef5de26a7c172d39ef26910f507a"
+    },
+    {
+      "path": "tests/coding.test.ts",
+      "mode": "100644",
+      "sha256": "407b2543d79d4996b1332e4844a64f5d4fd65bbfd9694629d08603423f97c487"
+    }
+  ],
+  "oraclePassed": true,
+  "originalScopePresent": true,
+  "approval": "synthetic exact-brief confirmation",
+  "delivery": "synthetic callback receipts",
+  "artifactHash": "0b614106020aacc632f01de58cb13a96c61072d8b459eea063f7f961894d3a23",
+  "compiledDigests": {
+    "coding_runtime_pi/dist/runtime.js": "069c0ee2d0c4266165ec00404d0675d384e5f7f6f91ad807be0f2dd66718a65c",
+    "coding_runtime_pi/dist/documents.js": "d5faa72e5736546d3340cc175b18c4b0bf56ff1de15ad2265732e8a6bf13ce15",
+    "coding_runtime_pi/dist/report.js": "ff29693fd3e12bc04758627d959a709f58f215ff64a786f9e9b49cc6545d4741",
+    "dist/coding/pi-worker.js": "0734af64f9fe2f2a287f2165e72969708628d472a9e475633781fb41959b6dea",
+    "dist/coding/pi-review-evidence.js": "4b53ce8b753d4559ceb6cea019c054b840dd6f92f341ffa8fb369c68402dae8b",
+    "dist/coding/controller.js": "54860527721df13c422f129bccb0c55732a4a65501fbf6f7e7261aba0884207c"
+  },
+  "publication": "not performed",
+  "productionJobWrites": 0,
+  "execution": "candidate source overlay on verified base image",
+  "routeRemoved": false
+}
