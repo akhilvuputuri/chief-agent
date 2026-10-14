@@ -1,6 +1,6 @@
 # Operating model
 
-The allowlisted Telegram gateway uses our TypeScript conversation loop. OpenRouter supplies `openai/gpt-5.6-sol` with medium reasoning and price-first routing capped at $2/M input and $10/M output. Gemini Flash is the independent search helper. Postgres holds memories, history, task checkpoints, budgets, skills and domain records.
+The allowlisted Telegram gateway uses our TypeScript conversation loop. OpenRouter supplies the main model pinned in `config/model-policy.json` (Gemini 4 Argon from v0.3.72) with medium reasoning and outage-aware provider routing capped at $2/M input and $10/M output. Gemini Flash is the independent search helper. Postgres holds memories, history, task checkpoints, budgets, skills and domain records.
 
 The agent selects named tools and observes actual results. It can research public sources, manage tasks and notes, schedule reminders, read Gmail/Calendar and mirror state to Sheets. It cannot edit executable code, run a shell or deploy itself.
 

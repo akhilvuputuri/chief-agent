@@ -1,3 +1,7 @@
+# Provider routing stability and Gemini 4 Argon — 15 October 2026
+
+The v0.3.71 canary paused when OpenRouter provider OpenInference stalled and disconnected mid-plan. Every provider-attributed coding pause in the prior 14 days came from small DeepSeek hosts selected by the forced `sort: "price"` routing. Candidate v0.3.72 removes that sort while keeping price ceilings, and, at the owner's direction, moves the main model and standard agent tier from GPT-6.1 Sol to Gemini 4 Argon (same $2/$10 per million ceiling). The coding reviewer stays on Sol until the worker passes Argon's real context window (Pi's catalog lacks Argon and would assume 32k). DeepSeek coding/planning and the Gemini 3.8 Flash fast tier are unchanged. Review, release, effective-model verification and a canary remain. [Journal 85](docs/journey/85-provider-routing-stability.md).
+
 # Pi worker 0.1.4 pin candidate — 14 October 2026
 
 [PR222](https://github.com/akhilvuputuri/chief-agent/pull/222) is released as v0.3.70 at `ee2c3a13e87f12a14eee4d2d0250a368cb558d35` with exact release receipt, startup health and a separate production heartbeat. The published worker index `sha256:d8d28eb24ad20cb5481147c73ce2cd5f33c9ce62bcab0e076b51d8d99ffb0546` passed anonymous verification (194 compiled files match main, linux/amd64, non-root worker, Pi 1.1.0, root-owned native guard). Candidate v0.3.71 pins it for new Pi jobs. Remaining: exact review, CI, guarded release and one released-artifact canary with a passing pairing. Paused owner jobs stay unchanged. [Evidence](docs/journey/83-pi-context-verification.md#v0370-release-worker-publication-and-pin-candidate--14-october-2026).
@@ -230,7 +234,7 @@ Secrets live only in private environment/operations files and server configurati
 
 `telegram.ts` → `agent.ts` → `custom-agent.ts` → `model.ts` and the in-process owner-scoped dispatcher. `context.ts` builds context; `execution.ts` persists runs, calls and budgets. Postgres retains all state. Production Compose has gateway + Postgres and a one-shot migration service. No production Hermes service or HTTP tool callback.
 
-- Main model: the bundled `config/model-policy.json` pin wins when set; its initial `null` retains the existing `AGENT_MODEL` environment/default `openai/gpt-5.6-sol`. Medium reasoning, OpenRouter price-first and default ceilings $2/M input and $10/M output remain. Future model changes use the [reviewed PR/release procedure](docs/deployment.md#changing-the-production-model-through-a-release), not a server edit.
+- Main model: the bundled `config/model-policy.json` pin wins when set; its initial `null` retains the existing `AGENT_MODEL` environment/default `openai/gpt-5.6-sol`; the policy now pins `google/gemini-4-argon` (v0.3.72 candidate). Medium reasoning, OpenRouter default outage-aware routing (no price sort since v0.3.72) and default ceilings $2/M input and $10/M output remain. Future model changes use the [reviewed PR/release procedure](docs/deployment.md#changing-the-production-model-through-a-release), not a server edit.
 - Search helper: `google/gemini-3.8-flash`.
 - Voice: ElevenLabs `scribe_v2`, `eleven_flash_v2_5`, existing stock River voice. The audio-provider boundary remains unchanged.
 - Read-only Gmail, Calendar queries plus approval-gated event creation, preparation Sheet and daily Sheet integrations are retained.

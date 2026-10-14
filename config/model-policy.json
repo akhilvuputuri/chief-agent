@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "main": "openai/gpt-6.1-sol",
+  "main": "google/gemini-4-argon",
   "agents": {
     "default": "fast",
     "tiers": {
       "fast": "google/gemini-3.8-flash",
-      "standard": "openai/gpt-6.1-sol"
+      "standard": "google/gemini-4-argon"
     }
   }
 }

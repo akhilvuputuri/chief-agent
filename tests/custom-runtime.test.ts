@@ -100,7 +100,6 @@ test("actual OpenRouter wire preserves Sol, medium reasoning and price-first cei
   assert.equal(sent.model, "openai/gpt-5.6-sol");
   assert.deepEqual(sent.reasoning, { enabled: true, effort: "medium" });
   assert.deepEqual(sent.provider, {
-    sort: "price",
     max_price: { prompt: 2, completion: 10 },
     require_parameters: true,
   });

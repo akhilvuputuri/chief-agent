@@ -559,7 +559,6 @@ test("OpenRouter streaming preserves routing ceilings and returns the ordinary c
   });
   assert.equal(body.stream, true);
   assert.deepEqual(body.provider, {
-    sort: "price",
     max_price: { prompt: 2, completion: 10 },
     require_parameters: true,
   });
