@@ -3,7 +3,7 @@
   "branch": "main",
   "image": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:e7554fb19f010706e16f748f6fc4b433567a503069d603761d1bf76a965e7687",
   "model": "deepseek/deepseek-v4.1-flash",
-  "reviewerModel": "google/gemini-4-argon",
+  "reviewerModel": "openai/gpt-6.1-sol",
   "effort": "high",
   "limits": {
     "ms": 7200000,

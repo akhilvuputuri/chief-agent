@@ -12,7 +12,7 @@ The current checked-in defaults are `AGENT_MODEL=openai/gpt-5.6-sol`, medium rea
 
 For future model changes, a coding agent should:
 
-1. Verify the exact OpenRouter model ID, tool/reasoning support and provider prices. The runtime requests medium reasoning, price-first routing and the existing $2/M input / $10/M output provider ceilings; it fails explicitly when no provider meets those filters. Do not loosen those ceilings silently.
+1. Verify the exact OpenRouter model ID, tool/reasoning support and provider prices. The runtime requests medium reasoning, OpenRouter's default outage-aware provider routing (no price sort) and the existing $2/M input / $10/M output provider ceilings; it fails explicitly when no provider meets those filters. Do not loosen those ceilings silently.
 2. Edit **only** `config/model-policy.json` to set `main` to that ID. `null` reverts to the existing `AGENT_MODEL` environment behavior. No API keys or account data belong in this file. Run the normal checks and open a PR for independent review.
 3. Merge the reviewed PR. The ordinary main-branch checks and release rebuild the gateway image, wait for idle work, recreate the gateway, check startup health and preserve a rollback image. A PR branch or passing CI is not a production model change; verify the exact release receipt.
 4. Make a small owner-initiated Telegram request and confirm its `model.started`/`model.completed` record names the new model and reports an eligible provider outcome. Startup health alone cannot prove OpenRouter accepted the model. If that check fails, revert the policy change by PR and follow the normal release path; do not change the server `.env` to override a pinned policy.

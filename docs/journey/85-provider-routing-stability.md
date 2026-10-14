@@ -1,7 +1,7 @@
 # 85 — Why do coding jobs keep pausing on provider faults?
 
 Work date: 2026-10-15. Written: 2026-10-15.
-Status: in progress. Candidate v0.3.72 removes OpenRouter's price-sorted routing and moves strong-model defaults to Gemini 4 Argon; review, release and a canary remain.
+Status: in progress. Candidate v0.3.72 removes OpenRouter's price-sorted routing and moves the main model and standard agent tier to Gemini 4 Argon; the coding reviewer stays on GPT-6.1 Sol for now. Review, release and a canary remain.
 
 ## User-visible problem and preceding iteration
 
@@ -26,13 +26,15 @@ Alternatives considered: extending recovery to disconnects by resolving the gene
 ## Implementation and review
 
 - `src/model.ts`: removes `sort: "price"`; `max_price` and `require_parameters` are unchanged. This adapter serves the main assistant, subagents and Pi coding calls. The legacy Python runtime keeps its own copy in a separately pinned image that new jobs do not use.
-- Owner-directed model change: `config/model-policy.json` `main` and the `standard` agent tier, plus the Pi and legacy coding `reviewerModel` defaults, move from `openai/gpt-6.1-sol` to `google/gemini-4-argon`. OpenRouter lists Argon at $2/M input and $10/M output with tools, reasoning and a 1,048,576-token context, so it fits the existing ceilings. The fast tier (Gemini 3.8 Flash) and DeepSeek coding/planning defaults are unchanged.
+- Owner-directed model change: `config/model-policy.json` `main` and the `standard` agent tier move from `openai/gpt-6.1-sol` to `google/gemini-4-argon`. OpenRouter lists Argon at $2/M input and $10/M output with tools, reasoning and a 1,048,576-token context, so it fits the existing ceilings. The fast tier (Gemini 3.8 Flash) and DeepSeek coding/planning defaults are unchanged.
+- The owner also asked for the coding reviewer to move to Argon. Independent review of the first head (`86d775c`) found that Pi 1.1.0's bundled model catalog has no Argon entry, so `coding_runtime_pi/src/model.ts` would fall back to a 32,000-token context window (and drop catalog compat flags) for a Pi reviewer; the worker passes no explicit window. Reviewer compaction would then start near 24k tokens, risking the context failures journal 83 addressed. The owner chose to keep the Pi and legacy coding reviewer defaults on GPT-6.1 Sol until a worker change passes the selected model's real context window; that follow-up also needs Argon in the acceptance helpers' model allowlists.
+- Review also noted OpenRouter's default routing weights providers by price, so much Argon traffic may go to its cheapest endpoint (listed at $1/$5); the canary should record the serving provider.
 - Tests now assert the request's provider block has no sort and the policy's standard tier resolves to Argon.
 
 ## Verification and outcome
 
-Pending: full local and hosted checks, exact-head independent review, release, a post-release check of the effective main model, and a canary. Gemini 4 Argon has no prior evidence as a coding reviewer or main assistant in this repository; the earlier [Gemini 3.8 Flash coder diagnosis](83-pi-context-verification.md#gemini-convergence-diagnosis-and-owner-selected-lean-release--14-october-2026) concerns a different model and role and does not transfer either way.
+Pending: full local and hosted checks, exact-head independent review, release, a post-release check of the effective main model, and a canary. Gemini 4 Argon has no prior evidence as main assistant in this repository; the earlier [Gemini 3.8 Flash coder diagnosis](83-pi-context-verification.md#gemini-convergence-diagnosis-and-owner-selected-lean-release--14-october-2026) concerns a different model and role and does not transfer either way.
 
 ## Follow-up and next iteration
 
-If pauses continue on routed providers, measure provider distribution after release and consider resolving disconnect billing by generation ID before allowing one fresh generation.
+Pass the selected model's context window from host to worker (new worker image and pin), then move the coding reviewer to Argon. If pauses continue on routed providers, measure provider distribution after release and consider resolving disconnect billing by generation ID before allowing one fresh generation.

@@ -1,6 +1,6 @@
 # Provider routing stability and Gemini 4 Argon — 15 October 2026
 
-The v0.3.71 canary paused when OpenRouter provider OpenInference stalled and disconnected mid-plan. Every provider-attributed coding pause in the prior 14 days came from small DeepSeek hosts selected by the forced `sort: "price"` routing. Candidate v0.3.72 removes that sort while keeping price ceilings, and, at the owner's direction, moves the main model, standard agent tier and coding reviewer defaults from GPT-6.1 Sol to Gemini 4 Argon (same $2/$10 per million pricing). DeepSeek coding/planning and the Gemini 3.8 Flash fast tier are unchanged. Review, release, effective-model verification and a canary remain. [Journal 85](journey/85-provider-routing-stability.md).
+The v0.3.71 canary paused when OpenRouter provider OpenInference stalled and disconnected mid-plan. Every provider-attributed coding pause in the prior 14 days came from small DeepSeek hosts selected by the forced `sort: "price"` routing. Candidate v0.3.72 removes that sort while keeping price ceilings, and, at the owner's direction, moves the main model and standard agent tier from GPT-6.1 Sol to Gemini 4 Argon (same $2/$10 per million ceiling). The coding reviewer stays on Sol until the worker passes Argon's real context window (Pi's catalog lacks Argon and would assume 32k). DeepSeek coding/planning and the Gemini 3.8 Flash fast tier are unchanged. Review, release, effective-model verification and a canary remain. [Journal 85](journey/85-provider-routing-stability.md).
 
 # Pi worker 0.1.4 pin candidate — 14 October 2026
 
