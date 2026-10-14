@@ -128,8 +128,9 @@ export class OpenRouter implements ModelAdapter {
             messages: input.messages,
             tools: input.tools.map((f) => ({ type: "function", function: f })),
             reasoning: { enabled: true, effort: input.reasoning },
+            // No price sort: OpenRouter's default routing avoids providers with recent
+            // outages while still preferring cheaper ones under the max_price ceilings.
             provider: {
-              sort: "price",
               max_price: {
                 prompt: this.inputPrice,
                 completion: this.outputPrice,
