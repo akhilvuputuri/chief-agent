@@ -906,3 +906,98 @@ test("SDK isolates output schemas too, including schemas of ungranted tools", as
     clearTimeout(timer);
   }
 });
+
+test("Reader saved-article listing decodes strictly, and a not-yet-offered grant stays listed as unavailable", async () => {
+  const f = await fixture();
+  try {
+    const withListing = structuredClone(registry);
+    withListing.connections[0]!.tools.push({
+      name: "list_saved_articles",
+      mode: "read",
+      result: "reader_saved",
+    });
+    const tools = new McpTools(
+      f.db,
+      withListing,
+      credentials,
+      async (_url, _token, use) =>
+        use({
+          list: async () => listing,
+          call: async (name, args) => {
+            f.calls.push({ name, args });
+            return answer;
+          },
+        }),
+      async () => {},
+    );
+    // Reader has not deployed the listing yet: saves remain discoverable.
+    let listing: RemoteTool[] = remote;
+    let answer: unknown = text({ articles: [], next: null });
+    const before: any = await tools.call("123", { operation: "mcp_tools" });
+    const grants = before.connections[0].tools;
+    assert.ok(grants.find((t: any) => t.name === "save_link").inputSchema);
+    assert.deepEqual(
+      grants.find((t: any) => t.name === "list_saved_articles"),
+      {
+        qualifiedName: "reader/list_saved_articles",
+        name: "list_saved_articles",
+        mode: "read",
+        unavailable: true,
+      },
+    );
+    const read = {
+      operation: "mcp_read",
+      connection: "reader",
+      tool: "list_saved_articles",
+      arguments: { limit: 2 },
+    };
+    await assert.rejects(tools.call("123", read), /unavailable/);
+    listing = [
+      ...remote,
+      {
+        name: "list_saved_articles",
+        inputSchema: {
+          type: "object",
+          properties: {
+            limit: { type: "integer", minimum: 1, maximum: 200 },
+            before: { type: "string" },
+            since: { type: "string" },
+          },
+          additionalProperties: false,
+        },
+      },
+    ];
+    const article = {
+      url: "https://example.org/a",
+      title: "A saved article",
+      site: null,
+      domain: "example.org",
+      saved_at: "2026-10-15T01:02:03.000Z",
+    };
+    answer = text({ articles: [article], next: "cursor" });
+    assert.deepEqual(await tools.call("123", read), {
+      articles: [article],
+      next: "cursor",
+    });
+    // Anything beyond the metadata contract is refused, not passed through.
+    answer = text({
+      articles: [{ ...article, saved_at: "yesterday" }],
+      next: null,
+    });
+    await assert.rejects(tools.call("123", read), McpFailure);
+    // The shipped registry grants the listing as a read.
+    const shipped = mcpRegistrySchema.parse(
+      JSON.parse(
+        await readFile(new URL("../config/mcp.json", import.meta.url), "utf8"),
+      ),
+    );
+    assert.deepEqual(
+      shipped.connections[0]!.tools.find(
+        (t) => t.name === "list_saved_articles",
+      ),
+      { name: "list_saved_articles", mode: "read", result: "reader_saved" },
+    );
+  } finally {
+    await f.pg.close();
+  }
+});

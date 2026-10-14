@@ -5,7 +5,7 @@
       "id": "reader",
       "url": "https://p01--reader-api--2sn8tjhm47hb.code.run/mcp",
       "credential": "reader",
-      "description": "Save requested articles and sourced Markdown briefs to Reader. Server ready does not mean downloaded on the phone.",
+      "description": "Save requested articles and sourced Markdown briefs to Reader, and list the titles, links and sites of articles the owner saved (no article text). Server ready does not mean downloaded on the phone.",
       "tools": [
         {
           "name": "save_link",
@@ -19,7 +19,16 @@
           "idempotencyArgument": "idempotency_key",
           "result": "reader_receipt"
         },
-        { "name": "get_save_status", "mode": "read", "result": "reader_status" }
+        {
+          "name": "get_save_status",
+          "mode": "read",
+          "result": "reader_status"
+        },
+        {
+          "name": "list_saved_articles",
+          "mode": "read",
+          "result": "reader_saved"
+        }
       ]
     }
   ]

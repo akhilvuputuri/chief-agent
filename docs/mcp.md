@@ -71,7 +71,14 @@ operation names, timing and safe categories. Results remain in private storage.
 
 ## Reader
 
-Reader grants exactly `save_link`, `save_document` and `get_save_status`. Source
+Reader grants exactly `save_link`, `save_document`, `get_save_status` and the
+read-only `list_saved_articles` (title, link, site and save time of saved
+articles; no content). Reader answers the listing only after the owner turns on
+**Share saved-article titles** for Chief's connection in Reader Settings; the news
+bulletin uses it as its interest sample ([news bulletin](news-bulletin.md)). Its
+`reader_saved` decoder accepts only that metadata shape. Discovery lists a granted
+tool that the server does not offer as `unavailable` instead of failing the whole
+connection, so a staggered rollout does not hide the save tools. Source
 URLs and Markdown are validated against deployed schemas and the 220000-byte
 request limit. Receipts and status text blocks are decoded and validated.
 

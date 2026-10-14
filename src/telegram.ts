@@ -2,7 +2,12 @@ import { invoiceFacts, privateInvoiceIntake } from "./gathering/facts.js";
 import { mutePending } from "./stocks.js";
 import { preview as responsibilityPreview } from "./responsibilities.js";
 import { ResponsibilityDelivery } from "./responsibility-worker.js";
-import { recordVote } from "./news.js";
+import {
+  deliveredItem,
+  editionKeyboard,
+  mcpReaderLink,
+  saveItem,
+} from "./news.js";
 import { errorFields, opsLog } from "./ops-log.js";
 import { WorkTools, renderWork, renderWorkList } from "./work.js";
 import { TelegramViews, viewCallback } from "./telegram-views.js";
@@ -375,34 +380,58 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
         .editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } })
         .catch(() => {});
   });
-  // News 👍/👎: owner-scoped set-state votes, never queued behind the model.
-  bot.callbackQuery(/^nw:(up|dn):([0-9a-f-]{36})$/, async (ctx) => {
+  // News Save: saves a delivered item to Reader, never queued behind the model.
+  // The callback is answered at once; the keyboard shows the outcome.
+  bot.callbackQuery(/^nw:sv:([0-9a-f-]{36})$/, async (ctx) => {
     if (!allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids)) return;
-    const vote = ctx.match[1] === "up" ? 1 : -1;
-    const result = await recordVote(
-      db,
-      String(ctx.from.id),
-      ctx.match[2]!,
-      vote,
-    );
-    // Telegram caps callback answers at 200 characters; names come from feeds.
+    const user = String(ctx.from.id);
+    const itemId = ctx.match[1]!;
+    const item = await deliveredItem(db, user, itemId);
+    if (!item) {
+      await ctx.answerCallbackQuery({
+        text: "That bulletin item is no longer available.",
+      });
+      return;
+    }
+    const mcp = assistant.tools?.mcp;
+    const reader = mcp?.configured ? mcpReaderLink(mcp) : undefined;
     await ctx.answerCallbackQuery({
-      text: (!result
-        ? "That bulletin item is no longer available."
-        : vote === 1
-          ? `👍 Noted: more like this from ${result.domain}${result.topics.length ? ` and on ${result.topics.join(", ")}` : ""}.`
-          : `👎 Noted: less like this from ${result.domain}${result.topics.length ? ` and on ${result.topics.join(", ")}` : ""}.`
-      )
-        .split(/(?=[\s\S])/u)
-        .slice(0, 190)
-        .join(""),
+      text: reader
+        ? `Saving ${item.position} to Reader…`
+        : "Reader isn't connected to Chief, so nothing was saved.",
     });
-    if (result?.changed)
+    if (!reader) return;
+    const keyboard = (saving?: string) =>
+      editionKeyboard(db, user, item.edition_id, saving).then((k) =>
+        ctx
+          .editMessageReplyMarkup({ reply_markup: { inline_keyboard: k } })
+          .catch(() => {}),
+      );
+    await keyboard(itemId);
+    const outcome = await saveItem(db, reader, user, itemId).catch(() => ({
+      saved: false,
+      message: `Couldn't save ${item.position} to Reader; tap again to retry safely.`,
+    }));
+    await keyboard();
+    // Success is visible as ✓; anything else needs words.
+    if (!outcome.saved || /Imports/.test(outcome.message))
       await ctx
-        .editMessageReplyMarkup({
-          reply_markup: { inline_keyboard: result.keyboard },
+        .reply(outcome.message, {
+          ...(ctx.callbackQuery.message?.message_thread_id
+            ? {
+                message_thread_id: ctx.callbackQuery.message.message_thread_id,
+              }
+            : {}),
+          link_preview_options: { is_disabled: true },
         })
         .catch(() => {});
+  });
+  // Buttons on bulletins sent before votes were replaced by Save.
+  bot.callbackQuery(/^nw:(up|dn):[0-9a-f-]{36}$/, async (ctx) => {
+    if (!allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids)) return;
+    await ctx.answerCallbackQuery({
+      text: "Votes are retired. Newer bulletins have 📥 buttons that save to Reader, and your saves shape the picks.",
+    });
   });
   bot.on("message", async (ctx) => {
     if (!allowedChat(ctx.from?.id, ctx.chat.type, ids)) return;

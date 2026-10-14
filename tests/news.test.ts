@@ -9,11 +9,19 @@ import {
   NewsTools,
   composeEdition,
   rankCandidates,
-  recordVote,
+  editionKeyboard,
+  saveItem,
+  saveKeyboard,
   siteAddress,
-  voteKeyboard,
   type Candidate,
+  type ReaderLink,
 } from "../src/news.js";
+import {
+  affinity,
+  contentWords,
+  interestProfile,
+  type SavedArticle,
+} from "../src/news-interests.js";
 import {
   advertisedFeeds,
   discoverFeed,
@@ -26,6 +34,23 @@ import {
   domainOf as toolDomainOf,
   selectDomains,
 } from "../src/tool-domains.js";
+
+class FakeReader implements ReaderLink {
+  saves: SavedArticle[] = [];
+  calls: { user: string; key: string; url: string }[] = [];
+  listFails = false;
+  result: any = { state: "complete", result: { status: "queued" } };
+  async save(user: string, key: string, url: string) {
+    this.calls.push({ user, key, url });
+    if (this.result instanceof Error) throw this.result;
+    return this.result;
+  }
+  async savedArticles() {
+    if (this.listFails)
+      throw Object.assign(new Error("tool"), { category: "tool" });
+    return this.saves;
+  }
+}
 
 class FakeFetcher implements FeedFetcher {
   pages = new Map<string, string>();
@@ -83,6 +108,8 @@ async function fixture(now: Date) {
   const fetcher = new FakeFetcher();
   const sent: { user: string; payload: any }[] = [];
   let sendFails = false;
+  const reader = new FakeReader();
+  let readerOn = true;
   const bulletin = new NewsBulletin(
     db,
     fetcher,
@@ -92,6 +119,8 @@ async function fixture(now: Date) {
       sent.push({ user, payload });
     },
     () => clock,
+    undefined,
+    () => (readerOn ? reader : undefined),
   );
   const tools = new NewsTools(db, fetcher, bulletin, () => clock);
   const call = (a: any, user = "a", r = run) => tools.call(user, r, a);
@@ -101,6 +130,10 @@ async function fixture(now: Date) {
     background,
     fetcher,
     sent,
+    reader,
+    disconnectReader: () => {
+      readerOn = false;
+    },
     bulletin,
     tools,
     call,
@@ -399,10 +432,10 @@ test("ranking: topic matches first, at most two per site, old items and repeats 
     c("B", "Ancient piece", "https://b.example/old", 24 * 8),
     c("C", "Seen before", "https://c.example/seen", 1),
   ];
-  const none = { source: new Map(), topic: new Map() };
+  const none = interestProfile([], now);
   const r = rankCandidates(pool, {
     topics: ["quantum computing"],
-    weights: none,
+    profile: none,
     delivered: new Set(["c.example/seen"]),
     now,
     count: 4,
@@ -415,7 +448,7 @@ test("ranking: topic matches first, at most two per site, old items and repeats 
   // With no other site to fill the edition, the per-site cap relaxes.
   const onlyA = rankCandidates(pool.slice(0, 3), {
     topics: [],
-    weights: none,
+    profile: none,
     delivered: new Set(),
     now,
     count: 3,
@@ -423,58 +456,143 @@ test("ranking: topic matches first, at most two per site, old items and repeats 
   assert.equal(onlyA.selected.length, 3);
 });
 
-test("👍/👎 are owner-scoped set-state votes that shift the next edition", async () => {
+test("Reader saves shape the next edition, and saved links are never suggested", async () => {
   const now = sgtAt("2026-09-28T08:00");
   const f = await fixture(now);
   try {
+    // Saved from Safari: hardware pieces from a site Chief does not follow,
+    // and one link the bulletin would otherwise suggest.
+    f.reader.saves = [
+      {
+        url: "https://chips.example/gpu-prices",
+        title: "GPU prices fall as AI chip supply grows",
+        domain: "chips.example",
+        savedAt: hoursBefore(now, 24),
+      },
+      {
+        url: "https://chips.example/fabs",
+        title: "New chip fabs and the AI hardware race",
+        domain: "chips.example",
+        savedAt: hoursBefore(now, 48),
+      },
+      {
+        url: "https://chips.example/memory",
+        title: "Memory chip makers ride the AI boom",
+        domain: "chips.example",
+        savedAt: hoursBefore(now, 72),
+      },
+      {
+        url: "https://www.alpha.example/ai?utm_source=x",
+        title: "AI chips get cheaper",
+        domain: "alpha.example",
+        savedAt: hoursBefore(now, 2),
+      },
+    ];
     await followTwoSites(f, now);
     await f.call({ operation: "news_edition_now" });
     await f.bulletin.tick();
-    const items = (
-      await f.db.query("SELECT id,domain FROM news_items ORDER BY position")
-    ).rows;
-    const beta = items.find((i) => i.domain === "beta.example")!;
-    assert.equal(await recordVote(f.db, "b", beta.id, -1), null);
-    const first = await recordVote(f.db, "a", beta.id, -1);
-    assert.equal(first!.changed, true);
-    const again = await recordVote(f.db, "a", beta.id, -1);
-    assert.equal(again!.changed, false);
-    const button = again!.keyboard
-      .flat()
-      .find((b) => b.callback_data === `nw:dn:${beta.id}`)!;
-    assert.match(button.text, /👎✓/);
+    const text = f.sent.at(-1)!.payload.text as string;
+    // Already in Reader (canonical match through www and tracking parameters).
+    assert.ok(!text.split("\n").includes("https://alpha.example/ai"));
+    // The chip story outranks the fresher, unrelated ones.
+    const lines = text.split("\n").filter((l) => /^\d\. /.test(l));
+    assert.equal(lines[0], "1. AI chips get cheaper, again");
+    assert.match(text, /Tap 📥 to save one to Reader/);
+    const edition = (
+      await f.db.query(
+        "SELECT trace FROM news_editions ORDER BY created_at DESC LIMIT 1",
+      )
+    ).rows[0];
+    assert.equal(edition.trace.excluded.saved, 1);
+    assert.equal(edition.trace.reader.state, "ok");
+    assert.equal(edition.trace.reader.articles, 4);
+    const top = (
+      await f.db.query("SELECT score FROM news_items WHERE position=1")
+    ).rows[0].score;
+    assert.ok(top.similar > 0);
+    assert.match(top.like, /chip/i);
     const status = await f.call({ operation: "news_status" });
-    assert.ok(status.learned.sites["beta.example"] < 0);
-    assert.equal(status.recentEditions[0].disliked, 1);
-    const later = sgtAt("2026-09-29T08:00");
-    f.setNow(later);
-    f.fetcher.pages.set(
-      "https://alpha.example/",
-      rss("Alpha", [
-        {
-          title: "Alpha fresh",
-          url: "https://alpha.example/n",
-          at: hoursBefore(later, 1),
-        },
-      ]),
+    assert.equal(status.learned.savedArticles, 4);
+    assert.equal(status.learned.topSites[0].site, "chips.example");
+    assert.ok(status.learned.topTerms.includes("chip"));
+    assert.deepEqual(status.learned.unfollowedSites, ["chips.example"]);
+    assert.equal(status.reader.state, "ok");
+    // Reader refusing the listing (not allowed yet) degrades to plain ranking.
+    f.reader.listFails = true;
+    const refused = await f.call({ operation: "news_status" });
+    assert.equal(refused.reader.state, "unavailable");
+    assert.equal(refused.reader.category, "tool");
+    assert.match(refused.reader.note, /Share saved-article titles/);
+    assert.equal(refused.learned.savedArticles, 0);
+    f.disconnectReader();
+    assert.equal(
+      (await f.call({ operation: "news_status" })).reader.state,
+      "not_connected",
     );
-    f.fetcher.pages.set(
-      "https://beta.example/",
-      rss("Beta", [
-        {
-          title: "Beta fresh",
-          url: "https://beta.example/n",
-          at: hoursBefore(later, 1),
-        },
-      ]),
-    );
-    await f.call({ operation: "news_edition_now" });
-    await f.bulletin.tick();
-    const text = f.sent.at(-1)!.payload.text;
-    assert.ok(text.indexOf("Alpha fresh") < text.indexOf("Beta fresh"));
   } finally {
     await f.pg.close();
   }
+});
+
+test("word overlap folds plurals, ignores stop words and keeps separate interests", () => {
+  const now = new Date("2026-10-15T00:00:00Z");
+  assert.deepEqual(contentWords("The chips and the batteries!"), [
+    "chip",
+    "battery",
+  ]);
+  const at = (d: number) => new Date(now.getTime() - d * 86400000);
+  const saved = (url: string, title: string, domain: string, days: number) => ({
+    url,
+    title,
+    domain,
+    savedAt: at(days),
+  });
+  const profile = interestProfile(
+    [
+      saved("https://a.example/1", "Sourdough baking at home", "a.example", 1),
+      saved("https://a.example/2", "Better sourdough starters", "a.example", 2),
+      saved(
+        "https://b.example/1",
+        "Rust compiler performance",
+        "www.b.example",
+        3,
+      ),
+      saved("https://c.example/1", "Ancient save", "c.example", 400),
+    ],
+    now,
+  );
+  // One interest does not dilute the other.
+  const bread = affinity(profile, {
+    title: "A sourdough guide",
+    url: "https://x.example/s",
+  });
+  const rust = affinity(profile, {
+    title: "Rust compiler news",
+    url: "https://x.example/r",
+  });
+  const other = affinity(profile, {
+    title: "Football results",
+    url: "https://x.example/f",
+  });
+  assert.ok(bread.similar > 0 && rust.similar > 0);
+  assert.equal(other.similar, 0);
+  assert.equal(other.like, null);
+  // Site affinity matches the article's site without www; very old saves do
+  // not shape the profile, but are still never re-suggested.
+  assert.ok(
+    affinity(profile, { title: "x", url: "https://b.example/z" }).site > 0.9,
+  );
+  assert.equal(
+    affinity(profile, { title: "x", url: "https://c.example/z" }).site,
+    0,
+  );
+  assert.ok(profile.saved.has("c.example/1"));
+  // A save loses half its weight after 60 days.
+  const faded = interestProfile(
+    [saved("https://d.example/1", "t", "d.example", 60)],
+    now,
+  );
+  assert.ok(Math.abs(faded.sites.get("d.example")! - 0.5) < 1e-9);
 });
 
 test("on-demand editions work while off and are limited to three a day", async () => {
@@ -574,18 +692,24 @@ test("turning off mutes a queued edition; send failures become uncertain; last s
   }
 });
 
-test("vote keyboard pairs two items per row within Telegram's callback limit", () => {
-  const items = [1, 2, 3].map((position) => ({
+test("save keyboard is one row of numbered Save buttons within Telegram's callback limit", () => {
+  const mark = (p: number) =>
+    p === 2 ? ("saved" as const) : p === 3 ? ("saving" as const) : undefined;
+  const items = [3, 1, 2, 4, 5].map((position) => ({
     position,
     id: randomUUID(),
-    vote: position === 2 ? 1 : null,
+    mark: mark(position),
   }));
-  const kb = voteKeyboard(items);
-  assert.equal(kb.length, 2);
-  assert.equal(kb[0]!.length, 4);
-  assert.match(kb[0]![2]!.text, /2 👍✓/);
-  for (const b of kb.flat())
+  const kb = saveKeyboard(items);
+  assert.equal(kb.length, 1);
+  assert.deepEqual(
+    kb[0]!.map((b) => b.text),
+    ["📥 1", "✓ 2", "… 3", "📥 4", "📥 5"],
+  );
+  for (const b of kb.flat()) {
+    assert.match(b.callback_data, /^nw:sv:[0-9a-f-]{36}$/);
     assert.ok(Buffer.byteLength(b.callback_data) <= 64);
+  }
 });
 
 test("news tools belong to the news domain and are cued by bulletin requests", () => {
@@ -680,7 +804,7 @@ test("the edition fits one message by dropping whole items, never cutting one", 
   assert.ok(fitted.items.length < 8 && fitted.items.length > 0);
   for (const item of fitted.items)
     assert.ok(fitted.text.includes(item.entry.url));
-  assert.match(fitted.text, /Tap 👍 or 👎/);
+  assert.match(fitted.text, /Tap 📥/);
 });
 
 test("undated items are delivered once; nextEdition skips a day already sent; all-failed wording", async () => {
@@ -871,13 +995,6 @@ test("an aggregator counts as one site for the per-site cap and for votes", asyn
     ).rows;
     assert.equal(items.filter((i) => i.domain === "agg.example").length, 2);
     assert.ok(items.some((i) => i.domain === "blog.example"));
-    const vote = await recordVote(
-      f.db,
-      "a",
-      items.find((i) => i.domain === "agg.example")!.id,
-      -1,
-    );
-    assert.equal(vote!.domain, "agg.example");
   } finally {
     await f.pg.close();
   }
@@ -954,7 +1071,7 @@ test("when two feeds carry one link, the better-scoring copy is kept", () => {
   });
   const r = rankCandidates([copy("a", null, []), copy("b", 1, ["ai"])], {
     topics: ["ai"],
-    weights: { source: new Map(), topic: new Map() },
+    profile: interestProfile([], now),
     delivered: new Set(),
     now,
     count: 5,
@@ -1027,17 +1144,111 @@ test("moving the time withdraws a queued edition and builds at the new time", as
   }
 });
 
-test("votes count only on bulletins that were delivered", async () => {
+test("Save works only on delivered items, keyed by the item id, with honest outcomes", async () => {
   const f = await fixture(sgtAt("2026-09-28T08:00"));
   try {
     await followTwoSites(f, sgtAt("2026-09-28T08:00"));
     f.failSends(true);
     await f.bulletin.build("a", "on_demand");
-    const item = (await f.db.query("SELECT id FROM news_items LIMIT 1"))
-      .rows[0];
-    assert.equal(await recordVote(f.db, "a", item.id, 1), null); // still pending
+    const item = (
+      await f.db.query(
+        "SELECT id,url,edition_id,position FROM news_items ORDER BY position LIMIT 1",
+      )
+    ).rows[0];
+    // Never shown yet: no save.
+    assert.match(
+      (await saveItem(f.db, f.reader, "a", item.id)).message,
+      /no longer available/,
+    );
     await f.bulletin.tick(); // send fails: uncertain, possibly shown
-    assert.ok(await recordVote(f.db, "a", item.id, 1));
+    assert.match(
+      (await saveItem(f.db, f.reader, "b", item.id)).message,
+      /no longer available/,
+    );
+    const saved = await saveItem(f.db, f.reader, "a", item.id);
+    assert.equal(saved.saved, true);
+    assert.deepEqual(f.reader.calls, [
+      { user: "a", key: item.id, url: item.url },
+    ]);
+    f.reader.result = { state: "complete", result: { status: "bookmark" } };
+    assert.match(
+      (await saveItem(f.db, f.reader, "a", item.id)).message,
+      /Imports/,
+    );
+    f.reader.result = { state: "pending", category: "auth" };
+    assert.match(
+      (await saveItem(f.db, f.reader, "a", item.id)).message,
+      /reconnect/,
+    );
+    f.reader.result = { state: "pending", category: "uncertain" };
+    const unsure = await saveItem(f.db, f.reader, "a", item.id);
+    assert.equal(unsure.saved, false);
+    assert.match(unsure.message, /retry safely/);
+    assert.match(
+      (await saveItem(f.db, undefined, "a", item.id)).message,
+      /isn't connected/,
+    );
+    // The keyboard reads the durable Reader journal for this item id.
+    await f.db.query(
+      `INSERT INTO mcp_operations(user_id,connection,request_key,tool,binding,schema_hash,payload,state)
+       VALUES('a','reader',$1,'save_link','b','h','{}'::jsonb,'complete')`,
+      [item.id],
+    );
+    const kb = await editionKeyboard(f.db, "a", item.edition_id);
+    assert.equal(
+      kb[0]!.find((b) => b.callback_data === `nw:sv:${item.id}`)!.text,
+      `✓ ${item.position}`,
+    );
+    const status = await f.call({ operation: "news_status" });
+    assert.equal(status.recentEditions[0].saved, 1);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("editions are capped at five suggestions, including older settings", async () => {
+  const now = sgtAt("2026-09-28T08:00");
+  const f = await fixture(now);
+  try {
+    f.fetcher.pages.set(
+      "https://many.example/",
+      rss(
+        "Many",
+        Array.from({ length: 9 }, (_, i) => ({
+          title: [
+            "Volcano erupts",
+            "Markets rally",
+            "Chess final",
+            "Rain floods city",
+            "Quantum chip",
+            "Election recount",
+            "Coffee prices",
+            "Mars rover",
+            "Tennis upset",
+          ][i]!,
+          url: `https://many.example/${i}`,
+          at: hoursBefore(now, i + 1),
+        })),
+      ),
+    );
+    await f.call({ operation: "news_source_add", site: "many.example" });
+    // Validation allows 1–5; the tool layer also clamps.
+    assert.equal(
+      (await f.call({ operation: "news_settings", itemsPerEdition: 8 }))
+        .settings.items_per_edition,
+      5,
+    );
+    // A row saved under the old 1–8 range still yields at most five.
+    await f.db.query(
+      "INSERT INTO news_settings(user_id,items_per_edition) VALUES('a',8) ON CONFLICT(user_id) DO UPDATE SET items_per_edition=8",
+    );
+    await f.call({ operation: "news_edition_now" });
+    await f.bulletin.tick();
+    assert.equal(f.sent.at(-1)!.payload.items.length, 5);
+    assert.equal(
+      (await f.call({ operation: "news_status" })).settings.items_per_edition,
+      5,
+    );
   } finally {
     await f.pg.close();
   }

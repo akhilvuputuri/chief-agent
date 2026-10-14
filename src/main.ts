@@ -36,7 +36,12 @@ import { CreditBucket } from "./market-credits.js";
 import { StockLookup } from "./stock-lookup.js";
 import { MarketHistory } from "./market-history.js";
 import { RuleDelivery, RuleEngine } from "./stock-rules.js";
-import { NewsBulletin, NewsTools, voteKeyboard } from "./news.js";
+import {
+  NewsBulletin,
+  NewsTools,
+  mcpReaderLink,
+  saveKeyboard,
+} from "./news.js";
 import { PublicFeedFetcher } from "./news-feed.js";
 import { run as runTelegram } from "@grammyjs/runner";
 import { CustomAgent } from "./custom-agent.js";
@@ -271,7 +276,7 @@ if (c.MARKET_DATA_PROVIDER === "twelvedata" && !c.TWELVE_DATA_API_KEY)
     "MARKET_DATA_PROVIDER=twelvedata requires TWELVE_DATA_API_KEY",
   );
 const parser = new ScheduleParser();
-// Editions are plain text with link previews off; 👍/👎 buttons carry item ids.
+// Editions are plain text with link previews off; Save buttons carry item ids.
 const newsFetcher = new PublicFeedFetcher();
 const newsBulletin = new NewsBulletin(
   db,
@@ -291,7 +296,7 @@ const newsBulletin = new NewsBulletin(
             ...(payload.items?.length
               ? {
                   reply_markup: {
-                    inline_keyboard: voteKeyboard(payload.items),
+                    inline_keyboard: saveKeyboard(payload.items),
                   },
                 }
               : {}),
@@ -311,6 +316,8 @@ const newsBulletin = new NewsBulletin(
   },
   undefined,
   (user) => topics.capture(user, { kind: "topic", topic: "news" }),
+  // `mcp` is assigned below; Reader learning is off when connectors are.
+  () => (mcp ? mcpReaderLink(mcp) : undefined),
 );
 const daily = new DailyTools(db, parser, calendar, mirror);
 if (
