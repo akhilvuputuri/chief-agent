@@ -41,7 +41,7 @@ Independent review: pending.
 
 ## Verification and outcome
 
-- Chief, local mocked tests: 32 news tests (including save-driven ranking, exclusion of saved links through `www.` and tracking parameters, Reader refused or disconnected, idempotent keyed saves and their outcomes, the five-item cap including legacy rows) and 21 MCP tests (strict decoding, unavailable grant, shipped registry). Full `npm run check` result: see the PR.
+- Chief, local mocked tests: 32 news tests (including save-driven ranking, exclusion of saved links through `www.` and tracking parameters, Reader refused or disconnected, idempotent keyed saves and their outcomes, the five-item cap including legacy rows) and 21 MCP tests (strict decoding, unavailable grant, shipped registry). Full local suite on `da5eabf`: 920/920 application tests, 50 script tests, 105 Pi runtime tests and Prettier pass. The coding benchmark's two `chief-protocol` fixtures fail identically on unmodified `origin/main` (a local environment issue; `evals/` is unchanged here), and `check:coding` could not run locally because `ruff` is not installed. Hosted CI is the authority for both.
 - Reader: 26 backend tests, including the opt-in gate, self-grant refusal, paging, brief exclusion and revocation. The iOS simulator build succeeded.
 - Not measured: whether word overlap picks better articles than votes did. No live data yet.
 
