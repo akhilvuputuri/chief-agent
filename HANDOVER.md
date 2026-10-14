@@ -1,3 +1,7 @@
+# Pi worker 0.1.4 pin candidate — 14 October 2026
+
+[PR222](https://github.com/akhilvuputuri/chief-agent/pull/222) is released as v0.3.70 at `ee2c3a13e87f12a14eee4d2d0250a368cb558d35` with exact release receipt, startup health and a separate production heartbeat. The published worker index `sha256:d8d28eb24ad20cb5481147c73ce2cd5f33c9ce62bcab0e076b51d8d99ffb0546` passed anonymous verification (194 compiled files match main, linux/amd64, non-root worker, Pi 1.1.0, root-owned native guard). Candidate v0.3.71 pins it for new Pi jobs. Remaining: exact review, CI, guarded release and one released-artifact canary with a passing pairing. Paused owner jobs stay unchanged. [Evidence](docs/journey/83-pi-context-verification.md#v0370-release-worker-publication-and-pin-candidate--14-october-2026).
+
 # Owner-requested verification checkpoint — 14 October 2026
 
 Work is checkpointed at the owner's request. PR222 remains a draft, with no deployment: production is v0.3.69/e4b71ad. Product recovery source `38d62bb` and corrected control `7b25047` have independent approval, 1,175 local checks/build/format, hosted Linux/image checks and the passing actual worker-restart/recovery control. The paid matrix, immutable worker publication/activation and released-artifact canary remain incomplete.
