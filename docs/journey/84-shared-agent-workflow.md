@@ -1,7 +1,7 @@
 # 84 — How can the development workflow apply across repositories without copies drifting?
 
 Work date(s): 2026-10-14. Written/revised: 2026-10-14.
-Status: in review. The workflow plugin is released in a-stack as `workflow--v0.1.0`. Chief's adoption (this PR) is not yet merged.
+Status: released. Chief adopted a-stack `workflow--v0.1.0` (PR 224, deployed `7373ea8`) and then moved to `workflow--v0.1.1`. Loading in authenticated and cloud Claude sessions is still unverified.
 
 ## Problem and preceding iteration
 
@@ -83,14 +83,35 @@ Independent review of `895002d` (Opus 5.5): REQUEST CHANGES.
   - This entry mislabelled hook loading as measured.
   - "Inspect policy and permissions" and "never weaken branch protection" were dropped from the merge guidance.
 
-All of these were restored or corrected in the follow-up commit. Re-review is pending.
+All of these were restored or corrected in `7f804b7`. The delta review (Opus 5.5) approved `7f804b78d9577ac0124d0fab8b5020574cbb0708` and found no lost rules. Devin Review reported no bugs; its one flag (automatic plugin loading needs verification) is the acceptance check listed below.
 
 The lost identity and freshness rules are stricter than a-stack `workflow--v0.1.0`. They are candidates to upstream into the next plugin version. This is a documentation and configuration change with no runtime code, so a release redeploys the same application behavior.
 
 Remaining acceptance: a fresh authenticated Claude Code session in this repository registers the a-stack marketplace on folder trust, installs `workflow@a-stack`, and shows the core rules. The same check is needed in a Claude cloud session.
 
+### Release closure — 2026-10-14
+
+- **Merge:** PR 224 merged at approved head `7f804b7` as squash commit `7373ea8b0fb31865550fdb7c0a696c18c79cb5f3`. Its `checks` run passed.
+- **Release:** the [release run](https://github.com/akhilvuputuri/chief-agent/actions/runs/38441965426) succeeded. `npm run release:status -- 7373ea8b0fb31865550fdb7c0a696c18c79cb5f3` returned `success`: exact commit deployed and startup health passed at release time. No runtime code changed.
+
+### Pin moved to `workflow--v0.1.1` — 2026-10-14
+
+a-stack [PR 7](https://github.com/akhilvuputuri/a-stack/pull/7) released `workflow` and `ios-design` 0.1.1 at `fd2f7112e700529cfec826d44250349b35434ecc`, after an independent REQUEST CHANGES review, a fix and an approving re-review. The release:
+
+- added Codex plugin manifests, with an explicit empty Codex hooks file so Codex doesn't run the Claude hook;
+- added `npx skills` installation;
+- upstreamed the stricter freshness, git-identity and supplied-context rules from this entry's review.
+
+**Tested** (14 October 2026), installing from GitHub at `workflow--v0.1.1` in scratch homes:
+
+- `skills@1.7.0` lists 8 skills.
+- `claude plugin marketplace add 'akhilvuputuri/a-stack#workflow--v0.1.1'` installs workflow (7 skills and the SessionStart hook) and ios-design (1 skill).
+- `@openai/codex@0.159.1` `plugin marketplace add akhilvuputuri/a-stack@workflow--v0.1.1` and `plugin add` work, and `debug prompt-input` lists all 8 skills.
+
+This PR moves `.claude/settings.json`, AGENTS.md and REVIEW.md to that tag and adds `.codex/config.toml`.
+
 ## Follow-up and next iteration
 
 - Verify plugin loading in local and cloud Claude sessions, and record the result here.
-- Changes to workflow rules now go to a-stack as a new plugin version. Chief moves to it with a reviewed PR that changes the pinned ref.
+- Changes to workflow rules now go to a-stack as a new plugin version. Chief moves to it with a reviewed PR that changes the pinned ref, as this 0.1.1 follow-up did.
 - Adopt the workflow in other repositories with the `adopt` skill.

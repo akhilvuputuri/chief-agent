@@ -2,7 +2,7 @@
 
 ## Workflow
 
-This repository follows the [a-stack engineering workflow](https://github.com/akhilvuputuri/a-stack/blob/workflow--v0.1.0/plugins/workflow/CORE.md), pinned to marketplace ref `workflow--v0.1.0`. Claude Code loads it through the `workflow@a-stack` plugin pinned in `.claude/settings.json`. Its core rules cover freshness, capabilities, independent review, delivery, evidence, records and hygiene, and its skills cover `preflight`, `independent-review`, `ship`, `journal`, `incident` and `experiment`. Other agents should read the linked CORE.md at that tag before starting work. The bindings below supply this repository's specifics and win where they are more specific.
+This repository follows the [a-stack engineering workflow](https://github.com/akhilvuputuri/a-stack/blob/workflow--v0.1.1/plugins/workflow/CORE.md), pinned to marketplace ref `workflow--v0.1.1`. Claude Code loads it through the `workflow@a-stack` plugin pinned in `.claude/settings.json`. Its core rules cover freshness, capabilities, independent review, delivery, evidence, records and hygiene, and its skills cover `preflight`, `independent-review`, `ship`, `journal`, `incident` and `experiment`. For Codex, run `codex plugin marketplace add akhilvuputuri/a-stack@workflow--v0.1.1` and `codex plugin add workflow@a-stack` once; `.codex/config.toml` keeps it enabled here. The Codex plugin has no hooks, so the rules below are Codex's always-on workflow. Other agents should read the linked CORE.md at that tag before starting work. The bindings below supply this repository's specifics and win where they are more specific.
 
 Non-negotiable even without the plugin:
 

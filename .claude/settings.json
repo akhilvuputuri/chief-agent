@@ -4,7 +4,7 @@
       "source": {
         "source": "github",
         "repo": "akhilvuputuri/a-stack",
-        "ref": "workflow--v0.1.0"
+        "ref": "workflow--v0.1.1"
       }
     }
   },

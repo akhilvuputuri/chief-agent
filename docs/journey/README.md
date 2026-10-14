@@ -92,7 +92,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 10 October | [80 — CodeBuild timeout mismatch](80-codebuild-timeout-mismatch.md): why did a sandbox end before its saved allocation? | v0.3.65 application protection verified; provider 45-minute restriction remains unresolved |
 | 11 October | [81 — Pi planning progress](81-pi-planning-progress.md): why did 203 calls produce no plan? | Released v0.3.67; verified 0.1.2 image and 45-minute admission; 40-minute profile installed; full-task acceptance pending |
 | 11 October | [82 — Pi report contract](82-pi-report-contract.md): why did complete plans fail at handoff? | Candidate full-document contract and workflow tests; paid/review/release pending |
-| 14 October | [84 — Shared a-stack workflow](84-shared-agent-workflow.md): how can the development workflow apply across repositories without copies drifting? | Workflow plugin released as a-stack `workflow--v0.1.0`; Chief adoption in review; model-context and cloud loading unverified |
+| 14 October | [84 — Shared a-stack workflow](84-shared-agent-workflow.md): how can the development workflow apply across repositories without copies drifting? | Released: Chief adopted the shared workflow (deployed `7373ea8`), pinned to `workflow--v0.1.1`; model-context and cloud loading unverified |
 
 ## Coding-agent learning path
 
