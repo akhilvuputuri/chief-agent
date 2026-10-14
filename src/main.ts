@@ -432,6 +432,9 @@ if (c.CODING_RUNTIME === "on") {
             m.supported_parameters.includes("tools") &&
             (m.supported_parameters.includes("reasoning") ||
               m.supported_parameters.includes("reasoning_effort")),
+          ...(Number.isSafeInteger(m.context_length) && m.context_length > 0
+            ? { contextWindow: m.context_length }
+            : {}),
         }));
     },
     {

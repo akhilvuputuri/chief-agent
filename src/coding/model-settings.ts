@@ -8,6 +8,7 @@ export interface ModelChoice {
   inputPrice: number;
   outputPrice: number;
   tools: boolean;
+  contextWindow?: number;
 }
 export type CodingCatalog = () => Promise<ModelChoice[]>;
 const run = (user: string) => {

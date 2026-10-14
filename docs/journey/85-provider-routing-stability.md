@@ -38,3 +38,7 @@ Pending: full local and hosted checks, exact-head independent review, release, a
 ## Follow-up and next iteration
 
 Pass the selected model's context window from host to worker (new worker image and pin), then move the coding reviewer to Argon. If pauses continue on routed providers, measure provider distribution after release and consider resolving disconnect billing by generation ID before allowing one fresh generation.
+
+### Worker context-window follow-up — 15 October 2026
+
+The host now snapshots each selected Pi model's context length from the live OpenRouter catalog into the job settings at creation (`contextWindows`, at most three bounded entries; catalog failure or missing metadata omits it rather than guessing). The worker assignment carries those windows beside `settings`, because workers built before this change strictly validate `settings` but ignore unknown top-level fields; jobs created during the host-before-image rollout therefore still run on worker 0.1.4. Pi runtime 0.1.5 uses a host window only as a fallback for models missing from Pi's bundled catalog, so catalogued models keep their existing windows. Synthetic tests cover catalog snapshot, failure and missing metadata, the old-worker settings schema, bounds and fallback precedence. Moving the coding reviewer to Argon still requires publishing and pinning the 0.1.5 worker; no paid evidence exists yet.
