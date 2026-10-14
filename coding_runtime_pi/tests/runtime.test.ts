@@ -1213,3 +1213,41 @@ test("caller evidence survives clarification and four references coexist with an
   assert.deepEqual(result.referenceDocuments, referenceDocuments);
   assert.equal(result.plan!.text, detail);
 });
+
+test("configured checks use decreasing remaining task time beyond the interactive shell deadline", async () => {
+  const f = await fixture();
+  const commands = ["node --check sum.js", "node --check test.mjs"];
+  const timeouts: number[] = [];
+  const runtime = new CodingRuntime({
+    store: f.store,
+    model: scripted([
+      [report("plan", "Inspect source syntax and run the configured checks.")],
+      [report("done", "Source inspected; host checks remain authoritative.")],
+    ]),
+    executor: (task) => {
+      const local = localExecutor(task.workspace, join(f.root, "home"));
+      return async (command, signal, timeout, output) => {
+        if (commands.includes(command)) timeouts.push(timeout);
+        return local(command, signal, timeout, output);
+      };
+    },
+  });
+  const task = await runtime.start({
+    workspace: f.workspace,
+    objective: "Verify syntax",
+    checks: commands,
+    limits: { ms: 900000, models: 10, tools: 10 },
+  });
+  const planned = await runtime.run(task.id);
+  await runtime.approve(task.id, planned.plan!.revision, planned.plan!.hash);
+  const approved = await f.store.get(task.id);
+  approved.used.ms = 60000;
+  await f.store.save(approved);
+  const result = await runtime.run(task.id);
+  assert.equal(result.status, "completed", result.summary);
+  assert.equal(result.checks.length, 2);
+  assert.equal(timeouts.length, 2);
+  assert(timeouts[0]! > 120000 && timeouts[0]! < 840000);
+  assert(timeouts[1]! < timeouts[0]!);
+  assert(result.used.ms >= 60000);
+});

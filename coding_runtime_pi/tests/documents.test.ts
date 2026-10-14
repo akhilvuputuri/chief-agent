@@ -64,3 +64,46 @@ test("report identity binds full content and verdict independently of summary pr
   assert.equal(original.detail, base.detail);
   assert.throws(() => reportDocument({ ...base, detail: base.detail + "X" }));
 });
+
+test("complete maximum-size immutable evidence is paged without relaxing report bounds", async () => {
+  const text = "a".repeat(3999) + "😀" + "b".repeat(500000 - 4001);
+  const input = [{ id: "candidate_diff", title: "Bound candidate diff", text }];
+  const evidence = documents(input);
+  const restored: string[] = [];
+  for (let page = 0; page < 125; page++) {
+    const result = await evidence.tool.execute(
+      "read",
+      { id: "candidate_diff", page },
+      undefined,
+      undefined,
+      {} as any,
+    );
+    const chunk = JSON.parse((result.content[0] as any).text);
+    assert.equal(chunk.pages, 125);
+    assert(chunk.text.length <= 4002);
+    assert(!chunk.text.includes("�"));
+    for (let i = chunk.from; i < chunk.to; i++)
+      restored[i] = chunk.text[i - chunk.from];
+  }
+  assert.equal(restored.join(""), text);
+  assert.deepEqual(evidence.unread(), []);
+  assert.deepEqual(documents(input).unread(), ["candidate_diff"]);
+  assert.throws(() => documents([{ ...input[0]!, text: text + "X" }]));
+  assert.throws(() =>
+    documents(
+      Array.from({ length: 5 }, (_, i) => ({
+        id: `doc_${i}`,
+        title: "Bound",
+        text: "x",
+      })),
+    ),
+  );
+  assert.throws(() =>
+    reportDocument({
+      kind: "review",
+      summary: "Bound",
+      detail: "x".repeat(32001),
+      verdict: "APPROVE",
+    }),
+  );
+});

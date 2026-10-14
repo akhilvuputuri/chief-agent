@@ -5,6 +5,11 @@ import { z } from "zod";
 import type { CodingController } from "./controller.js";
 import { ModelError } from "../model.js";
 import { CodingModelFailure } from "./model-failure.js";
+import {
+  isTerminalHttpStatus,
+  retryParentHeader,
+  type TerminalHttpReceipt,
+} from "@chief-agent/pi-runtime/terminal-http-recovery";
 
 const message = z
   .object({
@@ -171,6 +176,7 @@ export async function codingApi(
                   job,
                   path.includes("/reviewer/") ? "reviewer" : "coder",
                   req.body,
+                  req.headers[retryParentHeader],
                 );
                 return response.stream
                   ? reply.type("text/event-stream").send(response.body)
@@ -213,18 +219,40 @@ export async function codingApi(
                     : error instanceof ModelError
                       ? "model_provider_failed"
                       : "worker_request_rejected";
-              await controller
+              const recorded = await controller
                 .recordRejection(job, {
                   phase: diagnosticPhase,
                   code,
                   httpStatus: 409,
                   ...(error instanceof CodingModelFailure ? error.details : {}),
                 })
-                .catch(() => {});
+                .catch(() => false);
+              const recovery: TerminalHttpReceipt | undefined =
+                recorded &&
+                path.endsWith("chat/completions") &&
+                job.settings.runtime === "pi" &&
+                !req.headers[retryParentHeader] &&
+                error instanceof CodingModelFailure &&
+                ["model_rate_limited", "model_transient_failure"].includes(
+                  error.code,
+                ) &&
+                isTerminalHttpStatus(error.details.providerStatus) &&
+                !error.details.timeoutKind &&
+                !error.details.finishReason &&
+                !error.details.providerFailure
+                  ? {
+                      version: 1,
+                      kind: "terminal-provider-http",
+                      callId: error.details.callId,
+                      attemptId: job.attempt_id!,
+                      providerStatus: error.details.providerStatus,
+                    }
+                  : undefined;
               return reply.code(409).send({
                 error:
                   "Coding request rejected; inspect job state before retrying",
                 code,
+                ...(recovery ? { recovery } : {}),
               });
             }
           },

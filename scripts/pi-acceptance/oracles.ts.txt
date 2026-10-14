@@ -1,0 +1,78 @@
+import { Execution as OracleExecution, recoverRuntime as oracleRecoverRuntime, readOperations as oracleReadOperations } from '../src/execution.js';
+import { action as globalAction } from '../src/protocol.js';
+import { codingAction as domainAction } from '../src/coding/schema.js';
+import ts from 'typescript';
+const workload = process.env.PI_ACCEPTANCE_WORKLOAD;
+if(!['runtime-neutral-approval','pinned-execution-status','owner-scoped-model-call-audit'].includes(workload ?? '')) throw new Error('An exact frozen workload ID is required');
+if (workload === 'runtime-neutral-approval') test('external oracle: runtime-neutral approval with preserved decisions', async () => {
+ const source = await readFile(new URL('../src/telegram.ts', import.meta.url), 'utf8');
+ const ast = ts.createSourceFile('telegram.ts', source, ts.ScriptTarget.Latest, true);
+ const fn = ast.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === 'codingDecisionNotice');
+ assert(fn, 'Existing notification entry point must remain');
+ const js = ts.transpileModule('export '+fn.getText(ast), {compilerOptions:{module:ts.ModuleKind.ESNext}}).outputText;
+ const {codingDecisionNotice} = await import('data:text/javascript;base64,'+Buffer.from(js).toString('base64'));
+ const approved = codingDecisionNotice({status:'approved',duplicate:false});
+ assert.match(approved,/approved/i);assert.match(approved,/queued/i);assert.match(approved,/sandbox/i);assert.match(approved,/draft PR/i);assert.doesNotMatch(approved,/Python|\bPi\b|\bNode\b/i);
+ assert.equal(codingDecisionNotice({status:'approved',duplicate:true}),'That requirement message was already decided. Ask Chief for the current coding status.');
+ assert.equal(codingDecisionNotice({status:'declined',duplicate:false}),'Requirement proposal declined. Tell Chief what to change.');
+ const description = runtimeContext({coding:true},null,undefined,new Set(['work'])).tools.find(t=>t.name==='coding_start')!.description;
+ assert.doesNotMatch(description,/Python implementation|Pi implementation|Node implementation/i);
+ assert.match(description,/confirmation/i);assert.match(description,/planning/i);
+});
+if (workload === 'pinned-execution-status') test('external oracle: execution profile comes from the owned job', async t => {
+ const f=await fixture(t), job=await f.start('profile','plan');
+ const description=runtimeContext({coding:true},null,undefined,new Set(['work'])).tools.find(t=>t.name==='coding_status')!.description;
+ assert.match(description,/pinned/i);assert.match(description,/execution|backend|runtime/i);assert.match(description,/not.*completion/i);
+ const notes={subtask:'Retained subtask',findings:'Observed finding',nextAction:'Remaining work',questions:''},stamp='2026-10-13T00:00:00.000Z';
+ await f.db.query("UPDATE coding_jobs SET checkpoint=checkpoint || $2::jsonb WHERE id=$1",[job.id,JSON.stringify({runtimeMemory:{scopeHash:'a'.repeat(64),leader:{notes,receipts:[{key:'b'.repeat(64),tool:'read'}],modelCalls:7,toolsUsed:12,compactions:2,nudges:1,resets:0,lastProgressAt:stamp}}})]);
+ for (const runtime of ['pi','python',undefined]) {
+  const pinned={...settings,runtime,model:'oracle/coder',leaderModel:'oracle/leader',reviewerModel:'oracle/reviewer',effort:'medium',privateSentinel:'NOT_FOR_STATUS_PRIVATE_MARKER'};
+  await f.db.query('UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1',[job.id,JSON.stringify(pinned)]);
+  const expected={runtime:runtime??'node',image:pinned.image,models:{leader:pinned.leaderModel,coder:pinned.model,reviewer:pinned.reviewerModel},effort:'medium'};
+  const detail=await f.c.status('a',job.id), list=await f.c.status('a');
+  assert.deepEqual(detail.execution,expected);assert.deepEqual(list.find((r:any)=>r.id===job.id).execution,expected);
+  assert(!JSON.stringify([detail,list]).includes('NOT_FOR_STATUS_PRIVATE_MARKER'));
+  for(const entry of [detail,list.find((r:any)=>r.id===job.id)]) {
+   assert.deepEqual(entry.runtime.notebook,notes);assert.equal(entry.runtime.member,'leader');assert.equal(entry.runtime.lastProgressAt,stamp);assert.equal(entry.runtime.workerModelCalls,7);assert.equal(entry.runtime.workerToolsUsed,12);assert.equal(entry.runtime.compactions,2);assert.equal(entry.runtime.nudges,1);assert.equal(entry.runtime.resets,0);assert.equal(entry.runtime.evidenceCount,1);assert.match(entry.runtime.notice,/not verified completion/i);
+  }
+  assert.equal(detail.settings,undefined);assert.equal(detail.used_models,0);assert.equal(detail.state,'queued');
+ }
+ await f.db.query("UPDATE coding_jobs SET settings=settings-'leaderModel' WHERE id=$1",[job.id]);
+ assert.equal((await f.c.status('a',job.id)).execution.models.leader,'oracle/coder');
+ await assert.rejects(f.c.status('b',job.id));f.revoke();await assert.rejects(f.c.status('a',job.id));
+ assert.equal(f.creates(),0);assert.equal(f.modelCalls(),0);assert.equal(f.publishes(),0);
+});
+if (workload === 'owner-scoped-model-call-audit') test('external oracle: strict owner/attempt-scoped model call audit', async t => {
+ const f=await fixture(t), job=await f.start('usage','plan');
+ const request={operation:'coding_model_usage',id:job.id};
+ assert(domainAction.safeParse(request).success);assert(globalAction.safeParse(request).success);
+ for(const bad of [{operation:'coding_model_usage'},{...request,id:'bad'},{...request,attemptId:randomUUID()},{...request,user:'b'}]) {assert(!domainAction.safeParse(bad).success);assert(!globalAction.safeParse(bad).success);}
+ assert(!runtimeContext({},null).tools.some(t=>t.name==='coding_model_usage'));
+ assert(runtimeContext({coding:true},null,undefined,new Set(['work'])).tools.some(t=>t.name==='coding_model_usage'));
+ const zero={jobId:job.id,attemptId:null,total:0,states:{pending:0,complete:0,uncertain:0},roles:{leader:0,coder:0,reviewer:0},purposes:{agent:0,compaction:0,unknown:0}};
+ assert.deepEqual(await f.c.call('a',randomUUID(),request as any),zero);
+ const attempt=randomUUID(), old=randomUUID();await f.db.query('UPDATE coding_jobs SET attempt_id=$2 WHERE id=$1',[job.id,attempt]);
+ const cases=[['leader','complete','agent'],['coder','complete','compaction'],['coder','uncertain',undefined],['reviewer','pending','unexpected']];
+ for(const [role,state,purpose] of cases) await f.db.query('INSERT INTO coding_model_calls(id,job_id,attempt_id,role,request_hash,state,input) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)',[randomUUID(),job.id,attempt,role,'oracle-hash',state,JSON.stringify({purpose,messages:[{content:'PRIVATE_SENTINEL'}]})]);
+ await f.db.query("INSERT INTO coding_model_calls(id,job_id,attempt_id,role,request_hash,state,input) VALUES($1,$2,$3,'coder','old','complete','{}')",[randomUUID(),job.id,old]);
+ const before=await f.row(job.id);
+ const expected={jobId:job.id,attemptId:attempt,total:4,states:{pending:1,complete:2,uncertain:1},roles:{leader:1,coder:2,reviewer:1},purposes:{agent:1,compaction:1,unknown:2}};
+ assert.deepEqual(await f.c.call('a',randomUUID(),request as any),expected);
+ const tool=new JobTools(f.db,{call:async()=>({})},undefined,undefined,undefined,undefined,undefined,undefined,undefined,undefined,undefined,f.c);
+ assert.deepEqual(await tool.execute('a',f.run,request),expected);
+ assert.deepEqual(await f.row(job.id),before);
+ await assert.rejects(f.c.call('b',randomUUID(),request as any));
+ await assert.rejects(f.c.call('a',randomUUID(),{...request,id:randomUUID()} as any));
+ f.revoke();await assert.rejects(f.c.call('a',randomUUID(),request as any));
+ assert.equal(f.creates(),0);assert.equal(f.modelCalls(),0);assert.equal(f.publishes(),0);
+});
+
+if (workload === 'owner-scoped-model-call-audit') test('external oracle: usage audit is journaled and recovered as a read', async t => {
+ const f=await fixture(t);
+ assert(oracleReadOperations.has('coding_model_usage'),'Audit must be classified as a read by host execution');
+ const ex=new OracleExecution(f.db,'a',f.run,new AbortController().signal);await ex.start();
+ const id=await ex.beginCall('oracle-read-classification','coding_model_usage',{operation:'coding_model_usage',id:randomUUID()});
+ assert.deepEqual((await f.db.query('SELECT operation,is_write,state FROM runtime_calls WHERE id=$1',[id])).rows,[{operation:'coding_model_usage',is_write:false,state:'started'}]);
+ await oracleRecoverRuntime(f.db);
+ assert.deepEqual((await f.db.query('SELECT operation,is_write,state FROM runtime_calls WHERE id=$1',[id])).rows,[{operation:'coding_model_usage',is_write:false,state:'interrupted'}]);
+});

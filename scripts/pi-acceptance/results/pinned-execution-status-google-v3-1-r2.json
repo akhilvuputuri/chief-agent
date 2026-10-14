@@ -1,0 +1,37 @@
+{
+  "dateUtc": "2026-10-13",
+  "case": "pinned-execution-status-google-v3-1-r2",
+  "harness": "7b250479461e8832ad4fdf43cf3f8ef47d2551d6",
+  "source": "9abd9d0b0d5042a89e773db463cf78f00e52539b",
+  "workloadRevision": 3,
+  "build": {
+    "id": "chief-coding:3faafaa5-21e2-40e1-ab39-bdd57ab98ebe",
+    "status": "STOPPED",
+    "start": "2026-10-13T15:51:42.728Z",
+    "end": "2026-10-13T16:21:42.816Z",
+    "seconds": 1800
+  },
+  "outcome": "operator_stopped_at_user_requested_checkpoint",
+  "providerAdmissions": 284,
+  "completeGenerations": 284,
+  "providerOutcomes": {
+    "complete": 284
+  },
+  "reportedCostUsd": 2.0119824,
+  "billingUnknown": 0,
+  "purposes": {
+    "agent": 276,
+    "compaction": 8
+  },
+  "lastSavedArtifactPhase": "plan",
+  "finalImplementationArtifactAvailable": false,
+  "checks": "not reached",
+  "review": "not reached",
+  "oraclePassed": false,
+  "publication": "not performed",
+  "productionJobWrites": 0,
+  "injectedTerminalFailures": false,
+  "recoveryObserved": false,
+  "limits": "Operator stop is not a natural runtime failure or successful acceptance. Only the planning artifact was exported before stop; final implementation/session evidence is unavailable. No provider failure occurred to exercise recovery.",
+  "routeRemoved": true
+}

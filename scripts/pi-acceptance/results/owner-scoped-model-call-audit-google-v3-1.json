@@ -1,0 +1,111 @@
+{
+  "date": "2026-10-13",
+  "case": "owner-scoped-model-call-audit-google-v3-1",
+  "harness": "9229c38f236a37c330d8f4cb55ec9fa71621a726",
+  "source": "9abd9d0b0d5042a89e773db463cf78f00e52539b",
+  "workloadRevision": 3,
+  "build": "chief-coding:a60556e1-1f2c-4dc7-8b7a-242f18e41174",
+  "codeBuildStatus": "FAILED",
+  "codeBuildSeconds": 931,
+  "runtimeSeconds": 902,
+  "state": "paused",
+  "phase": "incomplete",
+  "knownPauseReason": "Model run did not finish cleanly; session retained",
+  "models": {
+    "leader": "google/gemini-3.8-flash",
+    "coder": "google/gemini-3.8-flash",
+    "reviewer": "openai/gpt-6.1-sol"
+  },
+  "providerAdmissions": 209,
+  "providerDispatches": 209,
+  "completeGenerations": 208,
+  "providerOutcomes": {
+    "complete": 208,
+    "failed_known": 1
+  },
+  "reportedCostUsd": 1.35122625,
+  "billingUnknown": 1,
+  "hostModelCalls": 209,
+  "roles": {
+    "leader": 33,
+    "coder": 176
+  },
+  "purposes": {
+    "agent": 206,
+    "compaction": 3
+  },
+  "nativeEvidence": {
+    "sessionCount": 2,
+    "failedTools": 3,
+    "successfulReads": 195,
+    "uniqueReads": 147,
+    "repeatedReads": 48,
+    "documentReads": 12,
+    "repeatedDocumentReads": 9,
+    "firstSavedChangeSeconds": null,
+    "tools": {
+      "grep": 88,
+      "read": 94,
+      "report": 1,
+      "read_document": 12,
+      "find": 2,
+      "ls": 1,
+      "bash": 7
+    },
+    "compactions": [
+      {
+        "beforeTokens": 21977,
+        "afterTokens": 1100,
+        "projectedTokens": 8394,
+        "projectedBytes": 33748,
+        "summaryCharacters": 4400,
+        "retainedMessages": 0
+      },
+      {
+        "beforeTokens": 17637,
+        "afterTokens": 1179,
+        "projectedTokens": 8473,
+        "projectedBytes": 34068,
+        "summaryCharacters": 4714,
+        "retainedMessages": 0
+      },
+      {
+        "beforeTokens": 21342,
+        "afterTokens": 1216,
+        "projectedTokens": 8510,
+        "projectedBytes": 34209,
+        "summaryCharacters": 4863,
+        "retainedMessages": 0
+      }
+    ]
+  },
+  "checks": [],
+  "review": null,
+  "files": [],
+  "oraclePassed": false,
+  "originalScopePresent": true,
+  "approval": "synthetic exact-brief confirmation",
+  "delivery": "synthetic callback receipts",
+  "artifactHash": "266a24608d21b1d56e6f51f822b3a516b9908a006afd3cacf7366d07b730626f",
+  "compiledDigests": {
+    "coding_runtime_pi/dist/runtime.js": "069c0ee2d0c4266165ec00404d0675d384e5f7f6f91ad807be0f2dd66718a65c",
+    "coding_runtime_pi/dist/documents.js": "d5faa72e5736546d3340cc175b18c4b0bf56ff1de15ad2265732e8a6bf13ce15",
+    "coding_runtime_pi/dist/report.js": "ff29693fd3e12bc04758627d959a709f58f215ff64a786f9e9b49cc6545d4741",
+    "dist/coding/pi-worker.js": "0734af64f9fe2f2a287f2165e72969708628d472a9e475633781fb41959b6dea",
+    "dist/coding/pi-review-evidence.js": "4b53ce8b753d4559ceb6cea019c054b840dd6f92f341ffa8fb369c68402dae8b",
+    "dist/coding/controller.js": "54860527721df13c422f129bccb0c55732a4a65501fbf6f7e7261aba0884207c"
+  },
+  "publication": "not performed",
+  "productionJobWrites": 0,
+  "execution": "candidate source overlay on verified base image",
+  "routeRemoved": true,
+  "terminalProviderFailure": {
+    "httpStatus": 504,
+    "purpose": "agent",
+    "requestedOutputTokens": 16000,
+    "requestBytes": 149938,
+    "messages": 76,
+    "outcomeKnown": true,
+    "billingUnknown": true
+  }
+}

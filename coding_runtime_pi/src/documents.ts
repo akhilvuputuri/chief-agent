@@ -2,7 +2,7 @@ import { Type } from "typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   documentHash,
-  reportLimits,
+  referenceLimits,
   type ReferenceDocument,
 } from "./report.js";
 
@@ -21,7 +21,7 @@ export function documents(
       d.title.length > 200 ||
       !d.text.trim() ||
       Buffer.from(d.text).toString() !== d.text ||
-      d.text.length > reportLimits.document
+      d.text.length > referenceLimits.document
     )
       throw new Error("Invalid reference document");
     entries.set(d.id, { ...d });

@@ -1,0 +1,93 @@
+{
+  "date": "2026-10-13",
+  "case": "owner-scoped-model-call-audit-openai-1",
+  "harness": "e56a3c8cb21d388b76fadc7113dd3f5e2e85df37",
+  "source": "9abd9d0b0d5042a89e773db463cf78f00e52539b",
+  "workloadRevision": 2,
+  "build": "chief-coding:58b9b345-9b47-4244-a1c7-bbc3d3f0d7f4",
+  "codeBuildStatus": "FAILED",
+  "outcome": "paused during implementation: Symlink paths are unsupported",
+  "runtimeSeconds": 516,
+  "codeBuildSeconds": 543,
+  "providerDispatches": 27,
+  "completeGenerations": 27,
+  "reportedCostUsd": 0.6522911,
+  "billingUnknown": 0,
+  "models": {
+    "leader": "openai/gpt-6.1-sol",
+    "coder": "openai/gpt-6.1-sol",
+    "reviewer": "anthropic/claude-sonnet-5.5"
+  },
+  "purposes": {
+    "agent": 24,
+    "compaction": 3
+  },
+  "nativeEvidence": {
+    "tools": {
+      "read_document": 12,
+      "bash": 8,
+      "read": 49,
+      "grep": 15,
+      "find": 5,
+      "ls": 5,
+      "edit": 7,
+      "report": 1
+    },
+    "failedTools": 7,
+    "successfulReads": 83,
+    "uniqueReads": 73,
+    "repeatedReads": 10,
+    "documentReads": 12,
+    "repeatedDocumentReads": 8,
+    "firstSavedChangeSeconds": 394,
+    "compactions": [
+      {
+        "beforeTokens": 43075,
+        "afterTokens": 11339,
+        "projectedTokens": 18529,
+        "projectedBytes": 79735,
+        "summaryCharacters": 5236,
+        "retainedMessages": 12
+      },
+      {
+        "beforeTokens": 31870,
+        "afterTokens": 8579,
+        "projectedTokens": 15769,
+        "projectedBytes": 98818,
+        "summaryCharacters": 6139,
+        "retainedMessages": 24
+      },
+      {
+        "beforeTokens": 39949,
+        "afterTokens": 10263,
+        "projectedTokens": 16710,
+        "projectedBytes": 72695,
+        "summaryCharacters": 5591,
+        "retainedMessages": 6
+      }
+    ]
+  },
+  "savedFiles": [
+    "src/coding/controller.ts",
+    "src/coding/schema.ts",
+    "src/execution.ts",
+    "src/protocol.ts",
+    "src/runtime.ts",
+    "src/tools.ts"
+  ],
+  "observedPathOutsideManifest": ["src/execution.ts"],
+  "checks": [],
+  "review": "not reached",
+  "oracle": "not run; worker did not reach a reviewed candidate",
+  "approval": "synthetic exact-brief confirmation",
+  "delivery": "synthetic callback receipts",
+  "originalScopePresent": true,
+  "artifactHash": "6e45f3798a4b1f5753fdfd1c5057c202e37411a4ec3b15ea1a4902691befa140",
+  "symlinkOrigin": "Agent bash command linked external acceptance-control node_modules into candidate; trailing-slash directory ignore did not ignore symlink, snapshot rejected it.",
+  "publication": "not performed",
+  "productionJobWrites": 0,
+  "routeRemoved": true,
+  "otherWaveCasesStarted": false,
+  "execution": "compiled candidate overlay on verified Pi 0.1.3 base image",
+  "limitations": "Independent review confirmed v2 omitted the required execution.ts integration from permitted paths and failed to test host read/write classification. The execution.ts edit is not fairly graded as a model scope violation. The separate model-created symlink still caused the observed snapshot rejection; no regrading or pooling with revision3."
+}

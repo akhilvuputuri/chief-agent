@@ -7,6 +7,9 @@ export const reportLimits = Object.freeze({
   summary: 4000,
   question: 2000,
 });
+// Immutable evidence is paged separately from model-written report documents.
+// This admits the complete existing host patch bound without larger wire pages.
+export const referenceLimits = Object.freeze({ document: 500000 });
 export type ReportDocument = Report & { version: 1; hash: string };
 export function reportDocument(report: Report): ReportDocument {
   if (

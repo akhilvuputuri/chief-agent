@@ -1,6 +1,6 @@
 {
   "name": "@chief-agent/pi-runtime",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "type": "module",
   "description": "Independent Pi-based learn, plan and approved-build runtime",
@@ -9,7 +9,8 @@
   },
   "exports": {
     ".": "./dist/index.js",
-    "./report": "./dist/report.js"
+    "./report": "./dist/report.js",
+    "./terminal-http-recovery": "./dist/terminal-http-recovery.js"
   },
   "bin": {
     "pi-runtime": "./dist/cli.js"

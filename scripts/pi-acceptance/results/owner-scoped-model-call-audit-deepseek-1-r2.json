@@ -1,0 +1,60 @@
+{
+  "date": "2026-10-13",
+  "case": "owner-scoped-model-call-audit-deepseek-1-r2",
+  "harness": "e56a3c8cb21d388b76fadc7113dd3f5e2e85df37",
+  "source": "9abd9d0b0d5042a89e773db463cf78f00e52539b",
+  "workloadRevision": 2,
+  "build": "chief-coding:a7e28103-4346-488d-be49-5afe514d7fda",
+  "codeBuildStatus": "FAILED",
+  "outcome": "paused during final planning call at the existing five-minute deadline",
+  "runtimeSeconds": 757,
+  "codeBuildSeconds": 813,
+  "providerDispatches": 23,
+  "completeGenerations": 22,
+  "reportedCostUsd": 0.0132876324,
+  "billingUnknown": 1,
+  "finalRelayOutcome": "unresolved; aborted dispatch retained without replay",
+  "requestedFinalOutputTokens": 16000,
+  "finalRequestBytes": 94347,
+  "finalRequestMessages": 27,
+  "finalRequestSeconds": 300.277,
+  "roles": {
+    "leader": 23
+  },
+  "purposes": {
+    "agent": 22,
+    "compaction": 1
+  },
+  "models": {
+    "leader": "deepseek/deepseek-v4.1-flash",
+    "coder": "deepseek/deepseek-v4.1-flash",
+    "reviewer": "openai/gpt-6.1-sol"
+  },
+  "nativeEvidence": {
+    "successfulReads": 32,
+    "uniqueReads": 31,
+    "repeatedReads": 1,
+    "compactions": [
+      {
+        "beforeTokens": 35498,
+        "afterTokens": 12740,
+        "projectedTokens": 19187,
+        "projectedBytes": 88339,
+        "summaryCharacters": 5496,
+        "retainedMessages": 22
+      }
+    ],
+    "firstSavedChangeSeconds": null
+  },
+  "checks": [],
+  "savedFiles": 0,
+  "oraclePassed": false,
+  "originalScopePresent": true,
+  "artifactHash": "266a24608d21b1d56e6f51f822b3a516b9908a006afd3cacf7366d07b730626f",
+  "approval": "not reached",
+  "delivery": "not reached",
+  "publication": "not performed",
+  "productionJobWrites": 0,
+  "routeRemoved": true,
+  "execution": "compiled candidate overlay on verified Pi 0.1.3 base image"
+}

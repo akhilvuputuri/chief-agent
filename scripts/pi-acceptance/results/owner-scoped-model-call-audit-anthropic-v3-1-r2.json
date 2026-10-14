@@ -1,0 +1,131 @@
+{
+  "date": "2026-10-13",
+  "case": "owner-scoped-model-call-audit-anthropic-v3-1-r2",
+  "harness": "9229c38f236a37c330d8f4cb55ec9fa71621a726",
+  "source": "9abd9d0b0d5042a89e773db463cf78f00e52539b",
+  "workloadRevision": 3,
+  "build": "chief-coding:e8a02887-42ac-4151-8465-bea2a87e2629",
+  "codeBuildStatus": "FAILED",
+  "codeBuildSeconds": 970,
+  "runtimeSeconds": 940,
+  "state": "paused",
+  "phase": "incomplete",
+  "knownPauseReason": "Checks failed; artifact and session retained",
+  "models": {
+    "leader": "anthropic/claude-sonnet-5.5",
+    "coder": "anthropic/claude-sonnet-5.5",
+    "reviewer": "openai/gpt-6.1-sol"
+  },
+  "providerAdmissions": 30,
+  "providerDispatches": 30,
+  "completeGenerations": 30,
+  "providerOutcomes": {
+    "complete": 30
+  },
+  "reportedCostUsd": 1.980396,
+  "billingUnknown": 0,
+  "hostModelCalls": 30,
+  "roles": {
+    "leader": 9,
+    "coder": 21
+  },
+  "purposes": {
+    "agent": 30
+  },
+  "nativeEvidence": {
+    "sessionCount": 2,
+    "failedTools": 2,
+    "successfulReads": 28,
+    "uniqueReads": 28,
+    "repeatedReads": 0,
+    "documentReads": 3,
+    "repeatedDocumentReads": 0,
+    "firstSavedChangeSeconds": 80,
+    "tools": {
+      "read_document": 3,
+      "bash": 19,
+      "report": 2,
+      "grep": 14,
+      "read": 11
+    },
+    "compactions": []
+  },
+  "checks": [
+    {
+      "command": "npm ci",
+      "exitCode": 0
+    },
+    {
+      "command": "npm run check",
+      "exitCode": 0
+    },
+    {
+      "command": "npm run build",
+      "exitCode": 0
+    },
+    {
+      "command": "npm run format:check",
+      "exitCode": 1
+    }
+  ],
+  "review": null,
+  "files": [
+    {
+      "path": "src/coding/controller.ts",
+      "mode": "100644",
+      "sha256": "b0381aed93b33c37fdb765e93eb4ca50634b84099baa79e0ed3bb924c33dca19"
+    },
+    {
+      "path": "src/coding/schema.ts",
+      "mode": "100644",
+      "sha256": "acb0a8777cd5514e7880bd306ed74cc00b3d28fdff1977f5e705531121544880"
+    },
+    {
+      "path": "src/execution.ts",
+      "mode": "100644",
+      "sha256": "d28159ed0bb57b95b746aeeb1db3fa1bf2a200cc2b14903346af4f594f94fd3b"
+    },
+    {
+      "path": "src/protocol.ts",
+      "mode": "100644",
+      "sha256": "33356bdfc946e5609b20e49e83cfbe862f41e06e712b80b97d7589d8476e5fb2"
+    },
+    {
+      "path": "src/runtime.ts",
+      "mode": "100644",
+      "sha256": "0846edade569708541ea93cd2d7972c8da6a98b65c1db051c3aa5c225497c164"
+    },
+    {
+      "path": "src/tools.ts",
+      "mode": "100644",
+      "sha256": "3cb1c8662ad4721e172686cc4846e6b73ef87d58fcf2519faaa6e361828dcb77"
+    },
+    {
+      "path": "tests/coding-model-usage.test.ts",
+      "mode": "100644",
+      "sha256": "3cd19c0e9a0e36341fd616abe37b9cb7d8f20d099311d4390b8f77f4bfc4b6b4"
+    },
+    {
+      "path": "tests/coding.test.ts",
+      "mode": "100644",
+      "sha256": "7b3e2c8e9799c9d501ee0c5e3ab3ba3b10379acde8f5d9dc2cda63987619012c"
+    }
+  ],
+  "oraclePassed": false,
+  "originalScopePresent": true,
+  "approval": "synthetic exact-brief confirmation",
+  "delivery": "synthetic callback receipts",
+  "artifactHash": "697f7a0f70f43ca67024b8fbdf75a2d4f17eae8ccf4fb3da09fa43d81533940d",
+  "compiledDigests": {
+    "coding_runtime_pi/dist/runtime.js": "069c0ee2d0c4266165ec00404d0675d384e5f7f6f91ad807be0f2dd66718a65c",
+    "coding_runtime_pi/dist/documents.js": "d5faa72e5736546d3340cc175b18c4b0bf56ff1de15ad2265732e8a6bf13ce15",
+    "coding_runtime_pi/dist/report.js": "ff29693fd3e12bc04758627d959a709f58f215ff64a786f9e9b49cc6545d4741",
+    "dist/coding/pi-worker.js": "0734af64f9fe2f2a287f2165e72969708628d472a9e475633781fb41959b6dea",
+    "dist/coding/pi-review-evidence.js": "4b53ce8b753d4559ceb6cea019c054b840dd6f92f341ffa8fb369c68402dae8b",
+    "dist/coding/controller.js": "54860527721df13c422f129bccb0c55732a4a65501fbf6f7e7261aba0884207c"
+  },
+  "publication": "not performed",
+  "productionJobWrites": 0,
+  "execution": "candidate source overlay on verified base image",
+  "routeRemoved": true
+}

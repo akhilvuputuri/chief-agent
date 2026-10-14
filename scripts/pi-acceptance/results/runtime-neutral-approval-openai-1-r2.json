@@ -1,0 +1,86 @@
+{
+  "date": "2026-10-13",
+  "case": "runtime-neutral-approval-openai-1-r2",
+  "harness": "6aa01302c9da0b6b72e6e1e310d1ff7a99d176b3",
+  "source": "9abd9d0b0d5042a89e773db463cf78f00e52539b",
+  "workloadRevision": 2,
+  "build": "chief-coding:a76f1c78-2f5a-432d-9d28-6186bc0edf5b",
+  "codeBuildStatus": "SUCCEEDED",
+  "outcome": "accepted-candidate",
+  "seconds": 908,
+  "roles": {
+    "leader": 9,
+    "coder": 6,
+    "reviewer": 2
+  },
+  "purposes": {
+    "agent": 16,
+    "compaction": 1
+  },
+  "providerDispatches": 17,
+  "reportedCostUsd": 0.3134552,
+  "billingUnknown": 0,
+  "nativeEvidence": {
+    "sessionCount": 3,
+    "tools": {
+      "bash": 3,
+      "read": 18,
+      "grep": 12,
+      "edit": 2,
+      "report": 3,
+      "find": 2
+    },
+    "failedTools": 2,
+    "successfulReads": 30,
+    "uniqueReads": 28,
+    "repeatedReads": 2,
+    "documentReads": 0,
+    "repeatedDocumentReads": 0,
+    "compactions": [
+      {
+        "beforeTokens": 30822,
+        "afterTokens": 7302,
+        "projectedTokens": 13536,
+        "projectedBytes": 68786,
+        "summaryCharacters": 3581,
+        "retainedMessages": 17
+      }
+    ],
+    "firstSavedChangeSeconds": 109
+  },
+  "checks": [
+    {
+      "command": "npm ci",
+      "exitCode": 0
+    },
+    {
+      "command": "npm run check",
+      "exitCode": 0
+    },
+    {
+      "command": "npm run build",
+      "exitCode": 0
+    },
+    {
+      "command": "npm run format:check",
+      "exitCode": 0
+    }
+  ],
+  "review": "APPROVE",
+  "oraclePassed": true,
+  "scopePreserved": true,
+  "artifactHash": "d0d461c91d361c0a9940677b3c78984ef4d818ca0a608aad36a52764034f106a",
+  "publication": "not performed",
+  "productionJobWrites": 0,
+  "compactionLimit": "This paid run retained a fitting tail; oversized-tail replacement is directly covered by native regressions.",
+  "baseImage": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:7c0ab4236340a6d50c0f0ef9675bb9e71e8f5780bb9d0e8d6af57155a0a843e8",
+  "execution": "compiled candidate overlay on verified Pi 0.1.3 base image",
+  "approval": "synthetic exact-brief confirmation",
+  "delivery": "synthetic callback receipts",
+  "routeRemoved": true,
+  "models": {
+    "leader": "openai/gpt-6.1-sol",
+    "coder": "openai/gpt-6.1-sol",
+    "reviewer": "anthropic/claude-sonnet-5.5"
+  }
+}

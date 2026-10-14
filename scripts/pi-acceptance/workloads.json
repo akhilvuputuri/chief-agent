@@ -1,0 +1,33 @@
+{
+  "version": 3,
+  "source": "9abd9d0b0d5042a89e773db463cf78f00e52539b",
+  "scope": "Disposable acceptance candidates only; these benchmark changes are not authorized for merging into the product by this manifest.",
+  "checks": ["npm run check", "npm run build", "npm run format:check"],
+  "workloads": [
+    {
+      "id": "runtime-neutral-approval",
+      "objective": "Fix the misleading Python-specific implementation wording. The coding_start tool description in src/runtime.ts and approved coding requirement notification in src/telegram.ts must describe coding implementation without claiming a particular runtime, so the same wording is accurate for Pi, Python and legacy Node jobs. Preserve the confirmation boundary, queued sandbox, draft-PR promise and duplicate/rejected notification behavior. Change only those two source files; no tests, configuration or package scripts.",
+      "paths": ["src/runtime.ts", "src/telegram.ts"]
+    },
+    {
+      "id": "pinned-execution-status",
+      "objective": "Expose the exact job-pinned execution profile in coding_status detail and list results as execution: {runtime,image,models:{leader,coder,reviewer},effort}. Use persisted job settings, not current configuration/preferences. Historical missing runtime means node; missing leaderModel means the job model. Preserve the existing runtime notebook object and every existing status field. Do not return raw settings or private model inputs. Update the coding_status tool description to explain the profile is pinned and does not prove completion. Preserve owner isolation and make no writes, provider calls or job state transitions. Change only src/coding/controller.ts and src/runtime.ts, plus relevant tests if needed.",
+      "paths": ["src/coding/controller.ts", "src/runtime.ts", "tests/"]
+    },
+    {
+      "id": "owner-scoped-model-call-audit",
+      "objective": "Add a read-only coding_model_usage tool with exactly {operation:'coding_model_usage',id:<job UUID>}. Integrate strict domain and global protocol schemas, JobTools dispatch, runtime tool availability/description and CodingController. Return {jobId,attemptId,total,states:{pending,complete,uncertain},roles:{leader,coder,reviewer},purposes:{agent,compaction,unknown}} for coding_model_calls belonging to the owned job and its current attempt only. Every counter is a nonnegative integer, including zero. Null attempt returns zero counts and attemptId:null. Map input.purpose 'agent'/'compaction' to their buckets; missing or other values to unknown. Never return raw input/output, messages, tokens, secrets or job settings. Reject nonexistent/foreign jobs and revoked owners. This read must not need a foreground turn, mutate data, call a provider or change job state. Expose the tool only when coding capability is enabled; describe counts as admitted call states, not verified completion, billing or useful progress. Preserve existing coding tools/approval paths and legacy runtime behavior. Register the tool as a read in host execution so call journals use is_write:false and interrupted recovery classifies it as an interrupted read, not an uncertain write. No database migration, dependency, infrastructure or allocation changes. Modify only the relevant src protocol/runtime/tools/execution/coding modules and tests. Preserve normal JobTools audit receipts; the no-write restriction applies to coding jobs, attempts and model-call records.",
+      "paths": [
+        "src/protocol.ts",
+        "src/runtime.ts",
+        "src/tools.ts",
+        "src/coding/",
+        "tests/",
+        "src/tool-domains.ts",
+        "src/execution.ts"
+      ]
+    }
+  ],
+  "fixtureSource": "e4b71ad71d92a4de974c7f75943499cbc6725491",
+  "baseImage": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:7c0ab4236340a6d50c0f0ef9675bb9e71e8f5780bb9d0e8d6af57155a0a843e8"
+}
