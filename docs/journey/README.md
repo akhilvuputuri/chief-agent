@@ -94,6 +94,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 11 October | [82 — Pi report contract](82-pi-report-contract.md): why did complete plans fail at handoff? | Candidate full-document contract and workflow tests; paid/review/release pending |
 | 14 October | [84 — Shared a-stack workflow](84-shared-agent-workflow.md): how can the development workflow apply across repositories without copies drifting? | Released: Chief adopted the shared workflow (deployed `7373ea8`), pinned to `workflow--v0.1.1`; model-context and cloud loading unverified |
 | 15 October | [85 — Provider routing stability](85-provider-routing-stability.md): why do coding jobs keep pausing on provider faults? | In progress: price-sorted routing removed, main/standard models moved to Gemini 4 Argon, coding reviewer kept on Sol pending a worker context-window fix; review and release pending |
+| 15 October | [86 — Bulletin learning from Reader saves](86-news-reader-saves.md): how can the bulletin learn from what the owner actually saves, including from Safari? | In review: Save-to-Reader buttons, five suggestions, word-overlap ranking from Reader saves; not deployed |
 
 ## Coding-agent learning path
 

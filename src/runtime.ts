@@ -299,11 +299,11 @@ export function runtimeContext(
               news_source_remove:
                 "Stop following a site by exact id from news_status. Removing the last site turns the daily bulletin off.",
               news_settings:
-                "Configure the daily bulletin: deliveryTime 'HH:MM' Singapore time (null clears), topics (phrases that rank matching items higher; replaces the list, null clears), itemsPerEdition 1-8 (default 5), enabled. Turning it on needs a time and at least one site; ask the owner for missing preferences instead of choosing them. Report the returned nextEdition.",
+                "Configure the daily bulletin: deliveryTime 'HH:MM' Singapore time (null clears), topics (phrases that rank matching items higher; replaces the list, null clears), itemsPerEdition 1-5 (default 5), enabled. Turning it on needs a time and at least one site; ask the owner for missing preferences instead of choosing them. Report the returned nextEdition.",
               news_status:
-                "Show bulletin settings, followed sites and their fetch health, recent editions with 👍/👎 counts, and what the owner's votes have taught (per site and topic).",
+                "Show bulletin settings, followed sites and their fetch health, recent editions with how many items were saved to Reader, and what the owner's Reader saves have taught (top sites, frequent title words, often-saved sites not yet followed). If reader.note is present, relay it.",
               news_edition_now:
-                "Send a bulletin now (preview or extra edition, at most 3 per day). It arrives as its own Telegram message with 👍/👎 buttons; do not repeat its items in your reply.",
+                "Send a bulletin now (preview or extra edition, at most 3 per day). It arrives as its own Telegram message with Save-to-Reader buttons; do not repeat its items in your reply.",
               gmail_accounts:
                 "List connected Gmail account selectors and email addresses. Owner-only; no credentials returned.",
               gmail_search:

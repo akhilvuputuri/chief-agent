@@ -1,3 +1,7 @@
+# News bulletin learns from Reader saves — in review, 15 October 2026
+
+The bulletin's 👍/👎 buttons are replaced by one 📥 Save-to-Reader button per item, and editions are capped at five suggestions. Ranking now uses the owner's Reader library, including Safari saves, through a new read-only, owner-opted-in Reader listing (title, link, site and save time): site affinity plus word overlap with recent saves. Already-saved links are never suggested. App-only for Chief (no migration); Reader needs its own release first, and the owner must turn on sharing for Chief's connection. Local mocked tests pass; review, merge and both deployments are pending. [Journal 86](journey/86-news-reader-saves.md).
+
 # Provider routing stability and Gemini 4 Argon — 15 October 2026
 
 The v0.3.71 canary paused when OpenRouter provider OpenInference stalled and disconnected mid-plan. Every provider-attributed coding pause in the prior 14 days came from small DeepSeek hosts selected by the forced `sort: "price"` routing. Candidate v0.3.72 removes that sort while keeping price ceilings, and, at the owner's direction, moves the main model and standard agent tier from GPT-6.1 Sol to Gemini 4 Argon (same $2/$10 per million ceiling). The coding reviewer stays on Sol until the worker passes Argon's real context window (Pi's catalog lacks Argon and would assume 32k). DeepSeek coding/planning and the Gemini 3.8 Flash fast tier are unchanged. Review, release, effective-model verification and a canary remain. [Journal 85](journey/85-provider-routing-stability.md).

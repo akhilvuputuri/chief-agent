@@ -64,7 +64,7 @@ export const DOMAIN_SUMMARIES: Record<ToolDomain, string> = {
   parcels: "awaited parcels from email or the owner",
   library: "NLB ebook availability and the linked card's shelf",
   watchlist: "stock price-drop watchlist and read-only IBKR holdings",
-  news: "daily news bulletin from followed sites, topics and 👍/👎 learning",
+  news: "daily news bulletin from followed sites, topics and learning from Reader saves",
   routines: "scheduled independent agent routines",
   responsibilities:
     "owner-confirmed ongoing concerns, changes, attention and monitoring history",

@@ -306,7 +306,7 @@ export const action = z.discriminatedUnion("operation", [
         .max(20)
         .nullable()
         .optional(),
-      itemsPerEdition: z.number().int().min(1).max(8).optional(),
+      itemsPerEdition: z.number().int().min(1).max(5).optional(),
       enabled: z.boolean().optional(),
     })
     .strict(),

@@ -25,7 +25,7 @@ const toolGrant = z
       .regex(/^[a-zA-Z_][a-zA-Z0-9_]{0,99}$/)
       .optional(),
     result: z
-      .enum(["generic", "reader_receipt", "reader_status"])
+      .enum(["generic", "reader_receipt", "reader_status", "reader_saved"])
       .default("generic"),
   })
   .strict()
@@ -128,6 +128,34 @@ const submission = z.object({
   status: z.enum(["queued", "processing", "ready", "bookmark"]),
   error: z.string().max(2000).nullable(),
 });
+// One malformed or oversized record must not discard the whole page: long
+// text is cut, and a record that still does not fit the metadata contract is
+// skipped. Anything beyond that contract is dropped, never passed through.
+const savedArticle = z.object({
+  url: z.string().url().max(2048),
+  title: z.string().transform((t) => [...t].slice(0, 300).join("")),
+  site: z
+    .string()
+    .nullable()
+    .transform((t) => (t === null ? null : [...t].slice(0, 200).join(""))),
+  domain: z.string().min(1).max(253),
+  saved_at: z.string().datetime({ offset: true }),
+  prepared: z.boolean().optional(),
+});
+const savedArticles = z
+  .object({
+    articles: z.array(z.unknown()).max(200),
+    next: z.string().max(200).nullable(),
+  })
+  .transform((page) => ({
+    articles: page.articles.flatMap((a) => {
+      const parsed = savedArticle.safeParse(a);
+      return parsed.success ? [parsed.data] : [];
+    }),
+    skipped: page.articles.filter((a) => !savedArticle.safeParse(a).success)
+      .length,
+    next: page.next,
+  }));
 function decode(result: unknown, kind: string) {
   if (kind === "generic") return result;
   const r = result as {
@@ -137,6 +165,7 @@ function decode(result: unknown, kind: string) {
   const data =
     r.structuredContent ??
     JSON.parse(r.content?.find((b) => b.type === "text")?.text ?? "null");
+  if (kind === "reader_saved") return savedArticles.parse(data);
   if (kind === "reader_receipt") {
     const parsed = receipt.parse(data);
     if (parsed.submission_id === null && parsed.status !== "already_saved")
@@ -460,13 +489,23 @@ export class McpTools {
                   return {
                     connection: c.id,
                     description: c.description,
-                    tools: c.tools.map((g) => ({
-                      qualifiedName: `${c.id}/${g.name}`,
-                      name: g.name,
-                      mode: g.mode,
-                      inputSchema: this.discovered(discovered, g.name),
-                      hostSuppliedArgument: g.idempotencyArgument,
-                    })),
+                    tools: c.tools.map((g) => {
+                      const base = {
+                        qualifiedName: `${c.id}/${g.name}`,
+                        name: g.name,
+                        mode: g.mode,
+                      };
+                      // A grant the server does not (yet) offer is listed as
+                      // unavailable instead of hiding the connection's other
+                      // tools, for example during a staggered rollout.
+                      if (!discovered.some((t) => t.name === g.name))
+                        return { ...base, unavailable: true };
+                      return {
+                        ...base,
+                        inputSchema: this.discovered(discovered, g.name),
+                        hostSuppliedArgument: g.idempotencyArgument,
+                      };
+                    }),
                     pending: (
                       await this.db.query(
                         "SELECT request_key,tool,state FROM mcp_operations WHERE user_id=$1 AND connection=$2 AND state='pending' ORDER BY updated_at DESC LIMIT 20",
