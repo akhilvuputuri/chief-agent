@@ -185,6 +185,13 @@ export const workerEvent = z
   })
   .strict();
 
+/** Catalog context windows snapshotted for a Pi job's selected models. */
+export const codingContextWindows = z
+  .record(
+    z.string().min(1).max(120),
+    z.number().int().min(1024).max(100_000_000),
+  )
+  .refine((value) => Object.keys(value).length <= 3, "Too many models");
 export const codingSettings = z
   .object({
     repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
@@ -202,6 +209,7 @@ export const codingSettings = z
     harnessVersion: z.literal(2).optional(),
     effort: z.enum(["low", "medium", "high"]),
     maxOutputTokens: z.number().int().positive().max(16000).optional(),
+    contextWindows: codingContextWindows.optional(),
     limits: z
       .object({
         ms: z.number().int().positive().max(7200000),
@@ -216,6 +224,11 @@ export const codingSettings = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Explicit output allowance belongs to the Pi profile",
+      });
+    if (value.contextWindows !== undefined && value.runtime !== "pi")
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Model context windows belong to the Pi profile",
       });
     if (
       value.runtime === "pi" &&

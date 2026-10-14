@@ -42,7 +42,11 @@ export function compatibleModel(config: ModelConfig): ModelFactory {
             cacheRead: 0,
             cacheWrite: 0,
           },
-          contextWindow: config.contextWindow ?? known?.contextWindow ?? 32000,
+          contextWindow:
+            config.contextWindow ??
+            known?.contextWindow ??
+            config.fallbackContextWindow ??
+            32000,
           maxTokens: config.maxTokens ?? known?.maxTokens ?? 4096,
           compat: {
             ...known?.compat,

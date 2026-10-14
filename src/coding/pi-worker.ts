@@ -15,6 +15,7 @@ import {
   type Task,
 } from "@chief-agent/pi-runtime";
 import {
+  codingContextWindows,
   codingSettings,
   checkpoint,
   type Checkpoint,
@@ -32,6 +33,7 @@ const assignmentSchema = z.object({
   mode: z.enum(["plan", "implement"]),
   baseSha: z.string().regex(/^[a-f0-9]{40}$/),
   settings: codingSettings,
+  contextWindows: codingContextWindows.optional(),
   checkpoint,
   deadline: z.string().datetime(),
   usedModels: z.number().int(),
@@ -275,16 +277,18 @@ export async function runPiWorker(
     reviewRound = 0,
   ) {
     const config = assignment.settings;
+    const model =
+      role === "reviewer"
+        ? config.reviewerModel
+        : assignment.mode === "plan"
+          ? (config.leaderModel ?? config.model)
+          : config.model;
     return new CodingRuntime({
       store,
       model: compatibleModel({
         provider: "openrouter",
-        model:
-          role === "reviewer"
-            ? config.reviewerModel
-            : assignment.mode === "plan"
-              ? (config.leaderModel ?? config.model)
-              : config.model,
+        model,
+        fallbackContextWindow: assignment.contextWindows?.[model],
         baseUrl: `${workerOrigin}/coding/worker/${assignment.id}/pi/${role}/v1`,
         apiKey: workerToken,
         // Pi supplies the selected model's capacity. The request byte envelope

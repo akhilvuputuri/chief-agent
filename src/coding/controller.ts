@@ -442,6 +442,8 @@ export class CodingController {
         model: preferred.coder,
         reviewerModel: preferred.reviewer,
       };
+      const contextWindows = await this.contextWindows(selected);
+      if (contextWindows) Object.assign(selected, { contextWindows });
       const id = randomUUID();
       const made = await this.db.query(
         `WITH made AS (
@@ -604,7 +606,34 @@ export class CodingController {
     }
     return job;
   }
+  /** Snapshots catalog context windows for selected Pi models; missing metadata is omitted, never guessed. */
+  private async contextWindows(settings: CodingSettings) {
+    if (settings.runtime !== "pi" || !this.catalog) return undefined;
+    const ids = new Set([
+      settings.leaderModel ?? settings.model,
+      settings.model,
+      settings.reviewerModel,
+    ]);
+    try {
+      const found = Object.fromEntries(
+        (await this.catalog())
+          .filter(
+            (m) =>
+              ids.has(m.id) &&
+              Number.isSafeInteger(m.contextWindow) &&
+              m.contextWindow! >= 1024 &&
+              m.contextWindow! <= 100_000_000,
+          )
+          .map((m) => [m.id, m.contextWindow!]),
+      );
+      return Object.keys(found).length ? found : undefined;
+    } catch {
+      return undefined;
+    }
+  }
   async assignment(job: CodingJob) {
+    // Older workers strictly validate settings, so windows travel beside them.
+    const { contextWindows, ...settings } = job.settings;
     return {
       protocolVersion: 1,
       ...(job.settings.squad || job.settings.runtime === "pi"
@@ -616,7 +645,8 @@ export class CodingController {
       context: job.context,
       mode: job.mode,
       baseSha: job.base_sha,
-      settings: job.settings,
+      settings,
+      ...(contextWindows ? { contextWindows } : {}),
       checkpoint: job.checkpoint,
       deadline: new Date(job.attempt_deadline).toISOString(),
       usedModels: job.used_models,

@@ -66,7 +66,7 @@ const call = (name: string, args: unknown) => ({
     ],
   },
 });
-test("actual OpenRouter wire preserves Sol, medium reasoning and price-first ceilings", async () => {
+test("actual OpenRouter wire preserves Sol, medium reasoning and price ceilings without a price sort", async () => {
   let sent: any;
   const model = new OpenRouter("test-key", undefined, 2, 10, (async (
     _url,

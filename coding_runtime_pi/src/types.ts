@@ -77,6 +77,8 @@ export type ModelConfig = {
   baseUrl?: string;
   reasoning?: "off" | "low" | "medium" | "high";
   contextWindow?: number;
+  /** Used only when Pi's bundled catalog does not know the model; known models keep their catalog window. */
+  fallbackContextWindow?: number;
   maxTokens?: number;
   requestIdField?: string;
   requestPurposeField?: string;

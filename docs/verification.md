@@ -3,7 +3,7 @@
 Custom runtime release, 6 September 2026.
 
 - Strict TypeScript build and regression suite: 62 Node tests plus 2 Google OAuth scope tests pass.
-- Request-body tests confirm Sol, medium reasoning, price-first routing and 2/10 ceilings; no eligible provider fails clearly.
+- Request-body tests confirm Sol, medium reasoning, price-first routing and 2/10 ceilings; no eligible provider fails clearly. (Addendum, 15 October 2026: v0.3.72 removed the price sort; the same tests now assert unsorted, outage-aware routing with unchanged ceilings. See [journal 85](journey/85-provider-routing-stability.md).)
 - Runtime tests cover actual observations, invalid identity arguments, durable budgets, cancellation, retries, approval stops, uncertain writes, paused-task isolation and migration idempotence.
 - Migration tests preserve original history JSON and schedule next-run timestamps, seed text-only context, and pause tasks once.
 - Existing tests retain ownership, approval expiry/replay, unknown experience, mismatched source evidence, Telegram formatting, voice provider contracts and Google integration checks.
