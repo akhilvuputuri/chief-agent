@@ -594,7 +594,7 @@ export async function saveItem(
       : discussion
         ? done(
             true,
-            `Saved the Reddit discussion for ${n}; the post links no publisher article.`,
+            `Couldn't verify a publisher article for ${n}, so I saved the Reddit discussion instead.`,
             true,
           )
         : done(

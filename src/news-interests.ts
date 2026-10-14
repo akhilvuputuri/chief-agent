@@ -9,7 +9,6 @@
  * scorer (embeddings, a learned ranker over saved-versus-suggested items) can
  * replace them without touching feed gathering, delivery or the Save flow. */
 import {
-  SAME_STORY,
   canonicalUrl,
   domainOf,
   similarity,
@@ -39,7 +38,7 @@ export interface InterestProfile {
   docs: SavedDoc[];
   /** Canonical links already in Reader; never suggested again. */
   saved: Set<string>;
-  /** Title signatures of saved articles: the same story reached through a
+  /** Title signatures of articles saved in the last two weeks: the same story reached through a
    * different link (a Reddit post, a syndicated copy) is not suggested again. */
   stories: Set<string>[];
   /** IDF given to a word the owner has never saved (the rarest possible). */
@@ -53,6 +52,13 @@ const SITE_CAP = 3;
 const NEIGHBOURS = 3;
 /** Saved articles older than this do not shape the profile. */
 const PROFILE_DAYS = 365;
+/** Candidates are at most a week old, so only a recent save can be the same
+ * story. Older saves on a recurring headline (earnings, release notes) must
+ * not hide the next one. */
+const SAME_STORY_DAYS = 14;
+/** Stricter than in-edition clustering: a follow-up ("record revenue" →
+ * "revenue decline") is a new story, a repost with the same headline is not. */
+const SAVED_STORY = 0.75;
 
 const STOP = new Set(
   (
@@ -117,14 +123,14 @@ export function interestProfile(
     // An unprepared item's title is often only its host name: it still marks
     // the link and the site, but its words say nothing about the topic.
     const titled = a.prepared !== false;
-    if (titled) {
-      const signature = storyTokens(a.title);
-      if (signature.size >= 3) stories.push(signature);
-    }
     const ageDays = Math.max(
       0,
       (now.getTime() - a.savedAt.getTime()) / 86400000,
     );
+    if (titled && ageDays <= SAME_STORY_DAYS) {
+      const signature = storyTokens(a.title);
+      if (signature.size >= 3) stories.push(signature);
+    }
     if (ageDays > PROFILE_DAYS) continue;
     const weight = Math.pow(0.5, ageDays / SAVE_HALF_LIFE_DAYS);
     const site = bareDomain(a.domain);
@@ -161,7 +167,7 @@ export function savedStory(profile: InterestProfile, title: string) {
   const tokens = storyTokens(title);
   return (
     tokens.size >= 3 &&
-    profile.stories.some((s) => similarity(s, tokens) >= SAME_STORY)
+    profile.stories.some((s) => similarity(s, tokens) >= SAVED_STORY)
   );
 }
 

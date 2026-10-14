@@ -1,7 +1,7 @@
 # 86 — Learning the bulletin from what the owner saves to Reader
 
 Work date(s): 2026-10-15. Written/revised: 2026-10-15.
-Status: in review (round 2). Chief and Reader changes are implemented and tested locally; neither is merged or deployed. Live owner acceptance is pending.
+Status: in review (round 3). Chief and Reader changes are implemented and tested locally; neither is merged or deployed. Live owner acceptance is pending.
 
 ## User-visible problem and preceding iteration
 
@@ -55,6 +55,12 @@ Reader (`offline-reader`, branch `feat/reader-interests`): the `connection_grant
 - **(Red)** Adding the grant and a new description to the `reader` connection changed its definition, which is hashed into every operation's binding. Any Reader save still pending at deploy time could then never be replayed, and it would block other writes. The listing now lives on a separate `reader-library` connection, and a test pins the `reader` definition to its released form.
 - A saved story reached through a Reddit link was suggested again. Headlines matching a saved title (Jaccard ≥ 0.6) are now excluded.
 - Same root cause as the `news_status` P3 above.
+
+**Independent review round 2 (Opus 5.5, on `155e532`): REQUEST CHANGES.** Every round-1 and Devin finding was confirmed fixed. The reviewer compared binding hashes: `dcd05dc` changed the `reader` hash, and the head restores main's. It also measured 1000 saves × 1500 candidates at 177 ms. New findings:
+
+- **(P2, measured)** The same-story exclusion matched saves of any age at Jaccard ≥ 0.6. One save of "Apple reports record quarterly revenue" would hide "Apple reports quarterly revenue decline" forever. Signatures now come only from saves in the last 14 days (candidates are at most 7 days old), and the threshold is 0.75. Regressions cover the earnings follow-up and an old "Show HN" save.
+- **(P3)** The Reddit fallback claimed the post "links no publisher article" even when Reddit blocked the fetch or the link was ambiguous. The wording now says the article could not be verified.
+- **(P3, documented, not changed)** A save that is still running when the gateway restarts gets no reply. If it was already sent, it stays pending until tapped again, which settles it safely with the same key.
 
 Found while fixing: words shorter than three letters were dropped, so "AI" never matched. Two-letter words are kept, except a list of common ones. Reader's review added a `prepared` flag; unprepared saves (title is only a host name) contribute their link and site but no words.
 

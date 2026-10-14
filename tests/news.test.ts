@@ -657,9 +657,31 @@ test("word overlap folds plurals, ignores stop words and keeps separate interest
   assert.equal(pending.docs.length, 0);
   assert.ok(pending.saved.has("p.example/a"));
   assert.ok(pending.sites.get("p.example")! > 0.9);
-  // The same story under a different link is recognised as already saved.
-  assert.ok(savedStory(chips, "TSMC chip plant in Arizona (via Reddit)"));
+  // The same story under a different link is recognised as already saved...
+  assert.ok(savedStory(chips, "TSMC chip plant in Arizona!"));
   assert.ok(!savedStory(chips, "TSMC earnings beat forecasts"));
+  // ...but a follow-up in a recurring headline family is a new story, and a
+  // save older than two weeks cannot be the same story as this week's item.
+  const earnings = interestProfile(
+    [
+      saved(
+        "https://e.example/1",
+        "Apple reports record quarterly revenue",
+        "e.example",
+        1,
+      ),
+      saved(
+        "https://e.example/2",
+        "Show HN: A tiny Lisp interpreter in Rust",
+        "e.example",
+        20,
+      ),
+    ],
+    now,
+  );
+  assert.ok(!savedStory(earnings, "Apple reports quarterly revenue decline"));
+  assert.ok(savedStory(earnings, "Apple reports record quarterly revenue"));
+  assert.ok(!savedStory(earnings, "Show HN: A tiny Lisp interpreter in Go"));
 });
 
 test("on-demand editions work while off and are limited to three a day", async () => {

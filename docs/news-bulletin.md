@@ -38,7 +38,7 @@ Each item carries one button (`nw:sv:<item id>`), five to a row. A press is answ
 Success is shown only as ✓. Everything else gets a short reply in the same topic:
 
 - an import Reader could not prepare ("it is in Reader's Imports");
-- a Reddit post that links no publisher article: link resolution refuses it before anything is recorded, so Chief saves the Reddit discussion under the same key and says so;
+- a Reddit post whose publisher article could not be verified (a self post, a blocked fetch, or several candidate links): link resolution refuses it before anything is recorded, so Chief saves the Reddit discussion under the same key and says it did;
 - a save that is still **pending** (uncertain, rate-limited, refused credentials, or a Reader business error such as a full library or import queue). Chief's MCP host holds every other write until a pending write is settled, so the reply names what settles it (tap again, make room in Reader, wait, reconnect) and says that other saves and changes wait for it;
 - a save refused because another write is pending: the reply names the bulletin item holding it up, or says it is a Reader save made in conversation;
 - a missing connection, or an item tried under a previous Reader credential.
@@ -51,7 +51,7 @@ Success is shown only as ✓. Everything else gets a short reply in the same top
 - `site`: summed weights per site domain (without `www.`). An item matches on its own article domain or its followed site's domain, whichever is higher.
 - `s`: title words are lowercased, accents removed ("Zürich" → "zurich"), stop words removed (two-letter words such as "AI" are kept, common ones like "of" are not) and plurals lightly folded ("chips" → "chip"). Saved titles are TF-IDF vectors over the saved set. A candidate's vector holds its title words plus half-weighted excerpt words; words the owner has never saved get the highest IDF, so they count in the candidate's length and one shared word in a long headline stays a weak match. `s` is the mean of the three highest `cosine × save weight`. Using the nearest neighbours, not one centroid, means separate interests (bread and compilers) each count instead of blurring together.
 - Articles Reader has not prepared (queued, or a failed import) often have only their host name as a title. They mark their link and site but contribute no words.
-- A headline that is the same story as a saved title (title-token Jaccard ≥ 0.6, at least three tokens) is skipped too, so a saved article reached through a Reddit post or syndicated copy is not suggested again.
+- A headline that is the same story as a title saved in the last 14 days (title-token Jaccard ≥ 0.75, at least three tokens) is skipped too, so a saved article reached through a Reddit post or syndicated copy is not suggested again. Older saves, and follow-ups in a recurring headline family ("record revenue" → "revenue decline"), are not suppressed.
 - Scripts written without spaces (Chinese, Japanese) become one token per run, so they match only near-identical titles.
 
 This is phase 1: inspectable word overlap. It misses synonyms and paraphrase. `interestProfile` and `affinity` are the only seam the ranker uses, so a later scorer can replace them. **Learning data:** every suggestion is stored in `news_items` with its score. Joined with Reader's library by canonical link, "suggested and later saved" versus "suggested, not saved" is a labelled set for evaluating a replacement. The old `vote`/`voted_at` columns are retained but no longer read.
@@ -71,6 +71,7 @@ Other page retrieval in this project goes through hosted providers. Feeds are th
 - Only sites that publish a feed can be followed. Paywalled items link out; nothing is bypassed.
 - Excerpts are the feed's own text, not model summaries.
 - Topic matching is phrase matching, and save similarity is word overlap; neither is semantic classification.
+- A save still in flight when the gateway restarts gets no reply. If it was already sent to Reader it stays pending (holding up other writes) until the owner taps it again, which settles it safely with the same key.
 - Learning needs Reader connected (MCP on) and the owner's opt-in in Reader. Without it the bulletin still works, ranked by topics and recency only.
 - Fixed Singapore time zone; one edition per day.
 
