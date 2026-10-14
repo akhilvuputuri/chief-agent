@@ -128,20 +128,34 @@ const submission = z.object({
   status: z.enum(["queued", "processing", "ready", "bookmark"]),
   error: z.string().max(2000).nullable(),
 });
-const savedArticles = z.object({
-  articles: z
-    .array(
-      z.object({
-        url: z.string().url().max(2048),
-        title: z.string().max(1000),
-        site: z.string().max(500).nullable(),
-        domain: z.string().min(1).max(253),
-        saved_at: z.string().datetime({ offset: true }),
-      }),
-    )
-    .max(200),
-  next: z.string().max(200).nullable(),
+// One malformed or oversized record must not discard the whole page: long
+// text is cut, and a record that still does not fit the metadata contract is
+// skipped. Anything beyond that contract is dropped, never passed through.
+const savedArticle = z.object({
+  url: z.string().url().max(2048),
+  title: z.string().transform((t) => [...t].slice(0, 300).join("")),
+  site: z
+    .string()
+    .nullable()
+    .transform((t) => (t === null ? null : [...t].slice(0, 200).join(""))),
+  domain: z.string().min(1).max(253),
+  saved_at: z.string().datetime({ offset: true }),
+  prepared: z.boolean().optional(),
 });
+const savedArticles = z
+  .object({
+    articles: z.array(z.unknown()).max(200),
+    next: z.string().max(200).nullable(),
+  })
+  .transform((page) => ({
+    articles: page.articles.flatMap((a) => {
+      const parsed = savedArticle.safeParse(a);
+      return parsed.success ? [parsed.data] : [];
+    }),
+    skipped: page.articles.filter((a) => !savedArticle.safeParse(a).success)
+      .length,
+    next: page.next,
+  }));
 function decode(result: unknown, kind: string) {
   if (kind === "generic") return result;
   const r = result as {

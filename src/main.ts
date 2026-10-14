@@ -317,7 +317,7 @@ const newsBulletin = new NewsBulletin(
   undefined,
   (user) => topics.capture(user, { kind: "topic", topic: "news" }),
   // `mcp` is assigned below; Reader learning is off when connectors are.
-  () => (mcp ? mcpReaderLink(mcp) : undefined),
+  () => (mcp?.configured ? mcpReaderLink(mcp) : undefined),
 );
 const daily = new DailyTools(db, parser, calendar, mirror);
 if (

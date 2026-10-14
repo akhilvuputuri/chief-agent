@@ -8,7 +8,13 @@
  * `interestProfile` and `affinity` are the only seam the ranker uses. A later
  * scorer (embeddings, a learned ranker over saved-versus-suggested items) can
  * replace them without touching feed gathering, delivery or the Save flow. */
-import { canonicalUrl, domainOf } from "./news-feed.js";
+import {
+  SAME_STORY,
+  canonicalUrl,
+  domainOf,
+  similarity,
+  storyTokens,
+} from "./news-feed.js";
 
 /** Reader's saved-article metadata: title, link, site and save time only. */
 export interface SavedArticle {
@@ -16,6 +22,9 @@ export interface SavedArticle {
   title: string;
   domain: string;
   savedAt: Date;
+  /** False while Reader is still preparing it or after a failed import, when
+   * the title may be just the host name. Absent from older Readers. */
+  prepared?: boolean;
 }
 interface SavedDoc {
   title: string;
@@ -30,6 +39,11 @@ export interface InterestProfile {
   docs: SavedDoc[];
   /** Canonical links already in Reader; never suggested again. */
   saved: Set<string>;
+  /** Title signatures of saved articles: the same story reached through a
+   * different link (a Reddit post, a syndicated copy) is not suggested again. */
+  stories: Set<string>[];
+  /** IDF given to a word the owner has never saved (the rarest possible). */
+  unseen: number;
 }
 
 /** A save counts half as much after this many days. Saves are rarer than
@@ -43,18 +57,23 @@ const PROFILE_DAYS = 365;
 const STOP = new Set(
   (
     "the a an and or of to in on for with at by from as is are was were be been this that these those it its into over after before about how why what who new says said will can could " +
-    "you your our we they their his her not but just more most than then there here when where which while also out off now get got has have had does did do one two first year years week day today"
+    "you your our we they their his her not but just more most than then there here when where which while also out off now get got has have had does did do one two first year years week day today " +
+    // Two-letter words are kept (AI, EV, UK) except these common ones.
+    "am as at be by go he if in is it me my no of oh ok on or so to up us"
   ).split(" "),
 );
 
-/** Lowercased content words with light plural folding ("chips" → "chip"). */
+/** Lowercased content words with accents removed ("Zürich" → "zurich") and
+ * light plural folding ("chips" → "chip"). Scripts written without spaces
+ * (Chinese, Japanese) become one token per run, so they match only closely. */
 export function contentWords(text: string): string[] {
   return text
     .toLowerCase()
     .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
     .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .split(/\s+/)
-    .filter((t) => t.length >= 3 && !STOP.has(t))
+    .filter((t) => t.length >= 2 && !STOP.has(t))
     .map((t) =>
       t.length > 4 && t.endsWith("ies")
         ? t.slice(0, -3) + "y"
@@ -87,12 +106,20 @@ export function interestProfile(
 ): InterestProfile {
   const sites = new Map<string, number>();
   const saved = new Set<string>();
+  const stories: Set<string>[] = [];
   const recent: { a: SavedArticle; words: string[]; weight: number }[] = [];
   for (const a of saves) {
     try {
       saved.add(canonicalUrl(a.url));
     } catch {
       // A link Chief cannot canonicalize still shapes the profile below.
+    }
+    // An unprepared item's title is often only its host name: it still marks
+    // the link and the site, but its words say nothing about the topic.
+    const titled = a.prepared !== false;
+    if (titled) {
+      const signature = storyTokens(a.title);
+      if (signature.size >= 3) stories.push(signature);
     }
     const ageDays = Math.max(
       0,
@@ -102,7 +129,7 @@ export function interestProfile(
     const weight = Math.pow(0.5, ageDays / SAVE_HALF_LIFE_DAYS);
     const site = bareDomain(a.domain);
     sites.set(site, (sites.get(site) ?? 0) + weight);
-    recent.push({ a, words: contentWords(a.title), weight });
+    recent.push({ a, words: titled ? contentWords(a.title) : [], weight });
   }
   const df = new Map<string, number>();
   for (const r of recent)
@@ -118,13 +145,32 @@ export function interestProfile(
         vector.set(t, (vector.get(t) ?? 0) + (idf.get(t) ?? 1));
       return { title: r.a.title, weight: r.weight, vector: normalize(vector) };
     });
-  return { size: saves.length, sites, idf, docs, saved };
+  return {
+    size: saves.length,
+    sites,
+    idf,
+    docs,
+    saved,
+    stories,
+    unseen: Math.log(recent.length + 1) + 1,
+  };
+}
+
+/** Whether this headline is a story the owner already saved under another link. */
+export function savedStory(profile: InterestProfile, title: string) {
+  const tokens = storyTokens(title);
+  return (
+    tokens.size >= 3 &&
+    profile.stories.some((s) => similarity(s, tokens) >= SAME_STORY)
+  );
 }
 
 /** How much a candidate resembles what the owner saves.
  * `similar` is in [0, 1]: the mean over the three closest saved titles of
  * cosine × that save's recency weight, so separate interests each count
- * instead of being averaged into one blurred centroid.
+ * instead of being averaged into one blurred centroid. The candidate's
+ * vector includes every content word (never-saved words at the highest IDF)
+ * so one shared word in a long headline is a weak match, not a near-exact one.
  * `site` is the decayed number of saves from the item's site, capped at 3. */
 export function affinity(
   profile: InterestProfile,
@@ -153,15 +199,16 @@ export function affinity(
   if (!profile.docs.length) return { similar: 0, site, like: null };
   const vector = new Map<string, number>();
   const add = (words: string[], scale: number) => {
-    for (const t of words) {
-      const w = profile.idf.get(t);
-      // Words the owner has never saved cannot match; skip them.
-      if (w) vector.set(t, (vector.get(t) ?? 0) + w * scale);
-    }
+    for (const t of words)
+      vector.set(
+        t,
+        (vector.get(t) ?? 0) + (profile.idf.get(t) ?? profile.unseen) * scale,
+      );
   };
   add(contentWords(item.title), 1);
   add(contentWords((item.summary ?? "").slice(0, 400)), 0.5);
-  if (!vector.size) return { similar: 0, site, like: null };
+  if (![...vector.keys()].some((t) => profile.idf.has(t)))
+    return { similar: 0, site, like: null };
   normalize(vector);
   const near = profile.docs
     .map((d) => ({ d, s: cosine(vector, d.vector) * d.weight }))

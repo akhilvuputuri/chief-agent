@@ -408,23 +408,30 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
           .catch(() => {}),
       );
     await keyboard(itemId);
-    const outcome = await saveItem(db, reader, user, itemId).catch(() => ({
-      saved: false,
-      message: `Couldn't save ${item.position} to Reader; tap again to retry safely.`,
-    }));
-    await keyboard();
-    // Success is visible as ✓; anything else needs words.
-    if (!outcome.saved || /Imports/.test(outcome.message))
-      await ctx
-        .reply(outcome.message, {
-          ...(ctx.callbackQuery.message?.message_thread_id
-            ? {
-                message_thread_id: ctx.callbackQuery.message.message_thread_id,
-              }
-            : {}),
-          link_preview_options: { is_disabled: true },
-        })
-        .catch(() => {});
+    // A save can take a minute (link resolution, then Reader's import
+    // status), so it finishes outside the handler instead of holding one of
+    // the runner's update slots. The outcome is the keyboard, plus words when
+    // the ✓ alone would not say enough.
+    const thread = ctx.callbackQuery.message?.message_thread_id;
+    void saveItem(db, reader, user, itemId)
+      .catch(() => ({
+        saved: false,
+        notify: true,
+        message: `Couldn't save ${item.position} to Reader; tap it again to retry safely.`,
+      }))
+      .then(async (outcome) => {
+        await keyboard();
+        if (outcome.notify)
+          await ctx
+            .reply(outcome.message, {
+              ...(thread ? { message_thread_id: thread } : {}),
+              link_preview_options: { is_disabled: true },
+            })
+            .catch(() => {});
+      })
+      .catch((error) =>
+        opsLog("news.save_reply_failed", "warn", errorFields(error)),
+      );
   });
   // Buttons on bulletins sent before votes were replaced by Save.
   bot.callbackQuery(/^nw:(up|dn):[0-9a-f-]{36}$/, async (ctx) => {

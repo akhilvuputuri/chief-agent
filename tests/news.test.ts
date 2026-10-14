@@ -16,9 +16,11 @@ import {
   type Candidate,
   type ReaderLink,
 } from "../src/news.js";
+import { ToolValidationError } from "../src/tool-errors.js";
 import {
   affinity,
   contentWords,
+  savedStory,
   interestProfile,
   type SavedArticle,
 } from "../src/news-interests.js";
@@ -37,18 +39,29 @@ import {
 
 class FakeReader implements ReaderLink {
   saves: SavedArticle[] = [];
-  calls: { user: string; key: string; url: string }[] = [];
-  listFails = false;
+  calls: { user: string; key: string; url: string; target?: string }[] = [];
+  listFails: string | false = false;
   result: any = { state: "complete", result: { status: "queued" } };
-  async save(user: string, key: string, url: string) {
-    this.calls.push({ user, key, url });
-    if (this.result instanceof Error) throw this.result;
-    return this.result;
+  /** Per-target override, e.g. an article link that cannot be verified. */
+  byTarget: Record<string, any> = {};
+  async save(
+    user: string,
+    key: string,
+    url: string,
+    _signal?: AbortSignal,
+    target?: string,
+  ) {
+    this.calls.push({ user, key, url, ...(target ? { target } : {}) });
+    const r = this.byTarget[target ?? "article"] ?? this.result;
+    if (r instanceof Error) throw r;
+    return r;
   }
   async savedArticles() {
     if (this.listFails)
-      throw Object.assign(new Error("tool"), { category: "tool" });
-    return this.saves;
+      throw Object.assign(new Error(this.listFails), {
+        category: this.listFails,
+      });
+    return { articles: this.saves, partial: false, skipped: 0 };
   }
 }
 
@@ -483,7 +496,8 @@ test("Reader saves shape the next edition, and saved links are never suggested",
       },
       {
         url: "https://www.alpha.example/ai?utm_source=x",
-        title: "AI chips get cheaper",
+        // Matched by link alone (title differs from the feed's).
+        title: "Accelerator prices",
         domain: "alpha.example",
         savedAt: hoursBefore(now, 2),
       },
@@ -518,12 +532,17 @@ test("Reader saves shape the next edition, and saved links are never suggested",
     assert.deepEqual(status.learned.unfollowedSites, ["chips.example"]);
     assert.equal(status.reader.state, "ok");
     // Reader refusing the listing (not allowed yet) degrades to plain ranking.
-    f.reader.listFails = true;
+    f.reader.listFails = "tool";
     const refused = await f.call({ operation: "news_status" });
     assert.equal(refused.reader.state, "unavailable");
     assert.equal(refused.reader.category, "tool");
     assert.match(refused.reader.note, /Share saved-article titles/);
     assert.equal(refused.learned.savedArticles, 0);
+    f.reader.listFails = "invalid"; // Reader without the listing yet
+    assert.match(
+      (await f.call({ operation: "news_status" })).reader.note,
+      /needs its update/,
+    );
     f.disconnectReader();
     assert.equal(
       (await f.call({ operation: "news_status" })).reader.state,
@@ -539,6 +558,12 @@ test("word overlap folds plurals, ignores stop words and keeps separate interest
   assert.deepEqual(contentWords("The chips and the batteries!"), [
     "chip",
     "battery",
+  ]);
+  // Accents are removed, not turned into word breaks.
+  assert.deepEqual(contentWords("Zürich München señor"), [
+    "zurich",
+    "munchen",
+    "senor",
   ]);
   const at = (d: number) => new Date(now.getTime() - d * 86400000);
   const saved = (url: string, title: string, domain: string, days: number) => ({
@@ -593,6 +618,48 @@ test("word overlap folds plurals, ignores stop words and keeps separate interest
     now,
   );
   assert.ok(Math.abs(faded.sites.get("d.example")! - 0.5) < 1e-9);
+  // One shared word in a long headline is a weak match; an identical title
+  // is a strong one (the candidate's unseen words count in its norm).
+  const chips = interestProfile(
+    [
+      saved("https://n.example/1", "Nvidia chip export rules", "n.example", 1),
+      saved(
+        "https://n.example/2",
+        "TSMC chip plant in Arizona",
+        "n.example",
+        1,
+      ),
+      saved("https://n.example/3", "Chip shortage eases", "n.example", 1),
+    ],
+    now,
+  );
+  const exact = affinity(chips, {
+    title: "Nvidia chip export rules",
+    url: "https://z.example/1",
+  }).similar;
+  const weak = affinity(chips, {
+    title:
+      "Local council approves budget for parks libraries roads schools and a chip shop",
+    url: "https://z.example/2",
+  }).similar;
+  assert.ok(exact > 2.5 * weak, `${exact} vs ${weak}`);
+  // An unprepared save (title is just a host name) marks its link and site
+  // but contributes no words.
+  const pending = interestProfile(
+    [
+      {
+        ...saved("https://p.example/a", "p.example", "p.example", 1),
+        prepared: false,
+      },
+    ],
+    now,
+  );
+  assert.equal(pending.docs.length, 0);
+  assert.ok(pending.saved.has("p.example/a"));
+  assert.ok(pending.sites.get("p.example")! > 0.9);
+  // The same story under a different link is recognised as already saved.
+  assert.ok(savedStory(chips, "TSMC chip plant in Arizona (via Reddit)"));
+  assert.ok(!savedStory(chips, "TSMC earnings beat forecasts"));
 });
 
 test("on-demand editions work while off and are limited to three a day", async () => {
@@ -1178,12 +1245,66 @@ test("Save works only on delivered items, keyed by the item id, with honest outc
     f.reader.result = { state: "pending", category: "auth" };
     assert.match(
       (await saveItem(f.db, f.reader, "a", item.id)).message,
-      /reconnect/,
+      /Reconnect Reader.*other Reader saves/,
+    );
+    // A Reader business error (for example a full library) stays pending:
+    // say what to do and that it holds up other changes.
+    f.reader.result = { state: "pending", category: "tool" };
+    assert.match(
+      (await saveItem(f.db, f.reader, "a", item.id)).message,
+      /library \(1,000 articles\) or import queue is full.*wait for it/,
     );
     f.reader.result = { state: "pending", category: "uncertain" };
     const unsure = await saveItem(f.db, f.reader, "a", item.id);
     assert.equal(unsure.saved, false);
-    assert.match(unsure.message, /retry safely/);
+    assert.match(unsure.message, /settle it safely/);
+    assert.equal(unsure.notify, true);
+    // Another pending save blocks this one: name the item that holds it up.
+    const other = (
+      await f.db.query(
+        "SELECT id,position FROM news_items WHERE edition_id=$1 AND id<>$2 ORDER BY position LIMIT 1",
+        [item.edition_id, item.id],
+      )
+    ).rows[0];
+    await f.db.query(
+      `INSERT INTO mcp_operations(user_id,connection,request_key,tool,binding,schema_hash,payload,state)
+       VALUES('a','reader',$1,'save_link','b','h','{}'::jsonb,'pending')`,
+      [other.id],
+    );
+    f.reader.result = new ToolValidationError(
+      "A pending MCP write needs reconciliation before another write",
+    );
+    assert.match(
+      (await saveItem(f.db, f.reader, "a", item.id)).message,
+      new RegExp(
+        `item ${other.position} from the Mon 28 Sep bulletin is still waiting`,
+      ),
+    );
+    await f.db.query("DELETE FROM mcp_operations WHERE request_key=$1", [
+      other.id,
+    ]);
+    // A Reddit post with no publisher article: the discussion is saved
+    // instead, under the same key, and the owner is told.
+    await f.db.query(
+      "UPDATE news_items SET url='https://www.reddit.com/r/x/comments/1/self_post/' WHERE id=$1",
+      [item.id],
+    );
+    f.reader.calls = [];
+    f.reader.byTarget = {
+      article: new ToolValidationError(
+        "The article link could not be verified. Supply the publisher URL, or explicitly choose the Reddit discussion; no save was submitted.",
+      ),
+      discussion: { state: "complete", result: { status: "queued" } },
+    };
+    const thread = await saveItem(f.db, f.reader, "a", item.id);
+    assert.equal(thread.saved, true);
+    assert.equal(thread.notify, true);
+    assert.match(thread.message, /Reddit discussion/);
+    assert.deepEqual(
+      f.reader.calls.map((c) => c.target ?? "article"),
+      ["article", "discussion"],
+    );
+    f.reader.byTarget = {};
     assert.match(
       (await saveItem(f.db, undefined, "a", item.id)).message,
       /isn't connected/,

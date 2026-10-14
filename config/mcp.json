@@ -5,7 +5,7 @@
       "id": "reader",
       "url": "https://p01--reader-api--2sn8tjhm47hb.code.run/mcp",
       "credential": "reader",
-      "description": "Save requested articles and sourced Markdown briefs to Reader, and list the titles, links and sites of articles the owner saved (no article text). Server ready does not mean downloaded on the phone.",
+      "description": "Save requested articles and sourced Markdown briefs to Reader. Server ready does not mean downloaded on the phone.",
       "tools": [
         {
           "name": "save_link",
@@ -19,11 +19,15 @@
           "idempotencyArgument": "idempotency_key",
           "result": "reader_receipt"
         },
-        {
-          "name": "get_save_status",
-          "mode": "read",
-          "result": "reader_status"
-        },
+        { "name": "get_save_status", "mode": "read", "result": "reader_status" }
+      ]
+    },
+    {
+      "id": "reader-library",
+      "url": "https://p01--reader-api--2sn8tjhm47hb.code.run/mcp",
+      "credential": "reader",
+      "description": "Read-only list of the titles, links, sites and save times of articles the owner saved to Reader (no article text). Reader answers only after the owner turns on sharing for Chief's connection in Reader Settings.",
+      "tools": [
         {
           "name": "list_saved_articles",
           "mode": "read",

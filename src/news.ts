@@ -14,6 +14,7 @@ import type { McpTools } from "./mcp.js";
 import {
   affinity,
   describeProfile,
+  savedStory,
   interestProfile,
   type InterestProfile,
   type SavedArticle,
@@ -101,8 +102,14 @@ export interface ReaderLink {
     requestKey: string,
     url: string,
     signal?: AbortSignal,
+    target?: "article" | "discussion",
   ): Promise<any>;
-  savedArticles(user: string, signal?: AbortSignal): Promise<SavedArticle[]>;
+  /** Newest first. `partial` when a later page failed after earlier ones
+   * arrived: the profile uses what arrived instead of discarding it. */
+  savedArticles(
+    user: string,
+    signal?: AbortSignal,
+  ): Promise<{ articles: SavedArticle[]; partial: boolean; skipped: number }>;
 }
 const savedPage = (r: any) => {
   if (!r || !Array.isArray(r.articles))
@@ -113,15 +120,19 @@ const savedPage = (r: any) => {
       title: string;
       domain: string;
       saved_at: string;
+      prepared?: boolean;
     }[];
+    skipped?: number;
     next: string | null;
   };
 };
 /** Reader through Chief's reviewed MCP grants: the same durable, idempotent
- * save path the agent uses, and the read-only saved-article listing. */
+ * save path the agent uses (connection `reader`), and the read-only listing
+ * (connection `reader-library`, kept separate so the save connection's
+ * definition, and with it every pending save's binding, is unchanged). */
 export function mcpReaderLink(mcp: McpTools): ReaderLink {
   return {
-    save: (user, requestKey, url, signal) =>
+    save: (user, requestKey, url, signal, target) =>
       mcp.call(
         user,
         {
@@ -130,36 +141,48 @@ export function mcpReaderLink(mcp: McpTools): ReaderLink {
           tool: "save_link",
           requestKey,
           arguments: { url },
+          ...(target ? { readerTarget: target } : {}),
         },
         signal,
       ),
     async savedArticles(user, signal) {
-      const out: SavedArticle[] = [];
+      const articles: SavedArticle[] = [];
       let before: string | null = null;
+      let skipped = 0;
       for (let page = 0; page < READER_PAGES; page++) {
-        const r = savedPage(
-          await mcp.call(
-            user,
-            {
-              operation: "mcp_read",
-              connection: "reader",
-              tool: "list_saved_articles",
-              arguments: { limit: 200, ...(before ? { before } : {}) },
-            },
-            signal,
-          ),
-        );
+        let r;
+        try {
+          r = savedPage(
+            await mcp.call(
+              user,
+              {
+                operation: "mcp_read",
+                connection: "reader-library",
+                tool: "list_saved_articles",
+                arguments: { limit: 200, ...(before ? { before } : {}) },
+              },
+              signal,
+            ),
+          );
+        } catch (error) {
+          if (page === 0) throw error;
+          return { articles, partial: true, skipped };
+        }
+        skipped += r.skipped ?? 0;
         for (const a of r.articles)
-          out.push({
+          articles.push({
             url: a.url,
             title: a.title,
             domain: a.domain,
             savedAt: new Date(a.saved_at),
+            prepared: a.prepared,
           });
+        // A page can be short (Reader skips unreadable records) but still
+        // have a next page; only a null cursor ends the listing.
         if (!r.next) break;
         before = r.next;
       }
-      return out;
+      return { articles, partial: false, skipped };
     },
   };
 }
@@ -224,7 +247,10 @@ export function rankCandidates(
       excluded.delivered++;
       continue;
     }
-    if (opts.profile.saved.has(canonical)) {
+    if (
+      opts.profile.saved.has(canonical) ||
+      savedStory(opts.profile, c.entry.title)
+    ) {
       excluded.saved++;
       continue;
     }
@@ -458,65 +484,139 @@ export async function editionKeyboard(
   );
 }
 
+const BLOCKS =
+  "Until it is settled, other Reader saves and Chief's other changes wait for it.";
+/** The pending Reader write that holds up new writes, described for the owner. */
+async function pendingBlocker(db: Database, user: string, except: string) {
+  const row = (
+    await db.query(
+      `SELECT i.position,to_char(e.edition_date,'YYYY-MM-DD') AS day FROM mcp_operations o
+       LEFT JOIN news_items i ON i.id=o.request_key AND i.user_id=o.user_id
+       LEFT JOIN news_editions e ON e.id=i.edition_id
+       WHERE o.user_id=$1 AND o.state='pending' AND o.request_key<>$2
+       ORDER BY o.updated_at LIMIT 1`,
+      [user, except],
+    )
+  ).rows[0];
+  return row?.position
+    ? `item ${row.position} from the ${dayLabel(row.day)} bulletin is still waiting on Reader. Tap it again to settle it, then save this one.`
+    : "another Reader save is still unconfirmed. Ask me to check Reader's pending save, then try again.";
+}
+
 /** Saves a delivered bulletin item to Reader, keyed by the item id so a
  * repeated or concurrent press can never create a second save. Returns a
- * short owner-facing outcome. */
+ * short owner-facing outcome; `notify` when it needs words beyond the ✓. */
 export async function saveItem(
   db: Database,
   reader: ReaderLink | undefined,
   user: string,
   itemId: string,
   signal?: AbortSignal,
-): Promise<{ saved: boolean; message: string; editionId?: string }> {
+): Promise<{
+  saved: boolean;
+  notify: boolean;
+  message: string;
+  editionId?: string;
+}> {
   const item = await deliveredItem(db, user, itemId);
   if (!item)
     return {
       saved: false,
+      notify: true,
       message: "That bulletin item is no longer available.",
     };
+  const n = item.position;
+  const done = (saved: boolean, message: string, notify = !saved) => ({
+    saved,
+    notify,
+    message,
+    editionId: item.edition_id,
+  });
   if (!reader)
-    return {
-      saved: false,
-      editionId: item.edition_id,
-      message: "Reader isn't connected to Chief, so nothing was saved.",
-    };
+    return done(
+      false,
+      "Reader isn't connected to Chief, so nothing was saved.",
+    );
   let r: any;
+  let discussion = false;
   try {
-    r = await reader.save(user, item.id, item.url, signal);
+    try {
+      r = await reader.save(user, item.id, item.url, signal);
+    } catch (error) {
+      // A post in a followed subreddit often links no publisher article.
+      // Nothing was submitted (link resolution comes before the save is
+      // recorded), so saving the discussion under the same key is safe.
+      const reddit = /(^|\.)reddit\.com$/i.test(
+        (() => {
+          try {
+            return new URL(item.url).hostname;
+          } catch {
+            return "";
+          }
+        })(),
+      );
+      if (
+        !reddit ||
+        !(error instanceof ToolValidationError) ||
+        !/could not be verified/.test(error.message)
+      )
+        throw error;
+      discussion = true;
+      r = await reader.save(user, item.id, item.url, signal, "discussion");
+    }
   } catch (error) {
-    return {
-      saved: false,
-      editionId: item.edition_id,
-      message:
-        error instanceof ToolValidationError
-          ? `Couldn't save ${item.position} to Reader: ${error.message}`
-          : `Couldn't save ${item.position} to Reader; tap again to retry safely.`,
-    };
+    if (error instanceof ToolValidationError) {
+      if (/pending MCP write/.test(error.message))
+        return done(
+          false,
+          `Didn't save ${n}: ${await pendingBlocker(db, user, item.id)}`,
+        );
+      if (/bound to another connection/.test(error.message))
+        return done(
+          false,
+          `${n} was tried under Chief's previous Reader connection, so it can't be retried from here; check Reader's Imports.`,
+        );
+      return done(false, `Couldn't save ${n} to Reader: ${error.message}`);
+    }
+    return done(
+      false,
+      `Couldn't save ${n} to Reader; tap it again to retry safely.`,
+    );
   }
   const status = r?.result?.status;
   if (r?.state === "complete")
-    return {
-      saved: true,
-      editionId: item.edition_id,
-      message:
-        status === "bookmark"
-          ? `Saved ${item.position}, but Reader couldn't prepare the article; it is in Reader's Imports.`
-          : status === "already_saved"
-            ? `${item.position} was already in Reader.`
-            : `Saved ${item.position} to Reader.`,
-    };
-  return {
-    saved: false,
-    editionId: item.edition_id,
-    message:
-      r?.state === "rejected"
-        ? `Reader refused ${item.position}; nothing was saved.`
-        : r?.category === "auth"
-          ? "Reader rejected Chief's connection; reconnect it before saving."
-          : r?.category === "capacity"
-            ? "Reader is busy or full right now; try again later."
-            : `Couldn't confirm the save of ${item.position}; tap again to retry safely.`,
-  };
+    return status === "bookmark"
+      ? done(
+          true,
+          `Saved ${n}, but Reader couldn't prepare the article; it is in Reader's Imports.`,
+          true,
+        )
+      : discussion
+        ? done(
+            true,
+            `Saved the Reddit discussion for ${n}; the post links no publisher article.`,
+            true,
+          )
+        : done(
+            true,
+            status === "already_saved"
+              ? `${n} was already in Reader.`
+              : `Saved ${n} to Reader.`,
+          );
+  if (r?.state === "rejected")
+    return done(false, `Reader refused ${n}; nothing was saved.`);
+  // Still pending: the save may or may not have happened, and Chief holds
+  // other writes until it is settled. Say so, and what settles it.
+  return done(
+    false,
+    r?.category === "auth"
+      ? `Reader rejected Chief's connection, so ${n} isn't confirmed. Reconnect Reader, then tap ${n} again. ${BLOCKS}`
+      : r?.category === "capacity"
+        ? `Reader is rate-limiting Chief; tap ${n} again in about ${r.retryAfterSeconds ?? 60} seconds. ${BLOCKS}`
+        : r?.category === "tool"
+          ? `Reader didn't accept ${n}. If your Reader library (1,000 articles) or import queue is full, make room, then tap ${n} again. ${BLOCKS}`
+          : `Couldn't confirm the save of ${n}; tap it again to settle it safely. ${BLOCKS}`,
+  );
 }
 
 /** Builds editions on schedule or on request and delivers them through a
@@ -555,15 +655,19 @@ export class NewsBulletin {
       };
     const started = Date.now();
     try {
+      // The signal stops further pages at the budget (keeping those that
+      // arrived); the outer deadline only guards a call that ignores it.
       const saves = await withDeadline(
         reader.savedArticles(user, AbortSignal.timeout(READER_MS)),
-        READER_MS,
+        READER_MS + 5000,
       );
       return {
-        profile: interestProfile(saves, now),
+        profile: interestProfile(saves.articles, now),
         reader: {
           state: "ok" as const,
-          articles: saves.length,
+          articles: saves.articles.length,
+          ...(saves.partial ? { partial: true } : {}),
+          ...(saves.skipped ? { skipped: saves.skipped } : {}),
           ms: Date.now() - started,
         },
       };
@@ -1013,13 +1117,7 @@ export class NewsTools {
       reader:
         reader.state === "ok"
           ? reader
-          : {
-              ...reader,
-              note:
-                reader.state === "not_connected"
-                  ? "Reader is not connected to Chief, so the bulletin cannot learn from saved articles."
-                  : "Reader's saved articles could not be read. In Reader → Settings → Assistant connections, the owner can turn on 'Share saved-article titles' for Chief's connection.",
-            },
+          : { ...reader, note: readerNote(reader) },
       learned: describeProfile(profile, followed),
       basis:
         "Items come only from the followed sites' feeds; ranked by topic match, recency, how often the owner saves from that site, and word overlap with titles the owner saved to Reader (from the bulletin or elsewhere; a save counts half after 60 days). Already-saved links are skipped. No model writes or picks the items. unfollowedSites are sites the owner often saves from but does not follow: offer to follow them, never add them unasked.",
@@ -1189,6 +1287,24 @@ export class NewsTools {
         ? `Daily bulletin on: ${row.items_per_edition} items at ${row.delivery_time} Singapore time from the followed sites${row.topics.length ? `, favouring ${row.topics.join(", ")}` : ""}.`
         : "Daily bulletin is off; settings and sites are kept.",
     };
+  }
+}
+
+/** What the owner can do about an unreadable Reader library. */
+function readerNote(reader: { state: string; category?: string }) {
+  if (reader.state === "not_connected")
+    return "Reader is not connected to Chief, so the bulletin cannot learn from saved articles.";
+  switch (reader.category) {
+    case "tool":
+      return "Reader refused to list saved articles. In Reader → Settings → Assistant connections, the owner can turn on 'Share saved-article titles' for Chief's connection.";
+    case "invalid":
+      return "Reader does not offer saved-article sharing to Chief yet: Reader needs its update with the 'Share saved-article titles' switch, or Chief's reader-library connection is not set up.";
+    case "auth":
+      return "Reader rejected Chief's connection; it needs reconnecting before the bulletin can learn from saved articles.";
+    case "capacity":
+      return "Reader is rate-limiting Chief right now; saved articles will be read again for the next edition.";
+    default:
+      return "Reader could not be reached; saved articles will be read again for the next edition.";
   }
 }
 

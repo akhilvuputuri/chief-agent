@@ -1,7 +1,7 @@
 # 86 — Learning the bulletin from what the owner saves to Reader
 
 Work date(s): 2026-10-15. Written/revised: 2026-10-15.
-Status: in review. Chief and Reader changes are implemented and tested locally; neither is merged or deployed. Live owner acceptance is pending.
+Status: in review (round 2). Chief and Reader changes are implemented and tested locally; neither is merged or deployed. Live owner acceptance is pending.
 
 ## User-visible problem and preceding iteration
 
@@ -37,7 +37,26 @@ Chief (branch `feat/news-reader-saves`):
 
 Reader (`offline-reader`, branch `feat/reader-interests`): the `connection_grants` table (additive, via the existing idempotent schema), the `list_saved_articles` MCP tool and `GET /v1/interests/saved` (keyset-paged with exact microsecond cursors; articles only, briefs excluded), `PATCH /v1/connections/:id`, and a Settings toggle.
 
-Independent review: pending.
+**Independent review round 1 (Opus 5.5, on `dcd05dc`): REQUEST CHANGES.** The reviewer ran its own regressions against the real `McpTools` with a mocked transport. Findings:
+
+- **(P2, reproduced)** A Save that stays pending blocks all of Chief's writes, and the owner got misleading text. Triggers: a Reader 429, or a Reader business error such as a full library, which arrives as a text-only error. Other Save buttons then replied with internal text, and the agent's other writes were refused. Now every pending outcome says what settles it and that other saves and changes wait. A save refused because of another pending write names the bulletin item holding it up. The MCP pending-write rule itself is unchanged.
+- **(P2, measured)** Similarity was not the documented cosine. Words the owner never saved were dropped before normalizing, so one shared word in a 14-word headline scored 0.363 against 0.416 for an identical title, and the excerpt's half weight cancelled out. Unseen words now count at the highest IDF; a regression requires an exact match to score more than 2.5× a one-word overlap.
+- **(P3)** Further fixes:
+  - Accents were turned into word breaks ("Zürich" → "rich"). Marks are now removed.
+  - `news_status` advised turning on sharing when connectors were off or Reader lacked the tool. Learning now needs configured MCP, and each failure category has its own note.
+  - One oversized title failed the whole page, and a later failed page discarded earlier ones. Records are now cut or skipped, and pages that arrived are kept.
+  - Reddit self-posts could not be saved. The discussion is now saved under the same key, which is safe because link resolution refuses before anything is recorded.
+  - A press held a grammY runner slot for up to about 90 seconds. The save now finishes outside the handler.
+  - Clearer text for an item tried under a previous Reader credential.
+- **Not changed:** the model could reuse a news item id as its own `requestKey` (the reviewer judged it unlikely). `news_status` performs live Reader reads (within Reader's rate limit).
+
+**Devin Review (automated, on `dcd05dc`):**
+
+- **(Red)** Adding the grant and a new description to the `reader` connection changed its definition, which is hashed into every operation's binding. Any Reader save still pending at deploy time could then never be replayed, and it would block other writes. The listing now lives on a separate `reader-library` connection, and a test pins the `reader` definition to its released form.
+- A saved story reached through a Reddit link was suggested again. Headlines matching a saved title (Jaccard ≥ 0.6) are now excluded.
+- Same root cause as the `news_status` P3 above.
+
+Found while fixing: words shorter than three letters were dropped, so "AI" never matched. Two-letter words are kept, except a list of common ones. Reader's review added a `prepared` flag; unprepared saves (title is only a host name) contribute their link and site but no words.
 
 ## Verification and outcome
 
