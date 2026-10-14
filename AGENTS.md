@@ -2,14 +2,14 @@
 
 ## Workflow
 
-This repository follows the [a-stack engineering workflow](https://github.com/akhilvuputuri/a-stack/blob/workflow--v0.1.0/plugins/workflow/CORE.md), pinned to marketplace ref `workflow--v0.1.0`. Claude Code loads it through the `workflow@a-stack` plugin pinned in `.claude/settings.json`. Its core rules cover freshness, capabilities, independent review, delivery, evidence, records and hygiene, and its skills cover `preflight`, `independent-review`, `ship`, `journal`, `incident` and `experiment`. Other agents should read the linked CORE.md at that tag before starting work. The bindings below supply this repository's specifics and win where they are more specific.
+This repository follows the [a-stack engineering workflow](https://github.com/akhilvuputuri/a-stack/blob/workflow--v0.1.1/plugins/workflow/CORE.md), pinned to marketplace ref `workflow--v0.1.1`. Claude Code loads it through the `workflow@a-stack` plugin pinned in `.claude/settings.json`. Its core rules cover freshness, capabilities, independent review, delivery, evidence, records and hygiene, and its skills cover `preflight`, `independent-review`, `ship`, `journal`, `incident` and `experiment`. For Codex, run `codex plugin marketplace add akhilvuputuri/a-stack@workflow--v0.1.1` and `codex plugin add workflow@a-stack` once; `.codex/config.toml` keeps it enabled here. The Codex plugin has no hooks, so the rules below are Codex's always-on workflow. Other agents should read the linked CORE.md at that tag before starting work. The bindings below supply this repository's specifics and win where they are more specific.
 
 Non-negotiable even without the plugin:
 
 - Fetch origin and read from `origin/main` before exploring or changing anything, and again whenever you cannot establish that the last fetch is still current. Never reset or clean a shared or dirty checkout. Work on a branch or worktree.
 - Every change gets an independent reviewer that did not write it, with an explicit APPROVE or REQUEST CHANGES for the exact head SHA. Re-review after every fix.
 - A task ends at verified delivery (exact deployed SHA and evidence) or a named blocker.
-- Label claims as reported, tested, measured, hypothesis or deferred. Never invent results.
+- Label claims as reported, tested, measured, hypothesis or deferred. Never invent results. A supplied memory or context item is not proof the model used it.
 - Commit as the human developer's git identity, with no agent author or `Co-Authored-By` trailer. If `git config user.name`/`user.email` is unset or shows an agent (common in cloud sessions), stop and ask the developer; never set an identity yourself. Keep secrets and private data out of the repository, PRs and logs.
 
 ### Workflow bindings

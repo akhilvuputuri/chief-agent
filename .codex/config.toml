@@ -1,0 +1,4 @@
+# Enables the a-stack workflow plugin in this trusted project. Install it first:
+# see the Workflow section of AGENTS.md.
+[plugins."workflow@a-stack"]
+enabled = true
