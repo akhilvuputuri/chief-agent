@@ -106,7 +106,7 @@ export interface ReaderLink {
 }
 const savedPage = (r: any) => {
   if (!r || !Array.isArray(r.articles))
-    throw new Error("Reader returned no saved-article list");
+    throw new ToolValidationError("Reader returned no saved-article list");
   return r as {
     articles: {
       url: string;
