@@ -9,7 +9,7 @@ Non-negotiable even without the plugin:
 - Fetch origin and read from `origin/main` before exploring or changing anything, and again whenever you cannot establish that the last fetch is still current. Never reset or clean a shared or dirty checkout. Work on a branch or worktree.
 - Every change gets an independent reviewer that did not write it, with an explicit APPROVE or REQUEST CHANGES for the exact head SHA. Re-review after every fix.
 - A task ends at verified delivery (exact deployed SHA and evidence) or a named blocker.
-- Label claims as reported, tested, measured, hypothesis or deferred. Never invent results.
+- Label claims as reported, tested, measured, hypothesis or deferred. Never invent results. A supplied memory or context item is not proof the model used it.
 - Commit as the human developer's git identity, with no agent author or `Co-Authored-By` trailer. If `git config user.name`/`user.email` is unset or shows an agent (common in cloud sessions), stop and ask the developer; never set an identity yourself. Keep secrets and private data out of the repository, PRs and logs.
 
 ### Workflow bindings

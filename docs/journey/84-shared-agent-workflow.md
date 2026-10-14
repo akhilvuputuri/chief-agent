@@ -1,7 +1,7 @@
 # 84 — How can the development workflow apply across repositories without copies drifting?
 
 Work date(s): 2026-10-14. Written/revised: 2026-10-14.
-Status: released. Chief adopted a-stack `workflow--v0.1.0` (PR 224, deployed `7373ea8`) and then moved to `workflow--v0.1.1`. Loading in authenticated and cloud Claude sessions is still unverified.
+Status: released for PR 224, which adopted a-stack `workflow--v0.1.0` and deployed `7373ea8`. The move to `workflow--v0.1.1` is in PR 226, with its release pending. Loading in authenticated and cloud Claude sessions, and Codex project-config enablement, are still unverified.
 
 ## Problem and preceding iteration
 
@@ -54,7 +54,7 @@ The chosen design has three parts:
 
 All five were fixed. The delta review approved `8c6ae40`. Devin Review reported no bugs. The PR merged as `00149678c0f5608be34226af4ef22d2c69270b22`, which is tagged `workflow--v0.1.0`.
 
-**In Chief (this PR):**
+**In Chief (PR 224):**
 
 - **`.claude/settings.json`:** pins `workflow@a-stack` at `workflow--v0.1.0`.
 - **AGENTS.md:** opens with the workflow block and Chief's bindings: checks, reviewer, merge authority, release, records, diagnostics and exceptions. The generic freshness, review-loop, journal-rule and commit-identity sections were removed. The architecture, product and safety constraints, cloud parity priority, coding-squad review exception, documentation scope, plugins and storage sections stay.
@@ -83,7 +83,7 @@ Independent review of `895002d` (Opus 5.5): REQUEST CHANGES.
   - This entry mislabelled hook loading as measured.
   - "Inspect policy and permissions" and "never weaken branch protection" were dropped from the merge guidance.
 
-All of these were restored or corrected in `7f804b7`. The delta review (Opus 5.5) approved `7f804b78d9577ac0124d0fab8b5020574cbb0708` and found no lost rules. Devin Review reported no bugs; its one flag (automatic plugin loading needs verification) is the acceptance check listed below.
+All of these were restored or corrected in `7f804b7`. The delta review (Opus 5.5) approved `7f804b78d9577ac0124d0fab8b5020574cbb0708` and found no lost rules. Reported: Devin Review's GitHub check passed on head `7f804b7`. Its review page showed no bugs and one flag, "automatic plugin loading needs verification". The flag was not posted to GitHub. It is the acceptance check listed below.
 
 The lost identity and freshness rules are stricter than a-stack `workflow--v0.1.0`. They are candidates to upstream into the next plugin version. This is a documentation and configuration change with no runtime code, so a release redeploys the same application behavior.
 
@@ -105,13 +105,14 @@ a-stack [PR 7](https://github.com/akhilvuputuri/a-stack/pull/7) released `workfl
 **Tested** (14 October 2026), installing from GitHub at `workflow--v0.1.1` in scratch homes:
 
 - `skills@1.7.0` lists 8 skills.
-- `claude plugin marketplace add 'akhilvuputuri/a-stack#workflow--v0.1.1'` installs workflow (7 skills and the SessionStart hook) and ios-design (1 skill).
+- `claude plugin marketplace add 'akhilvuputuri/a-stack#workflow--v0.1.1'` followed by `claude plugin install workflow@a-stack` and `claude plugin install ios-design@a-stack` installs workflow (7 skills and the SessionStart hook) and ios-design (1 skill).
 - `@openai/codex@0.159.1` `plugin marketplace add akhilvuputuri/a-stack@workflow--v0.1.1` and `plugin add` work, and `debug prompt-input` lists all 8 skills.
 
-This PR moves `.claude/settings.json`, AGENTS.md and REVIEW.md to that tag and adds `.codex/config.toml`.
+[PR 226](https://github.com/akhilvuputuri/chief-agent/pull/226) moves `.claude/settings.json`, AGENTS.md and REVIEW.md to that tag. It adds `.codex/config.toml`, and adds the supplied-context rule to AGENTS.md's always-on rules, which are the only always-on rules Codex reads. Its release is pending.
 
 ## Follow-up and next iteration
 
 - Verify plugin loading in local and cloud Claude sessions, and record the result here.
+- Verify that Codex, after `codex plugin add workflow@a-stack`, loads the plugin in this trusted project through `.codex/config.toml`.
 - Changes to workflow rules now go to a-stack as a new plugin version. Chief moves to it with a reviewed PR that changes the pinned ref, as this 0.1.1 follow-up did.
 - Adopt the workflow in other repositories with the `adopt` skill.
