@@ -1,3 +1,7 @@
+# Agentic coding subagent stage 1 — in review, 15 October 2026
+
+Stage 1 of the [agentic coding design](docs/coding-subagent.md): the coding agent commits its own work, and after the Argon review the sandbox pushes its branch and opens the draft PR with a just-in-time, single-repository token from a separate minimal App; Chief verifies the PR is exactly the reviewed artifact. Dormant until the owner installs the `chief-coding-agent` App and a worker built from this release is pinned. [Journal 89](docs/journey/89-agentic-coding-subagent.md).
+
 # Shadow decisions measure Jev's accuracy — 15 October 2026
 
 v0.3.77 (PR 234, deployed in `1ec8c4d`) keeps Jev's own routing pick on every shadowed turn and gives shadow mode its own switch, `SHADOW_DECISIONS`. The two-week review found the tool picker adding about 0.6 s per reply with little use, and routing accuracy unmeasurable until now. Next: confirm the first `version: 2` records, backfill the 38 earlier turns privately once the owner allows database access, then trial `TOOL_PICKER=off`. [Journal 88](docs/journey/88-shadow-accuracy.md).

@@ -12,6 +12,7 @@ import { assertSquadCheckpoint } from "./squad-state.js";
 import { codingDestination } from "./delivery-routing.js";
 import { CodingRequirements, requirementScope } from "./requirements.js";
 import { CodingMergeApprovals } from "./merge-approvals.js";
+import type { AgentGitHubTokens, AgentToken } from "./agent-github.js";
 import {
   createHash,
   createHmac,
@@ -109,6 +110,10 @@ export class CodingController {
     private catalog?: CodingCatalog,
     private priceFilters = { input: 2, output: 10 },
     legacyAutomationEnabled = false,
+    private agentGit?: {
+      tokens: AgentGitHubTokens;
+      author: { name: string; email: string };
+    },
   ) {
     this.requirements = new CodingRequirements(db, allowed, clock);
     this.merges = new CodingMergeApprovals(db, allowed, clock);
@@ -493,6 +498,8 @@ export class CodingController {
       };
       const contextWindows = await this.contextWindows(selected);
       if (contextWindows) Object.assign(selected, { contextWindows });
+      // Agent publication is snapshotted only when the separate agent App is configured.
+      if (selected.agentGit && !this.agentGit) delete selected.agentGit;
       const id = randomUUID();
       const made = await this.db.query(
         `WITH made AS (
@@ -689,9 +696,44 @@ export class CodingController {
         });
     return Object.keys(found).length ? found : undefined;
   }
+  private agentTokens = new Map<string, AgentToken>();
+  /** Issues the attempt's single-repository agent token; never for plans, other jobs or unapproved work. */
+  async githubToken(job: CodingJob) {
+    if (
+      !this.agentGit ||
+      !job.settings.agentGit ||
+      job.mode !== "implement" ||
+      job.state !== "running" ||
+      !this.allowed(job.user_id) ||
+      !(await this.requirements.approved(job)) ||
+      new Date(job.attempt_deadline).getTime() <= this.clock().getTime()
+    )
+      throw new Error("Agent GitHub access unavailable for this attempt");
+    const cached = this.agentTokens.get(job.attempt_id);
+    if (
+      cached &&
+      Date.parse(cached.expiresAt) - this.clock().getTime() > 600000
+    )
+      return cached;
+    const issued = await this.agentGit.tokens.issue();
+    this.agentTokens.set(job.attempt_id, issued);
+    opsLog("coding.agent_token_issued", "info", { taskId: job.id });
+    return issued;
+  }
+  private async revokeAgentToken(attempt: string | null | undefined) {
+    const issued = attempt ? this.agentTokens.get(attempt) : undefined;
+    if (!issued || !attempt) return;
+    this.agentTokens.delete(attempt);
+    await this.agentGit?.tokens.revoke(issued.token);
+  }
   async assignment(job: CodingJob) {
     // Workers strictly validate settings: windows travel beside them and host-only workflow stays home.
-    const { contextWindows, prWorkflow: _hostOnly, ...settings } = job.settings;
+    const {
+      contextWindows,
+      prWorkflow: _hostOnly,
+      agentGit,
+      ...settings
+    } = job.settings;
     return {
       protocolVersion: 1,
       ...(job.settings.squad || job.settings.runtime === "pi"
@@ -705,6 +747,15 @@ export class CodingController {
       baseSha: job.base_sha,
       settings,
       ...(contextWindows ? { contextWindows } : {}),
+      ...(agentGit && this.agentGit && job.mode === "implement"
+        ? {
+            agentGit: {
+              repository: job.settings.repository,
+              branch: `chief/coding-${job.id}`,
+              author: this.agentGit.author,
+            },
+          }
+        : {}),
       checkpoint: job.checkpoint,
       deadline: new Date(job.attempt_deadline).toISOString(),
       usedModels: job.used_models,
@@ -926,6 +977,7 @@ export class CodingController {
         r.review.model !== job.settings.reviewerModel ||
         r.review.patchHash !== artifactHash(r.checkpoint) ||
         !r.checkpoint.files.length ||
+        !!r.published !== !!(job.settings.agentGit && this.agentGit) ||
         ["npm run check", "npm run build", "npm run format:check"].some(
           (cmd) => !r.checks.some((c) => c.command === cmd && c.exitCode === 0),
         ))
@@ -962,6 +1014,8 @@ export class CodingController {
       ],
     );
     if (!update.rows.length) throw new Error("Worker attempt superseded");
+    // The attempt is over: its agent token no longer has a purpose.
+    await this.revokeAgentToken(job.attempt_id);
     return { accepted: true };
   }
   async generate(
@@ -1485,7 +1539,13 @@ export class CodingController {
           )
         ).rows[0];
         if (!fresh) return;
-        const published = await this.publisher.publish(fresh);
+        const published =
+          fresh.settings.agentGit && fresh.result?.published
+            ? await this.publisher.verifyAgentPublication!(
+                fresh,
+                fresh.result.published,
+              )
+            : await this.publisher.publish(fresh);
         await this.db.query(
           `WITH changed AS (UPDATE coding_jobs SET state='pr_ready',stage='pr_ready',pr_url=$2,head_sha=$3,summary=$6,updated_at=now() WHERE id=$1 AND state='publishing' RETURNING id)
           INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$4,jsonb_build_object('summary',$6::text,'url',$2::text,'tree',$5::text) FROM changed ON CONFLICT DO NOTHING`,

@@ -1,7 +1,7 @@
 # 89 — Can Chief's coding agent work like a developer instead of a sealed job?
 
 Work date(s): 2026-10-15. Written/revised: 2026-10-15.
-Status: proposed. [Design](../coding-subagent.md) approved in direction by the owner and revised after independent review; stage 1 waits for a second, minimal GitHub App. Plan approval is kept.
+Status: in progress. [Design](../coding-subagent.md) approved after two review rounds; stage 1 is implemented and dormant until the owner installs the minimal agent App. Plan approval is kept.
 
 ## User-visible problem and preceding iteration
 
@@ -30,3 +30,7 @@ Nothing implemented yet. Prerequisite met on 15 October at the owner's request: 
 ## Follow-up and next iteration
 
 Issue creation is a separate decision (Issues: write on the app plus a scoped tool).
+
+### Stage 1 implementation — 15 October 2026
+
+Implemented (tested offline, not yet enabled): Pi snapshots diff against the pinned base so agent commits keep their changes (a regression test shows a committed edit vanishing when diffing against `HEAD`); the coder is told to commit as it works; after Argon approval the worker verifies the committed tree is the approved artifact, pushes from an isolated repository with a just-in-time token, and opens the draft PR; the host verifies that PR (branch, base, exact tree, ancestry) instead of publishing; the token issuer requests exactly contents/pull-requests write and checks/statuses read, fails closed and revokes unless `main` has update, pull-request and `test` rules that the agent cannot bypass and auto-merge is off. Tests cover the pinned permission request, four fail-closed cases with revocation, a planted `insteadOf` redirect that does not capture the push, verification-before-token ordering, controller gating/caching/revocation, and publisher acceptance and rejection cases. The model does not see the token in stage 1; stage 2 gives it `gh` for the review loop.

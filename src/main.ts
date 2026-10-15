@@ -15,6 +15,7 @@ import { CodeBuildClient } from "@aws-sdk/client-codebuild";
 import { CodingController } from "./coding/controller.js";
 import { CodeBuildSandbox } from "./coding/provider.js";
 import { GitHubPublisher } from "./coding/github.js";
+import { AgentGitHubTokens } from "./coding/agent-github.js";
 import { codingSettings } from "./coding/schema.js";
 import { codingApi } from "./coding/api.js";
 import {
@@ -451,6 +452,19 @@ if (c.CODING_RUNTIME === "on") {
       output: c.OPENROUTER_MAX_OUTPUT_PRICE,
     },
     legacySettings.autoMerge === true,
+    c.CODING_AGENT_GITHUB_APP_ID &&
+      c.CODING_AGENT_GITHUB_INSTALLATION_ID &&
+      c.CODING_AGENT_GITHUB_PRIVATE_KEY
+      ? {
+          tokens: new AgentGitHubTokens(
+            settings.repository,
+            c.CODING_AGENT_GITHUB_APP_ID,
+            c.CODING_AGENT_GITHUB_INSTALLATION_ID,
+            c.CODING_AGENT_GITHUB_PRIVATE_KEY,
+          ),
+          author: { name: c.CODING_COMMIT_NAME, email: c.CODING_COMMIT_EMAIL },
+        }
+      : undefined,
   );
 }
 // Read-only IBKR holdings (issue #146): off unless explicitly enabled with its migration.

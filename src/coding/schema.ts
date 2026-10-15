@@ -181,6 +181,19 @@ export const outcome = z
       })
       .strict()
       .optional(),
+    /** The draft PR an agent-git worker pushed and opened; the host verifies it before recording. */
+    published: z
+      .object({
+        url: z
+          .string()
+          .max(300)
+          .regex(
+            /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/[1-9][0-9]*$/,
+          ),
+        head: z.string().regex(/^[a-f0-9]{40}$/),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type Checkpoint = z.infer<typeof checkpoint>;
@@ -220,6 +233,8 @@ export const codingSettings = z
     contextWindows: codingContextWindows.optional(),
     /** Host-only: Pi PRs collect GitHub/Devin feedback, then merge only after the owner confirms. */
     prWorkflow: z.literal("owner_merge").optional(),
+    /** Host-only: the sandbox commits, pushes its branch and opens the draft PR with a scoped agent token. */
+    agentGit: z.boolean().optional(),
     limits: z
       .object({
         ms: z.number().int().positive().max(7200000),
@@ -239,6 +254,14 @@ export const codingSettings = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Model context windows belong to the Pi profile",
+      });
+    if (
+      value.agentGit &&
+      (value.runtime !== "pi" || value.prWorkflow !== "owner_merge")
+    )
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Agent git publication requires the Pi owner-merge profile",
       });
     if (value.prWorkflow !== undefined && value.runtime !== "pi")
       ctx.addIssue({

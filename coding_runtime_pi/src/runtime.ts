@@ -470,7 +470,8 @@ export class CodingRuntime {
             try {
               if (task.intent === "build" && execute)
                 contextProgress.checkpoint(
-                  (await workspace.snapshot(execute, stop.signal)).hash,
+                  (await workspace.snapshot(execute, stop.signal, task.base))
+                    .hash,
                 );
               const result = await compactContext(
                 event,
@@ -630,7 +631,7 @@ export class CodingRuntime {
         ) {
           try {
             contextProgress.checkpoint(
-              (await workspace.snapshot(execute, stop.signal)).hash,
+              (await workspace.snapshot(execute, stop.signal, task.base)).hash,
               "eight-turn observation windows",
             );
           } catch (error) {
@@ -800,7 +801,11 @@ export class CodingRuntime {
             });
             await this.event(task, "check", `${command}: ${check.exitCode}`);
           }
-          task.artifact = await workspace.snapshot(execute!, stop.signal);
+          task.artifact = await workspace.snapshot(
+            execute!,
+            stop.signal,
+            task.base,
+          );
           if (task.artifact.base !== task.base)
             throw new Error("Repository base changed during implementation");
           task.status = task.checks.every((c) => c.exitCode === 0)
