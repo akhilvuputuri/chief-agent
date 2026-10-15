@@ -25,6 +25,7 @@ try {
         "openai/gpt-6.1-sol",
         "anthropic/claude-sonnet-5.5",
         "google/gemini-3.8-flash",
+        "google/gemini-4-argon",
       ]),
       messages: z.array(z.unknown()).max(2048),
       tools: z.array(z.unknown()).max(12),

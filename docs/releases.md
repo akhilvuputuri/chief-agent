@@ -2,6 +2,18 @@
 
 [PR 228](https://github.com/akhilvuputuri/chief-agent/pull/228) replaces bulletin 👍/👎 with idempotent Save-to-Reader buttons, caps editions at five and ranks by the owner's Reader saves through a read-only `reader-library` grant. Exact-head independent review (Opus 5.5) approved `c168238` after three rounds, including a Devin-found binding issue fixed by leaving the `reader` connection unchanged; hosted CI passed. [Release](https://github.com/akhilvuputuri/chief-agent/actions/runs/38611905703) verified `f9daace9d7499b752d9a59818017ba0dffd2e063` and startup health; sanitized production logs separately show its heartbeat and no errors for two hours. This release also first deploys main's #229 (`3e52623`, Pi context windows), whose own release run was superseded. Learning needs [PageStash PR 46](https://github.com/akhilvuputuri/PageStash/pull/46) deployed and the owner's opt-in; owner acceptance is pending. No tag created yet. [Journal 86](journey/86-news-reader-saves.md).
 
+## Released v0.3.73 — Pi model context windows (host, in the `f9daace` deployment)
+
+[PR 229](https://github.com/akhilvuputuri/chief-agent/pull/229) merged as `3e526235ada428dd6b6d18e2b6e5b7442f61e071` with exact-head approval, hosted CI and 1,179 local tests. Its own release was superseded by PR #228; the [`f9daace` release](https://github.com/akhilvuputuri/chief-agent/actions/runs/38611905703) deployed it with exact receipt, startup health and later heartbeats. Worker 0.1.5 was published separately and verified anonymously. [Journal 85](journey/85-provider-routing-stability.md).
+
+## Released v0.3.72 — outage-aware provider routing and Gemini 4 Argon
+
+[PR 227](https://github.com/akhilvuputuri/chief-agent/pull/227) merged as `cb2c4fc8452dc6079e17215fc20a47bfdac99ab9` with exact-head approval, hosted CI and 1,175 local tests. The [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/38605869702) recorded exact deployment and startup health; logs show the gateway start with no errors. The routing benefit is a hypothesis pending post-release pause measurement, and the effective main model awaits a post-release conversation. [Journal 85](journey/85-provider-routing-stability.md).
+
+## Released v0.3.71 — Pi worker 0.1.4 selection
+
+[PR 225](https://github.com/akhilvuputuri/chief-agent/pull/225) merged as `aad30566ea135ad8c71e5a7a5cdd2fdc7d735faa` with exact-head approval, hosted CI and 1,175 local tests. The [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/38507059612) recorded exact deployment and startup health; logs show the gateway start and a five-minute heartbeat. The first owner canary then paused on a provider disconnect, leading to journal 85. [Journal 83](journey/83-pi-context-verification.md).
+
 ## Released v0.3.70 — Pi context, review-evidence and provider-recovery host
 
 [PR 222](https://github.com/akhilvuputuri/chief-agent/pull/222) merged as `ee2c3a13e87f12a14eee4d2d0250a368cb558d35`. Exact-head independent review (Claude Opus 5.5 at `30e28f6`, after GPT-6 Astra approvals of the product source), hosted CI and 1,175 local tests passed. The [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/38503230794) receipt records exact deployment and startup health; sanitized production logs separately show `gateway.started` and a five-minute heartbeat for that release with no warnings or errors. New Pi jobs continued to use worker 0.1.3 until the separate image pin. Paid status workloads passed once each for three pairings; the remaining matrix was not run by owner decision, so no reliability or recovery-benefit claim is made. [Journal 83](journey/83-pi-context-verification.md).
