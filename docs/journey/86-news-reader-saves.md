@@ -1,7 +1,7 @@
 # 86 — Learning the bulletin from what the owner saves to Reader
 
 Work date(s): 2026-10-15. Written/revised: 2026-10-15.
-Status: in review (round 3). Chief and Reader changes are implemented and tested locally; neither is merged or deployed. Live owner acceptance is pending.
+Status: released 15 October 2026 SGT. Chief deployed `f9daace` ([PR 228](https://github.com/akhilvuputuri/chief-agent/pull/228)) through the ordinary release; Reader merged `505acf7` ([PageStash PR 46](https://github.com/akhilvuputuri/PageStash/pull/46)) and awaits its manual Northflank deploy and app build. Learning is inactive until then and until the owner turns on sharing; owner acceptance is pending.
 
 ## User-visible problem and preceding iteration
 
@@ -75,3 +75,18 @@ Found while fixing: words shorter than three letters were dropped, so "AI" never
 - Owner acceptance: turn on sharing for Chief's connection in Reader, receive an edition, save one, and confirm ✓ and the article in Reader.
 - Phase 2: evaluate replacement scorers offline on the logged suggested and saved set before shipping one.
 - Possible: the agent offering `unfollowedSites` to follow; an exploration slot.
+
+### Release closure — 15 October 2026 (SGT)
+
+- **Chief.** Independent review (Opus 5.5) approved exact head `c168238` after three rounds; hosted CI passed on it. Squash-merged as `f9daace9d7499b752d9a59818017ba0dffd2e063`, which contains only #228. Its parent is main's unrelated #229 (`3e52623`, Pi context windows; package version 0.3.73). #229's own release run was refused because main had already moved on, which is the guard working, so this release also first deployed #229. [Release run 38611905703](https://github.com/akhilvuputuri/chief-agent/actions/runs/38611905703) deployed `f9daace` with startup health passing. Separately, private CloudWatch logs show `gateway.heartbeat` for `f9daace` every five minutes for two hours after 18:07 UTC, with no warn/error lines in that window. No migration or Compose change. No version tag was created here; `v0.3.73` is left to the release record for both PRs.
+- **Reader.** Approved at `df3af43`, `2406ed0` (merge of main's Trash work, which added the `trashed_at` exclusion) and `c6e489b` (docs-only merge). CI passed. Merged as `505acf759ca97810918843519b0feb8d09c2eaeb`. Not deployed: the backend needs a manual Northflank build of that SHA, and the switch needs a new app build after the `ios-design` check.
+- **What is live now.** 📥 Save buttons on new bulletins, five suggestions, and votes retired. Until Reader is deployed, the bulletin ranks by topics and recency only. `news_status` is expected (not yet observed in production) to report that Reader needs its update, or "not connected" if the owner has no configured Reader connection.
+- **Pending acceptance.**
+  1. Deploy Reader's backend, then install the app build.
+  2. Turn on **Share saved-article titles** for Chief's connection.
+  3. Receive an edition, save an item, and confirm the ✓ and the article in Reader.
+  4. Confirm `news_status` reports `reader.state: ok` with saved articles counted.
+- **Follow-ups:**
+  - `redd.it` short links do not get the discussion fallback (Devin, non-blocking).
+  - A save that is still running when the gateway restarts gets no reply.
+  - Headlines that differ only in tokens shorter than three characters can collide within the 14-day same-story window.
