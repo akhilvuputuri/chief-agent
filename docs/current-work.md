@@ -1,3 +1,7 @@
+# Agentic coding subagent — proposed, 15 October 2026
+
+The owner wants the coding agent to commit, push, run its Argon review, mark its PR ready, handle Devin comments and report to Chief, who asks the owner before merging and releasing. [Design](coding-subagent.md) and [journal 89](journey/89-agentic-coding-subagent.md) stage it: per-job single-repository GitHub token and agent-owned commits, then the agent-owned PR loop with session resume instead of idle sandboxes, then a chat "okay" for merge. Plan approval stays. `main` is now protected by a ruleset (pull request, `test` check, no force pushes or deletion).
+
 # Shadow decisions measure Jev's accuracy — 15 October 2026
 
 v0.3.77 (PR 234, deployed in `1ec8c4d`) keeps Jev's own routing pick on every shadowed turn and gives shadow mode its own switch, `SHADOW_DECISIONS`. The two-week review found the tool picker adding about 0.6 s per reply with little use, and routing accuracy unmeasurable until now. Next: confirm the first `version: 2` records, backfill the 38 earlier turns privately once the owner allows database access, then trial `TOOL_PICKER=off`. [Journal 88](journey/88-shadow-accuracy.md).
