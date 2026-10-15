@@ -1,7 +1,7 @@
 # 89 — Can Chief's coding agent work like a developer instead of a sealed job?
 
 Work date(s): 2026-10-15. Written/revised: 2026-10-15.
-Status: proposed. [Design](../coding-subagent.md) approved in direction by the owner; stage 1 not started. Plan approval is kept.
+Status: proposed. [Design](../coding-subagent.md) approved in direction by the owner and revised after independent review; stage 1 waits for a second, minimal GitHub App. Plan approval is kept.
 
 ## User-visible problem and preceding iteration
 
@@ -20,6 +20,8 @@ Sandbox isolation from production secrets is load-bearing: the coder runs untrus
 ## Implementation and review
 
 Planned in three stages (see the design): (1) a per-job token through the authenticated worker connection, a credential helper, pinned `gh`, and agent-owned commits/push/draft PR with exact-artifact verification; (2) the agent owns ready, CI/Devin comment handling and re-review, with Chief resuming the same session when results arrive instead of idling a sandbox; (3) a plain "okay" reply authorizes the existing exact-head merge and release.
+
+Independent review of the first design (`ec0d3ad`, Claude Opus 5.5) requested changes: with a single App identity holding `contents: write`, an injected agent could merge its own PR via the API once `test` passed (zero required approvals), releasing to production without the owner. The design now uses two identities: a minimal `chief-coding-agent` App for the sandbox and the existing publisher App as the only non-human identity that may update `main` (update restriction added in stage 1). It also pins token permissions (no `workflows`/`actions: write`), revokes tokens at attempt end, limits agent pushes to `chief/coding-*` and restricts tags, requires the host to witness Argon's verdict from its sealed journal, and names the resume transition and session caps.
 
 ## Verification and outcome
 
