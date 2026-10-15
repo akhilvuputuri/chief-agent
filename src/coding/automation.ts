@@ -299,8 +299,10 @@ export class CodingAutomation {
       }
       const feedback = i.feedback.filter((f) => !d.handled.includes(f.id));
       if (feedback.length) {
+        // Owner-approved: each Pi owner-merge round gets its own active window; totals stay shared.
+        const freshRound = j.settings.prWorkflow === "owner_merge";
         if (
-          d.remainingMs <= 0 ||
+          (!freshRound && d.remainingMs <= 0) ||
           j.used_models >= j.settings.limits.models ||
           (j.checkpoint.squadState?.toolsUsed ??
             j.checkpoint.piState?.toolsUsed ??
@@ -373,7 +375,7 @@ export class CodingAutomation {
             JSON.stringify(cp),
             j.revision,
             JSON.stringify(handled),
-            Math.floor(d.remainingMs),
+            freshRound ? j.settings.limits.ms : Math.floor(d.remainingMs),
             `mr-feedback:${fingerprint}`,
             text,
             j.stage,

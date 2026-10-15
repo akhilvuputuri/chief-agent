@@ -1,3 +1,7 @@
+# Coding feedback rounds fixed — in review, 16 October 2026
+
+The first live owner-merge job paused after a spurious feedback round: Devin's "No Issues Found" summary was treated as feedback, and the round ran out of leftover time before the Argon re-review. Candidate v0.3.79 ignores Devin summary bodies (all-clear verdicts and unposted-flag notes; its inline findings still count), gives each feedback round a fresh 40-minute window (owner decision; totals stay shared, three rounds max), and closes stage 1's two review follow-ups. [Journal 87](docs/journey/87-pi-owner-merge-feedback.md#first-live-owner-merge-job--1516-october-2026).
+
 # Agentic coding subagent stage 1 — in review, 15 October 2026
 
 Stage 1 of the [agentic coding design](docs/coding-subagent.md): the coding agent commits its own work, and after the Argon review the sandbox pushes its branch and opens the draft PR with a just-in-time, single-repository token from a separate minimal App; Chief verifies the PR is exactly the reviewed artifact. Dormant until the owner installs the `chief-coding-agent` App and a worker built from this release is pinned. [Journal 89](docs/journey/89-agentic-coding-subagent.md).

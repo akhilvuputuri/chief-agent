@@ -1564,10 +1564,10 @@ export class CodingController {
           if (!(error instanceof AgentPublicationMismatch)) throw error;
           // A PR that is not the reviewed artifact is never retried or recorded.
           await this.db.query(
-            "UPDATE coding_jobs SET state='paused',stage='paused',summary=$2,updated_at=now() WHERE id=$1 AND state='publishing'",
+            "UPDATE coding_jobs SET state='paused',stage='paused',publication_started=false,summary=$2,updated_at=now() WHERE id=$1 AND state='publishing'",
             [
               j.id,
-              "Agent PR does not match the independently reviewed artifact; inspect it before resuming",
+              "Agent PR does not match the independently reviewed artifact; inspect it, then resume to republish the reviewed candidate or cancel",
             ],
           );
           return;

@@ -37,6 +37,7 @@ import {
 import { codingApi } from "../src/coding/api.js";
 import {
   GitHubPublisher,
+  AgentPublicationMismatch,
   artifactHash,
   validateFiles,
   canonicalJson,
@@ -291,7 +292,7 @@ test("agent-published PRs are accepted only for the job branch, exact reviewed t
   const repo = "example/repo",
     id = randomUUID(),
     pushed = "a".repeat(39) + "f";
-  let pr: any, headTree: string, compare: any;
+  let pr: any, headTree: string, compare: any, branchTip: string;
   const reset = () => {
     pr = {
       state: "open",
@@ -304,6 +305,7 @@ test("agent-published PRs are accepted only for the job branch, exact reviewed t
     };
     headTree = "candidate-tree";
     compare = { ahead_by: 2, behind_by: 0 };
+    branchTip = pushed;
   };
   reset();
   const transport: any = async (url: string, options: any = {}) => {
@@ -324,6 +326,8 @@ test("agent-published PRs are accepted only for the job branch, exact reviewed t
     else if (path.endsWith(`/git/commits/${pushed}`))
       data = { tree: { sha: headTree } };
     else if (path.endsWith(`/compare/${base}...${pushed}`)) data = compare;
+    else if (path.endsWith(`/git/ref/heads/chief/coding-${id}`))
+      data = { object: { sha: branchTip } };
     else throw new Error(`Unexpected fixture path ${path}`);
     return new Response(JSON.stringify(data), { status: 200 });
   };
@@ -362,6 +366,22 @@ test("agent-published PRs are accepted only for the job branch, exact reviewed t
       message as RegExp,
     );
   }
+  // GitHub has not caught up with the push yet: retry, never a mismatch.
+  reset();
+  pr.head.sha = "0".repeat(40);
+  await assert.rejects(
+    publisher.verifyAgentPublication(job, published),
+    (error: Error) => {
+      assert(!(error instanceof AgentPublicationMismatch));
+      assert.match(error.message, /still updating/);
+      return true;
+    },
+  );
+  branchTip = "1".repeat(40);
+  await assert.rejects(
+    publisher.verifyAgentPublication(job, published),
+    AgentPublicationMismatch,
+  );
   reset();
   await assert.rejects(
     publisher.verifyAgentPublication(job, {

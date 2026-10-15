@@ -237,3 +237,37 @@ test("an explicitly reopened thread remains feedback despite old Devin resolved 
   assert.equal(i.feedback.length, 0);
   assert.equal(i.unresolvedThreads, 0);
 });
+
+test("Devin's all-clear summary review is not feedback, while its inline findings and human reviews are", async () => {
+  const f = fixture();
+  f.reviews.push({
+    id: 50,
+    state: "COMMENTED",
+    commit_id: head,
+    submitted_at: "2026-10-15T15:17:00Z",
+    user: { login: "devin-ai-integration[bot]" },
+    body: '## ✅ Devin Review: No Issues Found\n\nDevin Review analyzed this PR and found no bugs or issues to report.\n\n<!-- devin-review-badge-begin -->\n<a href="https://app.devin.ai/review/x">badge</a>',
+  });
+  let i = await f.gh.inspect(f.t);
+  assert.equal(i.feedback.length, 0);
+  f.inline.push({
+    id: 51,
+    updated_at: "2026-10-15T15:18:00Z",
+    user: { login: "devin-ai-integration[bot]" },
+    body: "Heading level is wrong\n<!-- devin-review-badge-begin -->",
+    path: "docs/releases.md",
+    line: 3,
+  });
+  f.reviews.push({
+    id: 52,
+    state: "CHANGES_REQUESTED",
+    commit_id: head,
+    submitted_at: "2026-10-15T15:19:00Z",
+    user: { login: "akhilvuputuri" },
+    body: "Please keep the older entries unchanged",
+  });
+  i = await f.gh.inspect(f.t);
+  assert.equal(i.feedback.length, 2);
+  assert.match(JSON.stringify(i.feedback), /Heading level is wrong/);
+  assert.match(JSON.stringify(i.feedback), /keep the older entries/);
+});
