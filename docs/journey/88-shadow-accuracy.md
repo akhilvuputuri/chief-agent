@@ -1,7 +1,7 @@
 # 88 — Measuring Jev's accuracy, not only its fast path
 
 Work date(s): 2026-10-14 to 2026-10-15. Written: 2026-10-15.
-Status: in review. Shadow records keep Jev's own routing pick, and shadow mode has its own switch. Not deployed.
+Status: released 15 October 2026 in the `1ec8c4d` deployment (package 0.3.77). Shadow records keep Jev's own routing pick, and shadow mode has its own switch. Routing accuracy is not yet measured.
 
 ## User-visible problem and preceding iteration
 
@@ -41,7 +41,8 @@ Alternatives considered:
   - tests did not cover a wrong pick below the threshold, a wrong pick on a several-agent turn, or the `decisions` query;
   - the query description in the design doc was stale.
 - **Re-review of `ed0e710`:** APPROVE. One cosmetic note, added to the design doc: for messages longer than Jev sees, the cues are added to Jev's pick, so `jev` is approximate there.
-- Main was then merged (journal index conflict only) and the package moved to 0.3.77; exact-head approval of the final head is recorded on the PR.
+- Main was then merged (journal index conflict only) and the package moved to 0.3.77. **Final-head re-review of `a81229e`:** APPROVE, no findings.
+- **Devin Review** (on `941d6a2`, a second signal): the picker label followed the configured mode, fixed in `ed0e710`. It also noted that domains Jev picked in the previous hour stay held after the picker is switched off (existing behaviour, `src/agent.ts` held domains). Not changed here: the first hour of `cues` records after switching the picker off should be excluded from a picker comparison.
 
 The data sent to TypeSafe and the per-message cost are unchanged. Turning the picker off is deliberately not part of this change.
 
@@ -50,6 +51,15 @@ The data sent to TypeSafe and the per-message cost are unchanged. Turning the pi
 Tested: `npm run typecheck`, 935 application tests, 51 script tests (after the review fixes), the picker/context/decision eval unit tests, `check:pi`, build and format pass locally. Locally, the coding-benchmark fixture test fails identically on unchanged main, and `check:coding` cannot run without `ruff`; hosted CI runs both.
 
 Not yet measured: routing accuracy. It needs released records with `choice`.
+
+### Release closure — 2026-10-15
+
+- [PR 234](https://github.com/akhilvuputuri/chief-agent/pull/234) merged as `fff41bb8cb67aab5cee587740ac7f7f8a980fe88` at the approved head `a81229e`, after hosted CI and Devin passed.
+- Its own [release run](https://github.com/akhilvuputuri/chief-agent/actions/runs/38717317786) correctly refused to deploy: main had already moved to `1ec8c4d` (PR 236, docs only).
+- The [release of `1ec8c4d1ffe8b506903c7b4dacfe93cffc6c63a7`](https://github.com/akhilvuputuri/chief-agent/actions/runs/38719275433), which contains this change, succeeded. `npm run release:status` reports the exact commit deployed with startup health at 10:22 UTC.
+- Sanitized logs show `gateway.started` for that release at 10:21:54 UTC. Its `config.loaded` line does not list `SHADOW_DECISIONS` among environment overrides, so production reads `jev` from `config/runtime.json`.
+- No `decision.shadow` line from the new release had appeared when this was recorded, so no `version: 2` record has been observed yet. First check: `npm run logs:cloudwatch -- decisions --since 24h` shows `choice` and `matched` on routing lines.
+- No tag created.
 
 ## Follow-up and next iteration
 
