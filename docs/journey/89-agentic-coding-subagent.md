@@ -1,0 +1,30 @@
+# 89 — Can Chief's coding agent work like a developer instead of a sealed job?
+
+Work date(s): 2026-10-15. Written/revised: 2026-10-15.
+Status: proposed. [Design](../coding-subagent.md) approved in direction by the owner; stage 1 not started. Plan approval is kept.
+
+## User-visible problem and preceding iteration
+
+[Journal 87](87-pi-owner-merge-feedback.md) added Devin feedback repair and an owner-confirmed merge for Pi jobs, but kept the original architecture: the sandboxed coder has no GitHub credentials, and the host commits its snapshot, marks the PR ready, relays review comments and merges. The owner reported (reported) that this is unconventional and over-isolated: the coding agent should commit, run its Argon review, mark the PR ready, handle Devin's comments and keep committing, then report to Chief, who asks the owner before merging and releasing. They also asked why neither Chief nor the coding agent can create GitHub issues; the answer was that no such capability was ever granted (logs showed no failed attempt).
+
+## Evidence
+
+- The host already mints repository-scoped GitHub App installation tokens with `contents: write` and `pull_requests: write` for publishing (`src/coding/github.ts`), so the app holds the permissions stage 1 needs (measured from source; app settings not inspected).
+- `main` has no branch protection and no rulesets (measured via the GitHub API on 15 October). Handing the sandbox a write token without protection would let a prompt-injected agent push directly to `main`, which triggers a production release.
+- The worker image has `git` but not `gh` (`Dockerfile.coding-pi`).
+
+## Diagnosis and alternatives
+
+Sandbox isolation from production secrets is load-bearing: the coder runs untrusted code and Chief's host holds owner credentials. Withholding all GitHub authority is not: with `main` protected on GitHub, a single-repository, short-lived token bounds the blast radius to that repository's branches, PRs and comments. Alternatives considered: keep extending host-side plumbing per GitHub action (rejected: each capability needs bespoke code and the agent cannot act on what it reads), or run the coder on Chief's host (rejected: untrusted code next to owner credentials).
+
+## Implementation and review
+
+Planned in three stages (see the design): (1) a per-job token through the authenticated worker connection, a credential helper, pinned `gh`, and agent-owned commits/push/draft PR with exact-artifact verification; (2) the agent owns ready, CI/Devin comment handling and re-review, with Chief resuming the same session when results arrive instead of idling a sandbox; (3) a plain "okay" reply authorizes the existing exact-head merge and release.
+
+## Verification and outcome
+
+Nothing implemented yet. Prerequisite: the owner protects `main` (pull request and required `test` check; no force pushes or deletion). The host will refuse to issue sandbox tokens without that rule.
+
+## Follow-up and next iteration
+
+Issue creation is a separate decision (Issues: write on the app plus a scoped tool).
