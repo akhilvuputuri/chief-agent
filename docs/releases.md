@@ -1,4 +1,8 @@
-## Released v0.3.73 — Pi model context windows (host)
+## Deployed `f9daace` — bulletin Save to Reader and Reader-based learning (package 0.3.73)
+
+[PR 228](https://github.com/akhilvuputuri/chief-agent/pull/228) replaces bulletin 👍/👎 with idempotent Save-to-Reader buttons, caps editions at five and ranks by the owner's Reader saves through a read-only `reader-library` grant. Exact-head independent review (Opus 5.5) approved `c168238` after three rounds, including a Devin-found binding issue fixed by leaving the `reader` connection unchanged; hosted CI passed. [Release](https://github.com/akhilvuputuri/chief-agent/actions/runs/38611905703) verified `f9daace9d7499b752d9a59818017ba0dffd2e063` and startup health; sanitized production logs separately show its heartbeat and no errors for two hours. This release also first deploys main's #229 (`3e52623`, Pi context windows), whose own release run was superseded. Learning needs [PageStash PR 46](https://github.com/akhilvuputuri/PageStash/pull/46) deployed and the owner's opt-in; owner acceptance is pending. No tag created yet. [Journal 86](journey/86-news-reader-saves.md).
+
+## Released v0.3.73 — Pi model context windows (host, in the `f9daace` deployment)
 
 [PR 229](https://github.com/akhilvuputuri/chief-agent/pull/229) merged as `3e526235ada428dd6b6d18e2b6e5b7442f61e071` with exact-head approval, hosted CI and 1,179 local tests. Its own release was superseded by PR #228; the [`f9daace` release](https://github.com/akhilvuputuri/chief-agent/actions/runs/38611905703) deployed it with exact receipt, startup health and later heartbeats. Worker 0.1.5 was published separately and verified anonymously. [Journal 85](journey/85-provider-routing-stability.md).
 
