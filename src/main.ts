@@ -407,7 +407,9 @@ if (c.CODING_RUNTIME === "on") {
       c.CODING_GITHUB_PRIVATE_KEY,
       { name: c.CODING_COMMIT_NAME, email: c.CODING_COMMIT_EMAIL },
       undefined,
-      settings.autoMerge === true || legacySettings.autoMerge === true,
+      settings.autoMerge === true ||
+        settings.prWorkflow === "owner_merge" ||
+        legacySettings.autoMerge === true,
     ),
     c.CODING_AUTH_KEY,
     c.CODING_PUBLIC_ORIGIN,

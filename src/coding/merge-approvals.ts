@@ -57,7 +57,7 @@ export class CodingMergeApprovals {
           summary=CASE WHEN $4 THEN 'Owner approved merge; re-verifying the exact head before merging' ELSE 'Owner declined merge; the PR stays open' END,
           updated_at=now()
         WHERE id=$1 AND user_id=$2 AND state='pr_ready' AND stage='awaiting_merge_approval'
-          AND revision=$5 AND head_sha=$6 AND (lease IS NULL OR lease_until<now())
+          AND revision=$5 AND head_sha=$6
           AND EXISTS(SELECT 1 FROM coding_events WHERE id=$7 AND job_id=$1 AND delivery='sent' AND NOT(payload ? 'decision')
             AND payload->>'telegramMessageId'=$8 AND (payload->>'confirmUntil')::timestamptz>$9)
         RETURNING id

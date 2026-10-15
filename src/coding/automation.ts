@@ -86,6 +86,41 @@ export class CodingAutomation {
   private async manual(j: CodingJob, d: Record, reason: string) {
     await this.phase(j, d, "manual_review", reason, true);
   }
+  /** Keeps one answerable card for the current revision/head; lost or expired answers are re-offered. */
+  private async offerMergeCard(j: CodingJob, d: Record) {
+    const cards = (
+      await this.db.query(
+        "SELECT delivery,payload FROM coding_events WHERE job_id=$1 AND payload->'merge'->>'head'=$2 AND (payload->'merge'->>'revision')::int=$3 ORDER BY created_at DESC,id DESC",
+        [j.id, d.head, j.revision],
+      )
+    ).rows;
+    const latest = cards[0];
+    if (
+      latest &&
+      !latest.payload.decision &&
+      (["pending", "uncertain"].includes(latest.delivery) ||
+        (latest.delivery === "sent" &&
+          new Date(latest.payload.confirmUntil).getTime() >
+            this.now().getTime()))
+    )
+      return;
+    const summary = Array.from(String(j.result?.summary ?? ""))
+      .slice(0, 800)
+      .join("");
+    await this.db.query(
+      "INSERT INTO coding_events(job_id,event_key,payload) VALUES($1,$2,$3::jsonb)",
+      [
+        j.id,
+        `merge-approval:${j.revision}:${d.head}:${randomUUID()}`,
+        JSON.stringify({
+          summary: `**Ready to merge**\nCoder's own summary (not verified by Chief): ${summary}`,
+          question: `${cards.length ? "The PR state changed or the earlier card lapsed, so please confirm again. " : ""}Exact-head CI and Devin passed, ${d.handled.length} review comment(s) were handled, and the independent ${j.settings.reviewerModel} review approved the final candidate. Merge this PR? Chief will merge only head ${d.head.slice(0, 12)} and then watch the release.`,
+          url: (j as any).pr_url,
+          merge: { revision: j.revision, head: d.head, tree: d.tree },
+        }),
+      ],
+    );
+  }
   async tick() {
     if (this.busy) return;
     this.busy = true;
@@ -311,6 +346,10 @@ export class CodingAutomation {
           cp.piState = {
             version: 1,
             toolsUsed: cp.piState!.toolsUsed,
+            // Continue review numbering so repair/review session scopes never collide.
+            ...(cp.piState!.reviewRound
+              ? { reviewRound: cp.piState!.reviewRound }
+              : {}),
             mrFeedback: { round, text },
           };
         const handled = [...d.handled, ...batch.map((f) => f.id)];
@@ -366,31 +405,20 @@ export class CodingAutomation {
         j.settings.prWorkflow === "owner_merge" &&
         j.stage !== "merge_approved"
       ) {
-        if (j.stage !== "awaiting_merge_approval") {
-          await this.phase(
-            j,
-            d,
-            "awaiting_merge_approval",
+        // Always touch the job so a waiting card never starves other PR jobs, but
+        // never overwrite an owner answer recorded after this tick read the job.
+        const waiting = await this.db.query(
+          "UPDATE coding_jobs SET stage='awaiting_merge_approval',summary=$3,updated_at=now() WHERE id=$1 AND lease=$2 AND lease_until>now() AND state='pr_ready' AND stage=$4 RETURNING id",
+          [
+            j.id,
+            j.lease,
             "CI, Devin and the independent review passed with no open threads; waiting for the owner to merge.",
-          );
-          await this.db.query(
-            "INSERT INTO coding_events(job_id,event_key,payload) VALUES($1,$2,$3::jsonb) ON CONFLICT DO NOTHING",
-            [
-              j.id,
-              `merge-approval:${j.revision}:${d.head}`,
-              JSON.stringify({
-                summary: `**Ready to merge**\n${Array.from(
-                  String(j.result?.summary ?? ""),
-                )
-                  .slice(0, 800)
-                  .join("")}`.trim(),
-                question: `Exact-head CI and Devin passed, ${d.handled.length} review comment(s) were handled, and the independent ${j.settings.reviewerModel} review approved the final candidate. Merge this PR? Chief will merge only head ${d.head.slice(0, 12)} and then watch the release.`,
-                url: (j as any).pr_url,
-                merge: { revision: j.revision, head: d.head, tree: d.tree },
-              }),
-            ],
-          );
-        }
+            j.stage,
+          ],
+        );
+        if (!waiting.rows.length) return;
+        j.stage = "awaiting_merge_approval";
+        await this.offerMergeCard(j, d);
         return;
       }
       // Avoid merging while a release would have to interrupt any owner work.

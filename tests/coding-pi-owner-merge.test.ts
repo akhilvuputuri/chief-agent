@@ -141,12 +141,26 @@ async function fixture(t: TestContext, piState: any = undefined) {
     );
     return card as { id: string; payload: any };
   };
+  /** A second published owner-merge job sharing the same database and inspection. */
+  const addJob = async () => {
+    const other = randomUUID();
+    await db.query(
+      "INSERT INTO coding_jobs(id,user_id,request_key,request_hash,origin_run,objective,context,mode,base_sha,settings,state,stage,checkpoint,result,attempt_id,cleanup,pr_url,head_sha,attempt_deadline,used_models) SELECT $2,user_id,'second',request_hash,origin_run,objective,context,mode,base_sha,settings,'pr_ready','pr_ready',checkpoint,result,$3,cleanup,'https://github.com/akhilvuputuri/chief-agent/pull/8',head_sha,attempt_deadline,used_models FROM coding_jobs WHERE id=$1",
+      [id, other, randomUUID()],
+    );
+    const row = (
+      await db.query("SELECT * FROM coding_jobs WHERE id=$1", [other])
+    ).rows[0] as CodingJob;
+    await auto.start(row, tree);
+    return other;
+  };
   return {
     db,
     auto,
     approvals,
     job,
     id,
+    addJob,
     deliverCard,
     setInspection: (i: Partial<PrInspection>) =>
       (inspection = { ...inspection, ...i }),
@@ -284,4 +298,85 @@ test("owner-confirmed merge is a Pi-only, host-only setting", () => {
       maxOutputTokens: undefined,
     }),
   );
+});
+
+test("a job waiting for the owner never starves other PR jobs", async (t) => {
+  const f = await fixture(t);
+  f.setInspection({ checks: "passed", draft: false });
+  await f.auto.tick();
+  assert.equal((await f.job()).stage, "awaiting_merge_approval");
+  const second = await f.addJob();
+  for (let i = 0; i < 4; i++) await f.auto.tick();
+  const other = (
+    await f.db.query("SELECT stage FROM coding_jobs WHERE id=$1", [second])
+  ).rows[0];
+  assert.equal(other.stage, "awaiting_merge_approval");
+  assert.equal(f.counts().merges, 0);
+});
+
+test("an approval lost to a check flap, or a lapsed card, is re-offered rather than silently hanging", async (t) => {
+  const f = await fixture(t);
+  f.setInspection({ checks: "passed", draft: false });
+  await f.auto.tick();
+  const first = await f.deliverCard(55);
+  await f.approvals.confirm("owner", first.id, true, "owner", 55);
+  f.setInspection({ checks: "pending" });
+  await f.auto.tick();
+  assert.equal((await f.job()).stage, "awaiting_ci");
+  f.setInspection({ checks: "passed" });
+  await f.auto.tick();
+  assert.equal((await f.job()).stage, "awaiting_merge_approval");
+  const cards = (
+    await f.db.query(
+      "SELECT id,payload FROM coding_events WHERE job_id=$1 AND payload ? 'merge' ORDER BY created_at",
+      [f.id],
+    )
+  ).rows;
+  assert.equal(cards.length, 2);
+  assert.match(cards[1].payload.question, /confirm again/);
+  assert.match(cards[1].payload.summary, /not verified by Chief/);
+  // The answered card cannot be replayed into a second approval.
+  assert.equal(
+    (await f.approvals.confirm("owner", first.id, true, "owner", 55)).duplicate,
+    true,
+  );
+  assert.equal(f.counts().merges, 0);
+  const second = await f.deliverCard(56);
+  await f.db.query(
+    "UPDATE coding_events SET payload=payload || jsonb_build_object('confirmUntil',$2::text) WHERE id=$1",
+    [second.id, new Date(Date.now() - 1000).toISOString()],
+  );
+  await f.auto.tick();
+  const third = (
+    await f.db.query(
+      "SELECT count(*)::int AS n FROM coding_events WHERE job_id=$1 AND payload ? 'merge'",
+      [f.id],
+    )
+  ).rows[0].n;
+  assert.equal(third, 3);
+  const live = await f.deliverCard(57);
+  // A tap while the automation holds the job lease is still accepted.
+  await f.db.query(
+    "UPDATE coding_jobs SET lease=$2,lease_until=now()+interval '1 minute' WHERE id=$1",
+    [f.id, randomUUID()],
+  );
+  await f.approvals.confirm("owner", live.id, true, "owner", 57);
+  await f.db.query(
+    "UPDATE coding_jobs SET lease=NULL,lease_until=NULL WHERE id=$1",
+    [f.id],
+  );
+  await f.auto.tick();
+  assert.equal(f.counts().merges, 1);
+});
+
+test("feedback rounds continue review numbering so session scopes never collide", async (t) => {
+  const f = await fixture(t, { version: 1, toolsUsed: 20, reviewRound: 2 });
+  f.setInspection({
+    draft: false,
+    feedback: [{ id: "devin-2", text: "Devin: typo" }],
+  });
+  await f.auto.tick();
+  const queued = await f.job();
+  assert.equal(queued.checkpoint.piState!.reviewRound, 2);
+  assert.equal(queued.checkpoint.piState!.mrFeedback!.round, 1);
 });

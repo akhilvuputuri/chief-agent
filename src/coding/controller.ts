@@ -136,7 +136,7 @@ export class CodingController {
     )
       throw new Error("Coding origin must be an HTTPS origin");
   }
-  /** Pi approval is the host-acknowledged review document plus a completed reviewer call this attempt. */
+  /** Pi approval: the acknowledged review document must match a sealed reviewer response in this attempt. */
   private async hasPiReviewerProof(job: CodingJob) {
     const document = job.result?.checkpoint?.piState?.reportDocument;
     if (
@@ -145,14 +145,38 @@ export class CodingController {
       document.detail !== job.result?.review?.findings
     )
       return false;
-    return (
-      (
-        await this.db.query(
-          "SELECT 1 FROM coding_model_calls WHERE job_id=$1 AND attempt_id=$2 AND role='reviewer' AND state='complete' LIMIT 1",
-          [job.id, job.attempt_id],
+    const calls = (
+      await this.db.query(
+        "SELECT id,result_box FROM coding_model_calls WHERE job_id=$1 AND attempt_id=$2 AND role='reviewer' AND state='complete' AND result_box IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT $3",
+        [job.id, job.attempt_id, job.settings.limits.models],
+      )
+    ).rows;
+    for (const call of calls) {
+      try {
+        const response = JSON.parse(
+          open(
+            this.resultKey(),
+            call.result_box,
+            this.resultScope(job, call.id),
+          ),
+        );
+        if (
+          response.message?.tool_calls?.some((c: any) => {
+            if (c.function?.name !== "report") return false;
+            const r = JSON.parse(c.function.arguments);
+            return (
+              r.kind === "review" &&
+              r.verdict === "APPROVE" &&
+              r.detail === document.detail
+            );
+          })
         )
-      ).rows.length === 1
-    );
+          return true;
+      } catch {
+        /* An unreadable journal entry is not approval. */
+      }
+    }
+    return false;
   }
   async logs(job: CodingJob, raw: unknown) {
     if (!this.allowed(job.user_id)) throw new Error("Owner unavailable");
