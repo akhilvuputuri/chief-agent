@@ -93,7 +93,7 @@ Fast path at a threshold, i.e. Jev picks an agent with at least this probability
 
 Higher thresholds remove good and bad routes at about the same rate. Requiring continuity to say the message stands alone (score below 0.33 or 0.5) also did not raise precision: it blocked good routes as often as bad ones, and scored some context-dependent follow-ups as standalone.
 
-**Private review of the 13 wrong agent picks** (categories only). These are the turns where Jev picked an agent that did not match Chief, using the uncorrected record: the "any" row below, 28 agent picks minus 15 matches. With the corrected count there are 15 mismatches: these 13, less the repeated-`daily` turn (which then matches), plus 2 single-agent turns where Jev picked `chief`. A `chief` pick means no fast path, so those 2 were not reviewed.
+**Private review of the 13 wrong agent picks** (categories only). These are the turns where Jev picked an agent that did not match Chief, using the uncorrected record: the "any" row below, 28 agent picks minus 15 matches. With the corrected count there are 15 mismatches: these 13, less the repeated-`daily` turn (which then matches), plus 3 `chief` picks: 2 on single-agent turns and 1 on a several-agent turn. A `chief` pick means no fast path, so those 3 were not reviewed.
 
 - **Would have worked (3):** a quick public lookup that Chief split across web and research; the repeated-`daily` turn above; one borderline lookup that ignored an earlier answer in the conversation.
 - **Capabilities only Chief has (6):** saving links to Reader and coding-job requests. No agent covers them, and Jev picked `daily`, `news`, `web` or `jobs`.
