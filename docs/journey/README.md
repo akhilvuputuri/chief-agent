@@ -95,7 +95,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 14 October | [84 — Shared a-stack workflow](84-shared-agent-workflow.md): how can the development workflow apply across repositories without copies drifting? | Released: Chief adopted the shared workflow (deployed `7373ea8`), pinned to `workflow--v0.1.1`; model-context and cloud loading unverified |
 | 15 October | [85 — Provider routing stability](85-provider-routing-stability.md): why do coding jobs keep pausing on provider faults? | In progress: price-sorted routing removed, main/standard models moved to Gemini 4 Argon, coding reviewer kept on Sol pending a worker context-window fix; review and release pending |
 | 15 October | [86 — Bulletin learning from Reader saves](86-news-reader-saves.md): how can the bulletin learn from what the owner actually saves, including from Safari? | In review: Save-to-Reader buttons, five suggestions, word-overlap ranking from Reader saves; not deployed |
-| 15 October | [87 — Pi owner-confirmed merge](87-pi-owner-merge-feedback.md): can a Pi job handle Devin feedback and merge on the owner's word? | In progress: host loop, worker feedback entry, merge card and Coding routing tested offline; disabled until a new worker is pinned |
+| 15 October | [87 — Pi owner-confirmed merge](87-pi-owner-merge-feedback.md): can a Pi job handle Devin feedback and merge on the owner's word? | In progress: v0.3.75 released; v0.3.76 enables it with the verified worker; live run pending |
 
 ## Coding-agent learning path
 

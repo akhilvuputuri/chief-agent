@@ -1,6 +1,8 @@
 # Independent Pi runtime and Chief bridge
 
-The selected worker is Pi runtime 0.1.5 (v0.3.74), built from integrated `3e526235ada428dd6b6d18e2b6e5b7442f61e071`. It adds a host-supplied context window for models missing from Pi's bundled catalog, so a Gemini 4 Argon reviewer uses its real 1M window instead of a 32k fallback. See [journal 85](journey/85-provider-routing-stability.md).
+The selected worker (v0.3.76) is built from integrated `c44cb6fbd6b1c7df84fb04ca3f744e7259c556e2`. It adds the owner-merge feedback round: unresolved MR feedback reaches a fresh coder session as an untrusted `mr_feedback` document before rerunning checks and the independent review. See [journal 87](journey/87-pi-owner-merge-feedback.md).
+
+Previously: Pi runtime 0.1.5 (v0.3.74), built from integrated `3e526235ada428dd6b6d18e2b6e5b7442f61e071`. It adds a host-supplied context window for models missing from Pi's bundled catalog, so a Gemini 4 Argon reviewer uses its real 1M window instead of a 32k fallback. See [journal 85](journey/85-provider-routing-stability.md).
 
 Previously: Pi runtime 0.1.4 (v0.3.71), built from integrated `ee2c3a13e87f12a14eee4d2d0250a368cb558d35`. It adds per-call output budgets, append-only compaction with token/transport headroom, immutable candidate-bound change inventory/diff for reviewers, and one host-verified generation after an authenticated terminal provider HTTP failure. Paid status workloads passed once each with OpenAI/Claude, Claude/OpenAI and DeepSeek/OpenAI before the recovery change; general reliability remains unmeasured. See [journal 83](journey/83-pi-context-verification.md).
 
