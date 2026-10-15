@@ -530,8 +530,8 @@ export class CodingAutomation {
       } else if (j && j.stage !== "merging") {
         // Read failures never mean checks passed. Retry bounded reads; never replay writes.
         await this.db.query(
-          "UPDATE coding_jobs SET summary='Automatic merge cannot verify GitHub state; waiting for inspection',updated_at=now() WHERE id=$1 AND lease=$2 AND state='pr_ready'",
-          [j.id, j.lease],
+          "UPDATE coding_jobs SET summary='Automatic merge cannot verify GitHub state; waiting for inspection',updated_at=now() WHERE id=$1 AND lease=$2 AND state='pr_ready' AND stage=$3",
+          [j.id, j.lease, j.stage],
         );
       }
     } finally {
