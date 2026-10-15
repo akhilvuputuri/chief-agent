@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { fixture, settings } from "./helpers/coding-fixture.js";
 import { CodingController } from "../src/coding/controller.js";
 import { codingSettings } from "../src/coding/schema.js";
+import { setOpsSink } from "../src/ops-log.js";
 
 const pi = codingSettings.parse({
   ...settings,
@@ -91,6 +92,9 @@ test("Pi jobs snapshot catalog context windows and send them beside strictly val
 
 test("catalog failure or missing metadata leaves Pi jobs without guessed windows", async (t) => {
   const f = await fixture(t);
+  const lines: any[] = [];
+  const previous = setOpsSink((line) => lines.push(JSON.parse(line)));
+  t.after(() => setOpsSink(previous));
   const failing = controller(f, async () => {
     throw new Error("catalog unavailable");
   });
@@ -112,6 +116,15 @@ test("catalog failure or missing metadata leaves Pi jobs without guessed windows
     await f.db.query("SELECT settings FROM coding_jobs WHERE id=$1", [other.id])
   ).rows[0];
   assert.equal(second.settings.contextWindows, undefined);
+  const unavailable = lines
+    .filter((l) => l.event === "coding.context_window_unavailable")
+    .map((l) => [l.model, l.errorCode, l.level]);
+  assert.deepEqual(unavailable, [
+    ["deepseek/deepseek-v4.1-flash", "catalog_unavailable", "warn"],
+    ["google/gemini-4-argon", "catalog_unavailable", "warn"],
+    ["deepseek/deepseek-v4.1-flash", "metadata_missing", "warn"],
+    ["google/gemini-4-argon", "metadata_missing", "warn"],
+  ]);
 });
 
 test("context windows are rejected outside the Pi profile and when out of bounds", () => {

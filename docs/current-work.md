@@ -1,3 +1,7 @@
+# Argon coding reviewer candidate — 15 October 2026
+
+v0.3.72 (outage-aware routing; Gemini 4 Argon as main/standard model) and the v0.3.73 context-window host are released and healthy. Worker 0.1.5 is published and verified. Candidate v0.3.74 pins it and moves the coding reviewer to Argon. Remaining: review, CI, release, an owner canary showing an Argon review verdict, and observing the effective main model. [Journal 85](journey/85-provider-routing-stability.md).
+
 # News bulletin learns from Reader saves — in review, 15 October 2026
 
 The bulletin's 👍/👎 buttons are replaced by one 📥 Save-to-Reader button per item, and editions are capped at five suggestions. Ranking now uses the owner's Reader library, including Safari saves, through a new read-only, owner-opted-in Reader listing (title, link, site and save time): site affinity plus word overlap with recent saves. Already-saved links are never suggested. App-only for Chief (no migration); Reader needs its own release first, and the owner must turn on sharing for Chief's connection. Local mocked tests pass; review, merge and both deployments are pending. [Journal 86](journey/86-news-reader-saves.md).

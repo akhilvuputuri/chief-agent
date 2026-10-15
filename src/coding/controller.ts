@@ -614,8 +614,10 @@ export class CodingController {
       settings.model,
       settings.reviewerModel,
     ]);
+    let found: Record<string, number> = {};
+    let errorCode = "metadata_missing";
     try {
-      const found = Object.fromEntries(
+      found = Object.fromEntries(
         (await this.catalog())
           .filter(
             (m) =>
@@ -626,10 +628,17 @@ export class CodingController {
           )
           .map((m) => [m.id, m.contextWindow!]),
       );
-      return Object.keys(found).length ? found : undefined;
     } catch {
-      return undefined;
+      errorCode = "catalog_unavailable";
     }
+    // Pi falls back to its own catalog, or 32k for uncatalogued models; make that visible.
+    for (const model of ids)
+      if (found[model] === undefined)
+        opsLog("coding.context_window_unavailable", "warn", {
+          model,
+          errorCode,
+        });
+    return Object.keys(found).length ? found : undefined;
   }
   async assignment(job: CodingJob) {
     // Older workers strictly validate settings, so windows travel beside them.
