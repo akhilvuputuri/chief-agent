@@ -242,7 +242,8 @@ test("the turn never waits for shadow calls, and the record joins what Chief did
     assert.deepEqual(routing.probabilities, { jobs: 0.99, chief: 0.01 });
     const continuity = rows.find((r) => r.consumer === "continuity");
     assert.equal(continuity.prediction, "keep");
-    assert.equal(rows.find((r) => r.consumer === "picker").picker, "off");
+    // No picker in this assistant: the word cues chose the domains.
+    assert.equal(rows.find((r) => r.consumer === "picker").picker, "cues");
   } finally {
     release();
     await pg.close();
@@ -281,13 +282,13 @@ test("shadow log lines carry decisions and scores, never message text", () => {
     projectEvent("decision.shadow", randomUUID(), {
       consumer: "picker",
       ok: true,
-      picker: "off",
+      picker: "cues",
       offered: ["work"],
       unused: ["work"],
       loadedLater: [],
     });
     const picker = JSON.parse(lines[1]!);
-    assert.equal(picker.picker, "off");
+    assert.equal(picker.picker, "cues");
     assert.equal(picker.unusedCount, 1);
   } finally {
     setOpsSink(previous);
@@ -367,11 +368,29 @@ test("the record counts only delegations that ran, by catalogue name, and marks 
       ["email", "success"],
       ["parcels", "success"],
     ]);
-    await shadow.record(db, "owner", two, [routing("chief")]);
+    await shadow.record(db, "owner", two, [routing("chief", "email")]);
     assert.equal((await recorded(two)).actual, "several");
     assert.equal((await recorded(two)).agree, true);
     // One agent cannot match a turn that needed several.
     assert.equal((await recorded(two)).matched, false);
+    // Below the threshold and wrong: no harm (agree) but not accurate (matched).
+    const itself = await turn([]);
+    await shadow.record(db, "owner", itself, [routing("chief", "email")]);
+    assert.equal((await recorded(itself)).actual, "chief");
+    assert.equal((await recorded(itself)).agree, true);
+    assert.equal((await recorded(itself)).matched, false);
+    // A failed prediction has no pick, so neither agreement nor accuracy.
+    const failed = await turn([["email", "success"]]);
+    await shadow.record(db, "owner", failed, [
+      {
+        ...routing("chief"),
+        ok: false,
+        decision: undefined,
+        choice: undefined,
+      },
+    ]);
+    assert.equal((await recorded(failed)).agree, null);
+    assert.equal((await recorded(failed)).matched, null);
     // Picker check: offered against used, and domains loaded mid-turn.
     const picked = await turn([]);
     await db.query(
@@ -392,11 +411,33 @@ test("the record counts only delegations that ran, by catalogue name, and marks 
     await exec.endCall(call, {}, "success");
     await recordPickerCheck(db, "owner", picked, domainOf);
     const p = await recorded(picked);
-    assert.equal(p.picker, "jev");
+    // No tools.picked event in this run: the word cues chose.
+    assert.equal(p.picker, "cues");
     assert.deepEqual(p.offered, ["canvas", "work"]);
     assert.deepEqual(p.used, ["canvas"]);
     assert.deepEqual(p.unused, ["work"]);
     assert.deepEqual(p.loadedLater, ["skills"]);
+    // Jev picked the first message's domains; a later fallback does not change that.
+    const jev = await turn([]);
+    await db.query(
+      "INSERT INTO events(run_id,user_id,type,data) VALUES($1,'owner','tools.picked',$2),($1,'owner','tools.selected',$3),($1,'owner','tools.picked',$4)",
+      [
+        jev,
+        JSON.stringify({ outcome: "picked", domains: ["work"] }),
+        JSON.stringify({ domains: ["work"] }),
+        JSON.stringify({ outcome: "timeout" }),
+      ],
+    );
+    await recordPickerCheck(db, "owner", jev, domainOf);
+    assert.equal((await recorded(jev)).picker, "jev");
+    // A timed-out pick falls back to the cues.
+    const timedOut = await turn([]);
+    await db.query(
+      "INSERT INTO events(run_id,user_id,type,data) VALUES($1,'owner','tools.picked',$2)",
+      [timedOut, JSON.stringify({ outcome: "timeout" })],
+    );
+    await recordPickerCheck(db, "owner", timedOut, domainOf);
+    assert.equal((await recorded(timedOut)).picker, "cues");
   } finally {
     await pg.close();
   }

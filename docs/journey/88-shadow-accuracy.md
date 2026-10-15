@@ -29,18 +29,24 @@ Alternatives considered:
 
 ## Implementation and review
 
-- [src/shadow.ts](../../src/shadow.ts): routing predictions keep `choice` (Jev's own pick, before the threshold) and `probabilities` (Jev's probability for each offered candidate and `chief`, rounded to four places; any other key is dropped). Records are `version: 2` and add `choice`, `matched` (did Jev's own pick equal what Chief did; `several` never matches) and `probabilities`. The picker check adds `picker: "jev" | "off"`, because with the picker off it measures the word cues instead.
+- [src/shadow.ts](../../src/shadow.ts): routing predictions keep `choice` (Jev's own pick, before the threshold) and `probabilities` (Jev's probability for each offered candidate and `chief`, rounded to four places; any other key is dropped). Records are `version: 2` and add `choice`, `matched` (did Jev's own pick equal what Chief did; `several` never matches) and `probabilities`. The picker check adds `picker`: `jev` when Jev chose the first message's domains in that run, `cues` when the word cues did (picker off, failed, timed out or backing off). It is read from the run's `tools.picked` event, not the configured mode, so a failed pick is not counted as Jev's.
+- Docs: stopping all message traffic to Jev now needs both `TOOL_PICKER=off` and `SHADOW_DECISIONS=off`; [configuration](../configuration.md), [shadow decisions](../shadow-decisions.md), [context management](../context-management.md) and `.env.example` say so, and the stale note that the picker switch needs a Compose rollout is corrected.
 - [src/ops-log.ts](../../src/ops-log.ts): `decision.shadow` lines add `choice`, `matched` and, for the picker check, `picker`. Per-candidate probabilities stay in Postgres.
 - [src/config.ts](../../src/config.ts), [config/runtime.json](../../config/runtime.json), [src/main.ts](../../src/main.ts): new behaviour setting `SHADOW_DECISIONS` (`jev` or `off`, default `jev`). Shadow mode runs when it is `jev` and an OpenRouter key is set, independent of `TOOL_PICKER`. Compose does not pass the name, so the file is authoritative in production.
 - [scripts/cloudwatch-logs.mjs](../../scripts/cloudwatch-logs.mjs): the `decisions` summary also groups by `picker`, `choice` and `matched`.
-- Tests: [tests/shadow.test.ts](../../tests/shadow.test.ts) covers the kept pick below the threshold, probability filtering and rounding, `matched` for single, several and below-threshold turns, the picker mode, and the log projection. [tests/runtime-config.test.ts](../../tests/runtime-config.test.ts) covers the new setting and its independence from `TOOL_PICKER`.
-- Independent review: pending.
+- Tests: [tests/shadow.test.ts](../../tests/shadow.test.ts) covers the kept pick below the threshold, probability filtering and rounding, `matched` against `agree` for single, several, Chief-only, below-threshold and failed predictions, who chose the picker's domains, and the log projection. [scripts/cloudwatch-logs.test.mjs](../../scripts/cloudwatch-logs.test.mjs) asserts the `decisions` query grouping. [tests/runtime-config.test.ts](../../tests/runtime-config.test.ts) covers the new setting and its independence from `TOOL_PICKER`.
+- **Independent review (Claude Opus 5.5) of `941d6a2`:** APPROVE, no blocking findings. Non-blocking findings, all fixed in the next revision:
+  - turning `TOOL_PICKER` off no longer stops all traffic to Jev, and no doc said so;
+  - `picker` recorded the configured mode, so a failed or timed-out pick counted as Jev's; it is now derived from the run;
+  - tests did not cover a wrong pick below the threshold, a wrong pick on a several-agent turn, or the `decisions` query;
+  - the query description in the design doc was stale.
+- Re-review of the fixes: pending.
 
 The data sent to TypeSafe and the per-message cost are unchanged. Turning the picker off is deliberately not part of this change.
 
 ## Verification and outcome
 
-Tested: `npm run typecheck`, 935 application tests, 50 script tests, the picker/context/decision eval unit tests, `check:pi`, build and format pass locally. Locally, the coding-benchmark fixture test fails identically on unchanged main, and `check:coding` cannot run without `ruff`; hosted CI runs both.
+Tested: `npm run typecheck`, 935 application tests, 51 script tests (after the review fixes), the picker/context/decision eval unit tests, `check:pi`, build and format pass locally. Locally, the coding-benchmark fixture test fails identically on unchanged main, and `check:coding` cannot run without `ruff`; hosted CI runs both.
 
 Not yet measured: routing accuracy. It needs released records with `choice`.
 

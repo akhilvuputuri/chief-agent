@@ -43,6 +43,7 @@ const fields: Record<string, Shape> = {
   agentType: "model",
   // Shadow routing: Jev's own pick (an agent type or chief), before the threshold.
   choice: "model",
+  // Shadow picker check: who chose the offered domains, "jev" or "cues".
   picker: "name",
   tier: "name",
   effort: "name",

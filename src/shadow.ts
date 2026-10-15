@@ -355,15 +355,23 @@ export async function recordPickerCheck(
   user: string,
   run: string,
   domainOf: (operation: string) => string | undefined,
-  picker: "jev" | "off" = "jev",
 ) {
   try {
-    const selected = (
+    const rows = (
       await db.query(
-        "SELECT data FROM events WHERE run_id=$1 AND user_id=$2 AND type IN ('tools.selected','tools.loaded') ORDER BY id",
+        "SELECT type,data FROM events WHERE run_id=$1 AND user_id=$2 AND type IN ('tools.picked','tools.selected','tools.loaded') ORDER BY id",
         [run, user],
       )
-    ).rows.map((r) => r.data as { domains?: string[] });
+    ).rows as { type: string; data: any }[];
+    const selected = rows
+      .filter((r) => r.type !== "tools.picked")
+      .map((r) => r.data as { domains?: string[] });
+    // Who chose the first message's domains: Jev, or the word cues (picker off, failed,
+    // timed out or backing off). Taken from this run, not from the configured mode.
+    const picker =
+      rows.find((r) => r.type === "tools.picked")?.data?.outcome === "picked"
+        ? "jev"
+        : "cues";
     const offered = new Set(selected[0]?.domains ?? []);
     const loaded = new Set(selected.at(-1)?.domains ?? []);
     const used = new Set(
@@ -380,7 +388,6 @@ export async function recordPickerCheck(
       version: 2,
       consumer: "picker",
       ok: true,
-      // "off": the word cues chose the offered domains, so this measures them instead.
       picker,
       offered: [...offered].sort(),
       used: [...used].sort(),

@@ -115,6 +115,15 @@ test("uses the session proxy only when HTTPS_PROXY is set", () => {
   assert.ok(lower.requestHandler.httpsAgent instanceof HttpsProxyAgent);
 });
 
+test("decisions query groups by Jev's own pick and its match", () => {
+  const q = QUERIES.decisions.query();
+  assert.match(q, /event = "decision\.shadow"/);
+  assert.match(
+    q,
+    /by kind, picker, state, choice, agentType, matched, agree, interrupted$/,
+  );
+});
+
 test("picker query summarises decisions without the in-list form", () => {
   const q = QUERIES.picker.query();
   assert.match(q, /tools\.picked/);
