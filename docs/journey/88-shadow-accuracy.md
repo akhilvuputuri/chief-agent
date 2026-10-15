@@ -40,7 +40,8 @@ Alternatives considered:
   - `picker` recorded the configured mode, so a failed or timed-out pick counted as Jev's; it is now derived from the run;
   - tests did not cover a wrong pick below the threshold, a wrong pick on a several-agent turn, or the `decisions` query;
   - the query description in the design doc was stale.
-- Re-review of the fixes: pending.
+- **Re-review of `ed0e710`:** APPROVE. One cosmetic note, added to the design doc: for messages longer than Jev sees, the cues are added to Jev's pick, so `jev` is approximate there.
+- Main was then merged (journal index conflict only) and the package moved to 0.3.77; exact-head approval of the final head is recorded on the PR.
 
 The data sent to TypeSafe and the per-message cost are unchanged. Turning the picker off is deliberately not part of this change.
 
