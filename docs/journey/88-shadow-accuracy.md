@@ -1,7 +1,7 @@
 # 88 — Measuring Jev's accuracy, not only its fast path
 
 Work date(s): 2026-10-14 to 2026-10-15. Written: 2026-10-15.
-Status: released 15 October 2026 in the `1ec8c4d` deployment (package 0.3.77). Shadow records keep Jev's own routing pick, and shadow mode has its own switch. A private backfill on 16 October measured routing accuracy on 44 turns: Jev finds the right agent but over-routes turns Chief handles itself, and no confidence threshold makes the fast path safe.
+Status: released 15 October 2026 in the `1ec8c4d` deployment (package 0.3.77). Shadow records keep Jev's own routing pick, and shadow mode has its own switch. A private backfill on 16 October measured routing accuracy on 44 turns: Jev finds the right agent but over-routes turns Chief handles itself; no threshold tested raised precision on this sample, so the fast path stays off.
 
 ## User-visible problem and preceding iteration
 
@@ -63,13 +63,13 @@ Not yet measured: routing accuracy. It needs released records with `choice`.
 
 ## Routing backfill — 2026-10-16
 
-**Measured, owner-authorized private inspection.** All 44 shadowed routing turns from 1 to 15 October (42 `version: 1`, 2 live `version: 2`) were exported read-only from Postgres over the operator connection into an owner-only scratch file. Each turn's first message and earlier turns were rebuilt the way `recentTurns` builds them and replayed through the released `ShadowDecisions` routing question, which now keeps Jev's pick. 44 calls, none failed, $0.002 in total. The export was deleted after the analysis; only these aggregates are kept.
+**Measured, owner-authorized private inspection.** All 44 shadowed routing turns from 1 to 15 October: the 38 analysed above, 4 more `version: 1` turns from 13–15 October before the release, and 2 live `version: 2` turns were exported read-only from Postgres over the operator connection into an owner-only scratch file. Each turn's first message and earlier turns were rebuilt the way `recentTurns` builds them and replayed through the released `ShadowDecisions` routing question, which now keeps Jev's pick. 44 calls, none failed, $0.002 in total. The export was deleted after the analysis; only these aggregates are kept.
 
 Limitations:
 
 - The agent catalogue was rebuilt from today's descriptions, restricted by date to the agents that existed (11 types on 1 October, 14 from 5 October; `IBKR_PORTFOLIO` and `GATHERING_RUNTIME` are on in production). The catalogue offered at the time is not stored.
 - Earlier turns come from stored conversation history and may differ slightly from what Jev saw live.
-- **Replay fidelity:** the 2 live `version: 2` picks and the 2 earlier fast-path picks were reproduced, with similar scores.
+- **Replay fidelity:** the 2 live `version: 2` picks and the 2 earlier fast-path picks were reproduced. Scores were similar but not identical: the live `library` fast path (0.97, matched) replayed at 0.95, just under the threshold. So the 0.97 row below is sensitive to replay noise at a sample of one or two turns.
 - 44 turns is a small sample.
 
 **Measurement fix in the analysis.** The shadow record calls a turn `several` whenever Chief made more than one delegation, even when every call went to the same agent. Counting repeated calls to one agent as that agent moves one turn from `several` to `daily` and one to `web`. The figures below use the corrected count; `src/shadow.ts` still records the uncorrected one.
@@ -93,14 +93,14 @@ Fast path at a threshold, i.e. Jev picks an agent with at least this probability
 
 Higher thresholds remove good and bad routes at about the same rate. Requiring continuity to say the message stands alone (score below 0.33 or 0.5) also did not raise precision: it blocked good routes as often as bad ones, and scored some context-dependent follow-ups as standalone.
 
-**Private review of the 13 mismatches** (categories only):
+**Private review of the 13 wrong agent picks** (categories only). These are the turns where Jev picked an agent that did not match Chief, using the uncorrected record: the "any" row below, 28 agent picks minus 15 matches. With the corrected count there are 15 mismatches: these 13, less the repeated-`daily` turn (which then matches), plus 2 single-agent turns where Jev picked `chief`. A `chief` pick means no fast path, so those 2 were not reviewed.
 
-- **Would have worked (2–3):** a quick public lookup that Chief split across web and research; the repeated-`daily` turn above; one borderline lookup that ignored an earlier answer in the conversation.
+- **Would have worked (3):** a quick public lookup that Chief split across web and research; the repeated-`daily` turn above; one borderline lookup that ignored an earlier answer in the conversation.
 - **Capabilities only Chief has (6):** saving links to Reader and coding-job requests. No agent covers them, and Jev picked `daily`, `news`, `web` or `jobs`.
 - **Context-dependent follow-ups (3):** short replies that only make sense with the previous exchange. Agents cannot see the conversation.
 - **Partial (1):** an image plus a web task where Jev picked only the media agent.
 
-**Conclusion (measured on this sample):** Jev is good at "which agent" and poor at "does this need an agent at all". The fast path should stay off. The likely lever is the `chief` criterion in `config/decisions.json`: it does not mention Reader saves, coding jobs or short follow-ups, which cover 9 of the 13 mismatches. That is a hypothesis; tuning the wording on these same 44 turns would overfit, so it needs fresh turns or a held-out set.
+**Conclusion (measured on this sample):** Jev is good at "which agent" and poor at "does this need an agent at all". The fast path should stay off. The likely lever is the `chief` criterion in `config/decisions.json`: it does not mention Reader saves, coding jobs or short follow-ups to the previous exchange (it mentions "earlier conversations", which is about recalling past conversations), and those cover 9 of the 13 wrong picks. That is a hypothesis; tuning the wording on these same 44 turns would overfit, so it needs fresh turns or a held-out set.
 
 ## Follow-up and next iteration
 
