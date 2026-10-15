@@ -27,6 +27,15 @@ Chief delegates a code change to a coding subagent that works like a developer o
 - **Tools.** The worker image adds a pinned `gh` CLI. The token reaches `git`/`gh` through a credential helper reading an owner-only file outside the workspace, not the process environment.
 - **Host-witnessed review.** The subagent invokes Argon, but every reviewer model call still passes through Chief's proxy and is sealed in the host journal. Chief accepts an approval only from that sealed reviewer response (the proof used since v0.3.75) and verifies the PR's head tree equals the reviewed artifact, so a self-reported or mismatched review is rejected.
 
+### Stage 1 ruleset and verification requirements
+
+From the second design review:
+
+- **Separate update ruleset.** Put the `main` update restriction in its own ruleset, bypassed only by the admin role and `chief-coding-publisher` with `bypass_mode: pull_request`, so the publisher can update `main` only by merging a PR and never skips the PR or `test` requirements of "Protect main".
+- **Host verification from the agent's side.** Rule endpoints do not reveal bypass actors to non-admin callers. Before using a token, the host queries `GET /repos/{repo}/rules/branches/main` with that agent token and requires an `update` rule present together with the pull-request and `test` rules, and the ruleset's `current_user_can_bypass` must be `never` for the agent App. It also requires repository auto-merge to stay disabled and checks `base.ref == main` at merge.
+- **Branch limit.** A ruleset on all branches except `chief/coding-*` restricting creation, update and deletion, bypassed by the admin role, the publisher App and Devin's bot if it pushes branches. The agent can still write other jobs' `chief/coding-*` branches; the exact-head merge gate bounds that.
+- **Tags.** A tag ruleset restricting creation, update and deletion, bypassed by the admin role.
+
 ## Stage 2 — the subagent owns the PR loop
 
 - The subagent marks the PR ready, reads review threads and comments with `gh`, and treats them as untrusted evidence within the approved plan (out-of-scope requests are answered, not implemented).
