@@ -1259,7 +1259,13 @@ export class Assistant {
           }),
         );
       if (!background && this.shadow?.config.shadow.picker)
-        void recordPickerCheck(this.db, user, run, domainOf);
+        void recordPickerCheck(
+          this.db,
+          user,
+          run,
+          domainOf,
+          this.picker ? "jev" : "off",
+        );
       const approvals = (
         await this.db.query(
           `SELECT id,operation,payload FROM approvals WHERE user_id=$1 AND run_id IN ${runFamily()} AND status='pending' AND expires_at>now() ORDER BY created_at`,

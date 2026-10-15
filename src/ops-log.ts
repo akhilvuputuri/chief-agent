@@ -41,6 +41,9 @@ const fields: Record<string, Shape> = {
   phase: "name",
   // An agent type such as "email" or "public-research/researcher".
   agentType: "model",
+  // Shadow routing: Jev's own pick (an agent type or chief), before the threshold.
+  choice: "model",
+  picker: "name",
   tier: "name",
   effort: "name",
   errorCode: "code",
@@ -80,6 +83,7 @@ const fields: Record<string, Shape> = {
   loadedLaterCount: "count",
   score: "number",
   agree: "bool",
+  matched: "bool",
   recalled: "count",
   referenceCount: "count",
   positionCount: "count",
@@ -390,6 +394,7 @@ const projections: Record<string, Projection> = {
       ? {
           runId: run,
           kind: "picker",
+          picker: d.picker ?? undefined,
           offeredCount: Array.isArray(d.offered) ? d.offered.length : undefined,
           unusedCount: Array.isArray(d.unused) ? d.unused.length : undefined,
           loadedLaterCount: Array.isArray(d.loadedLater)
@@ -407,6 +412,8 @@ const projections: Record<string, Projection> = {
           messages: d.messages,
           score: d.score ?? undefined,
           agree: d.agree ?? undefined,
+          choice: d.choice ?? undefined,
+          matched: d.matched ?? undefined,
           latencyMs: d.latencyMs,
           costUsd: d.costUsd,
           model: d.model ?? undefined,

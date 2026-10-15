@@ -65,3 +65,4 @@ Status: released `d434bc7` on 1 October 2026. Tested with mocked transports; pro
   - picker: unused offered domains against mid-turn loads.
 - **Then** enable continuity first, behind a switch, and fast-path routing after it.
 - **News relevance** is the next shadow consumer: rank bulletin items with Jev and compare with the owner's 👍/👎.
+- **15 October:** the two-week review found routing accuracy unmeasurable, because the record discarded Jev's pick below the threshold, and the picker adding about 0.6 s per reply for little use. [Journal 88](88-shadow-accuracy.md) records the pick and gives shadow mode its own switch.

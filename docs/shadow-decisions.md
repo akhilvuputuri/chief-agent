@@ -31,7 +31,7 @@ Shadow mode lets Chief try a decision model on real messages without changing an
 
 ## Switches
 
-Shadow mode follows the tool picker's switch. It runs only when `TOOL_PICKER=jev` (the default) and `OPENROUTER_API_KEY` is set, because it sends the same kind of data to the same provider. Setting `TOOL_PICKER=off` in the server environment stops both. Individual consumers are switched with `shadow.continuity`, `shadow.routing` and `shadow.picker` in `config/decisions.json`, which takes a release.
+Shadow mode has its own switch, `SHADOW_DECISIONS` in `config/runtime.json` (`jev`, the default, or `off`). It runs when that is `jev` and `OPENROUTER_API_KEY` is set. It is independent of `TOOL_PICKER`, so the picker can be turned off while measurement continues ([journal 88](journey/88-shadow-accuracy.md)). Production Compose does not pass the name, so a change takes effect on the next release. Individual consumers are switched with `shadow.continuity`, `shadow.routing` and `shadow.picker` in `config/decisions.json`, which also takes a release.
 
 ## Reading the data
 
@@ -43,7 +43,19 @@ Shadow mode follows the tool picker's switch. It runs only when `TOOL_PICKER=jev
 
   This groups `decision.shadow` lines by consumer, prediction, actual agent and agreement, with average score, latency, cost, unused domains and mid-turn loads.
 
-- **Private detail:** `events` rows of type `decision.shadow` in Postgres hold the full record: prediction, score, threshold, actual, delegated agent types, recall count, latency, cost and model.
+- **Private detail:** `events` rows of type `decision.shadow` in Postgres hold the full record: prediction, score, threshold, actual, delegated agent types, recall count, latency, cost and model. From `version: 2`, routing records also hold `choice`, `matched` and `probabilities`, and picker checks hold `picker`.
+
+### Routing record fields (version 2)
+
+| Field           | Meaning                                                                                                                       |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `prediction`    | The would-be action at the configured threshold: an agent type, or `chief` (no fast path).                                    |
+| `score`         | Jev's probability for its own pick (which may be `chief`).                                                                    |
+| `choice`        | Jev's own pick before the threshold. Kept on every turn, so accuracy can be measured at any threshold.                        |
+| `probabilities` | Jev's probability for each offered agent and `chief`, rounded to four places. Postgres only; not in the operational log.      |
+| `actual`        | What Chief did: one catalogue agent, `several`, or `chief`.                                                                   |
+| `agree`         | `true` when the fast path would have matched Chief, or deferred. A `chief` prediction always agrees: this measures harm only. |
+| `matched`       | `true` when Jev's own pick equals `actual`. This is the accuracy measure. A turn that needed several agents never matches.    |
 
 ## Interpreting
 
@@ -51,5 +63,6 @@ Shadow mode follows the tool picker's switch. It runs only when `TOOL_PICKER=jev
   - A prediction that names an agent Chief did not delegate to is a would-be wrong route.
   - A prediction of `chief` is never wrong; it only means no fast path.
   - Precision of the would-be routes is the number to watch before enabling the fast path.
+  - Accuracy is `matched` over all turns. Grouping `choice`/`matched` by score shows, for any threshold, the share of turns Jev would handle and how often its pick matched Chief. Records before `version: 2` lack `choice` and cannot answer this.
 - **Continuity.** Agreement cannot be read automatically, because Chief always keeps the context. Review a sample of would-be drops privately: did the reply use the previous exchange? A turn that called the recall tools is a hint, not proof.
-- **Picker.** Many turns with unused offered domains and few mid-turn loads mean the picker adds latency for little.
+- **Picker.** Many turns with unused offered domains and few mid-turn loads mean the picker adds latency for little. `picker: "off"` records measure the word cues instead, which is the comparison when the picker is switched off.

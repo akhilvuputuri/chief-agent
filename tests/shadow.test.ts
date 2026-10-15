@@ -66,7 +66,12 @@ test("shadow predictions use the eval's questions and thresholds", async () => {
       : reply({
           agent: {
             choice: "calendar",
-            probabilities: { calendar: 0.98, email: 0.01, chief: 0.01 },
+            probabilities: {
+              calendar: 0.98123456,
+              email: 0.01,
+              chief: 0.01,
+              billing: 0.5,
+            },
           },
         });
   }) as typeof fetch);
@@ -75,7 +80,15 @@ test("shadow predictions use the eval's questions and thresholds", async () => {
     predictions.map((p) => [p.consumer, p]),
   );
   assert.equal(byConsumer.continuity.decision, "drop");
+  assert.equal(byConsumer.continuity.choice, undefined);
   assert.equal(byConsumer.routing.decision, "calendar");
+  assert.equal(byConsumer.routing.choice, "calendar");
+  // Only offered candidates, rounded; an unknown key is dropped.
+  assert.deepEqual(byConsumer.routing.probabilities, {
+    calendar: 0.9812,
+    email: 0.01,
+    chief: 0.01,
+  });
   const continuity = bodies.find((b) => b.questions.needs_previous);
   assert.deepEqual(
     continuity.questions.needs_previous,
@@ -102,6 +115,9 @@ test("shadow predictions use the eval's questions and thresholds", async () => {
     })) as typeof fetch);
   const [, lowRouting] = await low.start(input());
   assert.equal(lowRouting!.decision, "chief");
+  // Jev's own pick is kept below the threshold, so accuracy can be measured at any threshold.
+  assert.equal(lowRouting!.choice, "calendar");
+  assert.equal(lowRouting!.score, 0.9);
 });
 
 test("shadow failures resolve as failed predictions and never throw", async () => {
@@ -220,9 +236,13 @@ test("the turn never waits for shadow calls, and the record joins what Chief did
     // Chief answered itself, so the would-be fast path disagrees with what happened.
     assert.equal(routing.actual, "chief");
     assert.equal(routing.agree, false);
+    assert.equal(routing.version, 2);
+    assert.equal(routing.choice, "jobs");
+    assert.equal(routing.matched, false);
+    assert.deepEqual(routing.probabilities, { jobs: 0.99, chief: 0.01 });
     const continuity = rows.find((r) => r.consumer === "continuity");
     assert.equal(continuity.prediction, "keep");
-    assert(rows.some((r) => r.consumer === "picker"));
+    assert.equal(rows.find((r) => r.consumer === "picker").picker, "off");
   } finally {
     release();
     await pg.close();
@@ -240,6 +260,9 @@ test("shadow log lines carry decisions and scores, never message text", () => {
       score: 0.98,
       actual: "email",
       agree: true,
+      choice: "email",
+      matched: true,
+      probabilities: { email: 0.98, chief: 0.02 },
       latencyMs: 310,
       costUsd: 0.00003,
       model: "typesafe/jev-1.13-20260917",
@@ -250,7 +273,22 @@ test("shadow log lines carry decisions and scores, never message text", () => {
     assert.equal(line.state, "email");
     assert.equal(line.agree, true);
     assert.equal(line.score, 0.98);
+    assert.equal(line.choice, "email");
+    assert.equal(line.matched, true);
+    // The per-candidate probabilities stay in the private record.
+    assert.equal(line.probabilities, undefined);
     assert.doesNotMatch(lines[0]!, /landlord/);
+    projectEvent("decision.shadow", randomUUID(), {
+      consumer: "picker",
+      ok: true,
+      picker: "off",
+      offered: ["work"],
+      unused: ["work"],
+      loadedLater: [],
+    });
+    const picker = JSON.parse(lines[1]!);
+    assert.equal(picker.picker, "off");
+    assert.equal(picker.unusedCount, 1);
   } finally {
     setOpsSink(previous);
   }
@@ -260,10 +298,11 @@ test("the record counts only delegations that ran, by catalogue name, and marks 
   const { pg, db } = await database();
   const shadow = new ShadowDecisions("key", config, (async () =>
     reply({})) as typeof fetch);
-  const routing = (decision: string) => ({
+  const routing = (decision: string, choice = decision) => ({
     consumer: "routing" as const,
     ok: true,
     decision,
+    choice,
     score: 0.99,
     latencyMs: 300,
     costUsd: 0.00003,
@@ -299,6 +338,13 @@ test("the record counts only delegations that ran, by catalogue name, and marks 
     await shadow.record(db, "owner", one, [routing("email")]);
     assert.equal((await recorded(one)).actual, "email");
     assert.equal((await recorded(one)).agree, true);
+    assert.equal((await recorded(one)).matched, true);
+    // Below the threshold: no fast path, but Jev's own pick still matched Chief.
+    const below = await turn([["email", "success"]]);
+    await shadow.record(db, "owner", below, [routing("chief", "email")]);
+    assert.equal((await recorded(below)).agree, true);
+    assert.equal((await recorded(below)).choice, "email");
+    assert.equal((await recorded(below)).matched, true);
     // A refused type and a never-dispatched call do not count; the retry that ran does.
     const retried = await turn([
       ["emial", "failed"],
@@ -313,6 +359,7 @@ test("the record counts only delegations that ran, by catalogue name, and marks 
     const r = await recorded(retried);
     assert.deepEqual(r.delegated, ["email"]);
     assert.equal(r.agree, false);
+    assert.equal(r.matched, false);
     assert.equal(r.interrupted, true);
     assert.equal(r.messages, 2);
     // Two delegations that ran are "several"; a chief prediction never disagrees.
@@ -323,6 +370,8 @@ test("the record counts only delegations that ran, by catalogue name, and marks 
     await shadow.record(db, "owner", two, [routing("chief")]);
     assert.equal((await recorded(two)).actual, "several");
     assert.equal((await recorded(two)).agree, true);
+    // One agent cannot match a turn that needed several.
+    assert.equal((await recorded(two)).matched, false);
     // Picker check: offered against used, and domains loaded mid-turn.
     const picked = await turn([]);
     await db.query(
@@ -343,6 +392,7 @@ test("the record counts only delegations that ran, by catalogue name, and marks 
     await exec.endCall(call, {}, "success");
     await recordPickerCheck(db, "owner", picked, domainOf);
     const p = await recorded(picked);
+    assert.equal(p.picker, "jev");
     assert.deepEqual(p.offered, ["canvas", "work"]);
     assert.deepEqual(p.used, ["canvas"]);
     assert.deepEqual(p.unused, ["work"]);
