@@ -1,6 +1,6 @@
 # Coding feedback rounds fixed — in review, 16 October 2026
 
-The first live owner-merge job paused after a spurious feedback round: Devin's "No Issues Found" summary was treated as feedback, and the round ran out of leftover time before the Argon re-review. Candidate v0.3.79 ignores Devin summary verdicts, gives each feedback round a fresh 40-minute window (owner decision; totals stay shared, three rounds max), and closes stage 1's two review follow-ups. [Journal 87](journey/87-pi-owner-merge-feedback.md#first-live-owner-merge-job--1516-october-2026).
+The first live owner-merge job paused after a spurious feedback round: Devin's "No Issues Found" summary was treated as feedback, and the round ran out of leftover time before the Argon re-review. Candidate v0.3.79 ignores Devin summary bodies (all-clear verdicts and unposted-flag notes; its inline findings still count), gives each feedback round a fresh 40-minute window (owner decision; totals stay shared, three rounds max), and closes stage 1's two review follow-ups. [Journal 87](journey/87-pi-owner-merge-feedback.md#first-live-owner-merge-job--1516-october-2026).
 
 # Agentic coding subagent stage 1 — in review, 15 October 2026
 
