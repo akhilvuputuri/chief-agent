@@ -20,6 +20,10 @@ const schema = z.object({
   CODING_GITHUB_APP_ID: z.string().default(""),
   CODING_GITHUB_INSTALLATION_ID: z.string().default(""),
   CODING_GITHUB_PRIVATE_KEY: z.string().default(""),
+  // Separate minimal App for sandbox tokens; agent publication stays off until all three are set.
+  CODING_AGENT_GITHUB_APP_ID: z.string().default(""),
+  CODING_AGENT_GITHUB_INSTALLATION_ID: z.string().default(""),
+  CODING_AGENT_GITHUB_PRIVATE_KEY: z.string().default(""),
   CODING_COMMIT_NAME: z.string().default(""),
   CODING_COMMIT_EMAIL: z.string().default(""),
   MINIAPP_ORIGIN: z

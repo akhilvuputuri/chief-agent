@@ -283,3 +283,91 @@ test("cancellation while the model claim is acknowledged prevents subsequent pai
   assert.equal(f.modelCalls(), 0);
   assert.equal((await f.row(j.id)).state, "cancelled");
 });
+
+test("agent-published PRs are accepted only for the job branch, exact reviewed tree and pinned base", async () => {
+  const key = generateKeyPairSync("rsa", { modulusLength: 2048 })
+    .privateKey.export({ type: "pkcs8", format: "pem" })
+    .toString();
+  const repo = "example/repo",
+    id = randomUUID(),
+    pushed = "a".repeat(39) + "f";
+  let pr: any, headTree: string, compare: any;
+  const reset = () => {
+    pr = {
+      state: "open",
+      head: {
+        ref: `chief/coding-${id}`,
+        sha: pushed,
+        repo: { full_name: repo },
+      },
+      base: { ref: "main", repo: { full_name: repo } },
+    };
+    headTree = "candidate-tree";
+    compare = { ahead_by: 2, behind_by: 0 };
+  };
+  reset();
+  const transport: any = async (url: string, options: any = {}) => {
+    const path = new URL(url).pathname;
+    let data: any;
+    if (path.endsWith("/access_tokens"))
+      data = {
+        token: "fixture",
+        expires_at: new Date(Date.now() + 3600000).toISOString(),
+      };
+    else if (path.endsWith("/pulls/9")) data = pr;
+    else if (path.endsWith(`/git/commits/${base}`))
+      data = { tree: { sha: "base-tree" } };
+    else if (path.endsWith("/git/trees/base-tree"))
+      data = { tree: [], truncated: false };
+    else if (path.endsWith("/git/trees") && options.method === "POST")
+      data = { sha: "candidate-tree" };
+    else if (path.endsWith(`/git/commits/${pushed}`))
+      data = { tree: { sha: headTree } };
+    else if (path.endsWith(`/compare/${base}...${pushed}`)) data = compare;
+    else throw new Error(`Unexpected fixture path ${path}`);
+    return new Response(JSON.stringify(data), { status: 200 });
+  };
+  const publisher = new GitHubPublisher(
+    repo,
+    "1",
+    "2",
+    key,
+    { name: "Human Fixture", email: "fixture@example.com" },
+    transport,
+  );
+  const job = {
+    id,
+    revision: 1,
+    base_sha: base,
+    objective: "Synthetic",
+    result: candidate(),
+    settings: { repository: repo },
+  };
+  const published = { url: `https://github.com/${repo}/pull/9`, head: pushed };
+  assert.deepEqual(await publisher.verifyAgentPublication(job, published), {
+    url: published.url,
+    head: pushed,
+    tree: "candidate-tree",
+  });
+  for (const [change, message] of [
+    [() => (pr.head.ref = "chief/coding-other"), /identity/],
+    [() => (pr.base.ref = "release"), /identity/],
+    [() => (headTree = "something-else"), /differs from the reviewed/],
+    [() => (compare = { ahead_by: 2, behind_by: 1 }), /descend/],
+  ] as const) {
+    reset();
+    change();
+    await assert.rejects(
+      publisher.verifyAgentPublication(job, published),
+      message as RegExp,
+    );
+  }
+  reset();
+  await assert.rejects(
+    publisher.verifyAgentPublication(job, {
+      url: "https://github.com/other/repo/pull/9",
+      head: pushed,
+    }),
+    /outside the configured repository/,
+  );
+});

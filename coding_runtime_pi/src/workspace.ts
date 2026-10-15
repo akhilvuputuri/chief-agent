@@ -207,7 +207,14 @@ export class Workspace {
       }
     }
   }
-  async snapshot(execute: Executor, signal: AbortSignal): Promise<Artifact> {
+  /** Diffs the staged tree against the pinned base, so agent commits never hide changes. */
+  async snapshot(
+    execute: Executor,
+    signal: AbortSignal,
+    pinned?: string,
+  ): Promise<Artifact> {
+    if (pinned !== undefined && !/^[a-f0-9]{40}$/.test(pinned))
+      throw new Error("Artifact base must be a full commit SHA");
     const quote = (value: string) =>
       "'" + value.replaceAll("'", "'\"'\"'") + "'";
     const run = async (args: string[], max = 500_000) => {
@@ -222,7 +229,7 @@ export class Workspace {
       return result.output;
     };
     await run(["add", "-A"]);
-    const base = (await run(["rev-parse", "HEAD"])).trim();
+    const base = pinned ?? (await run(["rev-parse", "HEAD"])).trim();
     const patch = await run([
       "diff",
       "--cached",
@@ -231,9 +238,10 @@ export class Workspace {
       "--no-renames",
       "--binary",
       "--patch",
+      base,
     ]);
     const names = (
-      await run(["diff", "--cached", "--name-only", "--no-renames", "-z"])
+      await run(["diff", "--cached", "--name-only", "--no-renames", "-z", base])
     )
       .split("\0")
       .filter(Boolean);

@@ -1,6 +1,6 @@
 # Agentic coding subagent — design
 
-Status: proposed, 15 October 2026. Owner-approved direction; built in stages, each through the normal review and release path. Supersedes the host-publisher and host-feedback parts of [coding automation](coding-automation.md) for new Pi jobs once stage 2 ships; older jobs keep their snapshot.
+Status: stage 1 implemented and dormant (15 October 2026); enabled after the owner installs the agent App and a worker image with stage 1 is pinned. Owner-approved direction; built in stages, each through the normal review and release path. Supersedes the host-publisher and host-feedback parts of [coding automation](coding-automation.md) for new Pi jobs once stage 2 ships; older jobs keep their snapshot.
 
 ## Goal
 
@@ -61,3 +61,11 @@ From the second design review:
 - Repository Actions secrets (such as the deploy key) are not bound to an environment; they stay unreachable only because the agent token cannot push workflow files or dispatch workflows and only `main`/trusted paths use them. Moving deploy secrets into a protected environment is a recommended hardening.
 - Devin and CI timing varies; resume rounds bound cost but a slow review delays completion.
 - Measuring success: the first stage-2 job should show the subagent's own commits, an Argon approval of the pushed diff, Devin comments handled, and an owner-confirmed merge with the exact release recorded.
+
+## Stage 1 implementation notes
+
+- **Commits without moving the artifact base.** Workspace snapshots diff the staged tree against the pinned base commit (`Task.base`, Pi runtime 0.1.6) instead of `HEAD`, so agent commits never hide changes.
+- **The model never holds the token in stage 1, and nothing it controls is published.** The coder commits with `git` as working history. After the Argon review approves, the worker builds one commit in a fresh repository from the approved file contents on top of the pinned base (fetched from GitHub, never from the workspace), with the owner's identity, and only then requests the token and pushes it to `chief/coding-<job>`. Workspace git configuration, filters, hooks and the model's own commits therefore cannot change what is pushed or capture the credential; each reviewed round is one commit. Errors name the failed step, never the command.
+- **Host verification.** `verifyAgentPublication` replaces host publishing for agent-git jobs: the PR must be open on `chief/coding-<job>` against `main`, its head commit tree must equal the host-built tree of the approved artifact, and it must descend from the pinned base. The token endpoint serves only running, approved implementation attempts; tokens are cached per attempt, revoked when the attempt finishes, and swept (revoked) on each controller tick once their attempt is no longer running (timeout, stop, cancel, crash). A gateway restart loses the cache, leaving any outstanding token to expire within an hour. A PR that fails verification pauses the job instead of retrying. CI runs with a read-only workflow token because it executes agent code on pull requests.
+- **Branch and tag rulesets** (`chief/coding-*` limit, tag restriction) are applied and checked through the API at enablement; per-token verification covers `main` only.
+- **Enablement** needs `CODING_AGENT_GITHUB_APP_ID`, `CODING_AGENT_GITHUB_INSTALLATION_ID` and `CODING_AGENT_GITHUB_PRIVATE_KEY` in the production `.env`, the stage 1 rulesets applied, a worker image built from this release, and `agentGit: true` in `config/coding-pi.json`. Until then new jobs keep host publishing.

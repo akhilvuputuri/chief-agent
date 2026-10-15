@@ -97,7 +97,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 15 October | [86 — Bulletin learning from Reader saves](86-news-reader-saves.md): how can the bulletin learn from what the owner actually saves, including from Safari? | In review: Save-to-Reader buttons, five suggestions, word-overlap ranking from Reader saves; not deployed |
 | 15 October | [87 — Pi owner-confirmed merge](87-pi-owner-merge-feedback.md): can a Pi job handle Devin feedback and merge on the owner's word? | In progress: v0.3.75 released; v0.3.76 enables it with the verified worker; live run pending |
 | 14–15 October | [88 — Measuring Jev's accuracy](88-shadow-accuracy.md): can the shadow records show whether Jev decides as Chief does? | Released in `1ec8c4d` (0.3.77): routing records keep Jev's own pick; shadow mode has its own switch; accuracy not yet measured |
-| 15 October | [89 — Agentic coding subagent](89-agentic-coding-subagent.md): can Chief's coding agent work like a developer instead of a sealed job? | Proposed: staged design approved in direction; `main` ruleset applied |
+| 15 October | [89 — Agentic coding subagent](89-agentic-coding-subagent.md): can Chief's coding agent work like a developer instead of a sealed job? | In progress: stage 1 (agent commits, sandbox push, host-verified PR) implemented and dormant until the agent App is installed |
 
 ## Coding-agent learning path
 

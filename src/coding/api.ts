@@ -73,13 +73,14 @@ export async function codingApi(
         ["POST", "finish"],
         ["POST", "model"],
         ["POST", "logs"],
+        ["POST", "github-token"],
         ["POST", "pi-session"],
         ["GET", "pi-session"],
         ["POST", "pi/coder/v1/chat/completions"],
         ["POST", "pi/reviewer/v1/chat/completions"],
       ] as const) {
         const diagnosticPhase =
-          path === "pi-session"
+          path === "pi-session" || path === "github-token"
             ? "checkpoint"
             : path === "pi/coder/v1/chat/completions" ||
                 path === "pi/reviewer/v1/chat/completions"
@@ -191,6 +192,8 @@ export async function codingApi(
               if (path === "finish")
                 return await controller.finish(job, req.body);
               if (path === "logs") return await controller.logs(job, req.body);
+              if (path === "github-token")
+                return await controller.githubToken(job);
               if (path === "model") {
                 if (Buffer.byteLength(JSON.stringify(req.body)) > 180000) {
                   await controller

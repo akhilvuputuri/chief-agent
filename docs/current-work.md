@@ -1,3 +1,7 @@
+# Agentic coding subagent stage 1 — in review, 15 October 2026
+
+Stage 1 of the [agentic coding design](coding-subagent.md): the coding agent commits its own work, and after the Argon review the sandbox pushes its branch and opens the draft PR with a just-in-time, single-repository token from a separate minimal App; Chief verifies the PR is exactly the reviewed artifact. Dormant until the owner installs the `chief-coding-agent` App and a worker built from this release is pinned. [Journal 89](journey/89-agentic-coding-subagent.md).
+
 # Agentic coding subagent — proposed, 15 October 2026
 
 The owner wants the coding agent to commit, push, run its Argon review, mark its PR ready, handle Devin comments and report to Chief, who asks the owner before merging and releasing. [Design](coding-subagent.md) and [journal 89](journey/89-agentic-coding-subagent.md) stage it: per-job single-repository GitHub token and agent-owned commits, then the agent-owned PR loop with session resume instead of idle sandboxes, then a chat "okay" for merge. Plan approval stays. `main` is now protected by a ruleset (pull request, `test` check, no force pushes or deletion).

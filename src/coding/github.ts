@@ -66,8 +66,15 @@ export interface RepositoryPublisher {
     signal?: AbortSignal,
   ): Promise<{ url: string; head: string; tree?: string }>;
   automation?: () => import("./merge-policy.js").PrAutomationRepository;
+  verifyAgentPublication?(
+    job: Parameters<RepositoryPublisher["publish"]>[0],
+    published: { url: string; head: string },
+    signal?: AbortSignal,
+  ): Promise<{ url: string; head: string; tree: string }>;
 }
 
+/** An agent-published PR is not the reviewed artifact; publication must stop, not retry. */
+export class AgentPublicationMismatch extends Error {}
 /** The installation credential never crosses the worker boundary. */
 export class GitHubPublisher implements RepositoryPublisher {
   private token?: { value: string; expires: number };
@@ -193,6 +200,98 @@ export class GitHubPublisher implements RepositoryPublisher {
       throw new Error("Main commit unavailable");
     return ref.object.sha as string;
   }
+  /** The exact Git tree of the approved artifact on its base, built through the host App. */
+  private async candidateTree(
+    j: Parameters<RepositoryPublisher["publish"]>[0],
+    signal?: AbortSignal,
+  ) {
+    const commit = await this.api(
+      `git/commits/${j.base_sha}`,
+      "GET",
+      undefined,
+      signal,
+    );
+    const baseTree = await this.api(
+      `git/trees/${commit.tree.sha}?recursive=1`,
+      "GET",
+      undefined,
+      signal,
+    );
+    if (baseTree.truncated)
+      throw new Error("Repository tree exceeds supported size");
+    const tree = [];
+    for (const file of j.result.checkpoint.files) {
+      const prior = baseTree.tree.find((p: any) => p.path === file.path);
+      if (prior && prior.mode !== "100644" && prior.mode !== "100755")
+        throw new Error("Only regular files may be changed");
+      if (file.content === null && !prior)
+        throw new Error("Cannot delete an absent file");
+      tree.push({
+        path: file.path,
+        mode: file.mode ?? prior?.mode ?? "100644",
+        type: "blob",
+        ...(file.content === null ? { sha: null } : { content: file.content }),
+      });
+    }
+    if (!tree.length) throw new Error("Candidate has no changes");
+    const created = await this.api(
+      "git/trees",
+      "POST",
+      { base_tree: commit.tree.sha, tree },
+      signal,
+    );
+    return String(created.sha);
+  }
+  /** Confirms an agent-pushed draft PR is exactly the approved artifact on the pinned base. */
+  async verifyAgentPublication(
+    j: Parameters<RepositoryPublisher["publish"]>[0],
+    published: { url: string; head: string },
+    signal?: AbortSignal,
+  ) {
+    if (j.settings.repository !== this.repository)
+      throw new Error("Repository not allowed");
+    validateFiles(j.result.checkpoint.files);
+    const prefix = `https://github.com/${this.repository}/pull/`;
+    const number = published.url.slice(prefix.length);
+    if (!published.url.startsWith(prefix) || !/^[1-9][0-9]*$/.test(number))
+      throw new AgentPublicationMismatch(
+        "Agent PR is outside the configured repository",
+      );
+    const pr = await this.api(`pulls/${number}`, "GET", undefined, signal);
+    if (
+      pr.state !== "open" ||
+      pr.head?.repo?.full_name !== this.repository ||
+      pr.base?.repo?.full_name !== this.repository ||
+      pr.base?.ref !== "main" ||
+      pr.head?.ref !== `chief/coding-${j.id}` ||
+      pr.head?.sha !== published.head
+    )
+      throw new AgentPublicationMismatch(
+        "Agent PR identity does not match the job",
+      );
+    const tree = await this.candidateTree(j, signal);
+    const head = await this.api(
+      `git/commits/${published.head}`,
+      "GET",
+      undefined,
+      signal,
+    );
+    if (head.tree?.sha !== tree)
+      throw new AgentPublicationMismatch(
+        "Agent PR tree differs from the reviewed artifact",
+      );
+    const compare = await this.api(
+      `compare/${j.base_sha}...${published.head}`,
+      "GET",
+      undefined,
+      signal,
+    );
+    if (compare.behind_by !== 0 || !(compare.ahead_by >= 1))
+      throw new AgentPublicationMismatch(
+        "Agent PR does not descend from the pinned base",
+      );
+    return { url: published.url, head: published.head, tree };
+  }
   async publish(
     j: Parameters<RepositoryPublisher["publish"]>[0],
     signal?: AbortSignal,
@@ -240,41 +339,7 @@ export class GitHubPublisher implements RepositoryPublisher {
       )
         throw new Error("Existing coding PR needs operator inspection");
     }
-    const commit = await this.api(
-      `git/commits/${j.base_sha}`,
-      "GET",
-      undefined,
-      signal,
-    );
-    const baseTree = await this.api(
-      `git/trees/${commit.tree.sha}?recursive=1`,
-      "GET",
-      undefined,
-      signal,
-    );
-    if (baseTree.truncated)
-      throw new Error("Repository tree exceeds supported size");
-    const tree = [];
-    for (const file of j.result.checkpoint.files) {
-      const prior = baseTree.tree.find((p: any) => p.path === file.path);
-      if (prior && prior.mode !== "100644" && prior.mode !== "100755")
-        throw new Error("Only regular files may be changed");
-      if (file.content === null && !prior)
-        throw new Error("Cannot delete an absent file");
-      tree.push({
-        path: file.path,
-        mode: file.mode ?? prior?.mode ?? "100644",
-        type: "blob",
-        ...(file.content === null ? { sha: null } : { content: file.content }),
-      });
-    }
-    if (!tree.length) throw new Error("Candidate has no changes");
-    const newTree = await this.api(
-      "git/trees",
-      "POST",
-      { base_tree: commit.tree.sha, tree },
-      signal,
-    );
+    const newTree = { sha: await this.candidateTree(j, signal) };
     if (continuation && continuation.head.sha === j.head_sha) {
       const current = await this.api(`git/commits/${j.head_sha}`);
       if (current.tree?.sha === newTree.sha)

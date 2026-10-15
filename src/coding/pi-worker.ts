@@ -22,6 +22,7 @@ import {
   type Outcome,
 } from "./schema.js";
 import { artifactHash, canonicalJson, validateFiles } from "./github.js";
+import { publishSandboxBranch } from "./agent-git-publish.js";
 import { piReviewEvidence } from "./pi-review-evidence.js";
 
 const assignmentSchema = z.object({
@@ -34,6 +35,19 @@ const assignmentSchema = z.object({
   baseSha: z.string().regex(/^[a-f0-9]{40}$/),
   settings: codingSettings,
   contextWindows: codingContextWindows.optional(),
+  agentGit: z
+    .object({
+      repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
+      branch: z.string().regex(/^chief\/coding-[0-9a-f-]{36}$/),
+      author: z
+        .object({
+          name: z.string().min(1).max(200),
+          email: z.string().email().max(200),
+        })
+        .strict(),
+    })
+    .strict()
+    .optional(),
   checkpoint,
   deadline: z.string().datetime(),
   usedModels: z.number().int(),
@@ -73,6 +87,10 @@ export async function runPiWorker(
       directory: string,
       assignment: Assignment,
     ) => Promise<void>;
+    /** Test-only: a local remote and GitHub API stand-in for agent publication. */
+    agentRemote?: string;
+    agentBaseSource?: string;
+    agentApi?: typeof fetch;
   },
 ) {
   let assignment = assignmentSchema.parse(await client.request("assignment"));
@@ -103,6 +121,17 @@ export async function runPiWorker(
   }
   const tree = await new PiWorkspace(workspace).initialize();
   await tree.restore(assignment.checkpoint.files);
+  // Agent commits use the owner's identity; credentials are never configured in the workspace.
+  if (assignment.agentGit) {
+    const quoteArg = (value: string) =>
+      "'" + value.replaceAll("'", "'\"'\"'") + "'";
+    await command(
+      `git config user.name ${quoteArg(assignment.agentGit.author.name)}`,
+    );
+    await command(
+      `git config user.email ${quoteArg(assignment.agentGit.author.email)}`,
+    );
+  }
   const stateKey = createHmac("sha256", client.token)
     .update(`local:${assignment.id}:${assignment.attemptId}`)
     .digest("hex");
@@ -246,7 +275,7 @@ export async function runPiWorker(
     await uploadSession(task, scope);
     const snap = await new PiWorkspace(working)
       .initialize()
-      .then((w) => w.snapshot(initial, stop));
+      .then((w) => w.snapshot(initial, stop, assignment.baseSha));
     const next: Checkpoint = {
       plan:
         assignment.mode === "implement"
@@ -418,8 +447,10 @@ export async function runPiWorker(
           text: assignment.checkpoint.piState.findings,
         },
       ];
-      task.instructions = `${assignment.context}\nRead all pages of review_findings with read_document before repairs.`;
+      task.instructions = `${assignment.context}\nRead all pages of review_findings with read_document before repairs.${assignment.agentGit ? "\nCommit your work with git as you go, using clear messages. Do not push, add remotes or change git configuration." : ""}`;
     }
+    if (assignment.agentGit && assignment.mode === "implement")
+      task.instructions = `${task.instructions}\nCommit your work with git as you go, using clear messages. Do not push, add remotes or change git configuration; after independent review Chief pushes your branch and opens the pull request.`;
     if (mrFeedback) {
       task.referenceDocuments = [
         ...(task.referenceDocuments ?? []),
@@ -608,6 +639,34 @@ export async function runPiWorker(
         break;
       }
       if (verdict.report.verdict === "APPROVE") {
+        const published = assignment.agentGit
+          ? await publishSandboxBranch({
+              execute: initial,
+              signal: stop,
+              scratch: root,
+              repository: assignment.agentGit.repository,
+              branch: assignment.agentGit.branch,
+              base: assignment.baseSha,
+              author: assignment.agentGit.author,
+              title: `Chief coding job: ${Array.from(assignment.objective.split("\n")[0]!).slice(0, 80).join("")}`,
+              body: `${result.summary}\n\nIndependent review (${assignment.settings.reviewerModel}): APPROVE for artifact ${candidateHash}.`,
+              // Exactly the approved artifact; the model's own commits are working history only.
+              files: saved.files,
+              token: async () =>
+                (
+                  (await client.request("github-token", {})) as {
+                    token: string;
+                  }
+                ).token,
+              ...(hooks?.agentRemote
+                ? {
+                    remote: hooks.agentRemote,
+                    baseSource: hooks.agentBaseSource,
+                    api: hooks.agentApi,
+                  }
+                : {}),
+            })
+          : undefined;
         const finished: Outcome = {
           kind: "candidate",
           summary: result.summary,
@@ -620,6 +679,7 @@ export async function runPiWorker(
             model: assignment.settings.reviewerModel,
             patchHash: candidateHash,
           },
+          ...(published ? { published } : {}),
         };
         await client.request("finish", finished);
         return;
@@ -636,7 +696,7 @@ export async function runPiWorker(
           text: verdict.report.detail,
         },
       ];
-      result.instructions = `${assignment.context}\nRead all pages of review_findings with read_document before repairs.`;
+      result.instructions = `${assignment.context}\nRead all pages of review_findings with read_document before repairs.${assignment.agentGit ? "\nCommit your work with git as you go, using clear messages. Do not push, add remotes or change git configuration." : ""}`;
       await store.save(result);
       runtime = makeRuntime("coder", scopeFor("build", `repair-${round}`));
       currentTask = result.id;
