@@ -26,6 +26,12 @@ Tell Chief which leader, coder or reviewer model to use. `coding_models` is read
 
 Role decisions are append-only owner-scoped events. New jobs capture the preferences; active/approved jobs and automatic repair retain their original snapshot. This changes only coding roles, not Chief's main model. The owned squad policy accepts its configured reviewer; other repository development still requires the most capable independent reviewer.
 
+## Pi owner-confirmed merge
+
+`settings.prWorkflow: "owner_merge"` is a host-only Pi selector (never sent to the worker). After the exact-artifact Pi review approves and the draft PR is published, the same durable automation marks it ready so GitHub/Devin review it, then waits for exact-head CI and Devin. Unresolved feedback is delivered as an untrusted `mr_feedback` document to a fresh Pi coder round on the published candidate (at most three rounds within the job's remaining time, model and tool allocation); the worker reruns the real checks and obtains a fresh independent review before the PR is updated. Out-of-scope requests are left unimplemented and reported.
+
+When CI and Devin pass, all feedback is handled and no GitHub thread is open, Chief sends a Merge / Keep open card for that exact PR head. A tap is accepted only from the owner, for the delivered message, at the same revision and head, while the job waits. After approval the host re-runs every merge gate (head/tree/base/main, protected paths, reviewer proof, checks, feedback, threads, idle runtime) and merges only that head, then watches the exact release. Any change resets the approval; Keep open leaves the PR unmerged. Main moving since the approved base still requires manual reconciliation.
+
 ## Read-only operational diagnostics
 
 The Python `logs_read` tool calls a job-capability API on Chief. It reads owner-scoped authoritative runtime/event/call metadata, not shell or unrestricted production logs. Model failure identity/status, tool outcomes, timing and counters are projected through the existing operational allowlist. Raw prompts, conversations, memories, integrations, tool arguments/results and free-text errors are excluded. Historical rows retain their actual timestamp; the reader does not invent an event-time release from today's running image.

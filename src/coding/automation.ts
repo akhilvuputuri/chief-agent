@@ -37,7 +37,7 @@ export class CodingAutomation {
     private now: () => Date,
   ) {}
   async start(job: CodingJob, tree: string) {
-    if (!job.settings.autoMerge) return;
+    if (!job.settings.autoMerge && !job.settings.prWorkflow) return;
     const previous = (
       await this.db.query(
         "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key=$2",
@@ -94,7 +94,7 @@ export class CodingAutomation {
     try {
       j = (
         await this.db.query(
-          `UPDATE coding_jobs SET lease=$1,lease_until=now()+interval '3 minutes' WHERE id=(SELECT id FROM coding_jobs WHERE state='pr_ready' AND settings->>'autoMerge'='true' AND cleanup IN ('none','complete') AND stage IN ('pr_ready','readying','awaiting_ci','merging','release_pending') AND (lease IS NULL OR lease_until<now()) ORDER BY updated_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *`,
+          `UPDATE coding_jobs SET lease=$1,lease_until=now()+interval '3 minutes' WHERE id=(SELECT id FROM coding_jobs WHERE state='pr_ready' AND (settings->>'autoMerge'='true' OR settings->>'prWorkflow'='owner_merge') AND cleanup IN ('none','complete') AND stage IN ('pr_ready','readying','awaiting_ci','awaiting_merge_approval','merge_approved','merging','release_pending') AND (lease IS NULL OR lease_until<now()) ORDER BY updated_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *`,
           [randomUUID()],
         )
       ).rows[0];
@@ -258,8 +258,9 @@ export class CodingAutomation {
         if (
           d.remainingMs <= 0 ||
           j.used_models >= j.settings.limits.models ||
-          (j.checkpoint.squadState?.toolsUsed ?? 0) >=
-            j.settings.limits.tools ||
+          (j.checkpoint.squadState?.toolsUsed ??
+            j.checkpoint.piState?.toolsUsed ??
+            0) >= j.settings.limits.tools ||
           d.handled.length + feedback.length > 200
         ) {
           await this.manual(
@@ -270,11 +271,21 @@ export class CodingAutomation {
           return;
         }
         const cp = structuredClone(j.checkpoint);
-        if (!cp.squadState) {
+        const pi = j.settings.prWorkflow === "owner_merge" && cp.piState;
+        const round = (cp.piState?.mrFeedback?.round ?? 0) + 1;
+        if (!cp.squadState && !pi) {
           await this.manual(
             j,
             d,
             "Feedback repair requires the fixed squad runtime.",
+          );
+          return;
+        }
+        if (pi && round > 3) {
+          await this.manual(
+            j,
+            d,
+            "Review feedback remains after three repair rounds; inspect the PR before continuing.",
           );
           return;
         }
@@ -294,7 +305,14 @@ export class CodingAutomation {
           );
           return;
         }
-        cp.squadState.findings = text;
+        if (cp.squadState) cp.squadState.findings = text;
+        else
+          // A fresh coder round on the published candidate; reviewer state is not carried over.
+          cp.piState = {
+            version: 1,
+            toolsUsed: cp.piState!.toolsUsed,
+            mrFeedback: { round, text },
+          };
         const handled = [...d.handled, ...batch.map((f) => f.id)];
         const fingerprint = createHash("sha256")
           .update(JSON.stringify(handled))
@@ -344,6 +362,37 @@ export class CodingAutomation {
           );
         return;
       }
+      if (
+        j.settings.prWorkflow === "owner_merge" &&
+        j.stage !== "merge_approved"
+      ) {
+        if (j.stage !== "awaiting_merge_approval") {
+          await this.phase(
+            j,
+            d,
+            "awaiting_merge_approval",
+            "CI, Devin and the independent review passed with no open threads; waiting for the owner to merge.",
+          );
+          await this.db.query(
+            "INSERT INTO coding_events(job_id,event_key,payload) VALUES($1,$2,$3::jsonb) ON CONFLICT DO NOTHING",
+            [
+              j.id,
+              `merge-approval:${j.revision}:${d.head}`,
+              JSON.stringify({
+                summary: `**Ready to merge**\n${Array.from(
+                  String(j.result?.summary ?? ""),
+                )
+                  .slice(0, 800)
+                  .join("")}`.trim(),
+                question: `Exact-head CI and Devin passed, ${d.handled.length} review comment(s) were handled, and the independent ${j.settings.reviewerModel} review approved the final candidate. Merge this PR? Chief will merge only head ${d.head.slice(0, 12)} and then watch the release.`,
+                url: (j as any).pr_url,
+                merge: { revision: j.revision, head: d.head, tree: d.tree },
+              }),
+            ],
+          );
+        }
+        return;
+      }
       // Avoid merging while a release would have to interrupt any owner work.
       const busy = (
         await this.db.query(
@@ -351,10 +400,11 @@ export class CodingAutomation {
         )
       ).rows.length;
       if (busy) {
+        // An owner approval survives a busy wait; any PR change still resets it.
         await this.phase(
           j,
           d,
-          "awaiting_ci",
+          j.stage === "merge_approved" ? "merge_approved" : "awaiting_ci",
           "Checks passed; waiting for idle runtime work before merge.",
         );
         return;

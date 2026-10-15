@@ -257,7 +257,7 @@ test("declining requirements never starts implementation and unknown delivery ca
   });
   let uncertainId = "";
   await f.c.deliver(async (_u, _t, _text, id) => {
-    uncertainId = id!;
+    uncertainId = id!.id;
     throw new Error("send outcome unknown");
   });
   assert.equal(

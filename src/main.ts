@@ -1074,8 +1074,8 @@ const routineTimer = setInterval(() => {
       opsLog("coding.tick_failed", "error", errorFields(error)),
     );
   void coding
-    ?.deliver(async (user, target, text, approvalId, document) =>
-      sendCodingDelivery(text, approvalId, document, {
+    ?.deliver(async (user, target, text, approval, document) =>
+      sendCodingDelivery(text, approval, document, {
         text: (part, keyboard) =>
           topics.deliver(user, target, (extra) =>
             bot.api.sendMessage(user, part.text, {

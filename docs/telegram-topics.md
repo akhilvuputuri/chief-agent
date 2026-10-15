@@ -28,7 +28,7 @@ Each input records its raw `threadId`. `work_start` captures an owner origin fro
 
 ## Coding progress and owner decisions
 
-Validated worker milestones (planning, implementing, verifying and reviewing) go to Coding. Requirement briefs/buttons, questions, paused/failed/cancelled jobs and completed draft PRs go to Main regardless of the job's originating thread. The authenticated original thread remains recorded on the job; it does not select asynchronous notification placement. Coding is a progress surface, with ordinary Chief input/replies in place and shared conversation/memory. Messages in Coding do not automatically authorize or dispatch implementation.
+From v0.3.75 every coding-job message goes to Coding: worker milestones, requirement briefs and buttons, questions, paused/failed/cancelled jobs, completed draft PRs and merge cards. Earlier releases sent owner decisions and results to Main; the owner asked for one place to follow and answer coding work. The authenticated original thread remains recorded on the job; it does not select asynchronous notification placement. Ordinary Chief input and replies in Coding keep the shared conversation and memory. Messages in Coding do not automatically start coding work.
 
 Requirement confirmation still needs the allowed owner's bound button or direct reply to the delivered brief, exact revision/scope/artifact and valid delivery receipt. Routing changes do not weaken authorization. Coding and other outboxes preserve uncertain-send handling. Disabling live coding does not prevent the Coding topic from being prepared.
 

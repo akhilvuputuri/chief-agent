@@ -487,7 +487,7 @@ for (const { documentLength, terminalRecovery } of [
           assert(document?.content.includes(fullPlan));
           assert.equal(formatTelegram(text, 1024).length, 1);
           assert(document?.content.includes("Original request"));
-          approvalId = id;
+          approvalId = id.id;
           approvedMessage = message_id;
         }
         return { message_id };

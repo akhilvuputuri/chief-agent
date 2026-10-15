@@ -11,6 +11,7 @@ import {
 import { assertSquadCheckpoint } from "./squad-state.js";
 import { codingDestination } from "./delivery-routing.js";
 import { CodingRequirements, requirementScope } from "./requirements.js";
+import { CodingMergeApprovals } from "./merge-approvals.js";
 import {
   createHash,
   createHmac,
@@ -75,6 +76,7 @@ export type CodingJob = {
 
 export class CodingController {
   readonly requirements: CodingRequirements;
+  readonly merges: CodingMergeApprovals;
   private ticking = false;
   private delivering = false;
   private activeMs(job: CodingJob) {
@@ -109,7 +111,11 @@ export class CodingController {
     legacyAutomationEnabled = false,
   ) {
     this.requirements = new CodingRequirements(db, allowed, clock);
-    if ((settings.autoMerge || legacyAutomationEnabled) && publisher.automation)
+    this.merges = new CodingMergeApprovals(db, allowed, clock);
+    if (
+      (settings.autoMerge || settings.prWorkflow || legacyAutomationEnabled) &&
+      publisher.automation
+    )
       this.automation = new CodingAutomation(
         db,
         publisher.automation(),
@@ -130,11 +136,30 @@ export class CodingController {
     )
       throw new Error("Coding origin must be an HTTPS origin");
   }
+  /** Pi approval is the host-acknowledged review document plus a completed reviewer call this attempt. */
+  private async hasPiReviewerProof(job: CodingJob) {
+    const document = job.result?.checkpoint?.piState?.reportDocument;
+    if (
+      document?.kind !== "review" ||
+      document.verdict !== "APPROVE" ||
+      document.detail !== job.result?.review?.findings
+    )
+      return false;
+    return (
+      (
+        await this.db.query(
+          "SELECT 1 FROM coding_model_calls WHERE job_id=$1 AND attempt_id=$2 AND role='reviewer' AND state='complete' LIMIT 1",
+          [job.id, job.attempt_id],
+        )
+      ).rows.length === 1
+    );
+  }
   async logs(job: CodingJob, raw: unknown) {
     if (!this.allowed(job.user_id)) throw new Error("Owner unavailable");
     return codingDiagnostics(this.db, job.user_id, raw);
   }
   private async hasReviewerProof(job: CodingJob) {
+    if (job.settings.runtime === "pi") return this.hasPiReviewerProof(job);
     const calls = (
       await this.db.query(
         "SELECT id,state,input,result_box FROM coding_model_calls WHERE job_id=$1 AND attempt_id=$2 AND role='reviewer' ORDER BY created_at DESC,id DESC LIMIT $3",
@@ -641,8 +666,8 @@ export class CodingController {
     return Object.keys(found).length ? found : undefined;
   }
   async assignment(job: CodingJob) {
-    // Older workers strictly validate settings, so windows travel beside them.
-    const { contextWindows, ...settings } = job.settings;
+    // Workers strictly validate settings: windows travel beside them and host-only workflow stays home.
+    const { contextWindows, prWorkflow: _hostOnly, ...settings } = job.settings;
     return {
       protocolVersion: 1,
       ...(job.settings.squad || job.settings.runtime === "pi"
@@ -1448,10 +1473,12 @@ export class CodingController {
             published.tree ?? null,
             j.settings.autoMerge
               ? "Draft PR prepared; checking CI, Devin and MR feedback before guarded merge."
-              : "Draft PR prepared; CI and independent review of its head remain required.",
+              : j.settings.prWorkflow
+                ? "Draft PR prepared; collecting CI, Devin and MR feedback before asking the owner to merge."
+                : "Draft PR prepared; CI and independent review of its head remain required.",
           ],
         );
-        if (j.settings.autoMerge && published.tree) {
+        if ((j.settings.autoMerge || j.settings.prWorkflow) && published.tree) {
           await this.automation?.start(
             { ...fresh, head_sha: published.head, pr_url: published.url },
             published.tree,
@@ -1485,7 +1512,7 @@ export class CodingController {
       user: string,
       target: import("../delivery-routing.js").Destination,
       text: string,
-      approvalId?: string,
+      approval?: import("./delivery.js").CodingApproval,
       document?: import("./delivery.js").CodingDocument,
     ) => Promise<unknown>,
   ) {
@@ -1506,8 +1533,14 @@ export class CodingController {
           ])
         ).rows[0];
         const req = e.payload.requirements;
+        const merge = e.payload.merge;
         if (
           !this.allowed(j.user_id) ||
+          (merge &&
+            (j.state !== "pr_ready" ||
+              j.stage !== "awaiting_merge_approval" ||
+              j.revision !== merge.revision ||
+              j.head_sha !== merge.head)) ||
           (req &&
             (j.state !== "plan_ready" ||
               j.mode !== "plan" ||
@@ -1558,22 +1591,29 @@ export class CodingController {
             ]
               .filter(Boolean)
               .join("\n\n"),
-          req ? e.id : undefined,
+          req
+            ? { kind: "requirements", id: e.id }
+            : merge
+              ? { kind: "merge", id: e.id }
+              : undefined,
           attachment,
         );
-        if (req) {
+        if (req || merge) {
           const receipt = sent as { message_id?: number } | undefined;
           if (
             !Number.isSafeInteger(receipt?.message_id) ||
             receipt!.message_id! <= 0
           )
             throw new Error("Requirement delivery receipt unavailable");
+          // A merge card stays valid only while the job remains at that exact head.
           await this.db.query(
             "UPDATE coding_events SET payload=payload || jsonb_build_object('telegramMessageId',$2::bigint,'confirmUntil',$3::text) WHERE id=$1",
             [
               e.id,
               receipt!.message_id,
-              new Date(this.clock().getTime() + 900000).toISOString(),
+              new Date(
+                this.clock().getTime() + (merge ? 7 * 86400000 : 900000),
+              ).toISOString(),
             ],
           );
         }

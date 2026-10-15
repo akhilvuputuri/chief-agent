@@ -1,3 +1,7 @@
+# Pi owner-confirmed merge and Coding routing — in review, 15 October 2026
+
+Candidate v0.3.75 carries the squad's PR feedback loop to Pi: ready for Devin, bounded untrusted-feedback repair rounds with fresh checks and independent review, then a Merge / Keep open card bound to the exact head; Chief merges only on the owner's tap after re-verifying every gate. All coding messages now go to the Coding topic. The loop stays disabled until a worker image with the feedback entry is published and pinned with `prWorkflow` enabled. [Journal 87](docs/journey/87-pi-owner-merge-feedback.md).
+
 # Argon coding reviewer candidate — 15 October 2026
 
 v0.3.72 (outage-aware routing; Gemini 4 Argon as main/standard model) and the v0.3.73 context-window host are released and healthy. Worker 0.1.5 is published and verified. Candidate v0.3.74 pins it and moves the coding reviewer to Argon. Remaining: review, CI, release, an owner canary showing an Argon review verdict, and observing the effective main model. [Journal 85](docs/journey/85-provider-routing-stability.md).

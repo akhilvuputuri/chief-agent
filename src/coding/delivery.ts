@@ -1,11 +1,13 @@
 import { formatTelegram, type FormattedMessage } from "../telegram-format.js";
 import type { InlineKeyboardMarkup } from "grammy/types";
 export type CodingDocument = { filename: string; content: string };
+/** Which owner decision a delivered message's buttons answer. */
+export type CodingApproval = { kind: "requirements" | "merge"; id: string };
 type Receipt = { message_id: number };
 /** One document message binds the full brief and its approval buttons atomically. */
 export async function sendCodingDelivery(
   text: string,
-  approvalId: string | undefined,
+  approval: CodingApproval | undefined,
   document: CodingDocument | undefined,
   transport: {
     text: (
@@ -19,19 +21,32 @@ export async function sendCodingDelivery(
     ) => Promise<Receipt>;
   },
 ): Promise<Receipt> {
-  const keyboard = approvalId
-    ? {
-        inline_keyboard: [
-          [
-            {
-              text: "Approve requirements",
-              callback_data: `cod:yes:${approvalId}`,
-            },
-            { text: "Request changes", callback_data: `cod:no:${approvalId}` },
+  const keyboard =
+    approval?.kind === "requirements"
+      ? {
+          inline_keyboard: [
+            [
+              {
+                text: "Approve requirements",
+                callback_data: `cod:yes:${approval.id}`,
+              },
+              {
+                text: "Request changes",
+                callback_data: `cod:no:${approval.id}`,
+              },
+            ],
           ],
-        ],
-      }
-    : undefined;
+        }
+      : approval?.kind === "merge"
+        ? {
+            inline_keyboard: [
+              [
+                { text: "Merge", callback_data: `cdm:yes:${approval.id}` },
+                { text: "Keep open", callback_data: `cdm:no:${approval.id}` },
+              ],
+            ],
+          }
+        : undefined;
   if (document) {
     const captions = formatTelegram(text, 1024);
     if (captions.length !== 1)

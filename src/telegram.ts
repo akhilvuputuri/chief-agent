@@ -161,6 +161,45 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
       }
     });
   }
+  if (assistant.tools?.coding) {
+    const coding = assistant.tools.coding;
+    // Merge cards answer one exact PR head; the host re-verifies everything before merging.
+    bot.callbackQuery(/^cdm:(yes|no):([0-9a-f-]{36})$/, async (ctx) => {
+      if (
+        !allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids) ||
+        !ctx.callbackQuery.message
+      )
+        return;
+      await ctx.answerCallbackQuery();
+      let result: { status: string; duplicate: boolean; jobId: string };
+      try {
+        result = await coding.merges.confirm(
+          String(ctx.from.id),
+          ctx.match[2]!,
+          ctx.match[1] === "yes",
+          String(ctx.callbackQuery.message.chat.id),
+          ctx.callbackQuery.message.message_id,
+        );
+      } catch {
+        await ctx.reply(
+          "I could not verify that merge decision; the PR may have changed. Ask Chief for the current coding status.",
+          inThread(threadOf(ctx.callbackQuery.message)),
+        );
+        return;
+      }
+      try {
+        await ctx.reply(
+          codingMergeNotice(result),
+          inThread(threadOf(ctx.callbackQuery.message)),
+        );
+      } catch (error) {
+        opsLog("coding.confirmation_ack_failed", "warn", {
+          jobId: result.jobId,
+          errorType: error instanceof Error ? error.name : "unknown",
+        });
+      }
+    });
+  }
   bot.callbackQuery(viewCallback, async (ctx) => {
     if (!allowedChat(ctx.from.id, ctx.chat?.type ?? "", ids)) return;
     // Clear Telegram's spinner before loading data; do not queue behind a long agent turn.
@@ -1740,6 +1779,13 @@ class PreparationQueue {
   }
 }
 
+function codingMergeNotice(result: { status: string; duplicate: boolean }) {
+  if (result.duplicate)
+    return "That merge card was already answered. Ask Chief for the current coding status.";
+  return result.status === "merge_approved"
+    ? "Merge approved. Chief will re-check the exact head, merge it and report the release."
+    : "Kept open. The PR stays unmerged for you to review on GitHub.";
+}
 function codingDecisionNotice(result: { status: string; duplicate: boolean }) {
   if (result.duplicate)
     return "That requirement message was already decided. Ask Chief for the current coding status.";
