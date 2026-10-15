@@ -447,7 +447,7 @@ export async function runPiWorker(
           text: assignment.checkpoint.piState.findings,
         },
       ];
-      task.instructions = `${assignment.context}\nRead all pages of review_findings with read_document before repairs.${assignment.agentGit ? "\nCommit your work with git as you go, using clear messages. Do not push, add remotes or change git configuration." : ""}`;
+      task.instructions = `${assignment.context}\nRead all pages of review_findings with read_document before repairs.`;
     }
     if (assignment.agentGit && assignment.mode === "implement")
       task.instructions = `${task.instructions}\nCommit your work with git as you go, using clear messages. Do not push, add remotes or change git configuration; after independent review Chief pushes your branch and opens the pull request.`;

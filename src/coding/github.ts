@@ -263,12 +263,25 @@ export class GitHubPublisher implements RepositoryPublisher {
       pr.head?.repo?.full_name !== this.repository ||
       pr.base?.repo?.full_name !== this.repository ||
       pr.base?.ref !== "main" ||
-      pr.head?.ref !== `chief/coding-${j.id}` ||
-      pr.head?.sha !== published.head
+      pr.head?.ref !== `chief/coding-${j.id}`
     )
       throw new AgentPublicationMismatch(
         "Agent PR identity does not match the job",
       );
+    if (pr.head?.sha !== published.head) {
+      // GitHub updates a PR's head asynchronously after a push; only a different branch tip is a mismatch.
+      const ref = await this.api(
+        `git/ref/heads/chief/coding-${j.id}`,
+        "GET",
+        undefined,
+        signal,
+      );
+      if (ref.object?.sha !== published.head)
+        throw new AgentPublicationMismatch(
+          "Agent PR branch does not hold the reported commit",
+        );
+      throw new Error("Agent PR head is still updating; retrying");
+    }
     const tree = await this.candidateTree(j, signal);
     const head = await this.api(
       `git/commits/${published.head}`,

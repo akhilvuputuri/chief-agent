@@ -171,7 +171,11 @@ export class GitHubAutomation implements PrAutomationRepository {
         (c.user?.login === "chief-coding-publisher[bot]" &&
           (c.body.startsWith("Chief review attestation:") ||
             c.body.startsWith("Chief feedback response:"))) ||
-        c.user?.login === "github-actions[bot]"
+        c.user?.login === "github-actions[bot]" ||
+        // Devin's summary (badge) bodies are verdicts, not findings; its findings arrive inline.
+        (c.user?.login === "devin-ai-integration[bot]" &&
+          c.path === undefined &&
+          c.body.includes("<!-- devin-review-badge-begin -->"))
       )
         continue;
       const text = JSON.stringify({

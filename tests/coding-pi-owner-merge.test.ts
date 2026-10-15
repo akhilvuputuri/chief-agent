@@ -441,3 +441,26 @@ test("the bundled Pi profile enables owner-confirmed merge and never automatic m
   assert.equal(bundled.prWorkflow, "owner_merge");
   assert.equal(bundled.autoMerge, false);
 });
+
+test("each Pi owner-merge feedback round gets a fresh active window even after the first is spent", async (t) => {
+  const f = await fixture(t);
+  await f.db.query(
+    "UPDATE coding_events SET payload=jsonb_set(payload,'{remainingMs}','0'::jsonb) WHERE job_id=$1 AND event_key='automation:1'",
+    [f.id],
+  );
+  f.setInspection({
+    draft: false,
+    feedback: [{ id: "human-1", text: "Reviewer: rename the heading" }],
+  });
+  await f.auto.tick();
+  const queued = await f.job();
+  assert.equal(queued.state, "queued");
+  const budget = (
+    await f.db.query(
+      "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='feedback:2'",
+      [f.id],
+    )
+  ).rows[0].payload;
+  assert.equal(budget.remainingMs, 900000);
+  assert.equal(queued.used_models, 12);
+});
