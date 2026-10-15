@@ -1,3 +1,11 @@
+## Released v0.3.75 — Pi owner-confirmed merge loop and Coding routing
+
+[PR 233](https://github.com/akhilvuputuri/chief-agent/pull/233) merged as `c44cb6fbd6b1c7df84fb04ca3f744e7259c556e2` after three independent review rounds (approved at `e93073c`), hosted CI and 1,194 local tests. The [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/38705870411) recorded exact deployment and startup health; logs show `gateway.started` at 08:32 UTC with no errors. All coding messages now route to the Coding topic. The owner-merge loop shipped disabled until the worker pin. [Journal 87](journey/87-pi-owner-merge-feedback.md).
+
+## Released v0.3.74 — Pi worker 0.1.5 and Gemini 4 Argon reviewer
+
+[PR 231](https://github.com/akhilvuputuri/chief-agent/pull/231) merged as `b75fbc0bff30db2652383148f9a710b48e0aaaf8` with exact-head approval, hosted CI and 1,182 local tests. The [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/38677712661) recorded exact deployment and startup health. The first owner job on it completed end to end with an Argon APPROVE and draft [PR 232](https://github.com/akhilvuputuri/chief-agent/pull/232). [Journal 85](journey/85-provider-routing-stability.md).
+
 ## Deployed `f9daace` — bulletin Save to Reader and Reader-based learning (package 0.3.73)
 
 [PR 228](https://github.com/akhilvuputuri/chief-agent/pull/228) replaces bulletin 👍/👎 with idempotent Save-to-Reader buttons, caps editions at five and ranks by the owner's Reader saves through a read-only `reader-library` grant. Exact-head independent review (Opus 5.5) approved `c168238` after three rounds, including a Devin-found binding issue fixed by leaving the `reader` connection unchanged; hosted CI passed. [Release](https://github.com/akhilvuputuri/chief-agent/actions/runs/38611905703) verified `f9daace9d7499b752d9a59818017ba0dffd2e063` and startup health; sanitized production logs separately show its heartbeat and no errors for two hours. This release also first deploys main's #229 (`3e52623`, Pi context windows), whose own release run was superseded. Learning needs [PageStash PR 46](https://github.com/akhilvuputuri/PageStash/pull/46) deployed and the owner's opt-in; owner acceptance is pending. No tag created yet. [Journal 86](journey/86-news-reader-saves.md).

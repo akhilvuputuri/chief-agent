@@ -1,7 +1,7 @@
 # 87 — Can a Pi coding job handle Devin feedback and merge on the owner's word?
 
 Work date(s): 2026-10-15. Written/revised: 2026-10-15.
-Status: in progress. The host loop, worker feedback entry, merge card and Coding-topic routing are implemented and tested offline; the feature stays disabled until a worker image containing the feedback entry is published and pinned with `prWorkflow` enabled.
+Status: in progress. v0.3.75 released the host loop, merge card and Coding-topic routing; candidate v0.3.76 pins the verified worker with the feedback entry and enables `prWorkflow` for new Pi jobs. A live feedback round and owner-confirmed merge remain.
 
 ## User-visible problem and preceding iteration
 
@@ -41,3 +41,9 @@ Updated in [coding-agent lessons](coding-agent-lessons.md): external review feed
 ## Follow-up and next iteration
 
 Measure how often main moves before a merge decision and whether a reviewed rebase-and-re-review step is worth adding.
+
+### Release and enablement candidate — 15 October 2026
+
+[PR 233](https://github.com/akhilvuputuri/chief-agent/pull/233) merged as `c44cb6fbd6b1c7df84fb04ca3f744e7259c556e2` after three independent review rounds (approved at `e93073c`), hosted CI and 1,194 local tests. The [main-only image workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/38703652600) published the worker from that commit at index `sha256:637a956d25e6ff110e88f0c6e19e061a4f20bb101a3630bcdd16b8cf7c2e2ec0`, matching the workflow's recorded digest. Anonymous verification found linux/amd64, user `worker`, the fixed worker command, Pi 1.1.0, a root-owned native guard, and all 196 compiled files identical to a clean local build of that tree. The image was not executed locally.
+
+Candidate v0.3.76 pins that worker and sets `prWorkflow: "owner_merge"` in `config/coding-pi.json`, so new Pi jobs follow the loop; existing jobs keep their settings snapshot. It also makes the read-failure summary write stage-conditional (a low finding from the final review). The first live job must show Devin feedback handled within scope, a fresh independent review, and a merge only after the owner's tap.

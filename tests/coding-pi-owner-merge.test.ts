@@ -427,3 +427,17 @@ test("a card whose delivery became uncertain is replaced", async (t) => {
   ).rows.map((r: any) => r.delivery);
   assert.deepEqual(cards, ["uncertain", "pending"]);
 });
+
+test("the bundled Pi profile enables owner-confirmed merge and never automatic merge", async () => {
+  const bundled = codingSettings.parse(
+    JSON.parse(
+      await readFile(
+        new URL("../config/coding-pi.json", import.meta.url),
+        "utf8",
+      ),
+    ),
+  );
+  assert.equal(bundled.runtime, "pi");
+  assert.equal(bundled.prWorkflow, "owner_merge");
+  assert.equal(bundled.autoMerge, false);
+});
