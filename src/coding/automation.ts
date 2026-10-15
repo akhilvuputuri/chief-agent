@@ -25,6 +25,8 @@ const record = z
   })
   .strict();
 type Record = z.infer<typeof record>;
+/** An owner decision or other writer changed the job after this tick read it; stop without writing. */
+class StageChanged extends Error {}
 const key = (revision: number) => `automation:${revision}`;
 /** Durable publication/feedback/merge state, separate from the sandbox's checkpoints. */
 export class CodingAutomation {
@@ -67,11 +69,18 @@ export class CodingAutomation {
     notify = false,
   ) {
     const changed = await this.db.query(
-      `WITH changed AS (UPDATE coding_jobs SET stage=$3,summary=$4,updated_at=now() WHERE id=$1 AND lease=$2 AND lease_until>now() AND state='pr_ready' RETURNING id), saved AS (UPDATE coding_events SET payload=$5::jsonb WHERE job_id IN (SELECT id FROM changed) AND event_key=$6 RETURNING job_id) SELECT job_id FROM saved`,
-      [j.id, j.lease, stage, summary, JSON.stringify(data), key(j.revision)],
+      `WITH changed AS (UPDATE coding_jobs SET stage=$3,summary=$4,updated_at=now() WHERE id=$1 AND lease=$2 AND lease_until>now() AND state='pr_ready' AND stage=$7 RETURNING id), saved AS (UPDATE coding_events SET payload=$5::jsonb WHERE job_id IN (SELECT id FROM changed) AND event_key=$6 RETURNING job_id) SELECT job_id FROM saved`,
+      [
+        j.id,
+        j.lease,
+        stage,
+        summary,
+        JSON.stringify(data),
+        key(j.revision),
+        j.stage,
+      ],
     );
-    if (!changed.rows.length)
-      throw new Error("Automation lease or state changed");
+    if (!changed.rows.length) throw new StageChanged();
     j.stage = stage;
     if (notify)
       await this.db.query(
@@ -98,7 +107,7 @@ export class CodingAutomation {
     if (
       latest &&
       !latest.payload.decision &&
-      (["pending", "uncertain"].includes(latest.delivery) ||
+      (["pending", "sending"].includes(latest.delivery) ||
         (latest.delivery === "sent" &&
           new Date(latest.payload.confirmUntil).getTime() >
             this.now().getTime()))
@@ -357,7 +366,7 @@ export class CodingAutomation {
           .update(JSON.stringify(handled))
           .digest("hex");
         await this.db.query(
-          `WITH changed AS (UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',summary='MR feedback returned to leader/coder; fresh independent review is required',checkpoint=$3::jsonb,result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,cleanup='none',model_busy=false,publication_started=false,updated_at=now() WHERE id=$1 AND lease=$2 AND lease_until>now() AND state='pr_ready' AND revision=$4 RETURNING id,revision), budget AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,'feedback:'||revision,jsonb_build_object('handled',$5::jsonb,'remainingMs',$6::bigint),'suppressed' FROM changed RETURNING job_id), revised AS (INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$7,$8,'implement' FROM changed RETURNING job_id) INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$7,jsonb_build_object('summary','MR feedback returned to coder; candidate approval is invalidated until fresh checks and review.') FROM changed ON CONFLICT DO NOTHING`,
+          `WITH changed AS (UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',summary='MR feedback returned to leader/coder; fresh independent review is required',checkpoint=$3::jsonb,result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,cleanup='none',model_busy=false,publication_started=false,updated_at=now() WHERE id=$1 AND lease=$2 AND stage=$9 AND lease_until>now() AND state='pr_ready' AND revision=$4 RETURNING id,revision), budget AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,'feedback:'||revision,jsonb_build_object('handled',$5::jsonb,'remainingMs',$6::bigint),'suppressed' FROM changed RETURNING job_id), revised AS (INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$7,$8,'implement' FROM changed RETURNING job_id) INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$7,jsonb_build_object('summary','MR feedback returned to coder; candidate approval is invalidated until fresh checks and review.') FROM changed ON CONFLICT DO NOTHING`,
           [
             j.id,
             j.lease,
@@ -367,6 +376,7 @@ export class CodingAutomation {
             Math.floor(d.remainingMs),
             `mr-feedback:${fingerprint}`,
             text,
+            j.stage,
           ],
         );
         return;
@@ -495,7 +505,9 @@ export class CodingAutomation {
         true,
       );
     } catch (error) {
-      if (j && data && error instanceof MergeRefused) {
+      if (error instanceof StageChanged) {
+        // The owner (or another writer) changed the job mid-tick; its decision stands.
+      } else if (j && data && error instanceof MergeRefused) {
         await this.manual(
           j,
           data,

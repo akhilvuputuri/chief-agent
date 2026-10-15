@@ -98,8 +98,14 @@ async function fixture(t: TestContext, piState: any = undefined) {
   };
   let merges = 0,
     readies = 0;
+  let onInspect: (() => Promise<void>) | undefined;
   const repository = {
-    inspect: async () => inspection,
+    inspect: async () => {
+      const hook = onInspect;
+      onInspect = undefined;
+      await hook?.();
+      return inspection;
+    },
     ready: async () => {
       readies++;
       inspection = { ...inspection, draft: false };
@@ -162,6 +168,7 @@ async function fixture(t: TestContext, piState: any = undefined) {
     id,
     addJob,
     deliverCard,
+    onNextInspect: (hook: () => Promise<void>) => (onInspect = hook),
     setInspection: (i: Partial<PrInspection>) =>
       (inspection = { ...inspection, ...i }),
     counts: () => ({ merges, readies }),
@@ -379,4 +386,44 @@ test("feedback rounds continue review numbering so session scopes never collide"
   const queued = await f.job();
   assert.equal(queued.checkpoint.piState!.reviewRound, 2);
   assert.equal(queued.checkpoint.piState!.mrFeedback!.round, 1);
+});
+
+test("an owner decision recorded mid-tick stands: Keep open is never undone by a check flap or new feedback", async (t) => {
+  for (const change of [
+    { checks: "pending" as const },
+    { feedback: [{ id: "devin-late", text: "Devin: late comment" }] },
+  ]) {
+    const f = await fixture(t);
+    f.setInspection({ checks: "passed", draft: false });
+    await f.auto.tick();
+    const card = await f.deliverCard();
+    f.setInspection(change);
+    f.onNextInspect(async () => {
+      await f.approvals.confirm("owner", card.id, false, "owner", 55);
+    });
+    await f.auto.tick();
+    const after = await f.job();
+    assert.equal(after.state, "pr_ready");
+    assert.equal(after.stage, "merge_declined");
+    assert.equal(after.revision, 1);
+    assert.equal(f.counts().merges, 0);
+  }
+});
+
+test("a card whose delivery became uncertain is replaced", async (t) => {
+  const f = await fixture(t);
+  f.setInspection({ checks: "passed", draft: false });
+  await f.auto.tick();
+  await f.db.query(
+    "UPDATE coding_events SET delivery='uncertain' WHERE job_id=$1 AND payload ? 'merge'",
+    [f.id],
+  );
+  await f.auto.tick();
+  const cards = (
+    await f.db.query(
+      "SELECT delivery FROM coding_events WHERE job_id=$1 AND payload ? 'merge' ORDER BY created_at",
+      [f.id],
+    )
+  ).rows.map((r: any) => r.delivery);
+  assert.deepEqual(cards, ["uncertain", "pending"]);
 });
