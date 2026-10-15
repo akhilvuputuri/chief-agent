@@ -85,6 +85,12 @@ test("the runtime file refuses secrets, identifiers, unknown names and bad value
   }
   // A well-formed file with an invalid value fails when the config is read.
   assert.throws(() => readConfig(required, { TOOL_PICKER: "maybe" }));
+  assert.throws(() => readConfig(required, { SHADOW_DECISIONS: "maybe" }));
+  // Shadow decisions have their own switch: turning the picker off leaves them on.
+  assert.equal(
+    readConfig(required, { TOOL_PICKER: "off" }).SHADOW_DECISIONS,
+    "jev",
+  );
 });
 
 test("the startup log carries setting names only", () => {

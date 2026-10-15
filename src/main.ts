@@ -660,8 +660,8 @@ const assistant = new Assistant(
     ? new ToolPicker(c.OPENROUTER_API_KEY)
     : undefined,
   // Shadow decisions (#127) record what Jev would decide; they never change a turn.
-  // It sends the same kind of data as the Jev picker, so it follows the picker's switch.
-  c.TOOL_PICKER === "jev" && c.OPENROUTER_API_KEY
+  // Its own switch, so the picker can be turned off while measurement continues.
+  c.SHADOW_DECISIONS === "jev" && c.OPENROUTER_API_KEY
     ? new ShadowDecisions(c.OPENROUTER_API_KEY)
     : undefined,
 );

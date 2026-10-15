@@ -62,6 +62,9 @@ type Prediction = {
   /** continuity: drop or keep; routing: an agent type or chief. */
   decision?: string;
   score?: number;
+  /** routing: Jev's own pick before the threshold, and its probability for each candidate. */
+  choice?: string;
+  probabilities?: Record<string, number>;
   latencyMs: number;
   costUsd: number | null;
   model: string | null;
@@ -143,6 +146,12 @@ export class ShadowDecisions {
                   ? agent
                   : "chief",
               score: p,
+              // Kept below the threshold too, so accuracy can be measured at any threshold.
+              choice: agent,
+              probabilities: candidateProbabilities(
+                answers.agent.probabilities,
+                [...input.agents.map((a) => a.type), "chief"],
+              ),
             };
           },
         ),
@@ -155,7 +164,12 @@ export class ShadowDecisions {
     state: unknown,
     questions: unknown,
     ledger: Spending | undefined,
-    read: (answers: any) => { decision: string; score: number } | null,
+    read: (
+      answers: any,
+    ) => Pick<
+      Prediction,
+      "decision" | "score" | "choice" | "probabilities"
+    > | null,
   ): Promise<Prediction> {
     const started = Date.now();
     let charge: string | undefined;
@@ -267,7 +281,7 @@ export class ShadowDecisions {
                 : "chief"
             : "keep";
         await event(db, user, run, "decision.shadow", {
-          version: 1,
+          version: 2,
           consumer: p.consumer,
           ok: p.ok,
           prediction: p.decision ?? null,
@@ -282,6 +296,10 @@ export class ShadowDecisions {
             p.consumer === "routing" && p.decision
               ? p.decision === "chief" || p.decision === actual
               : null,
+          // routing accuracy: did Jev's own pick, at any score, match what Chief did?
+          choice: p.choice ?? null,
+          matched: p.choice ? p.choice === actual : null,
+          ...(p.probabilities ? { probabilities: p.probabilities } : {}),
           delegated,
           recalled,
           interrupted: turn.interrupted,
@@ -297,6 +315,21 @@ export class ShadowDecisions {
       /* Shadow data is optional; a failure here never affects the owner. */
     }
   }
+}
+
+/** Jev's probabilities for the offered candidates only, rounded; anything else is dropped. */
+function candidateProbabilities(
+  raw: unknown,
+  candidates: string[],
+): Record<string, number> | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const out: Record<string, number> = {};
+  for (const type of candidates) {
+    const p = (raw as Record<string, unknown>)[type];
+    if (typeof p === "number" && p >= 0 && p <= 1)
+      out[type] = Math.round(p * 10_000) / 10_000;
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 /** The catalogue name for a type Chief passed: an alias stays, a full ID becomes its alias. */
@@ -324,12 +357,21 @@ export async function recordPickerCheck(
   domainOf: (operation: string) => string | undefined,
 ) {
   try {
-    const selected = (
+    const rows = (
       await db.query(
-        "SELECT data FROM events WHERE run_id=$1 AND user_id=$2 AND type IN ('tools.selected','tools.loaded') ORDER BY id",
+        "SELECT type,data FROM events WHERE run_id=$1 AND user_id=$2 AND type IN ('tools.picked','tools.selected','tools.loaded') ORDER BY id",
         [run, user],
       )
-    ).rows.map((r) => r.data as { domains?: string[] });
+    ).rows as { type: string; data: any }[];
+    const selected = rows
+      .filter((r) => r.type !== "tools.picked")
+      .map((r) => r.data as { domains?: string[] });
+    // Who chose the first message's domains: Jev, or the word cues (picker off, failed,
+    // timed out or backing off). Taken from this run, not from the configured mode.
+    const picker =
+      rows.find((r) => r.type === "tools.picked")?.data?.outcome === "picked"
+        ? "jev"
+        : "cues";
     const offered = new Set(selected[0]?.domains ?? []);
     const loaded = new Set(selected.at(-1)?.domains ?? []);
     const used = new Set(
@@ -343,9 +385,10 @@ export async function recordPickerCheck(
         .filter((d): d is string => !!d),
     );
     await event(db, user, run, "decision.shadow", {
-      version: 1,
+      version: 2,
       consumer: "picker",
       ok: true,
+      picker,
       offered: [...offered].sort(),
       used: [...used].sort(),
       // Offered but unused costs schema characters; used but not offered cost a load step.

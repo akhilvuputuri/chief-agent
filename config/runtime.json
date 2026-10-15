@@ -11,6 +11,7 @@
     "SEARCH_MODEL": "google/gemini-3.8-flash",
     "MEDIA_MODEL": "",
     "TOOL_PICKER": "jev",
+    "SHADOW_DECISIONS": "jev",
     "TELEGRAM_TOPICS": "auto",
     "VOICE_REPLIES": "false",
     "MARKET_DATA_PROVIDER": "",

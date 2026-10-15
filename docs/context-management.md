@@ -80,7 +80,7 @@ The word cues in stage 2 missed many phrasings (stock tickers, book titles, "has
 - Background job steps use the stage 2 selection without Jev.
 - `tools_load` and auto-loading on a direct tool call remain the escape hatch.
 
-**Failure behaviour.** The call times out after 1.5 seconds and is never retried. On a timeout, HTTP error, partial answer or missing key, the stage 2 word cues are used instead. After a 429 the picker is skipped for 5 minutes. A 401/402/403 is logged at error level. The application setting `TOOL_PICKER=off` disables it; production Compose does not pass that variable yet, so turning it off there needs a reviewed Compose rollout or a revert.
+**Failure behaviour.** The call times out after 1.5 seconds and is never retried. On a timeout, HTTP error, partial answer or missing key, the stage 2 word cues are used instead. After a 429 the picker is skipped for 5 minutes. A 401/402/403 is logged at error level. The behaviour setting `TOOL_PICKER=off` in `config/runtime.json` disables it on the next release; production Compose does not pass the name, so the file is authoritative ([configuration](configuration.md)). Shadow decisions have their own switch, `SHADOW_DECISIONS`.
 
 **Long messages.** Jev sees the first 2,000 characters of a message. A longer message also keeps its word cues, and each follow-up absorbed mid-turn gets its own decision.
 
