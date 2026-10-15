@@ -1,6 +1,6 @@
 # Agentic coding subagent — proposed, 15 October 2026
 
-The owner wants the coding agent to commit, push, run its Argon review, mark its PR ready, handle Devin comments and report to Chief, who asks the owner before merging and releasing. [Design](coding-subagent.md) and [journal 89](journey/89-agentic-coding-subagent.md) stage it: per-job single-repository GitHub token and agent-owned commits, then the agent-owned PR loop with session resume instead of idle sandboxes, then a chat "okay" for merge. Plan approval stays. Prerequisite: protect `main` (it currently has no protection).
+The owner wants the coding agent to commit, push, run its Argon review, mark its PR ready, handle Devin comments and report to Chief, who asks the owner before merging and releasing. [Design](coding-subagent.md) and [journal 89](journey/89-agentic-coding-subagent.md) stage it: per-job single-repository GitHub token and agent-owned commits, then the agent-owned PR loop with session resume instead of idle sandboxes, then a chat "okay" for merge. Plan approval stays. `main` is now protected by a ruleset (pull request, `test` check, no force pushes or deletion).
 
 # Shadow decisions measure Jev's accuracy — 15 October 2026
 

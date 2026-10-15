@@ -23,7 +23,7 @@ Planned in three stages (see the design): (1) a per-job token through the authen
 
 ## Verification and outcome
 
-Nothing implemented yet. Prerequisite: the owner protects `main` (pull request and required `test` check; no force pushes or deletion). The host will refuse to issue sandbox tokens without that rule.
+Nothing implemented yet. Prerequisite met on 15 October at the owner's request: repository ruleset "Protect main" (id 25169302, active on the default branch) requires a pull request and the GitHub Actions `test` check and blocks force pushes and deletion; the repository admin role may bypass for emergencies, and the Chief GitHub app is not a bypass actor. Verified through `GET /repos/akhilvuputuri/chief-agent/rules/branches/main`, the endpoint the host will check before issuing sandbox tokens.
 
 ## Follow-up and next iteration
 
