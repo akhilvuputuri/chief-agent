@@ -1,7 +1,7 @@
 # 88 — Measuring Jev's accuracy, not only its fast path
 
 Work date(s): 2026-10-14 to 2026-10-15. Written: 2026-10-15.
-Status: released 15 October 2026 in the `1ec8c4d` deployment (package 0.3.77). Shadow records keep Jev's own routing pick, and shadow mode has its own switch. Routing accuracy is not yet measured.
+Status: released 15 October 2026 in the `1ec8c4d` deployment (package 0.3.77). Shadow records keep Jev's own routing pick, and shadow mode has its own switch. A private backfill on 16 October measured routing accuracy on 44 turns: Jev finds the right agent but over-routes turns Chief handles itself, and no confidence threshold makes the fast path safe.
 
 ## User-visible problem and preceding iteration
 
@@ -61,9 +61,52 @@ Not yet measured: routing accuracy. It needs released records with `choice`.
 - No `decision.shadow` line from the new release had appeared when this was recorded, so no `version: 2` record has been observed yet. First check: `npm run logs:cloudwatch -- decisions --since 24h` shows `choice` and `matched` on routing lines.
 - No tag created.
 
+## Routing backfill — 2026-10-16
+
+**Measured, owner-authorized private inspection.** All 44 shadowed routing turns from 1 to 15 October (42 `version: 1`, 2 live `version: 2`) were exported read-only from Postgres over the operator connection into an owner-only scratch file. Each turn's first message and earlier turns were rebuilt the way `recentTurns` builds them and replayed through the released `ShadowDecisions` routing question, which now keeps Jev's pick. 44 calls, none failed, $0.002 in total. The export was deleted after the analysis; only these aggregates are kept.
+
+Limitations:
+
+- The agent catalogue was rebuilt from today's descriptions, restricted by date to the agents that existed (11 types on 1 October, 14 from 5 October; `IBKR_PORTFOLIO` and `GATHERING_RUNTIME` are on in production). The catalogue offered at the time is not stored.
+- Earlier turns come from stored conversation history and may differ slightly from what Jev saw live.
+- **Replay fidelity:** the 2 live `version: 2` picks and the 2 earlier fast-path picks were reproduced, with similar scores.
+- 44 turns is a small sample.
+
+**Measurement fix in the analysis.** The shadow record calls a turn `several` whenever Chief made more than one delegation, even when every call went to the same agent. Counting repeated calls to one agent as that agent moves one turn from `several` to `daily` and one to `web`. The figures below use the corrected count; `src/shadow.ts` still records the uncorrected one.
+
+| What Chief did         | Turns | Jev's own pick                                                                 |
+| ---------------------- | ----- | ------------------------------------------------------------------------------ |
+| Delegated to one agent | 18    | the same agent 16, `chief` 2, never a wrong agent                              |
+| Answered itself        | 23    | `chief` 13; an agent 10 (`daily` 4, `web` 2, `calendar` 2, `news` 1, `jobs` 1) |
+| Used several agents    | 3     | a single agent 2, `chief` 1                                                    |
+
+Overall, Jev's pick matched Chief on 29 of 44 turns.
+
+Fast path at a threshold, i.e. Jev picks an agent with at least this probability (uncorrected `several`; the correction changes each row by at most one turn):
+
+| Threshold | Fast-path turns | Matched Chief |
+| --------- | --------------- | ------------- |
+| any       | 28 (64%)        | 15 (54%)      |
+| 0.7       | 18 (41%)        | 13 (72%)      |
+| 0.9       | 7 (16%)         | 5 (71%)       |
+| 0.97      | 1 (2%)          | 0             |
+
+Higher thresholds remove good and bad routes at about the same rate. Requiring continuity to say the message stands alone (score below 0.33 or 0.5) also did not raise precision: it blocked good routes as often as bad ones, and scored some context-dependent follow-ups as standalone.
+
+**Private review of the 13 mismatches** (categories only):
+
+- **Would have worked (2–3):** a quick public lookup that Chief split across web and research; the repeated-`daily` turn above; one borderline lookup that ignored an earlier answer in the conversation.
+- **Capabilities only Chief has (6):** saving links to Reader and coding-job requests. No agent covers them, and Jev picked `daily`, `news`, `web` or `jobs`.
+- **Context-dependent follow-ups (3):** short replies that only make sense with the previous exchange. Agents cannot see the conversation.
+- **Partial (1):** an image plus a web task where Jev picked only the media agent.
+
+**Conclusion (measured on this sample):** Jev is good at "which agent" and poor at "does this need an agent at all". The fast path should stay off. The likely lever is the `chief` criterion in `config/decisions.json`: it does not mention Reader saves, coding jobs or short follow-ups, which cover 9 of the 13 mismatches. That is a hypothesis; tuning the wording on these same 44 turns would overfit, so it needs fresh turns or a held-out set.
+
 ## Follow-up and next iteration
 
-- **Accuracy report.** Once records carry `choice`, report Jev's agreement with Chief per confidence level: at a threshold, the share of turns Jev would handle and how often its pick matched. At about three foreground turns a day, a useful sample takes several weeks.
-- **Backfill.** With owner-authorized private inspection, replay the 38 earlier turns through Jev with the threshold at zero for an immediate first sample. Conversation text stays in private scratch; only aggregates are published.
+- **Accuracy report.** Live records now carry `choice`; repeat the threshold table on new turns.
+- **Backfill.** Done on 16 October; see above.
+- **`several` counting.** Record repeated delegations to one agent as that agent in `src/shadow.ts`.
+- **`chief` criterion.** Revise the routing description to cover Reader saves, coding jobs and conversation follow-ups, then measure it on turns it was not tuned on.
 - **Picker.** Trial `TOOL_PICKER=off` in `config/runtime.json` now that shadow mode no longer depends on it; compare reply latency and mid-turn loads.
 - **Continuity.** Privately review the would-be drops, starting with the two that made recall calls.
