@@ -58,7 +58,7 @@ Not yet measured: routing accuracy. It needs released records with `choice`.
 - Its own [release run](https://github.com/akhilvuputuri/chief-agent/actions/runs/38717317786) correctly refused to deploy: main had already moved to `1ec8c4d` (PR 236, docs only).
 - The [release of `1ec8c4d1ffe8b506903c7b4dacfe93cffc6c63a7`](https://github.com/akhilvuputuri/chief-agent/actions/runs/38719275433), which contains this change, succeeded. `npm run release:status` reports the exact commit deployed with startup health at 10:22 UTC.
 - Sanitized logs show `gateway.started` for that release at 10:21:54 UTC. Its `config.loaded` line does not list `SHADOW_DECISIONS` among environment overrides, so production reads `jev` from `config/runtime.json`.
-- No foreground message had arrived after the restart when this was recorded, so no `version: 2` record has been observed yet. First check: `npm run logs:cloudwatch -- decisions --since 24h` shows `choice` and `matched` on routing lines.
+- No `decision.shadow` line from the new release had appeared when this was recorded, so no `version: 2` record has been observed yet. First check: `npm run logs:cloudwatch -- decisions --since 24h` shows `choice` and `matched` on routing lines.
 - No tag created.
 
 ## Follow-up and next iteration
