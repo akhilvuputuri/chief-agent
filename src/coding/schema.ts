@@ -104,6 +104,14 @@ export const checkpoint = z
           .regex(/^[a-f0-9]{64}$/)
           .optional(),
         findings: z.string().max(reportLimits.document).optional(),
+        /** Untrusted merge-request feedback for one owner-merge repair round. */
+        mrFeedback: z
+          .object({
+            round: z.number().int().min(1).max(3),
+            text: z.string().min(1).max(reportLimits.document),
+          })
+          .strict()
+          .optional(),
         reportFailure: z.string().max(500).optional(),
         reportDocument: z
           .object({
@@ -210,6 +218,8 @@ export const codingSettings = z
     effort: z.enum(["low", "medium", "high"]),
     maxOutputTokens: z.number().int().positive().max(16000).optional(),
     contextWindows: codingContextWindows.optional(),
+    /** Host-only: Pi PRs collect GitHub/Devin feedback, then merge only after the owner confirms. */
+    prWorkflow: z.literal("owner_merge").optional(),
     limits: z
       .object({
         ms: z.number().int().positive().max(7200000),
@@ -229,6 +239,11 @@ export const codingSettings = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Model context windows belong to the Pi profile",
+      });
+    if (value.prWorkflow !== undefined && value.runtime !== "pi")
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Owner-confirmed merge belongs to the Pi profile",
       });
     if (
       value.runtime === "pi" &&

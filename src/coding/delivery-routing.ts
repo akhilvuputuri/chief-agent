@@ -1,9 +1,6 @@
 import type { Destination } from "../delivery-routing.js";
-import { workerEvent } from "./schema.js";
 
-/** Only validated worker progress belongs in Coding; owner decisions stay in General. */
-export function codingDestination(payload: unknown): Destination {
-  return workerEvent.safeParse(payload).success
-    ? { kind: "topic", topic: "coding" }
-    : { kind: "general" };
+/** Everything about a coding job, including approvals, questions, results and merge cards, belongs in Coding. */
+export function codingDestination(_payload: unknown): Destination {
+  return { kind: "topic", topic: "coding" };
 }

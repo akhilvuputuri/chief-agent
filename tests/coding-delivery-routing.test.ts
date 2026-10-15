@@ -2,13 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { codingDestination } from "../src/coding/delivery-routing.js";
 
-test("only bounded worker milestones route to Coding; decisions, terminal results and malformed events stay in General", () => {
-  for (const stage of ["planning", "implementing", "verifying", "reviewing"])
-    assert.deepEqual(
-      codingDestination({ key: "fixture", stage, summary: "Milestone" }),
-      { kind: "topic", topic: "coding" },
-    );
+test("every coding job message, including decisions and results, routes to Coding", () => {
   for (const payload of [
+    { key: "fixture", stage: "planning", summary: "Milestone" },
     { summary: "Paused" },
     {
       summary: "Draft PR ready",
@@ -19,14 +15,12 @@ test("only bounded worker milestones route to Coding; decisions, terminal result
       summary: "Requirements",
       requirements: { revision: 1, plan: "Confirm this" },
     },
-    {
-      key: "fixture",
-      stage: "reviewing",
-      summary: "Milestone",
-      question: "Decision",
-    },
+    { summary: "Ready to merge", merge: { revision: 2, head: "a".repeat(40) } },
     { key: "fixture", stage: "failed", summary: "Failure" },
     null,
   ])
-    assert.deepEqual(codingDestination(payload), { kind: "general" });
+    assert.deepEqual(codingDestination(payload), {
+      kind: "topic",
+      topic: "coding",
+    });
 });

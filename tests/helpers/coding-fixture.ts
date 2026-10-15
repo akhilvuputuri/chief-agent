@@ -311,17 +311,17 @@ export async function requirementBrief(
   let approvalId = "";
   let brief = "";
   await f.c.deliver(async (_user, target, text, id) => {
-    assert.deepEqual(target, { kind: "general" });
+    assert.deepEqual(target, { kind: "topic", topic: "coding" });
     if (id) {
-      approvalId = id;
+      approvalId = id.id;
       brief = text;
     }
     return { message_id: ++messageId };
   });
   await f.c.deliver(async (_user, target, text, id) => {
-    assert.deepEqual(target, { kind: "general" });
+    assert.deepEqual(target, { kind: "topic", topic: "coding" });
     if (id) {
-      approvalId = id;
+      approvalId = id.id;
       brief = text;
     }
     return { message_id: ++messageId };
