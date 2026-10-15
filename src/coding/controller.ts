@@ -33,6 +33,7 @@ import {
   type Outcome,
 } from "./schema.js";
 import {
+  AgentPublicationMismatch,
   artifactHash,
   canonicalJson,
   validateFiles,
@@ -1373,9 +1374,20 @@ export class CodingController {
       ],
     );
   }
+  /** Revokes agent tokens whose attempt is no longer running (timeout, stop, cancel, crash). */
+  private async sweepAgentTokens() {
+    for (const attempt of [...this.agentTokens.keys()]) {
+      const live = await this.db.query(
+        "SELECT 1 FROM coding_jobs WHERE attempt_id=$1 AND state IN ('provisioning','running')",
+        [attempt],
+      );
+      if (!live.rows.length) await this.revokeAgentToken(attempt);
+    }
+  }
   async tick() {
     if (this.ticking) return;
     this.ticking = true;
+    await this.sweepAgentTokens().catch(() => {});
     let j: CodingJob | undefined;
     try {
       j = (
@@ -1539,13 +1551,27 @@ export class CodingController {
           )
         ).rows[0];
         if (!fresh) return;
-        const published =
-          fresh.settings.agentGit && fresh.result?.published
-            ? await this.publisher.verifyAgentPublication!(
-                fresh,
-                fresh.result.published,
-              )
-            : await this.publisher.publish(fresh);
+        let published: { url: string; head: string; tree?: string };
+        try {
+          published =
+            fresh.settings.agentGit && fresh.result?.published
+              ? await this.publisher.verifyAgentPublication!(
+                  fresh,
+                  fresh.result.published,
+                )
+              : await this.publisher.publish(fresh);
+        } catch (error) {
+          if (!(error instanceof AgentPublicationMismatch)) throw error;
+          // A PR that is not the reviewed artifact is never retried or recorded.
+          await this.db.query(
+            "UPDATE coding_jobs SET state='paused',stage='paused',summary=$2,updated_at=now() WHERE id=$1 AND state='publishing'",
+            [
+              j.id,
+              "Agent PR does not match the independently reviewed artifact; inspect it before resuming",
+            ],
+          );
+          return;
+        }
         await this.db.query(
           `WITH changed AS (UPDATE coding_jobs SET state='pr_ready',stage='pr_ready',pr_url=$2,head_sha=$3,summary=$6,updated_at=now() WHERE id=$1 AND state='publishing' RETURNING id)
           INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$4,jsonb_build_object('summary',$6::text,'url',$2::text,'tree',$5::text) FROM changed ON CONFLICT DO NOTHING`,

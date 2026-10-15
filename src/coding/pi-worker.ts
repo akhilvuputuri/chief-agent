@@ -89,6 +89,7 @@ export async function runPiWorker(
     ) => Promise<void>;
     /** Test-only: a local remote and GitHub API stand-in for agent publication. */
     agentRemote?: string;
+    agentBaseSource?: string;
     agentApi?: typeof fetch;
   },
 ) {
@@ -446,7 +447,7 @@ export async function runPiWorker(
           text: assignment.checkpoint.piState.findings,
         },
       ];
-      task.instructions = `${assignment.context}\nRead all pages of review_findings with read_document before repairs.`;
+      task.instructions = `${assignment.context}\nRead all pages of review_findings with read_document before repairs.${assignment.agentGit ? "\nCommit your work with git as you go, using clear messages. Do not push, add remotes or change git configuration." : ""}`;
     }
     if (assignment.agentGit && assignment.mode === "implement")
       task.instructions = `${task.instructions}\nCommit your work with git as you go, using clear messages. Do not push, add remotes or change git configuration; after independent review Chief pushes your branch and opens the pull request.`;
@@ -642,7 +643,6 @@ export async function runPiWorker(
           ? await publishSandboxBranch({
               execute: initial,
               signal: stop,
-              workspace,
               scratch: root,
               repository: assignment.agentGit.repository,
               branch: assignment.agentGit.branch,
@@ -650,21 +650,8 @@ export async function runPiWorker(
               author: assignment.agentGit.author,
               title: `Chief coding job: ${Array.from(assignment.objective.split("\n")[0]!).slice(0, 80).join("")}`,
               body: `${result.summary}\n\nIndependent review (${assignment.settings.reviewerModel}): APPROVE for artifact ${candidateHash}.`,
-              verify: async () => {
-                const committed = await new PiWorkspace(workspace)
-                  .initialize()
-                  .then((w) => w.snapshot(initial, stop, assignment.baseSha));
-                if (
-                  artifactHash({
-                    ...saved,
-                    patch: committed.patch,
-                    files: committed.files,
-                  }) !== candidateHash
-                )
-                  throw new Error(
-                    "Committed tree differs from the independently approved candidate",
-                  );
-              },
+              // Exactly the approved artifact; the model's own commits are working history only.
+              files: saved.files,
               token: async () =>
                 (
                   (await client.request("github-token", {})) as {
@@ -672,7 +659,11 @@ export async function runPiWorker(
                   }
                 ).token,
               ...(hooks?.agentRemote
-                ? { remote: hooks.agentRemote, api: hooks.agentApi }
+                ? {
+                    remote: hooks.agentRemote,
+                    baseSource: hooks.agentBaseSource,
+                    api: hooks.agentApi,
+                  }
                 : {}),
             })
           : undefined;
@@ -705,7 +696,7 @@ export async function runPiWorker(
           text: verdict.report.detail,
         },
       ];
-      result.instructions = `${assignment.context}\nRead all pages of review_findings with read_document before repairs.`;
+      result.instructions = `${assignment.context}\nRead all pages of review_findings with read_document before repairs.${assignment.agentGit ? "\nCommit your work with git as you go, using clear messages. Do not push, add remotes or change git configuration." : ""}`;
       await store.save(result);
       runtime = makeRuntime("coder", scopeFor("build", `repair-${round}`));
       currentTask = result.id;

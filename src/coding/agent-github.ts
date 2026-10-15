@@ -112,8 +112,10 @@ export class AgentGitHubTokens {
     )
       throw new Error("Invalid agent token response");
     // GitHub may narrow but must never widen what was requested.
-    const granted = data.permissions ?? {};
+    const granted = data.permissions;
     if (
+      !granted ||
+      typeof granted !== "object" ||
       Object.entries(granted).some(([name, level]) =>
         (AGENT_TOKEN_PERMISSIONS as Record<string, string>)[name] === undefined
           ? name !== "metadata"

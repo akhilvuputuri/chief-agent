@@ -73,6 +73,8 @@ export interface RepositoryPublisher {
   ): Promise<{ url: string; head: string; tree: string }>;
 }
 
+/** An agent-published PR is not the reviewed artifact; publication must stop, not retry. */
+export class AgentPublicationMismatch extends Error {}
 /** The installation credential never crosses the worker boundary. */
 export class GitHubPublisher implements RepositoryPublisher {
   private token?: { value: string; expires: number };
@@ -252,7 +254,9 @@ export class GitHubPublisher implements RepositoryPublisher {
     const prefix = `https://github.com/${this.repository}/pull/`;
     const number = published.url.slice(prefix.length);
     if (!published.url.startsWith(prefix) || !/^[1-9][0-9]*$/.test(number))
-      throw new Error("Agent PR is outside the configured repository");
+      throw new AgentPublicationMismatch(
+        "Agent PR is outside the configured repository",
+      );
     const pr = await this.api(`pulls/${number}`, "GET", undefined, signal);
     if (
       pr.state !== "open" ||
@@ -262,7 +266,9 @@ export class GitHubPublisher implements RepositoryPublisher {
       pr.head?.ref !== `chief/coding-${j.id}` ||
       pr.head?.sha !== published.head
     )
-      throw new Error("Agent PR identity does not match the job");
+      throw new AgentPublicationMismatch(
+        "Agent PR identity does not match the job",
+      );
     const tree = await this.candidateTree(j, signal);
     const head = await this.api(
       `git/commits/${published.head}`,
@@ -271,7 +277,9 @@ export class GitHubPublisher implements RepositoryPublisher {
       signal,
     );
     if (head.tree?.sha !== tree)
-      throw new Error("Agent PR tree differs from the reviewed artifact");
+      throw new AgentPublicationMismatch(
+        "Agent PR tree differs from the reviewed artifact",
+      );
     const compare = await this.api(
       `compare/${j.base_sha}...${published.head}`,
       "GET",
@@ -279,7 +287,9 @@ export class GitHubPublisher implements RepositoryPublisher {
       signal,
     );
     if (compare.behind_by !== 0 || !(compare.ahead_by >= 1))
-      throw new Error("Agent PR does not descend from the pinned base");
+      throw new AgentPublicationMismatch(
+        "Agent PR does not descend from the pinned base",
+      );
     return { url: published.url, head: published.head, tree };
   }
   async publish(

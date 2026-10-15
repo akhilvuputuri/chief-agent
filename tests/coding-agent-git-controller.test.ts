@@ -179,3 +179,17 @@ test("agent tokens are issued only to a running, approved implementation attempt
   assert.deepEqual(accepted, { accepted: true });
   assert.deepEqual(tokens.revoked, [first.token]);
 });
+
+test("tokens for attempts that stopped without finishing are revoked by the sweep", async (t) => {
+  const f = await fixture(t);
+  const { c, tokens } = controller(f);
+  const job = await runningJob(f, c, "agent-sweep");
+  const issued = await c.githubToken(job);
+  await (c as any).sweepAgentTokens();
+  assert.deepEqual(tokens.revoked, []);
+  await f.db.query("UPDATE coding_jobs SET state='paused' WHERE id=$1", [
+    job.id,
+  ]);
+  await (c as any).sweepAgentTokens();
+  assert.deepEqual(tokens.revoked, [issued.token]);
+});

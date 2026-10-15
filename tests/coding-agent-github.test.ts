@@ -21,7 +21,7 @@ function github(options: {
   rules?: any[];
   bypass?: string;
   autoMerge?: boolean;
-  granted?: Record<string, string>;
+  granted?: Record<string, string> | null;
 }) {
   const calls: { method: string; url: string; body?: any }[] = [];
   const transport = (async (url: string, init: any = {}) => {
@@ -36,10 +36,13 @@ function github(options: {
         {
           token: "ghs_fixture",
           expires_at: new Date(Date.now() + 3600000).toISOString(),
-          permissions: options.granted ?? {
-            ...AGENT_TOKEN_PERMISSIONS,
-            metadata: "read",
-          },
+          permissions:
+            options.granted === null
+              ? undefined
+              : (options.granted ?? {
+                  ...AGENT_TOKEN_PERMISSIONS,
+                  metadata: "read",
+                }),
         },
         201,
       );
@@ -123,6 +126,7 @@ test("agent tokens fail closed and are revoked when main is not safe or permissi
       },
       /pinned set/,
     ],
+    [{ granted: null }, /pinned set/],
   ] as const) {
     const g = github(options as any);
     await assert.rejects(g.tokens.issue(), message as RegExp);
@@ -139,29 +143,38 @@ async function repository() {
   const root = await mkdtemp(join(tmpdir(), "agent-publish-"));
   const work = join(root, "work");
   const remote = join(root, "remote.git");
-  const decoy = join(root, "decoy.git");
   await mkdir(work);
   const git = (cwd: string, ...args: string[]) =>
     execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
   execFileSync("git", ["init", "-q", "--bare", remote]);
-  execFileSync("git", ["init", "-q", "--bare", decoy]);
   git(work, "init", "-q");
   git(work, "config", "user.name", "Owner");
   git(work, "config", "user.email", "owner@example.invalid");
+  git(work, "config", "uploadpack.allowAnySHA1InWant", "true");
   await writeFile(join(work, "a.txt"), "base\n");
+  await writeFile(join(work, "gone.txt"), "to delete\n");
   git(work, "add", ".");
   git(work, "commit", "-qm", "base");
   const base = git(work, "rev-parse", "HEAD");
-  await writeFile(join(work, "a.txt"), "agent change\n");
-  git(work, "commit", "-qam", "Agent commit");
-  await writeFile(join(work, "b.txt"), "uncommitted\n");
-  return { root, work, remote, decoy, base, git };
+  // Like GitHub, the remote already holds the base the job started from.
+  git(work, "push", "-q", remote, `${base}:refs/heads/main`);
+  // The agent's own working history, including content that was never approved.
+  await writeFile(join(work, "secret.txt"), "never approved\n");
+  git(work, "add", ".");
+  git(
+    work,
+    "commit",
+    "-qm",
+    "Agent working commit",
+    "--author",
+    "Someone <x@example.invalid>",
+  );
+  return { root, work, remote, base, git };
 }
+const branch = `chief/coding-${"1".repeat(8)}-1111-4111-8111-${"1".repeat(12)}`;
 
-test("sandbox publication commits, verifies before any token, and pushes from an isolated repository", async () => {
+test("sandbox publication pushes exactly the approved files as one owner commit on the base, token last", async () => {
   const r = await repository();
-  // A hostile workspace rule tries to redirect the push and capture the credential.
-  r.git(r.work, "config", `url.${r.decoy}.insteadOf`, r.remote);
   const order: string[] = [];
   const api = (async (url: string, init: any = {}) => {
     order.push(`${init.method ?? "GET"} ${url.replace(/\?.*/, "")}`);
@@ -171,11 +184,9 @@ test("sandbox publication commits, verifies before any token, and pushes from an
       201,
     );
   }) as typeof fetch;
-  const branch = `chief/coding-${"1".repeat(8)}-1111-4111-8111-${"1".repeat(12)}`;
   const published = await publishSandboxBranch({
-    execute: localExecutor(r.work, join(r.root, "home"), () => {}),
+    execute: localExecutor(r.root, join(r.root, "home"), () => {}),
     signal: new AbortController().signal,
-    workspace: r.work,
     scratch: r.root,
     repository: "akhilvuputuri/chief-agent",
     branch,
@@ -183,37 +194,50 @@ test("sandbox publication commits, verifies before any token, and pushes from an
     author: { name: "Owner", email: "owner@example.invalid" },
     title: "Chief coding job: fixture",
     body: "Reviewed",
-    verify: async () => {
-      order.push("verify");
-    },
+    files: [
+      { path: "a.txt", content: "approved change\n" },
+      { path: "docs/new.md", content: "new file\n" },
+      { path: "gone.txt", content: null },
+    ],
     token: async () => {
       order.push("token");
       return "ghs_fixture";
     },
     remote: r.remote,
+    baseSource: r.work,
     api,
   });
-  assert.deepEqual(order.slice(0, 2), ["verify", "token"]);
+  assert.equal(order[0], "token");
   assert.equal(
     published.url,
     "https://github.com/akhilvuputuri/chief-agent/pull/9",
   );
-  const pushed = execFileSync(
-    "git",
-    ["--git-dir", r.remote, "rev-parse", `refs/heads/${branch}`],
-    { encoding: "utf8" },
-  ).trim();
-  assert.equal(pushed, published.head);
-  assert.equal(
-    execFileSync("git", ["--git-dir", r.remote, "show", `${pushed}:b.txt`], {
+  const remoteGit = (...args: string[]) =>
+    execFileSync("git", ["--git-dir", r.remote, ...args], {
       encoding: "utf8",
-    }),
-    "uncommitted\n",
+    }).trim();
+  assert.equal(remoteGit("rev-parse", `refs/heads/${branch}`), published.head);
+  assert.equal(remoteGit("rev-parse", `${published.head}^`), r.base);
+  assert.equal(
+    remoteGit("log", "-1", "--format=%an <%ae>|%cn <%ce>", published.head),
+    "Owner <owner@example.invalid>|Owner <owner@example.invalid>",
   );
+  assert.deepEqual(
+    remoteGit("ls-tree", "-r", "--name-only", published.head).split("\n"),
+    ["a.txt", "docs/new.md"],
+  );
+  assert.equal(remoteGit("show", `${published.head}:a.txt`), "approved change");
+  assert.equal(remoteGit("rev-list", "--count", published.head), "2");
   assert.throws(() =>
     execFileSync(
       "git",
-      ["--git-dir", r.decoy, "rev-parse", `refs/heads/${branch}`],
+      [
+        "--git-dir",
+        r.remote,
+        "cat-file",
+        "-e",
+        r.git(r.work, "rev-parse", "HEAD"),
+      ],
       {
         stdio: "pipe",
       },
@@ -226,13 +250,12 @@ test("sandbox publication commits, verifies before any token, and pushes from an
   );
 });
 
-test("a failed artifact check never requests a token or pushes, and branches stay job-scoped", async () => {
+test("publication refuses unsafe branches or paths before requesting any token", async () => {
   const r = await repository();
   let tokens = 0;
   const base = {
-    execute: localExecutor(r.work, join(r.root, "home"), () => {}),
+    execute: localExecutor(r.root, join(r.root, "home"), () => {}),
     signal: new AbortController().signal,
-    workspace: r.work,
     scratch: r.root,
     repository: "akhilvuputuri/chief-agent",
     base: r.base,
@@ -244,29 +267,33 @@ test("a failed artifact check never requests a token or pushes, and branches sta
       return "ghs_fixture";
     },
     remote: r.remote,
+    baseSource: r.work,
     api: (async () => json([])) as typeof fetch,
   };
   await assert.rejects(
     publishSandboxBranch({
       ...base,
-      branch: `chief/coding-${"2".repeat(8)}-2222-4222-8222-${"2".repeat(12)}`,
-      verify: async () => {
-        throw new Error(
-          "Committed tree differs from the independently approved candidate",
-        );
-      },
+      branch: "main",
+      files: [{ path: "a.txt", content: "x" }],
     }),
-    /differs/,
-  );
-  await assert.rejects(
-    publishSandboxBranch({ ...base, branch: "main", verify: async () => {} }),
     /job's chief\/coding branch/,
   );
+  for (const path of ["../escape.txt", ".git/config", "/abs.txt", "a//b.txt"])
+    await assert.rejects(
+      publishSandboxBranch({
+        ...base,
+        branch,
+        files: [{ path, content: "x" }],
+      }),
+      /path is invalid/,
+    );
   assert.equal(tokens, 0);
   assert.equal(
-    execFileSync("git", ["--git-dir", r.remote, "for-each-ref"], {
-      encoding: "utf8",
-    }).trim(),
-    "",
+    execFileSync(
+      "git",
+      ["--git-dir", r.remote, "for-each-ref", "--format=%(refname)"],
+      { encoding: "utf8" },
+    ).trim(),
+    "refs/heads/main",
   );
 });
