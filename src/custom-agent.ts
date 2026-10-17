@@ -15,6 +15,7 @@ import {
   type ModelAdapter,
   type Message,
   type ModelMessage,
+  type ReasoningEffort,
   type ToolDefinition,
 } from "./model.js";
 import { Stop, readOperations, type StopReason } from "./execution.js";
@@ -36,6 +37,7 @@ function callForm(op: string, raw: string) {
 }
 import { domainOf } from "./tool-domains.js";
 import { runFamily } from "./run-family.js";
+import { higher as higherEffort } from "./effort.js";
 const finishTool: ToolDefinition = {
   name: "finish_turn",
   description:
@@ -86,7 +88,8 @@ export class CustomAgent implements Agent {
         : req.specialist === "media" && this.specialists.media && !childModel
           ? this.specialists.media
           : this.model;
-    const effort = req.effort ?? "medium";
+    // Raised mid-turn by req.escalateEffort; never lowered within a turn.
+    let effort = req.effort ?? "medium";
     const execution = req.execution;
     if (!execution || !req.execute || !req.signal)
       throw new Error("Owner-scoped execution is required");
@@ -114,6 +117,32 @@ export class CustomAgent implements Agent {
       { code: string; count: number; step: number }
     >();
     let step = 0;
+    // Turn progress for effort escalation: counts and tool names only.
+    let toolCalls = 0,
+      failedCalls = 0;
+    const toolsUsed = new Set<string>();
+    let pendingEffort: Promise<ReasoningEffort | undefined> | undefined;
+    // Starts an effort question for the next model call. A pending answer is kept: the
+    // higher of the two applies, so a raise is never lost.
+    const askEffort = (followUp = false) => {
+      if (!req.escalateEffort || effort === "high") return;
+      const earlier = pendingEffort;
+      const asked = req
+        .escalateEffort({
+          step,
+          toolCalls,
+          failedCalls,
+          tools: [...toolsUsed],
+          current: effort,
+          ...(followUp ? { followUp: true } : {}),
+        })
+        .catch(() => undefined);
+      pendingEffort = earlier
+        ? Promise.all([earlier, asked]).then(([a, b]) =>
+            a && b ? higherEffort(a, b) : (a ?? b),
+          )
+        : asked;
+    };
     const steer = async () => {
       if (req.signal!.aborted) throw new Stop("cancelled");
       if (!req.shouldYield?.()) return false;
@@ -130,6 +159,8 @@ export class CustomAgent implements Agent {
         req.message = inputs.at(-1)!.message;
         // New owner input (for example the id the model asked for) can make a refused form valid.
         failures.clear();
+        // An absorbed follow-up can be harder than the message the effort was picked for.
+        askEffort(true);
       }
       await execution.checkpoint(messages);
       if (inputs.length)
@@ -203,6 +234,13 @@ export class CustomAgent implements Agent {
           });
         }
         for (let attempt = 0; !first; attempt++) {
+          // Asked while the previous step's tools ran; it delays this call only when the
+          // tools finished first (at most the decision's timeout).
+          if (pendingEffort) {
+            const raised = await pendingEffort;
+            pendingEffort = undefined;
+            if (raised) effort = higherEffort(effort, raised);
+          }
           const remaining = await execution.consume("models");
           const start = Date.now();
           invocationId = randomUUID();
@@ -211,6 +249,7 @@ export class CustomAgent implements Agent {
               invocationId,
               model: model.model ?? null,
               attempt,
+              effort,
             });
             await req.refreshContext?.();
             tools = [...(req.runtime?.tools ?? []), finishTool];
@@ -291,6 +330,7 @@ export class CustomAgent implements Agent {
               provider: generation.provider,
               usage: generation.usage ?? null,
               latencyMs: Date.now() - start,
+              effort,
             });
             break;
           } catch (error) {
@@ -364,6 +404,10 @@ export class CustomAgent implements Agent {
         let finish: (Answer & { reason: StopReason }) | undefined;
         let finishObservation: string | undefined;
         step++;
+        // A step that only finishes the turn has no next model call to raise.
+        const working = calls.some((c) => c.function.name !== "finish_turn");
+        const failedBefore = failedCalls;
+        if (working) askEffort();
         for (const [callIndex, call] of calls.entries()) {
           if (req.shouldYield?.() || req.signal.aborted) {
             await skipCalls(callIndex);
@@ -379,6 +423,10 @@ export class CustomAgent implements Agent {
           if (op.startsWith("work_") && op !== "work_status")
             await execution.attach(true);
           await execution.consume("tools");
+          if (op !== "finish_turn") {
+            toolCalls++;
+            toolsUsed.add(op);
+          }
           const journal = await execution.beginCall(call.id, op, {
             raw: call.function.arguments,
           });
@@ -527,6 +575,7 @@ export class CustomAgent implements Agent {
               ["RESULT_UNRECORDED", "TOOL_FAILED"].includes(
                 (result as any).error.code,
               );
+            if (op !== "finish_turn") failedCalls++;
             await execution.endCall(
               journal,
               result,
@@ -549,6 +598,8 @@ export class CustomAgent implements Agent {
           await execution.attach();
           req.afterTool?.(op);
         }
+        // A failure in this step asks again now, so the recovering call can run higher.
+        if (working && failedCalls > failedBefore && !finish) askEffort();
         if (await steer()) continue;
         if (finish) {
           answer = finish;

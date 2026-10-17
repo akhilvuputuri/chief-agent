@@ -85,6 +85,8 @@ const fields: Record<string, Shape> = {
   score: "number",
   agree: "bool",
   matched: "bool",
+  step: "count",
+  previousEffort: "name",
   recalled: "count",
   referenceCount: "count",
   positionCount: "count",
@@ -276,6 +278,7 @@ const projections: Record<string, Projection> = {
       model: d.model,
       provider: d.provider,
       latencyMs: d.latencyMs,
+      effort: d.effort,
       ...usageFields(d.usage),
     },
   ],
@@ -388,6 +391,24 @@ const projections: Record<string, Projection> = {
     { runId: run, kind: d.kind, messages: d.messages },
   ],
   "telegram.view_failed": (run) => ["warn", { ref: run }],
+  // Reasoning effort per message (journal 90): Jev's pick and what was applied; no text.
+  "effort.decided": (run, d) => [
+    d.ok === false ? "warn" : "info",
+    {
+      runId: run,
+      kind: d.phase,
+      step: d.step,
+      state: d.applied,
+      previousEffort: d.previous ?? undefined,
+      choice: d.choice ?? undefined,
+      score:
+        d.choice && d.probabilities ? d.probabilities[d.choice] : undefined,
+      latencyMs: d.latencyMs,
+      costUsd: d.costUsd,
+      model: d.model ?? undefined,
+      errorCode: d.error,
+    },
+  ],
   // Shadow decisions (#127): prediction, score and agreement only; never message text.
   "decision.shadow": (run, d) => [
     d.ok === false ? "warn" : "info",

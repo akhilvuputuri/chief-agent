@@ -14,7 +14,7 @@ COPY --from=build /app/dist ./dist
 COPY --from=build /app/coding_runtime_pi/package.json ./coding_runtime_pi/package.json
 COPY --from=build /app/coding_runtime_pi/dist ./coding_runtime_pi/dist
 COPY package.json ./
-COPY config/model-policy.json config/tool-picker.json config/decisions.json config/runtime.json ./config/
+COPY config/model-policy.json config/tool-picker.json config/decisions.json config/runtime.json config/reasoning-effort.json ./config/
 COPY config/coding.json config/coding-pi.json config/coding-backend.json config/mcp.json ./config/
 COPY skills ./skills
 COPY plugins ./plugins
