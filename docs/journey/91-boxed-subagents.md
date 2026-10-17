@@ -112,3 +112,10 @@ The reviewer approved the corrected design. Six non-blocking points were adopted
 - The IAM table gains tenancy, metadata-tag and market-type conditions. It also states the residual risk around termination protection and shutdown behaviour, with a check after launch.
 - The `pendingTime` check waits until it has been verified.
 - Steering messages are bound to the owner's input ID.
+
+### Devin review (`8574bb7`)
+
+Devin raised two points, both adopted:
+
+- **Credential rotation.** A lost `hello` response during rotation would have locked a warm box out. The previous credential now stays valid until the new one is first used.
+- **Journal index.** This entry was missing from the topic paths. It is now added to the DevOps path and the delegation case study.
