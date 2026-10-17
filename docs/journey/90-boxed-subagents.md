@@ -14,19 +14,19 @@ Four parallel read-only explorations of main `9fae411` produced this evidence. F
 **Tested (read from code):**
 
 - The worker channel is pull-only. Its routes are `assignment`, `heartbeat`, `progress`, `checkpoint`, `finish`, `model`, `logs`, `github-token`, `pi-session` and the Pi chat-completions proxy (`src/coding/api.ts`). The host can only refuse calls, abort model calls or stop the build. `coding_runtime_pi/src/rpc.ts` has a reply/approve/cancel/events RPC that only the CLI uses.
-- Eleven places tangle the generic box lifecycle with coding workflow ([design](../boxes.md#what-exists-today-and-why-it-is-not-enough)). The worst:
+- The exploration found eleven points where the generic box lifecycle is tangled with coding workflow; the design groups them ([design](../boxes.md#what-exists-today-and-why-it-is-not-enough)). The worst:
   - the global `coding_one_active_worker` index also counts host-side `publishing`;
   - approval policy sits inside worker authentication and heartbeat;
   - `coding_events` is overloaded.
 - `agent_run` is classed as a read operation (`src/execution.ts`). A placement that starts infrastructure would bypass the uncertain-write guard.
-- The CodeBuild attempt token is passed as a `PLAINTEXT` environment variable (`src/coding/provider.ts`). Only the controller principal can read builds (`deploy/coding/controller-policy.json`), and its host already holds the token-derivation key, so the practical exposure is account administrators.
+- The CodeBuild attempt token is passed as a `PLAINTEXT` environment variable (`src/coding/provider.ts`). It is readable by any principal with `codebuild:BatchGetBuilds` on the project. Our policy grants that to the controller (`deploy/coding/controller-policy.json`), whose host already holds the token-derivation key, and administrators have it implicitly, so the practical exposure is low.
 
 **Measured (earlier journals):**
 
-- CodeBuild overhead is about 27–56 s per attempt. This is derived from the [journal 83](83-pi-context-verification.md) runs as total build seconds minus runtime seconds.
+- CodeBuild overhead is about 27–64 s per attempt. This is derived from the [journal 83](83-pi-context-verification.md) runs as total build seconds minus runtime seconds.
 - CodeBuild medium costs $0.01 per minute, billed per whole minute ([journal 70](70-coding-allocations.md)).
-- The 45-minute lifetime clamp was observed on 10 October; on 13 October a 125-minute timeout was admitted ([journal 80](80-codebuild-timeout-mismatch.md)).
-- `spawn ENOMEM` occurred on both the medium and large compute sizes.
+- The 45-minute lifetime clamp was observed on 10 October ([journal 80](80-codebuild-timeout-mismatch.md)). After AWS Support replied on 12 October, a 13 October probe was admitted at 125 minutes; this proves admission only ([journal 83](83-pi-context-verification.md)).
+- `spawn ENOMEM` occurred on medium and a cgroup limit was hit on large. Partitioning test processes on unchanged medium fixed it, so this is not evidence that CodeBuild compute is too small ([journal 83](83-pi-context-verification.md)).
 
 **Documented by vendors (web, dated 2024–October 2026):**
 
@@ -56,6 +56,43 @@ Default pending: only Chief spawns boxes.
 ## Implementation and review
 
 Design only: [boxes.md](../boxes.md). Implementation follows the phases listed there, each with exact-head review.
+
+### Review of the first draft (`15102bf`, Claude Opus 5.5): changes requested
+
+**Blocking findings and their corrections:**
+
+1. **IAM.** A launch-template condition does not stop `RunInstances` overriding template parameters, and tag-scoped `ModifyInstanceAttribute` could change instance type, security groups, shutdown behaviour or volume deletion. The design now constrains every resource type with its own condition key, drops `ModifyInstanceAttribute` entirely, lists volume sweep and SSM permissions, and requires negative tests.
+2. **Warm reuse.** It had no trust reset: local git configuration (`core.fsmonitor`, filters), untracked files, a poisoned `node_modules`, caches, home-directory files and leftover processes could carry from one round into a later approved round. Now every task gets:
+   - a fresh container;
+   - a fresh clone with no local git configuration;
+   - a fresh install.
+
+   A box is bound to one job, owner and repository. Reuse is proposed only after implementation approval, and the remaining container-escape risk is stated.
+
+3. **IMDS.** The controls contradicted each other until the design said where tasks run. Now the box agent is a host service outside Docker, tasks run in bridged containers where hop limit 1 applies, and `DOCKER-USER` rules block IMDS.
+4. **Steering.** It could bypass approval binding. Messages now carry only answers and clarifications, and a scope change needs a new revision and approval. The in-box `approve` RPC is unreachable, and steering is owner-attributed, never Chief's own initiative.
+
+**Non-blocking findings, all adopted:**
+
+- **Bootstrap.** Restarts no longer look like compromise: there is a session-credential re-hello, user data is never modified, and the limits of the identity document are stated.
+- **Publication.** A per-repository publication lock replaces the serialisation the global index used to provide. The CodeBuild fallback keeps one task per box and no warm TTL.
+- **Authorisation.** Per-call checks are explicit.
+- **Lifecycle:**
+  - start fails over to a fresh box when capacity runs out;
+  - at-least-once messages are handled idempotently;
+  - a host-restart grace period;
+  - the sweep is scoped by an environment tag;
+  - lifetime has a cumulative cap and an absolute cap;
+  - workspace inspection does not follow symlinks.
+- **Factual corrections:**
+  - attribution of the clamp evidence;
+  - the memory diagnosis;
+  - CodeBuild limits that are our own configuration;
+  - overhead range;
+  - token lifetime;
+  - the cost figure is a published rate.
+- **Rollback.** Covers jobs already on EC2 and stack deletion.
+- **Owner questions.** Expanded.
 
 ## Verification and outcome
 
