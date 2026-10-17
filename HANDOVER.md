@@ -1,3 +1,7 @@
+# Reasoning effort chosen per message — 17 October 2026
+
+v0.3.82 (PR 246, deployed as `be3647e`) lets Jev pick the main model's reasoning effort for each foreground message and raise it mid-turn; every decision is logged as `effort.decided`. Next: after a week, report the effort distribution, escalation rate, Jev latency and reasoning tokens per effort, then tune `config/reasoning-effort.json`. [Journal 90](docs/journey/90-jev-reasoning-effort.md).
+
 # Owner "continue" for parked coding PRs — in review, 17 October 2026
 
 When an owner-merge coding PR stops for owner attention (manual review or Keep open), the owner can now tell Chief to continue: `coding_resume` returns the PR to the automatic checks, rebase and Merge card, and holds that still apply (protected files, exhausted allocation, two rebases) come back with their reason. Candidate v0.3.81. [Journal 87](docs/journey/87-pi-owner-merge-feedback.md#owner-continue-for-parked-prs--17-october-2026).
