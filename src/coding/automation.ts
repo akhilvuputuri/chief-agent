@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { Database } from "../db.js";
 import type { CodingJob } from "./controller.js";
 import { artifactHash } from "./github.js";
+import { requirementScope } from "./requirements.js";
 import {
   MergeRefused,
   approvedArtifact,
@@ -94,6 +95,70 @@ export class CodingAutomation {
   }
   private async manual(j: CodingJob, d: Record, reason: string) {
     await this.phase(j, d, "manual_review", reason, true);
+  }
+  /**
+   * Main moved before merge: re-implement the approved plan on current main (owner policy,
+   * 16 October 2026: the plan approval carries over; checks, review and the Merge card repeat).
+   */
+  private async rebase(j: CodingJob, d: Record, main: string) {
+    const prior = Number(
+      (
+        await this.db.query(
+          "SELECT count(*)::int AS n FROM coding_revisions WHERE job_id=$1 AND message LIKE 'Rebase onto current main%'",
+          [j.id],
+        )
+      ).rows[0].n,
+    );
+    if (
+      !/^[a-f0-9]{40}$/.test(main) ||
+      prior >= 2 ||
+      j.used_models >= j.settings.limits.models ||
+      (j.checkpoint.piState?.toolsUsed ?? 0) >= j.settings.limits.tools
+    ) {
+      await this.manual(
+        j,
+        d,
+        prior >= 2
+          ? "Main moved again after two automatic rebases; inspect before merging."
+          : "Main moved, but the shared allocation is exhausted; explicit owner action is needed.",
+      );
+      return;
+    }
+    const cp = structuredClone(j.checkpoint);
+    // A fresh implementation on current main; whole-file contents from the old base are not reused.
+    cp.files = [];
+    cp.patch = "";
+    cp.piState = {
+      version: 1,
+      toolsUsed: cp.piState?.toolsUsed ?? 0,
+      ...(cp.piState?.reviewRound
+        ? { reviewRound: cp.piState.reviewRound }
+        : {}),
+    };
+    const scope = requirementScope({ ...j, base_sha: main, checkpoint: cp });
+    const message = `Rebase onto current main ${main}: approved plan carried over (owner policy, 16 October 2026)`;
+    const changed = await this.db.query(
+      `WITH changed AS (UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',base_sha=$5,summary='Main moved; re-applying the approved change on current main before checks, review and the Merge card',checkpoint=$3::jsonb,result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,cleanup='none',model_busy=false,publication_started=false,updated_at=now() WHERE id=$1 AND lease=$2 AND stage=$9 AND lease_until>now() AND state='pr_ready' AND revision=$4 RETURNING id,revision),
+      budget AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,'feedback:'||revision,jsonb_build_object('handled',$6::jsonb,'remainingMs',$7::bigint),'suppressed' FROM changed RETURNING job_id),
+      approval AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,'rebase-approval:'||revision,jsonb_build_object('decision','approved','approvedScope',$8::text,'carriedFrom',$10::text,'reason','rebase'),'suppressed' FROM changed RETURNING job_id),
+      revised AS (INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$11,$12,'implement' FROM changed RETURNING job_id)
+      INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$11,jsonb_build_object('summary','Main moved since this job started, so Chief is re-applying your approved change on current main, then re-running the checks and review before asking you to merge.') FROM changed ON CONFLICT DO NOTHING RETURNING job_id`,
+      [
+        j.id,
+        j.lease,
+        JSON.stringify(cp),
+        j.revision,
+        main,
+        JSON.stringify(d.handled),
+        j.settings.limits.ms,
+        scope,
+        j.stage,
+        requirementScope(j),
+        `rebase:${main}:${j.revision}`,
+        message,
+      ],
+    );
+    if (!changed.rows.length) throw new StageChanged();
   }
   /** Keeps one answerable card for the current revision/head; lost or expired answers are re-offered. */
   private async offerMergeCard(j: CodingJob, d: Record) {
@@ -253,12 +318,16 @@ export class CodingAutomation {
         );
         return;
       }
-      if (i.main !== j.base_sha || i.base !== j.base_sha) {
-        await this.manual(
-          j,
-          d,
-          "Main changed since approved requirements; reconcile base and review before merging.",
-        );
+      const ownerMerge = j.settings.prWorkflow === "owner_merge";
+      // Owner-merge PRs are built on the job base by construction, so main's tip is what matters.
+      if (i.main !== j.base_sha || (!ownerMerge && i.base !== j.base_sha)) {
+        if (ownerMerge) await this.rebase(j, d, i.main);
+        else
+          await this.manual(
+            j,
+            d,
+            "Main changed since approved requirements; reconcile base and review before merging.",
+          );
         return;
       }
       if (j.result.checkpoint.files.some((f) => protectedMergePath(f.path))) {
@@ -460,7 +529,8 @@ export class CodingAutomation {
       if (
         final.head !== d.head ||
         final.tree !== d.tree ||
-        final.base !== j.base_sha ||
+        (j.settings.prWorkflow !== "owner_merge" &&
+          final.base !== j.base_sha) ||
         final.main !== j.base_sha ||
         final.closed ||
         final.merged

@@ -1,3 +1,7 @@
+# Automatic rebases for owner-merge jobs — in review, 17 October 2026
+
+When main moves before a coding PR is merged, Chief now rebases on its own: it re-implements the approved plan on current main, re-runs checks and Argon review, updates the same PR and returns to the Merge card, with the plan approval carried over (owner decision). Chief's coding tool text now matches the workflow, and a no-op revise/resume no longer stops the turn. Candidate v0.3.80. [Journal 87](docs/journey/87-pi-owner-merge-feedback.md#resume-moved-main-and-chiefs-guidance--1617-october-2026).
+
 # Coding feedback rounds fixed — in review, 16 October 2026
 
 The first live owner-merge job paused after a spurious feedback round: Devin's "No Issues Found" summary was treated as feedback, and the round ran out of leftover time before the Argon re-review. Candidate v0.3.79 ignores Devin summary bodies (all-clear verdicts and unposted-flag notes; its inline findings still count), gives each feedback round a fresh 40-minute window (owner decision; totals stay shared, three rounds max), and closes stage 1's two review follow-ups. [Journal 87](docs/journey/87-pi-owner-merge-feedback.md#first-live-owner-merge-job--1516-october-2026).

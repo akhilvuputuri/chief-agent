@@ -391,3 +391,78 @@ test("agent-published PRs are accepted only for the job branch, exact reviewed t
     /outside the configured repository/,
   );
 });
+
+test("a rebased continuation rebuilds on the new base and force-updates only the job branch", async () => {
+  const key = generateKeyPairSync("rsa", { modulusLength: 2048 })
+    .privateKey.export({ type: "pkcs8", format: "pem" })
+    .toString();
+  const repo = "example/repo",
+    id = randomUUID(),
+    oldHead = "1".repeat(40),
+    newBase = "2".repeat(40),
+    newHead = "3".repeat(40),
+    branch = `chief/coding-${id}-r1`;
+  for (const behind of [3, 0]) {
+    let head = oldHead;
+    const writes: any[] = [];
+    const transport: any = async (url: string, options: any = {}) => {
+      const path = new URL(url).pathname;
+      const method = options.method ?? "GET";
+      let data: any;
+      if (path.endsWith("/access_tokens"))
+        data = {
+          token: "fixture",
+          expires_at: new Date(Date.now() + 3600000).toISOString(),
+        };
+      else if (path.endsWith("/pulls/7"))
+        data = {
+          state: "open",
+          head: { ref: branch, sha: head, repo: { full_name: repo } },
+          base: { ref: "main", sha: "0".repeat(40), repo: { full_name: repo } },
+        };
+      else if (path.endsWith(`/compare/${newBase}...${oldHead}`))
+        data = { behind_by: behind, ahead_by: 1 };
+      else if (path.endsWith(`/git/commits/${newBase}`))
+        data = { tree: { sha: "base-tree" } };
+      else if (path.endsWith(`/git/commits/${oldHead}`))
+        data = { tree: { sha: "old-tree" } };
+      else if (path.endsWith("/git/trees/base-tree"))
+        data = { tree: [], truncated: false };
+      else if (path.endsWith("/git/trees") && method === "POST")
+        data = { sha: "candidate-tree" };
+      else if (path.endsWith("/git/commits") && method === "POST") {
+        writes.push({ commit: JSON.parse(options.body) });
+        data = { sha: newHead };
+      } else if (
+        path.endsWith(`/git/refs/heads/${branch}`) &&
+        method === "PATCH"
+      ) {
+        writes.push({ ref: JSON.parse(options.body) });
+        head = newHead;
+        data = {};
+      } else throw new Error(`Unexpected fixture path ${method} ${path}`);
+      return new Response(JSON.stringify(data), { status: 200 });
+    };
+    const publisher = new GitHubPublisher(
+      repo,
+      "1",
+      "2",
+      key,
+      { name: "Human Fixture", email: "fixture@example.com" },
+      transport,
+    );
+    const published = await publisher.publish({
+      id,
+      revision: 3,
+      base_sha: newBase,
+      objective: "Synthetic",
+      result: candidate(),
+      settings: { repository: repo },
+      pr_url: `https://github.com/${repo}/pull/7`,
+      head_sha: oldHead,
+    });
+    assert.equal(published.head, newHead);
+    assert.deepEqual(writes[0].commit.parents, [behind ? newBase : oldHead]);
+    assert.deepEqual(writes[1].ref, { sha: newHead, force: behind > 0 });
+  }
+});

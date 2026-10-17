@@ -1,3 +1,4 @@
+import { ToolValidationError } from "../tool-errors.js";
 import { PiSessions } from "./pi-sessions.js";
 import { z } from "zod";
 import { reviewMetadata, completePlanDelivered } from "./review-proof.js";
@@ -264,7 +265,7 @@ export class CodingController {
     if (!this.allowed(user)) throw new Error("Coding owner unavailable");
     const rows = (
       await this.db.query(
-        `SELECT id,revision,objective,mode,state,stage,summary,question,base_sha,pr_url,head_sha,cleanup,publication_started,used_models,settings->'limits' AS limits,updated_at,checkpoint->'runtimeMemory' AS runtime_memory,checkpoint->'squadState'->>'phase' AS runtime_phase,(SELECT max(created_at) FROM coding_events e WHERE e.job_id=coding_jobs.id AND e.payload->>'kind' IN ('squad_handoff','checkpoint')) AS checkpoint_at FROM coding_jobs WHERE user_id=$1 ${id ? "AND id=$2" : ""} ORDER BY created_at DESC LIMIT 20`,
+        `SELECT id,revision,objective,mode,state,stage,summary,question,base_sha,pr_url,head_sha,cleanup,publication_started,used_models,settings->'limits' AS limits,settings->>'prWorkflow' AS merge_flow,updated_at,checkpoint->'runtimeMemory' AS runtime_memory,checkpoint->'squadState'->>'phase' AS runtime_phase,(SELECT max(created_at) FROM coding_events e WHERE e.job_id=coding_jobs.id AND e.payload->>'kind' IN ('squad_handoff','checkpoint')) AS checkpoint_at FROM coding_jobs WHERE user_id=$1 ${id ? "AND id=$2" : ""} ORDER BY created_at DESC LIMIT 20`,
         id ? [user, id] : [user],
       )
     ).rows;
@@ -297,6 +298,8 @@ export class CodingController {
       }
       delete row.runtime_memory;
       delete row.runtime_phase;
+      row.mergeFlow = row.merge_flow ?? "draft_only";
+      delete row.merge_flow;
     }
     if (id && !rows.length) throw new Error("Coding job unavailable");
     if (!id) return rows;
@@ -629,8 +632,13 @@ export class CodingController {
       ],
     );
     if (!changed.rows.length)
-      throw new Error(
-        "Coding scope changed, job is active, or sandbox cleanup is pending; inspect status before revising",
+      // Nothing was written: a precondition, not an uncertain action, so the turn can continue.
+      throw new ToolValidationError(
+        job.state === "pr_ready" && job.settings.prWorkflow === "owner_merge"
+          ? "This job already has a PR and continues on its own: Chief handles Devin and MR feedback, rebases onto main when it moves, re-runs checks and review, then sends the owner a Merge / Keep open card. Nothing to resume or revise; report its stage from coding_status."
+          : job.state === "pr_ready"
+            ? "This job already has a draft PR; it predates the owner-merge workflow, so it can only be merged on GitHub or replaced by a new job."
+            : "Coding scope changed, job is active, or sandbox cleanup is pending; inspect status before revising",
       );
     return this.status(user, a.id);
   }

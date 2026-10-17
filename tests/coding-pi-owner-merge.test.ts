@@ -6,6 +6,10 @@ import { PGlite } from "@electric-sql/pglite";
 import { ensureUser, type Database } from "../src/db.js";
 import { CodingAutomation } from "../src/coding/automation.js";
 import { CodingMergeApprovals } from "../src/coding/merge-approvals.js";
+import {
+  CodingRequirements,
+  requirementScope,
+} from "../src/coding/requirements.js";
 import type { CodingJob } from "../src/coding/controller.js";
 import { codingSettings, outcome } from "../src/coding/schema.js";
 import { artifactHash } from "../src/coding/github.js";
@@ -463,4 +467,68 @@ test("each Pi owner-merge feedback round gets a fresh active window even after t
   ).rows[0].payload;
   assert.equal(budget.remainingMs, 900000);
   assert.equal(queued.used_models, 12);
+});
+
+test("when main moves, an owner-merge job is rebased automatically with its approval carried over", async (t) => {
+  const f = await fixture(t, { version: 1, toolsUsed: 20, reviewRound: 2 });
+  const before = await f.job();
+  const moved = "f".repeat(40);
+  f.setInspection({ checks: "passed", draft: false, main: moved });
+  await f.auto.tick();
+  const queued = await f.job();
+  assert.equal(queued.state, "queued");
+  assert.equal(queued.revision, 2);
+  assert.equal(queued.base_sha, moved);
+  assert.deepEqual(queued.checkpoint.files, []);
+  assert.equal(queued.checkpoint.plan, before.checkpoint.plan);
+  assert.deepEqual(queued.checkpoint.piState, {
+    version: 1,
+    toolsUsed: 20,
+    reviewRound: 2,
+  });
+  assert.equal(f.counts().merges, 0);
+  const requirements = new CodingRequirements(
+    f.db,
+    () => true,
+    () => new Date(),
+  );
+  assert.equal(await requirements.approved(queued), true);
+  const carried = (
+    await f.db.query(
+      "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='rebase-approval:2'",
+      [f.id],
+    )
+  ).rows[0].payload;
+  assert.equal(carried.approvedScope, requirementScope(queued));
+  assert.equal(carried.carriedFrom, requirementScope(before));
+  const budget = (
+    await f.db.query(
+      "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='feedback:2'",
+      [f.id],
+    )
+  ).rows[0].payload;
+  assert.equal(budget.remainingMs, 900000);
+  const notice = (
+    await f.db.query(
+      "SELECT payload,delivery FROM coding_events WHERE job_id=$1 AND payload->>'summary' LIKE 'Main moved since this job started%'",
+      [f.id],
+    )
+  ).rows;
+  assert.equal(notice.length, 1);
+  assert.equal(notice[0].delivery, "pending");
+});
+
+test("automatic rebases stop after two rounds and hand back to the owner", async (t) => {
+  const f = await fixture(t);
+  for (const n of [1, 2])
+    await f.db.query(
+      "INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) VALUES($1,$2,$3,'Rebase onto current main earlier','implement')",
+      [f.id, 10 + n, `earlier-${n}`],
+    );
+  f.setInspection({ checks: "passed", draft: false, main: "f".repeat(40) });
+  await f.auto.tick();
+  const job = await f.job();
+  assert.equal(job.state, "pr_ready");
+  assert.equal(job.stage, "manual_review");
+  assert.match(job.summary, /two automatic rebases/);
 });

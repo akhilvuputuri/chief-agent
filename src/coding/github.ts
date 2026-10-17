@@ -328,7 +328,6 @@ export class GitHubPublisher implements RepositoryPublisher {
         continuation.head?.repo?.full_name !== this.repository ||
         continuation.base?.repo?.full_name !== this.repository ||
         continuation.base?.ref !== "main" ||
-        continuation.base.sha !== j.base_sha ||
         !new RegExp(`^chief/coding-${j.id}-r[1-9][0-9]*$`).test(
           continuation.head?.ref ?? "",
         )
@@ -353,7 +352,18 @@ export class GitHubPublisher implements RepositoryPublisher {
         throw new Error("Existing coding PR needs operator inspection");
     }
     const newTree = { sha: await this.candidateTree(j, signal) };
-    if (continuation && continuation.head.sha === j.head_sha) {
+    // A rebase round moved the job base past the published head: rebuild on the new base.
+    const rebased = continuation
+      ? (
+          await this.api(
+            `compare/${j.base_sha}...${j.head_sha}`,
+            "GET",
+            undefined,
+            signal,
+          )
+        ).behind_by > 0
+      : false;
+    if (continuation && !rebased && continuation.head.sha === j.head_sha) {
       const current = await this.api(`git/commits/${j.head_sha}`);
       if (current.tree?.sha === newTree.sha)
         return {
@@ -367,7 +377,7 @@ export class GitHubPublisher implements RepositoryPublisher {
       if (
         current.tree?.sha !== newTree.sha ||
         current.parents?.length !== 1 ||
-        current.parents[0].sha !== j.head_sha
+        current.parents[0].sha !== (rebased ? j.base_sha : j.head_sha)
       )
         throw new Error("PR continuation was changed externally");
       return {
@@ -405,7 +415,7 @@ export class GitHubPublisher implements RepositoryPublisher {
       {
         message: `Coding job ${j.id}: proposed change`,
         tree: newTree.sha,
-        parents: [continuation ? j.head_sha : j.base_sha],
+        parents: [continuation && !rebased ? j.head_sha : j.base_sha],
         author: this.author,
         committer: this.author,
         // Commit identity is the human repository owner, configured by the operator.
@@ -417,7 +427,8 @@ export class GitHubPublisher implements RepositoryPublisher {
         await this.api(
           `git/refs/heads/${branch}`,
           "PATCH",
-          { sha: newCommit.sha, force: false },
+          // Only a rebase rewrites the job's own branch; main is never written here.
+          { sha: newCommit.sha, force: rebased },
           signal,
         );
       } catch {

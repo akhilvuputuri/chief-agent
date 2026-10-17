@@ -6,6 +6,7 @@ import { CodingController } from "../src/coding/controller.js";
 import { codingSettings, outcome } from "../src/coding/schema.js";
 import { requirementScope } from "../src/coding/requirements.js";
 import { artifactHash } from "../src/coding/github.js";
+import { ToolValidationError } from "../src/tool-errors.js";
 
 const pi = codingSettings.parse({
   ...settings,
@@ -192,4 +193,38 @@ test("tokens for attempts that stopped without finishing are revoked by the swee
   ]);
   await (c as any).sweepAgentTokens();
   assert.deepEqual(tokens.revoked, [issued.token]);
+});
+
+test("replying to an owner-merge job that already has a PR is a validation error with guidance, and status shows its flow", async (t) => {
+  const f = await fixture(t);
+  const { c } = controller(f);
+  const job = await runningJob(f, c, "agent-pr-ready");
+  await f.db.query(
+    "UPDATE coding_jobs SET state='pr_ready',stage='manual_review',cleanup='complete' WHERE id=$1",
+    [job.id],
+  );
+  await assert.rejects(
+    c.call("a", f.run, {
+      operation: "coding_reply",
+      id: job.id,
+      baseRevision: job.revision,
+      requestKey: "rebase-please",
+      message: "Rebase it",
+    }),
+    (error: Error) => {
+      assert(error instanceof ToolValidationError);
+      assert.match(error.message, /continues on its own/);
+      return true;
+    },
+  );
+  const status: any = await c.call("a", f.run, {
+    operation: "coding_status",
+    id: job.id,
+  });
+  const row = Array.isArray(status) ? status[0] : (status.jobs?.[0] ?? status);
+  assert.equal(
+    JSON.stringify(status).includes('"mergeFlow":"owner_merge"'),
+    true,
+    JSON.stringify(row).slice(0, 300),
+  );
 });
