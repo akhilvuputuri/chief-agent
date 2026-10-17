@@ -1,6 +1,10 @@
-# Automatic rebases for owner-merge jobs — in review, 17 October 2026
+# Owner "continue" for parked coding PRs — in review, 17 October 2026
 
-When main moves before a coding PR is merged, Chief now rebases on its own: it re-implements the approved plan on current main, re-runs checks and Argon review, updates the same PR and returns to the Merge card, with the plan approval carried over (owner decision). Chief's coding tool text now matches the workflow, and a no-op revise/resume no longer stops the turn. Candidate v0.3.80. [Journal 87](journey/87-pi-owner-merge-feedback.md#resume-moved-main-and-chiefs-guidance--1617-october-2026).
+When an owner-merge coding PR stops for owner attention (manual review or Keep open), the owner can now tell Chief to continue: `coding_resume` returns the PR to the automatic checks, rebase and Merge card, and holds that still apply (protected files, exhausted allocation, two rebases) come back with their reason. Candidate v0.3.81. [Journal 87](journey/87-pi-owner-merge-feedback.md#owner-continue-for-parked-prs--17-october-2026).
+
+# Automatic rebases for owner-merge jobs — live as v0.3.80, 17 October 2026
+
+When main moves before a coding PR is merged, Chief now rebases on its own: it re-implements the approved plan on current main, re-runs checks and Argon review, updates the same PR and returns to the Merge card, with the plan approval carried over (owner decision). Chief's coding tool text now matches the workflow, and a no-op revise/resume no longer stops the turn. Released as v0.3.80 (`69805d7`). [Journal 87](journey/87-pi-owner-merge-feedback.md#resume-moved-main-and-chiefs-guidance--1617-october-2026).
 
 # Coding feedback rounds fixed — in review, 16 October 2026
 

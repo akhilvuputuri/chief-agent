@@ -10,7 +10,8 @@ import {
   CodingRequirements,
   requirementScope,
 } from "../src/coding/requirements.js";
-import type { CodingJob } from "../src/coding/controller.js";
+import { CodingController, type CodingJob } from "../src/coding/controller.js";
+import { ToolValidationError } from "../src/tool-errors.js";
 import { codingSettings, outcome } from "../src/coding/schema.js";
 import { artifactHash } from "../src/coding/github.js";
 import type { PrInspection } from "../src/coding/merge-policy.js";
@@ -552,4 +553,122 @@ test("a rebase never carries over a scope the owner did not approve, and blocked
   assert.equal(job.state, "pr_ready");
   assert.equal(job.stage, "manual_review");
   assert.match(job.summary, /no recorded owner approval/);
+});
+
+/** The owner's "continue" as Chief's coding_resume call, through the real controller. */
+async function continueAsOwner(
+  f: Awaited<ReturnType<typeof fixture>>,
+  requestKey: string,
+) {
+  const run = randomUUID();
+  await f.db.query(
+    "INSERT INTO work_turns(run_id,user_id,request) VALUES($1,'owner','continue the coding job')",
+    [run],
+  );
+  const c = new CodingController(
+    f.db,
+    settings,
+    {} as any,
+    {} as any,
+    "c".repeat(64),
+    "https://coding.example.com",
+    () => true,
+    () => ({
+      generate: async () => ({ message: { role: "assistant", content: "" } }),
+    }),
+    () => new Date(),
+  );
+  return c.call("owner", run, {
+    operation: "coding_resume",
+    id: f.id,
+    baseRevision: (await f.job()).revision,
+    requestKey,
+  });
+}
+
+test("an owner continue re-runs the gates with fresh waits and a hold that applies again is a new notice", async (t) => {
+  const f = await fixture(t);
+  // Checks stayed unavailable for over an hour, so the PR stopped for the owner.
+  await f.db.query(
+    "UPDATE coding_events SET payload=jsonb_set(payload,'{waitingSince}',to_jsonb($2::text)) WHERE job_id=$1 AND event_key='automation:1'",
+    [f.id, new Date(Date.now() - 2 * 86400000).toISOString()],
+  );
+  await f.auto.tick();
+  await f.auto.tick();
+  assert.equal((await f.job()).stage, "manual_review");
+  const notices = async () =>
+    (
+      await f.db.query(
+        "SELECT event_key,delivery FROM coding_events WHERE job_id=$1 AND event_key LIKE 'automation-notice:%' ORDER BY event_key",
+        [f.id],
+      )
+    ).rows;
+  assert.deepEqual(
+    (await notices()).map((n) => n.event_key),
+    ["automation-notice:1:manual_review"],
+  );
+  // The owner re-ran CI and asks to continue while it is still pending: the job waits, not re-parks.
+  await continueAsOwner(f, "continue-1");
+  assert.equal((await f.job()).stage, "awaiting_ci");
+  await f.auto.tick();
+  await f.auto.tick();
+  assert.equal((await f.job()).stage, "awaiting_ci");
+  // A hold that applies again stops it, and the owner is told again.
+  f.setInspection({ head: "f".repeat(40) });
+  await f.auto.tick();
+  const job = await f.job();
+  assert.equal(job.stage, "manual_review");
+  assert.match(job.summary, /PR changed outside the squad/);
+  const sent = await notices();
+  assert.deepEqual(
+    sent.map((n) => n.event_key),
+    [
+      "automation-notice:1:manual_review",
+      "automation-notice:1:manual_review:continue-1",
+    ],
+  );
+  assert.equal(sent[1].delivery, "pending");
+  assert.equal(f.counts().merges, 0);
+});
+
+test("continuing after Keep open offers a fresh card and the declined card stays refused", async (t) => {
+  const f = await fixture(t);
+  f.setInspection({ checks: "passed" });
+  await f.auto.tick();
+  await f.auto.tick();
+  const declined = await f.deliverCard();
+  await f.approvals.confirm("owner", declined.id, false, "owner", 55);
+  assert.equal((await f.job()).stage, "merge_declined");
+  await continueAsOwner(f, "continue-after-keep-open");
+  await f.auto.tick();
+  assert.equal((await f.job()).stage, "awaiting_merge_approval");
+  await assert.rejects(
+    f.approvals.confirm("owner", declined.id, true, "owner", 55),
+  );
+  const fresh = await f.deliverCard(56);
+  assert.notEqual(fresh.id, declined.id);
+  assert.equal(f.counts().merges, 0);
+  await f.approvals.confirm("owner", fresh.id, true, "owner", 56);
+  assert.equal((await f.job()).stage, "merge_approved");
+});
+
+test("a PR that already merged cannot be continued back through the gates", async (t) => {
+  const f = await fixture(t);
+  await f.db.query(
+    "UPDATE coding_events SET payload=payload || jsonb_build_object('mergeSha',$2::text) WHERE job_id=$1 AND event_key='automation:1'",
+    [f.id, merged],
+  );
+  await f.db.query(
+    "UPDATE coding_jobs SET stage='manual_review',summary='PR merged, but release failed' WHERE id=$1",
+    [f.id],
+  );
+  await assert.rejects(
+    continueAsOwner(f, "continue-merged"),
+    (error: Error) => {
+      assert(error instanceof ToolValidationError);
+      assert.match(error.message, /already merged/);
+      return true;
+    },
+  );
+  assert.equal((await f.job()).stage, "manual_review");
 });

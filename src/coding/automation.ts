@@ -83,15 +83,25 @@ export class CodingAutomation {
     );
     if (!changed.rows.length) throw new StageChanged();
     j.stage = stage;
-    if (notify)
+    if (notify) {
+      // Each owner continue may stop again at the same revision; that stop is a new notice.
+      const continued = Number(
+        (
+          await this.db.query(
+            "SELECT count(*)::int AS n FROM coding_events WHERE job_id=$1 AND event_key LIKE 'continue:%'",
+            [j.id],
+          )
+        ).rows[0].n,
+      );
       await this.db.query(
         "INSERT INTO coding_events(job_id,event_key,payload) VALUES($1,$2,$3::jsonb) ON CONFLICT DO NOTHING",
         [
           j.id,
-          `automation-notice:${j.revision}:${stage}`,
+          `automation-notice:${j.revision}:${stage}${continued ? `:continue-${continued}` : ""}`,
           JSON.stringify({ summary, url: (j as any).pr_url }),
         ],
       );
+    }
   }
   private async manual(j: CodingJob, d: Record, reason: string) {
     await this.phase(j, d, "manual_review", reason, true);
