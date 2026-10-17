@@ -40,7 +40,7 @@ Four parallel read-only explorations of main `9fae411` produced this evidence. F
 The two-way channel and multi-task boxes do not need new compute. A box agent that long-polls the host gets steering over the existing HTTPS origin on any provider. The provider decision matters for what happens between tasks:
 
 - **CodeBuild and Fargate** can only end and restart, so every round clones and installs again.
-- **EC2 can stop with its disk kept.** That makes the owner's "short warm TTL" nearly free, and lets feedback and rebase rounds resume an existing workspace. It also removes the CodeBuild memory caps and the one-build limit.
+- **EC2 can stop with its disk kept.** That makes the owner's "short warm TTL" nearly free. After the review's trust reset, every task still re-clones and re-installs, so warm reuse saves boot time and the image pull, plus verified package downloads once a cache exists; phase 3 measures it. EC2 also removes our one-build limit, and lets us choose memory per profile.
 
 The cost of EC2 is operating the lifecycle ourselves: launch templates, tags, IAM conditions, IMDS lockdown, sweeps and image updates. Fargate is simpler to run but cannot keep a disk across stops. Hosted sandboxes were deferred for residency and vendor reasons.
 
@@ -101,3 +101,14 @@ Nothing is implemented or measured yet. Still to measure: EC2 boot to `hello`, w
 ## Follow-up and next iteration
 
 Phase 2 is the box layer with a CodeBuild provider and an `echo` profile, with no new infrastructure. Open questions are listed in the design.
+
+### Re-review (`72d83d3`): approved
+
+The reviewer approved the corrected design. Six non-blocking points were adopted in the next commit:
+
+- The rationale for warm reuse now states what it saves: boot, the image pull and, later, verified package downloads, not the workspace. Phase 3 measures it, and the owner is asked whether the TTL is still worth it.
+- Phase 2 on CodeBuild proves one task per box. The multi-task proof moves to EC2.
+- A consumed bootstrap secret is never presented twice by a real agent, so any reuse means compromise.
+- The IAM table gains tenancy, metadata-tag and market-type conditions. It also states the residual risk around termination protection and shutdown behaviour, with a check after launch.
+- The `pendingTime` check waits until it has been verified.
+- Steering messages are bound to the owner's input ID.
