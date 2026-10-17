@@ -1,3 +1,14 @@
+## Released v0.3.82 — reasoning effort chosen per message by Jev
+
+[PR 246](https://github.com/akhilvuputuri/chief-agent/pull/246) merged as `be3647e85dcac9de6b5d1b303ffef9ed1139b6dd`.
+
+- **Review.** Exact-head independent review (Claude Opus 5.5) approved `c5e5994`. Earlier rounds found two blocking issues, both fixed: the image lacked `config/reasoning-effort.json`, so the gateway would not have started, and escalation after a failed tool call came one call late, or not at all. Devin found that absorbed follow-ups kept stale effort, also fixed.
+- **Checks.** Hosted CI and Devin passed. Locally, 962 application and 51 script tests passed.
+- **Release.** The [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39027476521) recorded exact deployment and startup health. Logs show `gateway.started` for the release and, about three minutes after startup, no `effort.config_failed` or warn/error lines.
+- **Behaviour.** Jev now picks `low`, `medium` or `high` for each foreground message. It can raise effort as the turn grows, after a failed tool call or when a follow-up is absorbed. Effort never falls within a turn. Each decision is logged as `effort.decided`. `EFFORT_PICKER=off` in `config/runtime.json` restores fixed `medium`.
+- **Not yet measured.** The effort distribution, escalations, latency and quality.
+- No tag created yet. [Journal 90](journey/90-jev-reasoning-effort.md), [design](reasoning-effort.md).
+
 ## Released v0.3.81 — owner continue for parked coding PRs
 
 [PR 244](https://github.com/akhilvuputuri/chief-agent/pull/244) merged as `9fae41197066d44fcfd9f44a0cdbf50ae0cf42a8`. Exact-head independent review (Claude Opus 5.5) approved `eda7f0d` after one round of fixes; hosted CI and Devin passed; 956 application, 51 script, 61 coding-runtime and 107 Pi tests passed locally. The [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39022531557) recorded exact deployment and startup health, and logs show `gateway.started` for that release at 09:51 UTC with no errors in the following minutes. The owner can ask Chief to continue an owner-merge PR parked at manual review or Keep open. [Journal 87](journey/87-pi-owner-merge-feedback.md#owner-continue-for-parked-prs--17-october-2026).

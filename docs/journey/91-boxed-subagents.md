@@ -119,3 +119,10 @@ Devin raised two points, both adopted:
 
 - **Credential rotation.** A lost `hello` response during rotation would have locked a warm box out. The previous credential now stays valid until the new one is first used.
 - **Journal index.** This entry was missing from the topic paths. It is now added to the DevOps path and the delegation case study.
+
+The reviewer approved `6054397` and asked for the rotation rule to be stated precisely. Devin independently found that overlapping retries could leave a box holding a superseded credential. Both are now covered:
+
+- rotation is idempotent for each predecessor and recorded before the reply;
+- the predecessor may only retry `hello`;
+- the box persists the replacement before using it;
+- any use of a retired credential is handled as compromise.
