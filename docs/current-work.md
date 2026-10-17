@@ -1,6 +1,6 @@
 # Boxed sub-agents design — proposed, 17 October 2026
 
-Heavy delegated work moves to sub-agents with their own on-demand boxes that Chief can steer and close (issue #245). The owner decided that coding moves first, boxes keep a short warm TTL (about 15 idle minutes, then stop), and self-managed EC2 replaces CodeBuild, with CodeBuild kept as fallback. Design only; no AWS resources yet. [Design](boxes.md), [journal 90](journey/90-boxed-subagents.md).
+Heavy delegated work moves to sub-agents with their own on-demand boxes that Chief can steer and close (issue #245). The owner decided that coding moves first, boxes keep a short warm TTL (about 15 idle minutes, then stop), and self-managed EC2 replaces CodeBuild, with CodeBuild kept as fallback. Design only; no AWS resources yet. [Design](boxes.md), [journal 91](journey/91-boxed-subagents.md).
 
 # Owner "continue" for parked coding PRs — live as v0.3.81, 17 October 2026
 

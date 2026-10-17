@@ -1,6 +1,6 @@
 # Boxed sub-agents — design
 
-Status: design, 17 October 2026. Nothing here is implemented yet. Tracking issue: [#245](https://github.com/akhilvuputuri/chief-agent/issues/245). Exploration: [journal 90](journey/90-boxed-subagents.md).
+Status: design, 17 October 2026. Nothing here is implemented yet. Tracking issue: [#245](https://github.com/akhilvuputuri/chief-agent/issues/245). Exploration: [journal 91](journey/91-boxed-subagents.md).
 
 ## Goal
 
@@ -265,7 +265,7 @@ Pi sessions and model-call journals keep their storage, keyed by task.
 
 Each phase is a separate PR with exact-head independent review, CI, a release record and a journal entry.
 
-1. **Design record.** This document and journal 90.
+1. **Design record.** This document and journal 91.
 2. **Box layer with a CodeBuild provider; no new infrastructure.**
    - The tables, the reconciler (TTLs, sweep, verified termination, per-profile concurrency), the channel with bootstrap, and the box agent.
    - An `echo` profile proves spawn, steering, inspection, idle close and verified termination end to end, one task per box.

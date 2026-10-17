@@ -57,6 +57,9 @@ const schema = z.object({
   // Shadow decisions (#127): Jev predicts beside each turn without changing it. Separate
   // from TOOL_PICKER so the picker can be turned off while measurement continues.
   SHADOW_DECISIONS: z.enum(["jev", "off"]).default("jev"),
+  // Reasoning effort per foreground message (journal 90): Jev picks low, medium or high
+  // and can raise it mid-turn; "off" keeps every turn at AGENT_REASONING_EFFORT.
+  EFFORT_PICKER: z.enum(["jev", "off"]).default("jev"),
   // Topics in the bot's private chat, when threaded mode is on in BotFather. "auto" files
   // scheduled output into topics and sends a message typed in a topic to its agent first;
   // "file" only files output and answers in the topic; "off" uses General only.
@@ -138,6 +141,7 @@ export const RUNTIME_SETTINGS = [
   "MEDIA_MODEL",
   "TOOL_PICKER",
   "SHADOW_DECISIONS",
+  "EFFORT_PICKER",
   "TELEGRAM_TOPICS",
   "VOICE_REPLIES",
   "MARKET_DATA_PROVIDER",

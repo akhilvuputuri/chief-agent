@@ -1,4 +1,4 @@
-# 90 — Can Chief delegate heavy work to sub-agents with their own boxes?
+# 91 — Can Chief delegate heavy work to sub-agents with their own boxes?
 
 Work date(s): 2026-10-17. Written/revised: 2026-10-17.
 Status: proposed. [Design](../boxes.md) recorded with owner decisions. No implementation yet, and no AWS resources created.
