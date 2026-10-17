@@ -300,9 +300,68 @@ test("asking to continue a parked owner-merge PR returns it to the automation, o
   }
   const events = (
     await f.db.query(
-      "SELECT count(*)::int AS n FROM coding_events WHERE job_id=$1 AND event_key LIKE 'continue:%'",
+      "SELECT delivery,payload->>'previousStage' AS previous FROM coding_events WHERE job_id=$1 AND event_key LIKE 'continue:%' ORDER BY created_at,id",
       [job.id],
     )
-  ).rows[0].n;
-  assert.equal(events, 2);
+  ).rows;
+  assert.deepEqual(events, [
+    { delivery: "suppressed", previous: "manual_review" },
+    { delivery: "suppressed", previous: "merge_declined" },
+  ]);
+});
+
+test("continue is refused while a host tick holds the job, and other PR workflows keep their guidance", async (t) => {
+  const f = await fixture(t);
+  const { c } = controller(f);
+  const job = await runningJob(f, c, "agent-continue-held");
+  await f.db.query(
+    "UPDATE coding_jobs SET state='pr_ready',stage='manual_review',cleanup='complete',summary='Parked',lease=$2,lease_until=now()+interval '3 minutes' WHERE id=$1",
+    [job.id, randomUUID()],
+  );
+  await assert.rejects(
+    c.call("a", f.run, {
+      operation: "coding_resume",
+      id: job.id,
+      baseRevision: job.revision,
+      requestKey: "continue-held",
+    }),
+    (error: Error) => {
+      assert(error instanceof ToolValidationError);
+      assert.match(error.message, /being processed/);
+      return true;
+    },
+  );
+  assert.equal(
+    (
+      await f.db.query(
+        "SELECT count(*)::int AS n FROM coding_events WHERE job_id=$1 AND event_key LIKE 'continue:%'",
+        [job.id],
+      )
+    ).rows[0].n,
+    0,
+  );
+  // A legacy automatic-merge job is not the owner-merge flow: no continue, and no advice to try one.
+  await f.db.query(
+    "UPDATE coding_jobs SET lease=NULL,lease_until=NULL,settings=(settings - 'prWorkflow') || '{\"autoMerge\":true}'::jsonb WHERE id=$1",
+    [job.id],
+  );
+  await assert.rejects(
+    c.call("a", f.run, {
+      operation: "coding_resume",
+      id: job.id,
+      baseRevision: job.revision,
+      requestKey: "continue-legacy",
+    }),
+    (error: Error) => {
+      assert(error instanceof ToolValidationError);
+      assert.match(error.message, /will not continue automatically/);
+      assert.doesNotMatch(error.message, /coding_resume/);
+      return true;
+    },
+  );
+  assert.equal(
+    (await f.db.query("SELECT stage FROM coding_jobs WHERE id=$1", [job.id]))
+      .rows[0].stage,
+    "manual_review",
+  );
 });
