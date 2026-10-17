@@ -77,6 +77,7 @@ import { WebTools } from "./providers.js";
 import { Assistant } from "./agent.js";
 import { ToolPicker } from "./tool-picker.js";
 import { ShadowDecisions } from "./shadow.js";
+import { EffortPicker } from "./effort.js";
 import { server } from "./server.js";
 import {
   telegram,
@@ -677,6 +678,10 @@ const assistant = new Assistant(
   // Its own switch, so the picker can be turned off while measurement continues.
   c.SHADOW_DECISIONS === "jev" && c.OPENROUTER_API_KEY
     ? new ShadowDecisions(c.OPENROUTER_API_KEY)
+    : undefined,
+  // Reasoning effort per foreground message (journal 90); off keeps medium.
+  c.EFFORT_PICKER === "jev" && c.OPENROUTER_API_KEY
+    ? new EffortPicker(c.OPENROUTER_API_KEY)
     : undefined,
 );
 if (responsibilities)

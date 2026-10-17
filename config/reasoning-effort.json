@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "model": "typesafe/jev-1.13-20260917",
+  "timeoutMs": 1500,
+  "state": {
+    "previousTurns": 2,
+    "messageChars": 2000,
+    "previousUserChars": 500,
+    "assistantChars": 300
+  },
+  "question": {
+    "instructions": "How much careful reasoning does the assistant need to handle `latest_user_message` well, given `previous_turns` and, when present, `turn_progress` (the steps and tool calls it has already made on this message)?",
+    "criteria": {
+      "low": "A greeting, thanks or acknowledgement, a short reply to a question the assistant just asked, or one simple, unambiguous action or lookup with nothing to weigh.",
+      "medium": "An ordinary request: a lookup or action with a few details, a short summary, or handing one clear task to one area.",
+      "high": "Multi-step planning or coordination across several areas, ambiguous or conflicting requirements, careful comparison or calculation, recovering from failed steps, or work an earlier attempt got wrong."
+    }
+  },
+  "apply": {
+    "low": 0.7,
+    "high": 0.6
+  },
+  "escalation": {
+    "firstStep": 3,
+    "every": 3,
+    "onFailure": true
+  }
+}

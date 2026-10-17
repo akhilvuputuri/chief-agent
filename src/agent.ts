@@ -52,6 +52,11 @@ import {
 import type { JobTools } from "./tools.js";
 import { runFamily } from "./run-family.js";
 import { recordPickerCheck, type ShadowDecisions } from "./shadow.js";
+import {
+  shouldEscalate,
+  type EffortDecision,
+  type EffortPicker,
+} from "./effort.js";
 export interface Agent {
   run(request: AgentRequest): Promise<AgentResponse>;
 }
@@ -276,6 +281,7 @@ export class Assistant {
     private budget: Budget = defaultBudget,
     private picker?: ToolPicker,
     private shadow?: ShadowDecisions,
+    private effort?: EffortPicker,
   ) {
     this.inbox = new InputInbox(db);
   }
@@ -679,6 +685,15 @@ export class Assistant {
         pendingLibraryApproval: pendingApprovals.library === true,
       };
       const previousTurns = recentTurns(history);
+      // Reasoning effort (journal 90): started here so it runs alongside the picker and
+      // adds no wait while the picker runs. Foreground only; a failure keeps medium.
+      const effortDecided =
+        !background && this.effort
+          ? this.effort.decide(
+              { message, previous: previousTurns },
+              new Spending(this.db, user, run),
+            )
+          : undefined;
       // Foreground messages ask the picker; background job steps, a missing
       // picker or a picker failure use the deterministic cues.
       const pick = async (text: string, earlier = previousTurns) => {
@@ -1082,6 +1097,43 @@ export class Assistant {
           });
         },
       };
+      if (effortDecided) {
+        const traceEffort = (
+          phase: "initial" | "escalation",
+          step: number,
+          from: string | null,
+          d: EffortDecision,
+        ) =>
+          execution.trace("effort.decided", {
+            version: 1,
+            phase,
+            step,
+            previous: from,
+            ok: d.ok,
+            choice: d.choice ?? null,
+            probabilities: d.probabilities ?? null,
+            applied: d.applied,
+            latencyMs: d.latencyMs,
+            costUsd: d.costUsd,
+            model: d.model,
+            ...(d.error ? { error: d.error } : {}),
+          });
+        const initial = await effortDecided;
+        await traceEffort("initial", 0, null, initial);
+        request.effort = initial.applied;
+        const effort = this.effort!;
+        let asked = { step: 0, failedCalls: 0 };
+        request.escalateEffort = async (progress) => {
+          if (!shouldEscalate(effort.config, progress, asked)) return undefined;
+          asked = { step: progress.step, failedCalls: progress.failedCalls };
+          const d = await effort.decide(
+            { message: request.message, previous: previousTurns, progress },
+            new Spending(this.db, user, run),
+          );
+          await traceEffort("escalation", progress.step, progress.current, d);
+          return d.applied;
+        };
+      }
       const responsibility =
         background && current && this.tools.responsibilities
           ? await this.tools.responsibilities.scope(user, current.id)

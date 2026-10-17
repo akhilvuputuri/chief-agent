@@ -13,6 +13,7 @@ Other reviewed policy files already in the repo:
 - `config/model-policy.json`: main and agent models. A pinned main model wins over `AGENT_MODEL`.
 - `config/tool-picker.json`: the Jev domain picker.
 - `config/decisions.json`: the shadow decisions.
+- `config/reasoning-effort.json`: Jev's reasoning-effort question, thresholds and escalation schedule ([reasoning effort](reasoning-effort.md)).
 
 ## `config/runtime.json`
 
@@ -29,7 +30,7 @@ Other reviewed policy files already in the repo:
 An environment value still wins over the file.
 
 - **Passed by Compose (20 names):** production's Compose file passes these with Compose defaults, so the file cannot change them in production until Compose stops passing them. That step is part of the operator rollout in #143.
-- **Not passed (`MEDIA_MODEL`, `TOOL_PICKER`, `SHADOW_DECISIONS`, `TELEGRAM_TOPICS`):** the file is already authoritative in production. Editing them in a PR changes production on the next release, with no operator step.
+- **Not passed (`MEDIA_MODEL`, `TOOL_PICKER`, `SHADOW_DECISIONS`, `EFFORT_PICKER`, `TELEGRAM_TOPICS`):** the file is already authoritative in production. Editing them in a PR changes production on the next release, with no operator step.
 
 To make the switch safe:
 
@@ -37,7 +38,7 @@ To make the switch safe:
 - Before Compose stops passing these names, update `config/runtime.json` to production's current values for exactly those names. Then the switch changes nothing.
 - When `envSettings` is empty after the switch, the file is authoritative.
 
-To change a behaviour setting today, edit `config/runtime.json` in a PR. It takes effect in production on the next release for the four names above. `TOOL_PICKER` and `SHADOW_DECISIONS` both send messages to Jev; stopping that traffic needs both set to `off`. For the others, it takes effect once Compose stops passing them; until then the production `.env` value wins.
+To change a behaviour setting today, edit `config/runtime.json` in a PR. It takes effect in production on the next release for the five names above. `TOOL_PICKER`, `SHADOW_DECISIONS` and `EFFORT_PICKER` all send messages to Jev; stopping that traffic needs all three set to `off`. For the others, it takes effect once Compose stops passing them; until then the production `.env` value wins.
 
 Locally, a `.env` line that sets a behaviour name, even to an empty value, overrides the file. Delete such lines rather than leaving them empty. `config.loaded` lists them.
 

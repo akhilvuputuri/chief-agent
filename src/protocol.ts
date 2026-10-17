@@ -630,6 +630,13 @@ export interface AgentRequest {
   firstCall?: { name: "agent_run"; arguments: string; reason: string };
   /** Reasoning effort for this run's model calls; medium when unset. */
   effort?: import("./model.js").ReasoningEffort;
+  /**
+   * Asked when the model requests tools, while they run. Returns a higher effort for the
+   * next model call, or undefined to keep the current one. Never lowers effort.
+   */
+  escalateEffort?: (
+    progress: import("./effort.js").EffortProgress,
+  ) => Promise<import("./model.js").ReasoningEffort | undefined>;
   executeResearch?: (run: string, input: unknown) => Promise<unknown>;
   /** Dispatches a domain agent's call under its child run, after the host checks that run's granted tools. */
   executeAgent?: (run: string, input: unknown) => Promise<unknown>;
