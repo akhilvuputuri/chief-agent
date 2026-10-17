@@ -2,6 +2,8 @@
 
 Chief is a coordinator. It keeps the conversation, memory, recall, work tracking, canvases and the job-alignment workflow. Domain work runs in agents: each is a separate run with its own context, its own tools and, by default, a cheaper model. Chief starts one with a single generic tool and relays what it reports.
 
+Heavy work that needs its own compute is planned as [boxed sub-agents](boxes.md); the light agents described here are unchanged.
+
 This page is the design record for that split: why it exists, how an agent is defined and run, what it may do, and how to add one. The change history is in [journal 49](journey/49-coordinator-agents.md).
 
 ## Why
