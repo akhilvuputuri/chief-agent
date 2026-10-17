@@ -1,3 +1,14 @@
+## Released v0.3.82 — reasoning effort chosen per message by Jev
+
+[PR 246](https://github.com/akhilvuputuri/chief-agent/pull/246) merged as `be3647e85dcac9de6b5d1b303ffef9ed1139b6dd`.
+
+- **Review.** Exact-head independent review (Claude Opus 5.5) approved `c5e5994`. Earlier rounds found two blocking issues, both fixed: the image lacked `config/reasoning-effort.json`, so the gateway would not have started, and escalation after a failed tool call came one call late, or not at all. Devin found that absorbed follow-ups kept stale effort, also fixed.
+- **Checks.** Hosted CI and Devin passed. Locally, 962 application and 51 script tests passed.
+- **Release.** The [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39027476521) recorded exact deployment and startup health. Logs show `gateway.started` for the release and, about three minutes after startup, no `effort.config_failed` or warn/error lines.
+- **Behaviour.** Jev now picks `low`, `medium` or `high` for each foreground message. It can raise effort as the turn grows, after a failed tool call or when a follow-up is absorbed. Effort never falls within a turn. Each decision is logged as `effort.decided`. `EFFORT_PICKER=off` in `config/runtime.json` restores fixed `medium`.
+- **Not yet measured.** The effort distribution, escalations, latency and quality.
+- No tag created yet. [Journal 90](journey/90-jev-reasoning-effort.md), [design](reasoning-effort.md).
+
 ## Released v0.3.80 — automatic rebases for owner-merge jobs
 
 [PR 243](https://github.com/akhilvuputuri/chief-agent/pull/243) merged as `69805d73cf67e1ebc5e9799bd2a94a21c1881844` after exact-head independent review (Claude Opus 5.5), hosted CI and local tests. The [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39011683129) recorded exact deployment and startup health. When main moves before an owner-merge PR is merged, the approved plan is re-implemented on current main and the same PR is rebuilt, with the plan approval carried over. [Journal 87](journey/87-pi-owner-merge-feedback.md#resume-moved-main-and-chiefs-guidance--1617-october-2026).

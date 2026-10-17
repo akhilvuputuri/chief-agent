@@ -1,7 +1,7 @@
 # 90 — Reasoning effort chosen per message, raised as the turn grows
 
 Work date(s): 2026-10-17. Written: 2026-10-17.
-Status: in review. Jev picks the main model's reasoning effort per foreground message and can raise it mid-turn. Not deployed.
+Status: released 17 October 2026 as `be3647e` (package 0.3.82). Jev picks the main model's reasoning effort per foreground message and can raise it mid-turn. Not yet measured on real messages.
 
 ## User-visible problem and preceding iteration
 
@@ -61,11 +61,20 @@ Every foreground message ran the main model at `medium` reasoning (`AGENT_REASON
   - It confirmed the startup fix.
   - It found that a follow-up absorbed mid-turn kept the first message's effort: a `low` "thanks" that absorbs a planning request stayed `low` until step 3.
   - **Fix:** absorbing a follow-up now asks Jev before the next model call. A full-turn test fails without it.
-  - Re-review of this fix: pending.
+  - **Final-head re-review of `c5e5994`** (fix plus a merge of main): APPROVE.
+  - Non-blocking note: a follow-up question sends the pre-turn history, not the message the turn started with. It is left for a later change.
 
 ## Verification and outcome
 
 Tested locally after the review fixes: typecheck, 962 application tests, 51 script tests, the picker/context/decision eval tests, `check:pi`, build and format pass. `check:coding` needs `ruff`, which is not installed locally; hosted CI runs it. Not yet measured: the distribution of efforts on real messages, how often turns escalate and at which step, added latency with and without the picker, and any change in reply quality or cost.
+
+### Release closure — 2026-10-17
+
+- [PR 246](https://github.com/akhilvuputuri/chief-agent/pull/246) merged as `be3647e85dcac9de6b5d1b303ffef9ed1139b6dd` at the approved head `c5e5994`, after hosted CI and Devin passed.
+- The [release run](https://github.com/akhilvuputuri/chief-agent/actions/runs/39027476521) succeeded. `npm run release:status` reports the exact commit deployed with startup health at 11:11 UTC.
+- Sanitized logs show `gateway.started` for that release at 11:11:02 UTC. Checked at 11:14 UTC, about three minutes after startup: no `effort.config_failed` line from 11:00 and no warn or error line from 11:11 (the CLI `errors` query covers both). No heartbeat from the new release had arrived yet; they come every five minutes.
+- No `effort.decided` line had appeared when this was recorded, so no live decision has been observed yet. First check: `npm run logs:cloudwatch -- event --event effort.decided --since 24h`.
+- No tag created.
 
 ## Follow-up and next iteration
 
@@ -76,3 +85,4 @@ Tested locally after the review fixes: typecheck, 962 application tests, 51 scri
   - main-model reasoning tokens per effort.
 - Check `low` turns that the owner corrected or that needed a retry.
 - Tune thresholds or the schedule in the config file if `low` is too eager or escalations come too late.
+- Include the turn's own first message in follow-up questions (review note on `c5e5994`).
