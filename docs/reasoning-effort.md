@@ -15,7 +15,7 @@ Chief's main model runs every foreground message at one reasoning effort. Before
   - A scheduled question is asked when the step's tools start; a question after a failure is asked when that step's tools finish, so the call that recovers already uses its answer. The answer applies from the next model call.
   - Effort only rises within a turn, and once it is `high` Jev is not asked again. A step that only calls `finish_turn` asks nothing, since no model call follows.
   - Counts: `tool_calls` and `tools_used` count every requested call except `finish_turn`, including ones later refused. `failed_tool_calls` counts calls that ended failed, including validation errors and repeated-failure refusals. Calls skipped because newer input arrived are not failures.
-  - A follow-up absorbed mid-turn replaces the message Jev sees from the next question on. It does not trigger a question of its own.
+  - A follow-up absorbed mid-turn asks again before the next model call, with that follow-up as `latest_user_message` and `absorbed_follow_up: true`. Like every escalation it can only raise effort. That question adds Jev's latency to the next call.
 - **Scope.**
   - Foreground messages only.
   - Background jobs, responsibility investigations and child agents keep their own effort: `medium`, or what Chief passes to `agent_run`.

@@ -56,11 +56,16 @@ Every foreground message ran the main model at `medium` reasoning (`AGENT_REASON
     - a code comment overstated "never delays";
     - the counter rules are now documented;
     - follow-ups absorbed mid-turn are documented. They already reach Jev, because the escalation reads the request's current message.
-- Re-review of the fixes: pending.
+- **Re-review of `c2d0a69`:** APPROVE.
+- **Devin Review** of `c2d0a69` (a second signal):
+  - It confirmed the startup fix.
+  - It found that a follow-up absorbed mid-turn kept the first message's effort: a `low` "thanks" that absorbs a planning request stayed `low` until step 3.
+  - **Fix:** absorbing a follow-up now asks Jev before the next model call. A full-turn test fails without it.
+  - Re-review of this fix: pending.
 
 ## Verification and outcome
 
-Tested locally after the review fixes: typecheck, 961 application tests, 51 script tests, the picker/context/decision eval tests, `check:pi`, build and format pass. `check:coding` needs `ruff`, which is not installed locally; hosted CI runs it. Not yet measured: the distribution of efforts on real messages, how often turns escalate and at which step, added latency with and without the picker, and any change in reply quality or cost.
+Tested locally after the review fixes: typecheck, 962 application tests, 51 script tests, the picker/context/decision eval tests, `check:pi`, build and format pass. `check:coding` needs `ruff`, which is not installed locally; hosted CI runs it. Not yet measured: the distribution of efforts on real messages, how often turns escalate and at which step, added latency with and without the picker, and any change in reply quality or cost.
 
 ## Follow-up and next iteration
 

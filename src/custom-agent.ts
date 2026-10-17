@@ -122,6 +122,27 @@ export class CustomAgent implements Agent {
       failedCalls = 0;
     const toolsUsed = new Set<string>();
     let pendingEffort: Promise<ReasoningEffort | undefined> | undefined;
+    // Starts an effort question for the next model call. A pending answer is kept: the
+    // higher of the two applies, so a raise is never lost.
+    const askEffort = (followUp = false) => {
+      if (!req.escalateEffort || effort === "high") return;
+      const earlier = pendingEffort;
+      const asked = req
+        .escalateEffort({
+          step,
+          toolCalls,
+          failedCalls,
+          tools: [...toolsUsed],
+          current: effort,
+          ...(followUp ? { followUp: true } : {}),
+        })
+        .catch(() => undefined);
+      pendingEffort = earlier
+        ? Promise.all([earlier, asked]).then(([a, b]) =>
+            a && b ? higherEffort(a, b) : (a ?? b),
+          )
+        : asked;
+    };
     const steer = async () => {
       if (req.signal!.aborted) throw new Stop("cancelled");
       if (!req.shouldYield?.()) return false;
@@ -138,6 +159,8 @@ export class CustomAgent implements Agent {
         req.message = inputs.at(-1)!.message;
         // New owner input (for example the id the model asked for) can make a refused form valid.
         failures.clear();
+        // An absorbed follow-up can be harder than the message the effort was picked for.
+        askEffort(true);
       }
       await execution.checkpoint(messages);
       if (inputs.length)
@@ -383,25 +406,6 @@ export class CustomAgent implements Agent {
         step++;
         // A step that only finishes the turn has no next model call to raise.
         const working = calls.some((c) => c.function.name !== "finish_turn");
-        const askEffort = () => {
-          if (!req.escalateEffort || effort === "high") return;
-          const earlier = pendingEffort;
-          const asked = req
-            .escalateEffort({
-              step,
-              toolCalls,
-              failedCalls,
-              tools: [...toolsUsed],
-              current: effort,
-            })
-            .catch(() => undefined);
-          // Never lose a raise an earlier question already returned.
-          pendingEffort = earlier
-            ? Promise.all([earlier, asked]).then(([a, b]) =>
-                a && b ? higherEffort(a, b) : (a ?? b),
-              )
-            : asked;
-        };
         const failedBefore = failedCalls;
         if (working) askEffort();
         for (const [callIndex, call] of calls.entries()) {

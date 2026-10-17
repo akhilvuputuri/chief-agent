@@ -55,6 +55,8 @@ export type EffortProgress = {
   failedCalls: number;
   tools: string[];
   current: ReasoningEffort;
+  /** A follow-up was absorbed into the turn; `latest_user_message` is that follow-up. */
+  followUp?: boolean;
 };
 
 export type EffortDecision = {
@@ -81,6 +83,7 @@ export function shouldEscalate(
   lastAsked: { step: number; failedCalls: number },
 ) {
   if (progress.current === "high") return false;
+  if (progress.followUp) return true;
   const { firstStep, every, onFailure } = config.escalation;
   if (onFailure && progress.failedCalls > lastAsked.failedCalls) return true;
   return (
@@ -145,6 +148,9 @@ export class EffortPicker {
                 failed_tool_calls: input.progress.failedCalls,
                 tools_used: input.progress.tools.slice(0, 20),
                 current_effort: input.progress.current,
+                ...(input.progress.followUp
+                  ? { absorbed_follow_up: true }
+                  : {}),
               },
             }
           : {}),

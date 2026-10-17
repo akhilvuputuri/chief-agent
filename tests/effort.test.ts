@@ -181,6 +181,9 @@ test("escalation asks from the configured step, every few steps, and after a new
     false,
   );
   assert.equal(ask({ step: firstStep, current: "high" }), false);
+  // An absorbed follow-up always asks (below high).
+  assert.equal(ask({ step: 1, followUp: true }), true);
+  assert.equal(ask({ step: 1, followUp: true, current: "high" }), false);
   // A new failed tool call asks at once; an old one does not.
   assert.equal(ask({ step: 1, failedCalls: 1 }), true);
   assert.equal(
@@ -426,6 +429,75 @@ test("a step that only finishes the turn does not ask again", async () => {
     assert.equal(efforts.length, firstStep);
     assert.equal(questions, 1);
   } finally {
+    await pg.close();
+  }
+});
+
+test("a follow-up absorbed mid-turn gets its own effort question", async () => {
+  const { pg, db } = await database();
+  const asked: any[] = [];
+  const picker = new EffortPicker("key", config, (async (
+    _url: string,
+    init: RequestInit,
+  ) => {
+    const body = JSON.parse(String(init.body));
+    asked.push({
+      message: body.state.latest_user_message,
+      progress: body.state.turn_progress ?? null,
+    });
+    return asked.length === 1
+      ? reply("low", { low: 0.9 })
+      : reply("high", { high: 0.9 });
+  }) as typeof fetch);
+  let entered!: () => void;
+  const inFirstCall = new Promise<void>((r) => (entered = r));
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  const efforts: ReasoningEffort[] = [];
+  const assistant = new Assistant(
+    db,
+    new CustomAgent({
+      generate: async (input) => {
+        efforts.push(input.reasoning);
+        if (efforts.length === 1) {
+          entered();
+          await held;
+          return { message: { role: "assistant", content: "Stale." } };
+        }
+        return { message: { role: "assistant", content: "Planned." } };
+      },
+    }),
+    new JobTools(db, { call: async () => ({}) }),
+    { web: true },
+    undefined,
+    undefined,
+    undefined,
+    picker,
+  );
+  try {
+    const first = assistant.respondDetailed("owner", "thanks");
+    await inFirstCall;
+    const id = await assistant.recordInput(
+      "owner",
+      "and also plan my week across work, gym and the two trips",
+    );
+    const second = assistant.respondDetailed(
+      "owner",
+      "and also plan my week across work, gym and the two trips",
+      undefined,
+      undefined,
+      { id },
+    );
+    release();
+    const [reply1] = await Promise.all([first, second]);
+    assert.equal(reply1.reply, "Planned.");
+    assert.deepEqual(efforts, ["low", "high"]);
+    assert.equal(asked.length, 2);
+    assert.equal(asked[1].message.startsWith("and also plan"), true);
+    assert.equal(asked[1].progress.absorbed_follow_up, true);
+    assert.equal(asked[1].progress.current_effort, "low");
+  } finally {
+    assistant.shutdown();
     await pg.close();
   }
 });
