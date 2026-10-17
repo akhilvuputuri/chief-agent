@@ -12,7 +12,10 @@ Chief's main model runs every foreground message at one reasoning effort. Before
 - **As the turn grows.**
   - When the model asks for tools, Jev is asked again, starting at model step 3 and then every 3 steps, and at once after a new failed tool call.
   - The escalation adds `turn_progress`: steps, tool calls, failed tool calls, distinct tool names and the current effort. It never sends arguments or results.
-  - The answer applies from the next model call. Effort only rises within a turn, and once it is `high` Jev is not asked again.
+  - A scheduled question is asked when the step's tools start; a question after a failure is asked when that step's tools finish, so the call that recovers already uses its answer. The answer applies from the next model call.
+  - Effort only rises within a turn, and once it is `high` Jev is not asked again. A step that only calls `finish_turn` asks nothing, since no model call follows.
+  - Counts: `tool_calls` and `tools_used` count every requested call except `finish_turn`, including ones later refused. `failed_tool_calls` counts calls that ended failed, including validation errors and repeated-failure refusals. Calls skipped because newer input arrived are not failures.
+  - A follow-up absorbed mid-turn replaces the message Jev sees from the next question on. It does not trigger a question of its own.
 - **Scope.**
   - Foreground messages only.
   - Background jobs, responsibility investigations and child agents keep their own effort: `medium`, or what Chief passes to `agent_run`.
@@ -20,9 +23,13 @@ Chief's main model runs every foreground message at one reasoning effort. Before
 ## Latency and cost
 
 - **Start of a message.** The first question starts when the turn's earlier turns are known and is awaited only after the request is built. It runs alongside the tool picker's call (median about 0.6 s), so it adds little while the picker is on. With the picker off, it can add up to its 1.5 s timeout, typically about 0.45 s.
-- **Escalation.** These questions run while the step's tools execute, so they delay the next model call only when the tools finish first.
+- **Escalation.** Scheduled questions run while the step's tools execute, so they delay the next model call only when the tools finish first. A question after a failed tool call starts when the tools finish, so it delays the recovering call by Jev's latency (typically about 0.45 s, at most the 1.5 s timeout).
 - **Cost.** Each question costs about $0.00002–0.00004, recorded in the run's provider charges.
 - **Model price.** `high` costs more main-model reasoning tokens than `medium`; `low` costs fewer. No dollar cap is added.
+
+## Startup
+
+If `config/reasoning-effort.json` cannot be read, the gateway logs `effort.config_failed` and runs without the effort picker (every turn `medium`) instead of failing to start. The production image copies the file. A test checks that every config file the gateway reads is copied into the image.
 
 ## Switch
 

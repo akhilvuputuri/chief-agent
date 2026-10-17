@@ -320,6 +320,116 @@ test("a foreground turn starts at Jev's effort and raises it mid-turn, logged st
   }
 });
 
+function scripted(
+  db: Database,
+  picker: EffortPicker,
+  steps: (n: number) => { name: string; args: unknown } | string,
+  efforts: ReasoningEffort[],
+) {
+  let n = 0;
+  return new Assistant(
+    db,
+    new CustomAgent({
+      generate: async (input) => {
+        efforts.push(input.reasoning);
+        const next = steps(++n);
+        if (typeof next === "string")
+          return { message: { role: "assistant", content: next } };
+        return {
+          message: {
+            role: "assistant",
+            content: null,
+            tool_calls: [
+              {
+                id: randomUUID(),
+                type: "function",
+                function: {
+                  name: next.name,
+                  arguments: JSON.stringify(next.args),
+                },
+              },
+            ],
+          },
+        };
+      },
+    }),
+    new JobTools(db, { call: async () => ({}) }),
+    { web: true },
+    undefined,
+    undefined,
+    undefined,
+    picker,
+  );
+}
+
+test("a failed tool call raises effort for the very next model call", async () => {
+  const { pg, db } = await database();
+  const asked: any[] = [];
+  const picker = new EffortPicker("key", config, (async (
+    _url: string,
+    init: RequestInit,
+  ) => {
+    asked.push(JSON.parse(String(init.body)).state.turn_progress ?? null);
+    return asked.length === 1
+      ? reply("medium", { medium: 0.9 })
+      : reply("high", { high: 0.9 });
+  }) as typeof fetch);
+  const efforts: ReasoningEffort[] = [];
+  // Step 1 fails validation (an invalid memory key); step 2 recovers.
+  const assistant = scripted(
+    db,
+    picker,
+    (n) =>
+      n === 1
+        ? { name: "memory_set", args: { key: "Bad Key", value: "v" } }
+        : n === 2
+          ? { name: "memory_set", args: { key: "good_key", value: "v" } }
+          : "Done.",
+    efforts,
+  );
+  try {
+    assert.equal(await assistant.respond("owner", "save that"), "Done.");
+    assert.deepEqual(efforts, ["medium", "high", "high"]);
+    // Asked once at the start and once right after the failure, with it counted.
+    assert.equal(asked.length, 2);
+    assert.equal(asked[1].model_steps, 1);
+    assert.equal(asked[1].failed_tool_calls, 1);
+  } finally {
+    await pg.close();
+  }
+});
+
+test("a step that only finishes the turn does not ask again", async () => {
+  const { pg, db } = await database();
+  let questions = 0;
+  const picker = new EffortPicker("key", config, (async () => {
+    questions++;
+    return reply("medium", { medium: 0.9 });
+  }) as typeof fetch);
+  const efforts: ReasoningEffort[] = [];
+  const { firstStep } = config.escalation;
+  // The step that reaches the escalation schedule only calls finish_turn.
+  const assistant = scripted(
+    db,
+    picker,
+    (n) =>
+      n < firstStep
+        ? {
+            name: "memory_set",
+            args: { key: `note_${"abcdefghij"[n]}`, value: "v" },
+          }
+        : { name: "finish_turn", args: { reply: "Saved.", reason: "answer" } },
+    efforts,
+  );
+  try {
+    assert.equal(await assistant.respond("owner", "save these"), "Saved.");
+    assert.equal(efforts.length, firstStep);
+    assert.equal(questions, 1);
+  } finally {
+    await pg.close();
+  }
+});
+
 test("without a picker every turn stays at medium", async () => {
   const { pg, db } = await database();
   const efforts: ReasoningEffort[] = [];

@@ -211,7 +211,8 @@ export class CustomAgent implements Agent {
           });
         }
         for (let attempt = 0; !first; attempt++) {
-          // Asked while the previous step's tools ran; it never delays a reply.
+          // Asked while the previous step's tools ran; it delays this call only when the
+          // tools finished first (at most the decision's timeout).
           if (pendingEffort) {
             const raised = await pendingEffort;
             pendingEffort = undefined;
@@ -380,8 +381,12 @@ export class CustomAgent implements Agent {
         let finish: (Answer & { reason: StopReason }) | undefined;
         let finishObservation: string | undefined;
         step++;
-        if (req.escalateEffort && effort !== "high")
-          pendingEffort = req
+        // A step that only finishes the turn has no next model call to raise.
+        const working = calls.some((c) => c.function.name !== "finish_turn");
+        const askEffort = () => {
+          if (!req.escalateEffort || effort === "high") return;
+          const earlier = pendingEffort;
+          const asked = req
             .escalateEffort({
               step,
               toolCalls,
@@ -390,6 +395,15 @@ export class CustomAgent implements Agent {
               current: effort,
             })
             .catch(() => undefined);
+          // Never lose a raise an earlier question already returned.
+          pendingEffort = earlier
+            ? Promise.all([earlier, asked]).then(([a, b]) =>
+                a && b ? higherEffort(a, b) : (a ?? b),
+              )
+            : asked;
+        };
+        const failedBefore = failedCalls;
+        if (working) askEffort();
         for (const [callIndex, call] of calls.entries()) {
           if (req.shouldYield?.() || req.signal.aborted) {
             await skipCalls(callIndex);
@@ -580,6 +594,8 @@ export class CustomAgent implements Agent {
           await execution.attach();
           req.afterTool?.(op);
         }
+        // A failure in this step asks again now, so the recovering call can run higher.
+        if (working && failedCalls > failedBefore && !finish) askEffort();
         if (await steer()) continue;
         if (finish) {
           answer = finish;

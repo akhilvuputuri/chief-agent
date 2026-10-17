@@ -45,11 +45,22 @@ Every foreground message ran the main model at `medium` reasoning (`AGENT_REASON
   - the log projection.
 - [tests/runtime-config.test.ts](../../tests/runtime-config.test.ts) covers the new setting.
 - Design: [reasoning effort](../reasoning-effort.md).
-- Independent review: pending.
+- **Independent review (Claude Opus 5.5) of `a768835`:** REQUEST CHANGES.
+  - **Blocking, an outage:** the production image did not copy `config/reasoning-effort.json`, so the gateway would have failed to start on release.
+    - Fixed in the Dockerfile.
+    - `tests/dockerfile-config.test.ts` now checks that every config file under `src` is copied; it fails without the fix.
+    - An unreadable effort config now disables the feature with `effort.config_failed` instead of stopping the gateway.
+  - **Blocking, a late raise:** escalation after a failed tool call came one model call late, or never, because progress was captured before that step's tools ran. A failure now asks again when the step's tools finish, merged with any earlier answer. A full-turn test shows the recovering call runs raised.
+  - **Non-blocking, all addressed:**
+    - no question on a step that only finishes the turn;
+    - a code comment overstated "never delays";
+    - the counter rules are now documented;
+    - follow-ups absorbed mid-turn are documented. They already reach Jev, because the escalation reads the request's current message.
+- Re-review of the fixes: pending.
 
 ## Verification and outcome
 
-Tested locally: typecheck, 958 application tests, 51 script tests, the picker/context/decision eval tests, `check:pi`, build and format pass. `check:coding` needs `ruff`, which is not installed locally; hosted CI runs it. Not yet measured: the distribution of efforts on real messages, how often turns escalate and at which step, added latency with and without the picker, and any change in reply quality or cost.
+Tested locally after the review fixes: typecheck, 961 application tests, 51 script tests, the picker/context/decision eval tests, `check:pi`, build and format pass. `check:coding` needs `ruff`, which is not installed locally; hosted CI runs it. Not yet measured: the distribution of efforts on real messages, how often turns escalate and at which step, added latency with and without the picker, and any change in reply quality or cost.
 
 ## Follow-up and next iteration
 

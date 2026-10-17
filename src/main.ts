@@ -679,9 +679,17 @@ const assistant = new Assistant(
   c.SHADOW_DECISIONS === "jev" && c.OPENROUTER_API_KEY
     ? new ShadowDecisions(c.OPENROUTER_API_KEY)
     : undefined,
-  // Reasoning effort per foreground message (journal 90); off keeps medium.
+  // Reasoning effort per foreground message (journal 90); off keeps medium. An unreadable
+  // config disables it instead of stopping the gateway.
   c.EFFORT_PICKER === "jev" && c.OPENROUTER_API_KEY
-    ? new EffortPicker(c.OPENROUTER_API_KEY)
+    ? (() => {
+        try {
+          return new EffortPicker(c.OPENROUTER_API_KEY);
+        } catch (error) {
+          opsLog("effort.config_failed", "error", errorFields(error));
+          return undefined;
+        }
+      })()
     : undefined,
 );
 if (responsibilities)
