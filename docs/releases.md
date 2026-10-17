@@ -1,3 +1,7 @@
+## Released v0.3.81 — owner continue for parked coding PRs
+
+[PR 244](https://github.com/akhilvuputuri/chief-agent/pull/244) merged as `9fae41197066d44fcfd9f44a0cdbf50ae0cf42a8`. Exact-head independent review (Claude Opus 5.5) approved `eda7f0d` after one round of fixes; hosted CI and Devin passed; 956 application, 51 script, 61 coding-runtime and 107 Pi tests passed locally. The [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39022531557) recorded exact deployment and startup health, and logs show `gateway.started` for that release at 09:51 UTC with no errors in the following minutes. The owner can ask Chief to continue an owner-merge PR parked at manual review or Keep open. [Journal 87](journey/87-pi-owner-merge-feedback.md#owner-continue-for-parked-prs--17-october-2026).
+
 ## Released v0.3.80 — automatic rebases for owner-merge jobs
 
 [PR 243](https://github.com/akhilvuputuri/chief-agent/pull/243) merged as `69805d73cf67e1ebc5e9799bd2a94a21c1881844` after exact-head independent review (Claude Opus 5.5), hosted CI and local tests. The [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39011683129) recorded exact deployment and startup health. When main moves before an owner-merge PR is merged, the approved plan is re-implemented on current main and the same PR is rebuilt, with the plan approval carried over. [Journal 87](journey/87-pi-owner-merge-feedback.md#resume-moved-main-and-chiefs-guidance--1617-october-2026).

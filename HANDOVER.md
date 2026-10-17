@@ -1,6 +1,10 @@
-# Owner "continue" for parked coding PRs — in review, 17 October 2026
+# Boxed sub-agents design — proposed, 17 October 2026
 
-When an owner-merge coding PR stops for owner attention (manual review or Keep open), the owner can now tell Chief to continue: `coding_resume` returns the PR to the automatic checks, rebase and Merge card, and holds that still apply (protected files, exhausted allocation, two rebases) come back with their reason. Candidate v0.3.81. [Journal 87](docs/journey/87-pi-owner-merge-feedback.md#owner-continue-for-parked-prs--17-october-2026).
+Heavy delegated work moves to sub-agents with their own on-demand boxes that Chief can steer and close (issue #245). The owner decided that coding moves first, boxes keep a short warm TTL (about 15 idle minutes, then stop), and self-managed EC2 replaces CodeBuild, with CodeBuild kept as fallback. Design only; no AWS resources yet. [Design](docs/boxes.md), [journal 90](docs/journey/90-boxed-subagents.md).
+
+# Owner "continue" for parked coding PRs — live as v0.3.81, 17 October 2026
+
+When an owner-merge coding PR stops for owner attention (manual review or Keep open), the owner can now tell Chief to continue: `coding_resume` returns the PR to the automatic checks, rebase and Merge card, and holds that still apply (protected files, exhausted allocation, two rebases) come back with their reason. Released as v0.3.81 (`9fae411`). [Journal 87](docs/journey/87-pi-owner-merge-feedback.md#owner-continue-for-parked-prs--17-october-2026).
 
 # Automatic rebases for owner-merge jobs — live as v0.3.80, 17 October 2026
 

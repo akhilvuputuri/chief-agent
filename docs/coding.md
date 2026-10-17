@@ -2,6 +2,8 @@
 
 Chief dispatches coding work through owner-scoped tools. A durable controller in the existing service provisions one CodeBuild environment at a time. A separate [Python 3.12+ runtime](../coding_runtime/README.md) in an immutable image inspects the pinned repository, plans, changes files, verifies and obtains a separate reviewer-context verdict. Chief's conversational turn can end while the worker continues. The live gateway never executes coding shell commands.
 
+Planned successor: coding jobs move onto [boxed sub-agents](boxes.md) (self-managed EC2, warm reuse, two-way channel; design only, 17 October 2026).
+
 ## Request and result
 
 Tell Chief about the bug or feature in ordinary conversation. No slash command is required. Chief clarifies missing requirements and dispatches a planning job, then shows the complete requirement brief for confirmation. Every new `coding_start` job begins in `plan`, including a legacy `mode: implement` request. Planning is read-only and stops at a brief or question; it does not authorise implementation.
