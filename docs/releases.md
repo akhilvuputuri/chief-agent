@@ -1,3 +1,15 @@
+## Released v0.3.80 — automatic rebases for owner-merge jobs
+
+[PR 243](https://github.com/akhilvuputuri/chief-agent/pull/243) merged as `69805d73cf67e1ebc5e9799bd2a94a21c1881844` after exact-head independent review (Claude Opus 5.5), hosted CI and local tests. The [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39011683129) recorded exact deployment and startup health. When main moves before an owner-merge PR is merged, the approved plan is re-implemented on current main and the same PR is rebuilt, with the plan approval carried over. [Journal 87](journey/87-pi-owner-merge-feedback.md#resume-moved-main-and-chiefs-guidance--1617-october-2026).
+
+## Released v0.3.79 — Devin all-clear verdicts ignored, fresh window per feedback round
+
+[PR 241](https://github.com/akhilvuputuri/chief-agent/pull/241) merged as `3b8628dbe974eb2bdf169bcf6dd6926d1d6e1be5`. The [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/38775824850) recorded exact deployment; logs show `gateway.started` for that release at 17:19 UTC on 15 October. [Journal 87](journey/87-pi-owner-merge-feedback.md).
+
+## Released v0.3.78 — agent git stage 1 (dormant)
+
+[PR 240](https://github.com/akhilvuputuri/chief-agent/pull/240) merged as `0f05783773e64617c878355f9c5199c9b985361a`. The [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/38771303648) recorded exact deployment. Agent-owned commits and PRs stay off until the separate agent GitHub App is configured and a worker built from this code is pinned. [Journal 89](journey/89-agentic-coding-subagent.md).
+
 ## Released v0.3.77 — Jev's own routing pick and a separate shadow switch (in the `1ec8c4d` deployment)
 
 [PR 234](https://github.com/akhilvuputuri/chief-agent/pull/234) merged as `fff41bb8cb67aab5cee587740ac7f7f8a980fe88`. Exact-head independent review (Claude Opus 5.5) approved `a81229e` after one round of non-blocking fixes; hosted CI and Devin passed; 935 application and 51 script tests passed locally. Its own release was refused because main had moved; the [release of `1ec8c4d1ffe8b506903c7b4dacfe93cffc6c63a7`](https://github.com/akhilvuputuri/chief-agent/actions/runs/38719275433) deployed it with exact receipt and startup health, and logs show `gateway.started` for that release. Shadow routing records now keep Jev's pick below the threshold and whether it matched Chief; `SHADOW_DECISIONS` in `config/runtime.json` separates shadow mode from `TOOL_PICKER`. Replies, data sent to Jev per message and cost are unchanged; turning `TOOL_PICKER` off no longer stops all Jev traffic, which now also needs `SHADOW_DECISIONS=off`. Accuracy is not yet measured. No tag created yet. [Journal 88](journey/88-shadow-accuracy.md).
