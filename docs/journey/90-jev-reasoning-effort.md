@@ -72,7 +72,7 @@ Tested locally after the review fixes: typecheck, 962 application tests, 51 scri
 
 - [PR 246](https://github.com/akhilvuputuri/chief-agent/pull/246) merged as `be3647e85dcac9de6b5d1b303ffef9ed1139b6dd` at the approved head `c5e5994`, after hosted CI and Devin passed.
 - The [release run](https://github.com/akhilvuputuri/chief-agent/actions/runs/39027476521) succeeded. `npm run release:status` reports the exact commit deployed with startup health at 11:11 UTC.
-- Sanitized logs show `gateway.started` for that release at 11:11:02 UTC, no `effort.config_failed` and no warn/error lines in the following 30 minutes. This is evidence that the image now carries `config/reasoning-effort.json`.
+- Sanitized logs show `gateway.started` for that release at 11:11:02 UTC. Checked at 11:14 UTC, about three minutes after startup: no `effort.config_failed` line from 11:00 and no warn or error line from 11:11 (the CLI `errors` query covers both). No heartbeat from the new release had arrived yet; they come every five minutes.
 - No `effort.decided` line had appeared when this was recorded, so no live decision has been observed yet. First check: `npm run logs:cloudwatch -- event --event effort.decided --since 24h`.
 - No tag created.
 
