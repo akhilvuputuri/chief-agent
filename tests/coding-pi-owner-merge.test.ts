@@ -472,6 +472,16 @@ test("each Pi owner-merge feedback round gets a fresh active window even after t
 test("when main moves, an owner-merge job is rebased automatically with its approval carried over", async (t) => {
   const f = await fixture(t, { version: 1, toolsUsed: 20, reviewRound: 2 });
   const before = await f.job();
+  await f.db.query(
+    "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'owner-approved',$2::jsonb,'suppressed')",
+    [
+      f.id,
+      JSON.stringify({
+        decision: "approved",
+        approvedScope: requirementScope(before),
+      }),
+    ],
+  );
   const moved = "f".repeat(40);
   f.setInspection({ checks: "passed", draft: false, main: moved });
   await f.auto.tick();
@@ -523,7 +533,7 @@ test("automatic rebases stop after two rounds and hand back to the owner", async
   for (const n of [1, 2])
     await f.db.query(
       "INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) VALUES($1,$2,$3,'Rebase onto current main earlier','implement')",
-      [f.id, 10 + n, `earlier-${n}`],
+      [f.id, 10 + n, `rebase:earlier-${n}`],
     );
   f.setInspection({ checks: "passed", draft: false, main: "f".repeat(40) });
   await f.auto.tick();
@@ -531,4 +541,15 @@ test("automatic rebases stop after two rounds and hand back to the owner", async
   assert.equal(job.state, "pr_ready");
   assert.equal(job.stage, "manual_review");
   assert.match(job.summary, /two automatic rebases/);
+});
+
+test("a rebase never carries over a scope the owner did not approve, and blocked PRs are not rebased", async (t) => {
+  const f = await fixture(t);
+  f.setInspection({ checks: "passed", draft: false, main: "f".repeat(40) });
+  await f.auto.tick();
+  // The fixture job has no recorded approval for its scope.
+  const job = await f.job();
+  assert.equal(job.state, "pr_ready");
+  assert.equal(job.stage, "manual_review");
+  assert.match(job.summary, /no recorded owner approval/);
 });

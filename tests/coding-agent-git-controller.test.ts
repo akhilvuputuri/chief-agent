@@ -200,7 +200,7 @@ test("replying to an owner-merge job that already has a PR is a validation error
   const { c } = controller(f);
   const job = await runningJob(f, c, "agent-pr-ready");
   await f.db.query(
-    "UPDATE coding_jobs SET state='pr_ready',stage='manual_review',cleanup='complete' WHERE id=$1",
+    "UPDATE coding_jobs SET state='pr_ready',stage='awaiting_ci',cleanup='complete' WHERE id=$1",
     [job.id],
   );
   await assert.rejects(
@@ -214,6 +214,28 @@ test("replying to an owner-merge job that already has a PR is a validation error
     (error: Error) => {
       assert(error instanceof ToolValidationError);
       assert.match(error.message, /continues on its own/);
+      return true;
+    },
+  );
+  await f.db.query(
+    "UPDATE coding_jobs SET stage='manual_review',summary='Main moved again after two automatic rebases; inspect before merging.' WHERE id=$1",
+    [job.id],
+  );
+  await assert.rejects(
+    c.call("a", f.run, {
+      operation: "coding_reply",
+      id: job.id,
+      baseRevision: job.revision,
+      requestKey: "rebase-please-2",
+      message: "Rebase it",
+    }),
+    (error: Error) => {
+      assert(error instanceof ToolValidationError);
+      assert.match(
+        error.message,
+        /stopped for owner attention \(Main moved again/,
+      );
+      assert.match(error.message, /cannot merge it in this state/);
       return true;
     },
   );

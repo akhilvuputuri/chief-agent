@@ -634,11 +634,15 @@ export class CodingController {
     if (!changed.rows.length)
       // Nothing was written: a precondition, not an uncertain action, so the turn can continue.
       throw new ToolValidationError(
-        job.state === "pr_ready" && job.settings.prWorkflow === "owner_merge"
-          ? "This job already has a PR and continues on its own: Chief handles Devin and MR feedback, rebases onto main when it moves, re-runs checks and review, then sends the owner a Merge / Keep open card. Nothing to resume or revise; report its stage from coding_status."
-          : job.state === "pr_ready"
-            ? "This job already has a draft PR; it predates the owner-merge workflow, so it can only be merged on GitHub or replaced by a new job."
-            : "Coding scope changed, job is active, or sandbox cleanup is pending; inspect status before revising",
+        job.state !== "pr_ready"
+          ? "Coding scope changed, job is active, or sandbox cleanup is pending; inspect status before revising"
+          : job.stage === "manual_review" || job.stage === "merge_declined"
+            ? `This job's PR stopped for owner attention (${job.summary}). It will not continue automatically and Chief cannot merge it in this state; explain the reason, then the owner can act on GitHub or start a new job.`
+            : job.settings.prWorkflow === "owner_merge"
+              ? "This job already has a PR and continues on its own: Chief handles Devin and MR feedback, rebases onto main when it moves, re-runs checks and review, then sends the owner a Merge / Keep open card. Nothing to resume or revise; report its stage from coding_status."
+              : job.settings.autoMerge
+                ? "This job already has a PR and continues through its automatic merge workflow; report its stage from coding_status."
+                : "This job already has a draft PR; it predates the owner-merge workflow, so it can only be merged on GitHub or replaced by a new job.",
       );
     return this.status(user, a.id);
   }

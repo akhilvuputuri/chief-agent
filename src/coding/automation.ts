@@ -98,13 +98,13 @@ export class CodingAutomation {
   }
   /**
    * Main moved before merge: re-implement the approved plan on current main (owner policy,
-   * 16 October 2026: the plan approval carries over; checks, review and the Merge card repeat).
+   * 17 October 2026: the plan approval carries over; checks, review and the Merge card repeat).
    */
   private async rebase(j: CodingJob, d: Record, main: string) {
     const prior = Number(
       (
         await this.db.query(
-          "SELECT count(*)::int AS n FROM coding_revisions WHERE job_id=$1 AND message LIKE 'Rebase onto current main%'",
+          "SELECT count(*)::int AS n FROM coding_revisions WHERE job_id=$1 AND request_key LIKE 'rebase:%'",
           [j.id],
         )
       ).rows[0].n,
@@ -124,6 +124,21 @@ export class CodingAutomation {
       );
       return;
     }
+    // Carry over only an approval the owner actually gave for this exact scope.
+    const approved = (
+      await this.db.query(
+        "SELECT 1 FROM coding_events WHERE job_id=$1 AND payload->>'decision'='approved' AND payload->>'approvedScope'=$2 LIMIT 1",
+        [j.id, requirementScope(j)],
+      )
+    ).rows.length;
+    if (!approved) {
+      await this.manual(
+        j,
+        d,
+        "Main moved, but this job's current scope has no recorded owner approval to carry over; explicit owner action is needed.",
+      );
+      return;
+    }
     const cp = structuredClone(j.checkpoint);
     // A fresh implementation on current main; whole-file contents from the old base are not reused.
     cp.files = [];
@@ -136,7 +151,7 @@ export class CodingAutomation {
         : {}),
     };
     const scope = requirementScope({ ...j, base_sha: main, checkpoint: cp });
-    const message = `Rebase onto current main ${main}: approved plan carried over (owner policy, 16 October 2026)`;
+    const message = `Rebase onto current main ${main}: approved plan carried over (owner policy, 17 October 2026)`;
     const changed = await this.db.query(
       `WITH changed AS (UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',base_sha=$5,summary='Main moved; re-applying the approved change on current main before checks, review and the Merge card',checkpoint=$3::jsonb,result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,cleanup='none',model_busy=false,publication_started=false,updated_at=now() WHERE id=$1 AND lease=$2 AND stage=$9 AND lease_until>now() AND state='pr_ready' AND revision=$4 RETURNING id,revision),
       budget AS (INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT id,'feedback:'||revision,jsonb_build_object('handled',$6::jsonb,'remainingMs',$7::bigint),'suppressed' FROM changed RETURNING job_id),
@@ -320,14 +335,14 @@ export class CodingAutomation {
       }
       const ownerMerge = j.settings.prWorkflow === "owner_merge";
       // Owner-merge PRs are built on the job base by construction, so main's tip is what matters.
-      if (i.main !== j.base_sha || (!ownerMerge && i.base !== j.base_sha)) {
-        if (ownerMerge) await this.rebase(j, d, i.main);
-        else
-          await this.manual(
-            j,
-            d,
-            "Main changed since approved requirements; reconcile base and review before merging.",
-          );
+      const mainMoved =
+        i.main !== j.base_sha || (!ownerMerge && i.base !== j.base_sha);
+      if (mainMoved && !ownerMerge) {
+        await this.manual(
+          j,
+          d,
+          "Main changed since approved requirements; reconcile base and review before merging.",
+        );
         return;
       }
       if (j.result.checkpoint.files.some((f) => protectedMergePath(f.path))) {
@@ -347,6 +362,11 @@ export class CodingAutomation {
           d,
           "Independent reviewer proof is missing or does not match this exact artifact.",
         );
+        return;
+      }
+      // Rebase only candidates that could otherwise merge; blocked ones go to the owner first.
+      if (mainMoved) {
+        await this.rebase(j, d, i.main);
         return;
       }
       // Devin can start only after ready_for_review. Readiness is not merge approval.
