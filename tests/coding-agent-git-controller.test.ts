@@ -235,7 +235,7 @@ test("replying to an owner-merge job that already has a PR is a validation error
         error.message,
         /stopped for owner attention \(Main moved again/,
       );
-      assert.match(error.message, /cannot merge it in this state/);
+      assert.match(error.message, /use coding_resume on this job/);
       return true;
     },
   );
@@ -249,4 +249,60 @@ test("replying to an owner-merge job that already has a PR is a validation error
     true,
     JSON.stringify(row).slice(0, 300),
   );
+});
+
+test("asking to continue a parked owner-merge PR returns it to the automation, once, at the current revision", async (t) => {
+  const f = await fixture(t);
+  const { c } = controller(f);
+  const job = await runningJob(f, c, "agent-continue");
+  for (const stage of ["manual_review", "merge_declined"]) {
+    await f.db.query(
+      "UPDATE coding_jobs SET state='pr_ready',stage=$2,cleanup='complete',summary='Parked' WHERE id=$1",
+      [job.id, stage],
+    );
+    await assert.rejects(
+      c.call("a", f.run, {
+        operation: "coding_resume",
+        id: job.id,
+        baseRevision: job.revision + 1,
+        requestKey: `stale-${stage}`,
+      }),
+      ToolValidationError,
+    );
+    await c.call("a", f.run, {
+      operation: "coding_resume",
+      id: job.id,
+      baseRevision: job.revision,
+      requestKey: `continue-${stage}`,
+    });
+    let row = (
+      await f.db.query(
+        "SELECT state,stage,revision FROM coding_jobs WHERE id=$1",
+        [job.id],
+      )
+    ).rows[0];
+    assert.deepEqual(row, {
+      state: "pr_ready",
+      stage: "awaiting_ci",
+      revision: job.revision,
+    });
+    // A retried identical request is idempotent rather than an error.
+    await c.call("a", f.run, {
+      operation: "coding_resume",
+      id: job.id,
+      baseRevision: job.revision,
+      requestKey: `continue-${stage}`,
+    });
+    row = (
+      await f.db.query("SELECT stage FROM coding_jobs WHERE id=$1", [job.id])
+    ).rows[0];
+    assert.equal(row.stage, "awaiting_ci");
+  }
+  const events = (
+    await f.db.query(
+      "SELECT count(*)::int AS n FROM coding_events WHERE job_id=$1 AND event_key LIKE 'continue:%'",
+      [job.id],
+    )
+  ).rows[0].n;
+  assert.equal(events, 2);
 });
