@@ -219,7 +219,7 @@ Starting a box creates infrastructure and spends money. `agent_run` is classed a
   - There is no `ModifyInstanceAttribute`, so it cannot change the instance type, security groups, shutdown behaviour or volume deletion.
   - Phase 3 includes negative tests: every override must fail with `UnauthorizedOperation`, including instance type, image, IMDS options, key pair, security group, subnet, unencrypted or oversized volume, and extra tags.
 
-  - **Residual risk.** I found no condition key for `DisableApiTermination`, `DisableApiStop` or `InstanceInitiatedShutdownBehavior`; phase 3 checks this. If none exists, a compromised controller could launch a box that the sweep cannot terminate, or that only stops at its hard maximum. The reconciler therefore reads these attributes with `DescribeInstanceAttribute` (read-only) right after launch, and holds and alerts on any mismatch.
+  - **Residual risk.** No condition key is known for `DisableApiTermination`, `DisableApiStop` or `InstanceInitiatedShutdownBehavior`; phase 3 checks this. If none exists, a compromised controller could launch a box that the sweep cannot terminate, or that only stops at its hard maximum. The reconciler therefore reads these attributes with `DescribeInstanceAttribute` (read-only) right after launch, and holds and alerts on any mismatch.
 
 - **Sweep.** Each reconciler pass lists the instances and volumes tagged for this environment. It terminates instances, and deletes leftover volumes, that no live box row owns or that are past their limits.
 - **Quotas.** Check the account's on-demand vCPU quota for standard instances in `ap-southeast-1` before enabling concurrency above 1.
