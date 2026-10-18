@@ -148,6 +148,8 @@ Python execution: [56 — Coding work](56-coding-runtime.md) → [57 — Python 
 
 ## Scheduled work
 
+- 18 October 2026: [94 — Live to-do reminders](94-live-todo-reminders.md): briefings lead with their own text and list live open to-dos inline; to-do review reminders become briefings. In review.
+
 - 2 October 2026: [56 — Coding work outside the live assistant](56-coding-runtime.md): durable dispatch, a separate runtime, disposable sandboxes, verification and draft PRs; released v0.3.33 foundation off; live activation pending scoped provider/App/ingress setup. Builds on [49 — Coordinator agents](49-coordinator-agents.md) and [05 — Cloud development](05-cloud-development.md).
 
 - 1–2 October 2026: [54 — Responsibilities](54-responsibilities.md): owner-confirmed concerns, scoped investigations and explainable attention; released v0.3.32, migration/activation verified; live acceptance pending.

@@ -18,26 +18,49 @@ On 7 October two scheduled to-do reminders sent generic text. The owner asked "w
 
 ## Diagnosis and alternatives
 
-This was a capability-selection gap, not missing code. The live list already existed as the briefing kind; the agent had no reason to choose it.
+This was mostly a capability-selection gap: the agent had no reason to choose a briefing. Independent review then showed the briefing itself was not a fix as built. It ignored the schedule's own text, arrived as a generic "Daily brief — date", and put the tasks behind the Sections tab. Steering a to-do reminder there would have repeated the 7 October confusion.
 
-Alternatives considered:
+Two options were considered:
 
-- **A new `includeTasks` flag on reminders.** Deferred: it is a schema and behaviour change, while the briefing kind already does this.
-- **Done/Snooze buttons on reminders.** A separate, larger change, and still the next step.
+- **A new `includeTasks` flag on reminders.** Deferred: it needs an additive column, which means an operator migration.
+- **Make the existing briefing worth choosing, then steer narrowly.** Chosen: no schema change.
+
+Done/Snooze buttons are a separate, larger change.
 
 ## Implementation and review
 
-- **`schedule_create` gets a tool description.** It says a reminder sends its content as written now, a briefing lists live open to-dos at send time, and reminders about the to-do list, tasks or a checklist should be briefings.
-- **The daily agent definition (`plugins/core/agents/daily.md`)** says the same. The `core` package hash in `plugins/registry.json` is re-pinned.
-- **Test:** `tests/daily.test.ts` pins both texts.
+- **The briefing builder moves to `src/daily-briefing.ts`** (out of `main.ts`), with the same Calendar and Gmail calls.
+  - The message now leads with the schedule's own text and the date.
+  - It lists the live open to-dos inline (up to 10, owner-scoped, tasks only).
+  - Calendar and unread email remain optional sections.
+- **Steering is narrow.** Both the `schedule_create` tool description and the daily agent say:
+  - use a reminder for a specific action or a checklist kept in a note;
+  - use a briefing when the owner wants to be reminded to review or work through the to-do list.
 
-Independent review: pending.
+  The `core` package hash in `plugins/registry.json` is re-pinned.
+
+- **Tests:**
+  - `tests/daily-briefing.test.ts` has 2 cases: the lead text and inline tasks with exclusions (done, notes, another owner); and no tasks with optional sections and calls.
+  - `tests/daily.test.ts` pins both guidance texts.
+
+Independent review of `0eb79fe` (Opus 5.5): REQUEST CHANGES.
+
+- **Blocking.** The guidance steered checklist reminders to a briefing that never showed the checklist, dropped the owner's wording and arrived as a generic "Daily brief".
+- **Non-blocking:**
+  - single-task reminders could be misrouted;
+  - this entry links entries 92 and 93, which merge first;
+  - the trade-offs were missing;
+  - the test only pinned wording.
+
+Fixes: the briefing builder change, the narrow steering above, a single-action carve-out, behaviour tests, and this record. Re-review is pending.
 
 ## Verification and outcome
 
-- Local checks: typecheck and Prettier pass. The plugin and agent tests pass with the new pin.
-- Not observed yet: a real to-do reminder request going to a briefing.
-- Existing frozen to-do reminders in production are not converted. That needs the owner's request, because it changes saved schedules.
+- Local checks: typecheck and Prettier pass. The briefing, daily, plugin and agent tests pass with the new pin.
+- Not observed yet:
+  - a real to-do reminder request becoming a briefing;
+  - the rendered Telegram layout.
+- Existing frozen to-do reminders in production are not converted. That needs the owner's request.
 
 ## Follow-up and next iteration
 

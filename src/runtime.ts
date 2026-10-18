@@ -160,7 +160,7 @@ export function runtimeContext(
         : ((
             {
               schedule_create:
-                "Schedule a fixed Telegram message. kind reminder sends its content exactly as written now. kind briefing builds the message at send time from the owner's live open to-dos (up to 10), plus calendar or email when included. For a reminder about the to-do list, open tasks or a checklist, use briefing so it shows the current items, not a frozen description. Singapore time: ISO, in 30m, every 2h, daily at 11pm, or five-field cron (hourly minimum).",
+                "Schedule a fixed Telegram message. kind reminder sends its content exactly as written now; use it for a specific action or a checklist kept in a note. kind briefing is built at send time: it leads with the content, then lists the owner's live open to-dos (up to 10), plus calendar or email when included. Use briefing when the owner wants to be reminded to review or work through their to-do list. Singapore time: ISO, in 30m, every 2h, daily at 11pm, or five-field cron (hourly minimum).",
               routine_create:
                 "On explicit user request, schedule an independent agent job with a self-contained instruction. Singapore time: ISO, in 30m, every 2h, daily at 11pm, or five-field cron (hourly minimum). latest catches up one slot; skip ignores slots over 5 minutes late. Use schedule_create for fixed reminders.",
               responsibility_create:
