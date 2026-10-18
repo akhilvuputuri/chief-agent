@@ -1,7 +1,7 @@
 # 91 — Can Chief delegate heavy work to sub-agents with their own boxes?
 
 Work date(s): 2026-10-17. Written/revised: 2026-10-17.
-Status: proposed. [Design](../boxes.md) recorded with owner decisions. No implementation yet, and no AWS resources created.
+Status: in progress. [Design](../boxes.md) recorded with owner decisions; the box-layer foundation (phase 2a) is implemented and dormant. No AWS resources yet.
 
 ## User-visible problem and preceding iteration
 
@@ -126,3 +126,33 @@ The reviewer approved `6054397` and asked for the rotation rule to be stated pre
 - the predecessor may only retry `hello`;
 - the box persists the replacement before using it;
 - any use of a retired credential is handled as compromise.
+
+## Revised plan: no CodeBuild box provider — 19 October 2026
+
+After the design merged, the owner asked (reported) why phase 2 still used CodeBuild. Phase 2 had been placed on CodeBuild only so that it could start before any AWS changes, and that reason does not hold up:
+
+- A CodeBuild box cannot stop or run a container per task, so the provider would be built only to be retired.
+- It would leave the EC2-specific risks untested: IAM, stop and start, the trust reset and boot time.
+- Today's coding path on CodeBuild already provides the fallback without being wrapped as a box provider.
+
+The plan is now: build the box layer with a fake provider for tests and a local Docker provider for development, then the EC2 provider and its CloudFormation, which the owner applies. Coding moves onto EC2 boxes after that, and its current CodeBuild path stays untouched until then.
+
+### Phase 2a: foundation (dormant)
+
+Added:
+
+- `db/032_boxes.sql`;
+- `src/boxes/` (provider interface and fake provider, credentials, `BoxController`, `/boxes/*` routes);
+- `tests/boxes.test.ts`.
+
+Nothing is wired into the gateway yet.
+
+Implemented as designed:
+
+- The bootstrap secret is the epoch-0 credential, so the bootstrap exchange and later restarts share one rotation path, which is idempotent until first use.
+- Credentials are derived (HMAC of host key, box, predecessor hash and epoch), so only hashes are stored.
+- A retired credential sent to `hello` is refused and alerted; one used on the channel is compromise.
+- A box cannot complete `hello` before its provider resource is recorded.
+- Restarts of stopped boxes count against concurrency.
+
+Long-polls last 8 s, below the server's 15 s request timeout.
