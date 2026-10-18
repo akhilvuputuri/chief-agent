@@ -41,18 +41,19 @@ Since [journal 92](journey/92-jev-news-ranking.md), TypeSafe's Jev decision mode
   - the owner's topics;
   - their 10 strongest recent Reader saves, by the profile's decayed weight.
 
-  Requests run eight at a time. A timeout, 429 or 5xx is retried once. Separate requests are deliberate: measured reports show Jev's accuracy falls when one request holds many items.
+  Requests run eight at a time. A timeout, 429 or 5xx is retried once, after a short random pause for a 429 or 5xx. The whole ranking, retries included, stops at a 10-second deadline. Separate requests are deliberate: measured reports show Jev's accuracy falls when one request holds many items.
 
 - **Order.**
   - `order: "jev"` (default): Jev's probability orders the regular picks, and the deterministic score breaks ties.
   - `order: "rrf"`: reciprocal-rank fusion of Jev's order and the deterministic order, the blend recommended when labels are this scarce.
   - The per-site cap applies either way.
-- **Exploration slot.** When an edition has room for at least two items and a spare candidate exists, one slot is drawn uniformly from the top 20 candidates of the active order that are not regular picks. It is placed at a uniformly random position. Its draw probability is stored, so saves can be learned and evaluated beyond the ranker's own choices.
-- **Fallback.** Any Jev failure (one failed request fails the ranking) keeps the deterministic order, so the bulletin is never held up. The exploration slot still applies.
+- **Exploration slot.** When an edition has room for at least two items and a spare candidate exists, one slot is drawn uniformly from the top 20 candidates of the active order that are not regular picks. It keeps the per-site cap whenever a candidate from another site is in that window. It is placed at a uniformly random position, and its draw probability is stored, so saves can be learned and evaluated beyond the ranker's own choices.
+- **Fallback.** Any Jev failure, including the deadline (one failed request fails the ranking), keeps the deterministic order. Jev can delay an edition by at most the 10-second deadline, typically about two seconds, but cannot stop it. The exploration slot still applies.
 - **What is recorded.**
   - Each `news_items.score` adds `jev` (the probability or `null`), `rankedBy` (`jev`, `jev_rrf` or `rules`) and, for the exploration pick, `explore` and `exploreProbability`.
   - The edition `trace` adds `ranker`: method, config `version` hash, saves in context, requests, latency, cost, model and error.
   - It also adds `candidates`: the top 50 ranked candidates, shown or not, with rank, every sub-score, Jev's probability, `shown` and `position`. Joined with later Reader saves, this is the labelled sample for evaluating rankers offline.
+- **Cost.** About $0.0005 per edition. Editions are not conversation runs, so Jev's ranking cost is recorded in the edition trace and the log line, not in the per-run provider charges.
 - **Log line.** The operational log line `news.ranked` carries the method, candidates asked, latency, cost and error code, without titles.
 - **Config.** [config/news-ranker.json](../config/news-ranker.json) holds the question, model, limits, `order`, `rrfK` and `exploreWindow`.
 

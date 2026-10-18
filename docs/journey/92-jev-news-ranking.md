@@ -79,13 +79,22 @@ Two research passes on 18 October. These are reported findings with sources, not
     - a Jev failure falling back to the rules while the edition is still sent.
   - Existing bulletin tests use a fixed random draw.
 - Design: [news bulletin](../news-bulletin.md#jev-ranking-and-the-exploration-slot).
-- Independent review: pending.
+- **Independent review (Claude Opus 5.5) of `36a636c`:** REQUEST CHANGES.
+  - **Blocking:** the candidate log cut titles at 200 UTF-16 units. An emoji at the cut left a lone surrogate, which Postgres rejects as JSON, so the whole edition insert failed, even with the ranker off.
+    - **Fix:** a shared `clip` removes split surrogates. It is used for trace titles, the stored closest-saved title and the text sent to Jev.
+    - A full-build test with an emoji at the cut fails without the fix.
+  - **Non-blocking, all addressed:**
+    - Jev could delay an edition by about 32 s while the doc said "never held up". There is now a 10-second deadline for the whole ranking, and the doc says Jev can delay but not stop an edition.
+    - A 429 was retried at once. It now waits a short random pause.
+    - The exploration pick could exceed the per-site cap. It now keeps the cap when another site is available, and the probability stays exact.
+    - Jev's cost is not in the per-run provider charges. Documented.
+- Re-review of the fixes: pending.
 
 ## Verification and outcome
 
 Tested locally:
 
-- typecheck, 974 application tests (one more, for the `jev_rrf` log label, added after the full run), 51 script tests, the eval tests, `check:pi`, build and format pass;
+- after the review fixes: typecheck, 977 application tests and 51 script tests pass; earlier, the eval tests, `check:pi`, build and format passed;
 - `check:coding` needs `ruff`, not installed locally; CI runs it.
 
 Not measured:

@@ -5,6 +5,7 @@
   "rrfK": 60,
   "exploreWindow": 20,
   "timeoutMs": 4000,
+  "deadlineMs": 10000,
   "retries": 1,
   "concurrency": 8,
   "maxCandidates": 30,

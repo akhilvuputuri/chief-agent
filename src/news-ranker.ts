@@ -8,6 +8,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { z } from "zod";
+import { clip } from "./news-feed.js";
 
 const text = z.string().min(1).max(2000);
 const count = z.number().int().positive();
@@ -21,8 +22,10 @@ const schema = z
     rrfK: count,
     // The exploration pick comes from the top of the active order, outside the regular picks.
     exploreWindow: count,
-    // Per request; a timeout, 429 or 5xx is retried `retries` times.
+    // Per request; a timeout, 429 or 5xx is retried `retries` times after a short pause.
     timeoutMs: count,
+    // The whole ranking, retries included: Jev can delay an edition by at most this.
+    deadlineMs: count,
     retries: z.number().int().min(0).max(3),
     // Requests in flight at once, and the shortlist Jev scores (deterministic order).
     concurrency: count,
@@ -75,6 +78,8 @@ export class JevNewsRanker {
     private key: string,
     readonly config: NewsRankerConfig = readNewsRankerConfig(),
     private transport: typeof fetch = fetch,
+    private pause: (ms: number) => Promise<void> = (ms) =>
+      new Promise((r) => setTimeout(r, ms)),
   ) {
     this.version = createHash("sha256")
       .update(JSON.stringify(config))
@@ -91,7 +96,7 @@ export class JevNewsRanker {
       owner_topics: input.topics.slice(0, 30),
       recent_saves: input.saves
         .slice(0, c.state.recentSaves)
-        .map((t) => t.slice(0, c.state.titleChars)),
+        .map((t) => clip(t, c.state.titleChars)),
     };
     const question = {
       save: {
@@ -114,6 +119,8 @@ export class JevNewsRanker {
       model,
       ...(error ? { error } : {}),
     });
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(), c.deadlineMs);
     const ask = async (x: (typeof shortlist)[number]) => {
       for (let attempt = 0; ; attempt++) {
         requests++;
@@ -124,7 +131,10 @@ export class JevNewsRanker {
             "https://openrouter.ai/api/alpha/decisions",
             {
               method: "POST",
-              signal: AbortSignal.timeout(c.timeoutMs),
+              signal: AbortSignal.any([
+                AbortSignal.timeout(c.timeoutMs),
+                deadline.signal,
+              ]),
               headers: {
                 Authorization: `Bearer ${this.key}`,
                 "Content-Type": "application/json",
@@ -134,10 +144,10 @@ export class JevNewsRanker {
                 state: {
                   ...profile,
                   candidate: {
-                    title: x.title.slice(0, c.state.titleChars),
+                    title: clip(x.title, c.state.titleChars),
                     site: x.site,
                     ...(x.excerpt
-                      ? { excerpt: x.excerpt.slice(0, c.state.excerptChars) }
+                      ? { excerpt: clip(x.excerpt, c.state.excerptChars) }
                       : {}),
                     ...(x.publishedAt
                       ? { published: x.publishedAt.toISOString().slice(0, 10) }
@@ -149,12 +159,17 @@ export class JevNewsRanker {
             },
           );
         } catch (error) {
+          if (deadline.signal.aborted) throw new RankError("deadline");
           if (retry && (error as Error)?.name === "TimeoutError") continue;
           throw error;
         }
         if (!response.ok) {
-          if (retry && (response.status === 429 || response.status >= 500))
+          if (retry && (response.status === 429 || response.status >= 500)) {
+            // A burst of parallel requests can meet a rate limit; pause before retrying.
+            await this.pause(BACKOFF_MS + Math.random() * BACKOFF_MS);
+            if (deadline.signal.aborted) throw new RankError("deadline");
             continue;
+          }
           throw new RankError(`http_${response.status}`);
         }
         const data: any = await response.json();
@@ -195,6 +210,7 @@ export class JevNewsRanker {
       if (failed) throw failed;
       return done();
     } catch (error) {
+      if (deadline.signal.aborted) return done("deadline");
       return done(
         error instanceof RankError
           ? error.message
@@ -202,8 +218,12 @@ export class JevNewsRanker {
             ? "timeout"
             : "failed",
       );
+    } finally {
+      clearTimeout(timer);
     }
   }
 }
 
 class RankError extends Error {}
+/** Pause before a retry after a 429 or 5xx, plus up to the same again at random. */
+const BACKOFF_MS = 300;

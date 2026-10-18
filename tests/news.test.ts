@@ -1607,3 +1607,39 @@ test("the blended order is labelled jev_rrf in the record and the log", async ()
     await f.pg.close();
   }
 });
+
+test("a long title with an emoji at the cut point is stored safely", async () => {
+  const now = sgtAt("2026-09-28T07:00");
+  const f = await fixture(now);
+  try {
+    // 199 letters then an emoji: cutting at 200 UTF-16 units would split its surrogate pair.
+    const title = "a".repeat(199) + "\u{1F600}" + "b".repeat(48);
+    f.fetcher.pages.set(
+      "https://alpha.example/",
+      rss("Alpha", [
+        { title, url: "https://alpha.example/long", at: hoursBefore(now, 1) },
+        {
+          title: "Short one",
+          url: "https://alpha.example/s",
+          at: hoursBefore(now, 2),
+        },
+      ]),
+    );
+    await f.call({ operation: "news_source_add", site: "alpha.example" });
+    await f.call({
+      operation: "news_settings",
+      deliveryTime: "08:00",
+      itemsPerEdition: 2,
+      enabled: true,
+    });
+    f.setNow(sgtAt("2026-09-28T08:00"));
+    await f.bulletin.tick();
+    assert.equal(f.sent.length, 1);
+    const trace = (await f.db.query("SELECT trace FROM news_editions")).rows[0]
+      .trace;
+    const logged = trace.candidates.find((c: any) => c.title.startsWith("aaa"));
+    assert.equal(logged.title, "a".repeat(199));
+  } finally {
+    await f.pg.close();
+  }
+});

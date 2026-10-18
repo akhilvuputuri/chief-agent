@@ -79,6 +79,7 @@ test("a rate limit or server error is retried once; other failures fail the rank
       ++calls === 1
         ? new Response("busy", { status: 429 })
         : reply({ save: 0.5 })) as typeof fetch,
+    async () => {},
   ).score({ topics: [], saves: [], candidates: candidates(2) });
   assert.equal(flaky.ok, true);
   assert.equal(flaky.requests, 3);
@@ -124,6 +125,24 @@ test("a rate limit or server error is retried once; other failures fail the rank
   ).score({ topics: [], saves: [], candidates: candidates(2) });
   clearInterval(alive);
   assert.equal(slow.error, "timeout");
+  // The whole ranking stops at its deadline, however many requests remain.
+  const hanging = ((_: string, init: RequestInit) =>
+    new Promise((_r, reject) =>
+      init.signal!.addEventListener("abort", () =>
+        reject(Object.assign(new Error("a"), { name: "AbortError" })),
+      ),
+    )) as typeof fetch;
+  const alive2 = setInterval(() => {}, 1000);
+  const started = Date.now();
+  const late = await new JevNewsRanker(
+    "key",
+    { ...config, timeoutMs: 60_000, deadlineMs: 30 },
+    hanging,
+  ).score({ topics: [], saves: [], candidates: candidates(20) });
+  clearInterval(alive2);
+  assert.equal(late.ok, false);
+  assert.equal(late.error, "deadline");
+  assert.ok(Date.now() - started < 5000);
   const unknown = await new JevNewsRanker("key", config, (async () =>
     reply({ save: 0.5 }, null)) as typeof fetch).score({
     topics: [],
@@ -195,6 +214,21 @@ test("reciprocal-rank fusion blends Jev's order with the deterministic one", () 
   assert.equal(regular(pure)[0]!.canonical, "s9.example/9");
   // Fused, the item both rankers like (rank 0 by rules, 1 by Jev) wins.
   assert.equal(regular(fused)[0]!.canonical, "s0.example/0");
+});
+
+test("the exploration pick keeps the per-site cap when another site can fill it", () => {
+  // The regular picks take two items from one site; the window holds more of it and one other.
+  const crowded = [
+    item(0, 10, "a.example"),
+    item(1, 9, "a.example"),
+    item(2, 8, "a.example"),
+    item(3, 7, "a.example"),
+    item(4, 6, "b.example"),
+  ];
+  const s = composeSelection(crowded, { count: 3, random: () => 0 });
+  assert.equal(s.explored!.domain, "b.example");
+  assert.equal(s.probability, 1);
+  assert.equal(s.items.filter((x) => x.domain === "a.example").length, 2);
 });
 
 test("the exploration slot comes from the top window at a random position, with its probability", () => {

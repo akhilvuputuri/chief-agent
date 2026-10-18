@@ -26,6 +26,7 @@ import {
   canonicalUrl,
   cleanText,
   discoverFeed,
+  clip,
   domainOf,
   looksLikeFeed,
   parseFeed,
@@ -298,7 +299,7 @@ export function rankCandidates(
         site: +fit.site.toFixed(3),
         similar: +fit.similar.toFixed(3),
         total: +total.toFixed(3),
-        ...(fit.like ? { like: fit.like.slice(0, 160) } : {}),
+        ...(fit.like ? { like: clip(fit.like, 160) } : {}),
       },
     });
   }
@@ -398,13 +399,24 @@ export function composeSelection(
   const sortRegular = (items: Scored[]) => items.sort(compare);
   const explore = opts.count >= 2 ? EXPLORE_SLOTS : 0;
   const regular = sortRegular(chooseItems(order, opts.count - explore));
-  // From the top of the active order when possible, otherwise any spare candidate.
-  const window = order
-    .slice(0, opts.exploreWindow ?? order.length)
-    .filter((s) => !regular.includes(s));
+  // From the top of the active order when possible, otherwise any spare candidate. The
+  // per-site cap holds when another site can fill the slot; the filter is deterministic
+  // given the regular picks, so 1/|spare| stays the pick's true probability.
+  const perSite = new Map<string, number>();
+  for (const s of regular)
+    perSite.set(s.domain, (perSite.get(s.domain) ?? 0) + 1);
+  const underCap = (items: Scored[]) => {
+    const ok = items.filter((s) => (perSite.get(s.domain) ?? 0) < PER_DOMAIN);
+    return ok.length ? ok : items;
+  };
+  const window = underCap(
+    order
+      .slice(0, opts.exploreWindow ?? order.length)
+      .filter((s) => !regular.includes(s)),
+  );
   const spare = window.length
     ? window
-    : unique.filter((s) => !regular.includes(s));
+    : underCap(unique.filter((s) => !regular.includes(s)));
   if (!explore || !spare.length)
     return {
       items: explore ? sortRegular(chooseItems(order, opts.count)) : regular,
@@ -1032,7 +1044,7 @@ export class NewsBulletin {
         candidates: ranked.unique.slice(0, CANDIDATE_LOG).map((s, i) => ({
           rank: i + 1,
           canonical: s.canonical,
-          title: s.entry.title.slice(0, 200),
+          title: clip(s.entry.title, 200),
           site: s.domain,
           source: s.sourceName,
           published: s.entry.publishedAt?.toISOString() ?? null,
