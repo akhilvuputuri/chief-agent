@@ -104,6 +104,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 18 October | [93 — Invoice-backed tracker](93-invoice-backed-tracker.md): can one agent fetch invoices and keep the subscription tracker in step? | In progress: bills agent, shared core skills and host-checked invoice fields tested locally; review and release pending |
 | 18 October | [94 — Open loops in context](94-open-loops-context.md): why did Chief forget plans and cards that were waiting on the owner? | In review: 24-hour requirements and monitoring cards; coding jobs and expired cards in the turn context |
 | 18 October | [94 — Live to-do reminders](94-live-todo-reminders.md): why did to-do reminders say "review your list" instead of showing it? | In review: to-do reminders steered to the live briefing kind |
+| 18 October | [95 — Live to-do reminders](95-live-todo-reminders.md): why did to-do reminders say "review your list" instead of showing it? | In review: to-do reminders steered to the live briefing kind |
 
 ## Coding-agent learning path
 
@@ -148,7 +149,7 @@ Python execution: [56 — Coding work](56-coding-runtime.md) → [57 — Python 
 
 ## Scheduled work
 
-- 18 October 2026: [94 — Live to-do reminders](94-live-todo-reminders.md): briefings lead with their own text and list live open to-dos inline; to-do review reminders become briefings. In review.
+- 18 October 2026: [95 — Live to-do reminders](95-live-todo-reminders.md): briefings lead with their own text and list live open to-dos inline; to-do review reminders become briefings. In review.
 
 - 2 October 2026: [56 — Coding work outside the live assistant](56-coding-runtime.md): durable dispatch, a separate runtime, disposable sandboxes, verification and draft PRs; released v0.3.33 foundation off; live activation pending scoped provider/App/ingress setup. Builds on [49 — Coordinator agents](49-coordinator-agents.md) and [05 — Cloud development](05-cloud-development.md).
 

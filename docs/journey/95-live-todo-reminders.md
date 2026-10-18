@@ -1,11 +1,11 @@
-# 94 — Why did to-do reminders say "review your list" instead of showing the list?
+# 95 — Why did to-do reminders say "review your list" instead of showing the list?
 
 Work date(s): 2026-10-18. Written/revised: 2026-10-18.
 Status: in review.
 
 ## Problem and preceding iteration
 
-On 7 October two scheduled to-do reminders sent generic text. The owner asked "what was this?" and complained the next morning. Between 8 and 11 October the owner started several coding jobs to fix it. One was approved, failed during implementation and was never picked up again (see [92](92-uncertain-coding-write-lock.md) and [93](93-open-loops-context.md) for the related failures in that work).
+On 7 October two scheduled to-do reminders sent generic text. The owner asked "what was this?" and complained the next morning. Between 8 and 11 October the owner started several coding jobs to fix it. One was approved, failed during implementation and was never picked up again (see [92](92-uncertain-coding-write-lock.md) and [94](94-open-loops-context.md) for the related failures in that work).
 
 ## Evidence
 
