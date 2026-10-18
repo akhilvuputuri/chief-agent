@@ -1,3 +1,7 @@
+# Coding transient retry — in review, 19 October 2026
+
+The host now re-queues a paused coding job once, with a notice to the owner, when the pause came from a stopped sandbox, a lost heartbeat or a provider 429 or 5xx. A job that pauses again waits for the owner. The owner approved this exception on 17 October 2026. See [journal 96](journey/96-coding-transient-retry.md).
+
 # Live to-do reminders — in review, 18 October 2026
 
 Reminder text is fixed at creation, while briefings list the owner's live open to-dos at send time. Briefings now lead with their own text and list open tasks inline, and `schedule_create` and the daily agent steer reminders to review the to-do list to briefings; single actions and checklists kept in a note stay reminders. See [journal 95](journey/95-live-todo-reminders.md).

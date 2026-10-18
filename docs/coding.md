@@ -20,7 +20,25 @@ The complete protected owner objective/context must fit a bounded UTF-8 request 
 
 The separate tables in migration 024 retain jobs, revisions, ordered progress events and private model-call journals. The host claims a lease before external work; an index allows one active or cleanup-pending sandbox globally. States are `queued`, `provisioning`, `running`, `plan_ready`, `awaiting_input`, `publishing`, `pr_ready`, `paused`, `failed`, `cancelled`. Cleanup is independently `none`, `pending` or `complete`. The coding allocation begins at the first worker heartbeat, with a separate bounded provisioning allowance; the Python 0.1.4 selector uses two active hours, 400 model calls and 1,000 model tool calls for new jobs. Changing this allocation does not change Chief's allocations or provider price ceilings. Model usage and provider metadata are private job events; sandbox billing and measured coding quality remain separate.
 
-Chief restart recovery does not pause or replay coding jobs. The next controller tick reconnects by sandbox ID. Missing heartbeats, expired allocation or a worker that exits without a recorded result pause the job. Saved files, plan and patch remain available. A new attempt needs an explicit owner resume and completed sandbox cleanup. Unknown create responses are reconciled through the attempt ID; they never cause another `StartBuild`. CodeBuild is configured without automatic retries. If no identity can be found in the bounded provider history, keep cleanup pending and have an authorized operator inspect the provider before settling the job. Do not directly set cleanup complete without evidence that no worker can still run.
+Chief restart recovery does not pause or replay coding jobs. The next controller tick reconnects by sandbox ID. Missing heartbeats, expired allocation or a worker that exits without a recorded result pause the job. Saved files, plan and patch remain available. A new attempt needs an explicit owner resume and completed sandbox cleanup, except for the one transient auto-retry below. Unknown create responses are reconciled through the attempt ID; they never cause another `StartBuild`. CodeBuild is configured without automatic retries. If no identity can be found in the bounded provider history, keep cleanup pending and have an authorized operator inspect the provider before settling the job. Do not directly set cleanup complete without evidence that no worker can still run.
+
+### Transient auto-retry
+
+The owner approved one host retry on 17 October 2026, after paused jobs from transient faults kept waiting for a manual `/continue`. On each tick, the controller looks for the oldest job that paused at least two minutes ago and less than a day ago. The job's current attempt must have paused for one of these causes:
+
+- the sandbox stopped without a reason or a recorded result (`sandbox_stopped`);
+- the worker heartbeat was lost (`heartbeat_lost`);
+- the worker's last rejected model request was a provider 429, 500, 502, 503 or 504, with no timeout, finish-reason or provider-failure classification.
+
+For that job, the controller re-queues the same approved scope as a new revision with request key `auto-retry:<attempt>`. In the same statement, it adds a pending General notice. The re-queue needs all of the following:
+
+- cleanup is complete or none;
+- no lease is held;
+- publication has not started;
+- the owner is still allowed;
+- the current revision was not itself created by an auto-retry.
+
+If the retried attempt pauses again, the job waits for the owner. Unclassified pauses, expired allocations, validation failures and other HTTP statuses are never retried. The cause is stored in the private `<attempt>:paused` event only. Set the coding setting `autoRetryTransientOnce` to `false` to turn retries off.
 
 Worker tokens are HMAC-derived from job and attempt IDs and a host key. They authorise only bounded worker endpoints, expire with the attempt and stop authorising work after cancellation or completion. The worker has no database, GitHub App, production model or Telegram credential. Model calls go through a job-scoped proxy using the existing OpenRouter adapter and price routing. Call IDs journal successful responses for reconciliation; pending or uncertain model calls are never replayed under the same ID. Diagnostic copies are filtered, while exact responses are encrypted with a derived key so a retry preserves source text rather than replaying a scrubbed approximation. Key rotation requires idle workers and reviewed rewrapping of retained response boxes. Model histories/results remain in private storage, not Actions logs.
 
