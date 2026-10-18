@@ -199,6 +199,11 @@ export async function runAgentType(
     model: { tier: choice.tier, id: choice.model },
     effort: choice.effort,
     ...result,
+    // The coordinator must not keep delegating writes the host already refused.
+    ...(typeof result.childRunId === "string" &&
+    (await req.execution.writesBlockedIn(result.childRunId).catch(() => false))
+      ? { writesBlocked: true }
+      : {}),
   };
 }
 

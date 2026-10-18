@@ -318,6 +318,17 @@ export class Execution {
       errorCode: typeof code === "string" ? code : undefined,
     });
   }
+  /** Whether a run (a delegated child of this owner) had a write refused for an earlier uncertain write. */
+  async writesBlockedIn(run: string) {
+    return (
+      (
+        await this.db.query(
+          "SELECT 1 FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id WHERE c.run_id=$1 AND r.user_id=$2 AND c.result->'error'->>'code'='WRITE_BLOCKED' LIMIT 1",
+          [run, this.user],
+        )
+      ).rows.length > 0
+    );
+  }
   async finish(reason: StopReason) {
     await this.db.query(
       "UPDATE runtime_runs SET state='stopped',stop_reason=$2,updated_at=now() WHERE id=$1",

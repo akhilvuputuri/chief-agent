@@ -244,3 +244,11 @@ Letting an agent commit moves `HEAD`; any artifact logic that diffs against `HEA
 A reviewer's verdict is not a finding. Collecting every review body as feedback turned Devin's "No Issues Found" into a repair round. Separately, budget repair rounds for their real cost: when the full checks take about 13 minutes, a round that inherits only leftover time fails at the re-review, not at the fix.
 
 An agent that can only report a blocker is not autonomous. When main moved, Chief's only option was to send the owner to GitHub, and its tool text still claimed it could not merge. Give the workflow a self-healing path (rebase by re-implementing the approved plan on current main, with checks and review repeated), keep the model's tool descriptions in step with what the system can do, and never classify a no-op precondition failure as an uncertain write, or the assistant goes silent exactly when the owner asks it to act.
+
+A refusal made before any write must never look like a partial write. On 16 October a `coding_reply` rejected by a revision precondition was recorded as an uncertain write, and the owner-wide guard then refused every write for about two days, while two turns kept retrying it. Measured: 4 refused writes, about 40% of the fortnight's model spend in two turns. The intervention ([journal 92](92-uncertain-coding-write-lock.md)):
+
+- refusals before any write are classified as validation errors;
+- an uncertain coding request settles itself only when no record exists under its request key;
+- one `WRITE_BLOCKED` refusal blocks the rest of the turn, including re-delegation to another agent.
+
+Independent review then found two inputs that would have settled a call that did write: an upper-case job id compared against canonical uuids, and a `LIKE` pattern broken by a backslash in a key. Devin found that a child agent's block did not reach the coordinator. All three are now regression tests. Not yet observed: a real coding refusal after the release.

@@ -71,7 +71,21 @@ Fixes:
 - The docs are reordered, with both behaviours stated.
 - Tests now cover upper-case ids and keys containing `\`, `%`, `_`, `.`, `*` and `(`. Reverting either fix makes its test fail.
 
-Re-review is pending.
+The delta review approved `97f1266`.
+
+Devin Review on `97f1266` then reported two further bugs:
+
+- **A child agent's block didn't reach the coordinator.** When a delegated agent hit `WRITE_BLOCKED`, the coordinator could re-delegate the same write to a fresh agent.
+- **The coding-agent learning guide wasn't updated,** which the repository requires for coding-harness changes.
+
+Fixes:
+
+- `agent_run` results now carry `writesBlocked` when the child had a write refused.
+- The coordinator adopts that block, and a blocked turn also refuses new `agent_run` delegations. Reads still run.
+- A regression test covers the child path, and fails when the delegation refusal is removed.
+- [The learning guide](coding-agent-lessons.md) has a new entry.
+
+Delta review of this change is pending.
 
 ## Verification and outcome
 

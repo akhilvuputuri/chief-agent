@@ -456,10 +456,11 @@ export class CustomAgent implements Agent {
               repeated.step !== step
             )
               throw new RepeatedFailureError(op, repeated.code, repeated.count);
+            // A new delegation could only retry the refused writes in another context.
             if (
               writesBlocked &&
               op !== "finish_turn" &&
-              !readOperations.has(op)
+              (!readOperations.has(op) || op === "agent_run")
             )
               throw new WriteBlockedError(writesBlocked);
             if (!enabled.has(op)) {
@@ -546,6 +547,13 @@ export class CustomAgent implements Agent {
               }
             }
             await execution.endCall(journal, result);
+            if (
+              op === "agent_run" &&
+              !writesBlocked &&
+              (result as { writesBlocked?: boolean })?.writesBlocked
+            )
+              writesBlocked =
+                "A delegated agent's write was refused because an earlier write's outcome is uncertain";
             // Any success is progress and may supply what a failing form lacked
             // (such as an id from parcel_match), so every count starts again.
             failures.clear();
