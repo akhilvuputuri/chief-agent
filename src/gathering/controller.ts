@@ -20,6 +20,8 @@ import {
   type GatherTarget,
 } from "./schema.js";
 import type { GatheringBrowsers } from "./sessions.js";
+import { SubscriptionTools } from "../subscriptions.js";
+import { errorFields, opsLog } from "../ops-log.js";
 const hash = (v: unknown) =>
   createHash("sha256").update(JSON.stringify(v)).digest("hex");
 const safeText = (s: unknown, max = 120) =>
@@ -932,7 +934,15 @@ export class Gathering {
           ],
         )
       ).rows[0]?.result;
-      return result ?? (await this.lostMutation(user, c.id, a.requestKey, a));
+      if (!result) return await this.lostMutation(user, c.id, a.requestKey, a);
+      const check = await this.trackerPriceCheck(
+        user,
+        run,
+        c.id,
+        t.key,
+        a.artifactId,
+      );
+      return check ? { ...result, trackerPriceCheck: check } : result;
     }
     if (a.operation === "gather_check") {
       await this.source(user, run, c, t, a.source);
@@ -1011,6 +1021,41 @@ export class Gathering {
       ).rows[0]?.result;
       if (result) await this.browsers?.closeCollection(user, c.id);
       return result ?? (await this.lostMutation(user, c.id, a.requestKey, a));
+    }
+  }
+  /**
+   * Compare a new match with the tracked item it belongs to. Foreground agents report the result;
+   * a background pass also queues one owner alert. Neither changes the tracker.
+   */
+  private async trackerPriceCheck(
+    user: string,
+    run: string,
+    collectionId: string,
+    targetKey: string,
+    artifactId: string,
+  ) {
+    try {
+      const tools = new SubscriptionTools(this.db);
+      const check = await tools.priceCheck(
+        user,
+        collectionId,
+        targetKey,
+        artifactId,
+      );
+      if (check?.status !== "differs") return check;
+      const background = !!(await this.turn(user, run)).background;
+      const alertQueued = background
+        ? await tools.queuePriceAlert(user, check, artifactId)
+        : false;
+      if (alertQueued)
+        opsLog("subscription.price_alert_queued", "info", {
+          ref: check.subscriptionId,
+        });
+      return { ...check, alertQueued };
+    } catch (error) {
+      // The match is already committed; a failed comparison must not turn it into an error.
+      opsLog("gathering.price_check_failed", "warn", errorFields(error));
+      return null;
     }
   }
   private async coverage(

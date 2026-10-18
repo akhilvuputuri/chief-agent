@@ -46,6 +46,19 @@ export const subscriptionFields = z
     cancellationDeadline: date.nullable().optional(),
     paidThroughDate: date.nullable().optional(),
     lastInvoiceDate: date.nullable().optional(),
+    // A stated future price ("goes up to 24.98 on 1 December"); amount, currency and date travel together.
+    pendingAmount: z
+      .string()
+      .regex(/^\d{1,12}(?:\.\d{1,6})?$/)
+      .nullable()
+      .optional(),
+    pendingCurrency: z
+      .string()
+      .regex(/^[A-Z]{3}$/)
+      .nullable()
+      .optional(),
+    pendingEffectiveDate: date.nullable().optional(),
+    priceAlerts: z.boolean().nullable().optional(),
     reminderEnabled: z.boolean().nullable().optional(),
     reminderDays: z.number().int().min(0).max(365).nullable().optional(),
     reminderTime: time.nullable().optional(),
@@ -89,6 +102,7 @@ export const subscriptionSettings = z
     baseRevision: z.number().int().positive(),
     sourceInputIds,
     enabled: z.boolean().optional(),
+    priceAlerts: z.boolean().optional(),
     daysBefore: z.number().int().min(0).max(365).nullable().optional(),
     time: time.optional(),
   })

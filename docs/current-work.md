@@ -2,6 +2,16 @@
 
 The host now re-queues a paused coding job once, with a notice to the owner, when the pause came from a stopped sandbox, a lost heartbeat or a provider 429 or 5xx. A job that pauses again waits for the owner. The owner approved this exception on 17 October 2026. See [journal 96](journey/96-coding-transient-retry.md).
 
+# Price-change alerts — in review, 19 October 2026
+
+Issue 132 price-change milestone.
+
+- **Announced prices.** A stated future price (`pendingAmount`, `pendingCurrency`, `pendingEffectiveDate`) is shown before its date, with a notice 3 days ahead even when reminders are off. From the date it is used everywhere and recorded with the next update.
+- **Invoice price checks.** Every invoice match is compared with the one tracked item it belongs to. A background pass sends one Telegram alert when the invoice doesn't show the saved price; the tracker is never changed by it.
+- **Setting.** `priceAlerts` per item, on by default.
+
+No migration. Branch `feat/price-alerts`; review, merge, release and owner acceptance pending. [Journal 97](journey/97-price-change-alerts.md), [design](subscriptions.md#price-change-alerts).
+
 # Live to-do reminders — released, 18 October 2026
 
 Reminder text is fixed at creation, while briefings list the owner's live open to-dos at send time. Briefings now lead with their own text and list open tasks inline, and `schedule_create` and the daily agent steer reminders to review the to-do list to briefings; single actions and checklists kept in a note stay reminders. PR 252 deployed as `3b93fa7`; live acceptance pending. See [journal 95](journey/95-live-todo-reminders.md).
@@ -18,9 +28,9 @@ Issue 132 next milestone. A new `core/bills` agent gathers an exact invoice coll
 
 A refused `coding_reply` on 16 October was recorded as uncertain and blocked every owner write until an operator settled it on 18 October; no uncertain calls remain. PR 249 (deployed `9437d86`, part of v0.3.83; live acceptance pending) settles provably empty coding calls automatically, classifies pre-write coding refusals as validation errors and stops a turn from retrying a blocked write. See [journal 92](journey/92-uncertain-coding-write-lock.md).
 
-# Boxed sub-agents design — proposed, 17 October 2026
+# Boxed sub-agents — foundation in review, 19 October 2026
 
-Heavy delegated work moves to sub-agents with their own on-demand boxes that Chief can steer and close (issue #245). The owner decided that coding moves first, boxes keep a short warm TTL (about 15 idle minutes, then stop), and self-managed EC2 replaces CodeBuild, with CodeBuild kept as fallback. Design only; no AWS resources yet. [Design](boxes.md), [journal 91](journey/91-boxed-subagents.md).
+Heavy delegated work moves to sub-agents with their own on-demand boxes that Chief can steer and close (issue #245). The owner decided that coding moves first, boxes keep a short warm TTL (about 15 idle minutes, then stop), and self-managed EC2 replaces CodeBuild. No AWS resources yet. [Design](boxes.md), [journal 91](journey/91-boxed-subagents.md). On 19 October the owner dropped CodeBuild as a box provider: the layer is built on a fake provider (tests), a local Docker provider (development) and EC2, and coding keeps its current CodeBuild path only until it moves. The dormant foundation (phase 2a) is in review.
 
 # Reasoning effort chosen per message — 17 October 2026
 

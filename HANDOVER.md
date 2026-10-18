@@ -10,9 +10,9 @@ Three fixes from the review of two weeks of logs and conversations are deployed,
 
 A new `core/bills` agent gathers an exact invoice collection, then updates the subscription tracker from the matched invoices when the owner asks. Tracker updates can cite one matched invoice, and the host checks its amount and invoice date against the PDF's recorded clues. Gathering, subscriptions and bills share the core `invoice-gathering`, `subscription-ledger` and `invoice-ledger` skills. Released as v0.3.83 (`1733d48`), with no migration. Next: owner acceptance with one real invoice. [Journal 93](docs/journey/93-invoice-backed-tracker.md).
 
-# Boxed sub-agents design — proposed, 17 October 2026
+# Boxed sub-agents — foundation in review, 19 October 2026
 
-Heavy delegated work moves to sub-agents with their own on-demand boxes that Chief can steer and close (issue #245). The owner decided that coding moves first, boxes keep a short warm TTL (about 15 idle minutes, then stop), and self-managed EC2 replaces CodeBuild, with CodeBuild kept as fallback. Design only; no AWS resources yet. [Design](docs/boxes.md), [journal 91](docs/journey/91-boxed-subagents.md).
+Heavy delegated work moves to sub-agents with their own on-demand boxes that Chief can steer and close (issue #245). The owner decided that coding moves first, boxes keep a short warm TTL (about 15 idle minutes, then stop), and self-managed EC2 replaces CodeBuild. No AWS resources yet. [Design](docs/boxes.md), [journal 91](docs/journey/91-boxed-subagents.md). On 19 October the owner dropped CodeBuild as a box provider: the layer is built on a fake provider (tests), a local Docker provider (development) and EC2, and coding keeps its current CodeBuild path only until it moves. The dormant foundation (phase 2a) is in review.
 
 # Reasoning effort chosen per message — 17 October 2026
 
