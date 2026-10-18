@@ -78,6 +78,7 @@ import { Assistant } from "./agent.js";
 import { ToolPicker } from "./tool-picker.js";
 import { ShadowDecisions } from "./shadow.js";
 import { EffortPicker } from "./effort.js";
+import { JevNewsRanker } from "./news-ranker.js";
 import { server } from "./server.js";
 import {
   telegram,
@@ -280,6 +281,19 @@ if (c.MARKET_DATA_PROVIDER === "twelvedata" && !c.TWELVE_DATA_API_KEY)
 const parser = new ScheduleParser();
 // Editions are plain text with link previews off; Save buttons carry item ids.
 const newsFetcher = new PublicFeedFetcher();
+// Jev ranks each bulletin's shortlist (journal 92). An unreadable config keeps the
+// deterministic ranker instead of stopping the gateway.
+const newsRanker =
+  c.NEWS_RANKER === "jev" && c.OPENROUTER_API_KEY
+    ? (() => {
+        try {
+          return new JevNewsRanker(c.OPENROUTER_API_KEY);
+        } catch (error) {
+          opsLog("news.ranker_config_failed", "error", errorFields(error));
+          return undefined;
+        }
+      })()
+    : undefined;
 const newsBulletin = new NewsBulletin(
   db,
   newsFetcher,
@@ -320,6 +334,7 @@ const newsBulletin = new NewsBulletin(
   (user) => topics.capture(user, { kind: "topic", topic: "news" }),
   // `mcp` is assigned below; Reader learning is off when connectors are.
   () => (mcp?.configured ? mcpReaderLink(mcp) : undefined),
+  { ranker: () => newsRanker },
 );
 const daily = new DailyTools(db, parser, calendar, mirror);
 if (

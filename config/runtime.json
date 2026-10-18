@@ -13,6 +13,7 @@
     "TOOL_PICKER": "jev",
     "SHADOW_DECISIONS": "jev",
     "EFFORT_PICKER": "jev",
+    "NEWS_RANKER": "jev",
     "TELEGRAM_TOPICS": "auto",
     "VOICE_REPLIES": "false",
     "MARKET_DATA_PROVIDER": "",

@@ -31,6 +31,31 @@ The stored item `score` keeps `site`, `similar` (the raw `s`) and `like`, the cl
 
 Near-identical stories (title-token Jaccard ≥ 0.6) keep only the best-scoring one. At most two items come from one site unless no other site can fill the edition. If nothing new remains, the edition says so rather than padding. Unreachable sites are named at the end. The message is fitted to one Telegram message by dropping excerpts, then whole trailing items, so every button matches a visible item.
 
+## Jev ranking and the exploration slot
+
+Since [journal 92](journey/92-jev-news-ranking.md), TypeSafe's Jev decision model orders each edition when `NEWS_RANKER` is `jev` (the default in `config/runtime.json`).
+
+- **Shortlist.** The deterministic scoring above ranks every candidate. The top 30, after deduplication, go to Jev.
+- **Question.** One Jev request per candidate asks one yes/no question: would the owner read and save this article? The request carries:
+  - the candidate's title, site, excerpt (300 characters) and date;
+  - the owner's topics;
+  - their 10 strongest recent Reader saves, by the profile's decayed weight.
+
+  Requests run eight at a time. A timeout, 429 or 5xx is retried once. Separate requests are deliberate: measured reports show Jev's accuracy falls when one request holds many items.
+
+- **Order.**
+  - `order: "jev"` (default): Jev's probability orders the regular picks, and the deterministic score breaks ties.
+  - `order: "rrf"`: reciprocal-rank fusion of Jev's order and the deterministic order, the blend recommended when labels are this scarce.
+  - The per-site cap applies either way.
+- **Exploration slot.** When an edition has room for at least two items and a spare candidate exists, one slot is drawn uniformly from the top 20 candidates of the active order that are not regular picks. It is placed at a uniformly random position. Its draw probability is stored, so saves can be learned and evaluated beyond the ranker's own choices.
+- **Fallback.** Any Jev failure (one failed request fails the ranking) keeps the deterministic order, so the bulletin is never held up. The exploration slot still applies.
+- **What is recorded.**
+  - Each `news_items.score` adds `jev` (the probability or `null`), `rankedBy` (`jev`, `jev_rrf` or `rules`) and, for the exploration pick, `explore` and `exploreProbability`.
+  - The edition `trace` adds `ranker`: method, config `version` hash, saves in context, requests, latency, cost, model and error.
+  - It also adds `candidates`: the top 50 ranked candidates, shown or not, with rank, every sub-score, Jev's probability, `shown` and `position`. Joined with later Reader saves, this is the labelled sample for evaluating rankers offline.
+- **Log line.** The operational log line `news.ranked` carries the method, candidates asked, latency, cost and error code, without titles.
+- **Config.** [config/news-ranker.json](../config/news-ranker.json) holds the question, model, limits, `order`, `rrfK` and `exploreWindow`.
+
 ## Save to Reader and what it learns
 
 Each item carries one button (`nw:sv:<item id>`), five to a row. A press is answered at once ("Saving 2 to Reader…") and the button shows `…`. The save then finishes outside the Telegram handler, so a slow save (link resolution plus Reader's import status, up to about a minute) never holds one of the runner's update slots. It goes through Chief's reviewed Reader MCP grant (`save_link`, [MCP connectors](mcp.md)) with the same durable journal, link resolution and status polling as an agent save. **The item id is the idempotency key**, so repeated or concurrent presses, or a press after an uncertain outcome, can never create a second article. The keyboard's ✓ comes from that journal (`mcp_operations`, state `complete`); there is no second copy of save state. Handlers check the Telegram allowlist and the item's owner, accept only items from delivered (`sent` or `uncertain`) editions, and are never queued behind the model. Buttons on bulletins sent before this change answer that votes are retired.
@@ -70,7 +95,7 @@ Other page retrieval in this project goes through hosted providers. Feeds are th
 
 - Only sites that publish a feed can be followed. Paywalled items link out; nothing is bypassed.
 - Excerpts are the feed's own text, not model summaries.
-- Topic matching is phrase matching, and save similarity is word overlap; neither is semantic classification.
+- Topic matching is phrase matching, and save similarity is word overlap. Jev's relevance judgement is a zero-shot model score, unmeasured against the owner's saves so far. With about one save every three days, evaluating it will take months.
 - A save still in flight when the gateway restarts gets no reply. If it was already sent to Reader it stays pending (holding up other writes) until the owner taps it again, which settles it safely with the same key.
 - Learning needs Reader connected (MCP on) and the owner's opt-in in Reader. Without it the bulletin still works, ranked by topics and recency only.
 - Fixed Singapore time zone; one edition per day.

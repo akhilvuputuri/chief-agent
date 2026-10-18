@@ -2,8 +2,9 @@
  * ranked by the owner's topics, recency and resemblance to what the owner has
  * saved to Reader, delivered once a day at a Singapore time. Each item has a
  * Save button that saves it to Reader; Reader's library (including articles
- * saved from Safari) is the interest sample. Building and sending an edition
- * makes no model call; the conversational agent only configures it. */
+ * saved from Safari) is the interest sample. Jev orders the shortlist when
+ * NEWS_RANKER is on (journal 92); otherwise building and sending an edition
+ * makes no model call. The conversational agent only configures it. */
 import { randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
 import type { Action } from "./protocol.js";
@@ -11,6 +12,7 @@ import { ToolValidationError } from "./tool-errors.js";
 import { SerialQueue, publicHttps } from "./security.js";
 import { errorFields, opsLog } from "./ops-log.js";
 import type { McpTools } from "./mcp.js";
+import type { JevNewsRanker, RankResult } from "./news-ranker.js";
 import {
   affinity,
   describeProfile,
@@ -41,6 +43,8 @@ const MAX_AGE_DAYS = 7;
 const PER_DOMAIN = 2;
 /** Suggestions per edition. Fewer, better picks: each one is a Save decision. */
 export const MAX_ITEMS = 5;
+/** Ranked candidates kept in each edition's trace. */
+const CANDIDATE_LOG = 50;
 const READER_MS = 30000; // Reader library fetch budget, alongside feed gathering
 const READER_PAGES = 5; // 200 per page; Reader's personal library holds at most 1000
 const FETCH_CONCURRENCY = 4;
@@ -321,21 +325,103 @@ export function rankCandidates(
     stories.push(tokens);
     return true;
   });
+  const selected = chooseItems(unique, opts.count);
+  selected.sort((a, b) => b.score.total - a.score.total);
+  return { selected, excluded, pool: scored.length, unique };
+}
+
+/** Takes items in `ordered` order, at most two per site unless other sites
+ * cannot fill the edition. */
+export function chooseItems(ordered: Scored[], count: number) {
   const selected: Scored[] = [];
   const perDomain = new Map<string, number>();
-  for (const s of unique) {
-    if (selected.length >= opts.count) break;
+  for (const s of ordered) {
+    if (selected.length >= count) break;
     if ((perDomain.get(s.domain) ?? 0) >= PER_DOMAIN) continue;
     perDomain.set(s.domain, (perDomain.get(s.domain) ?? 0) + 1);
     selected.push(s);
   }
   // Relax the per-site cap only when other sites cannot fill the edition.
-  for (const s of unique) {
-    if (selected.length >= opts.count) break;
+  for (const s of ordered) {
+    if (selected.length >= count) break;
     if (!selected.includes(s)) selected.push(s);
   }
-  selected.sort((a, b) => b.score.total - a.score.total);
-  return { selected, excluded, pool: scored.length };
+  return selected;
+}
+
+/** One slot per edition is an exploration pick (journal 92). */
+export const EXPLORE_SLOTS = 1;
+/** Without the Jev ranker's config, explore among the top 20 deterministic candidates. */
+const DEFAULT_EXPLORE_WINDOW = 20;
+
+/**
+ * The edition's items from the deduplicated ranking. With Jev scores, candidates are
+ * ordered by Jev's probability (the deterministic score breaks ties, and unscored ones
+ * follow in deterministic order); otherwise by the deterministic score. When the
+ * edition has room and a spare candidate exists, one slot is a uniformly random
+ * candidate from outside the regular picks, at a uniformly random position, so saves
+ * can be learned beyond the ranker's own choices. `probability` is that pick's chance.
+ */
+export function composeSelection(
+  unique: Scored[],
+  opts: {
+    count: number;
+    jev?: Map<string, number>;
+    /** "rrf" blends Jev's order with the deterministic one; default "jev". */
+    order?: "jev" | "rrf";
+    rrfK?: number;
+    /** The exploration pick comes from this many top candidates of the active order. */
+    exploreWindow?: number;
+    random: () => number;
+  },
+) {
+  const jev = opts.jev;
+  const p = (s: Scored) => jev?.get(s.canonical) ?? -1;
+  // unique is in deterministic order, so its index is the deterministic rank.
+  const jevRank = new Map(
+    [...unique]
+      .sort((a, b) => p(b) - p(a) || b.score.total - a.score.total)
+      .map((s, i) => [s, i]),
+  );
+  const fused = new Map(
+    unique.map((s, i) => [
+      s,
+      1 / ((opts.rrfK ?? 60) + i + 1) +
+        1 / ((opts.rrfK ?? 60) + jevRank.get(s)! + 1),
+    ]),
+  );
+  const key = (s: Scored) =>
+    !jev ? s.score.total : opts.order === "rrf" ? fused.get(s)! : p(s);
+  const compare = (a: Scored, b: Scored) =>
+    key(b) - key(a) || b.score.total - a.score.total;
+  const order = jev ? [...unique].sort(compare) : unique;
+  const sortRegular = (items: Scored[]) => items.sort(compare);
+  const explore = opts.count >= 2 ? EXPLORE_SLOTS : 0;
+  const regular = sortRegular(chooseItems(order, opts.count - explore));
+  // From the top of the active order when possible, otherwise any spare candidate.
+  const window = order
+    .slice(0, opts.exploreWindow ?? order.length)
+    .filter((s) => !regular.includes(s));
+  const spare = window.length
+    ? window
+    : unique.filter((s) => !regular.includes(s));
+  if (!explore || !spare.length)
+    return {
+      items: explore ? sortRegular(chooseItems(order, opts.count)) : regular,
+      explored: undefined,
+      probability: undefined,
+    };
+  const pick =
+    spare[
+      Math.min(spare.length - 1, Math.floor(opts.random() * spare.length))
+    ]!;
+  const at = Math.min(
+    regular.length,
+    Math.floor(opts.random() * (regular.length + 1)),
+  );
+  const items = [...regular];
+  items.splice(at, 0, pick);
+  return { items, explored: pick, probability: 1 / spare.length };
 }
 
 const WEEKDAYS = "Sun Mon Tue Wed Thu Fri Sat".split(" ");
@@ -642,6 +728,11 @@ export class NewsBulletin {
     }),
     /** Resolved per call: the MCP runtime is created after the bulletin. */
     readonly reader: () => ReaderLink | undefined = () => undefined,
+    /** Jev ranking (journal 92) and the exploration slot's randomness. */
+    private options: {
+      ranker?: () => JevNewsRanker | undefined;
+      random?: () => number;
+    } = {},
   ) {}
   /** The owner's interest profile from Reader's current library. When Reader
    * is unreachable or has not allowed it, the edition is ranked without it and
@@ -827,17 +918,61 @@ export class NewsBulletin {
           )
         ).rows.map((r) => r.canonical_url),
       );
+      const count = Math.min(
+        MAX_ITEMS,
+        settings?.items_per_edition ?? MAX_ITEMS,
+      );
       const ranked = rankCandidates(candidates, {
         topics: settings?.topics ?? [],
         profile: interests.profile,
         delivered,
         now,
-        count: Math.min(MAX_ITEMS, settings?.items_per_edition ?? MAX_ITEMS),
+        count,
       });
+      // Jev orders the shortlist when it answers; otherwise the deterministic order stands.
+      const ranker = this.options.ranker?.();
+      const jev: RankResult | undefined =
+        ranker && ranked.unique.length
+          ? await ranker.score({
+              topics: settings?.topics ?? [],
+              saves: [...interests.profile.docs]
+                .sort((a, b) => b.weight - a.weight)
+                .map((d) => d.title),
+              candidates: ranked.unique.map((s) => ({
+                key: s.canonical,
+                title: s.entry.title,
+                site: s.domain,
+                excerpt: s.entry.summary ?? undefined,
+                publishedAt: s.entry.publishedAt ?? undefined,
+              })),
+            })
+          : undefined;
+      const rankedBy = jev?.ok
+        ? ranker!.config.order === "rrf"
+          ? "jev_rrf"
+          : "jev"
+        : "rules";
+      const selection = composeSelection(ranked.unique, {
+        count,
+        jev: jev?.ok ? jev.scores : undefined,
+        order: ranker?.config.order,
+        rrfK: ranker?.config.rrfK,
+        exploreWindow: ranker?.config.exploreWindow ?? DEFAULT_EXPLORE_WINDOW,
+        random: this.options.random ?? Math.random,
+      });
+      if (jev)
+        opsLog("news.ranked", jev.ok ? "info" : "warn", {
+          kind: rankedBy,
+          offeredCount: jev.asked,
+          latencyMs: jev.latencyMs,
+          costUsd: jev.costUsd,
+          model: jev.model ?? undefined,
+          errorCode: jev.error,
+        });
       const id = randomUUID();
       const edition = composeEdition(
         date,
-        ranked.selected,
+        selection.items,
         failures,
         now,
         sources.length > 0 && failures.length === sources.length,
@@ -854,7 +989,15 @@ export class NewsBulletin {
         excerpt: s.entry.summary,
         published_at: s.entry.publishedAt?.toISOString() ?? null,
         topics: s.topics,
-        score: s.score,
+        // How this item was chosen, kept with its score for learning from saves.
+        score: {
+          ...s.score,
+          jev: jev?.ok ? (jev.scores.get(s.canonical) ?? null) : null,
+          rankedBy,
+          ...(s === selection.explored
+            ? { explore: true, exploreProbability: selection.probability }
+            : {}),
+        },
       }));
       const payload = {
         editionId: id,
@@ -863,10 +1006,46 @@ export class NewsBulletin {
         items: items.map((i) => ({ id: i.id, position: i.position })),
       };
       const traceDoc = {
-        modelCalls: 0,
+        // Jev ranking requests (journal 92); no generative model call.
+        modelCalls: jev?.requests ?? 0,
         sources: trace,
         pool: ranked.pool,
         excluded: ranked.excluded,
+        ranker: jev
+          ? {
+              by: rankedBy,
+              version: ranker!.version,
+              savesInContext: Math.min(
+                interests.profile.docs.length,
+                ranker!.config.state.recentSaves,
+              ),
+              ok: jev.ok,
+              asked: jev.asked,
+              requests: jev.requests,
+              latencyMs: jev.latencyMs,
+              costUsd: jev.costUsd,
+              model: jev.model,
+              ...(jev.error ? { error: jev.error } : {}),
+            }
+          : { by: rankedBy },
+        // The ranked candidates (shown or not) with both scores: the learning sample.
+        candidates: ranked.unique.slice(0, CANDIDATE_LOG).map((s, i) => ({
+          rank: i + 1,
+          canonical: s.canonical,
+          title: s.entry.title.slice(0, 200),
+          site: s.domain,
+          source: s.sourceName,
+          published: s.entry.publishedAt?.toISOString() ?? null,
+          total: s.score.total,
+          interest: s.score.interest,
+          recency: s.score.recency,
+          siteAffinity: s.score.site,
+          similar: s.score.similar,
+          jev: jev?.ok ? (jev.scores.get(s.canonical) ?? null) : null,
+          shown: selection.items.includes(s),
+          position: selection.items.indexOf(s) + 1 || null,
+          ...(s === selection.explored ? { explore: true } : {}),
+        })),
         // Every suggestion and its score is kept in news_items; joined with
         // Reader's library later, saved versus not-saved is a labelled sample.
         reader: interests.reader,
