@@ -42,7 +42,7 @@ Alternatives considered:
 - **Monitoring confirmation cards** stay valid for 24 hours, and the tool notice says so.
 - **`src/open-loops.ts`** adds `openLoops` to the foreground turn context when something waits on the owner (see [context management](../context-management.md#open-loops)):
   - up to five coding jobs, each with a host-written `awaiting` label and the worker's text in a separate field, marked as data;
-  - up to three delivered, unsuperseded monitoring cards that expired unanswered in the last day.
+  - up to three delivered monitoring cards that expired unanswered in the last day, dropped when a later proposal revised the same concern.
 
   The note tells Chief to cover these when asked for status, to revise or resume a listed job instead of starting a duplicate, and to mention an expired card only when relevant. A failed read logs `context.open_loops_failed` without failing the turn.
 
@@ -71,10 +71,10 @@ Fixes:
 - Merge cards are included.
 - Worker text is in a separate field.
 - The section is foreground only.
-- Expired cards are monitoring only: delivered, not superseded, from the last day, with their title.
+- Expired cards are monitoring only: delivered, from the last day, with their title, and dropped when a later proposal revised the same concern.
 - Tests are added, including mutation-checked pins.
 
-The stale proposal-time values for monitoring remain a documented limitation. Confirming still binds the exact spec, and the worker treats a passed expiry as expired. Re-review is pending.
+The stale proposal-time values for monitoring remain a documented limitation. Confirming still binds the exact spec, and the worker treats a passed expiry as expired. The delta review approved `049cf39`. It noted that supersession detection only catches revisions of an existing concern: a re-proposal of a never-confirmed concern gets a new id, so its earlier card can stay listed for a day. The docs overstated this, and are now corrected. Detecting it would need a stable proposal identity and is left as a follow-up.
 
 ## Verification and outcome
 

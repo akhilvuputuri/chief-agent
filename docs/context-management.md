@@ -159,7 +159,7 @@ Each foreground turn's runtime context carries `openLoops` when something waits 
 
 A requirements card is any event carrying `requirements`, including the first card (the attempt's `:finished` event). It counts only for the job's current revision. The worker's summary or question goes into a separate `workerText` field, which the note marks as data, never instructions.
 
-**Monitoring cards.** Up to three monitoring confirmation cards that were delivered, expired unanswered in the last day, and were not superseded by a later proposal for the same concern. Each carries its title.
+**Monitoring cards.** Up to three monitoring confirmation cards that were delivered and expired unanswered in the last day, each with its title. A card is dropped when a later proposal revised the same existing concern (same responsibility id). A re-proposal of a concern that was never confirmed gets a new id, so its earlier card can still be listed for that day.
 
 The note tells Chief to:
 

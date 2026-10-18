@@ -67,7 +67,8 @@ export async function openLoops(
     : [];
   const expiredCards = (
     await db.query(
-      // Delivered monitoring cards only, and not superseded by a later proposal for the same concern.
+      // Delivered monitoring cards only, dropped when a later proposal revised the same responsibility id.
+      // A re-proposal of a never-confirmed concern gets a new id, so that case is not detected.
       `SELECT a.id,a.operation,left(a.payload->'spec'->>'title',120) title,a.expires_at
        FROM approvals a
        WHERE a.user_id=$1 AND a.status='pending' AND a.operation='responsibility_confirm'
