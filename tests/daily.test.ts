@@ -201,3 +201,31 @@ test("calendar is read-only, bounded and verifies owner/account before event rea
     /Wrong/,
   );
 });
+test("the schedule_create text and daily agent describe when to use a live briefing", async () => {
+  // Two generic to-do reminders on 7 October drew "what was this?": reminder text is fixed at creation.
+  const { runtimeContext } = await import("../src/runtime.js");
+  const { readFile } = await import("node:fs/promises");
+  const tool = runtimeContext({}, null).tools.find(
+    (t: { name: string }) => t.name === "schedule_create",
+  )!;
+  assert.match(
+    tool.description,
+    /kind reminder sends its content exactly as written now; use it for a specific action or a checklist kept in a note/,
+  );
+  assert.match(
+    tool.description,
+    /Use briefing when the owner wants to be reminded to review or work through their to-do list/,
+  );
+  const daily = await readFile(
+    new URL("../plugins/core/agents/daily.md", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    daily,
+    /use it for a specific action or a checklist kept in a note/,
+  );
+  assert.match(
+    daily,
+    /use it when the owner wants to be reminded to review or work through their to-do list/,
+  );
+});

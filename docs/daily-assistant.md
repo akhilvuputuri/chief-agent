@@ -13,7 +13,7 @@ General tasks/notes, reminders, fixed briefings and a separate viewing workbook 
 - What is on my calendar tomorrow?
 - Sync my daily-life Sheet.
 
-Times default to Asia/Singapore. The reply must confirm the actual next firing time. Task due dates are separate from reminders. General records support open/done/archived status; they never modify job records. Calendar reads cover the primary calendar, maximum 31 days and 100 events; responses disclose truncation.
+A reminder sends its text exactly as written when it was created; use it for a specific action or a checklist kept in a note. A briefing is built at send time: it leads with its own text and date, lists the owner's live open to-dos inline (up to 10), and adds calendar or unread email as sections when included (`src/daily-briefing.ts`). Reminders to review or work through the to-do list are therefore created as briefings ([journal 95](journey/95-live-todo-reminders.md)). Times default to Asia/Singapore. The reply must confirm the actual next firing time. Task due dates are separate from reminders. General records support open/done/archived status; they never modify job records. Calendar reads cover the primary calendar, maximum 31 days and 100 events; responses disclose truncation.
 
 ## Scheduling design
 

@@ -69,7 +69,8 @@ import { Portfolio } from "./portfolio.js";
 import { CalendarTools } from "./calendar.js";
 import { DailySheet } from "./daily-sheet.js";
 import { SheetsTools } from "./sheets.js";
-import { GmailTools, unreadDigest } from "./gmail.js";
+import { GmailTools } from "./gmail.js";
+import { buildBriefing } from "./daily-briefing.js";
 import { readConfig } from "./config.js";
 import { connect, ensureUser, event } from "./db.js";
 import { JobTools } from "./tools.js";
@@ -808,81 +809,7 @@ const worker = new DailyWorker<Delivery>(
     if (!allowed.has(user)) throw new Error("Unauthorized delivery");
     await views.deliver(user, user, text, "schedule");
   },
-  async (j) => {
-    const title = `Daily brief — ${new Date().toLocaleDateString("en-SG", { timeZone: "Asia/Singapore" })}`;
-    const sections: NonNullable<Delivery["sections"]> = [];
-    const tasks = (
-      await db.query(
-        `SELECT title,due_at FROM daily_items WHERE user_id=$1 AND kind='task' AND status='open' ORDER BY due_at NULLS LAST,created_at LIMIT 10`,
-        [j.user_id],
-      )
-    ).rows;
-    sections.push({
-      title: "Open tasks (up to 10)",
-      body: tasks.length
-        ? tasks
-            .map(
-              (t) =>
-                `• ${t.title}${t.due_at ? " — due " + new Date(t.due_at).toLocaleString("en-SG", { timeZone: "Asia/Singapore" }) : ""}`,
-            )
-            .join("\n")
-        : "No open tasks.",
-    });
-    if (j.include_calendar) {
-      try {
-        const r = await calendar.list(
-          j.user_id,
-          new Date().toISOString(),
-          new Date(Date.now() + 86400000).toISOString(),
-        );
-        sections.push({
-          title: "Calendar — next 24 hours (up to 8)",
-          body: r.events.length
-            ? r.events
-                .slice(0, 8)
-                .map(
-                  (e: any) =>
-                    `• ${e.title} — ${e.start?.dateTime ?? e.start?.date}`,
-                )
-                .join("\n") +
-              (r.truncated || r.events.length > 8
-                ? "\nMore events available in Calendar."
-                : "")
-            : "No events.",
-        });
-      } catch {
-        sections.push({
-          title: "Calendar",
-          body: "Calendar unavailable; reconnect or enable Calendar API.",
-        });
-      }
-    }
-    if (j.include_email) {
-      try {
-        const r: any = await gmail.call(
-          j.user_id,
-          "gmail_search",
-          "in:inbox is:unread newer_than:1d",
-          undefined,
-          `briefing:${j.id}:${Date.now()}`,
-        );
-        const lines = unreadDigest(r);
-        sections.push({
-          title: "Unread inbox — past 24 hours (up to 5)",
-          body: lines.join("\n") || "No matching messages.",
-        });
-      } catch {
-        sections.push({
-          title: "Gmail",
-          body: "Gmail unavailable; existing read-only authorization may need renewal.",
-        });
-      }
-    }
-    return {
-      reply: `${title}\n\nOpen Sections to browse ${sections.map((s) => s.title).join(", ")}.`,
-      sections,
-    };
-  },
+  (j) => buildBriefing(j, { db, calendar, gmail }),
   (user) => mirror.sync(user),
 );
 async function sendWorkMessage(user: string, text: string | Delivery) {
