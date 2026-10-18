@@ -73,7 +73,7 @@ Box (EC2 instance; a local container in development)
 requested → launching → booting → ready ⇄ busy
                                     │ idle 15 min (warm TTL)
                                     ▼
-                         stopping → stopped ──(new task, within retention)──► starting → booting → ready
+                         stopping → stopped ──(new task, within retention)──► starting → ready (on hello)
                                     │ retention expires / job ends / hard max
                                     ▼
                                terminating → terminated (verified)
@@ -98,20 +98,20 @@ any state → lost (no provider identity or heartbeat) → reconciler terminates
   An uncertain launch is reconciled by the box-ID tag or the token.
 
 - **The sweep is scoped.** Tags carry both the box ID and a deployment tag (`chief:env`). A sweep only touches its own environment's resources, and treats rows in `requested` or `launching` as owners of matching instances.
-- **One stuck box never blocks the system.** Concurrency is limited per profile and provider; the single global `coding_one_active_worker` index is replaced. A box whose identity cannot be resolved is held for an operator without blocking others, and the owner is told.
+- **One stuck box never blocks the system.** Concurrency is limited per profile, and restarts of stopped boxes count against it; the single global `coding_one_active_worker` index is replaced. A box whose identity cannot be resolved is held for an operator without blocking others, and the owner is told.
 - **Host-side side effects stay serialised where they need to be.** The old global index also serialised publication and merge automation. Coding keeps that guarantee with a **per-repository publication lock** on the host, so two coding boxes can run while PR writes, rebases and Merge cards for one repository still happen one at a time.
 
 ## Channel (two-way, box dials out)
 
 All traffic goes over the existing HTTPS origin through Caddy. Boxes never accept inbound connections. Long-polling is used rather than WebSockets because it works through the current proxy, survives restarts on both sides, and behaves the same on every provider.
 
-| Route                         | Direction | Purpose                                                                                                                                                                                                             |
-| ----------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /boxes/:id/hello`       | box→host  | Exchange the one-time bootstrap secret (plus EC2 identity proof), or the stored session credential after a restart, for a session credential. Returns protocol version, box epoch and remaining lifetime.           |
-| `GET /boxes/:id/next?after=N` | host→box  | Long-poll (up to 8 s, below the server's 15 s request timeout) for ordered messages: `task.assign`, `task.message` (steering, answers, follow-ups), `task.cancel`, `box.inspect`, `box.stop`. Doubles as heartbeat. |
-| `POST /boxes/:id/events`      | box→host  | Ordered, idempotent event batches: task progress, tool calls, questions, artifacts, task results and box state.                                                                                                     |
-| `POST /boxes/:id/artifacts`   | box→host  | Bounded uploads of typed results (patch, files, report, dataset) stored owner-scoped on the host.                                                                                                                   |
-| Task-scoped routes            | box→host  | The existing model proxy and session store, authorised by a **per-task** token the box agent passes to the task runtime only.                                                                                       |
+| Route                         | Direction | Purpose                                                                                                                                                                                                      |
+| ----------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `POST /boxes/:id/hello`       | box→host  | Exchange the one-time bootstrap secret (plus EC2 identity proof), or the stored session credential after a restart, for a session credential. Returns protocol version, box epoch and remaining lifetime.    |
+| `GET /boxes/:id/next?after=N` | host→box  | Long-poll (up to 8 s, well inside the proxy's timeouts) for ordered messages: `task.assign`, `task.message` (steering, answers, follow-ups), `task.cancel`, `box.inspect`, `box.stop`. Doubles as heartbeat. |
+| `POST /boxes/:id/events`      | box→host  | Ordered, idempotent event batches: task progress, tool calls, questions, artifacts, task results and box state.                                                                                              |
+| `POST /boxes/:id/artifacts`   | box→host  | Bounded uploads of typed results (patch, files, report, dataset) stored owner-scoped on the host.                                                                                                            |
+| Task-scoped routes            | box→host  | The existing model proxy and session store, authorised by a **per-task** token the box agent passes to the task runtime only.                                                                                |
 
 - **Ordering and delivery.**
   - Messages carry a sequence number per box and are acknowledged by the next poll's `after`. Delivery is at least once.
@@ -289,7 +289,7 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
 
 - Chief can spawn a box, run two tasks in it one after the other, send a message to the running task, inspect its workspace, get typed artifacts back, and see it stop when idle and terminate at retention. Termination is verified.
 - Restarting Chief mid-task neither leaks a box nor duplicates a task. Orphans are found and terminated, and their capabilities revoked.
-- No production credential exists in any box. A replayed bootstrap secret terminates the box; an agent restart does not.
+- No production credential exists in any box. A retired credential, including the bootstrap secret at any age, is refused and alerted at `hello` and is treated as compromise on the channel; an agent restart is neither.
 - A task cannot leave anything behind for the next task in the same box: no processes, git configuration, hooks, dependencies, home-directory files or caches survive. This is tested with a deliberately hostile `echo` task.
 - Every IAM override attempt fails.
 - A coding job runs end to end on EC2 with the current approval, review and merge guarantees, and its feedback and rebase rounds reuse the box (measured provisions per job against today's).
@@ -323,4 +323,31 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
 - **2a, foundation (dormant; not wired into the gateway):**
   - `db/032_boxes.sql` adds `boxes`, `box_tasks`, `box_messages`, `box_events` and `box_notices`.
   - `src/boxes/` holds the provider interface and fake provider, credentials, the `BoxController` (owner operations, the channel and the reconciler) and the `/boxes/*` routes.
-  - `tests/boxes.test.ts` covers idempotent spawn, launch before provider call, concurrency (including restarts), idempotent bootstrap and rotation, refusal and alert for a retired `hello`, compromise on retired channel use, ordered and acknowledged messages, deduplicated events, owner-bound steering, idle stop and warm start, start failure, retention, lifetime and idle limits, lost boxes, boot timeout, uncertain and unresolvable launches, the orphan sweep, identity failure and the HTTP channel.
+- **Behaviour settled during review:**
+  - Identity is verified before a `hello` changes anything, so a stolen secret without the instance's proof is refused and alerted without harming the real box.
+  - The bootstrap hash is kept for the box's life.
+  - A box with any open task is never stopped as idle.
+  - Delegation, steering and termination lock the box row, so no task is orphaned on a closing box. Every path that ends or holds a box fails its open tasks.
+  - Events are recorded and applied atomically.
+  - Steering is bound to an owner input of the current turn.
+  - Provider calls are time-bounded.
+  - The sweep only touches resources tagged with this environment. Held and launching rows keep theirs.
+  - Claims rotate fairly by last reconciliation.
+  - A box closed during an uncertain launch is found and ended.
+  - A lost stop is repeated until its timeout.
+  - Unexpected errors return a generic 500.
+- **Tests:** `tests/boxes.test.ts` (25 cases) covers:
+  - spawn, launch, concurrency and restarts;
+  - bootstrap, rotation chains and lifelong bootstrap detection;
+  - retired-credential alert versus compromise;
+  - ordered messages and atomic events;
+  - owner- and turn-bound steering;
+  - the idle-stop race;
+  - task failure on close, provider end and hold;
+  - stop and warm start, stop retries and escalation;
+  - start failure; retention, lifetime and idle limits; host grace and lost boxes; boot timeout;
+  - uncertain, unresolvable and closed-during launches;
+  - the sweep's ownership rules;
+  - identity refusal;
+  - long-poll wake-up;
+  - the HTTP channel.

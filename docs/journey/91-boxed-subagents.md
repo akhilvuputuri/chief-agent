@@ -155,4 +155,27 @@ Implemented as designed:
 - A box cannot complete `hello` before its provider resource is recorded.
 - Restarts of stopped boxes count against concurrency.
 
-Long-polls last 8 s, below the server's 15 s request timeout.
+Long-polls last 8 s, well inside the proxy's timeouts.
+
+**Review of `9c27cd2` (Claude Opus 5.5): changes requested.** The credential design held up: none of the races examined could leave a box with no valid credential, two live credentials, or a credential an attacker could obtain. Two reconciler defects blocked approval:
+
+1. **Idle stop.** A box that had acknowledged a freshly delegated task, but not yet reported busy, could be stopped as idle, and the task would then sit queued until retention expired. A box with any open task is now never idle.
+2. **Orphaned tasks.** Tasks could be left open on a dead box in two ways: the stopping-to-ended path skipped task failure, and `delegate` could race a close. Delegation now locks the box row in one transaction, and every path that ends or holds a box fails its open tasks.
+
+Non-blocking findings, all adopted:
+
+- events are recorded and applied in one transaction;
+- the sweep checks each resource's environment tag;
+- steering is bound to an owner input of the current turn;
+- `hold` is guarded against overwriting a close;
+- the bootstrap hash is kept for the box's life;
+- identity is verified before rotation, so a thief cannot get the real box terminated;
+- message sequencing runs under the box lock;
+- provider calls are time-bounded and sweep errors are contained;
+- claims rotate by last reconciliation;
+- a box closed during an uncertain launch is found and ended;
+- a lost stop is retried;
+- unknown errors return a generic 500;
+- the documentation was corrected.
+
+Ten new tests cover these fixes.

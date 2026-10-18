@@ -9,14 +9,16 @@ CREATE TABLE IF NOT EXISTS boxes (
  reason text NOT NULL DEFAULT '', provider_id text, launch_started_at timestamptz,
  -- Credentials: only hashes are stored. Epoch 0 is the single-use bootstrap secret.
  epoch integer NOT NULL DEFAULT 0, credential_hash text NOT NULL, previous_hash text,
+ -- The consumed bootstrap secret stays recognisable for the box's whole life.
+ bootstrap_hash text,
  retired_hashes text[] NOT NULL DEFAULT '{}', message_seq bigint NOT NULL DEFAULT 0,
  seen_at timestamptz, idle_since timestamptz, running_since timestamptz,
  running_ms bigint NOT NULL DEFAULT 0, stopped_at timestamptz, absolute_deadline timestamptz NOT NULL,
- lease uuid, lease_until timestamptz,
+ lease uuid, lease_until timestamptz, reconciled_at timestamptz,
  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
  UNIQUE(user_id,request_key)
 );
-CREATE INDEX IF NOT EXISTS boxes_live ON boxes(updated_at) WHERE state<>'terminated';
+CREATE INDEX IF NOT EXISTS boxes_live ON boxes(reconciled_at) WHERE state NOT IN ('terminated','held');
 CREATE TABLE IF NOT EXISTS box_tasks (
  id uuid PRIMARY KEY, box_id uuid NOT NULL REFERENCES boxes(id), request_key text NOT NULL,
  kind text NOT NULL, payload jsonb NOT NULL,

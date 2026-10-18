@@ -24,8 +24,13 @@ export interface BoxProvider {
   stop(providerId: string): Promise<void>;
   start(providerId: string): Promise<void>;
   terminate(providerId: string): Promise<void>;
-  /** Every live resource tagged for this environment, for the orphan sweep. */
-  list(): Promise<{ providerId: string; boxId?: string }[]>;
+  /**
+   * Live box resources with their tags, for the orphan sweep. Each entry reports the
+   * environment tag it carries; the sweep never touches a resource from another environment.
+   */
+  list(): Promise<
+    { providerId: string; boxId?: string; environment?: string }[]
+  >;
   /** Optional proof that a hello comes from the recorded instance (EC2 identity document). */
   verifyIdentity?(providerId: string, proof: unknown): Promise<boolean>;
 }
@@ -91,15 +96,19 @@ export class FakeBoxProvider implements BoxProvider {
     this.check("list");
     return [...this.boxes]
       .filter(([, box]) => box.state !== "terminated")
-      .map(([providerId, box]) => ({ providerId, boxId: box.boxId }));
+      .map(([providerId, box]) => ({
+        providerId,
+        boxId: box.boxId,
+        environment: box.request.environment,
+      }));
   }
   /** Simulates a resource created outside any box row (or left behind by a lost row). */
-  orphan(boxId: string) {
+  orphan(boxId: string, environment = "test") {
     const id = `fake-${this.next++}`;
     this.boxes.set(id, {
       boxId,
       state: "running",
-      request: {} as LaunchRequest,
+      request: { environment } as LaunchRequest,
     });
     return id;
   }

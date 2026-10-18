@@ -6,6 +6,7 @@ import { ensureUser, type Database } from "../src/db.js";
 import {
   BoxController,
   BoxCredentialRefused,
+  type BoxTimings,
 } from "../src/boxes/controller.js";
 import { FakeBoxProvider } from "../src/boxes/provider.js";
 import { boxApi } from "../src/boxes/api.js";
@@ -25,6 +26,7 @@ async function fixture(
     retention?: number;
     hardMax?: number;
     identity?: boolean;
+    timings?: Partial<BoxTimings>;
   } = {},
 ) {
   const pg = new PGlite();
@@ -57,7 +59,7 @@ async function fixture(
       },
     },
   };
-  const inputs = new Set<string>(["input-1"]);
+  const inputs = new Set<string>(["run-1:input-1"]);
   const boxes = new BoxController(
     db,
     config,
@@ -65,8 +67,9 @@ async function fixture(
     "b".repeat(64),
     "https://companion.example.com",
     () => now,
-    { pollMs: 0, hostGraceMs: 0 },
-    async (user, inputId) => user === "owner" && inputs.has(inputId),
+    { pollMs: 0, hostGraceMs: 0, ...options.timings },
+    async (user, run, inputId) =>
+      user === "owner" && inputs.has(`${run}:${inputId}`),
   );
   const advance = (ms: number) => {
     now = new Date(now.getTime() + ms);
@@ -320,7 +323,7 @@ test("steering needs the owner's own input and a running task", async (t) => {
     payload: {},
   });
   await assert.rejects(
-    f.boxes.send("owner", id, {
+    f.boxes.send("owner", "run-1", id, {
       requestKey: "m",
       taskId,
       text: "go",
@@ -328,7 +331,17 @@ test("steering needs the owner's own input and a running task", async (t) => {
     }),
     /owner's own message/,
   );
-  await f.boxes.send("owner", id, {
+  // An input from another turn does not authorise steering in this one.
+  await assert.rejects(
+    f.boxes.send("owner", "run-2", id, {
+      requestKey: "m",
+      taskId,
+      text: "go",
+      ownerInputId: "input-1",
+    }),
+    /owner's own message/,
+  );
+  await f.boxes.send("owner", "run-1", id, {
     requestKey: "m",
     taskId,
     text: "go",
@@ -509,7 +522,7 @@ test("the sweep terminates only resources no live box owns", async (t) => {
   assert.equal(live[1].state, "running");
 });
 
-test("a box whose identity cannot be verified is refused and terminated", async (t) => {
+test("a hello without the instance's identity proof is refused before anything changes, sparing the real box", async (t) => {
   const f = await fixture(t, { identity: true });
   const box = await f.boxes.spawn("owner", {
     requestKey: "k",
@@ -526,7 +539,25 @@ test("a box whose identity cannot be verified is refused and terminated", async 
     }),
     BoxCredentialRefused,
   );
-  assert.match((await f.row(box.id)).reason, /identity/);
+  const row = await f.row(box.id);
+  assert.equal(row.state, "booting");
+  assert.equal(row.epoch, 0);
+  assert.ok(
+    (
+      await f.db.query(
+        "SELECT 1 FROM box_notices WHERE box_id=$1 AND notice_key='alert:identity:0'",
+        [box.id],
+      )
+    ).rows.length,
+  );
+  // The real box, with its proof, still completes the exchange.
+  f.identityOk.value = true;
+  const hello = await f.boxes.hello(box.id, {
+    protocol: 1,
+    credential: f.secretOf(box.id),
+    identity: {},
+  });
+  assert.equal(hello.epoch, 1);
 });
 
 test("the HTTP channel answers 401 without detail and serves hello, next and events", async (t) => {
@@ -574,4 +605,291 @@ test("the HTTP channel answers 401 without detail and serves hello, next and eve
     payload: {},
   });
   assert.equal(notUuid.statusCode, 401);
+});
+
+test("a box acknowledging a fresh task is never stopped as idle before it reports busy", async (t) => {
+  const f = await fixture(t);
+  const { id, credential } = await f.live();
+  f.advance(20 * MIN);
+  const { taskId } = await f.boxes.delegate("owner", id, {
+    requestKey: "t",
+    kind: "echo",
+    payload: {},
+  });
+  const polled = await f.boxes.next(id, credential, 0);
+  await f.boxes.next(id, credential, polled.messages[0].seq);
+  await f.boxes.tick();
+  assert.equal((await f.row(id)).state, "ready");
+  await f.boxes.events(id, credential, {
+    epoch: 1,
+    events: [{ seq: 1, kind: "task.result", taskId, payload: {} }],
+  });
+  await f.boxes.tick();
+  assert.equal((await f.row(id)).state, "stopping");
+});
+
+test("no task is left open on a closed, ended or held box", async (t) => {
+  const f = await fixture(t);
+  const { id, credential } = await f.live();
+  const first = await f.boxes.delegate("owner", id, {
+    requestKey: "t1",
+    kind: "echo",
+    payload: {},
+  });
+  await f.boxes.close("owner", id);
+  await assert.rejects(
+    f.boxes.delegate("owner", id, {
+      requestKey: "t2",
+      kind: "echo",
+      payload: {},
+    }),
+    /terminating; start a new box/,
+  );
+  // A retried delegate of an existing task still answers with that task.
+  assert.deepEqual(
+    await f.boxes.delegate("owner", id, {
+      requestKey: "t1",
+      kind: "echo",
+      payload: {},
+    }),
+    first,
+  );
+  const states = async (box: string) =>
+    (
+      await f.db.query("SELECT state FROM box_tasks WHERE box_id=$1", [box])
+    ).rows.map((r) => r.state);
+  assert.deepEqual(await states(id), ["failed"]);
+  await f.boxes.tick();
+  await f.boxes.tick();
+  assert.equal((await f.row(id)).state, "terminated");
+  await assert.rejects(f.boxes.next(id, credential, 0), BoxCredentialRefused);
+
+  // The provider ends a box while it is stopping.
+  const g = await fixture(t);
+  const b = await g.live();
+  g.advance(16 * MIN);
+  await g.boxes.next(b.id, b.credential, 0);
+  await g.boxes.tick();
+  assert.equal((await g.row(b.id)).state, "stopping");
+  await g.boxes.delegate("owner", b.id, {
+    requestKey: "t",
+    kind: "echo",
+    payload: {},
+  });
+  const resource = [...g.provider.boxes.values()][0];
+  resource.state = "terminated";
+  await g.boxes.tick();
+  assert.equal((await g.row(b.id)).state, "terminating");
+  assert.deepEqual(
+    (
+      await g.db.query("SELECT state FROM box_tasks WHERE box_id=$1", [b.id])
+    ).rows.map((r) => r.state),
+    ["failed"],
+  );
+});
+
+test("silent boxes are spared during the host's start-up grace", async (t) => {
+  const f = await fixture(t, { timings: { hostGraceMs: 10 * MIN } });
+  const { id, credential } = await f.live();
+  await f.boxes.next(id, credential, 0);
+  f.advance(5 * MIN);
+  await f.boxes.tick();
+  assert.equal((await f.row(id)).state, "ready");
+  f.advance(6 * MIN);
+  await f.boxes.tick();
+  assert.match((await f.row(id)).reason, /lost/);
+});
+
+test("a lost stop is repeated, a stuck stop escalates, and a box gone before connecting ends", async (t) => {
+  const f = await fixture(t);
+  const { id, credential } = await f.live();
+  f.advance(16 * MIN);
+  await f.boxes.next(id, credential, 0);
+  f.provider.fail.add("stop");
+  await f.boxes.tick();
+  assert.equal((await f.row(id)).state, "stopping");
+  await f.boxes.tick();
+  assert.equal(f.provider.calls.filter((c) => c === "stop").length, 2);
+  assert.equal((await f.row(id)).state, "stopping");
+  await f.boxes.tick();
+  assert.equal((await f.row(id)).state, "stopped");
+
+  const g = await fixture(t);
+  const b = await g.live();
+  g.advance(16 * MIN);
+  await g.boxes.next(b.id, b.credential, 0);
+  (g.provider as any).stop = async () => {};
+  await g.boxes.tick();
+  g.advance(11 * MIN);
+  await g.boxes.tick();
+  assert.match((await g.row(b.id)).reason, /Stop did not complete/);
+
+  const h = await fixture(t);
+  const box = await h.boxes.spawn("owner", {
+    requestKey: "k",
+    profile: "echo",
+    subject: "s",
+  });
+  await h.boxes.tick();
+  h.provider.boxes.clear();
+  await h.boxes.tick();
+  assert.match(
+    (await h.row(box.id)).reason,
+    /ended the box before it connected/,
+  );
+});
+
+test("running time accumulates across stop and start cycles", async (t) => {
+  const f = await fixture(t);
+  const { id, credential } = await f.live();
+  let current = credential;
+  for (let cycle = 0; cycle < 2; cycle++) {
+    f.advance(16 * MIN);
+    await f.boxes.next(id, current, 0);
+    await f.boxes.tick();
+    await f.boxes.tick();
+    assert.equal((await f.row(id)).state, "stopped");
+    f.advance(60 * MIN);
+    await f.boxes.delegate("owner", id, {
+      requestKey: `t${cycle}`,
+      kind: "echo",
+      payload: {},
+    });
+    await f.boxes.tick();
+    current = (await f.boxes.hello(id, { protocol: 1, credential: current }))
+      .credential;
+    const polled = await f.boxes.next(id, current, 0);
+    const taskId = polled.messages.at(-1)!.payload.taskId;
+    await f.boxes.events(id, current, {
+      epoch: (await f.row(id)).epoch,
+      events: [{ seq: 1, kind: "task.result", taskId, payload: {} }],
+    });
+    await f.boxes.next(id, current, polled.messages.at(-1)!.seq);
+  }
+  assert.equal(Number((await f.row(id)).running_ms), 32 * MIN);
+});
+
+test("rotation chains retire every predecessor, and the bootstrap secret is recognised for life", async (t) => {
+  const f = await fixture(t);
+  const { id, credential } = await f.live();
+  const secret = f.secretOf(id);
+  let current = credential;
+  const seen = [current];
+  for (let i = 0; i < 10; i++) {
+    // Presenting the still-unused replacement to hello is its first use.
+    current = (await f.boxes.hello(id, { protocol: 1, credential: current }))
+      .credential;
+    seen.push(current);
+  }
+  await f.boxes.next(id, current, 0);
+  assert.equal((await f.row(id)).epoch, 11);
+  await assert.rejects(
+    f.boxes.hello(id, { protocol: 1, credential: secret }),
+    BoxCredentialRefused,
+  );
+  assert.ok(
+    (
+      await f.db.query(
+        "SELECT 1 FROM box_notices WHERE box_id=$1 AND notice_key LIKE 'alert:retired-hello:%'",
+        [id],
+      )
+    ).rows.length,
+  );
+  assert.equal((await f.row(id)).state, "ready");
+  await assert.rejects(f.boxes.next(id, secret, 0), BoxCredentialRefused);
+  assert.match((await f.row(id)).reason, /Compromised/);
+});
+
+test("the predecessor is refused on events without alarm, and future epochs are rejected", async (t) => {
+  const f = await fixture(t);
+  const { id, credential: c1 } = await f.live();
+  await f.boxes.next(id, c1, 0);
+  const c2 = (await f.boxes.hello(id, { protocol: 1, credential: c1 }))
+    .credential;
+  await assert.rejects(
+    f.boxes.events(id, c1, {
+      epoch: 1,
+      events: [{ seq: 1, kind: "box.state", state: "busy" }],
+    }),
+    BoxCredentialRefused,
+  );
+  assert.equal((await f.row(id)).state, "ready");
+  await assert.rejects(
+    f.boxes.events(id, c2, {
+      epoch: 3,
+      events: [{ seq: 1, kind: "box.state", state: "busy" }],
+    }),
+    /Unknown epoch/,
+  );
+});
+
+test("the sweep spares held, launching and other-environment resources and ends duplicates", async (t) => {
+  const f = await fixture(t);
+  const { id } = await f.live();
+  const duplicate = f.provider.orphan(id);
+  const foreign = f.provider.orphan(
+    "00000000-0000-4000-8000-000000000001",
+    "prod",
+  );
+  const launching = await f.boxes.spawn("owner", {
+    requestKey: "l",
+    profile: "echo",
+    subject: "l",
+  });
+  f.provider.fail.add("launch");
+  await f.boxes.tick();
+  assert.equal((await f.row(launching.id)).state, "launching");
+  const held = await f.boxes.spawn("owner", {
+    requestKey: "h",
+    profile: "echo",
+    subject: "h",
+  });
+  await f.db.query("UPDATE boxes SET state='held' WHERE id=$1", [held.id]);
+  const heldResource = f.provider.orphan(held.id);
+  const terminated = await f.boxes.sweep();
+  assert.deepEqual(terminated, [duplicate]);
+  assert.equal(f.provider.boxes.get(foreign)!.state, "running");
+  assert.equal(f.provider.boxes.get(heldResource)!.state, "running");
+});
+
+test("closing during an uncertain launch finds and ends the resource", async (t) => {
+  const f = await fixture(t);
+  const box = await f.boxes.spawn("owner", {
+    requestKey: "k",
+    profile: "echo",
+    subject: "s",
+  });
+  f.provider.fail.add("launch");
+  await f.boxes.tick();
+  await f.boxes.close("owner", box.id);
+  await f.boxes.tick();
+  await f.boxes.tick();
+  await f.boxes.tick();
+  assert.equal((await f.row(box.id)).state, "terminated");
+  assert.equal([...f.provider.boxes.values()][0].state, "terminated");
+});
+
+test("a long-poll returns as soon as a message arrives", async (t) => {
+  const f = await fixture(t, { timings: { pollMs: 5000 } });
+  const { id, credential } = await f.live();
+  const started = Date.now();
+  const polling = f.boxes.next(id, credential, 0);
+  setTimeout(() => {
+    void f.boxes.delegate("owner", id, {
+      requestKey: "t",
+      kind: "echo",
+      payload: {},
+    });
+  }, 300);
+  const result = await polling;
+  assert.equal(result.messages.length, 1);
+  assert.ok(Date.now() - started < 3000);
+  const app = server();
+  await boxApi(app, f.boxes);
+  t.after(() => app.close());
+  const missing = await app.inject({
+    method: "GET",
+    url: `/boxes/${id}/next?after=0`,
+  });
+  assert.equal(missing.statusCode, 401);
 });

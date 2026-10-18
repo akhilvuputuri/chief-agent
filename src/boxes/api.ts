@@ -22,7 +22,8 @@ export async function boxApi(app: FastifyInstance, boxes: BoxController) {
             return reply.code(401).send({ error: "Box credential refused" });
           if (error instanceof ZodError || error instanceof ToolValidationError)
             return reply.code(400).send({ error: "Invalid box request" });
-          throw error;
+          // Never echo internal detail (SQL, provider errors) to a box.
+          return reply.code(500).send({ error: "Box request failed" });
         }
       };
       api.post("/:id/hello", { bodyLimit: 64000 }, async (req, reply) => {
