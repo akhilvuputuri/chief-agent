@@ -535,7 +535,7 @@ const projections: Record<string, Projection> = {
   ],
   "runtime.call_reconciled": (run, d) => [
     "info",
-    { runId: run, callId: d.id, operation: "calendar_draft" },
+    { runId: run, callId: d.id, operation: d.operation },
   ],
   "library.approval_decided": (run, d) => [
     "info",

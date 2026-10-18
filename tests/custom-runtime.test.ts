@@ -1085,3 +1085,65 @@ test("a success of another operation lets a refused form through again", async (
     await f.pg.close();
   }
 });
+test("a write refused for an earlier uncertain write blocks later writes in the turn, even after a read succeeds", async () => {
+  // 16 October: a refused write was retried three times in one turn because each
+  // successful read in between reset the repeated-failure guard.
+  let n = 0,
+    uncertain = "";
+  const f = await fixture({
+    generate: async () => {
+      n++;
+      if (n === 1) return call("memory_set", { key: "a", value: "1" });
+      if (n === 2) return call("memory_list", {});
+      if (n === 3) {
+        // The earlier write is now settled, so only the turn guard can refuse the next one.
+        await f.db.query(
+          "UPDATE runtime_calls SET state='failed' WHERE id=$1",
+          [uncertain],
+        );
+        return call("memory_set", { key: "b", value: "2" });
+      }
+      return text("A write is waiting on inspection.");
+    },
+  });
+  try {
+    await f.db.query(
+      "INSERT INTO users(id) VALUES('owner') ON CONFLICT DO NOTHING",
+    );
+    const run = randomUUID();
+    uncertain = randomUUID();
+    await f.db.query(
+      "INSERT INTO runtime_runs(id,user_id,state,stop_reason) VALUES($1,'owner','stopped','failed')",
+      [run],
+    );
+    await f.db.query(
+      `INSERT INTO runtime_calls(id,run_id,call_id,operation,arguments,is_write,state,result)
+       VALUES($1,$2,'c','memory_set','{}',true,'uncertain','{"error":{"code":"TOOL_FAILED"}}')`,
+      [uncertain, run],
+    );
+    assert.equal(
+      await f.assistant.respond("owner", "Remember two things"),
+      "A write is waiting on inspection.",
+    );
+    const calls = (
+      await f.db.query(
+        "SELECT operation,state,result FROM runtime_calls WHERE run_id<>$1 ORDER BY started_at,id",
+        [run],
+      )
+    ).rows;
+    assert.deepEqual(
+      calls.map((c) => [c.operation, c.state, c.result?.error?.code ?? null]),
+      [
+        ["memory_set", "failed", "WRITE_BLOCKED"],
+        ["memory_list", "success", null],
+        ["memory_set", "failed", "WRITE_BLOCKED"],
+      ],
+    );
+    assert.equal(
+      (await f.db.query("SELECT count(*)::int n FROM memories")).rows[0].n,
+      0,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});

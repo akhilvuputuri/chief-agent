@@ -371,6 +371,65 @@ export async function settleUncertainDrafts(db: Database, user: string) {
   return settled.rows.length;
 }
 // Startup recovery is deliberately conservative. No old invocation is replayed.
+/** Each settled coding operation and the record its write would leave, keyed by its request key. */
+const codingTraces: Record<string, string> = {
+  coding_start: `EXISTS(SELECT 1 FROM coding_jobs j WHERE j.user_id=$2 AND j.request_key=$3)`,
+  coding_reply: `EXISTS(SELECT 1 FROM coding_revisions v WHERE v.job_id::text=$4 AND v.request_key=$3)`,
+  coding_resume: `(EXISTS(SELECT 1 FROM coding_revisions v WHERE v.job_id::text=$4 AND v.request_key=$3)
+    OR EXISTS(SELECT 1 FROM coding_events e WHERE e.job_id::text=$4
+      AND (e.event_key='continue:'||$3 OR e.event_key LIKE 'requirements:%:'||$3)))`,
+};
+/**
+ * Settles the owner's uncertain coding_start/coding_reply/coding_resume calls that
+ * provably saved nothing. Each is idempotent by request key: its only write is a job
+ * (start), a revision (reply/resume), a continue event or a requirements card (resume),
+ * all keyed by that request key and inserted in the dispatcher's single statement. Once
+ * the run has stopped, no such row means the call failed. Rows that exist stay uncertain
+ * for an operator. Never replays. The update and its event are one statement.
+ */
+export async function settleUncertainCoding(db: Database, user: string) {
+  const candidates = (
+    await db.query(
+      `SELECT c.id,c.operation,c.arguments FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id
+       WHERE r.user_id=$1 AND c.state='uncertain' AND c.operation = ANY($2::text[])
+         AND r.state<>'running' AND c.started_at < now() - interval '2 minutes'`,
+      [user, Object.keys(codingTraces)],
+    )
+  ).rows;
+  let count = 0;
+  for (const row of candidates) {
+    let args: { requestKey?: unknown; id?: unknown };
+    try {
+      args = JSON.parse(row.arguments?.raw ?? "");
+    } catch {
+      continue;
+    }
+    const key = typeof args.requestKey === "string" ? args.requestKey : "";
+    const job = typeof args.id === "string" ? args.id : "";
+    if (!key || (row.operation !== "coding_start" && !job)) continue;
+    const settled = await db.query(
+      `WITH fixed AS (
+        UPDATE runtime_calls c SET state='failed',
+          result=COALESCE(c.result,'{}'::jsonb) || jsonb_build_object('reconciliation',
+            jsonb_build_object('at',now(),'from','uncertain','to','failed',
+              'basis','run stopped with no coding record for this request key'))
+        FROM runtime_runs r WHERE c.id=$1 AND r.id=c.run_id AND r.user_id=$2 AND r.state<>'running'
+          AND c.state='uncertain' AND $3::text IS NOT NULL AND $4::text IS NOT NULL
+          AND NOT ${codingTraces[row.operation]}
+        RETURNING c.id, c.run_id, c.operation
+      )
+      INSERT INTO events(run_id,user_id,type,data)
+      SELECT run_id,$2,'runtime.call_reconciled',jsonb_build_object('id',id,'operation',operation) FROM fixed
+      RETURNING run_id,data`,
+      [row.id, user, key, job],
+    );
+    for (const s of settled.rows) {
+      projectEvent("runtime.call_reconciled", s.run_id, s.data);
+      count++;
+    }
+  }
+  return count;
+}
 export async function recoverRuntime(db: Database) {
   // Charge interrupted active execution conservatively, capped at remaining allocation.
   await db.query(

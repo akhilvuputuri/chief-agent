@@ -20,6 +20,8 @@ export class RepeatedFailureError extends Error {
 }
 /** The host has established that this invocation made no domain mutation. */
 export class ToolValidationError extends Error {}
+/** An earlier write's outcome is uncertain, so this write was refused before any mutation. */
+export class WriteBlockedError extends ToolValidationError {}
 export function toolError(error: unknown) {
   const message = error instanceof Error ? error.message : "";
   if (error instanceof McpFailure)
@@ -42,6 +44,14 @@ export function toolError(error: unknown) {
             ? "MCP capacity limit; honour retryAfterSeconds or request owner action."
             : "MCP operation failed; inspect its durable state before retrying a write.",
       retryAfterSeconds: error.retryAfterSeconds,
+    };
+  if (error instanceof WriteBlockedError)
+    return {
+      code: "WRITE_BLOCKED",
+      retryable: false,
+      message:
+        message.replace(/\.?$/, ".") +
+        " No further writes run in this request. Do not retry: answer from what you have and tell the owner that a write is waiting on inspection.",
     };
   if (error instanceof ToolValidationError)
     return { code: "VALIDATION_FAILED", retryable: false, message };
