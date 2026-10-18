@@ -89,3 +89,25 @@ test("with no open tasks the briefing says so; calendar and email stay optional 
   );
   assert.deepEqual(f.calls, ["calendar", "gmail"]);
 });
+test("a long lead is cut by code point with an ellipsis, and unread email appears as a section", async () => {
+  const f = await fixture();
+  const brief = await buildBriefing(
+    f.job({ content: "a" + "😀".repeat(400), include_email: true }),
+    {
+      ...f.deps,
+      gmail: {
+        call: async () => ({
+          messages: [{ from: "Bank", subject: "Statement ready", snippet: "" }],
+        }),
+      },
+    },
+  );
+  const lead = brief.reply.split(" — ")[0];
+  assert.equal(Array.from(lead).length, 300);
+  assert.ok(lead.endsWith("…"));
+  assert.doesNotMatch(lead, /[\ud800-\udbff](?![\udc00-\udfff])/);
+  assert.equal(
+    brief.sections![1].title,
+    "Unread inbox — past 24 hours (up to 5)",
+  );
+});

@@ -102,7 +102,10 @@ export async function buildBriefing(
       });
     }
   }
-  const lead = j.content.trim().slice(0, 300);
+  // Cut by code point so an emoji is never split, and mark the cut.
+  const chars = Array.from(j.content.trim());
+  const lead =
+    chars.length > 300 ? chars.slice(0, 299).join("") + "…" : chars.join("");
   const others = sections.slice(1).map((s) => s.title);
   return {
     reply: [
