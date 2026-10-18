@@ -85,7 +85,9 @@ Fixes:
 - A regression test covers the child path, and fails when the delegation refusal is removed.
 - [The learning guide](coding-agent-lessons.md) has a new entry.
 
-Delta review of this change is pending.
+The delta review approved `3711831`. Its one non-blocking note: while blocked, read-only delegations (research, email, media) are also refused. A media attachment can only be read in the turn it arrives, so a follow-up may refuse only agent types that have write tools.
+
+Devin on `3711831` reported that a failed child lookup returned "not blocked", which still permitted repeat delegations. The lookup now fails closed: an error is logged as `agent.block_check_failed` and the child is treated as blocked. A test covers this and fails when the fallback is reverted to "not blocked". Delta review of this change is pending.
 
 ## Verification and outcome
 

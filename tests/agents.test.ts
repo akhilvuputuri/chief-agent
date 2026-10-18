@@ -719,3 +719,45 @@ test("a delegated agent's refused write blocks the coordinator from delegating a
     await pg.close();
   }
 });
+test("if the child's write-block lookup fails, the coordinator treats the child as blocked", async () => {
+  // Devin, PR 249: a failed lookup returned "not blocked" and permitted repeat delegations.
+  const { pg, db } = await database();
+  const original = Execution.prototype.writesBlockedIn;
+  Execution.prototype.writesBlockedIn = async () => {
+    throw new Error("lookup failed");
+  };
+  let coordinatorCalls = 0;
+  const behaviour = async (input: Parameters<ModelAdapter["generate"]>[0]) => {
+    if (system(input).includes("You are the jobs agent"))
+      return call("agent_report", {
+        status: "complete",
+        summary: "Nothing to do.",
+        findings: [],
+        refs: [],
+      });
+    coordinatorCalls++;
+    if (coordinatorCalls === 1)
+      return call("agent_run", { type: "jobs", objective: "List roles" });
+    if (coordinatorCalls === 2) {
+      assert.equal(lastTool(input).result.writesBlocked, true);
+      return call("agent_run", { type: "jobs", objective: "List roles again" });
+    }
+    if (coordinatorCalls === 3)
+      assert.equal(lastTool(input).error.code, "WRITE_BLOCKED");
+    return text("Done.");
+  };
+  const main: ModelAdapter = { model: "main/model", generate: behaviour };
+  const assistant = new Assistant(
+    db,
+    new CustomAgent(main, {}, (id) => ({ model: id, generate: behaviour })),
+    new JobTools(db, { call: async () => ({}) }),
+    { web: true },
+  );
+  try {
+    assert.equal(await assistant.respond("owner", "list my roles"), "Done.");
+    assert.equal(coordinatorCalls, 3);
+  } finally {
+    Execution.prototype.writesBlockedIn = original;
+    await pg.close();
+  }
+});
