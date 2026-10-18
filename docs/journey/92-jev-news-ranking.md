@@ -88,13 +88,18 @@ Two research passes on 18 October. These are reported findings with sources, not
     - A 429 was retried at once. It now waits a short random pause.
     - The exploration pick could exceed the per-site cap. It now keeps the cap when another site is available, and the probability stays exact.
     - Jev's cost is not in the per-run provider charges. Documented.
-- Re-review of the fixes: pending.
+- **Re-review of `3f55045`:** APPROVE.
+- **Devin Review** (on `36a636c`, a second signal) found three candidate-log errors that would have mislabelled the learning data. All are fixed, each with a test that fails without the fix:
+  - items dropped to fit one Telegram message were logged as shown; `shown` and `position` now come from the delivered message;
+  - a delivered item ranked beyond the top 50 was missing from the log; it is now appended;
+  - `rank` was the deterministic rank even when Jev set the order; `orderRank` is added.
+- Re-review of these fixes: pending.
 
 ## Verification and outcome
 
 Tested locally:
 
-- after the review fixes: typecheck, 977 application tests and 51 script tests pass; earlier, the eval tests, `check:pi`, build and format passed;
+- after the review fixes: typecheck, 979 application tests and 51 script tests pass; earlier, the eval tests, `check:pi`, build and format passed;
 - `check:coding` needs `ruff`, not installed locally; CI runs it.
 
 Not measured:

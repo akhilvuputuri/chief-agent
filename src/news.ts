@@ -422,6 +422,7 @@ export function composeSelection(
       items: explore ? sortRegular(chooseItems(order, opts.count)) : regular,
       explored: undefined,
       probability: undefined,
+      order,
     };
   const pick =
     spare[
@@ -433,7 +434,7 @@ export function composeSelection(
   );
   const items = [...regular];
   items.splice(at, 0, pick);
-  return { items, explored: pick, probability: 1 / spare.length };
+  return { items, explored: pick, probability: 1 / spare.length, order };
 }
 
 const WEEKDAYS = "Sun Mon Tue Wed Thu Fri Sat".split(" ");
@@ -1041,8 +1042,17 @@ export class NewsBulletin {
             }
           : { by: rankedBy },
         // The ranked candidates (shown or not) with both scores: the learning sample.
-        candidates: ranked.unique.slice(0, CANDIDATE_LOG).map((s, i) => ({
-          rank: i + 1,
+        // The top of the deterministic ranking plus anything delivered from beyond it.
+        // `rank` is the deterministic rank, `orderRank` the rank in the order used;
+        // `shown` and `position` describe the message actually sent.
+        candidates: [
+          ...ranked.unique.slice(0, CANDIDATE_LOG),
+          ...edition.items.filter(
+            (s) => ranked.unique.indexOf(s) >= CANDIDATE_LOG,
+          ),
+        ].map((s) => ({
+          rank: ranked.unique.indexOf(s) + 1,
+          orderRank: selection.order.indexOf(s) + 1,
           canonical: s.canonical,
           title: clip(s.entry.title, 200),
           site: s.domain,
@@ -1054,8 +1064,8 @@ export class NewsBulletin {
           siteAffinity: s.score.site,
           similar: s.score.similar,
           jev: jev?.ok ? (jev.scores.get(s.canonical) ?? null) : null,
-          shown: selection.items.includes(s),
-          position: selection.items.indexOf(s) + 1 || null,
+          shown: edition.items.includes(s),
+          position: edition.items.indexOf(s) + 1 || null,
           ...(s === selection.explored ? { explore: true } : {}),
         })),
         // Every suggestion and its score is kept in news_items; joined with

@@ -1515,6 +1515,10 @@ test("Jev ranks the bulletin: its order is used, and every candidate and decisio
     // Shown and unshown candidates, each with both scores and its position if shown.
     assert.ok(trace.candidates.length >= 3);
     assert.ok(trace.candidates.some((c: any) => !c.shown));
+    // Jev moved gardening to the top: its order rank is 1, its deterministic rank is not.
+    const garden = trace.candidates.find((c: any) => /Gardening/.test(c.title));
+    assert.equal(garden.orderRank, 1);
+    assert.ok(garden.rank > 1);
     for (const c of trace.candidates) {
       assert.equal(typeof c.total, "number");
       assert.equal(typeof c.jev, "number");
@@ -1639,6 +1643,116 @@ test("a long title with an emoji at the cut point is stored safely", async () =>
       .trace;
     const logged = trace.candidates.find((c: any) => c.title.startsWith("aaa"));
     assert.equal(logged.title, "a".repeat(199));
+  } finally {
+    await f.pg.close();
+  }
+});
+
+const words = (n: number) =>
+  Array.from({ length: 4 }, (_, k) => `w${n}x${k}${"q".repeat(k)}`).join(" ");
+
+test("the candidate log keeps delivered items beyond its cap and marks only what was sent", async () => {
+  const now = sgtAt("2026-09-28T07:00");
+  const f = await fixture(now);
+  try {
+    // Fifty topic matches from one site outrank everything else; the per-site cap then
+    // fills the edition from the second site, ranked beyond the log's top 50.
+    f.fetcher.pages.set(
+      "https://alpha.example/",
+      rss(
+        "Alpha",
+        Array.from({ length: 50 }, (_, i) => ({
+          title: `AI ${words(i)}`,
+          url: `https://alpha.example/${i}`,
+          at: hoursBefore(now, 1),
+        })),
+      ),
+    );
+    f.fetcher.pages.set(
+      "https://beta.example/",
+      rss(
+        "Beta",
+        Array.from({ length: 5 }, (_, i) => ({
+          title: `Other ${words(100 + i)}`,
+          url: `https://beta.example/${i}`,
+          at: hoursBefore(now, 30),
+        })),
+      ),
+    );
+    await f.call({ operation: "news_source_add", site: "alpha.example" });
+    await f.call({ operation: "news_source_add", site: "beta.example" });
+    await f.call({
+      operation: "news_settings",
+      deliveryTime: "08:00",
+      topics: ["AI"],
+      enabled: true,
+    });
+    f.setNow(sgtAt("2026-09-28T08:00"));
+    await f.bulletin.tick();
+    assert.equal(f.sent.length, 1);
+    const trace = (await f.db.query("SELECT trace FROM news_editions")).rows[0]
+      .trace;
+    const sent = (
+      await f.db.query("SELECT canonical_url FROM news_items ORDER BY position")
+    ).rows.map((r: any) => r.canonical_url);
+    const logged = new Map(trace.candidates.map((c: any) => [c.canonical, c]));
+    // Every delivered item is in the log, as shown, with its delivered position.
+    for (const [i, url] of sent.entries()) {
+      assert.ok(logged.has(url), url);
+      assert.equal((logged.get(url) as any).shown, true);
+      assert.equal((logged.get(url) as any).position, i + 1);
+    }
+    assert.ok(trace.candidates.some((c: any) => c.rank > 50 && c.shown));
+    assert.equal(
+      trace.candidates.filter((c: any) => c.shown).length,
+      sent.length,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("items dropped to fit one Telegram message are not logged as shown", async () => {
+  const now = sgtAt("2026-09-28T07:00");
+  const f = await fixture(now);
+  try {
+    // Long titles and links: five items cannot fit one message, so trailing ones are dropped.
+    for (const [n, site] of ["alpha", "beta", "gamma"].entries())
+      f.fetcher.pages.set(
+        `https://${site}.example/`,
+        rss(
+          site,
+          [0, 1].map((i) => ({
+            title: `${site} ${words(10 * n + i)} ${"t".repeat(250)}`,
+            url: `https://${site}.example/${i}/${"p".repeat(540)}`,
+            at: hoursBefore(now, 1 + i),
+          })),
+        ),
+      );
+    for (const site of ["alpha", "beta", "gamma"])
+      await f.call({ operation: "news_source_add", site: `${site}.example` });
+    await f.call({
+      operation: "news_settings",
+      deliveryTime: "08:00",
+      enabled: true,
+    });
+    f.setNow(sgtAt("2026-09-28T08:00"));
+    await f.bulletin.tick();
+    assert.equal(f.sent.length, 1);
+    const delivered = (
+      await f.db.query("SELECT count(*)::int n FROM news_items")
+    ).rows[0].n;
+    assert.ok(delivered < 5, `delivered ${delivered}`);
+    // More were selected than sent: the dropped ones exist in the log as not shown.
+    const trace0 = (await f.db.query("SELECT trace FROM news_editions")).rows[0]
+      .trace;
+    assert.ok(trace0.candidates.length >= 5);
+    const trace = (await f.db.query("SELECT trace FROM news_editions")).rows[0]
+      .trace;
+    assert.equal(
+      trace.candidates.filter((c: any) => c.shown).length,
+      delivered,
+    );
   } finally {
     await f.pg.close();
   }

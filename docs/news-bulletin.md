@@ -52,7 +52,7 @@ Since [journal 92](journey/92-jev-news-ranking.md), TypeSafe's Jev decision mode
 - **What is recorded.**
   - Each `news_items.score` adds `jev` (the probability or `null`), `rankedBy` (`jev`, `jev_rrf` or `rules`) and, for the exploration pick, `explore` and `exploreProbability`.
   - The edition `trace` adds `ranker`: method, config `version` hash, saves in context, requests, latency, cost, model and error.
-  - It also adds `candidates`: the top 50 ranked candidates, shown or not, with rank, every sub-score, Jev's probability, `shown` and `position`. Joined with later Reader saves, this is the labelled sample for evaluating rankers offline.
+  - It also adds `candidates`: the top 50 of the deterministic ranking, plus any delivered item ranked beyond them. Each has `rank` (deterministic), `orderRank` (in the order actually used), every sub-score, Jev's probability, and `shown` and `position` as delivered: items dropped to fit one Telegram message are not shown. Joined with later Reader saves, this is the labelled sample for evaluating rankers offline.
 - **Cost.** About $0.0005 per edition. Editions are not conversation runs, so Jev's ranking cost is recorded in the edition trace and the log line, not in the per-run provider charges.
 - **Log line.** The operational log line `news.ranked` carries the method, candidates asked, latency, cost and error code, without titles.
 - **Config.** [config/news-ranker.json](../config/news-ranker.json) holds the question, model, limits, `order`, `rrfK` and `exploreWindow`.
