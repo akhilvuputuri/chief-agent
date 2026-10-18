@@ -1,10 +1,11 @@
 # Reliability fixes from the two-week review — live, 19 October 2026
 
-Three fixes from the review of two weeks of logs and conversations are deployed, each with an exact release receipt; live acceptance is pending for all three. [Release record](docs/releases.md).
+Four fixes from the review of two weeks of logs and conversations are deployed, each with an exact release receipt; live acceptance is pending for all four. [Release record](docs/releases.md).
 
 - A refused coding request can no longer block every owner write: provably empty coding calls settle themselves, pre-write refusals are validation errors and a blocked write stops the turn. PR 249, `9437d86`, in v0.3.83. [Journal 92](docs/journey/92-uncertain-coding-write-lock.md).
 - Requirements and monitoring cards stay valid for 24 hours, and each foreground turn lists coding jobs and expired cards that wait on the owner. PR 251, `11d13c6`. [Journal 94](docs/journey/94-open-loops-context.md).
 - Briefings lead with their own text and list live open to-dos; to-do review reminders become briefings. PR 252, `3b93fa7`. [Journal 95](docs/journey/95-live-todo-reminders.md).
+- A coding job paused by a transient fault (stopped sandbox, lost heartbeat, provider 429/5xx) is retried once automatically, with a notice; a second pause waits for the owner. Owner-approved exception. PR 257, `496fd50`, first deployed in `c1d556b`. [Journal 96](docs/journey/96-coding-transient-retry.md).
 
 # Invoices linked to the subscription tracker — live as v0.3.83, 19 October 2026
 

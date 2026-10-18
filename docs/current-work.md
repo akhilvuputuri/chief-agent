@@ -1,6 +1,6 @@
-# Coding transient retry — in review, 19 October 2026
+# Coding transient retry — released, 19 October 2026
 
-The host now re-queues a paused coding job once, with a notice to the owner, when the pause came from a stopped sandbox, a lost heartbeat or a provider 429 or 5xx. A job that pauses again waits for the owner. The owner approved this exception on 17 October 2026. See [journal 96](journey/96-coding-transient-retry.md).
+The host now re-queues a paused coding job once, with a notice to the owner, when the pause came from a stopped sandbox, a lost heartbeat or a provider 429 or 5xx. A job that pauses again waits for the owner. The owner approved this exception on 17 October 2026. PR 257 deployed in `c1d556b`; live acceptance pending. See [journal 96](journey/96-coding-transient-retry.md).
 
 # Price-change alerts — in review, 19 October 2026
 
