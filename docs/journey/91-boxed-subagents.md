@@ -141,7 +141,7 @@ The plan is now: build the box layer with a fake provider for tests and a local 
 
 Added:
 
-- `db/032_boxes.sql`;
+- `db/032_boxes.sql`, staged on 19 October as `db-staged/032_boxes.sql` (see below);
 - `src/boxes/` (provider interface and fake provider, credentials, `BoxController`, `/boxes/*` routes);
 - `tests/boxes.test.ts`.
 
@@ -197,3 +197,11 @@ The other two points:
 
 - **Early long-poll abort.** Devin said a GET's request `close` aborts the long-poll at once. This was not reproduced on Node 22.19 with Fastify 5.12: a test with the old binding still waited the full interval. The abort is now bound to the response closing before it is written, which is correct on any version.
 - **Events from an earlier epoch.** These are kept deliberately. An agent sends events queued before a rotation under their original epoch, with its current credential. Task updates apply only to queued or running tasks, so an old event cannot overwrite a finished one.
+
+### Release blocked by the migration, and unblocked — 19 October 2026
+
+PR 259 merged with `db/032_boxes.sql` but no Compose inventory line and no operator rollout. The release guard in `scripts/cloud-release.py` refuses any change to `db/` or `compose.yaml` that a reviewed rollout has not installed, so the release of `860c45e` was refused (measured: release run 39157500387, "Database or Compose change requires a reviewed migration/deployment procedure"). Production stayed on `ef37e12`, and every later merge to main, from any session, would have been refused the same way.
+
+The box layer is dormant and nothing reads its tables, so the migration moved to `db-staged/` until phase 2c installs it with a reviewed rollout. The guard then sees `db/` unchanged, and the normal release proceeds.
+
+Lesson: a migration enters `db/` only together with its Compose inventory line and a reviewed rollout that runs right after the merge, never with dormant code alone.

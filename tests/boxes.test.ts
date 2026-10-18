@@ -37,6 +37,13 @@ async function fixture(
     await pg.exec(
       await readFile(new URL("../db/" + f, import.meta.url), "utf8"),
     );
+  // The box migration is staged outside db/ until its reviewed rollout (docs/boxes.md).
+  await pg.exec(
+    await readFile(
+      new URL("../db-staged/032_boxes.sql", import.meta.url),
+      "utf8",
+    ),
+  );
   const db = pg as unknown as Database;
   await ensureUser(db, "owner");
   await ensureUser(db, "other");
