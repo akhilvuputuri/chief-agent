@@ -380,7 +380,7 @@ export class SubscriptionTools {
       );
     const rows = (
       await this.db.query(
-        `${matchedInvoices} AND ($2::uuid IS NULL OR g.collection_id=$2) ORDER BY g.match_date DESC,g.collection_id,g.target_key,g.artifact_id LIMIT 2000`,
+        `${matchedInvoices} AND ($2::uuid IS NULL OR g.collection_id=$2) ORDER BY g.match_date DESC,g.collection_id,g.target_key,g.artifact_id`,
         [user, assigned ?? a.collectionId ?? null],
       )
     ).rows as MatchedInvoice[];
@@ -424,7 +424,7 @@ export class SubscriptionTools {
         productLabels: row.facts.productLabels,
         invoiceDates: row.facts.invoiceDates,
         serviceMonths: row.facts.serviceMonths,
-        amounts: row.facts.amounts.slice(0, 12),
+        amounts: row.facts.amounts,
         linkedSubscriptionIds: linked.get(row.artifact_id) ?? [],
       })),
       total: shownRows.length,
@@ -494,7 +494,6 @@ export class SubscriptionTools {
           : facts.invoiceDates.length === 1
             ? facts.invoiceDates[0]!
             : null;
-      const invoiceDate = fields.lastInvoiceDate ?? recorded;
       if (!issuers.some((n) => sameIssuer(owner, n)))
         refusal =
           "This invoice's recorded issuer does not match this item's merchant (or its label when it has no merchant).";
@@ -507,12 +506,10 @@ export class SubscriptionTools {
           "This invoice explicitly identifies a different plan or product from this item.";
       else if (
         target?.accountLabel &&
-        data.accountLabel &&
         subscriptionKey(target.accountLabel) !==
           subscriptionKey(data.accountLabel)
       )
-        refusal =
-          "This invoice was gathered for a different account label than this item.";
+        refusal = `This invoice was gathered for account "${target.accountLabel}"; it can update only an item with that accountLabel.`;
       else if (
         (fields.amount != null || fields.currency != null) &&
         !facts.amounts.some(
@@ -524,23 +521,18 @@ export class SubscriptionTools {
       )
         refusal =
           "That amount and currency do not occur in the invoice's recorded amounts; use an amount listed by subscription_invoices or ask the owner.";
-      else if (
-        fields.lastInvoiceDate &&
-        !(
-          (row.date_basis === "invoice_date" &&
-            row.match_date === fields.lastInvoiceDate) ||
-          facts.invoiceDates.includes(fields.lastInvoiceDate)
-        )
-      )
-        refusal =
-          "lastInvoiceDate must be the invoice date recorded for this file.";
+      // Only a single recorded invoice date can set lastInvoiceDate or order this invoice; the caller never chooses it.
+      else if (fields.lastInvoiceDate && fields.lastInvoiceDate !== recorded)
+        refusal = recorded
+          ? `lastInvoiceDate must be this file's recorded invoice date (${recorded}).`
+          : "This file has no single recorded invoice date, so lastInvoiceDate cannot come from it; ask the owner.";
       else if (
         old?.data.lastInvoiceDate &&
-        (!invoiceDate || invoiceDate < old.data.lastInvoiceDate)
+        (!recorded || recorded < old.data.lastInvoiceDate)
       )
-        refusal = invoiceDate
-          ? `This invoice (${invoiceDate}) is older than the saved last invoice (${old.data.lastInvoiceDate}); an older invoice cannot replace newer invoice fields.`
-          : `This invoice has no single recorded invoice date, so it cannot be ordered against the saved last invoice (${old.data.lastInvoiceDate}); pass lastInvoiceDate from its recorded invoiceDates if it has one, otherwise ask the owner.`;
+        refusal = recorded
+          ? `This invoice (${recorded}) is older than the saved last invoice (${old.data.lastInvoiceDate}); an older invoice cannot replace newer invoice fields.`
+          : `This invoice has no single recorded invoice date, so it cannot be ordered against the saved last invoice (${old.data.lastInvoiceDate}); ask the owner.`;
       else if (fields.amount != null && !fields.lastInvoiceDate && recorded)
         refusal = `Include this invoice's lastInvoiceDate (${recorded}) with its amount so later invoices can be ordered.`;
       else
@@ -854,12 +846,14 @@ export class SubscriptionTools {
       inputIds: await this.sourceIds(user, run, a.sourceInputIds),
       ...(evidence ? { invoice: evidence.ref } : {}),
     };
+    // Any change to the amount/currency pair, including to or from unknown.
     const priceChange =
       old &&
-      fields.amount != null &&
-      old.data.amount != null &&
+      (fields.amount !== undefined || fields.currency !== undefined) &&
       (old.data.currency !== data.currency ||
-        decimalKey(old.data.amount) !== decimalKey(data.amount!))
+        (old.data.amount == null) !== (data.amount == null) ||
+        (old.data.amount != null &&
+          decimalKey(old.data.amount) !== decimalKey(data.amount!)))
         ? {
             from: { amount: old.data.amount, currency: old.data.currency },
             to: { amount: data.amount, currency: data.currency },
@@ -932,7 +926,7 @@ export class SubscriptionTools {
           );
       if (priceChange)
         warnings.push(
-          `${data.label}: price changed from ${priceChange.from.amount} ${priceChange.from.currency} to ${priceChange.to.amount} ${priceChange.to.currency}${evidence ? ` (invoice ${evidence.ref.matchDate})` : ""}.`,
+          `${data.label}: price changed from ${priceChange.from.amount == null ? "unknown" : `${priceChange.from.amount} ${priceChange.from.currency}`} to ${priceChange.to.amount == null ? "unknown" : `${priceChange.to.amount} ${priceChange.to.currency}`}${evidence ? ` (invoice ${evidence.ref.matchDate})` : ""}.`,
         );
       return {
         ...read,

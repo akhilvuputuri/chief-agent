@@ -40,19 +40,19 @@ The AFTER trigger avoids reserving a slot for the attempted INSERT path of an up
 
 The tracker can take amounts and invoice dates from invoices that [gathering](gathering.md) matched, when the owner asks for that. A matched invoice alone is still not an instruction to save it.
 
-- `subscription_invoices(collectionId?, issuer?, offset?)` lists the owner's matched invoices from each collection's current scope, newest first. Each row has the gathering target, recorded issuer/product labels, invoice dates, service months, every currency amount found in the PDF and the subscription IDs already linked to it. Amounts include subtotals and tax, so they are candidates, not a verified charge. It is read-only and offered whenever subscriptions are on.
+- `subscription_invoices(collectionId?, issuer?, offset?)` lists the owner's matched invoices from each collection's current scope, newest first. Each row has the gathering target, recorded issuer/product labels, invoice dates, service months, every currency amount found in the PDF (up to the 30 that gathering records) and the subscription IDs already linked to it. Paging covers every current match. Amounts include subtotals and tax, so they are candidates, not a verified charge. It is read-only and offered whenever subscriptions are on.
 - `subscription_record(..., invoice: {collectionId, artifactId})` cites one matched invoice. The host accepts it only for `amount`/`currency` and the new `lastInvoiceDate` field, and refuses the record unless:
   - the file is a current-scope match owned by this owner;
   - the amount and currency occur in its recorded amounts, compared as decimals;
-  - `lastInvoiceDate` is its recorded invoice date;
+  - `lastInvoiceDate` is its single recorded invoice date (the match date for an invoice-date match, or the only date on the PDF); a PDF with several invoice dates cannot set it;
   - the item's merchant (or its label when it has no merchant) names the invoice's issuer, ignoring trailing legal or domain suffixes such as "AB", "PBC" or ".ai" unless what remains is under three characters: the same known vendor group, or one name leading the other ("YouTube" and "YouTube Premium"); a shared later word such as "Premium" or "Max" does not count, and the plan never decides the issuer;
   - no plan conflicts with the invoice's product, checked on the plan, the label and their combinations with the merchant or vendor family (a Claude Pro invoice cannot update an item saved as "Claude" plan "Max", "Max 5x" or "Max20");
-  - the gathered account label, when set, matches the item's;
-  - once a `lastInvoiceDate` is saved, the cited invoice has a single recorded invoice date that is not older, for any invoice-backed field;
+  - when the invoice was gathered for an account label, the item carries the same `accountLabel` (an unlabelled item cannot take it);
+  - once a `lastInvoiceDate` is saved, the cited invoice has a single recorded invoice date that is not older, for any invoice-backed field; the caller's date never orders it;
   - an invoice-backed amount comes with that invoice's `lastInvoiceDate` when the invoice records one;
   - an agent working on a gathering collection cites only that collection; the coordinator and unbound agents may cite any of the owner's collections.
 - Accepted fields get `sourceKind: "invoice"` with the collection and artifact IDs in `field_sources`. The update's `source_ref` adds the invoice reference and its gathering receipt. `source_kind` stays `owner`, because the owner authorised the update; no migration is needed. Other fields in the same call stay owner-sourced, and `confidence` reports when any field came from an invoice.
-- Any amount change on an update returns `priceChange` (previous and new amount and currency, and whether an invoice supplied it) and a warning line. Exact retries and request-key reuse rules are unchanged; the invoice reference is part of the request hash only when present, so older retries keep their hashes.
+- Any change to the amount/currency pair on an update, including a currency-only change and changes to or from unknown, returns `priceChange` (previous and new pair, and whether an invoice supplied it) and a warning line. Exact retries and request-key reuse rules are unchanged; the invoice reference is part of the request hash only when present, so older retries keep their hashes.
 - Writes still need a foreground owner turn. A background gathering pass reports the pending tracker update instead.
 - The Mini App shows the last invoice date, marks invoice-sourced items and links each invoice-backed history entry to its collection.
 

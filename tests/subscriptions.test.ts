@@ -1248,7 +1248,10 @@ test("invoice-backed records are checked against the matched PDF's recorded clue
     for (const [fields, error] of [
       [{ ...claude, amount: "120", currency: "USD" }, /do not occur/],
       [{ ...claude, amount: "100", currency: "SGD" }, /do not occur/],
-      [{ ...claude, lastInvoiceDate: "2026-09-06" }, /recorded for this file/],
+      [
+        { ...claude, lastInvoiceDate: "2026-09-06" },
+        /recorded invoice date \(2026-09-05\)/,
+      ],
       [
         {
           ...claude,
@@ -1435,7 +1438,7 @@ test("invoice evidence is owner-scoped, needs a match and respects the gathered 
           },
         },
       ),
-      /different account label/,
+      /gathered for account "Work"/,
     );
     await assert.rejects(
       f.record(
@@ -1448,6 +1451,24 @@ test("invoice evidence is owner-scoped, needs a match and respects the gathered 
         },
       ),
       /Include this invoice's lastInvoiceDate/,
+    );
+    // An unlabelled item cannot take an account-specific invoice.
+    await assert.rejects(
+      f.record(
+        {
+          ...claude,
+          amount: "100",
+          currency: "USD",
+          lastInvoiceDate: "2026-09-05",
+        },
+        {
+          invoice: {
+            collectionId: work.collectionId,
+            artifactId: work.artifactId,
+          },
+        },
+      ),
+      /gathered for account "Work"/,
     );
     const ok = await f.record(
       {
@@ -1822,6 +1843,112 @@ test("an agent bound to a gathering task reads and cites only its assigned colle
         .total,
       2,
     );
+  } finally {
+    await f.pg.close();
+  }
+});
+test("ambiguous invoice dates never order an invoice and every price-pair change is reported", async () => {
+  const f = await fixture();
+  try {
+    const item = await f.record({
+      ...claude,
+      amount: "100",
+      currency: "USD",
+      lastInvoiceDate: "2026-10-05",
+    });
+    // A service-period PDF naming two invoice dates cannot set or order lastInvoiceDate.
+    const twoDates = await matchedInvoice(f.db, {
+      date: "2026-11-05",
+      amounts: [{ currency: "USD", amount: "120" }],
+    });
+    await f.db.query(
+      "UPDATE gather_items SET match_date='2026-11',date_basis='service_period' WHERE artifact_id=$1",
+      [twoDates.artifactId],
+    );
+    await f.db.query(
+      `UPDATE gather_candidates SET facts=jsonb_set(facts,'{invoiceDates}','["2026-08-05","2026-11-05"]'::jsonb) WHERE artifact_id=$1`,
+      [twoDates.artifactId],
+    );
+    const cite = {
+      invoice: {
+        collectionId: twoDates.collectionId,
+        artifactId: twoDates.artifactId,
+      },
+    };
+    await assert.rejects(
+      f.record(
+        { amount: "120", currency: "USD", lastInvoiceDate: "2026-11-05" },
+        { id: item.id, baseRevision: item.revision, ...cite },
+      ),
+      /no single recorded invoice date, so lastInvoiceDate cannot come from it/,
+    );
+    await assert.rejects(
+      f.record(
+        { amount: "120", currency: "USD" },
+        { id: item.id, baseRevision: item.revision, ...cite },
+      ),
+      /cannot be ordered against the saved last invoice/,
+    );
+    // Currency-only, unknown-to-known and known-to-unknown changes are price changes too.
+    const sgd = await f.record(
+      { currency: "SGD" },
+      { id: item.id, baseRevision: item.revision },
+    );
+    assert.deepEqual(sgd.priceChange.to, { amount: "100", currency: "SGD" });
+    assert.ok(sgd.warnings.some((w: string) => /100 USD to 100 SGD/.test(w)));
+    const cleared = await f.record(
+      { amount: null, currency: null },
+      { id: item.id, baseRevision: sgd.revision },
+    );
+    assert.deepEqual(cleared.priceChange.to, { amount: null, currency: null });
+    assert.ok(cleared.warnings.some((w: string) => /to unknown/.test(w)));
+    const known = await f.record(
+      { amount: "9", currency: "SGD" },
+      { id: item.id, baseRevision: cleared.revision },
+    );
+    assert.ok(
+      known.warnings.some((w: string) => /from unknown to 9 SGD/.test(w)),
+    );
+    const same = await f.record(
+      { amount: "9.00", currency: "SGD" },
+      { id: item.id, baseRevision: known.revision },
+    );
+    assert.equal(same.priceChange, undefined);
+  } finally {
+    await f.pg.close();
+  }
+});
+test("invoice listings return every recorded amount and page past large histories", async () => {
+  const f = await fixture();
+  try {
+    const amounts = Array.from({ length: 20 }, (_, i) => ({
+      currency: "USD",
+      amount: String(i + 1),
+    }));
+    const one = await matchedInvoice(f.db, { date: "2026-09-05", amounts });
+    for (let i = 0; i < 24; i++)
+      await matchedInvoice(f.db, {
+        collection: one.collectionId,
+        date: `2026-08-${String(i + 1).padStart(2, "0")}`,
+        amounts: [{ currency: "USD", amount: "1" }],
+      });
+    const first = await f.tools.call("a", f.run, {
+      operation: "subscription_invoices",
+      collectionId: one.collectionId,
+    });
+    assert.equal(first.total, 25);
+    assert.equal(first.invoices[0].amounts.length, 20);
+    const seen = new Set<string>();
+    for (let offset: number | null = 0; offset !== null;) {
+      const page: any = await f.tools.call("a", f.run, {
+        operation: "subscription_invoices",
+        collectionId: one.collectionId,
+        offset,
+      });
+      for (const i of page.invoices) seen.add(i.artifactId);
+      offset = page.nextOffset;
+    }
+    assert.equal(seen.size, 25);
   } finally {
     await f.pg.close();
   }

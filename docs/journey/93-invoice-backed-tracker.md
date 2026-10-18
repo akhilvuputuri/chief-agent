@@ -72,7 +72,17 @@ Third round at `d83a5f8` requested changes for one blocking regression introduce
 
 Across the reviewer's 47 probes, the remaining unintended acceptances are the documented same-vendor case and a contrived "AI" merchant. Known safe-side refusals: "ChatGPT Team" against a "ChatGPT Business" invoice.
 
-Fourth round: the reviewer **APPROVED** exact head `12e6aad`, with all 52 probe cases giving the intended outcome. Main then advanced to `9437d86` (PR 249, which took journal 92), so this entry is renumbered 93 and the branch merges that main. The merged head needs its own exact-head approval before merge.
+Fourth round: the reviewer **APPROVED** exact head `12e6aad`, with all 52 probe cases giving the intended outcome. Main then advanced to `9437d86` (PR 249, which took journal 92), so this entry is renumbered 93 and the branch merges that main. The reviewer **APPROVED** merged head `b8fa3ef` after rebuilding the merge with `git merge-tree` and checking PR 249's write-block handling for delegated tracker writes. Hosted CI passed on that head.
+
+Devin Review on `b8fa3ef` raised five findings, all accepted:
+
+- **Accounts.** An invoice gathered for an account label could update an unlabelled item.
+- **Dates.** A caller-chosen date from a multi-date service-period PDF could set and order `lastInvoiceDate`.
+- **Paging.** A 2,000-row cap was applied before paging.
+- **Amounts.** Only 12 of up to 30 recorded amounts were listed.
+- **Price changes.** Currency-only and unknown↔known changes were not reported.
+
+All five are fixed with regressions, and the reviewer's 52 probes give unchanged results. The fixed head needs exact-head re-review.
 
 ## Verification and outcome
 
