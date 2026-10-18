@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Database } from "../db.js";
+import { ToolValidationError } from "../tool-errors.js";
 import type { CodingJob } from "./controller.js";
 import { artifactHash, canonicalJson } from "./github.js";
 
@@ -40,7 +41,7 @@ export class CodingRequirements {
       job.mode !== "plan" ||
       !job.checkpoint.plan.trim()
     )
-      throw new Error(
+      throw new ToolValidationError(
         "A completed requirement brief is needed before confirmation",
       );
     const payload = {

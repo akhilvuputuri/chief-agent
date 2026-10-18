@@ -100,6 +100,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 15 October | [89 — Agentic coding subagent](89-agentic-coding-subagent.md): can Chief's coding agent work like a developer instead of a sealed job? | In progress: stage 1 (agent commits, sandbox push, host-verified PR) implemented and dormant until the agent App is installed |
 | 17 October | [90 — Reasoning effort per message](90-jev-reasoning-effort.md): can Jev pick the main model's reasoning effort per message and raise it as a turn grows? | Released `be3647e` (0.3.82): Jev picks low/medium/high per foreground message, escalates only upward, every decision logged; not yet measured |
 | 17 October | [91 — Boxed sub-agents](91-boxed-subagents.md): can Chief delegate heavy work to sub-agents with their own boxes? | Proposed: design recorded with owner decisions (coding first, warm TTL, self-managed EC2); no implementation or AWS resources yet |
+| 16–18 October | [92 — Uncertain coding write lock](92-uncertain-coding-write-lock.md): why did one refused coding reply block every write for a day? | Operator-settled in production; self-settlement, reclassified refusals and a per-turn write block in review |
 
 ## Coding-agent learning path
 

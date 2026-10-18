@@ -199,6 +199,16 @@ export async function runAgentType(
     model: { tier: choice.tier, id: choice.model },
     effort: choice.effort,
     ...result,
+    // The coordinator must not keep delegating writes the host already refused.
+    ...(typeof result.childRunId === "string" &&
+    // Fail closed: if the lookup itself fails, treat the child as blocked so the
+    // coordinator cannot re-delegate its writes; an unknown answer is not "no".
+    (await req.execution.writesBlockedIn(result.childRunId).catch((e) => {
+      opsLog("agent.block_check_failed", "warn", errorFields(e));
+      return true;
+    }))
+      ? { writesBlocked: true }
+      : {}),
   };
 }
 

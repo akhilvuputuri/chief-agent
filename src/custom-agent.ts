@@ -23,6 +23,7 @@ import {
   toolError,
   NotDispatchedError,
   RepeatedFailureError,
+  WriteBlockedError,
 } from "./tool-errors.js";
 /** Model steps, with no successful call between them, in which one call form failed the same way before it is refused. */
 const REPEAT_LIMIT = 3;
@@ -117,6 +118,10 @@ export class CustomAgent implements Agent {
       { code: string; count: number; step: number }
     >();
     let step = 0;
+    // Set when the host refuses a write because an earlier write's outcome is uncertain.
+    // That refusal holds for the rest of this turn: later writes are refused without
+    // dispatch, and a successful read in between does not reset it.
+    let writesBlocked = "";
     // Turn progress for effort escalation: counts and tool names only.
     let toolCalls = 0,
       failedCalls = 0;
@@ -451,6 +456,13 @@ export class CustomAgent implements Agent {
               repeated.step !== step
             )
               throw new RepeatedFailureError(op, repeated.code, repeated.count);
+            // A new delegation could only retry the refused writes in another context.
+            if (
+              writesBlocked &&
+              op !== "finish_turn" &&
+              (!readOperations.has(op) || op === "agent_run")
+            )
+              throw new WriteBlockedError(writesBlocked);
             if (!enabled.has(op)) {
               // A known tool whose domain is not loaded yet: load the domain and
               // dispatch. Arguments are still validated and the owner-scoped
@@ -535,6 +547,13 @@ export class CustomAgent implements Agent {
               }
             }
             await execution.endCall(journal, result);
+            if (
+              op === "agent_run" &&
+              !writesBlocked &&
+              (result as { writesBlocked?: boolean })?.writesBlocked
+            )
+              writesBlocked =
+                "A delegated agent's write was refused because an earlier write's outcome is uncertain";
             // Any success is progress and may supply what a failing form lacked
             // (such as an id from parcel_match), so every count starts again.
             failures.clear();
@@ -550,6 +569,8 @@ export class CustomAgent implements Agent {
             }
             if (error instanceof Stop) throw error;
             result = { error: toolError(error) };
+            if (error instanceof WriteBlockedError && !writesBlocked)
+              writesBlocked = error.message;
             // finish_turn stays available: refusing it would leave no way to answer.
             if (
               op !== "finish_turn" &&

@@ -1,6 +1,7 @@
 import { squadState } from "./squad-schema.js";
 import { runtimeMemory } from "./memory-schema.js";
 import { z } from "zod";
+import { ToolValidationError } from "../tool-errors.js";
 import { reportLimits, reportDocument } from "@chief-agent/pi-runtime/report";
 
 const id = z.string().uuid();
@@ -305,7 +306,7 @@ export function assertCodingBrief(
       JSON.stringify({ messages: [{ role: "user", content }] }),
     ) > 70000
   )
-    throw new Error(
+    throw new ToolValidationError(
       "Coding brief is too large for one run; provide a shorter objective/context or a concise implementation brief. The original request and saved plan are retained.",
     );
 }
