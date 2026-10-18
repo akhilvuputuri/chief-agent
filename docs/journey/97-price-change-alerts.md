@@ -29,7 +29,7 @@ Two separate needs share one setting:
 - **Invoice disagreements** are detected, not known. The host cannot pick a recurring total from an invoice's amounts deterministically, but it can tell when none of them equals the saved price.
   - Each successful match is compared with the one item it can belong to, using journal 93's issuer, plan and account rules.
   - A foreground agent reports the comparison in its answer.
-  - A background pass sends one Telegram alert, deduplicated by an ID derived from the item and the invoice. This keeps alerts to one per change, needs no migration, and leaves applying the price to the owner.
+  - A background pass sends one Telegram alert, deduplicated by an ID derived from the item and the invoice. This gives one alert per item and invoice, needs no migration, and leaves applying the price to the owner. Each later invoice that still shows a new price alerts again until the tracker is updated.
 
 Alternatives deferred: reading merchant price-change emails, and a scheduled monthly invoice refresh. Both belong to the responsibility-driven phase 3 of issue 132.
 
@@ -48,7 +48,24 @@ Alternatives deferred: reading merchant price-change emails, and a scheduled mon
 - The shared skills cover pending prices and `trackerPriceCheck`.
 - Design: [subscriptions](../subscriptions.md#price-change-alerts).
 
-Review: pending.
+Review, 19 October 2026: the independent reviewer (Claude Opus 5.5) requested changes at `5f5a65d`.
+
+- **Blocking.** With reminders on, `priceAlerts=false` did not remove the price-change notice; the filter applied only when reminders were off.
+- **Non-blocking.** At schedule capacity, saving a price change was refused with a message about reminders only.
+- **Non-blocking.** The journal said "one per change", where the code sends one per item and invoice.
+- **Non-blocking.** A pending date already past was accepted, and clearing a change already in effect silently kept it.
+- **Non-blocking.** A capacity-dropped alert left no log.
+
+Fixes:
+
+- The setting filters the notice in every case, and grouped dates use only their remaining events' leads.
+- The capacity refusal names the price-change slot.
+- Pending dates must be in the future.
+- The write that first records an applied change returns a `priceChange`.
+- Skipped alerts log `subscription.price_alert_skipped`.
+- The docs say once in effect, correct the amount directly.
+
+Regression tests cover these. Re-review pending.
 
 ## Verification and outcome
 

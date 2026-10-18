@@ -64,12 +64,13 @@ Limits: plan conflicts are recognised for Claude and ChatGPT tiers, including si
 
 Issue 132 asks Chief to flag price increases (S5, R8, R11). Two sources feed alerts; neither changes the tracker in the background.
 
-- **Saved price changes.** An owner-stated future price goes in `pendingAmount`, `pendingCurrency` and `pendingEffectiveDate`, which must be set or cleared together. The current `amount` stays until the effective date.
+- **Saved price changes.** An owner-stated future price goes in `pendingAmount`, `pendingCurrency` and `pendingEffectiveDate`, which must be set or cleared together, with a future effective date. The current `amount` stays until that date. Clearing all three before the date drops the change; once it is in effect, correct `amount` directly.
   - From that Singapore date, reads, the Mini App, totals and later reminders use the new price.
-  - The next update writes it into the stored record and history (`source_ref.appliedPending`), and the amount's field source carries `appliedOn`.
+  - The next update writes it into the stored record and history (`source_ref.appliedPending`), reports it as a `priceChange` with source `saved price change`, and the amount's field source carries `appliedOn`.
   - No background job writes the record. The change is applied in every view, and history records it with the owner's next update.
 - **Price-change notice.** The effective date is a `price change` event for linked reminders, 3 days ahead at the reminder time (09:00 Singapore by default).
-  - It is planned when `priceAlerts` is on (the default) even if `reminderEnabled` is off. Other reminder dates still need reminders on.
+  - It is planned when `priceAlerts` is on (the default) even if `reminderEnabled` is off, and never when `priceAlerts` is off. Other reminder dates still need reminders on, and a date shared with other events uses only the remaining events' lead times.
+  - Like other linked reminders, the notice takes one of the shared 50 schedule slots. At capacity, saving a price change is refused unless `priceAlerts` is false.
   - `DailyWorker` delivers it model-free, after checking the item's revision, status and that the date is still the saved effective date with alerts on.
 - **Invoice price check.** After every successful `gather_match`, the host looks for the one active tracked item the invoice can belong to. It uses the same issuer, plan and account rules as invoice evidence, and compares the price in force on the invoice date with the PDF's recorded amounts. The match result carries `trackerPriceCheck`:
   - `unchanged` or `differs`;
@@ -80,7 +81,7 @@ Issue 132 asks Chief to flag price increases (S5, R8, R11). Two sources feed ale
   A failed check is logged as `gathering.price_check_failed` and never fails the committed match.
 
 - **Invoice alert.** In a background gathering pass, a `differs` result for an item with alerts on queues one model-free Telegram message with the saved price and the invoice's amounts. A foreground agent reports the result instead.
-  - The message's schedule ID is derived from the item and the invoice, so retries and re-matches never repeat it. It counts briefly against the shared 50-schedule capacity, and at capacity no alert is queued.
+  - The message's schedule ID is derived from the item and the invoice, so retries and re-matches never repeat it. That is one alert per item and invoice: each later invoice still showing a new price alerts again until the owner updates the tracker. It counts briefly against the shared 50-schedule capacity; at capacity no alert is queued and `subscription.price_alert_skipped` is logged.
   - The tracker is not changed. Applying the new price needs the owner's request, through the invoice-backed update above.
   - Queued alerts log `subscription.price_alert_queued`.
 - **Setting.** `subscription_settings(priceAlerts)` turns both notices off or on per item.

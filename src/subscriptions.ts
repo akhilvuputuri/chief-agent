@@ -6,6 +6,7 @@ import {
   type SubscriptionFields,
 } from "./subscription-schema.js";
 import { ToolValidationError } from "./tool-errors.js";
+import { opsLog } from "./ops-log.js";
 import {
   issuerIdentity,
   productEvidence,
@@ -228,7 +229,14 @@ function validate(data: SubscriptionFields) {
         "Use a short merchant, plan or account label without payment numbers or a full address.",
       );
 }
-type Due = { date: string; events: string[]; days: number; estimated: boolean };
+type Due = {
+  date: string;
+  events: string[];
+  days: number;
+  estimated: boolean;
+  /** Default lead per event; a filtered date uses only its remaining events' leads. */
+  leads: Record<string, number>;
+};
 const priceNoticeDays = 3;
 const singaporeDay = (now: number) =>
   new Date(now + 8 * 3600000).toISOString().slice(0, 10);
@@ -284,8 +292,16 @@ export function subscriptionDates(data: SubscriptionFields): Due[] {
     if (existing) {
       existing.events.push(event);
       existing.days = Math.max(existing.days, days ?? -1);
+      existing.leads[event] = days ?? -1;
       existing.estimated ||= estimated;
-    } else dates.push({ date, events: [event], days: days ?? -1, estimated });
+    } else
+      dates.push({
+        date,
+        events: [event],
+        days: days ?? -1,
+        estimated,
+        leads: { [event]: days ?? -1 },
+      });
   };
   add(
     data.nextChargeDate,
@@ -305,14 +321,15 @@ export function subscriptionReminders(data: SubscriptionFields, now: number) {
   // Price-change notices follow priceAlerts (on unless turned off); every other date needs reminders on.
   const alerts = data.priceAlerts !== false;
   for (const due of subscriptionDates(data)) {
-    const events = data.reminderEnabled
-      ? due.events
-      : alerts
-        ? due.events.filter((e) => e === "price change")
-        : [];
+    // priceAlerts=false removes the price-change notice whether or not other reminders are on.
+    const events = (
+      data.reminderEnabled
+        ? due.events
+        : due.events.filter((e) => e === "price change")
+    ).filter((e) => alerts || e !== "price change");
     if (!events.length) continue;
     const lead = data.reminderEnabled
-      ? (data.reminderDays ?? due.days)
+      ? (data.reminderDays ?? Math.max(...events.map((e) => due.leads[e]!)))
       : priceNoticeDays;
     if (lead < 0) continue; // Monthly and unknown cadences have no automatic lead time.
     const time = data.reminderTime ?? "09:00";
@@ -575,8 +592,13 @@ export class SubscriptionTools {
       if (
         (error as { constraint?: string }).constraint ===
         "daily_schedule_capacity_limit"
-      )
+      ) {
+        opsLog("subscription.price_alert_skipped", "warn", {
+          ref: check.subscriptionId,
+          kind: "capacity",
+        });
         return false;
+      }
       throw error;
     }
   }
@@ -1006,6 +1028,13 @@ export class SubscriptionTools {
       throw new ToolValidationError("Supply at least one subscription field.");
     const data = { ...(old?.data ?? defaults), ...fields };
     validate(data);
+    if (
+      fields.pendingEffectiveDate &&
+      fields.pendingEffectiveDate <= singaporeDay(this.now())
+    )
+      throw new ToolValidationError(
+        "A pending price change needs a future effective date; for a price already in effect, set amount and currency instead.",
+      );
     const evidence = a.invoice
       ? await this.invoiceEvidence(user, run, a.invoice, fields, data, old)
       : null;
@@ -1051,17 +1080,33 @@ export class SubscriptionTools {
       ...(old?.appliedPending ? { appliedPending: old.appliedPending } : {}),
     };
     // Any change to the amount/currency pair, including to or from unknown.
+    // Compare with the stored price, so a saved change first recorded by this write is reported too.
+    const prior = old?.appliedPending
+      ? (old.appliedPending.from as {
+          amount: string | null;
+          currency: string | null;
+        })
+      : {
+          amount: old?.data.amount ?? null,
+          currency: old?.data.currency ?? null,
+        };
+    const supplied =
+      fields.amount !== undefined || fields.currency !== undefined;
     const priceChange =
       old &&
-      (fields.amount !== undefined || fields.currency !== undefined) &&
-      (old.data.currency !== data.currency ||
-        (old.data.amount == null) !== (data.amount == null) ||
-        (old.data.amount != null &&
-          decimalKey(old.data.amount) !== decimalKey(data.amount!)))
+      (supplied || old.appliedPending) &&
+      (prior.currency !== (data.currency ?? null) ||
+        (prior.amount == null) !== (data.amount == null) ||
+        (prior.amount != null &&
+          decimalKey(prior.amount) !== decimalKey(data.amount!)))
         ? {
-            from: { amount: old.data.amount, currency: old.data.currency },
+            from: prior,
             to: { amount: data.amount, currency: data.currency },
-            source: evidence ? "invoice" : "owner",
+            source: supplied
+              ? evidence
+                ? "invoice"
+                : "owner"
+              : "saved price change",
           }
         : null;
     const { plans, warnings } = subscriptionReminders(data, this.now());
@@ -1155,7 +1200,7 @@ export class SubscriptionTools {
         "daily_schedule_capacity_limit"
       )
         throw new ToolValidationError(
-          "Limit of 50 active schedules reached; pause another reminder before enabling these dates.",
+          "Limit of 50 active schedules reached; pause another reminder before enabling these dates. A saved price change also takes a slot for its notice unless priceAlerts is false.",
         );
       if ((error as { code?: string }).code === "23505") {
         const duplicate = await replay();

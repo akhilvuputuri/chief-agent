@@ -2046,7 +2046,27 @@ test("a pending price change is shown before its date, noticed even with reminde
       amount: "24.98",
       currency: "SGD",
     });
-    assert.equal(updated.priceChange, undefined);
+    // The write that first records the applied change reports it.
+    assert.deepEqual(updated.priceChange, {
+      from: { amount: "22.98", currency: "SGD" },
+      to: { amount: "24.98", currency: "SGD" },
+      source: "saved price change",
+    });
+    // A pending date that is not in the future is refused.
+    await assert.rejects(
+      later.call("a", f.run, {
+        operation: "subscription_record",
+        requestKey: randomUUID(),
+        id: r.id,
+        baseRevision: updated.revision,
+        fields: {
+          pendingAmount: "26.98",
+          pendingCurrency: "SGD",
+          pendingEffectiveDate: "2026-12-02",
+        },
+      } as any),
+      /future effective date/,
+    );
   } finally {
     await f.pg.close();
   }
@@ -2134,7 +2154,7 @@ test("invoice price checks compare with the one owning item and alert once per i
       {
         pendingAmount: "24.98",
         pendingCurrency: "SGD",
-        pendingEffectiveDate: "2026-10-01",
+        pendingEffectiveDate: "2026-10-02",
       },
       { id: item.id, baseRevision: item.revision },
     );
@@ -2181,6 +2201,47 @@ test("price alerts respect the item's setting", async () => {
     assert.equal(c.status, "differs");
     assert.equal(c.alerts, false);
     assert.equal(await f.tools.queuePriceAlert("a", c, nov.artifactId), false);
+  } finally {
+    await f.pg.close();
+  }
+});
+test("price alerts off removes the notice even with reminders on, and grouped dates keep their own leads", async () => {
+  const f = await fixture();
+  try {
+    const r = await f.record({
+      ...netflix,
+      reminderEnabled: true,
+      priceAlerts: false,
+      pendingAmount: "24.98",
+      pendingCurrency: "SGD",
+      pendingEffectiveDate: "2026-12-01",
+    });
+    assert.equal(r.reminders.length, 0);
+    const plans = (data: object) =>
+      subscriptionReminders(
+        {
+          label: "TV",
+          status: "active",
+          amount: "10",
+          currency: "SGD",
+          amountType: "fixed",
+          cadence: "monthly",
+          nextChargeDate: "2026-12-01",
+          nextChargeEstimated: false,
+          pendingAmount: "12",
+          pendingCurrency: "SGD",
+          pendingEffectiveDate: "2026-12-01",
+          reminderEnabled: true,
+          ...data,
+        },
+        Date.parse("2026-10-01T00:00:00Z"),
+      ).plans;
+    // A monthly renewal (no lead) sharing the date keeps no lead once alerts are off.
+    assert.deepEqual(plans({ priceAlerts: false }), []);
+    const both = plans({});
+    assert.equal(both.length, 1);
+    assert.equal(both[0]!.fire, "2026-11-28T01:00:00.000Z");
+    assert.match(both[0]!.content, /Also on that date: renewal/);
   } finally {
     await f.pg.close();
   }
