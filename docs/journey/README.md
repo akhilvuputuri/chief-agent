@@ -104,6 +104,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 18 October | [93 — Invoice-backed tracker](93-invoice-backed-tracker.md): can one agent fetch invoices and keep the subscription tracker in step? | Released v0.3.83 (`1733d48`); exact receipt and startup verified; owner acceptance pending |
 | 18 October | [94 — Open loops in context](94-open-loops-context.md): why did Chief forget plans and cards that were waiting on the owner? | In review: 24-hour requirements and monitoring cards; coding jobs and expired cards in the turn context |
 | 18 October | [95 — Live to-do reminders](95-live-todo-reminders.md): why did to-do reminders say "review your list" instead of showing it? | In review: to-do reminders steered to the live briefing kind |
+| 18–19 October | [96 — Replaying the bulletin rankers](96-bulletin-ranker-replay.md): does Jev rank saved bulletin items higher than the deterministic ranker? | Measured offline: an apparent Jev gain was a time confound; on savable items no ranker is distinguishable from chance (7 saves); PR 250 on hold |
 
 ## Coding-agent learning path
 
