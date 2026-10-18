@@ -531,11 +531,22 @@ export class SubscriptionTools {
         notice: `The tracker already reflects a later invoice (${d.lastInvoiceDate}); no comparison was made.`,
       };
     // Compare with the price in force on the invoice date, including a saved price change.
+    // An invoice dated before a change already recorded in history is compared with the price it replaced.
     const on = date ?? today;
     const pendingApplies =
       !!d.pendingEffectiveDate && d.pendingEffectiveDate <= on;
-    const amount = pendingApplies ? d.pendingAmount : d.amount,
+    let amount = pendingApplies ? d.pendingAmount : d.amount,
       currency = pendingApplies ? d.pendingCurrency : d.currency;
+    const earlier = (
+      await this.db.query(
+        "SELECT source_ref->'appliedPending' AS applied FROM subscription_updates WHERE user_id=$1 AND subscription_id=$2 AND source_ref->'appliedPending'->>'effectiveDate' > $3 ORDER BY source_ref->'appliedPending'->>'effectiveDate' LIMIT 1",
+        [user, item.id, on],
+      )
+    ).rows[0]?.applied;
+    if (earlier) {
+      amount = earlier.from.amount;
+      currency = earlier.from.currency;
+    }
     const invoiceAmounts = [...row.facts.amounts]
       .sort(
         (x, y) =>
@@ -826,10 +837,9 @@ export class SubscriptionTools {
     return row;
   }
   async read(user: string, id: string, offset = 0) {
-    const row = effectiveRow(
-      await this.owned(user, id),
-      singaporeDay(this.now()),
-    );
+    // Prices come from the effective view; dates from the stored row, so a price change stays dated on its day.
+    const stored = await this.owned(user, id);
+    const row = effectiveRow(stored, singaporeDay(this.now()));
     const history = (
       await this.db.query(
         "SELECT id,revision,source_kind,source_ref,changes,recorded_at FROM subscription_updates WHERE user_id=$1 AND subscription_id=$2 ORDER BY revision DESC LIMIT 11 OFFSET $3",
@@ -839,7 +849,7 @@ export class SubscriptionTools {
     const reminders = (
       await this.db.query(
         `SELECT id,to_char(subscription_date,'YYYY-MM-DD') AS date,next_run AS "firesAt",status,last_error,started_at FROM daily_schedules WHERE user_id=$1 AND subscription_id=$2 ORDER BY CASE WHEN status='scheduled' THEN 0 WHEN status='processing' THEN 1 WHEN subscription_date::text=ANY($3::text[]) THEN 2 ELSE 3 END, subscription_date DESC LIMIT 20`,
-        [user, id, subscriptionDates(row.data).map((d) => d.date)],
+        [user, id, subscriptionDates(stored.data).map((d) => d.date)],
       )
     ).rows;
     const result = {
@@ -881,7 +891,10 @@ export class SubscriptionTools {
           [user],
         )
       ).rows as Row[]
-    ).map((row) => effectiveRow(row, singaporeDay(this.now())));
+    ).map((row) => ({
+      ...effectiveRow(row, singaporeDay(this.now())),
+      stored: row.data,
+    }));
     const merchant = subscriptionKey(a.merchant),
       plan = subscriptionKey(a.plan),
       account = subscriptionKey(a.accountLabel);
@@ -904,7 +917,7 @@ export class SubscriptionTools {
         .slice(0, 10);
     const upcoming = all
       .flatMap((row) =>
-        subscriptionDates(row.data)
+        subscriptionDates(row.stored)
           .filter((d) => d.date >= today && d.date < end)
           .map((d) => ({
             id: row.id,
@@ -1081,17 +1094,20 @@ export class SubscriptionTools {
     };
     // Any change to the amount/currency pair, including to or from unknown.
     // Compare with the stored price, so a saved change first recorded by this write is reported too.
-    const prior = old?.appliedPending
-      ? (old.appliedPending.from as {
-          amount: string | null;
-          currency: string | null;
-        })
-      : {
-          amount: old?.data.amount ?? null,
-          currency: old?.data.currency ?? null,
-        };
+    // An owner edit is compared with the price in force; a write without price fields
+    // that first records an applied change is compared with the stored price it replaced.
     const supplied =
       fields.amount !== undefined || fields.currency !== undefined;
+    const prior =
+      old?.appliedPending && !supplied
+        ? (old.appliedPending.from as {
+            amount: string | null;
+            currency: string | null;
+          })
+        : {
+            amount: old?.data.amount ?? null,
+            currency: old?.data.currency ?? null,
+          };
     const priceChange =
       old &&
       (supplied || old.appliedPending) &&
@@ -1175,7 +1191,7 @@ export class SubscriptionTools {
           );
       if (priceChange)
         warnings.push(
-          `${data.label}: price changed from ${priceChange.from.amount == null ? "unknown" : `${priceChange.from.amount} ${priceChange.from.currency}`} to ${priceChange.to.amount == null ? "unknown" : `${priceChange.to.amount} ${priceChange.to.currency}`}${evidence ? ` (invoice ${evidence.ref.matchDate})` : ""}.`,
+          `${data.label}: price changed from ${priceChange.from.amount == null ? "unknown" : `${priceChange.from.amount} ${priceChange.from.currency}`} to ${priceChange.to.amount == null ? "unknown" : `${priceChange.to.amount} ${priceChange.to.currency}`}${priceChange.source === "invoice" ? ` (invoice ${evidence!.ref.matchDate})` : priceChange.source === "saved price change" ? " (saved price change)" : ""}.`,
         );
       return {
         ...read,

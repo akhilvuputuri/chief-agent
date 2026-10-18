@@ -2246,3 +2246,100 @@ test("price alerts off removes the notice even with reminders on, and grouped da
     await f.pg.close();
   }
 });
+test("after a saved change takes effect: its day stays in the timeline, edits compare with the price in force, and older invoices use the price they replaced", async () => {
+  const f = await fixture();
+  try {
+    const r = await f.record({
+      ...netflix,
+      amount: "20",
+      lastInvoiceDate: "2026-11-01",
+      pendingAmount: "25",
+      pendingCurrency: "SGD",
+      pendingEffectiveDate: "2026-12-01",
+    });
+    const on = (iso: string) =>
+      new SubscriptionTools(f.db, () => Date.parse(iso));
+    // Effective day (1 December, Singapore): new price, and the change is still listed for today.
+    const day = await on("2026-12-01T01:00:00Z").list("a", {
+      operation: "subscription_list",
+    });
+    assert.equal(day.items[0].amount, "25");
+    assert.ok(
+      day.upcoming.some(
+        (u: any) =>
+          u.date === "2026-12-01" && u.events.includes("price change"),
+      ),
+    );
+    // The change is recorded by a plan edit on 2 December.
+    const later = on("2026-12-02T01:00:00Z");
+    const recorded = await later.call("a", f.run, {
+      operation: "subscription_record",
+      requestKey: randomUUID(),
+      id: r.id,
+      baseRevision: r.revision,
+      fields: { plan: "Standard" },
+    } as any);
+    assert.equal(recorded.priceChange.source, "saved price change");
+    // A November invoice for the old price, matched afterwards, is not a price change.
+    const nov = await matchedInvoice(f.db, {
+      label: "Netflix",
+      date: "2026-11-20",
+      amounts: [{ currency: "SGD", amount: "20" }],
+      productLabels: [],
+    });
+    assert.equal(
+      (await on("2026-12-03T01:00:00Z").priceCheck(
+        "a",
+        nov.collectionId,
+        nov.key,
+        nov.artifactId,
+      ))!.status,
+      "unchanged",
+    );
+    const dec = await matchedInvoice(f.db, {
+      label: "Netflix",
+      date: "2026-12-05",
+      amounts: [{ currency: "SGD", amount: "20" }],
+      productLabels: [],
+    });
+    assert.equal(
+      (await on("2026-12-06T01:00:00Z").priceCheck(
+        "a",
+        dec.collectionId,
+        dec.key,
+        dec.artifactId,
+      ))!.status,
+      "differs",
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+test("an owner price edit after a change takes effect reports the price in force as its start", async () => {
+  const f = await fixture();
+  try {
+    const r = await f.record({
+      ...netflix,
+      pendingAmount: "24.98",
+      pendingCurrency: "SGD",
+      pendingEffectiveDate: "2026-12-01",
+    });
+    const edit = await new SubscriptionTools(f.db, () =>
+      Date.parse("2026-12-02T01:00:00Z"),
+    ).call("a", f.run, {
+      operation: "subscription_record",
+      requestKey: randomUUID(),
+      id: r.id,
+      baseRevision: r.revision,
+      fields: { amount: "22.98", currency: "SGD" },
+    } as any);
+    assert.deepEqual(edit.priceChange, {
+      from: { amount: "24.98", currency: "SGD" },
+      to: { amount: "22.98", currency: "SGD" },
+      source: "owner",
+    });
+    assert.ok(edit.history[0].source_ref.appliedPending);
+  } finally {
+    await f.pg.close();
+  }
+});
