@@ -45,8 +45,8 @@ The tracker can take amounts and invoice dates from invoices that [gathering](ga
   - the file is a current-scope match owned by this owner;
   - the amount and currency occur in its recorded amounts, compared as decimals;
   - `lastInvoiceDate` is its recorded invoice date;
-  - the item's merchant (or its label when it has none) names the invoice's issuer: the same known vendor group, or one name leading the other ("YouTube" and "YouTube Premium"); a shared later word such as "Premium" or "Max" does not count, and the plan never decides the issuer;
-  - no plan conflicts with the invoice's product, checked on the plan, the label and their combinations with the merchant or vendor family (a Claude Pro invoice cannot update an item saved as "Claude" plan "Max");
+  - the item's merchant or label names the invoice's issuer, ignoring trailing legal or domain suffixes such as "AB", "PBC" or ".ai": the same known vendor group, or one name leading the other ("YouTube" and "YouTube Premium"); a shared later word such as "Premium" or "Max" does not count, and the plan never decides the issuer;
+  - no plan conflicts with the invoice's product, checked on the plan, the label and their combinations with the merchant or vendor family (a Claude Pro invoice cannot update an item saved as "Claude" plan "Max", "Max 5x" or "Max20");
   - the gathered account label, when set, matches the item's;
   - once a `lastInvoiceDate` is saved, the cited invoice has a single recorded invoice date that is not older, for any invoice-backed field;
   - an invoice-backed amount comes with that invoice's `lastInvoiceDate` when the invoice records one;
@@ -58,7 +58,7 @@ The tracker can take amounts and invoice dates from invoices that [gathering](ga
 
 The `core/bills` agent combines gathering and the tracker in one delegation: it gathers the assigned collection, then applies the matched invoices. `core/subscriptions` can apply invoices that were already gathered but cannot fetch new ones. Both read the shared `subscription-ledger` and `invoice-ledger` skills, and `bills` and `gathering` share `invoice-gathering` (see [agents](agents.md#agent-definitions)).
 
-Limits: plan conflicts are recognised for Claude and ChatGPT plans; other vendors rely on the issuer check and the agent's plan matching. The evidence check runs just before the write, outside its transaction, as source-input checks already do, so a scope revision landing in between is not re-checked. Amount selection among several recorded amounts is the agent's choice, checked only for presence in the document, not for semantic correctness. A single invoice does not establish a fixed recurring price, and cadence is never inferred from invoices. No automatic intake runs without an owner request, and no monthly summary or price alert schedule is added.
+Limits: plan conflicts are recognised for Claude and ChatGPT tiers, including sized names such as "Max 5x". Other vendors rely on the issuer check and the agent's plan matching, so a different product from the same vendor (a Google Cloud invoice for a Google-merchant YouTube item) is not refused. The evidence check runs just before the write, outside its transaction, as source-input checks already do, so a scope revision landing in between is not re-checked. Amount selection among several recorded amounts is the agent's choice, checked only for presence in the document, not for semantic correctness. A single invoice does not establish a fixed recurring price, and cadence is never inferred from invoices. No automatic intake runs without an owner request, and no monthly summary or price alert schedule is added.
 
 ## Capability and prompt cost
 

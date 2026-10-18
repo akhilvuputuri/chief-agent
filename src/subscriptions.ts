@@ -59,19 +59,55 @@ const decimalKey = (value: string) => {
   const trimmed = fraction.replace(/0+$/, "");
   return whole!.replace(/^0+(?=\d)/, "") + (trimmed ? "." + trimmed : "");
 };
-const words = (value: string) =>
-  value
+const legal = new Set([
+  "inc",
+  "llc",
+  "ltd",
+  "ab",
+  "pbc",
+  "corp",
+  "gmbh",
+  "plc",
+  "ai",
+  "com",
+]);
+// Trailing legal or domain suffixes ("Spotify AB", "Claude.ai") do not change the issuer.
+const words = (value: string) => {
+  const w = value
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter(Boolean);
+  while (w.length > 1 && legal.has(w[w.length - 1]!)) w.pop();
+  return w;
+};
 const leads = (a: string[], b: string[]) =>
   a.length > 0 && a.length <= b.length && a.every((w, i) => w === b[i]);
 /** One issuer: known vendor groups, or one name leading the other ("YouTube" / "YouTube Premium"). A shared later word ("Premium", "Max") is not enough. */
 function sameIssuer(owner: string, issuer: string) {
-  if (issuerIdentity(owner) === issuerIdentity(issuer)) return true;
   const a = words(owner),
     b = words(issuer);
+  const id = (n: string, w: string[]) =>
+    issuerIdentity(planTier(n) ?? w.join(" "));
+  if (id(owner, a) === id(issuer, b)) return true;
   return leads(a, b) || leads(b, a);
+}
+/** "Claude Max 5x", or "Max20" with an Anthropic merchant, reads as "Claude Max": the family and tier productEvidence recognises. */
+function planTier(name: string, family?: string) {
+  const w = name
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  for (let i = 0; i < w.length; i++) {
+    const tier = /^(plus|pro|max|team|business|enterprise)(?:\d+x?)?$/.exec(
+      w[i]!,
+    )?.[1];
+    if (!tier) continue;
+    const named = w.slice(0, i).find((x) => x === "claude" || x === "chatgpt");
+    const base =
+      named === "claude" ? "Claude" : named === "chatgpt" ? "ChatGPT" : family;
+    if (base) return base + " " + tier[0]!.toUpperCase() + tier.slice(1);
+  }
+  return null;
 }
 const planFamily: Record<string, string> = {
   anthropic: "Claude",
@@ -431,6 +467,9 @@ export class SubscriptionTools {
       const facts = row.facts;
       // The issuer must match the item's merchant (or its label without one); a plan never decides the issuer.
       const owner = data.merchant ?? data.label!;
+      const owners = [data.merchant, data.label].filter(
+        (n): n is string => !!n,
+      );
       const issuers = [target?.label ?? "", ...facts.issuerLabels].filter(
         Boolean,
       );
@@ -449,10 +488,14 @@ export class SubscriptionTools {
             ? facts.invoiceDates[0]!
             : null;
       const invoiceDate = fields.lastInvoiceDate ?? recorded;
-      if (!issuers.some((n) => sameIssuer(owner, n)))
+      if (!owners.some((o) => issuers.some((n) => sameIssuer(o, n))))
         refusal =
           "This invoice's recorded issuer does not match this item's merchant (or label).";
-      else if (plans.some((n) => n && productEvidence(facts, n) === "conflict"))
+      else if (
+        plans
+          .flatMap((n) => (n ? [n, planTier(n, family)] : []))
+          .some((n) => n && productEvidence(facts, n) === "conflict")
+      )
         refusal =
           "This invoice explicitly identifies a different plan or product from this item.";
       else if (
@@ -490,7 +533,7 @@ export class SubscriptionTools {
       )
         refusal = invoiceDate
           ? `This invoice (${invoiceDate}) is older than the saved last invoice (${old.data.lastInvoiceDate}); an older invoice cannot replace newer invoice fields.`
-          : `This invoice has no single recorded invoice date, so it cannot be ordered against the saved last invoice (${old.data.lastInvoiceDate}); ask the owner.`;
+          : `This invoice has no single recorded invoice date, so it cannot be ordered against the saved last invoice (${old.data.lastInvoiceDate}); pass lastInvoiceDate from its recorded invoiceDates if it has one, otherwise ask the owner.`;
       else if (fields.amount != null && !fields.lastInvoiceDate && recorded)
         refusal = `Include this invoice's lastInvoiceDate (${recorded}) with its amount so later invoices can be ordered.`;
       else

@@ -1558,6 +1558,41 @@ test("invoice identity needs the merchant's issuer, plan conflicts use combined 
       ),
       /different plan/,
     );
+    // Real plan names ("Max 5x", "Max20", "Claude Max (5x)") still conflict with a Pro invoice.
+    for (const item of [
+      { label: "Claude Max 5x", merchant: "Anthropic", plan: "Max 5x" },
+      { label: "Claude Max (5x)" },
+      { label: "Claude", merchant: "Anthropic", plan: "Max20" },
+    ])
+      await assert.rejects(
+        f.record(
+          {
+            ...item,
+            amount: "20.00",
+            currency: "USD",
+            lastInvoiceDate: "2026-09-05",
+          },
+          cite(pro),
+        ),
+        /different plan/,
+      );
+    // Legal suffixes do not change the issuer; the label is a fallback.
+    for (const item of [
+      { label: "Claude Pro", merchant: "Anthropic PBC", plan: "Pro" },
+      { label: "Claude Pro", merchant: "Claude.ai" },
+    ]) {
+      const r = await f.record(
+        {
+          ...item,
+          amount: "20.00",
+          currency: "USD",
+          lastInvoiceDate: "2026-09-05",
+        },
+        cite(pro),
+      );
+      assert.equal(r.fieldSources.amount.sourceKind, "invoice");
+      await f.db.query("DELETE FROM subscriptions WHERE id=$1", [r.id]);
+    }
     // A shared plan word or a later word of another issuer's name is not the same issuer.
     const youtube = await matchedInvoice(f.db, {
       label: "YouTube Premium",

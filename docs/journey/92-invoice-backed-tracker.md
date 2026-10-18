@@ -54,7 +54,15 @@ Fixes:
 - Bound agents are limited to their collection.
 - The prompt restates the hard limits.
 
-Regression tests cover each case. Re-review pending.
+Regression tests cover each case.
+
+Second round at `926a1f9`: the reviewer confirmed the first-round fixes and ran 20 identity and plan probes built from real `invoiceFacts`. It requested changes for one blocking case: sized plan names ("Max 5x", "Max20", "Claude Max (5x)") still passed against a Claude Pro invoice. The plan check now reduces each name to its family and tier before `productEvidence`, which itself is unchanged for `gather_match`. Non-blocking:
+
+- Legal or domain suffixes ("Spotify AB", "Anthropic PBC", "Claude.ai") were refused on the safe side. They are now ignored, and the label is a fallback for issuer matching.
+- The undated-invoice message now points to the recorded invoice dates.
+- Same-vendor different products remain a documented limit.
+
+All 20 probes now give the expected result. Re-review pending.
 
 ## Verification and outcome
 
