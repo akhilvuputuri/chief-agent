@@ -236,6 +236,8 @@ export const codingSettings = z
     prWorkflow: z.literal("owner_merge").optional(),
     /** Host-only: the sandbox commits, pushes its branch and opens the draft PR with a scoped agent token. */
     agentGit: z.boolean().optional(),
+    /** Host-only operator switch (default on): re-queue a job once after a classified transient pause. */
+    autoRetryTransientOnce: z.boolean().optional(),
     limits: z
       .object({
         ms: z.number().int().positive().max(7200000),

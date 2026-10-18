@@ -104,6 +104,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 18 October | [93 — Invoice-backed tracker](93-invoice-backed-tracker.md): can one agent fetch invoices and keep the subscription tracker in step? | Released v0.3.83 (`1733d48`); exact receipt and startup verified; owner acceptance pending |
 | 18 October | [94 — Open loops in context](94-open-loops-context.md): why did Chief forget plans and cards that were waiting on the owner? | Released `11d13c6`: 24-hour requirements and monitoring cards; coding jobs and expired cards in the turn context; live acceptance pending |
 | 18 October | [95 — Live to-do reminders](95-live-todo-reminders.md): why did to-do reminders say "review your list" instead of showing it? | Released `3b93fa7`: briefings lead with their text and list open tasks inline; to-do review reminders become briefings; live acceptance pending |
+| 19 October | [96 — Coding transient retry](96-coding-transient-retry.md): can the host retry a coding job once after a transient fault? | In review: one host retry after a stopped sandbox, lost heartbeat or provider 429/5xx, with an owner notice |
 | 19 October | [97 — Price-change alerts](97-price-change-alerts.md): how does Chief flag a price change without changing the tracker on its own? | In progress: saved price changes with notices, invoice price checks and one-time alerts tested locally; review and release pending |
 
 ## Coding-agent learning path
@@ -150,6 +151,7 @@ Python execution: [56 — Coding work](56-coding-runtime.md) → [57 — Python 
 ## Scheduled work
 
 - 18 October 2026: [95 — Live to-do reminders](95-live-todo-reminders.md): briefings lead with their own text and list live open to-dos inline; to-do review reminders become briefings. Released `3b93fa7`.
+- 19 October 2026: [96 — Coding transient retry](96-coding-transient-retry.md): the host re-queues a paused coding job once after a classified transient fault and tells the owner. In review.
 
 - 2 October 2026: [56 — Coding work outside the live assistant](56-coding-runtime.md): durable dispatch, a separate runtime, disposable sandboxes, verification and draft PRs; released v0.3.33 foundation off; live activation pending scoped provider/App/ingress setup. Builds on [49 — Coordinator agents](49-coordinator-agents.md) and [05 — Cloud development](05-cloud-development.md).
 
