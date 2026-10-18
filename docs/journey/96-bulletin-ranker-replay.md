@@ -1,4 +1,4 @@
-# 96 — Replaying the bulletin rankers: no ranker beats chance once a confound is removed
+# 96 — Replaying the bulletin rankers: no ranker is distinguishable from chance once a confound is removed
 
 Work date(s): 2026-10-18 to 2026-10-19. Written: 2026-10-19.
 Status: measured offline; no runtime change. The Jev ranking change ([PR 250](https://github.com/akhilvuputuri/chief-agent/pull/250)) is on hold pending this evidence.
@@ -15,7 +15,7 @@ All results are measured offline on 18 October from an owner-authorized, read-on
 
 - **Data.**
   - 19 sent editions (29 September to 18 October), 138 shown items, 7 saved to Reader from the bulletin.
-  - Sources: The Intercept, 404 Media, The Conversation. No topics are configured.
+  - Three followed sources (news and analysis sites); no topics are configured.
 - **Method.**
   - Each item was scored by Jev 1.13 (`typesafe/jev-1.13-20260917`) two ways, one request per item:
     - the released yes/no question;
@@ -37,7 +37,7 @@ All results are measured offline on 18 October from an owner-authorized, read-on
 ### The confound
 
 - **Most items could not be saved.** Save-to-Reader buttons replaced votes on 15 October ([PR 228](https://github.com/akhilvuputuri/chief-agent/pull/228), [journal 86](86-news-reader-saves.md)), and no votes were ever cast. So the 118 items before 15 October could not be saved from the bulletin at all. All 7 saves come from the last 4 editions (20 items).
-- **The same editions were the only ones with context.** Those last editions were the only ones where Jev had saves as context (0, 2, 5 and 6 saves). The graded mean per edition was 0.20–0.29 for the 15 earlier editions, and 0.25, 0.86, 1.27 and 1.24 for the last four.
+- **The same editions were the only ones with context.** The last three were the only editions with saves in Jev's context (2, 5 and 6 saves); the first save-era edition had none. The graded mean per edition was 0.20–0.29 for the 15 earlier editions, then 0.25 (no context yet), 0.86, 1.27 and 1.24.
 - **Correlations confirm it.** Correlation with the number of saves in context was 0.71 for graded Jev and 0.57 for the deterministic score. The deterministic score's site affinity also grows as the owner saves.
 - **What the first table measured.** Its AUCs mostly measured "is this a recent edition", not article quality.
 
@@ -59,9 +59,9 @@ Items that could be saved (the last 4 editions, 20 items, 7 saved):
 
 ### What the scores do measure (descriptive, all 138 items)
 
-- **Graded Jev follows resemblance to past saves:** correlation 0.60 with site affinity and 0.51 with word overlap. It does not follow recency (correlation 0.01). Its median is 0.24 on the 0–4 scale until saves are in context.
+- **Graded Jev follows resemblance to past saves:** correlation 0.60 with site affinity and 0.51 with word overlap. It does not follow recency (correlation 0.01). Its overall median is 0.24 on the 0–4 scale, and it rises only in editions with saves in context.
 - **The deterministic score is mostly recency:** correlation 0.77. Its word-overlap term is usually near zero.
-- **The two disagree a lot on live feeds.** On 18 October's 23 new candidates, the four top picks did not overlap. Jev favoured immigration-enforcement and Russia–Ukraine stories; the deterministic ranker favoured the freshest items.
+- **The two disagree a lot on live feeds.** On 18 October's 23 new candidates, the four top picks did not overlap. Jev favoured stories resembling past saves; the deterministic ranker favoured the freshest items.
 
 ## Diagnosis and alternatives
 
