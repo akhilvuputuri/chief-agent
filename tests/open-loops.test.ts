@@ -334,3 +334,20 @@ test("a replacement card still being sent after an expired one is reported as no
     "plan ready but its card is not delivered yet; read coding_status before offering one",
   ]);
 });
+test("a re-send whose delivery failed does not hide the live card before it", async () => {
+  // Review of PR 251: an 'uncertain' re-send masked the still-confirmable first card.
+  const f = await fixture();
+  const plan = await f.job();
+  await f.card(plan);
+  await f.db.query(
+    "INSERT INTO coding_events(job_id,event_key,payload,delivery,created_at) VALUES($1,$2,$3::jsonb,'uncertain',now()+interval '1 second')",
+    [
+      plan,
+      `requirements:2:${randomUUID()}`,
+      JSON.stringify({ requirements: { revision: 2, plan: "p" } }),
+    ],
+  );
+  assert.deepEqual(await awaiting(f.db), [
+    "owner to confirm the requirements card",
+  ]);
+});

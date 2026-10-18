@@ -21,13 +21,14 @@ export async function openLoops(
           // for the job's current revision can still be confirmed.
           `SELECT j.id,left(j.objective,120) objective,j.state,j.stage,left(j.summary,160) summary,
              left(j.question,200) question,j.updated_at,
-             -- State of the newest undecided card: one still being sent (or a replacement for an
-             -- expired card) is 'pending', not 'expired'.
+             -- State of the newest undecided, live card: one still being sent (or a replacement for an
+             -- expired card) is 'pending', not 'expired'. A failed delivery never counts, so it cannot
+             -- hide an older card that is still confirmable.
              (SELECT CASE WHEN e.delivery<>'sent' OR NOT (e.payload ? 'confirmUntil') THEN 'pending'
                           WHEN (e.payload->>'confirmUntil')::timestamptz > now() THEN 'open' ELSE 'expired' END
                 FROM coding_events e WHERE e.job_id=j.id AND e.payload ? 'requirements'
                   AND (e.payload->'requirements'->>'revision')::int = j.revision
-                  AND NOT (e.payload ? 'decision')
+                  AND NOT (e.payload ? 'decision') AND e.delivery IN ('pending','sending','sent')
                 ORDER BY e.created_at DESC, e.id DESC LIMIT 1) AS card,
              -- The newest undecided Merge / Keep open card for this revision and head.
              (SELECT CASE WHEN e.delivery<>'sent' OR NOT (e.payload ? 'confirmUntil') THEN 'pending'
@@ -35,7 +36,7 @@ export async function openLoops(
                 FROM coding_events e WHERE e.job_id=j.id AND e.payload ? 'merge'
                   AND (e.payload->'merge'->>'revision')::int = j.revision
                   AND e.payload->'merge'->>'head' IS NOT DISTINCT FROM j.head_sha
-                  AND NOT (e.payload ? 'decision')
+                  AND NOT (e.payload ? 'decision') AND e.delivery IN ('pending','sending','sent')
                 ORDER BY e.created_at DESC, e.id DESC LIMIT 1) AS merge_card,
              EXISTS(SELECT 1 FROM coding_events e WHERE e.job_id=j.id AND e.payload ? 'requirements'
                 AND e.payload->>'decision'='revise'
