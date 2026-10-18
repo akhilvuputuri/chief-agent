@@ -1,6 +1,6 @@
 # Subscriptions and recurring bills
 
-First milestone for [issue 132](https://github.com/akhilvuputuri/chief-agent/issues/132): manual owner statements, a persistent tracker, and linked reminders. Email is not required. Source extraction, automatic monitoring through [responsibilities 131](https://github.com/akhilvuputuri/chief-agent/issues/131), price-change alerts, monthly summaries and merchant cancellation handoffs remain later milestones.
+First milestone for [issue 132](https://github.com/akhilvuputuri/chief-agent/issues/132): manual owner statements, a persistent tracker, and linked reminders. Email is not required. Source extraction, automatic monitoring through [responsibilities 131](https://github.com/akhilvuputuri/chief-agent/issues/131). Price-change alerts and the monthly summary were added later (sections below); automatic source monitoring and merchant cancellation handoffs remain later milestones.
 
 ## Owner experience
 
@@ -28,7 +28,7 @@ The timeline shows known/estimated dates in a 30-calendar-day Singapore window, 
 
 ## Linked reminders
 
-Reminders are opt-in per item. `subscription_list(id)` reads reminder settings. `subscription_settings` is mutation-only and requires a request key, current revision and at least one preference change. When enabled, default notice is 7 days for annual renewals and cancellation deadlines, 3 for trial ends, none for other renewal cadences, at 09:00 Singapore. A per-item `daysBefore` overrides all its dates and `time` changes the hour. A monthly renewal needs an explicit lead time. There are no global defaults or monthly-summary settings yet.
+Reminders are opt-in per item. `subscription_list(id)` reads reminder settings. `subscription_settings` is mutation-only and requires a request key, current revision and at least one preference change. When enabled, default notice is 7 days for annual renewals and cancellation deadlines, 3 for trial ends, none for other renewal cadences, at 09:00 Singapore. A per-item `daysBefore` overrides all its dates and `time` changes the hour. A monthly renewal needs an explicit lead time. There are no global reminder defaults; the owner-wide monthly summary has its own setting (below).
 
 Migration 025 adds owner-bound subscription identity, event date and revision to existing `daily_schedules`. One item/date creates one occurrence, grouping trial/renewal events sharing that date. Record edits update a never-started occurrence or cancel obsolete dates. A new date can create a new occurrence. Completed, failed or already-started occurrences are never rearmed automatically, even when a later edit restores their date. Restoring a cancelled occurrence whose delivery had started returns an explicit no-replay warning. Results explain this limitation and return firing times/states. A passed notice window returns a warning and schedules nothing late.
 
@@ -58,7 +58,7 @@ The tracker can take amounts and invoice dates from invoices that [gathering](ga
 
 The `core/bills` agent combines gathering and the tracker in one delegation: it gathers the assigned collection, then applies the matched invoices. `core/subscriptions` can apply invoices that were already gathered but cannot fetch new ones. Both read the shared `subscription-ledger` and `invoice-ledger` skills, and `bills` and `gathering` share `invoice-gathering` (see [agents](agents.md#agent-definitions)).
 
-Limits: plan conflicts are recognised for Claude and ChatGPT tiers, including sized names such as "Max 5x". Other vendors rely on the issuer check and the agent's plan matching, so a different product from the same vendor (a Google Cloud invoice for a Google-merchant YouTube item) is not refused. The evidence check runs just before the write, outside its transaction, as source-input checks already do, so a scope revision landing in between is not re-checked. Amount selection among several recorded amounts is the agent's choice, checked only for presence in the document, not for semantic correctness. A single invoice does not establish a fixed recurring price, and cadence is never inferred from invoices. No automatic intake runs without an owner request, and no monthly summary or price alert schedule is added.
+Limits: plan conflicts are recognised for Claude and ChatGPT tiers, including sized names such as "Max 5x". Other vendors rely on the issuer check and the agent's plan matching, so a different product from the same vendor (a Google Cloud invoice for a Google-merchant YouTube item) is not refused. The evidence check runs just before the write, outside its transaction, as source-input checks already do, so a scope revision landing in between is not re-checked. Amount selection among several recorded amounts is the agent's choice, checked only for presence in the document, not for semantic correctness. A single invoice does not establish a fixed recurring price, and cadence is never inferred from invoices. No automatic intake runs without an owner request; price-change alerts and the monthly summary are separate features described below.
 
 ## Price-change alerts
 
@@ -97,7 +97,7 @@ Limits:
 Issue 132 S7 and R10: an optional monthly message built from saved records with no model call.
 
 - **Setting.** `subscription_summary_set(enabled, day?, time?)` is foreground-only and owner-wide. It schedules one message on `day` (1–28, default 1) at `time` (default 09:00) Singapore time. Turning it off cancels the schedule, which releases its slot in the shared 50-schedule capacity.
-- **Storage.** One `briefing`-kind `daily_schedules` row per owner, with an ID derived from the owner. No migration is needed. `DailyWorker`'s claim, lease, model-free delivery and no-replay rules apply, and `buildBriefing` hands that ID to the summary builder instead of building a to-do briefing. Generic schedule tools can still list, pause or cancel it.
+- **Storage.** One `briefing`-kind `daily_schedules` row per owner, with an ID derived from the owner. No migration is needed. `DailyWorker`'s claim, lease, model-free delivery and no-replay rules apply, and `buildBriefing` hands that ID to the summary builder instead of building a to-do briefing. Generic schedule tools list it but refuse to change it; `subscription_summary_set` is the only way to change it. A failed delivery is not replayed and leaves the summary stopped; the preview reports `status: failed` with the error until the owner turns it on again. A change is refused while a summary is being sent. Omitted day or time keep the saved ones.
 - **Content**, built when sent:
   - per-currency monthly equivalents now, with the excluded count;
   - the previous calendar month's recorded changes: new items, cancellations, and price changes with the price they replaced. Price changes come from owner edits, invoice-backed updates and saved price changes, dated on their effective day.

@@ -4,6 +4,7 @@ import type { Database } from "./db.js";
 import { ScheduleParser } from "./schedule.js";
 import type { SubscriptionFields } from "./subscription-schema.js";
 import {
+  decimalKey,
   effectiveRow,
   priceOn,
   singaporeDay,
@@ -98,6 +99,11 @@ export async function buildSubscriptionSummary(
     string,
     { amount?: string | null; currency?: string | null }
   >();
+  // Each item's status before the month and at its end, so one item gives one status line.
+  const status = new Map<
+    string,
+    { start?: string; end?: string; at?: string }
+  >();
   for (const u of updates) {
     const at = new Date(u.recorded_at).getTime();
     const name = label.get(u.subscription_id) ?? "Item";
@@ -117,31 +123,55 @@ export async function buildSubscriptionSummary(
     if ("amount" in u.changes) after.amount = u.changes.amount;
     if ("currency" in u.changes) after.currency = u.changes.currency;
     state.set(u.subscription_id, after);
+    if (at >= window.end) continue;
+    const st = status.get(u.subscription_id) ?? {};
+    if ("status" in u.changes || u.revision === 1) {
+      const value = u.changes.status ?? "unknown";
+      if (!inWindow(at)) st.start = value;
+      else {
+        st.end = value;
+        st.at = dayOf(at);
+      }
+    }
+    status.set(u.subscription_id, st);
     if (!inWindow(at)) continue;
     const day = dayOf(at);
     if (u.revision === 1)
       added.push({ date: day, text: `${name}: added ${day}` });
-    else if (
-      u.changes.status === "cancelled" ||
-      u.changes.status === "cancelling"
-    )
-      ended.push({
-        date: day,
-        text: `${name}: ${u.changes.status === "cancelled" ? "cancelled" : "cancelling"} (recorded ${day})`,
-      });
-    if (
-      u.revision > 1 &&
-      (after.amount !== before.amount || after.currency !== before.currency)
-    )
+    const samePrice =
+      after.currency === before.currency &&
+      (after.amount == null) === (before.amount == null) &&
+      (after.amount == null ||
+        decimalKey(after.amount) === decimalKey(before.amount!));
+    if (u.revision > 1 && !samePrice)
       prices.push({
         date: day,
         text: `${name}: ${money(before.amount, before.currency)} → ${money(after.amount, after.currency)} (${u.source_ref?.invoice ? `from the invoice matched for ${u.source_ref.invoice.matchDate}` : "owner"}, recorded ${day})`,
       });
   }
-  // A saved price change already in effect but not yet recorded in history.
+  // One line per item whose status changed over the month: ended, or reactivated.
+  const gone = (x?: string) => x === "cancelled" || x === "cancelling";
+  const live = (x?: string) => x === "active" || x === "trial";
+  const reactivated: Change[] = [];
+  for (const [id, st] of status) {
+    if (st.end === undefined || st.end === st.start) continue;
+    const name = label.get(id) ?? "Item";
+    if (gone(st.end) && !gone(st.start))
+      ended.push({
+        date: st.at!,
+        text: `${name}: ${st.end} (recorded ${st.at})`,
+      });
+    else if (live(st.end) && gone(st.start))
+      reactivated.push({
+        date: st.at!,
+        text: `${name}: ${st.end} again (recorded ${st.at})`,
+      });
+  }
+  // A saved price change already in effect but not yet recorded; not for an ended item.
   for (const r of rows)
     if (
       r.appliedPending &&
+      !gone(r.data.status) &&
       inWindow(
         Date.parse(`${(r.appliedPending as any).effectiveDate}T00:00:00+08:00`),
       )
@@ -167,16 +197,29 @@ export async function buildSubscriptionSummary(
     .sort(
       (a, b) => a.date.localeCompare(b.date) || a.text.localeCompare(b.text),
     );
-  const unknown = rows
-    .filter(
-      (r) =>
-        ["active", "trial", "unknown"].includes(r.data.status ?? "unknown") &&
-        (r.data.amount == null || r.data.amountType !== "fixed"),
-    )
-    .map(
-      (r) =>
-        `${r.data.label}: ${r.data.amount == null ? "amount unknown" : `${money(r.data.amount, r.data.currency)} (${r.data.amountType ?? "unknown"} amount)`}`,
-    );
+  // Every item the totals leave out, with the reason; matches subscriptionTotals' excluded count.
+  const unknown = rows.flatMap((r) => {
+    const d = r.data,
+      st = d.status ?? "unknown";
+    if (!["active", "trial", "unknown"].includes(st)) return [];
+    const reason =
+      st === "trial"
+        ? "trial"
+        : st === "unknown"
+          ? "status unknown"
+          : d.amount == null
+            ? "amount unknown"
+            : d.amountType !== "fixed"
+              ? `${d.amountType ?? "unknown"} amount`
+              : !d.cadence || d.cadence === "unknown"
+                ? "cadence unknown"
+                : null;
+    return reason
+      ? [
+          `${d.label}: ${d.amount == null ? "" : money(d.amount, d.currency) + ", "}${reason}`,
+        ]
+      : [];
+  });
   const byDate = (a: Change, b: Change) =>
     a.date.localeCompare(b.date) || a.text.localeCompare(b.text);
   const totalText = totals.totals.length
@@ -190,6 +233,7 @@ export async function buildSubscriptionSummary(
   const changes = [
     ...added.sort(byDate).map((c) => "New · " + c.text),
     ...ended.sort(byDate).map((c) => "Ended · " + c.text),
+    ...reactivated.sort(byDate).map((c) => "Back · " + c.text),
     ...prices.sort(byDate).map((c) => "Price · " + c.text),
   ];
   const sections: NonNullable<Delivery["sections"]> = [
@@ -198,7 +242,7 @@ export async function buildSubscriptionSummary(
       body:
         totalText +
         (totals.excluded
-          ? `\n${totals.excluded} item${totals.excluded === 1 ? "" : "s"} excluded (trial, variable or unknown amount).`
+          ? `\n${totals.excluded} item${totals.excluded === 1 ? "" : "s"} excluded (trial, variable or unknown amount, unknown cadence or status); see Not in the totals.`
           : "") +
         "\nEstimates per currency, not this month's charges; no currency conversion.",
     },
@@ -244,13 +288,28 @@ export async function setSubscriptionSummary(
   settings: { enabled: boolean; day?: number; time?: string },
 ) {
   const id = summaryScheduleId(user);
-  const day = settings.day ?? 1,
-    [hour, minute] = (settings.time ?? "09:00").split(":").map(Number) as [
-      number,
-      number,
-    ];
+  const existing = (
+    await db.query(
+      "SELECT status,schedule FROM daily_schedules WHERE id=$1 AND user_id=$2",
+      [id, user],
+    )
+  ).rows[0];
+  // A setting written during a delivery would be overwritten when the delivery completes.
+  if (existing?.status === "processing")
+    throw new ToolValidationError(
+      "The monthly summary is being sent right now; try the change again in a minute.",
+    );
+  // Omitted day or time keep the saved ones.
+  const [savedMinute, savedHour, savedDay] = String(
+    existing?.schedule ?? "0 9 1 * *",
+  ).split(" ");
+  const day = settings.day ?? Number(savedDay),
+    time =
+      settings.time ??
+      `${savedHour!.padStart(2, "0")}:${savedMinute!.padStart(2, "0")}`,
+    [hour, minute] = time.split(":").map(Number) as [number, number];
   const schedule = `${minute} ${hour} ${day} * *`;
-  const display = `monthly on day ${day} at ${settings.time ?? "09:00"} Singapore time`;
+  const display = `monthly on day ${day} at ${time} Singapore time`;
   const parsed = { kind: "cron", expr: schedule, display };
   const next = (
     await new ScheduleParser(() => new Date(now)).next(schedule, parsed)
@@ -305,7 +364,7 @@ export async function setSubscriptionSummary(
 export async function summaryStatus(db: Database, user: string) {
   const row = (
     await db.query(
-      `SELECT status,next_run AS "nextRun",parsed->>'display' AS schedule FROM daily_schedules WHERE id=$1 AND user_id=$2`,
+      `SELECT status,next_run AS "nextRun",parsed->>'display' AS schedule,last_error AS "lastError" FROM daily_schedules WHERE id=$1 AND user_id=$2`,
       [summaryScheduleId(user), user],
     )
   ).rows[0];
@@ -314,6 +373,14 @@ export async function summaryStatus(db: Database, user: string) {
         enabled: row.status === "scheduled",
         schedule: row.schedule,
         nextRun: row.status === "scheduled" ? row.nextRun : null,
+        status: row.status,
+        ...(row.status === "failed"
+          ? {
+              lastError: row.lastError,
+              statusNotice:
+                "A delivery failed and was not replayed; the summary stays stopped until it is turned on again.",
+            }
+          : {}),
       }
-    : { enabled: false, schedule: null, nextRun: null };
+    : { enabled: false, schedule: null, nextRun: null, status: "off" };
 }

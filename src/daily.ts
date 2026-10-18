@@ -12,6 +12,7 @@ export type DailyAction = Extract<
 export { ScheduleParser } from "./schedule.js";
 import { ScheduleParser } from "./schedule.js";
 import { ToolValidationError } from "./tool-errors.js";
+import { summaryScheduleId } from "./subscription-summary.js";
 /** Parsing runs before any write, so a rejected schedule is a validation failure. */
 async function parseSchedule(
   parser: Pick<ScheduleParser, "next">,
@@ -128,6 +129,10 @@ export class DailyTools {
       )
     ).rows[0];
     if (!old) throw new Error("Schedule not found");
+    if (old.id === summaryScheduleId(user))
+      throw new ToolValidationError(
+        "This is the monthly subscription summary; use subscription_summary_set so its schedule and contents stay together.",
+      );
     if (old.subscription_id)
       throw new ToolValidationError(
         "This reminder belongs to a subscription; use subscription_settings or update the subscription date so the record and reminder stay together.",

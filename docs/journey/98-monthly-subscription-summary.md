@@ -38,7 +38,19 @@ Changes are found by replaying each item's history, because a patch records only
 - Agent wiring: the `subscriptions` agent, the registry grants and delegation, and the `subscription-ledger` skill.
 - Design: [subscriptions](../subscriptions.md#monthly-summary).
 
-Review: pending.
+Review, 19 October 2026: the independent reviewer (Claude Opus 5.5) **APPROVED** `c948811` with non-blocking findings. Nine were fixed before merge:
+
+1. A setting changed during a delivery was silently undone. Changes are now refused while a summary is being sent.
+2. "Not in the totals" missed fixed-price trials and items with an unknown cadence or status. It now lists every excluded item with its reason.
+3. The ledger skill and docs still said there was no monthly summary.
+4. "10" restated as "10.00" was reported as a price change. Prices are now compared as decimals.
+5. Status changes were counted per write and reactivations were ignored. Each item now gives one net line for the month (Ended or Back).
+6. A saved price change on a cancelled item was still reported.
+7. Omitted day or time reset to the defaults. They now keep the saved values.
+8. Generic `schedule_update` could turn the summary daily. Generic tools now refuse it, as they do for linked reminders.
+9. A failed delivery looked like "off". The preview now returns `status: failed` and the error.
+
+Left as is: unbounded totals lines with dozens of currencies. Regression tests cover the fixes; the fixed head needs exact-head re-review.
 
 ## Verification and outcome
 

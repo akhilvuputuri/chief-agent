@@ -60,7 +60,7 @@ const matchedInvoices = `SELECT g.collection_id,g.target_key,g.artifact_id,g.mat
   JOIN gather_collections c ON c.id=g.collection_id AND c.user_id=g.user_id AND g.scope_revision=c.task_revision
   JOIN gather_candidates k ON k.collection_id=g.collection_id AND k.target_key=g.target_key AND k.artifact_id=g.artifact_id AND k.user_id=g.user_id
   WHERE g.user_id=$1`;
-const decimalKey = (value: string) => {
+export const decimalKey = (value: string) => {
   const [whole, fraction = ""] = value.split(".");
   const trimmed = fraction.replace(/0+$/, "");
   return whole!.replace(/^0+(?=\d)/, "") + (trimmed ? "." + trimmed : "");
