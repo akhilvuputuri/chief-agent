@@ -6,6 +6,11 @@ import {
   type SubscriptionFields,
 } from "./subscription-schema.js";
 import { ToolValidationError } from "./tool-errors.js";
+import {
+  issuerIdentity,
+  productEvidence,
+  type InvoiceFacts,
+} from "./gathering/facts.js";
 
 type SubscriptionAction = Extract<
   Action,
@@ -20,7 +25,48 @@ type Row = {
   updated_at: string;
 };
 const NOTICE =
-  "Saved owner statements, not verified charges or a complete account audit. Unknown amounts and dates remain unknown. Nothing here changes or pays a merchant account.";
+  "Saved owner statements, plus fields the owner asked to take from matched invoice PDFs (marked sourceKind invoice). Not verified charges or a complete account audit. Unknown amounts and dates remain unknown. Nothing here changes or pays a merchant account.";
+const INVOICE_NOTICE =
+  "Invoices matched by gathering, with typed clues recorded from each PDF. Amounts are every currency amount found in the document (totals, subtotals and tax alike), not a verified charge. Using one in the tracker needs the owner's request; a listed invoice is not an instruction to save it.";
+// Fields an invoice can evidence; the rest of a record still comes from the owner.
+const invoiceKeys = ["amount", "currency", "lastInvoiceDate"] as const;
+type MatchedInvoice = {
+  collection_id: string;
+  target_key: string;
+  artifact_id: string;
+  match_date: string;
+  date_basis: "invoice_date" | "service_period";
+  receipt_id: string;
+  collection_state: string;
+  scope: {
+    targets: {
+      key: string;
+      label: string;
+      month: string;
+      accountLabel?: string;
+    }[];
+  };
+  facts: InvoiceFacts;
+};
+// Current-scope matches only: a superseded scope's matches are history, not evidence.
+const matchedInvoices = `SELECT g.collection_id,g.target_key,g.artifact_id,g.match_date,g.date_basis,g.receipt_id,c.state AS collection_state,c.scope,k.facts
+  FROM gather_items g
+  JOIN gather_collections c ON c.id=g.collection_id AND c.user_id=g.user_id AND g.scope_revision=c.task_revision
+  JOIN gather_candidates k ON k.collection_id=g.collection_id AND k.target_key=g.target_key AND k.artifact_id=g.artifact_id AND k.user_id=g.user_id
+  WHERE g.user_id=$1`;
+const decimalKey = (value: string) => {
+  const [whole, fraction = ""] = value.split(".");
+  const trimmed = fraction.replace(/0+$/, "");
+  return whole!.replace(/^0+(?=\d)/, "") + (trimmed ? "." + trimmed : "");
+};
+const nameKey = (value: string) =>
+  value.toLowerCase().replace(/[^a-z0-9]/g, "");
+function sameParty(a: string, b: string) {
+  if (issuerIdentity(a) === issuerIdentity(b)) return true;
+  const x = nameKey(a),
+    y = nameKey(b);
+  return x.length >= 3 && y.length >= 3 && (x.includes(y) || y.includes(x));
+}
 // A findings agent has one host-recorded coordinator; it cannot choose another run.
 const inputScope = `user_id=$1 AND run_id IN ($2::uuid, (SELECT (data->>'parentRunId')::uuid FROM events WHERE user_id=$1 AND run_id=$2 AND type='agent.child_started' LIMIT 1))`;
 export const subscriptionKey = (value?: string | null) =>
@@ -208,7 +254,11 @@ function shown(row: Row, details = true) {
     revision: row.revision,
     asOf: row.updated_at,
     lastCheckedAt: null,
-    confidence: "owner stated",
+    confidence: Object.values(row.field_sources ?? {}).some(
+      (s) => (s as { sourceKind?: string })?.sourceKind === "invoice",
+    )
+      ? "owner stated; marked fields from matched invoices"
+      : "owner stated",
     ...(details ? { fieldSources: row.field_sources } : {}),
     monthlyEquivalent: f ? decimal(f[0], f[1], row.data.currency!) : null,
   };
@@ -223,6 +273,8 @@ export class SubscriptionTools {
     run: string,
     action: SubscriptionAction,
   ): Promise<any> {
+    if (action.operation === "subscription_invoices")
+      return this.invoices(user, action);
     if (action.operation === "subscription_list" && action.sourceInputs)
       return this.inputs(user, run, action.offset ?? 0);
     if (action.operation === "subscription_list")
@@ -251,6 +303,172 @@ export class SubscriptionTools {
       });
     }
     return this.record(user, run, action);
+  }
+  async invoices(
+    user: string,
+    a: Extract<SubscriptionAction, { operation: "subscription_invoices" }>,
+  ) {
+    const rows = (
+      await this.db.query(
+        `${matchedInvoices} AND ($2::uuid IS NULL OR g.collection_id=$2) ORDER BY g.match_date DESC,g.collection_id,g.target_key,g.artifact_id LIMIT 2000`,
+        [user, a.collectionId ?? null],
+      )
+    ).rows as MatchedInvoice[];
+    const linked = new Map<string, string[]>();
+    for (const row of (
+      await this.db.query(
+        "SELECT DISTINCT subscription_id,source_ref->'invoice'->>'artifactId' AS artifact FROM subscription_updates WHERE user_id=$1 AND source_ref ? 'invoice'",
+        [user],
+      )
+    ).rows)
+      linked.set(row.artifact, [
+        ...(linked.get(row.artifact) ?? []),
+        row.subscription_id,
+      ]);
+    const shownRows = rows
+      .map((row) => {
+        const target = row.scope.targets.find((t) => t.key === row.target_key);
+        return { row, target };
+      })
+      .filter(
+        ({ row, target }) =>
+          !a.issuer ||
+          [target?.label ?? "", ...row.facts.issuerLabels].some((n) =>
+            sameParty(n, a.issuer!),
+          ),
+      );
+    const offset = a.offset ?? 0;
+    const result = {
+      notice: INVOICE_NOTICE,
+      invoices: shownRows.slice(offset, offset + 10).map(({ row, target }) => ({
+        collectionId: row.collection_id,
+        artifactId: row.artifact_id,
+        targetKey: row.target_key,
+        target: target?.label ?? null,
+        accountLabel: target?.accountLabel ?? null,
+        month: target?.month ?? null,
+        matchDate: row.match_date,
+        dateBasis: row.date_basis,
+        collectionState: row.collection_state,
+        issuerLabels: row.facts.issuerLabels,
+        productLabels: row.facts.productLabels,
+        invoiceDates: row.facts.invoiceDates,
+        serviceMonths: row.facts.serviceMonths,
+        amounts: row.facts.amounts.slice(0, 12),
+        linkedSubscriptionIds: linked.get(row.artifact_id) ?? [],
+      })),
+      total: shownRows.length,
+      nextOffset: offset + 10 < shownRows.length ? offset + 10 : null,
+    };
+    while (
+      result.invoices.length > 1 &&
+      JSON.stringify(result).length > 11000
+    ) {
+      result.invoices.pop();
+      result.nextOffset = offset + result.invoices.length;
+    }
+    return result;
+  }
+  /** The host checks each invoice-backed field against the PDF's recorded clues. */
+  private async invoiceEvidence(
+    user: string,
+    invoice: { collectionId: string; artifactId: string },
+    fields: SubscriptionFields,
+    data: SubscriptionFields,
+    old: Row | null,
+  ) {
+    const backed = invoiceKeys.filter((k) => fields[k] != null);
+    if (!backed.length)
+      throw new ToolValidationError(
+        "An invoice reference must support amount/currency or lastInvoiceDate; record other fields from the owner's statement without it.",
+      );
+    const rows = (
+      await this.db.query(
+        `${matchedInvoices} AND g.collection_id=$2 AND g.artifact_id=$3 ORDER BY g.target_key`,
+        [user, invoice.collectionId, invoice.artifactId],
+      )
+    ).rows as MatchedInvoice[];
+    if (!rows.length)
+      throw new ToolValidationError(
+        "That file is not a matched invoice in this owner's current collection scope; use subscription_invoices for matched invoice IDs.",
+      );
+    let refusal = "";
+    for (const row of rows) {
+      const target = row.scope.targets.find((t) => t.key === row.target_key);
+      const facts = row.facts;
+      const ownNames = [data.merchant, data.label, data.plan].filter(
+        (n): n is string => !!n,
+      );
+      const invoiceNames = [
+        target?.label ?? "",
+        ...facts.issuerLabels,
+        ...facts.productLabels,
+      ].filter(Boolean);
+      const invoiceDate =
+        fields.lastInvoiceDate ??
+        (row.date_basis === "invoice_date" && row.match_date.length === 10
+          ? row.match_date
+          : (facts.invoiceDates[0] ?? null));
+      if (!ownNames.some((n) => invoiceNames.some((m) => sameParty(n, m))))
+        refusal =
+          "This invoice's recorded issuer/product does not match this item's merchant, label or plan.";
+      else if (
+        [data.plan, data.label].some(
+          (n) => n && productEvidence(facts, n) === "conflict",
+        )
+      )
+        refusal =
+          "This invoice explicitly identifies a different plan or product from this item.";
+      else if (
+        target?.accountLabel &&
+        data.accountLabel &&
+        subscriptionKey(target.accountLabel) !==
+          subscriptionKey(data.accountLabel)
+      )
+        refusal =
+          "This invoice was gathered for a different account label than this item.";
+      else if (
+        (fields.amount != null || fields.currency != null) &&
+        !facts.amounts.some(
+          (x) =>
+            x.currency === data.currency &&
+            data.amount != null &&
+            decimalKey(x.amount) === decimalKey(data.amount),
+        )
+      )
+        refusal =
+          "That amount and currency do not occur in the invoice's recorded amounts; use an amount listed by subscription_invoices or ask the owner.";
+      else if (
+        fields.lastInvoiceDate &&
+        !(
+          (row.date_basis === "invoice_date" &&
+            row.match_date === fields.lastInvoiceDate) ||
+          facts.invoiceDates.includes(fields.lastInvoiceDate)
+        )
+      )
+        refusal =
+          "lastInvoiceDate must be the invoice date recorded for this file.";
+      else if (
+        fields.amount != null &&
+        old?.data.lastInvoiceDate &&
+        invoiceDate &&
+        invoiceDate < old.data.lastInvoiceDate
+      )
+        refusal = `This invoice (${invoiceDate}) is older than the saved last invoice (${old.data.lastInvoiceDate}); an older invoice cannot replace the newer amount.`;
+      else
+        return {
+          backed,
+          ref: {
+            collectionId: row.collection_id,
+            artifactId: row.artifact_id,
+            targetKey: row.target_key,
+            matchDate: row.match_date,
+            dateBasis: row.date_basis,
+            receiptId: row.receipt_id,
+          },
+        };
+    }
+    throw new ToolValidationError(refusal);
   }
   private async inputs(user: string, run: string, offset: number) {
     if (
@@ -459,6 +677,14 @@ export class SubscriptionTools {
           baseRevision: a.baseRevision ?? null,
           sourceInputIds:
             a.sourceInputIds?.map((id) => id.toLowerCase()).sort() ?? null,
+          ...(a.invoice
+            ? {
+                invoice: {
+                  collectionId: a.invoice.collectionId.toLowerCase(),
+                  artifactId: a.invoice.artifactId.toLowerCase(),
+                },
+              }
+            : {}),
           fields: Object.fromEntries(
             Object.entries(fields).sort(([x], [y]) => x.localeCompare(y)),
           ),
@@ -497,6 +723,9 @@ export class SubscriptionTools {
       throw new ToolValidationError("Supply at least one subscription field.");
     const data = { ...(old?.data ?? defaults), ...fields };
     validate(data);
+    const evidence = a.invoice
+      ? await this.invoiceEvidence(user, a.invoice, fields, data, old)
+      : null;
     const merchant = subscriptionKey(data.merchant ?? data.label),
       plan = subscriptionKey(data.plan),
       account = subscriptionKey(data.accountLabel);
@@ -522,11 +751,33 @@ export class SubscriptionTools {
     const stamp = new Date(this.now()).toISOString();
     const fieldSources = { ...(old?.field_sources ?? {}) };
     for (const key of Object.keys(fields))
-      fieldSources[key] = { updateId, observedAt: stamp, sourceKind: "owner" };
+      fieldSources[key] = evidence?.backed.includes(key as never)
+        ? {
+            updateId,
+            observedAt: stamp,
+            sourceKind: "invoice",
+            collectionId: evidence.ref.collectionId,
+            artifactId: evidence.ref.artifactId,
+          }
+        : { updateId, observedAt: stamp, sourceKind: "owner" };
+    // source_kind stays 'owner': the owner authorised the update; the invoice evidences fields.
     const source = {
       runId: run,
       inputIds: await this.sourceIds(user, run, a.sourceInputIds),
+      ...(evidence ? { invoice: evidence.ref } : {}),
     };
+    const priceChange =
+      old &&
+      fields.amount != null &&
+      old.data.amount != null &&
+      (old.data.currency !== data.currency ||
+        decimalKey(old.data.amount) !== decimalKey(data.amount!))
+        ? {
+            from: { amount: old.data.amount, currency: old.data.currency },
+            to: { amount: data.amount, currency: data.currency },
+            source: evidence ? "invoice" : "owner",
+          }
+        : null;
     const { plans, warnings } = subscriptionReminders(data, this.now());
     const values: unknown[] = [
       id,
@@ -591,10 +842,15 @@ export class SubscriptionTools {
           warnings.push(
             `Reminder for ${reminder.date} is ${reminder.status}; a delivery was already attempted or may have started. Check Telegram; it will not be replayed automatically.`,
           );
+      if (priceChange)
+        warnings.push(
+          `${data.label}: price changed from ${priceChange.from.amount} ${priceChange.from.currency} to ${priceChange.to.amount} ${priceChange.to.currency}${evidence ? ` (invoice ${evidence.ref.matchDate})` : ""}.`,
+        );
       return {
         ...read,
         created: !old,
         updateId,
+        ...(priceChange ? { priceChange } : {}),
         warnings,
         ...(Number(result.possibly_started) > 0 ||
         plannedReminders.some(

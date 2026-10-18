@@ -14,6 +14,7 @@ import { runtimeContext } from "../src/runtime.js";
 import { Execution, readOperations, recoverRuntime } from "../src/execution.js";
 import { server } from "../src/server.js";
 import { projectObservation } from "../src/observations.js";
+import { plugins } from "../src/plugin-registry.js";
 
 async function fixture() {
   const pg = new PGlite();
@@ -907,7 +908,7 @@ test("tools and agent are gated independently of Gmail, results retain their not
   const enabled = runtimeContext({ subscriptions: true, gmail: false }, null);
   assert.equal(
     enabled.tools.filter((t) => t.name.startsWith("subscription_")).length,
-    3,
+    4,
   );
   assert.ok(
     JSON.parse(enabled.context).agentCatalogue.some(
@@ -1085,4 +1086,428 @@ test("Mini App subscription reads require authentication, owner isolation and no
     await app.close();
     await f.pg.close();
   }
+});
+// A matched invoice exactly as gathering leaves it: candidate facts, receipt and current-scope item.
+async function matchedInvoice(
+  db: Database,
+  o: {
+    user?: string;
+    label?: string;
+    accountLabel?: string;
+    month?: string;
+    date: string;
+    amounts: { currency: string; amount: string }[];
+    productLabels?: string[];
+    matched?: boolean;
+    collection?: string;
+  },
+) {
+  const user = o.user ?? "a",
+    collection = o.collection ?? randomUUID(),
+    artifact = randomUUID(),
+    attempt = randomUUID(),
+    receipt = randomUUID(),
+    key = "t" + artifact.slice(0, 8);
+  const target = {
+    key,
+    label: o.label ?? "Claude Max",
+    month: o.month ?? o.date.slice(0, 7),
+    ...(o.accountLabel ? { accountLabel: o.accountLabel } : {}),
+    dateBasis: "invoice_date",
+    browserOrigins: [],
+  };
+  if (!o.collection) {
+    const task = randomUUID();
+    await db.query(
+      "INSERT INTO work_tasks(id,user_id,objective,request,status) VALUES($1,$2,'Gather invoices','Gather invoices','done')",
+      [task, user],
+    );
+    await db.query(
+      "INSERT INTO gather_collections(id,user_id,task_id,task_revision,request_key,request_hash,scope,state) VALUES($1,$2,$3,1,$4,'h',$5::jsonb,'complete')",
+      [
+        collection,
+        user,
+        task,
+        randomUUID(),
+        JSON.stringify({
+          objective: "Gather invoices",
+          targets: [target],
+          sources: ["provided"],
+          mailboxes: [],
+          providedFiles: [],
+        }),
+      ],
+    );
+  } else
+    await db.query(
+      "UPDATE gather_collections SET scope=jsonb_set(scope,'{targets}',(scope->'targets')||$3::jsonb) WHERE id=$1 AND user_id=$2",
+      [collection, user, JSON.stringify([target])],
+    );
+  const task = (
+    await db.query("SELECT task_id FROM gather_collections WHERE id=$1", [
+      collection,
+    ])
+  ).rows[0].task_id;
+  const facts = {
+    pages: 1,
+    truncated: false,
+    selectableText: true,
+    invoiceHeading: true,
+    dates: [o.date],
+    invoiceDates: [o.date],
+    serviceDates: [],
+    serviceMonths: [],
+    amounts: o.amounts,
+    invoiceNumbers: ["INV-" + artifact.slice(0, 6)],
+    issuerLabels: ["Anthropic"],
+    productLabels: o.productLabels ?? ["Claude Max"],
+  };
+  await db.query(
+    "INSERT INTO gather_targets(collection_id,user_id,key,state,coverage_checked) VALUES($1,$2,$3,'covered',true)",
+    [collection, user, key],
+  );
+  await db.query(
+    "INSERT INTO file_artifacts(id,user_id,sha256,name,mime_type,bytes,encrypted,facts) VALUES($1,$2,$3,'invoice.pdf','application/pdf',10,'\\x00'::bytea,$4::jsonb)",
+    [artifact, user, artifact.replace(/-/g, "").padEnd(64, "0"), facts],
+  );
+  await db.query(
+    "INSERT INTO gather_attempts(id,user_id,collection_id,target_key,kind,state) VALUES($1,$2,$3,$4,'provided','success')",
+    [attempt, user, collection, key],
+  );
+  await db.query(
+    "INSERT INTO gather_candidates(collection_id,target_key,user_id,artifact_id,attempt_id,facts) VALUES($1,$2,$3,$4,$5,$6::jsonb)",
+    [collection, key, user, artifact, attempt, facts],
+  );
+  if (o.matched !== false) {
+    await db.query(
+      "INSERT INTO tool_receipts(id,user_id,run_id,task_id,operation,status) VALUES($1,$2,$3,$4,'gather_match','success')",
+      [receipt, user, randomUUID(), task],
+    );
+    await db.query(
+      "INSERT INTO gather_items(collection_id,target_key,user_id,artifact_id,match_date,date_basis,receipt_id) VALUES($1,$2,$3,$4,$5,'invoice_date',$6)",
+      [collection, key, user, artifact, o.date, receipt],
+    );
+  }
+  return { collectionId: collection, artifactId: artifact, key };
+}
+const claude = {
+  label: "Claude Max",
+  merchant: "Anthropic",
+  plan: "Claude Max",
+  status: "active",
+  amountType: "fixed",
+  cadence: "monthly",
+};
+test("invoice-backed records are checked against the matched PDF's recorded clues and keep invoice provenance", async () => {
+  const f = await fixture();
+  try {
+    const sep = await matchedInvoice(f.db, {
+      date: "2026-09-05",
+      amounts: [
+        { currency: "USD", amount: "100.00" },
+        { currency: "USD", amount: "9.00" },
+      ],
+    });
+    const listed = await f.tools.call("a", f.run, {
+      operation: "subscription_invoices",
+    });
+    assert.equal(listed.total, 1);
+    assert.equal(listed.invoices[0].artifactId, sep.artifactId);
+    assert.deepEqual(listed.invoices[0].amounts[0], {
+      currency: "USD",
+      amount: "100.00",
+    });
+    assert.match(listed.notice, /not an instruction to save/);
+    assert.equal(
+      (
+        await f.tools.call("a", f.run, {
+          operation: "subscription_invoices",
+          issuer: "Netflix",
+        })
+      ).total,
+      0,
+    );
+    assert.equal(
+      (
+        await f.tools.call("a", f.run, {
+          operation: "subscription_invoices",
+          issuer: "Claude",
+        })
+      ).total,
+      1,
+    );
+    assert.equal(
+      (await f.tools.invoices("b", { operation: "subscription_invoices" }))
+        .total,
+      0,
+    );
+    const invoice = {
+      collectionId: sep.collectionId,
+      artifactId: sep.artifactId,
+    };
+    for (const [fields, error] of [
+      [{ ...claude, amount: "120", currency: "USD" }, /do not occur/],
+      [{ ...claude, amount: "100", currency: "SGD" }, /do not occur/],
+      [{ ...claude, lastInvoiceDate: "2026-09-06" }, /recorded for this file/],
+      [
+        {
+          ...claude,
+          label: "Claude Pro",
+          plan: "Claude Pro",
+          amount: "100",
+          currency: "USD",
+        },
+        /different plan/,
+      ],
+      [
+        {
+          label: "Netflix",
+          merchant: "Netflix",
+          amount: "100",
+          currency: "USD",
+        },
+        /does not match/,
+      ],
+      [claude, /must support amount/],
+    ] as const)
+      await assert.rejects(f.record(fields, { invoice }), error);
+    await assert.rejects(
+      f.record(
+        { ...claude, amount: "100", currency: "USD" },
+        {
+          invoice: {
+            collectionId: sep.collectionId,
+            artifactId: randomUUID(),
+          },
+        },
+      ),
+      /not a matched invoice/,
+    );
+    assert.equal(
+      (await f.db.query("SELECT count(*)::int n FROM subscriptions")).rows[0].n,
+      0,
+    );
+    const key = randomUUID();
+    const created = await f.record(
+      {
+        ...claude,
+        amount: "100",
+        currency: "USD",
+        lastInvoiceDate: "2026-09-05",
+      },
+      { invoice, requestKey: key },
+    );
+    assert.equal(created.created, true);
+    assert.equal(created.fieldSources.amount.sourceKind, "invoice");
+    assert.equal(created.fieldSources.amount.artifactId, sep.artifactId);
+    assert.equal(created.fieldSources.lastInvoiceDate.sourceKind, "invoice");
+    assert.equal(created.fieldSources.cadence.sourceKind, "owner");
+    assert.equal(created.history[0].source_kind, "owner");
+    assert.equal(
+      created.history[0].source_ref.invoice.artifactId,
+      sep.artifactId,
+    );
+    assert.equal(created.history[0].source_ref.invoice.matchDate, "2026-09-05");
+    assert.match(created.confidence, /matched invoices/);
+    assert.match(created.notice, /owner statements/);
+    const retry = await f.tools.call("a", f.run, {
+      operation: "subscription_record",
+      requestKey: key,
+      invoice,
+      fields: {
+        ...claude,
+        amount: "100",
+        currency: "USD",
+        lastInvoiceDate: "2026-09-05",
+      } as any,
+    });
+    assert.equal(retry.duplicate, true);
+    await assert.rejects(
+      f.tools.call("a", f.run, {
+        operation: "subscription_record",
+        requestKey: key,
+        fields: {
+          ...claude,
+          amount: "100",
+          currency: "USD",
+          lastInvoiceDate: "2026-09-05",
+        } as any,
+      }),
+      /different subscription data/,
+    );
+    assert.deepEqual(
+      (await f.tools.call("a", f.run, { operation: "subscription_invoices" }))
+        .invoices[0].linkedSubscriptionIds,
+      [created.id],
+    );
+    const oct = await matchedInvoice(f.db, {
+      date: "2026-10-05",
+      amounts: [{ currency: "USD", amount: "110" }],
+    });
+    const raised = await f.record(
+      { amount: "110.00", currency: "USD", lastInvoiceDate: "2026-10-05" },
+      {
+        id: created.id,
+        baseRevision: created.revision,
+        invoice: { collectionId: oct.collectionId, artifactId: oct.artifactId },
+      },
+    );
+    assert.deepEqual(raised.priceChange, {
+      from: { amount: "100", currency: "USD" },
+      to: { amount: "110.00", currency: "USD" },
+      source: "invoice",
+    });
+    assert.ok(raised.warnings.some((w: string) => /price changed/.test(w)));
+    assert.equal(raised.monthlyEquivalent, "110.00");
+    await assert.rejects(
+      f.record(
+        { amount: "100", currency: "USD" },
+        { id: created.id, baseRevision: raised.revision, invoice },
+      ),
+      /older than the saved last invoice/,
+    );
+    // A superseded collection scope is history, not evidence.
+    await f.db.query(
+      "UPDATE gather_collections SET task_revision=2 WHERE id=$1",
+      [oct.collectionId],
+    );
+    await assert.rejects(
+      f.record(
+        { amount: "110", currency: "USD" },
+        {
+          id: created.id,
+          baseRevision: raised.revision,
+          invoice: {
+            collectionId: oct.collectionId,
+            artifactId: oct.artifactId,
+          },
+        },
+      ),
+      /not a matched invoice/,
+    );
+    assert.equal(
+      (await f.tools.call("a", f.run, { operation: "subscription_invoices" }))
+        .total,
+      1,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+test("invoice evidence is owner-scoped, needs a match and respects the gathered account label", async () => {
+  const f = await fixture();
+  try {
+    const foreign = await matchedInvoice(f.db, {
+      user: "b",
+      date: "2026-09-05",
+      amounts: [{ currency: "USD", amount: "100" }],
+    });
+    const candidate = await matchedInvoice(f.db, {
+      date: "2026-09-05",
+      amounts: [{ currency: "USD", amount: "100" }],
+      matched: false,
+    });
+    const work = await matchedInvoice(f.db, {
+      date: "2026-09-05",
+      accountLabel: "Work",
+      amounts: [{ currency: "USD", amount: "100" }],
+    });
+    for (const invoice of [foreign, candidate])
+      await assert.rejects(
+        f.record(
+          { ...claude, amount: "100", currency: "USD" },
+          {
+            invoice: {
+              collectionId: invoice.collectionId,
+              artifactId: invoice.artifactId,
+            },
+          },
+        ),
+        /not a matched invoice/,
+      );
+    await assert.rejects(
+      f.record(
+        { ...claude, accountLabel: "Personal", amount: "100", currency: "USD" },
+        {
+          invoice: {
+            collectionId: work.collectionId,
+            artifactId: work.artifactId,
+          },
+        },
+      ),
+      /different account label/,
+    );
+    const ok = await f.record(
+      { ...claude, accountLabel: "Work", amount: "100", currency: "USD" },
+      {
+        invoice: {
+          collectionId: work.collectionId,
+          artifactId: work.artifactId,
+        },
+      },
+    );
+    assert.equal(ok.fieldSources.amount.sourceKind, "invoice");
+    const background = randomUUID();
+    await f.db.query(
+      "INSERT INTO work_turns(run_id,user_id,request,background) VALUES($1,'a','Background pass',true)",
+      [background],
+    );
+    await assert.rejects(
+      f.tools.call("a", background, {
+        operation: "subscription_record",
+        requestKey: randomUUID(),
+        id: ok.id,
+        baseRevision: ok.revision,
+        invoice: {
+          collectionId: work.collectionId,
+          artifactId: work.artifactId,
+        },
+        fields: { amount: "100", currency: "USD" },
+      }),
+      /foreground owner request/,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+test("the bills agent shares core skills with gathering and subscriptions and needs both capabilities", () => {
+  const types = (availability: Record<string, boolean>) =>
+    JSON.parse(runtimeContext(availability, null).context).agentCatalogue.map(
+      (a: any) => a.type,
+    );
+  const both = types({ subscriptions: true, gathering: true, gmail: true });
+  assert.ok(both.includes("bills"));
+  assert.ok(both.includes("gathering"));
+  assert.ok(both.includes("subscriptions"));
+  const ledgerOnly = types({ subscriptions: true, gathering: false });
+  assert.ok(!ledgerOnly.includes("bills"));
+  assert.ok(ledgerOnly.includes("subscriptions"));
+  assert.ok(
+    !types({ subscriptions: false, gathering: true }).includes("bills"),
+  );
+  const skills = (id: string) =>
+    plugins
+      .catalogue()
+      .find((a) => a.agentId === id)!
+      .skills.map((s: any) => s.key);
+  assert.deepEqual(skills("core/bills"), [
+    "core/invoice-gathering",
+    "core/subscription-ledger",
+    "core/invoice-ledger",
+  ]);
+  assert.deepEqual(skills("core/gathering"), ["core/invoice-gathering"]);
+  assert.deepEqual(skills("core/subscriptions"), [
+    "core/subscription-ledger",
+    "core/invoice-ledger",
+  ]);
+  const bills = plugins.get("core/bills");
+  for (const op of [
+    "gather_capture",
+    "gather_finish",
+    "subscription_invoices",
+    "subscription_record",
+  ])
+    assert.ok(bills.tools.includes(op));
+  assert.ok(!bills.tools.includes("gather_start"));
+  assert.ok(readOperations.has("subscription_invoices"));
 });

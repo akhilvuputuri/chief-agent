@@ -4,7 +4,7 @@
   "enabled": [
     {
       "path": "core",
-      "sha256": "cb5323550bdb1e2240436485a921097b99ca62eea14e247cc44df023cb53e89e",
+      "sha256": "2a12d176613bc3e331b9b87e9e39086e887ad9f8b6a9d7b223f68474ac4fe137",
       "agents": [
         "email",
         "parcels",
@@ -18,7 +18,8 @@
         "library",
         "web",
         "media",
-        "gathering"
+        "gathering",
+        "bills"
       ],
       "allowTools": [
         "calendar_draft",
@@ -75,6 +76,7 @@
         "stock_rule_list",
         "stock_rule_remove",
         "stock_rule_update",
+        "subscription_invoices",
         "subscription_list",
         "subscription_record",
         "subscription_settings",
@@ -107,7 +109,8 @@
     "media": "core/media",
     "subscriptions": "core/subscriptions",
     "portfolio": "core/portfolio",
-    "gathering": "core/gathering"
+    "gathering": "core/gathering",
+    "bills": "core/bills"
   },
   "delegated": [
     "calendar_draft",
@@ -161,6 +164,7 @@
     "stock_rule_list",
     "stock_rule_remove",
     "stock_rule_update",
+    "subscription_invoices",
     "subscription_list",
     "subscription_record",
     "subscription_settings",

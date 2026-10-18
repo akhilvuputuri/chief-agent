@@ -50,15 +50,16 @@
     },
     {
       "id": "subscriptions",
-      "description": "Track subscriptions, memberships and recurring bills from explicit owner statements; report saved costs, decision dates and linked reminders. No email required.",
+      "description": "Track subscriptions and recurring bills from owner statements, or from already-gathered invoices when the owner asks; report costs, decision dates, price changes and reminders. Cannot fetch invoices.",
       "instructions": "agents/subscriptions.md",
       "contract": "findings/v1",
       "tools": [
         "subscription_record",
         "subscription_list",
-        "subscription_settings"
+        "subscription_settings",
+        "subscription_invoices"
       ],
-      "skills": [],
+      "skills": ["subscription-ledger", "invoice-ledger"],
       "limits": {
         "ms": 90000,
         "models": 8,
@@ -134,7 +135,7 @@
     },
     {
       "id": "stocks",
-      "description": "Answer stock questions now (price, day change, 12/26/52-week averages, lows and highs, all-time low and high), set up 'tell me when…' stock rules (below cost, averages, lows/highs, all-time levels, intraday or at the close), and configure and report the stock watchlist: stocks, drop thresholds, pause/resume and Singapore-time monitoring windows.",
+      "description": "Answer stock questions now (price, day change, 12/26/52-week averages, lows and highs, all-time low and high), set up 'tell me when\u2026' stock rules (below cost, averages, lows/highs, all-time levels, intraday or at the close), and configure and report the stock watchlist: stocks, drop thresholds, pause/resume and Singapore-time monitoring windows.",
       "instructions": "agents/stocks.md",
       "contract": "findings/v1",
       "tools": [
@@ -170,7 +171,11 @@
         "portfolio_disconnect"
       ],
       "skills": [],
-      "limits": { "ms": 60000, "models": 4, "tools": 4 },
+      "limits": {
+        "ms": 60000,
+        "models": 4,
+        "tools": 4
+      },
       "model": "fast",
       "effort": "low"
     },
@@ -242,7 +247,7 @@
     },
     {
       "id": "gathering",
-      "description": "Gather invoice PDFs for an exact durable collection from its selected sources, preserve files/provenance, match issuer/period clues and verify source coverage. Human login takeover is supported; no external account writes or automatic ledger intake.",
+      "description": "Gather invoice PDFs for an exact durable collection from its selected sources, match issuer/period clues and verify source coverage, with owner login takeover. Files only; no tracker updates.",
       "instructions": "agents/gathering.md",
       "contract": "findings/v1",
       "tools": [
@@ -257,7 +262,37 @@
         "gather_finish",
         "gather_browser"
       ],
-      "skills": [],
+      "skills": ["invoice-gathering"],
+      "limits": {
+        "ms": 180000,
+        "models": 12,
+        "tools": 40
+      },
+      "model": "fast",
+      "effort": "medium"
+    },
+    {
+      "id": "bills",
+      "description": "Gather invoice PDFs for an exact durable collection, then update the subscription tracker from the matched invoices when the owner asks for both: host-checked amounts and invoice dates, price changes, items the owner names. Owner login takeover; no account changes or payments.",
+      "instructions": "agents/bills.md",
+      "contract": "findings/v1",
+      "tools": [
+        "gather_status",
+        "gather_progress",
+        "gather_search",
+        "gather_email_files",
+        "gather_capture",
+        "gather_match",
+        "gather_check",
+        "gather_block",
+        "gather_finish",
+        "gather_browser",
+        "subscription_invoices",
+        "subscription_list",
+        "subscription_record",
+        "subscription_settings"
+      ],
+      "skills": ["invoice-gathering", "subscription-ledger", "invoice-ledger"],
       "limits": {
         "ms": 180000,
         "models": 12,
@@ -267,5 +302,18 @@
       "effort": "medium"
     }
   ],
-  "skills": []
+  "skills": [
+    {
+      "id": "invoice-gathering",
+      "path": "skills/invoice-gathering/SKILL.md"
+    },
+    {
+      "id": "subscription-ledger",
+      "path": "skills/subscription-ledger/SKILL.md"
+    },
+    {
+      "id": "invoice-ledger",
+      "path": "skills/invoice-ledger/SKILL.md"
+    }
+  ]
 }

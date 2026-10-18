@@ -45,6 +45,7 @@ export const subscriptionFields = z
     trialEndDate: date.nullable().optional(),
     cancellationDeadline: date.nullable().optional(),
     paidThroughDate: date.nullable().optional(),
+    lastInvoiceDate: date.nullable().optional(),
     reminderEnabled: z.boolean().nullable().optional(),
     reminderDays: z.number().int().min(0).max(365).nullable().optional(),
     reminderTime: time.nullable().optional(),
@@ -58,6 +59,13 @@ export const subscriptionRecord = z
     id: z.string().uuid().optional(),
     baseRevision: z.number().int().positive().optional(),
     sourceInputIds,
+    invoice: z
+      .object({
+        collectionId: z.string().uuid(),
+        artifactId: z.string().uuid(),
+      })
+      .strict()
+      .optional(),
     fields: subscriptionFields,
   })
   .strict();
@@ -83,5 +91,13 @@ export const subscriptionSettings = z
     enabled: z.boolean().optional(),
     daysBefore: z.number().int().min(0).max(365).nullable().optional(),
     time: time.optional(),
+  })
+  .strict();
+export const subscriptionInvoices = z
+  .object({
+    operation: z.literal("subscription_invoices"),
+    collectionId: z.string().uuid().optional(),
+    issuer: text.optional(),
+    offset: z.number().int().min(0).max(10000).optional(),
   })
   .strict();

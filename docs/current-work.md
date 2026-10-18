@@ -1,3 +1,7 @@
+# Invoices linked to the subscription tracker — in review, 18 October 2026
+
+Issue 132 next milestone. A new `core/bills` agent gathers an exact invoice collection and then, when the owner asked for it, updates the subscription tracker from the matched invoices. `subscription_invoices` lists matched invoices with their recorded clues. `subscription_record` can cite one invoice; the host checks the amount and invoice date against that PDF's recorded clues, refuses issuer, plan, account and older-invoice mismatches, marks those fields invoice-sourced and reports price changes. Gathering, subscriptions and bills share the core `invoice-gathering`, `subscription-ledger` and `invoice-ledger` skills. No migration. Branch `feat/billing-agent`; review, merge, release and owner acceptance pending. [Journal 92](journey/92-invoice-backed-tracker.md), [design](subscriptions.md#invoice-backed-fields).
+
 # Boxed sub-agents design — proposed, 17 October 2026
 
 Heavy delegated work moves to sub-agents with their own on-demand boxes that Chief can steer and close (issue #245). The owner decided that coding moves first, boxes keep a short warm TTL (about 15 idle minutes, then stop), and self-managed EC2 replaces CodeBuild, with CodeBuild kept as fallback. Design only; no AWS resources yet. [Design](boxes.md), [journal 91](journey/91-boxed-subagents.md).

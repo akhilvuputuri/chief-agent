@@ -1039,7 +1039,8 @@ export class Assistant {
           return this.call(capability, input, childRun);
         },
         agentState: async (agentId) =>
-          agentId === "core/gathering" && this.tools.gathering
+          (agentId === "core/gathering" || agentId === "core/bills") &&
+          this.tools.gathering
             ? await (async () => {
                 const linked = (
                   await this.db.query(
