@@ -1,7 +1,7 @@
 # 93 — Can one agent fetch invoices and keep the subscription tracker in step?
 
-Work date(s): 2026-10-18. Written/revised: 2026-10-18.
-Status: in progress. Implementation and focused tests pass locally; independent review, merge and release pending.
+Work date(s): 2026-10-18. Written/revised: 2026-10-18; release closure 2026-10-19 (SGT).
+Status: released as v0.3.83 (deployed `1733d48`). Owner acceptance and model-behaviour measurements pending.
 
 ## User-visible problem and preceding iteration
 
@@ -82,13 +82,22 @@ Devin Review on `b8fa3ef` raised five findings, all accepted:
 - **Amounts.** Only 12 of up to 30 recorded amounts were listed.
 - **Price changes.** Currency-only and unknown↔known changes were not reported.
 
-All five are fixed with regressions, and the reviewer's 52 probes give unchanged results. The fixed head needs exact-head re-review.
+All five are fixed with regressions, and the reviewer's 52 probes give unchanged results. The reviewer **APPROVED** exact head `ff135b1`, re-running all 52 probes plus new date and price-change probes. Hosted CI passed on that head. Devin completed there with one further finding, declined: paging fails past offset 10,000. Reaching it needs more than 10,000 matched invoices for one owner, at 100 files per collection. It is the same 10,000 offset ceiling as `subscription_list` and the parcel and responsibility lists, and `collectionId` narrows the listing.
 
 ## Verification and outcome
 
 Tested with PGlite fixtures that reproduce gathering's matched rows: owner isolation, unmatched candidates, superseded scopes, amount/currency and date checks, plan and account conflicts, older-invoice refusal, price-change output, retry hashing, background-lane refusal, and the bills/gathering/subscriptions catalogue and shared-skill wiring.
 
 Not established: whether a fast-tier model picks the right total from several recorded amounts, whether moving procedure into lazily read skills changes gathering or subscriptions behaviour, and whether the bills agent fits gathering plus tracker updates in one 12-call allocation on real collections.
+
+### Release closure — 19 October 2026 (SGT)
+
+- **Merge.** [PR 253](https://github.com/akhilvuputuri/chief-agent/pull/253) merged as `1733d48ac0fb0600aab7971dabc8dd13e0caf5a5` from approved head `ff135b1`.
+- **Release.** The [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39143260571) recorded the exact deployment and startup health (`npm run release:status`).
+- **Logs.** Private logs show `gateway.started` for that release at 16:07 UTC on 18 October. No warn/error lines were logged in the 30 minutes before the check, about two minutes after startup.
+- **Migration.** None.
+- **Local checks.** 983 application tests passed on the merged branch before the Devin fixes, and 56 focused tests after them.
+- **Not yet measured.** Owner Telegram acceptance, amount selection by the fast-tier model, behaviour with lazily read skills, and whether the bills agent fits gathering plus tracker updates in its 12-call allocation.
 
 ## Follow-up and next iteration
 
