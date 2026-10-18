@@ -1,3 +1,11 @@
+# Reliability fixes from the two-week review — live, 19 October 2026
+
+Three fixes from the review of two weeks of logs and conversations are deployed, each with an exact release receipt; live acceptance is pending for all three. [Release record](docs/releases.md).
+
+- A refused coding request can no longer block every owner write: provably empty coding calls settle themselves, pre-write refusals are validation errors and a blocked write stops the turn. PR 249, `9437d86`, in v0.3.83. [Journal 92](docs/journey/92-uncertain-coding-write-lock.md).
+- Requirements and monitoring cards stay valid for 24 hours, and each foreground turn lists coding jobs and expired cards that wait on the owner. PR 251, `11d13c6`. [Journal 94](docs/journey/94-open-loops-context.md).
+- Briefings lead with their own text and list live open to-dos; to-do review reminders become briefings. PR 252, `3b93fa7`. [Journal 95](docs/journey/95-live-todo-reminders.md).
+
 # Invoices linked to the subscription tracker — live as v0.3.83, 19 October 2026
 
 A new `core/bills` agent gathers an exact invoice collection, then updates the subscription tracker from the matched invoices when the owner asks. Tracker updates can cite one matched invoice, and the host checks its amount and invoice date against the PDF's recorded clues. Gathering, subscriptions and bills share the core `invoice-gathering`, `subscription-ledger` and `invoice-ledger` skills. Released as v0.3.83 (`1733d48`), with no migration. Next: owner acceptance with one real invoice. [Journal 93](docs/journey/93-invoice-backed-tracker.md).

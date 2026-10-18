@@ -1,7 +1,7 @@
 # 95 — Why did to-do reminders say "review your list" instead of showing the list?
 
 Work date(s): 2026-10-18. Written/revised: 2026-10-18.
-Status: in review.
+Status: released (PR 252, deployed `3b93fa7`). A real to-do review reminder becoming a briefing is not yet observed.
 
 ## Problem and preceding iteration
 
@@ -67,6 +67,13 @@ Production had no existing briefings in the review window: all 13 schedules were
   - a real to-do reminder request becoming a briefing;
   - the rendered Telegram layout.
 - Existing frozen to-do reminders in production are not converted. That needs the owner's request.
+
+### Release closure — 2026-10-18
+
+- **PR:** [252](https://github.com/akhilvuputuri/chief-agent/pull/252). The independent Opus 5.5 review approved the final head `b1990d8ea31eb99531f89442e0d2df96152439e4` in round 6. Hosted CI and Devin passed there, with no open Devin bugs.
+- **Merge:** squash merge as `3b93fa78673de745624786bde920ed5b1112e6c2`.
+- **Release:** [run 39148881889](https://github.com/akhilvuputuri/chief-agent/actions/runs/39148881889). `npm run release:status` returned `success` at 17:21:15Z. An earlier release run listed under this commit (39148820424) was the guard correctly refusing #254's `06a9d86`, which was no longer the tip of main.
+- **Versioning:** deployed after v0.3.83, without a version bump or tag.
 
 ## Follow-up and next iteration
 
