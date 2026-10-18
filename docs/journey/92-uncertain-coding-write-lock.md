@@ -1,7 +1,7 @@
 # 92 — Why did one refused coding reply block every write for a day?
 
 Work date(s): 2026-10-16 to 2026-10-18. Written/revised: 2026-10-18.
-Status: in review. The production lock was cleared by an operator on 18 October. The code fix is in this PR.
+Status: released. The operator cleared the production lock on 18 October; the code fix (PR 249) deployed as `9437d86` the same day.
 
 ## Problem and preceding iteration
 
@@ -87,7 +87,7 @@ Fixes:
 
 The delta review approved `3711831`. Its one non-blocking note: while blocked, read-only delegations (research, email, media) are also refused. A media attachment can only be read in the turn it arrives, so a follow-up may refuse only agent types that have write tools.
 
-Devin on `3711831` reported that a failed child lookup returned "not blocked", which still permitted repeat delegations. The lookup now fails closed: an error is logged as `agent.block_check_failed` and the child is treated as blocked. A test covers this and fails when the fallback is reverted to "not blocked". Delta review of this change is pending.
+Devin on `3711831` reported that a failed child lookup returned "not blocked", which still permitted repeat delegations. The lookup now fails closed: an error is logged as `agent.block_check_failed` and the child is treated as blocked. A test covers this and fails when the fallback is reverted to "not blocked". The delta review approved `7d36754`.
 
 ## Verification and outcome
 
@@ -95,6 +95,14 @@ Devin on `3711831` reported that a failed child lookup returned "not blocked", w
 - **Production, operator action on 18 October, approved by the owner:** call `73d9187d` was settled to `failed` with the same reconciliation shape and event as this code. Afterwards, no `uncertain` calls remain.
 
 Not yet observed: a real coding refusal after this release.
+
+### Release closure — 2026-10-18
+
+- **PR:** [249](https://github.com/akhilvuputuri/chief-agent/pull/249). The independent Opus 5.5 review approved the final head `7d36754a1c0343e0dbc1ac7d70671228df3a00f6` in round 4. Hosted CI and Devin passed there, and every Devin finding was resolved.
+- **Merge:** squash merge as `9437d860a15312933e82999d966a805889cd8cf1`.
+- **Release:** [run 39134957820](https://github.com/akhilvuputuri/chief-agent/actions/runs/39134957820). `npm run release:status` for the exact SHA returned `success` at 14:17:03Z (exact commit deployed, startup health passed), and CloudWatch shows `9437d86` running from 14:16 UTC.
+- **Versioning:** deployed after v0.3.83, without a version bump or tag ([releases](../releases.md)).
+- **Not yet observed:** a real coding refusal in production after this release.
 
 ## Follow-up and next iteration
 

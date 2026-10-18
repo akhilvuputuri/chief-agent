@@ -1,3 +1,13 @@
+## Deployed after v0.3.83 (untagged) — review-driven reliability fixes
+
+Three fixes from the two-week production review (3–17 October). Each had exact-head independent review (Claude Opus 5.5), hosted CI, and Devin with every finding resolved. None bumped the package version.
+
+- **[PR 249](https://github.com/akhilvuputuri/chief-agent/pull/249), `9437d86`.** Coding writes that provably saved nothing settle themselves. Coding refusals made before any write are validation errors. A write refused by the uncertain guard (`WRITE_BLOCKED`) blocks the rest of the turn, including re-delegation to another agent. [Release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39134957820) receipt: `success`. [Journal 92](journey/92-uncertain-coding-write-lock.md).
+- **[PR 251](https://github.com/akhilvuputuri/chief-agent/pull/251), `11d13c6`.** Coding requirements and monitoring cards stay valid for 24 hours. Foreground turns list coding jobs and expired monitoring cards that wait on the owner. [Release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39145803289) receipt: `success`. [Journal 94](journey/94-open-loops-context.md).
+- **[PR 252](https://github.com/akhilvuputuri/chief-agent/pull/252), `3b93fa7`.** Briefings lead with their own text and list live open tasks inline. Reminders to review the to-do list become briefings. [Release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39148881889) receipt: `success`. [Journal 95](journey/95-live-todo-reminders.md).
+
+Before these releases, an operator cleared the 16 October uncertain `coding_reply` lock in production with the owner's approval. Live behavioural acceptance of all three is still pending.
+
 ## Released v0.3.83 — invoices linked to the subscription tracker
 
 [PR 253](https://github.com/akhilvuputuri/chief-agent/pull/253) merged as `1733d48ac0fb0600aab7971dabc8dd13e0caf5a5`.
