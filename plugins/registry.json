@@ -4,7 +4,7 @@
   "enabled": [
     {
       "path": "core",
-      "sha256": "2a12d176613bc3e331b9b87e9e39086e887ad9f8b6a9d7b223f68474ac4fe137",
+      "sha256": "1b5f1f1c8f6299e0ed3aeee141df9ec26966efccd74437260b41996eb86d401d",
       "agents": [
         "email",
         "parcels",

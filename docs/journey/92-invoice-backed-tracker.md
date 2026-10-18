@@ -36,7 +36,25 @@ Alternatives considered:
 - The Mini App shows the last invoice date, marks invoice-sourced items and links invoice-backed history to its collection.
 - Design record: [subscriptions](../subscriptions.md#invoice-backed-fields), [agents](../agents.md#agent-definitions).
 
-Review: pending.
+Review, 18 October 2026: the independent reviewer (Claude Opus 5.5) requested changes at `f8d71c1` and reproduced each defect:
+
+- **Blocking.** A Claude Pro invoice updated an item saved as label "Claude", plan "Max", because each name alone passed the plan check.
+- **Blocking.** Substring identity let a Netflix item with plan "Premium" take a YouTube Premium invoice's price. An item labelled "Max" also matched a Claude Max target.
+- **Non-blocking.** The older-invoice guard covered only amounts, so a date-only update could move `lastInvoiceDate` back first. Service-period matches without an invoice date skipped the guard.
+- **Non-blocking.** `lastInvoiceDate` was not calendar-validated.
+- **Non-blocking.** A collection-bound agent could cite other collections.
+- **Non-blocking.** The bills prompt lacked the gathering hard limits.
+
+Fixes:
+
+- The issuer is matched on the merchant (or label) only, by vendor group or a leading name.
+- Plan conflicts are checked on combined names.
+- The age check covers every invoice-backed field, and undated invoices are refused once a date is saved.
+- An invoice-backed amount needs its recorded date.
+- Bound agents are limited to their collection.
+- The prompt restates the hard limits.
+
+Regression tests cover each case. Re-review pending.
 
 ## Verification and outcome
 

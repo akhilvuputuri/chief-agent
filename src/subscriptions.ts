@@ -59,14 +59,24 @@ const decimalKey = (value: string) => {
   const trimmed = fraction.replace(/0+$/, "");
   return whole!.replace(/^0+(?=\d)/, "") + (trimmed ? "." + trimmed : "");
 };
-const nameKey = (value: string) =>
-  value.toLowerCase().replace(/[^a-z0-9]/g, "");
-function sameParty(a: string, b: string) {
-  if (issuerIdentity(a) === issuerIdentity(b)) return true;
-  const x = nameKey(a),
-    y = nameKey(b);
-  return x.length >= 3 && y.length >= 3 && (x.includes(y) || y.includes(x));
+const words = (value: string) =>
+  value
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+const leads = (a: string[], b: string[]) =>
+  a.length > 0 && a.length <= b.length && a.every((w, i) => w === b[i]);
+/** One issuer: known vendor groups, or one name leading the other ("YouTube" / "YouTube Premium"). A shared later word ("Premium", "Max") is not enough. */
+function sameIssuer(owner: string, issuer: string) {
+  if (issuerIdentity(owner) === issuerIdentity(issuer)) return true;
+  const a = words(owner),
+    b = words(issuer);
+  return leads(a, b) || leads(b, a);
 }
+const planFamily: Record<string, string> = {
+  anthropic: "Claude",
+  openai: "ChatGPT",
+};
 // A findings agent has one host-recorded coordinator; it cannot choose another run.
 const inputScope = `user_id=$1 AND run_id IN ($2::uuid, (SELECT (data->>'parentRunId')::uuid FROM events WHERE user_id=$1 AND run_id=$2 AND type='agent.child_started' LIMIT 1))`;
 export const subscriptionKey = (value?: string | null) =>
@@ -96,6 +106,7 @@ function validate(data: SubscriptionFields) {
     "trialEndDate",
     "cancellationDeadline",
     "paidThroughDate",
+    "lastInvoiceDate",
   ] as const)
     if (data[key] && !validDate(data[key]!))
       throw new ToolValidationError("Use a real calendar date for " + key);
@@ -274,7 +285,7 @@ export class SubscriptionTools {
     action: SubscriptionAction,
   ): Promise<any> {
     if (action.operation === "subscription_invoices")
-      return this.invoices(user, action);
+      return this.invoices(user, action, run);
     if (action.operation === "subscription_list" && action.sourceInputs)
       return this.inputs(user, run, action.offset ?? 0);
     if (action.operation === "subscription_list")
@@ -304,14 +315,30 @@ export class SubscriptionTools {
     }
     return this.record(user, run, action);
   }
+  /** An agent bound to a gathering task works only with that task's collection. */
+  private async assignedCollection(user: string, run?: string) {
+    if (!run) return null;
+    return ((
+      await this.db.query(
+        "SELECT c.id FROM gather_collections c JOIN work_turns w ON w.task_id=c.task_id AND w.user_id=c.user_id WHERE w.run_id=$1 AND w.user_id=$2 AND EXISTS(SELECT 1 FROM events e WHERE e.user_id=$2 AND e.run_id=$1 AND e.type='agent.child_started')",
+        [run, user],
+      )
+    ).rows[0]?.id ?? null) as string | null;
+  }
   async invoices(
     user: string,
     a: Extract<SubscriptionAction, { operation: "subscription_invoices" }>,
+    run?: string,
   ) {
+    const assigned = await this.assignedCollection(user, run);
+    if (assigned && a.collectionId && a.collectionId !== assigned)
+      throw new ToolValidationError(
+        "This agent may read only its assigned collection's invoices.",
+      );
     const rows = (
       await this.db.query(
         `${matchedInvoices} AND ($2::uuid IS NULL OR g.collection_id=$2) ORDER BY g.match_date DESC,g.collection_id,g.target_key,g.artifact_id LIMIT 2000`,
-        [user, a.collectionId ?? null],
+        [user, assigned ?? a.collectionId ?? null],
       )
     ).rows as MatchedInvoice[];
     const linked = new Map<string, string[]>();
@@ -334,7 +361,7 @@ export class SubscriptionTools {
         ({ row, target }) =>
           !a.issuer ||
           [target?.label ?? "", ...row.facts.issuerLabels].some((n) =>
-            sameParty(n, a.issuer!),
+            sameIssuer(a.issuer!, n),
           ),
       );
     const offset = a.offset ?? 0;
@@ -372,6 +399,7 @@ export class SubscriptionTools {
   /** The host checks each invoice-backed field against the PDF's recorded clues. */
   private async invoiceEvidence(
     user: string,
+    run: string,
     invoice: { collectionId: string; artifactId: string },
     fields: SubscriptionFields,
     data: SubscriptionFields,
@@ -381,6 +409,11 @@ export class SubscriptionTools {
     if (!backed.length)
       throw new ToolValidationError(
         "An invoice reference must support amount/currency or lastInvoiceDate; record other fields from the owner's statement without it.",
+      );
+    const assigned = await this.assignedCollection(user, run);
+    if (assigned && invoice.collectionId !== assigned)
+      throw new ToolValidationError(
+        "This agent may cite only its assigned collection's invoices.",
       );
     const rows = (
       await this.db.query(
@@ -396,27 +429,30 @@ export class SubscriptionTools {
     for (const row of rows) {
       const target = row.scope.targets.find((t) => t.key === row.target_key);
       const facts = row.facts;
-      const ownNames = [data.merchant, data.label, data.plan].filter(
-        (n): n is string => !!n,
+      // The issuer must match the item's merchant (or its label without one); a plan never decides the issuer.
+      const owner = data.merchant ?? data.label!;
+      const issuers = [target?.label ?? "", ...facts.issuerLabels].filter(
+        Boolean,
       );
-      const invoiceNames = [
-        target?.label ?? "",
-        ...facts.issuerLabels,
-        ...facts.productLabels,
-      ].filter(Boolean);
-      const invoiceDate =
-        fields.lastInvoiceDate ??
-        (row.date_basis === "invoice_date" && row.match_date.length === 10
+      const family = planFamily[issuerIdentity(owner)];
+      const plans = [
+        data.plan,
+        data.label,
+        data.plan && `${data.label} ${data.plan}`,
+        data.plan && data.merchant && `${data.merchant} ${data.plan}`,
+        data.plan && family && `${family} ${data.plan}`,
+      ];
+      const recorded =
+        row.date_basis === "invoice_date" && row.match_date.length === 10
           ? row.match_date
-          : (facts.invoiceDates[0] ?? null));
-      if (!ownNames.some((n) => invoiceNames.some((m) => sameParty(n, m))))
+          : facts.invoiceDates.length === 1
+            ? facts.invoiceDates[0]!
+            : null;
+      const invoiceDate = fields.lastInvoiceDate ?? recorded;
+      if (!issuers.some((n) => sameIssuer(owner, n)))
         refusal =
-          "This invoice's recorded issuer/product does not match this item's merchant, label or plan.";
-      else if (
-        [data.plan, data.label].some(
-          (n) => n && productEvidence(facts, n) === "conflict",
-        )
-      )
+          "This invoice's recorded issuer does not match this item's merchant (or label).";
+      else if (plans.some((n) => n && productEvidence(facts, n) === "conflict"))
         refusal =
           "This invoice explicitly identifies a different plan or product from this item.";
       else if (
@@ -449,12 +485,14 @@ export class SubscriptionTools {
         refusal =
           "lastInvoiceDate must be the invoice date recorded for this file.";
       else if (
-        fields.amount != null &&
         old?.data.lastInvoiceDate &&
-        invoiceDate &&
-        invoiceDate < old.data.lastInvoiceDate
+        (!invoiceDate || invoiceDate < old.data.lastInvoiceDate)
       )
-        refusal = `This invoice (${invoiceDate}) is older than the saved last invoice (${old.data.lastInvoiceDate}); an older invoice cannot replace the newer amount.`;
+        refusal = invoiceDate
+          ? `This invoice (${invoiceDate}) is older than the saved last invoice (${old.data.lastInvoiceDate}); an older invoice cannot replace newer invoice fields.`
+          : `This invoice has no single recorded invoice date, so it cannot be ordered against the saved last invoice (${old.data.lastInvoiceDate}); ask the owner.`;
+      else if (fields.amount != null && !fields.lastInvoiceDate && recorded)
+        refusal = `Include this invoice's lastInvoiceDate (${recorded}) with its amount so later invoices can be ordered.`;
       else
         return {
           backed,
@@ -724,7 +762,7 @@ export class SubscriptionTools {
     const data = { ...(old?.data ?? defaults), ...fields };
     validate(data);
     const evidence = a.invoice
-      ? await this.invoiceEvidence(user, a.invoice, fields, data, old)
+      ? await this.invoiceEvidence(user, run, a.invoice, fields, data, old)
       : null;
     const merchant = subscriptionKey(data.merchant ?? data.label),
       plan = subscriptionKey(data.plan),

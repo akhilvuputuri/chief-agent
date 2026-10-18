@@ -45,10 +45,12 @@ The tracker can take amounts and invoice dates from invoices that [gathering](ga
   - the file is a current-scope match owned by this owner;
   - the amount and currency occur in its recorded amounts, compared as decimals;
   - `lastInvoiceDate` is its recorded invoice date;
-  - the item's merchant, label or plan names the invoice's issuer, product or target;
-  - no plan conflicts with the invoice's product (a Claude Pro invoice cannot update Claude Max);
+  - the item's merchant (or its label when it has none) names the invoice's issuer: the same known vendor group, or one name leading the other ("YouTube" and "YouTube Premium"); a shared later word such as "Premium" or "Max" does not count, and the plan never decides the issuer;
+  - no plan conflicts with the invoice's product, checked on the plan, the label and their combinations with the merchant or vendor family (a Claude Pro invoice cannot update an item saved as "Claude" plan "Max");
   - the gathered account label, when set, matches the item's;
-  - the invoice is not older than the saved `lastInvoiceDate` when it changes the amount.
+  - once a `lastInvoiceDate` is saved, the cited invoice has a single recorded invoice date that is not older, for any invoice-backed field;
+  - an invoice-backed amount comes with that invoice's `lastInvoiceDate` when the invoice records one;
+  - an agent working on a gathering collection cites only that collection; the coordinator and unbound agents may cite any of the owner's collections.
 - Accepted fields get `sourceKind: "invoice"` with the collection and artifact IDs in `field_sources`. The update's `source_ref` adds the invoice reference and its gathering receipt. `source_kind` stays `owner`, because the owner authorised the update; no migration is needed. Other fields in the same call stay owner-sourced, and `confidence` reports when any field came from an invoice.
 - Any amount change on an update returns `priceChange` (previous and new amount and currency, and whether an invoice supplied it) and a warning line. Exact retries and request-key reuse rules are unchanged; the invoice reference is part of the request hash only when present, so older retries keep their hashes.
 - Writes still need a foreground owner turn. A background gathering pass reports the pending tracker update instead.
@@ -56,7 +58,7 @@ The tracker can take amounts and invoice dates from invoices that [gathering](ga
 
 The `core/bills` agent combines gathering and the tracker in one delegation: it gathers the assigned collection, then applies the matched invoices. `core/subscriptions` can apply invoices that were already gathered but cannot fetch new ones. Both read the shared `subscription-ledger` and `invoice-ledger` skills, and `bills` and `gathering` share `invoice-gathering` (see [agents](agents.md#agent-definitions)).
 
-Limits: amount selection among several recorded amounts is the agent's choice, checked only for presence in the document, not for semantic correctness. A single invoice does not establish a fixed recurring price, and cadence is never inferred from invoices. No automatic intake runs without an owner request, and no monthly summary or price alert schedule is added.
+Limits: plan conflicts are recognised for Claude and ChatGPT plans; other vendors rely on the issuer check and the agent's plan matching. The evidence check runs just before the write, outside its transaction, as source-input checks already do, so a scope revision landing in between is not re-checked. Amount selection among several recorded amounts is the agent's choice, checked only for presence in the document, not for semantic correctness. A single invoice does not establish a fixed recurring price, and cadence is never inferred from invoices. No automatic intake runs without an owner request, and no monthly summary or price alert schedule is added.
 
 ## Capability and prompt cost
 

@@ -1437,8 +1437,26 @@ test("invoice evidence is owner-scoped, needs a match and respects the gathered 
       ),
       /different account label/,
     );
+    await assert.rejects(
+      f.record(
+        { ...claude, accountLabel: "Work", amount: "100", currency: "USD" },
+        {
+          invoice: {
+            collectionId: work.collectionId,
+            artifactId: work.artifactId,
+          },
+        },
+      ),
+      /Include this invoice's lastInvoiceDate/,
+    );
     const ok = await f.record(
-      { ...claude, accountLabel: "Work", amount: "100", currency: "USD" },
+      {
+        ...claude,
+        accountLabel: "Work",
+        amount: "100",
+        currency: "USD",
+        lastInvoiceDate: "2026-09-05",
+      },
       {
         invoice: {
           collectionId: work.collectionId,
@@ -1510,4 +1528,210 @@ test("the bills agent shares core skills with gathering and subscriptions and ne
     assert.ok(bills.tools.includes(op));
   assert.ok(!bills.tools.includes("gather_start"));
   assert.ok(readOperations.has("subscription_invoices"));
+});
+test("invoice identity needs the merchant's issuer, plan conflicts use combined names and order covers every invoice field", async () => {
+  const f = await fixture();
+  try {
+    const pro = await matchedInvoice(f.db, {
+      label: "Claude Pro",
+      date: "2026-09-05",
+      amounts: [{ currency: "USD", amount: "20.00" }],
+      productLabels: ["Claude Pro", "Claude subscription"],
+    });
+    const cite = (x: { collectionId: string; artifactId: string }) => ({
+      invoice: { collectionId: x.collectionId, artifactId: x.artifactId },
+    });
+    // Label and plan stored separately still name Claude Max.
+    const max = await f.record({
+      label: "Claude",
+      merchant: "Anthropic",
+      plan: "Max",
+      status: "active",
+      amount: "100",
+      currency: "USD",
+      lastInvoiceDate: "2026-08-05",
+    });
+    await assert.rejects(
+      f.record(
+        { amount: "20.00", currency: "USD", lastInvoiceDate: "2026-09-05" },
+        { id: max.id, baseRevision: max.revision, ...cite(pro) },
+      ),
+      /different plan/,
+    );
+    // A shared plan word or a later word of another issuer's name is not the same issuer.
+    const youtube = await matchedInvoice(f.db, {
+      label: "YouTube Premium",
+      date: "2026-09-07",
+      amounts: [{ currency: "SGD", amount: "15.98" }],
+      productLabels: [],
+    });
+    for (const item of [
+      { label: "Netflix", merchant: "Netflix", plan: "Premium" },
+      { label: "Premium" },
+    ])
+      await assert.rejects(
+        f.record(
+          {
+            ...item,
+            amount: "15.98",
+            currency: "SGD",
+            lastInvoiceDate: "2026-09-07",
+          },
+          cite(youtube),
+        ),
+        /does not match this item's merchant/,
+      );
+    const hboMax = await matchedInvoice(f.db, {
+      label: "Claude Max",
+      date: "2026-09-09",
+      amounts: [{ currency: "USD", amount: "100" }],
+    });
+    await assert.rejects(
+      f.record(
+        {
+          label: "Max",
+          amount: "100",
+          currency: "USD",
+          lastInvoiceDate: "2026-09-09",
+        },
+        cite(hboMax),
+      ),
+      /does not match this item's merchant/,
+    );
+    const yt = await f.record(
+      {
+        label: "YouTube",
+        merchant: "YouTube",
+        amount: "15.98",
+        currency: "SGD",
+        lastInvoiceDate: "2026-09-07",
+      },
+      cite(youtube),
+    );
+    assert.equal(yt.fieldSources.amount.sourceKind, "invoice");
+    // An older invoice cannot move lastInvoiceDate back, alone or with an amount.
+    const oct = await matchedInvoice(f.db, {
+      label: "YouTube Premium",
+      date: "2026-10-07",
+      amounts: [{ currency: "SGD", amount: "16.98" }],
+      productLabels: [],
+    });
+    const newer = await f.record(
+      { amount: "16.98", currency: "SGD", lastInvoiceDate: "2026-10-07" },
+      { id: yt.id, baseRevision: yt.revision, ...cite(oct) },
+    );
+    await assert.rejects(
+      f.record(
+        { lastInvoiceDate: "2026-09-07" },
+        { id: yt.id, baseRevision: newer.revision, ...cite(youtube) },
+      ),
+      /older than the saved last invoice/,
+    );
+    // A service-period match without one recorded invoice date cannot be ordered.
+    const undated = await matchedInvoice(f.db, {
+      label: "YouTube Premium",
+      date: "2026-08-07",
+      amounts: [{ currency: "SGD", amount: "14.98" }],
+      productLabels: [],
+    });
+    await f.db.query(
+      "UPDATE gather_items SET match_date='2026-08',date_basis='service_period' WHERE artifact_id=$1",
+      [undated.artifactId],
+    );
+    await f.db.query(
+      "UPDATE gather_candidates SET facts=jsonb_set(facts,'{invoiceDates}','[]'::jsonb) WHERE artifact_id=$1",
+      [undated.artifactId],
+    );
+    await assert.rejects(
+      f.record(
+        { amount: "14.98", currency: "SGD" },
+        { id: yt.id, baseRevision: newer.revision, ...cite(undated) },
+      ),
+      /no single recorded invoice date/,
+    );
+    await assert.rejects(
+      f.record({ label: "Bad date", lastInvoiceDate: "2026-02-30" }),
+      /real calendar date for lastInvoiceDate/,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+test("an agent bound to a gathering task reads and cites only its assigned collection's invoices", async () => {
+  const f = await fixture();
+  try {
+    const mine = await matchedInvoice(f.db, {
+      date: "2026-09-05",
+      amounts: [{ currency: "USD", amount: "100" }],
+    });
+    const other = await matchedInvoice(f.db, {
+      date: "2026-10-05",
+      amounts: [{ currency: "USD", amount: "110" }],
+    });
+    const task = (
+      await f.db.query("SELECT task_id FROM gather_collections WHERE id=$1", [
+        mine.collectionId,
+      ])
+    ).rows[0].task_id;
+    const child = randomUUID();
+    await f.db.query(
+      "INSERT INTO work_turns(run_id,user_id,request,background,task_id,revision) VALUES($1,'a','Bills agent',false,$2,1)",
+      [child, task],
+    );
+    await f.db.query(
+      "INSERT INTO events(run_id,user_id,type,data) VALUES($1,'a','agent.child_started',$2::jsonb)",
+      [child, JSON.stringify({ parentRunId: f.run })],
+    );
+    const listed = await f.tools.call("a", child, {
+      operation: "subscription_invoices",
+    });
+    assert.deepEqual(
+      listed.invoices.map((i: any) => i.artifactId),
+      [mine.artifactId],
+    );
+    await assert.rejects(
+      f.tools.call("a", child, {
+        operation: "subscription_invoices",
+        collectionId: other.collectionId,
+      }),
+      /only its assigned collection/,
+    );
+    await assert.rejects(
+      f.tools.call("a", child, {
+        operation: "subscription_record",
+        requestKey: randomUUID(),
+        invoice: {
+          collectionId: other.collectionId,
+          artifactId: other.artifactId,
+        },
+        fields: {
+          ...claude,
+          amount: "110",
+          currency: "USD",
+          lastInvoiceDate: "2026-10-05",
+        } as any,
+      }),
+      /only its assigned collection/,
+    );
+    const ok = await f.tools.call("a", child, {
+      operation: "subscription_record",
+      requestKey: randomUUID(),
+      invoice: { collectionId: mine.collectionId, artifactId: mine.artifactId },
+      fields: {
+        ...claude,
+        amount: "100",
+        currency: "USD",
+        lastInvoiceDate: "2026-09-05",
+      } as any,
+    });
+    assert.equal(ok.fieldSources.amount.sourceKind, "invoice");
+    // The coordinator itself is not bound and sees every collection.
+    assert.equal(
+      (await f.tools.call("a", f.run, { operation: "subscription_invoices" }))
+        .total,
+      2,
+    );
+  } finally {
+    await f.pg.close();
+  }
 });
