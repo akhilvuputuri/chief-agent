@@ -163,3 +163,46 @@ test("a refused write is reported as WRITE_BLOCKED, telling the model not to ret
   assert.match(e.message, /writes\. No further writes run in this request/);
   assert.match(e.message, /Do not retry/);
 });
+test("an upper-case job id still finds the lower-case stored revision, so a call that wrote stays uncertain", async () => {
+  const f = await fixture();
+  const jobId = await f.job();
+  await f.db.query(
+    "INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) VALUES($1,2,'k1','m','plan')",
+    [jobId],
+  );
+  const upper = await f.call({
+    args: { id: jobId.toUpperCase(), requestKey: "k1" },
+  });
+  const free = await f.call({
+    args: { id: jobId.toUpperCase(), requestKey: "k2" },
+  });
+  assert.equal(await settleUncertainCoding(f.db, "123"), 1);
+  assert.equal((await f.state(upper.id)).state, "uncertain");
+  assert.equal((await f.state(free.id)).state, "failed");
+});
+test("requirements cards match the request key exactly, whatever characters it contains", async () => {
+  const f = await fixture();
+  const jobId = await f.job();
+  const keys = ["a\\b", "50%_off", "x.y*z", "(r)"];
+  for (const [i, key] of keys.entries())
+    await f.db.query(
+      "INSERT INTO coding_events(job_id,event_key,payload) VALUES($1,$2,'{}')",
+      [jobId, `requirements:${i + 1}:${key}`],
+    );
+  const kept = [];
+  for (const key of keys)
+    kept.push(
+      await f.call({
+        operation: "coding_resume",
+        args: { id: jobId, requestKey: key },
+      }),
+    );
+  // A key that a LIKE or regex reading of the stored keys would match settles.
+  const near = await f.call({
+    operation: "coding_resume",
+    args: { id: jobId, requestKey: "ab" },
+  });
+  assert.equal(await settleUncertainCoding(f.db, "123"), 1);
+  for (const c of kept) assert.equal((await f.state(c.id)).state, "uncertain");
+  assert.equal((await f.state(near.id)).state, "failed");
+});

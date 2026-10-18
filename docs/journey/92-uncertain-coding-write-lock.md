@@ -52,7 +52,26 @@ Alternatives considered:
   - `tests/coding-settlement.test.ts` has 6 cases: settle, keep when a revision exists, start by key, resume event and card, the left-alone set, and the error mapping.
   - A loop test in `custom-runtime.test.ts`: blocked write, then a successful read, then a second write is still refused, even after the original uncertainty is cleared. Removing the guard makes this test fail.
 
-Independent review: pending.
+Independent review of `20dd113` (Opus 5.5): REQUEST CHANGES. There were two blocking findings, both reproduced with tests. Each could wrongly settle a call that did write:
+
+- **Upper-case job id.** The tool schema accepts an upper-case job uuid, but the revision is stored with the canonical lower-case id, so the settler compared text and missed it.
+- **Backslash in the request key.** A key containing `\` defeated the `LIKE` match against `requirements:` cards.
+
+The reviewer also found:
+
+- one remaining pre-write refusal still threw a plain error ("authenticated foreground owner request");
+- the docs left the deferred MCP replay and the steered-input scope undocumented, and placed the coding paragraph badly;
+- tests were missing for both blocking cases.
+
+Fixes:
+
+- The settler now lower-cases a well-formed job id.
+- Requirements cards are matched exactly, with a regex prefix and an equality check on the key.
+- That refusal is now a validation error.
+- The docs are reordered, with both behaviours stated.
+- Tests now cover upper-case ids and keys containing `\`, `%`, `_`, `.`, `*` and `(`. Reverting either fix makes its test fail.
+
+Re-review is pending.
 
 ## Verification and outcome
 

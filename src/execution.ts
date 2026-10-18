@@ -377,7 +377,8 @@ const codingTraces: Record<string, string> = {
   coding_reply: `EXISTS(SELECT 1 FROM coding_revisions v WHERE v.job_id::text=$4 AND v.request_key=$3)`,
   coding_resume: `(EXISTS(SELECT 1 FROM coding_revisions v WHERE v.job_id::text=$4 AND v.request_key=$3)
     OR EXISTS(SELECT 1 FROM coding_events e WHERE e.job_id::text=$4
-      AND (e.event_key='continue:'||$3 OR e.event_key LIKE 'requirements:%:'||$3)))`,
+      AND (e.event_key='continue:'||$3 OR (e.event_key ~ '^requirements:[0-9]+:'
+        AND regexp_replace(e.event_key,'^requirements:[0-9]+:','')=$3))))`,
 };
 /**
  * Settles the owner's uncertain coding_start/coding_reply/coding_resume calls that
@@ -405,7 +406,11 @@ export async function settleUncertainCoding(db: Database, user: string) {
       continue;
     }
     const key = typeof args.requestKey === "string" ? args.requestKey : "";
-    const job = typeof args.id === "string" ? args.id : "";
+    // Stored job ids are canonical lower-case uuids; the tool schema also accepts upper case.
+    const job =
+      typeof args.id === "string" && /^[0-9a-f-]{36}$/i.test(args.id)
+        ? args.id.toLowerCase()
+        : "";
     if (!key || (row.operation !== "coding_start" && !job)) continue;
     const settled = await db.query(
       `WITH fixed AS (

@@ -257,7 +257,7 @@ export class CodingController {
         )
       ).rows.length
     )
-      throw new Error(
+      throw new ToolValidationError(
         "Coding changes require an authenticated foreground owner request",
       );
   }
