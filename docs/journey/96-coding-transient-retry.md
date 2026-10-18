@@ -65,7 +65,7 @@ Independent review (Opus 5.5, commit `9435234`) requested changes:
 - **S2.** "Never a second time" overstated the guard: an owner resume creates a new revision that can be retried once. The wording is now exact.
 - **S3.** A failed stop-reason lookup was treated as no stated reason. It is now not classified as transient.
 
-While adding these tests, the off-switch test was found to mutate the fixture's shared settings, which silently disabled retries in later tests. It now restores them. The re-review is pending.
+While adding these tests, the off-switch test was found to mutate the fixture's shared settings, which silently disabled retries in later tests. It now restores them. The delta re-review approved `b01d226`; the remaining nit was a wording fix in this entry.
 
 ## Verification and outcome
 
@@ -78,7 +78,7 @@ Tested only: the focused tests pass on PGlite. Pending:
 ## Coding-harness learning record
 
 - **What remained ineffective:** pause recovery depended entirely on the owner noticing, so transient faults cost hours of wall time and no compute.
-- **Mechanism changed:** the host classifies pauses at the point it observes them and acts at most once per approved scope.
+- **Mechanism changed:** the host classifies pauses at the point it observes them and acts at most once per revision that the owner or automation created.
 - **What is unmeasured:** the share of real pauses that are transient, and whether retried attempts complete. The next small test is counting post-release `coding.auto_retry` events against paused jobs by cause over two weeks. If most retries pause again, narrow the classifier or remove it.
 
 ## Follow-up and next iteration
