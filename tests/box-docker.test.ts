@@ -58,7 +58,7 @@ test(
     assert.deepEqual(await readdir(root), []);
     const ps = spawnSync(
       "docker",
-      ["ps", "-aq", "--filter", "label=chief.box.task=1"],
+      ["ps", "-aq", "--filter", "label=chief.box.task"],
       {
         encoding: "utf8",
       },

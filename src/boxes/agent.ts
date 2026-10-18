@@ -99,6 +99,8 @@ export interface TaskRunner {
 /** Bounds on what a task program may send back; matching the host's event limits. */
 export const MAX_LINE = 256 * 1024;
 export const MAX_PAYLOAD = 60_000;
+/** Questions a task may have waiting for the one-per-second drainer before it is stopped. */
+export const MAX_PENDING_QUESTIONS = 20;
 
 /** A payload the host will accept: a plain object of bounded JSON size. */
 export function boundedPayload(value: unknown) {
@@ -690,7 +692,8 @@ export class BoxAgent {
             error: "The task's instructions exceed the box payload limit",
           },
         };
-        this.mark(p.taskId, "queued", { kind: String(p.kind), payload: {} });
+        // Journalled as finished, so a restart reports the refusal rather than running it.
+        this.mark(p.taskId, "finished", { outcome: refused });
         this.queue.push({
           id: p.taskId,
           kind: String(p.kind),
@@ -735,6 +738,11 @@ export class BoxAgent {
     // Questions are queued and sent one per second by a single drainer, in order, and only
     // while their task is still the active one.
     const queue = this.questions.get(taskId) ?? [];
+    // A task flooding questions is cut off rather than allowed to grow the agent's memory.
+    if (queue.length >= MAX_PENDING_QUESTIONS) {
+      this.current?.running.cancel();
+      return;
+    }
     queue.push(output.payload ?? {});
     this.questions.set(taskId, queue);
     if (queue.length === 1) void this.drain(taskId, key);

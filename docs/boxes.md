@@ -383,8 +383,8 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
     - Task IDs must be UUIDs before they reach paths, names or mounts.
     - SIGTERM cancels the running task.
     - The task journal records each step (queued, running, finished with its outcome, reported, done), so a restart re-reports an outcome the host may not have received and finishes an interrupted cleanup.
-    - Instructions too large for a box are refused by the host at delegation, and by the agent if they arrive anyway; they are never run as an empty task.
-    - Questions are sent one per second by a single drainer, in order, and only while their task is active.
+    - Instructions too large for a box are refused by the host at delegation, and by the agent if they arrive anyway (journalled as a finished failure, so a restart cannot run them); they are never run as an empty task.
+    - Questions are sent one per second by a single drainer, in order, and only while their task is active. A task with more than 20 questions waiting is stopped.
     - Task containers are labelled with their box ID, so a reset inspects only its own box's containers.
     - The agent's compiled files import only Node built-ins, so a box runs them with the image's Node and no `node_modules`.
     - A kill waits for its container removal before the reset checks, and a final line without a trailing newline still counts. Questions and progress each have their own one-per-second budget per task; excess progress is dropped, while a question waits for the next free slot.

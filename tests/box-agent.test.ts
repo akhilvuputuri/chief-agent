@@ -898,3 +898,62 @@ test("questions queued for a task that has finished are discarded", async (t) =>
   const result = sent.findIndex((e) => e.kind === "task.result");
   assert.ok(sent.slice(result).every((e) => e.kind !== "task.question"));
 });
+
+test("a refused task stays refused across a restart", async (t) => {
+  const dir = await agentDir(t);
+  const store = new StateStore(dir);
+  // Acknowledged and refused, then the agent restarted before reporting it.
+  const first = stubHost({
+    next: () =>
+      Response.json({
+        messages: [
+          {
+            seq: 1,
+            kind: "task.assign",
+            payload: {
+              taskId,
+              kind: "echo",
+              payload: { brief: "x".repeat(70_000) },
+            },
+          },
+        ],
+        remainingMs: 3_600_000,
+      }),
+  });
+  const agent = new BoxAgent({
+    origin: "https://host.example",
+    boxId: "00000000-0000-4000-8000-000000000000",
+    bootstrap: "s".repeat(43),
+    store,
+    runner: scriptedRunner({ type: "result", payload: {} }).runner,
+    shutdown: () => {},
+    fetch: first.fetch,
+    retryMs: 1,
+  });
+  (agent as any).handle({
+    seq: 1,
+    kind: "task.assign",
+    payload: { taskId, kind: "echo", payload: { brief: "x".repeat(70_000) } },
+  });
+  assert.equal(store.json<any>("tasks", {})[taskId].state, "finished");
+  const { runner, started } = scriptedRunner({ type: "result", payload: {} });
+  const host = stubHost({});
+  await new BoxAgent({
+    origin: "https://host.example",
+    boxId: "00000000-0000-4000-8000-000000000000",
+    store: (() => {
+      store.write("credential", "c".repeat(43));
+      return store;
+    })(),
+    runner,
+    shutdown: () => {},
+    fetch: host.fetch,
+    retryMs: 1,
+  }).run();
+  assert.deepEqual(started, []);
+  const failed = host.calls
+    .filter((c) => c.path === "events")
+    .map((c) => c.body.events[0])
+    .find((e) => e.kind === "task.failed");
+  assert.match(failed.payload.error, /exceed the box payload limit/);
+});

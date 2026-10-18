@@ -261,3 +261,5 @@ The phase 2b tests load the staged box migration.
 - **Admission order.** A flaky test exposed that first-come admission tied on `created_at` at the database clock's millisecond resolution. Boxes now carry an arrival sequence.
 
 Not changed, with reasons replied on the threads: task network egress (phase 2c), the local provider's stored bootstrap secret (development only, documented), and an answer acknowledged before an agent crash (the interrupted task is failed, not resumed, so no answer is silently lost).
+
+The re-review of `5686ed1` approved it and noted three small points, all adopted. A refusal is now journalled as a finished failure, so a restart cannot run the refused task with empty instructions. The Docker test's own leftover check matches any task label. A task with more than 20 questions waiting is stopped.
