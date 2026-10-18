@@ -21,18 +21,22 @@ export async function openLoops(
           // for the job's current revision can still be confirmed.
           `SELECT j.id,left(j.objective,120) objective,j.state,j.stage,left(j.summary,160) summary,
              left(j.question,200) question,j.updated_at,
-             (SELECT CASE WHEN (e.payload->>'confirmUntil')::timestamptz > now() THEN 'open' ELSE 'expired' END
+             -- State of the newest undecided card: one still being sent (or a replacement for an
+             -- expired card) is 'pending', not 'expired'.
+             (SELECT CASE WHEN e.delivery<>'sent' OR NOT (e.payload ? 'confirmUntil') THEN 'pending'
+                          WHEN (e.payload->>'confirmUntil')::timestamptz > now() THEN 'open' ELSE 'expired' END
                 FROM coding_events e WHERE e.job_id=j.id AND e.payload ? 'requirements'
                   AND (e.payload->'requirements'->>'revision')::int = j.revision
-                  AND e.delivery='sent' AND NOT (e.payload ? 'decision') AND e.payload ? 'confirmUntil'
-                ORDER BY e.created_at DESC LIMIT 1) AS card,
-             -- The Merge / Keep open card for this revision and head, if delivered and undecided.
-             (SELECT CASE WHEN (e.payload->>'confirmUntil')::timestamptz > now() THEN 'open' ELSE 'expired' END
+                  AND NOT (e.payload ? 'decision')
+                ORDER BY e.created_at DESC, e.id DESC LIMIT 1) AS card,
+             -- The newest undecided Merge / Keep open card for this revision and head.
+             (SELECT CASE WHEN e.delivery<>'sent' OR NOT (e.payload ? 'confirmUntil') THEN 'pending'
+                          WHEN (e.payload->>'confirmUntil')::timestamptz > now() THEN 'open' ELSE 'expired' END
                 FROM coding_events e WHERE e.job_id=j.id AND e.payload ? 'merge'
                   AND (e.payload->'merge'->>'revision')::int = j.revision
                   AND e.payload->'merge'->>'head' IS NOT DISTINCT FROM j.head_sha
-                  AND e.delivery='sent' AND NOT (e.payload ? 'decision') AND e.payload ? 'confirmUntil'
-                ORDER BY e.created_at DESC LIMIT 1) AS merge_card,
+                  AND NOT (e.payload ? 'decision')
+                ORDER BY e.created_at DESC, e.id DESC LIMIT 1) AS merge_card,
              EXISTS(SELECT 1 FROM coding_events e WHERE e.job_id=j.id AND e.payload ? 'requirements'
                 AND e.payload->>'decision'='revise'
                 AND (e.payload->'requirements'->>'revision')::int = j.revision - 1) AS revise_requested
@@ -56,7 +60,7 @@ export async function openLoops(
               ? "owner to confirm the requirements card"
               : j.card === "expired"
                 ? "requirements card expired; offer a fresh one (coding_resume)"
-                : j.revise_requested
+                : j.revise_requested && j.card !== "pending"
                   ? "owner asked for changes to the plan; ask what to change, then revise it (coding_reply)"
                   : "plan ready but its card is not delivered yet; read coding_status before offering one"
             : j.state === "awaiting_input"

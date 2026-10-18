@@ -285,3 +285,52 @@ test("a merge stage without a live card for the current head is not reported as 
     "merge card expired; read coding_status before offering the owner anything",
   ]);
 });
+test("a replacement card still being sent after an expired one is reported as not delivered, not expired", async () => {
+  // Devin, PR 251: the older expired card masked a pending replacement.
+  const f = await fixture();
+  const plan = await f.job({ age: "2 hours" });
+  await f.card(plan, { confirmUntil: hour(-1) });
+  await f.db.query(
+    "INSERT INTO coding_events(job_id,event_key,payload,delivery,created_at) VALUES($1,$2,$3::jsonb,'pending',now()+interval '1 second')",
+    [
+      plan,
+      `requirements:2:${randomUUID()}`,
+      JSON.stringify({ requirements: { revision: 2, plan: "p" } }),
+    ],
+  );
+  const merge = await f.job({
+    state: "pr_ready",
+    stage: "awaiting_merge_approval",
+    age: "1 hour",
+  });
+  await f.db.query("UPDATE coding_jobs SET head_sha=$2 WHERE id=$1", [
+    merge,
+    "c".repeat(40),
+  ]);
+  for (const [key, payload, delivery, offset] of [
+    [
+      "merge:old",
+      {
+        merge: { revision: 2, head: "c".repeat(40) },
+        confirmUntil: hour(-1),
+        telegramMessageId: 9,
+      },
+      "sent",
+      "0 seconds",
+    ],
+    [
+      "merge:new",
+      { merge: { revision: 2, head: "c".repeat(40) } },
+      "sending",
+      "1 second",
+    ],
+  ] as const)
+    await f.db.query(
+      "INSERT INTO coding_events(job_id,event_key,payload,delivery,created_at) VALUES($1,$2,$3::jsonb,$4,now()+$5::interval)",
+      [merge, key, JSON.stringify(payload), delivery, offset],
+    );
+  assert.deepEqual(await awaiting(f.db), [
+    "merge card not delivered yet; read coding_status before telling the owner to act",
+    "plan ready but its card is not delivered yet; read coding_status before offering one",
+  ]);
+});
