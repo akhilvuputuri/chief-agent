@@ -101,7 +101,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 17 October | [90 — Reasoning effort per message](90-jev-reasoning-effort.md): can Jev pick the main model's reasoning effort per message and raise it as a turn grows? | Released `be3647e` (0.3.82): Jev picks low/medium/high per foreground message, escalates only upward, every decision logged; not yet measured |
 | 17 October | [91 — Boxed sub-agents](91-boxed-subagents.md): can Chief delegate heavy work to sub-agents with their own boxes? | Proposed: design recorded with owner decisions (coding first, warm TTL, self-managed EC2); no implementation or AWS resources yet |
 | 16–18 October | [92 — Uncertain coding write lock](92-uncertain-coding-write-lock.md): why did one refused coding reply block every write for a day? | Operator-settled in production; self-settlement, reclassified refusals and a per-turn write block in review |
-| 18 October | [93 — Invoice-backed tracker](93-invoice-backed-tracker.md): can one agent fetch invoices and keep the subscription tracker in step? | In progress: bills agent, shared core skills and host-checked invoice fields tested locally; review and release pending |
+| 18 October | [93 — Invoice-backed tracker](93-invoice-backed-tracker.md): can one agent fetch invoices and keep the subscription tracker in step? | Released v0.3.83 (`1733d48`); exact receipt and startup verified; owner acceptance pending |
 
 ## Coding-agent learning path
 
