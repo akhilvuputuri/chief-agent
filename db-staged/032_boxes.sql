@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS boxes (
  seen_at timestamptz, idle_since timestamptz, running_since timestamptz,
  running_ms bigint NOT NULL DEFAULT 0, stopped_at timestamptz, absolute_deadline timestamptz NOT NULL,
  lease uuid, lease_until timestamptz, reconciled_at timestamptz,
+ -- Arrival order, independent of clock resolution: new boxes are admitted first-come.
+ arrival bigserial,
  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
  UNIQUE(user_id,request_key)
 );

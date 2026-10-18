@@ -304,6 +304,8 @@ export interface DockerOptions {
   command?: string[];
   /** Per-task resource limits, e.g. "6g" and "3". */
   memory?: string;
+  /** Labels this box's task containers, so a reset only ever inspects its own. */
+  scope?: string;
   cpus?: string;
   limits?: TaskLimits;
 }
@@ -314,12 +316,14 @@ export interface DockerOptions {
  */
 export class DockerRunner implements TaskRunner {
   private docker: string;
+  private scope: string;
   constructor(
     private image: string,
     private root: string,
     private options: DockerOptions = {},
   ) {
     this.docker = options.docker ?? "docker";
+    this.scope = (options.scope ?? "local").replace(/[^a-zA-Z0-9-]/g, "");
   }
   private name = (taskId: string) => `chief-task-${taskId}`;
   private work = (taskId: string) => join(this.root, taskId);
@@ -348,7 +352,7 @@ export class DockerRunner implements TaskRunner {
         "--name",
         this.name(task.id),
         "--label",
-        "chief.box.task=1",
+        `chief.box.task=${this.scope}`,
         "--user",
         "1000:1000",
         "--cap-drop",
@@ -404,7 +408,7 @@ export class DockerRunner implements TaskRunner {
         "ps",
         "-aq",
         "--filter",
-        "label=chief.box.task=1",
+        `label=chief.box.task=${this.scope}`,
       ]);
       if (left.code !== 0)
         throw new Error("Could not confirm that no task container remains");
@@ -438,9 +442,18 @@ export interface AgentOptions {
 }
 
 type Message = { seq: number; kind: string; payload: any };
+/**
+ * Task journal: queued → running → finished (outcome stored) → reported → done. Each step
+ * is durable, so a restart can finish exactly what was interrupted.
+ */
 type Journal = Record<
   string,
-  { state: string; kind?: string; payload?: Record<string, unknown> }
+  {
+    state: string;
+    kind?: string;
+    payload?: Record<string, unknown>;
+    outcome?: TaskOutcome;
+  }
 >;
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -453,7 +466,12 @@ export class BoxAgent {
     id: string;
     kind: string;
     payload: Record<string, unknown>;
+    /** Set when the task is refused before it can run, e.g. oversized instructions. */
+    refused?: TaskOutcome;
   }[] = [];
+  /** The task being started or run; questions for any other task are discarded. */
+  private active?: string;
+  private questions = new Map<string, Record<string, unknown>[]>();
   private current?: { id: string; running: RunningTask };
   private pendingMessages = new Map<string, string[]>();
   private events: Promise<void> = Promise.resolve();
@@ -619,16 +637,40 @@ export class BoxAgent {
   private mark(
     id: string,
     state: string,
-    task?: { kind: string; payload: Record<string, unknown> },
+    fields: Omit<Journal[string], "state"> = {},
   ) {
     const journal = this.journal();
-    // Finished tasks keep only their state: enough to refuse a redelivered assignment.
-    journal[id] = task
-      ? { state, ...task }
-      : state === "done"
-        ? { state }
-        : { ...journal[id], state };
+    // Done tasks keep only their state: enough to refuse a redelivered assignment.
+    journal[id] =
+      state === "done" ? { state } : { ...journal[id], ...fields, state };
     this.o.store.write("tasks", JSON.stringify(journal));
+  }
+
+  /**
+   * Reports a task's outcome and cleans up after it. The outcome is journalled before it
+   * is sent, so an interrupted report or reset is completed after a restart.
+   */
+  private async finish(id: string, outcome: TaskOutcome) {
+    this.mark(id, "finished", { outcome });
+    await this.report({
+      kind: outcome.type === "result" ? "task.result" : "task.failed",
+      taskId: id,
+      payload: outcome.payload,
+    });
+    this.mark(id, "reported");
+    return this.cleanup(id);
+  }
+
+  private async cleanup(id: string) {
+    try {
+      await this.o.runner.reset(id);
+    } catch {
+      // A task that cannot be cleaned up must not be followed by another in this box.
+      await this.end("A task left state behind that could not be removed");
+      return false;
+    }
+    this.mark(id, "done");
+    return true;
   }
 
   private handle(message: Message) {
@@ -639,7 +681,24 @@ export class BoxAgent {
     if (message.kind === "task.assign") {
       // At-least-once delivery: a task already known is never started twice.
       if (this.journal()[p.taskId]) return;
-      const payload = boundedPayload(p.payload) ?? {};
+      const payload = boundedPayload(p.payload ?? {});
+      if (!payload) {
+        // Instructions that do not fit are refused, never run as an empty task.
+        const refused: TaskOutcome = {
+          type: "failed",
+          payload: {
+            error: "The task's instructions exceed the box payload limit",
+          },
+        };
+        this.mark(p.taskId, "queued", { kind: String(p.kind), payload: {} });
+        this.queue.push({
+          id: p.taskId,
+          kind: String(p.kind),
+          payload: {},
+          refused,
+        });
+        return;
+      }
       this.mark(p.taskId, "queued", { kind: String(p.kind), payload });
       this.queue.push({ id: p.taskId, kind: String(p.kind), payload });
     } else if (message.kind === "task.message") {
@@ -659,29 +718,43 @@ export class BoxAgent {
   }
 
   private output(taskId: string, output: TaskOutput) {
-    // Each kind has its own budget of one event per second. Progress beyond it is dropped,
-    // since only the latest matters; a question is delayed to the next free slot, never lost.
+    if (taskId !== this.active) return;
     const key = `${taskId}:${output.type}`;
-    const wait = (this.progressAt.get(key) ?? -Infinity) + 1000 - this.clock();
-    const send = () => {
-      // Never move a later reservation backwards.
-      this.progressAt.set(
-        key,
-        Math.max(this.progressAt.get(key) ?? -Infinity, this.clock()),
-      );
+    if (output.type === "progress") {
+      // Progress is advisory: at most one per second, and only the latest matters.
+      const last = this.progressAt.get(key) ?? -Infinity;
+      if (this.clock() - last < 1000) return;
+      this.progressAt.set(key, this.clock());
       void this.report({
-        kind: output.type === "question" ? "task.question" : "task.progress",
+        kind: "task.progress",
         taskId,
         payload: output.payload ?? {},
       });
-    };
-    if (wait <= 0) return send();
-    if (output.type !== "question") return;
-    // Reserve the slot now so later questions queue behind this one, in order.
-    this.progressAt.set(key, this.clock() + wait);
-    setTimeout(() => {
-      if (!this.stopped) send();
-    }, wait).unref?.();
+      return;
+    }
+    // Questions are queued and sent one per second by a single drainer, in order, and only
+    // while their task is still the active one.
+    const queue = this.questions.get(taskId) ?? [];
+    queue.push(output.payload ?? {});
+    this.questions.set(taskId, queue);
+    if (queue.length === 1) void this.drain(taskId, key);
+  }
+
+  private async drain(taskId: string, key: string) {
+    const queue = this.questions.get(taskId)!;
+    while (queue.length && !this.stopped && this.active === taskId) {
+      const wait =
+        (this.progressAt.get(key) ?? -Infinity) + 1000 - this.clock();
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      if (this.stopped || this.active !== taskId) break;
+      this.progressAt.set(key, this.clock());
+      void this.report({
+        kind: "task.question",
+        taskId,
+        payload: queue.shift()!,
+      });
+    }
+    if (this.active !== taskId) this.questions.delete(taskId);
   }
 
   private async work() {
@@ -689,9 +762,16 @@ export class BoxAgent {
       const task = this.queue.shift();
       if (!task) return;
       await this.report({ kind: "box.state", state: "busy" });
+      if (task.refused) {
+        if (!(await this.finish(task.id, task.refused))) return;
+        if (!this.queue.length)
+          await this.report({ kind: "box.state", state: "idle" });
+        continue;
+      }
       this.mark(task.id, "running");
       await this.report({ kind: "task.started", taskId: task.id });
       let running: RunningTask;
+      this.active = task.id;
       try {
         running = this.o.runner.start(task, (output) =>
           this.output(task.id, output),
@@ -712,20 +792,11 @@ export class BoxAgent {
       this.pendingMessages.delete(task.id);
       const outcome = await running.done;
       this.current = undefined;
+      this.active = undefined;
+      this.questions.delete(task.id);
       for (const kind of ["progress", "question"])
         this.progressAt.delete(`${task.id}:${kind}`);
-      await this.report({
-        kind: outcome.type === "result" ? "task.result" : "task.failed",
-        taskId: task.id,
-        payload: outcome.payload,
-      });
-      this.mark(task.id, "done");
-      try {
-        await this.o.runner.reset(task.id);
-      } catch {
-        // A task that cannot be cleaned up must not be followed by another in this box.
-        return this.end("A task left state behind that could not be removed");
-      }
+      if (!(await this.finish(task.id, outcome))) return;
       if (!this.queue.length)
         await this.report({ kind: "box.state", state: "idle" });
     }
@@ -741,22 +812,21 @@ export class BoxAgent {
     await this.connect();
     if (this.stopped) return;
     for (const [id, entry] of Object.entries(this.journal())) {
-      if (entry.state === "running") {
+      let finished = true;
+      if (entry.state === "running")
         // The box restarted mid-task: the task's process is gone, so report it honestly.
-        this.mark(id, "done");
-        await this.report({
-          kind: "task.failed",
-          taskId: id,
+        finished = await this.finish(id, {
+          type: "failed",
           payload: { error: "The box restarted while this task was running" },
         });
-        try {
-          await this.o.runner.reset(id);
-        } catch {
-          return this.end("A task left state behind that could not be removed");
-        }
-      } else if (entry.state === "queued" && entry.kind !== undefined)
+      else if (entry.state === "finished" && entry.outcome)
+        // The outcome was recorded but may not have reached the host: report it again.
+        finished = await this.finish(id, entry.outcome);
+      else if (entry.state === "reported") finished = await this.cleanup(id);
+      else if (entry.state === "queued" && entry.kind !== undefined)
         // Acknowledged but never started: it still runs.
         this.queue.push({ id, kind: entry.kind, payload: entry.payload ?? {} });
+      if (!finished) return;
     }
     let working: Promise<void> = Promise.resolve();
     if (this.queue.length) working = this.work();

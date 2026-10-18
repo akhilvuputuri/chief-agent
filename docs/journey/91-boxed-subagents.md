@@ -251,3 +251,13 @@ Lesson: a migration enters `db/` only together with its Compose inventory line a
 - the rate-limit wording in the docs now matches the code.
 
 The phase 2b tests load the staged box migration.
+
+**Devin review of PR 260.** Of twelve findings, several described earlier commits and were already fixed. Six applied to the current head, and five of them are now fixed and tested:
+
+- **Interrupted cleanup and lost outcomes.** A restart between reporting a task's outcome and cleaning up after it could leave the task's container behind, which would then end the box. A restart before the outcome reached the host could lose the result. The task journal now records each step, so recovery re-reports a recorded outcome and completes an interrupted cleanup.
+- **Oversized instructions.** Instructions larger than the box limit were run as an empty task. They are now refused, at delegation by the host and on arrival by the agent.
+- **Late or bursting questions.** Questions are sent by a single drainer, one per second, and only while their task is active. A question can no longer arrive after its task's result, and an event-loop stall cannot burst several at once.
+- **Shared daemon.** Task containers are labelled with their box ID, so two boxes sharing a Docker daemon cannot fail each other's reset. On EC2 each box has its own daemon.
+- **Admission order.** A flaky test exposed that first-come admission tied on `created_at` at the database clock's millisecond resolution. Boxes now carry an arrival sequence.
+
+Not changed, with reasons replied on the threads: task network egress (phase 2c), the local provider's stored bootstrap secret (development only, documented), and an answer acknowledged before an agent crash (the interrupted task is failed, not resumed, so no answer is silently lost).

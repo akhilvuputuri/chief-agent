@@ -1116,3 +1116,16 @@ test("a live credential before the launch is recorded, or while the provider can
   );
   assert.equal((await g.row(other.id)).state, "booting");
 });
+
+test("the host refuses task instructions too large for a box", async (t) => {
+  const f = await fixture(t);
+  const { id } = await f.live();
+  await assert.rejects(
+    f.boxes.delegate("owner", id, {
+      requestKey: "big",
+      kind: "echo",
+      payload: { brief: "x".repeat(70_000) },
+    }),
+    /too large for a box/,
+  );
+});

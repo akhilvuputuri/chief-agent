@@ -228,6 +228,12 @@ export class BoxController {
     boxId: string,
     a: { requestKey: string; kind: string; payload: Record<string, unknown> },
   ) {
+    // Matches the box agent's payload bound; larger instructions are refused here rather
+    // than reaching a box that would have to refuse them.
+    if (JSON.stringify(a.payload).length > 60_000)
+      throw new ToolValidationError(
+        "Task instructions are too large for a box; send a smaller brief",
+      );
     return transaction(this.db, async (db) => {
       const box = (
         await db.query(
@@ -710,7 +716,7 @@ export class BoxController {
           await this.db.query(
             `UPDATE boxes SET lease=$1,lease_until=$2,reconciled_at=$3 WHERE id=(SELECT id FROM boxes
                WHERE state NOT IN ('terminated','held') AND (lease IS NULL OR lease_until<$3) AND NOT (id = ANY($4::uuid[]))
-               ORDER BY reconciled_at NULLS FIRST,created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *`,
+               ORDER BY reconciled_at NULLS FIRST,arrival LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *`,
             // Longer than a worst-case pass: three provider calls at their time bound.
             [
               lease,

@@ -382,6 +382,11 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
     - After a restart, acknowledged tasks that never started still run.
     - Task IDs must be UUIDs before they reach paths, names or mounts.
     - SIGTERM cancels the running task.
+    - The task journal records each step (queued, running, finished with its outcome, reported, done), so a restart re-reports an outcome the host may not have received and finishes an interrupted cleanup.
+    - Instructions too large for a box are refused by the host at delegation, and by the agent if they arrive anyway; they are never run as an empty task.
+    - Questions are sent one per second by a single drainer, in order, and only while their task is active.
+    - Task containers are labelled with their box ID, so a reset inspects only its own box's containers.
+    - The agent's compiled files import only Node built-ins, so a box runs them with the image's Node and no `node_modules`.
     - A kill waits for its container removal before the reset checks, and a final line without a trailing newline still counts. Questions and progress each have their own one-per-second budget per task; excess progress is dropped, while a question waits for the next free slot.
     - For 2c, the EC2 identity verifier must return `false` for a malformed or invalid proof and throw only when it cannot reach what it needs, because a throw means retry.
   - **`src/boxes/agent-main.ts`.** The entry point, configured by environment. On a box, shutdown is `systemctl poweroff`, which terminates the instance.

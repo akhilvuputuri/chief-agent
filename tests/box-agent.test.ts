@@ -765,3 +765,136 @@ test("questions asked in quick succession are delayed in order, never dropped", 
   );
   assert.equal(sent.filter((e) => e.kind === "task.progress").length, 1);
 });
+
+test("restart recovery re-reports a recorded outcome and completes an interrupted cleanup", async (t) => {
+  const dir = await agentDir(t);
+  const store = new StateStore(dir);
+  const reported = "33333333-3333-4333-8333-333333333333";
+  store.write("credential", "c".repeat(43));
+  store.write(
+    "tasks",
+    JSON.stringify({
+      [taskId]: {
+        state: "finished",
+        outcome: { type: "result", payload: { real: "answer" } },
+      },
+      [reported]: { state: "reported" },
+    }),
+  );
+  const resets: string[] = [];
+  const { runner, started } = scriptedRunner(
+    { type: "result", payload: {} },
+    async () => {},
+  );
+  runner.reset = async (id) => {
+    resets.push(id);
+  };
+  const host = stubHost({});
+  await new BoxAgent({
+    origin: "https://host.example",
+    boxId: "00000000-0000-4000-8000-000000000000",
+    store,
+    runner,
+    shutdown: () => {},
+    fetch: host.fetch,
+    retryMs: 1,
+  }).run();
+  const events = host.calls
+    .filter((c) => c.path === "events")
+    .map((c) => c.body.events[0]);
+  assert.deepEqual(
+    events
+      .filter((e) => e.kind === "task.result")
+      .map((e) => [e.taskId, e.payload]),
+    [[taskId, { real: "answer" }]],
+  );
+  assert.deepEqual(resets.sort(), [taskId, reported].sort());
+  assert.deepEqual(started, []);
+  const journal = store.json<Record<string, { state: string }>>("tasks", {});
+  assert.deepEqual(
+    Object.values(journal).map((e) => e.state),
+    ["done", "done"],
+  );
+});
+
+test("oversized instructions are refused, never run as an empty task", async (t) => {
+  const dir = await agentDir(t);
+  const host = stubHost({
+    next: (n) =>
+      n === 0
+        ? assign(1, taskId, { brief: "x".repeat(70_000) })
+        : Response.json({ messages: [], remainingMs: n > 3 ? 0 : 3_600_000 }),
+  });
+  const { runner, started } = scriptedRunner({ type: "result", payload: {} });
+  await new BoxAgent({
+    origin: "https://host.example",
+    boxId: "00000000-0000-4000-8000-000000000000",
+    bootstrap: "s".repeat(43),
+    store: new StateStore(dir),
+    runner,
+    shutdown: () => {},
+    fetch: host.fetch,
+    retryMs: 1,
+  }).run();
+  assert.deepEqual(started, []);
+  const failed = host.calls
+    .filter((c) => c.path === "events")
+    .map((c) => c.body.events[0])
+    .find((e) => e.kind === "task.failed");
+  assert.match(failed.payload.error, /exceed the box payload limit/);
+});
+
+test("questions queued for a task that has finished are discarded", async (t) => {
+  const dir = await agentDir(t);
+  const host = stubHost({
+    next: (n) =>
+      n === 0
+        ? assign(1)
+        : new Promise<Response>((resolve) =>
+            setTimeout(
+              () =>
+                resolve(
+                  Response.json({
+                    messages: [],
+                    remainingMs: n > 25 ? 0 : 3_600_000,
+                  }),
+                ),
+              100,
+            ),
+          ),
+  });
+  const runner: TaskRunner = {
+    start: (_task, onOutput) => {
+      onOutput({ type: "question", payload: { n: 1 } });
+      onOutput({ type: "question", payload: { n: 2 } });
+      return {
+        send: () => {},
+        cancel: () => {},
+        done: Promise.resolve({
+          type: "result" as const,
+          payload: { ok: true },
+        }),
+      };
+    },
+    reset: async () => {},
+  };
+  await new BoxAgent({
+    origin: "https://host.example",
+    boxId: "00000000-0000-4000-8000-000000000000",
+    bootstrap: "s".repeat(43),
+    store: new StateStore(dir),
+    runner,
+    shutdown: () => {},
+    fetch: host.fetch,
+    retryMs: 1,
+  }).run();
+  const sent = host.calls
+    .filter((c) => c.path === "events")
+    .map((c) => c.body.events[0]);
+  assert.deepEqual(
+    sent.filter((e) => e.kind === "task.question").map((e) => e.payload.n),
+    [1],
+  );
+  const result = sent.findIndex((e) => e.kind === "task.result");
+  assert.ok(sent.slice(result).every((e) => e.kind !== "task.question"));
+});

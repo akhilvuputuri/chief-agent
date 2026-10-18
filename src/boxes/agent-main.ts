@@ -30,6 +30,7 @@ const runner =
     ? new ProcessRunner(JSON.parse(required("CHIEF_BOX_TASK_COMMAND")), tasks)
     : new DockerRunner(required("CHIEF_BOX_TASK_IMAGE"), tasks, {
         memory: env.CHIEF_BOX_TASK_MEMORY,
+        scope: env.CHIEF_BOX_ID,
         cpus: env.CHIEF_BOX_TASK_CPUS,
       });
 
