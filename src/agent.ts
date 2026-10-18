@@ -6,7 +6,7 @@ import {
 } from "./telegram-feeds.js";
 import { InputInbox } from "./input-inbox.js";
 import { ContextLimitError } from "./context.js";
-import { NotDispatchedError } from "./tool-errors.js";
+import { NotDispatchedError, WriteBlockedError } from "./tool-errors.js";
 import { alignmentContext } from "./alignment.js";
 import {
   conversationState,
@@ -24,6 +24,7 @@ import {
   Stop,
   defaultBudget,
   readOperations,
+  settleUncertainCoding,
   settleUncertainDrafts,
   type Budget,
 } from "./execution.js";
@@ -407,6 +408,9 @@ export class Assistant {
     // A provably empty draft must not keep its own task paused; any other
     // uncertainty still refuses below. A settlement failure only means no change.
     await settleUncertainDrafts(this.db, user).catch((error) =>
+      opsLog("runtime.settle_failed", "warn", errorFields(error)),
+    );
+    await settleUncertainCoding(this.db, user).catch((error) =>
       opsLog("runtime.settle_failed", "warn", errorFields(error)),
     );
     return this.db.query(
@@ -1455,6 +1459,21 @@ export class Assistant {
           [scope.user],
         );
       let uncertain = await unresolved();
+      // A coding request that provably saved nothing (no record for its request key)
+      // must not block every later write. Same failure rules as the draft settler below.
+      if (
+        uncertain.rows.some((r) => String(r.operation).startsWith("coding_"))
+      ) {
+        try {
+          await settleUncertainCoding(this.db, scope.user);
+          uncertain = await unresolved();
+        } catch (error) {
+          opsLog("runtime.settle_failed", "warn", {
+            runId: scope.run,
+            ...errorFields(error),
+          });
+        }
+      }
       if (uncertain.rows.some((r) => r.operation === "calendar_draft")) {
         // This runs after the call was marked dispatched, so a failure here must
         // fall back to the ordinary refusal, never become this write's error.
@@ -1497,11 +1516,11 @@ export class Assistant {
         this.tools.mcp &&
         !(await this.tools.mcp.pendingAllows(scope.user, input))
       )
-        throw new Error(
+        throw new WriteBlockedError(
           "An uncertain write requires inspection: reconcile the pending MCP operation first",
         );
       if (uncertain.rows.length && !exactMcpReplay)
-        throw new Error(
+        throw new WriteBlockedError(
           uncertain.rows.every((r) => r.operation === "calendar_draft")
             ? "An uncertain write requires inspection before further writes. It is an earlier Calendar draft attempt. It is checked again on the owner's next write, from two minutes after it started, and cleared if it saved nothing; ask the owner to try again then, or request operator inspection if it persists."
             : "An uncertain write requires inspection before further writes",

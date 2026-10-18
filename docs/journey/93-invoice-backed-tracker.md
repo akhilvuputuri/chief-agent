@@ -1,4 +1,4 @@
-# 92 — Can one agent fetch invoices and keep the subscription tracker in step?
+# 93 — Can one agent fetch invoices and keep the subscription tracker in step?
 
 Work date(s): 2026-10-18. Written/revised: 2026-10-18.
 Status: in progress. Implementation and focused tests pass locally; independent review, merge and release pending.
@@ -70,7 +70,9 @@ Third round at `d83a5f8` requested changes for one blocking regression introduce
 - The label fallback for issuer matching was removed (the label counts only when there is no merchant), which also closes a merchant-Netflix, label-Disney+ acceptance.
 - Suffixes are kept when what remains is under three characters ("X Corp" stays distinct from "X.ai").
 
-Across the reviewer's 47 probes, the remaining acceptances are the documented same-vendor case and a contrived "AI" merchant. Known safe-side refusals: "ChatGPT Team" against a "ChatGPT Business" invoice. Re-review pending.
+Across the reviewer's 47 probes, the remaining unintended acceptances are the documented same-vendor case and a contrived "AI" merchant. Known safe-side refusals: "ChatGPT Team" against a "ChatGPT Business" invoice.
+
+Fourth round: the reviewer **APPROVED** exact head `12e6aad`, with all 52 probe cases giving the intended outcome. Main then advanced to `9437d86` (PR 249, which took journal 92), so this entry is renumbered 93 and the branch merges that main. The merged head needs its own exact-head approval before merge.
 
 ## Verification and outcome
 

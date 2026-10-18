@@ -257,7 +257,7 @@ export class CodingController {
         )
       ).rows.length
     )
-      throw new Error(
+      throw new ToolValidationError(
         "Coding changes require an authenticated foreground owner request",
       );
   }
@@ -482,7 +482,7 @@ export class CodingController {
       ).rows[0];
       if (prior) {
         if (prior.request_hash !== fingerprint)
-          throw new Error(
+          throw new ToolValidationError(
             "Coding request key already belongs to a different request",
           );
         return this.status(user, prior.id);
@@ -532,7 +532,7 @@ export class CodingController {
           )
         ).rows[0];
         if (duplicate.request_hash !== fingerprint)
-          throw new Error("Coding request key conflict");
+          throw new ToolValidationError("Coding request key conflict");
         return this.status(user, duplicate.id);
       }
       return this.status(user, id);
@@ -545,7 +545,7 @@ export class CodingController {
         )
       ).rows.length;
       if (publishing)
-        throw new Error(
+        throw new ToolValidationError(
           "PR publication is in flight or uncertain; inspect its result before cancelling",
         );
       await this.db.query(
@@ -560,7 +560,7 @@ export class CodingController {
         )
       ).rows[0];
       if (current?.state === "publishing" && current.publication_started)
-        throw new Error(
+        throw new ToolValidationError(
           "PR publication is in flight or uncertain; inspect its result before cancelling",
         );
       if (current?.state === "cancelled") this.abortModels(a.id);
@@ -574,7 +574,7 @@ export class CodingController {
     ).rows[0];
     if (!job) throw new Error("Coding job unavailable");
     if (a.operation === "coding_reply" && a.mode === "implement")
-      throw new Error(
+      throw new ToolValidationError(
         "Implementation requires confirmed requirements. Use coding_resume to request the confirmation card, or coding_reply in plan mode to revise requirements.",
       );
     if (
@@ -583,7 +583,7 @@ export class CodingController {
       job.mode === "plan"
     ) {
       if (job.revision !== a.baseRevision)
-        throw new Error("Coding revision changed");
+        throw new ToolValidationError("Coding revision changed");
       return this.requirements.request(job, a.requestKey);
     }
     // Owner asks to continue a parked owner-merge PR: return it to the automation, which
@@ -655,14 +655,14 @@ export class CodingController {
         prior.message !== message ||
         (a.operation === "coding_reply" && a.mode && prior.mode !== a.mode)
       )
-        throw new Error("Coding revision request key conflict");
+        throw new ToolValidationError("Coding revision request key conflict");
       return this.status(user, a.id);
     }
     if (
       a.operation === "coding_reply" &&
       job.context.length + message.length + 18 > 24000
     )
-      throw new Error(
+      throw new ToolValidationError(
         "Coding follow-up exceeds the supported brief size; prepare a new bounded job",
       );
     assertCodingBrief(
