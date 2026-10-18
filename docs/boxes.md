@@ -333,10 +333,15 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
   - Provider calls are time-bounded.
   - The sweep only touches resources tagged with this environment. Held and launching rows keep theirs.
   - Claims rotate fairly by last reconciliation.
+  - Admission into a profile's capacity is serialised with a per-profile advisory lock.
+  - The idle decision is taken under the box row lock.
+  - A retried `hello` connects a starting box, and a connected box is repaired to `ready`.
+  - Removing a profile ends its boxes; removing a provider holds them.
+  - The sweep visits every configured provider.
   - A box closed during an uncertain launch is found and ended.
   - A lost stop is repeated until its timeout.
   - Unexpected errors return a generic 500.
-- **Tests:** `tests/boxes.test.ts` (27 cases) covers:
+- **Tests:** `tests/boxes.test.ts` (31 cases) covers:
   - spawn, launch, concurrency and restarts;
   - bootstrap, rotation chains and lifelong bootstrap detection;
   - retired-credential alert versus compromise;

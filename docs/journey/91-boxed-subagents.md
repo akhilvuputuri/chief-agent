@@ -185,3 +185,15 @@ Ten new tests cover these fixes.
 - **Restart for open tasks.** A stopped box now restarts for an open task, not only for an unacknowledged message. This covers a task acknowledged during the stop.
 - **Identity checks gated.** Identity verification and its alert are reached only with a live credential, so knowing a box ID is not enough to trigger an alert.
 - **Lease length.** The reconciler lease now outlasts a worst-case pass.
+
+**Devin review of `8841ae6`.** Devin raised six points. Four were defects, now fixed and tested:
+
+- **Stuck in starting.** A retried `hello` after a lost rotation answer returned the right credential but left a warm-starting box marked `starting`. The idle and lifetime checks then never applied to it. The retry now connects the box, and a connected box found still `starting` is repaired to `ready`.
+- **Idle race.** The idle check ran outside the box lock, so a task delegated at that moment could be failed by the idle shutdown. The idle decision is now taken under the same row lock that delegation takes.
+- **Stranded boxes.** Removing a profile held its boxes without ending them, and the sweep skipped providers that no profile used. Termination now needs only the provider. A box whose profile is gone is ended; a box whose provider is gone is held for an operator. The sweep visits every configured provider.
+- **Concurrency across hosts.** Admission was not serialised across hosts. A per-profile advisory lock now guards launch and restart admission. Only one host runs today, so this is defensive.
+
+The other two points:
+
+- **Early long-poll abort.** Devin said a GET's request `close` aborts the long-poll at once. This was not reproduced on Node 22.19 with Fastify 5.12: a test with the old binding still waited the full interval. The abort is now bound to the response closing before it is written, which is correct on any version.
+- **Events from an earlier epoch.** These are kept deliberately. An agent sends events queued before a rotation under their original epoch, with its current credential. Task updates apply only to queued or running tasks, so an old event cannot overwrite a finished one.

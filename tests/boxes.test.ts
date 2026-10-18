@@ -941,3 +941,97 @@ test("identity checks and their alerts are reachable only with a live credential
     0,
   );
 });
+
+test("a retried hello after a lost rotation answer still connects a warm-starting box", async (t) => {
+  const f = await fixture(t);
+  const { id, credential: c1 } = await f.live();
+  await f.boxes.next(id, c1, 0);
+  // The rotation to epoch 2 is recorded, but its answer never reaches the box.
+  const c2 = (await f.boxes.hello(id, { protocol: 1, credential: c1 }))
+    .credential;
+  f.advance(16 * MIN);
+  await f.db.query("UPDATE boxes SET seen_at=$2 WHERE id=$1", [
+    id,
+    new Date("2026-10-20T00:16:00Z"),
+  ]);
+  await f.boxes.tick();
+  await f.boxes.tick();
+  assert.equal((await f.row(id)).state, "stopped");
+  await f.boxes.delegate("owner", id, {
+    requestKey: "t",
+    kind: "echo",
+    payload: {},
+  });
+  await f.boxes.tick();
+  assert.equal((await f.row(id)).state, "starting");
+  const retried = await f.boxes.hello(id, { protocol: 1, credential: c1 });
+  assert.equal(retried.credential, c2);
+  assert.equal((await f.row(id)).state, "ready");
+});
+
+test("a box that connected while marked starting is repaired to ready", async (t) => {
+  const f = await fixture(t);
+  const { id, credential } = await f.live();
+  await f.db.query(
+    "UPDATE boxes SET state='starting',running_since=$2 WHERE id=$1",
+    [id, new Date("2026-10-19T23:59:00Z")],
+  );
+  await f.boxes.next(id, credential, 0);
+  await f.boxes.tick();
+  assert.equal((await f.row(id)).state, "ready");
+});
+
+test("removing a profile ends its boxes; removing a provider holds them; the sweep covers every provider", async (t) => {
+  const f = await fixture(t);
+  const { id } = await f.live();
+  const orphan = f.provider.orphan("00000000-0000-4000-8000-000000000002");
+  const withoutProfile = new BoxController(
+    f.db,
+    { environment: "test", profiles: {} },
+    { fake: f.provider },
+    "b".repeat(64),
+    "https://companion.example.com",
+    () => new Date("2026-10-20T00:00:00Z"),
+    { hostGraceMs: 0 },
+  );
+  await withoutProfile.tick();
+  assert.match((await f.row(id)).reason, /profile is no longer configured/);
+  await withoutProfile.tick();
+  await withoutProfile.tick();
+  assert.equal((await f.row(id)).state, "terminated");
+  assert.equal(f.provider.boxes.get(orphan)!.state, "terminated");
+
+  const g = await fixture(t);
+  const b = await g.live();
+  const withoutProvider = new BoxController(
+    g.db,
+    { environment: "test", profiles: {} },
+    {},
+    "b".repeat(64),
+    "https://companion.example.com",
+  );
+  await withoutProvider.tick();
+  const held = await g.row(b.id);
+  assert.equal(held.state, "held");
+  assert.match(held.reason, /provider is no longer configured/);
+});
+
+test("an empty long-poll over HTTP waits for the poll interval", async (t) => {
+  const f = await fixture(t, { timings: { pollMs: 700 } });
+  const { id, credential } = await f.live();
+  const app = server();
+  await boxApi(app, f.boxes);
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  t.after(() => app.close());
+  const { port } = app.server.address() as { port: number };
+  const started = Date.now();
+  const response = await fetch(
+    `http://127.0.0.1:${port}/boxes/${id}/next?after=0`,
+    {
+      headers: { authorization: `Bearer ${credential}` },
+    },
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).messages, []);
+  assert.ok(Date.now() - started >= 600, "the poll waited");
+});

@@ -42,7 +42,11 @@ export async function boxApi(app: FastifyInstance, boxes: BoxController) {
         if (!id.success || !after.success)
           return reply.code(401).send({ error: "Box credential refused" });
         const abort = new AbortController();
-        req.raw.on("close", () => abort.abort());
+        // Abort only when the client goes away before the answer is written; a request's own
+        // `close` fires as soon as a bodiless GET has been read.
+        reply.raw.on("close", () => {
+          if (!reply.raw.writableFinished) abort.abort();
+        });
         return guard(reply, () =>
           boxes.next(
             id.data,

@@ -423,13 +423,25 @@ export class BoxController {
         [...closed, "requested"].includes(box.state)
       )
         return { refused: true as const };
-      // A retry while the replacement is still unused returns that same replacement.
-      if (sameHash(box.previous_hash, presented))
+      // A retry while the replacement is still unused returns that same replacement, and
+      // connects the box just as the first answer would have.
+      if (sameHash(box.previous_hash, presented)) {
+        await db.query(
+          `UPDATE boxes SET seen_at=$2::timestamptz,state=CASE WHEN $3 THEN 'ready' ELSE state END,
+             idle_since=CASE WHEN $3 THEN $2::timestamptz ELSE idle_since END,
+             running_since=COALESCE(running_since,$2::timestamptz),updated_at=$2 WHERE id=$1`,
+          [
+            box.id,
+            now,
+            ["launching", "booting", "starting"].includes(box.state),
+          ],
+        );
         return {
           box,
           credential: deriveCredential(this.key, box.id, presented, box.epoch),
           epoch: box.epoch,
         };
+      }
       if (sameHash(box.credential_hash, presented)) {
         const epoch = box.epoch + 1;
         const credential = deriveCredential(this.key, box.id, presented, epoch);
@@ -737,17 +749,6 @@ export class BoxController {
     return result.rows.length > 0;
   }
 
-  private async running(profile: string) {
-    return Number(
-      (
-        await this.db.query(
-          "SELECT count(*)::int AS n FROM boxes WHERE profile=$1 AND state = ANY($2::text[])",
-          [profile, [...active]],
-        )
-      ).rows[0].n,
-    );
-  }
-
   private async pending(boxId: string) {
     return (
       await this.db.query(
@@ -760,23 +761,50 @@ export class BoxController {
   private async reconcile(box: Box, now: Date) {
     const profile = this.config.profiles[box.profile];
     const provider = this.providers[box.provider];
-    if (!profile || !provider) {
-      await this.hold(box, "Profile or provider no longer configured");
+    if (!provider) {
+      // Without its provider the host cannot act on the resource: an operator must.
+      await this.hold(box, "Its provider is no longer configured");
       return;
     }
     const call = <T>(work: Promise<T>) => this.bounded(work);
     const t = now.getTime();
     const since = (d: Date | null) =>
       d ? t - new Date(d).getTime() : Infinity;
+    // Termination needs only the provider, so it completes even after a profile is removed.
+    if (box.state === "terminating") {
+      let providerId = box.provider_id;
+      if (!providerId && box.launch_started_at) {
+        // Closed during an uncertain launch: find the resource before declaring it gone.
+        providerId = (await call(provider.find(box.id))) ?? null;
+        if (!providerId) {
+          if (since(box.launch_started_at) > this.timings.launchTimeoutMs)
+            await this.set(box, "terminating", { state: "terminated" });
+          return;
+        }
+        await this.set(box, "terminating", { provider_id: providerId });
+      }
+      if (!providerId) {
+        await this.set(box, "terminating", { state: "terminated" });
+        return;
+      }
+      const state = await call(provider.describe(providerId));
+      if (state === "terminated" || state === "missing")
+        await this.set(box, "terminating", { state: "terminated" });
+      else await call(provider.terminate(providerId));
+      return;
+    }
+    if (!profile) {
+      await this.terminate(box, "Its profile is no longer configured");
+      return;
+    }
     switch (box.state) {
       case "requested": {
-        if ((await this.running(box.profile)) >= profile.concurrency) return;
         const secret = bootstrapSecret();
         const hash = hashCredential(secret);
         // The secret's hash and the launching state are recorded before the provider call,
         // so an uncertain launch is reconciled, never retried.
         if (
-          !(await this.set(box, "requested", {
+          !(await this.admit(box, profile, "requested", {
             state: "launching",
             credential_hash: hash,
             bootstrap_hash: hash,
@@ -834,7 +862,10 @@ export class BoxController {
           box.seen_at &&
           box.running_since &&
           new Date(box.seen_at) >= new Date(box.running_since);
-        if (!connected && since(box.running_since) > this.timings.bootTimeoutMs)
+        // A box that connected is ready, however its connection was answered.
+        if (connected)
+          await this.set(box, box.state, { state: "ready", idle_since: now });
+        else if (since(box.running_since) > this.timings.bootTimeoutMs)
           await this.terminate(box, "The box never connected after boot");
         return;
       }
@@ -851,32 +882,13 @@ export class BoxController {
           await this.terminate(box, "The box stopped polling and is lost");
           return;
         }
-        // A box with any open task is never idle, whatever it last reported.
-        const open = (
-          await this.db.query(
-            "SELECT 1 FROM box_tasks WHERE box_id=$1 AND state IN ('queued','running') LIMIT 1",
-            [box.id],
-          )
-        ).rows.length;
         if (
           box.state === "ready" &&
-          !open &&
-          !(await this.pending(box.id)) &&
           since(box.idle_since) > profile.idleTtlMinutes * 60_000
         ) {
-          if (provider.canStop && profile.retentionHours > 0) {
-            if (
-              await this.set(box, box.state, {
-                state: "stopping",
-                stopped_at: now,
-                running_ms:
-                  Number(box.running_ms) +
-                  (box.running_since ? since(box.running_since) : 0),
-                running_since: null,
-              })
-            )
-              await call(provider.stop(box.provider_id!));
-          } else await this.terminate(box, "Idle time-to-live reached");
+          const stop = provider.canStop && profile.retentionHours > 0;
+          if ((await this.idleClose(box, now, stop)) && stop)
+            await call(provider.stop(box.provider_id!));
         }
         return;
       }
@@ -915,9 +927,8 @@ export class BoxController {
           )
         ).rows.length;
         if (!open && !(await this.pending(box.id))) return;
-        if ((await this.running(box.profile)) >= profile.concurrency) return;
         if (
-          !(await this.set(box, "stopped", {
+          !(await this.admit(box, profile, "stopped", {
             state: "starting",
             running_since: now,
           }))
@@ -934,29 +945,76 @@ export class BoxController {
         }
         return;
       }
-      case "terminating": {
-        let providerId = box.provider_id;
-        if (!providerId && box.launch_started_at) {
-          // Closed during an uncertain launch: find the resource before declaring it gone.
-          providerId = (await call(provider.find(box.id))) ?? null;
-          if (!providerId) {
-            if (since(box.launch_started_at) > this.timings.launchTimeoutMs)
-              await this.set(box, "terminating", { state: "terminated" });
-            return;
-          }
-          await this.set(box, "terminating", { provider_id: providerId });
-        }
-        if (!providerId) {
-          await this.set(box, "terminating", { state: "terminated" });
-          return;
-        }
-        const state = await call(provider.describe(providerId));
-        if (state === "terminated" || state === "missing")
-          await this.set(box, "terminating", { state: "terminated" });
-        else await call(provider.terminate(providerId));
-        return;
-      }
     }
+  }
+
+  /**
+   * Admits a box into the profile's running capacity. Admission is serialised per profile
+   * with a transaction-scoped advisory lock, so concurrent reconcilers cannot share a slot.
+   */
+  private async admit(
+    box: Box,
+    profile: BoxProfile,
+    from: string,
+    fields: Record<string, unknown>,
+  ) {
+    return transaction(this.db, async (db) => {
+      await db.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+        `box-profile:${box.profile}`,
+      ]);
+      const running = Number(
+        (
+          await db.query(
+            "SELECT count(*)::int AS n FROM boxes WHERE profile=$1 AND state = ANY($2::text[])",
+            [box.profile, [...active]],
+          )
+        ).rows[0].n,
+      );
+      if (running >= profile.concurrency) return false;
+      const names = Object.keys(fields);
+      const changed = await db.query(
+        `UPDATE boxes SET ${names.map((n, i) => `${n}=$${i + 4}`).join(",")},updated_at=$3 WHERE id=$1 AND state=$2 RETURNING id`,
+        [box.id, from, this.clock(), ...names.map((n) => fields[n])],
+      );
+      return changed.rows.length > 0;
+    });
+  }
+
+  /**
+   * Ends an idle box's running time, under the box lock that delegation also takes, so a
+   * task delegated at the same moment either keeps the box running or arrives afterwards.
+   */
+  private async idleClose(box: Box, now: Date, stop: boolean) {
+    return transaction(this.db, async (db) => {
+      const current = (
+        await db.query("SELECT * FROM boxes WHERE id=$1 FOR UPDATE", [box.id])
+      ).rows[0] as Box;
+      if (current.state !== "ready") return false;
+      const busy = (
+        await db.query(
+          `SELECT 1 FROM box_tasks WHERE box_id=$1 AND state IN ('queued','running')
+           UNION ALL SELECT 1 FROM box_messages WHERE box_id=$1 AND acked_at IS NULL LIMIT 1`,
+          [box.id],
+        )
+      ).rows.length;
+      if (busy) return false;
+      const used =
+        Number(current.running_ms) +
+        (current.running_since
+          ? now.getTime() - new Date(current.running_since).getTime()
+          : 0);
+      await db.query(
+        `UPDATE boxes SET state=$2,reason=$3,stopped_at=$4,running_ms=$5,running_since=NULL,updated_at=$4 WHERE id=$1`,
+        [
+          box.id,
+          stop ? "stopping" : "terminating",
+          stop ? current.reason : "Idle time-to-live reached",
+          now,
+          used,
+        ],
+      );
+      return true;
+    });
   }
 
   private async hold(box: Box, reason: string) {
@@ -986,10 +1044,8 @@ export class BoxController {
    */
   async sweep() {
     const orphans: string[] = [];
-    const kinds = new Set(
-      Object.values(this.config.profiles).map((p) => p.provider),
-    );
-    for (const kind of kinds) {
+    // Every configured provider, including ones no current profile uses.
+    for (const kind of Object.keys(this.providers)) {
       const provider = this.providers[kind];
       if (!provider) continue;
       for (const resource of await this.bounded(provider.list())) {
