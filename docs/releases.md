@@ -2,8 +2,8 @@
 
 [PR 253](https://github.com/akhilvuputuri/chief-agent/pull/253) merged as `1733d48ac0fb0600aab7971dabc8dd13e0caf5a5`.
 
-- **Review.** Exact-head independent review (Claude Opus 5.5) approved `ff135b1` after five rounds. Its earlier blocking findings were invoice identity, plan-name and ordering gaps, and all are fixed with regressions. Devin's five findings were fixed; a sixth, about paging beyond offset 10,000, was declined as unreachable at personal scale.
-- **Checks.** Hosted CI and Devin passed. 983 application tests passed locally on the merged branch.
+- **Review.** Exact-head independent review (Claude Opus 5.5) approved `ff135b1` in its sixth round, after three rounds of requested changes. Its earlier blocking findings were invoice identity, plan-name and ordering gaps, and all are fixed with regressions. Devin's five findings were fixed; a sixth, about paging beyond offset 10,000, was declined as unreachable at personal scale.
+- **Checks.** Hosted CI passed on `ff135b1`; Devin completed there with one further finding, declined. Locally, 983 application tests passed on the merged branch before the Devin fixes, and 56 focused tests after them.
 - **Release.** The [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39143260571) recorded exact deployment and startup health. Logs show `gateway.started` for that release at 16:07 UTC on 18 October, with no warn/error lines in the 30 minutes before the check (about two minutes after startup). No migration.
 - **Behaviour.**
   - A new `core/bills` agent gathers an exact invoice collection, then updates the subscription tracker from the matched invoices when the owner asks.
