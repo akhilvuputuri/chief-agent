@@ -351,3 +351,20 @@ test("a re-send whose delivery failed does not hide the live card before it", as
     "owner to confirm the requirements card",
   ]);
 });
+test("a re-send still pending does not hide an earlier card that is still confirmable", async () => {
+  // Devin, PR 251: the newest-card pick let a pending re-send mask a live card.
+  const f = await fixture();
+  const plan = await f.job();
+  await f.card(plan);
+  await f.db.query(
+    "INSERT INTO coding_events(job_id,event_key,payload,delivery,created_at) VALUES($1,$2,$3::jsonb,'pending',now()+interval '1 second')",
+    [
+      plan,
+      `requirements:2:${randomUUID()}`,
+      JSON.stringify({ requirements: { revision: 2, plan: "p" } }),
+    ],
+  );
+  assert.deepEqual(await awaiting(f.db), [
+    "owner to confirm the requirements card",
+  ]);
+});
