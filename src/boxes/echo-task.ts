@@ -5,7 +5,7 @@
  * behind for the next task; `inspect` reports whatever an earlier task left.
  */
 import { createInterface } from "node:readline";
-import { existsSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 
@@ -48,6 +48,22 @@ async function run() {
       stdio: "ignore",
     }).unref();
   }
+  // `probe` reports the task's own privileges, as seen from inside its sandbox.
+  const probe = payload.probe
+    ? {
+        uid: process.getuid?.(),
+        capEff: /CapEff:\s*([0-9a-f]+)/.exec(
+          readFileSync("/proc/self/status", "utf8"),
+        )?.[1],
+        rootReadOnly: readFileSync("/proc/self/mountinfo", "utf8")
+          .split("\n")
+          .some(
+            (l) =>
+              l.split(" ")[4] === "/" &&
+              /(^|,)ro(,|$)/.test(l.split(" ")[5] ?? ""),
+          ),
+      }
+    : undefined;
   const leftovers = payload.inspect
     ? [home, process.cwd(), "/tmp"].flatMap((dir) =>
         existsSync(dir)
@@ -63,6 +79,7 @@ async function run() {
       echo: payload.text ?? null,
       messages,
       ...(leftovers ? { leftovers } : {}),
+      ...(probe ? { probe } : {}),
     },
   });
 }

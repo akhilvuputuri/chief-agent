@@ -9,16 +9,15 @@ import {
   readFileSync,
   renameSync,
   rmSync,
-  writeFileSync,
   writeSync,
 } from "node:fs";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
 
 /**
  * The in-box supervisor (docs/boxes.md). It holds the box credential, dials out to the
  * host, runs one task at a time through a runner, reports ordered events and ends the box
- * when its lifetime is spent or its credential is refused. It never accepts connections.
+ * when its lifetime is spent, the host stays unreachable, its credential is refused or a
+ * task's reset fails. It never accepts connections.
  */
 
 /** Durable state on the box disk. Files are written so a crash or power loss cannot
@@ -75,15 +74,17 @@ export type TaskOutput =
   | { type: "result"; payload: Record<string, unknown> }
   | { type: "failed"; payload: Record<string, unknown> };
 
+export type TaskOutcome = {
+  type: "result" | "failed";
+  payload: Record<string, unknown>;
+};
+
 export interface RunningTask {
   /** Delivers an owner's answer or clarification to the task. */
   send(text: string): void;
   cancel(): void;
   /** Resolves with the task's final output. */
-  done: Promise<{
-    type: "result" | "failed";
-    payload: Record<string, unknown>;
-  }>;
+  done: Promise<TaskOutcome>;
 }
 
 export interface TaskRunner {
@@ -95,60 +96,152 @@ export interface TaskRunner {
   reset(taskId: string): Promise<void>;
 }
 
+/** Bounds on what a task program may send back; matching the host's event limits. */
+export const MAX_LINE = 256 * 1024;
+export const MAX_PAYLOAD = 60_000;
+
+/** A payload the host will accept: a plain object of bounded JSON size. */
+export function boundedPayload(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
+  try {
+    return JSON.stringify(value).length <= MAX_PAYLOAD
+      ? (value as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export interface TaskLimits {
+  /** Longest a task may run before it is killed and failed. */
+  deadlineMs: number;
+  /** How long a task may keep running after its final line before it is killed. */
+  graceMs: number;
+}
+
+const defaultLimits: TaskLimits = {
+  deadlineMs: 2 * 3_600_000,
+  graceMs: 10_000,
+};
+
 /**
  * Drives a task program over JSON lines: stdin receives the task and later messages,
- * stdout yields progress, questions and one final result.
+ * stdout yields progress, questions and one final result. Output is bounded, the task is
+ * killed a grace period after its final line or at its deadline, and writes after the
+ * input has closed are dropped rather than crashing the agent.
  */
-function lineProtocol(
+export function lineProtocol(
   child: ChildProcess,
   task: { id: string; kind: string; payload: Record<string, unknown> },
   onOutput: (output: TaskOutput) => void,
+  kill: () => void,
+  limits: TaskLimits,
 ): RunningTask {
-  let final:
-    { type: "result" | "failed"; payload: Record<string, unknown> } | undefined;
-  const done = new Promise<{
-    type: "result" | "failed";
-    payload: Record<string, unknown>;
-  }>((resolve) => {
-    const lines = createInterface({ input: child.stdout! });
-    lines.on("line", (line) => {
+  let final: TaskOutcome | undefined;
+  const timers: NodeJS.Timeout[] = [];
+  const settle = (outcome: TaskOutcome) => {
+    if (final) return;
+    final = outcome;
+    child.stdin?.end();
+    timers.push(setTimeout(kill, limits.graceMs));
+  };
+  child.stdin?.on("error", () => {});
+  const done = new Promise<TaskOutcome>((resolve) => {
+    let buffer = "";
+    const line = (text: string) => {
       let output: TaskOutput;
       try {
-        output = JSON.parse(line) as TaskOutput;
+        output = JSON.parse(text) as TaskOutput;
       } catch {
         return;
       }
       if (output.type === "result" || output.type === "failed") {
-        final ??= {
+        const payload = boundedPayload(output.payload);
+        settle(
+          payload
+            ? { type: output.type, payload }
+            : {
+                type: "failed",
+                payload: {
+                  error: "The task's result was not a bounded JSON object",
+                },
+              },
+        );
+      } else if (
+        !final &&
+        (output.type === "progress" || output.type === "question")
+      )
+        onOutput({
           type: output.type,
-          payload: output.payload ?? {},
-        };
-        child.stdin?.end();
-      } else if (output.type === "progress" || output.type === "question")
-        onOutput(output);
+          payload: boundedPayload(output.payload) ?? {},
+        });
+    };
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      buffer += chunk;
+      let newline: number;
+      while ((newline = buffer.indexOf("\n")) >= 0) {
+        const text = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
+        if (text.length <= MAX_LINE) line(text);
+      }
+      if (buffer.length > MAX_LINE) {
+        buffer = "";
+        settle({
+          type: "failed",
+          payload: { error: "The task wrote an unbounded output line" },
+        });
+        kill();
+      }
     });
-    child.on("close", (code) =>
+    timers.push(
+      setTimeout(() => {
+        settle({
+          type: "failed",
+          payload: { error: "The task passed its deadline" },
+        });
+        kill();
+      }, limits.deadlineMs),
+    );
+    child.on("close", (code) => {
+      for (const timer of timers) clearTimeout(timer);
       resolve(
         final ?? {
           type: "failed",
           payload: { error: `Task exited without a result (code ${code})` },
         },
-      ),
-    );
-    child.on("error", () =>
-      resolve({ type: "failed", payload: { error: "Task could not start" } }),
-    );
+      );
+    });
+    child.on("error", () => {
+      for (const timer of timers) clearTimeout(timer);
+      resolve({ type: "failed", payload: { error: "Task could not start" } });
+    });
   });
   const write = (value: object) => {
-    if (child.stdin && !child.stdin.destroyed)
-      child.stdin.write(`${JSON.stringify(value)}\n`);
+    const stdin = child.stdin;
+    if (stdin && !stdin.destroyed && !stdin.writableEnded)
+      stdin.write(`${JSON.stringify(value)}\n`);
   };
   write({ type: "task", id: task.id, kind: task.kind, payload: task.payload });
   return {
     send: (text) => write({ type: "message", text }),
-    cancel: () => child.kill("SIGKILL"),
+    cancel: kill,
     done,
   };
+}
+
+/** Runs a command to completion; a missing binary is a failure, never a hang. */
+function exec(command: string, args: string[]) {
+  return new Promise<{ code: number; out: string }>((resolve) => {
+    let out = "";
+    const child = spawn(command, args, {
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    child.stdout.on("data", (d) => (out += d));
+    child.on("error", () => resolve({ code: -1, out }));
+    child.on("close", (code) => resolve({ code: code ?? -1, out }));
+  });
 }
 
 /**
@@ -159,6 +252,7 @@ export class ProcessRunner implements TaskRunner {
   constructor(
     private command: string[],
     private root: string,
+    private limits: TaskLimits = defaultLimits,
   ) {}
   private dirs(taskId: string) {
     const base = join(this.root, taskId);
@@ -182,28 +276,31 @@ export class ProcessRunner implements TaskRunner {
       ],
       detached: true,
     });
-    const running = lineProtocol(child, task, onOutput);
-    return {
-      ...running,
-      cancel: () => {
-        try {
-          process.kill(-child.pid!, "SIGKILL");
-        } catch {
-          child.kill("SIGKILL");
-        }
-      },
-      done: running.done.finally(() => {
-        try {
-          process.kill(-child.pid!, "SIGKILL");
-        } catch {
-          // The process group has already exited.
-        }
-      }),
+    const kill = () => {
+      try {
+        process.kill(-child.pid!, "SIGKILL");
+      } catch {
+        // The process group has already exited.
+      }
     };
+    const running = lineProtocol(child, task, onOutput, kill, this.limits);
+    return { ...running, done: running.done.finally(kill) };
   }
   async reset(taskId: string) {
     rmSync(this.dirs(taskId).base, { recursive: true, force: true });
   }
+}
+
+export interface DockerOptions {
+  docker?: string;
+  /** Extra `docker run` arguments, such as mounts in tests. */
+  extra?: string[];
+  /** Overrides the image's command; by default the image's own task program runs. */
+  command?: string[];
+  /** Per-task resource limits, e.g. "6g" and "3". */
+  memory?: string;
+  cpus?: string;
+  limits?: TaskLimits;
 }
 
 /**
@@ -211,14 +308,14 @@ export class ProcessRunner implements TaskRunner {
  * unprivileged user with a fresh workspace, removed with everything it wrote afterwards.
  */
 export class DockerRunner implements TaskRunner {
+  private docker: string;
   constructor(
     private image: string,
     private root: string,
-    private docker = "docker",
-    private extra: string[] = [],
-    /** Overrides the image's command; by default the image's own task program runs. */
-    private command: string[] = [],
-  ) {}
+    private options: DockerOptions = {},
+  ) {
+    this.docker = options.docker ?? "docker";
+  }
   private name = (taskId: string) => `chief-task-${taskId}`;
   private work = (taskId: string) => join(this.root, taskId);
   start(
@@ -233,6 +330,10 @@ export class DockerRunner implements TaskRunner {
     } catch {
       chmodSync(work, 0o777);
     }
+    const memory = this.options.memory
+      ? ["--memory", this.options.memory, "--memory-swap", this.options.memory]
+      : [];
+    const cpus = this.options.cpus ? ["--cpus", this.options.cpus] : [];
     const child = spawn(
       this.docker,
       [
@@ -258,44 +359,43 @@ export class DockerRunner implements TaskRunner {
         "HOME=/home/worker",
         "--pids-limit",
         "1024",
+        ...memory,
+        ...cpus,
         "--mount",
         `type=bind,source=${work},target=/workspace`,
         "--workdir",
         "/workspace",
-        ...this.extra,
+        ...(this.options.extra ?? []),
         this.image,
-        ...this.command,
+        ...(this.options.command ?? []),
       ],
-      { stdio: ["pipe", "pipe", "ignore"], env: { PATH: process.env.PATH } },
+      { stdio: ["pipe", "pipe", "ignore"] },
     );
-    const running = lineProtocol(child, task, onOutput);
-    return {
-      ...running,
-      cancel: () => {
-        spawn(this.docker, ["rm", "-f", this.name(task.id)], {
-          stdio: "ignore",
-        });
-      },
+    const kill = () => {
+      child.kill("SIGKILL");
+      void exec(this.docker, ["rm", "-f", this.name(task.id)]);
     };
+    return lineProtocol(
+      child,
+      task,
+      onOutput,
+      kill,
+      this.options.limits ?? defaultLimits,
+    );
   }
   async reset(taskId: string) {
-    await new Promise<void>((resolve) => {
-      spawn(this.docker, ["rm", "-f", this.name(taskId)], {
-        stdio: "ignore",
-      }).on("close", () => resolve());
-    });
+    // `rm -f` of a container that is already gone is fine; the listing below is the check.
+    await exec(this.docker, ["rm", "-f", this.name(taskId)]);
     rmSync(this.work(taskId), { recursive: true, force: true });
-    const left = await new Promise<string>((resolve) => {
-      let out = "";
-      const ps = spawn(
-        this.docker,
-        ["ps", "-aq", "--filter", "label=chief.box.task=1"],
-        { stdio: ["ignore", "pipe", "ignore"] },
-      );
-      ps.stdout.on("data", (d) => (out += d));
-      ps.on("close", () => resolve(out.trim()));
-    });
-    if (left) throw new Error("A task container survived its reset");
+    const left = await exec(this.docker, [
+      "ps",
+      "-aq",
+      "--filter",
+      "label=chief.box.task=1",
+    ]);
+    if (left.code !== 0)
+      throw new Error("Could not confirm that no task container remains");
+    if (left.out.trim()) throw new Error("A task container survived its reset");
   }
 }
 
@@ -313,14 +413,24 @@ export interface AgentOptions {
   fetch?: typeof fetch;
   /** Back-off between failed requests. */
   retryMs?: number;
+  /** A box that cannot reach the host for this long ends itself. */
+  maxSilentMs?: number;
+  /** How often the agent checks its own lifetime and host contact. */
+  watchMs?: number;
+  clock?: () => number;
 }
 
 type Message = { seq: number; kind: string; payload: any };
+type Journal = Record<
+  string,
+  { state: string; kind?: string; payload?: Record<string, unknown> }
+>;
+
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export class BoxAgent {
   private credential = "";
   private epoch = 0;
-  private remainingMs = Infinity;
   private stopped = false;
   private queue: {
     id: string;
@@ -330,30 +440,60 @@ export class BoxAgent {
   private current?: { id: string; running: RunningTask };
   private pendingMessages = new Map<string, string[]>();
   private events: Promise<void> = Promise.resolve();
+  private progressAt = new Map<string, number>();
   private readonly http: typeof fetch;
+  private readonly clock: () => number;
+  /** Local copy of the lifetime, enforced even when the host cannot be reached. */
+  private deadline = Infinity;
+  private lastContact: number;
+  private watch?: NodeJS.Timeout;
   constructor(private o: AgentOptions) {
     this.http = o.fetch ?? fetch;
+    this.clock = o.clock ?? (() => performance.now());
+    this.lastContact = this.clock();
   }
 
   private url(path: string) {
     return `${this.o.origin}/boxes/${this.o.boxId}/${path}`;
   }
 
+  /** Records host contact and the lifetime it reported. */
+  private contact(remainingMs?: number) {
+    this.lastContact = this.clock();
+    if (remainingMs !== undefined) this.deadline = this.clock() + remainingMs;
+  }
+
   private async end(reason: string) {
     if (this.stopped) return;
     this.stopped = true;
+    if (this.watch) clearInterval(this.watch);
     this.current?.running.cancel();
     await this.o.shutdown(reason);
+  }
+
+  /** Cancels the running task; used when the host stops the box. */
+  cancelCurrent() {
+    this.current?.running.cancel();
   }
 
   private async wait() {
     await new Promise((r) => setTimeout(r, this.o.retryMs ?? 2000));
   }
 
+  private checkLimits() {
+    if (this.clock() >= this.deadline) void this.end("Box lifetime reached");
+    else if (
+      this.clock() - this.lastContact >
+      (this.o.maxSilentMs ?? 30 * 60_000)
+    )
+      void this.end("The host has been unreachable for too long");
+  }
+
   /**
    * Exchanges the stored credential (or, on first boot only, the bootstrap secret) for the
    * next epoch's credential. Never runs concurrently with itself, and the replacement is
-   * stored durably before any call uses it.
+   * stored durably before any call uses it. Only a 401 is final; a box whose launch the
+   * host has not recorded yet is answered 503 and keeps trying.
    */
   async connect() {
     const presented = this.o.store.read("credential") ?? this.o.bootstrap;
@@ -372,6 +512,7 @@ export class BoxAgent {
           signal: AbortSignal.timeout(30000),
         });
       } catch {
+        this.checkLimits();
         await this.wait();
         continue;
       }
@@ -379,6 +520,7 @@ export class BoxAgent {
         // A real agent never presents a retired credential; this box cannot continue.
         return this.end("The host refused this box's credential");
       if (!response.ok) {
+        this.checkLimits();
         await this.wait();
         continue;
       }
@@ -390,17 +532,27 @@ export class BoxAgent {
       this.o.store.write("credential", body.credential);
       this.credential = body.credential;
       this.epoch = body.epoch;
-      this.remainingMs = body.remainingMs;
+      this.contact(body.remainingMs);
       return;
     }
   }
 
-  /** Reports one event in order; retried with the same sequence until the host has it. */
-  private report(event: Record<string, unknown>) {
+  private nextSeq() {
     const key = `seq-${this.epoch}`;
     const seq = Number(this.o.store.read(key) ?? "0") + 1;
     this.o.store.write(key, String(seq));
+    return seq;
+  }
+
+  /**
+   * Reports one event in order; retried with the same sequence until the host has it.
+   * A terminal task event the host rejects is replaced by a bounded failure, so the host's
+   * task never stays open.
+   */
+  private report(event: Record<string, unknown>) {
     const epoch = this.epoch;
+    let seq = this.nextSeq();
+    let body = event;
     this.events = this.events.then(async () => {
       while (!this.stopped) {
         try {
@@ -410,39 +562,61 @@ export class BoxAgent {
               "content-type": "application/json",
               authorization: `Bearer ${this.credential}`,
             },
-            body: JSON.stringify({ epoch, events: [{ seq, ...event }] }),
+            body: JSON.stringify({ epoch, events: [{ seq, ...body }] }),
             signal: AbortSignal.timeout(30000),
           });
           if (response.status === 401)
             return this.end("The host refused this box's credential");
-          // A malformed event will never be accepted; dropping it keeps later ones flowing.
-          if (response.ok || response.status === 400) return;
+          if (response.ok) {
+            this.contact();
+            return;
+          }
+          if (response.status === 400) {
+            const terminal =
+              body.kind === "task.result" || body.kind === "task.failed";
+            if (!terminal || body.rejected) return;
+            seq = this.nextSeq();
+            body = {
+              kind: "task.failed",
+              taskId: body.taskId,
+              payload: { error: "The host rejected the task's result" },
+              rejected: true,
+            };
+            continue;
+          }
         } catch {
           // Network failure: retry the same event.
         }
+        this.checkLimits();
         await this.wait();
       }
     });
     return this.events;
   }
 
-  private tasks() {
-    return this.o.store.json<Record<string, string>>("tasks", {});
+  private journal() {
+    return this.o.store.json<Journal>("tasks", {});
   }
 
-  private mark(id: string, state: string) {
-    const tasks = this.tasks();
-    tasks[id] = state;
-    this.o.store.write("tasks", JSON.stringify(tasks));
+  private mark(
+    id: string,
+    state: string,
+    task?: { kind: string; payload: Record<string, unknown> },
+  ) {
+    const journal = this.journal();
+    journal[id] = task ? { state, ...task } : { ...journal[id], state };
+    this.o.store.write("tasks", JSON.stringify(journal));
   }
 
   private handle(message: Message) {
     const p = message.payload ?? {};
+    if (typeof p.taskId !== "string" || !uuid.test(p.taskId)) return;
     if (message.kind === "task.assign") {
       // At-least-once delivery: a task already known is never started twice.
-      if (this.tasks()[p.taskId]) return;
-      this.mark(p.taskId, "queued");
-      this.queue.push({ id: p.taskId, kind: p.kind, payload: p.payload ?? {} });
+      if (this.journal()[p.taskId]) return;
+      const payload = boundedPayload(p.payload) ?? {};
+      this.mark(p.taskId, "queued", { kind: String(p.kind), payload });
+      this.queue.push({ id: p.taskId, kind: String(p.kind), payload });
     } else if (message.kind === "task.message") {
       const current = this.current;
       if (current && current.id === p.taskId)
@@ -459,6 +633,20 @@ export class BoxAgent {
     }
   }
 
+  private output(taskId: string, output: TaskOutput) {
+    if (output.type === "progress") {
+      // Progress is advisory: at most one per second, so a chatty task cannot bury its result.
+      const last = this.progressAt.get(taskId) ?? -Infinity;
+      if (this.clock() - last < 1000) return;
+      this.progressAt.set(taskId, this.clock());
+    }
+    void this.report({
+      kind: output.type === "question" ? "task.question" : "task.progress",
+      taskId,
+      payload: output.payload ?? {},
+    });
+  }
+
   private async work() {
     while (!this.stopped) {
       const task = this.queue.shift();
@@ -468,14 +656,9 @@ export class BoxAgent {
       await this.report({ kind: "task.started", taskId: task.id });
       let running: RunningTask;
       try {
-        running = this.o.runner.start(task, (output) => {
-          void this.report({
-            kind:
-              output.type === "question" ? "task.question" : "task.progress",
-            taskId: task.id,
-            payload: output.payload ?? {},
-          });
-        });
+        running = this.o.runner.start(task, (output) =>
+          this.output(task.id, output),
+        );
       } catch {
         running = {
           send: () => {},
@@ -492,6 +675,7 @@ export class BoxAgent {
       this.pendingMessages.delete(task.id);
       const outcome = await running.done;
       this.current = undefined;
+      this.progressAt.delete(task.id);
       await this.report({
         kind: outcome.type === "result" ? "task.result" : "task.failed",
         taskId: task.id,
@@ -511,23 +695,37 @@ export class BoxAgent {
 
   /** Connects, recovers interrupted tasks, then polls until the box ends. */
   async run() {
+    this.watch = setInterval(
+      () => this.checkLimits(),
+      this.o.watchMs ?? 10_000,
+    );
+    this.watch.unref?.();
     await this.connect();
     if (this.stopped) return;
-    for (const [id, state] of Object.entries(this.tasks()))
-      if (state === "queued" || state === "running") {
+    for (const [id, entry] of Object.entries(this.journal())) {
+      if (entry.state === "running") {
         // The box restarted mid-task: the task's process is gone, so report it honestly.
         this.mark(id, "done");
         await this.report({
           kind: "task.failed",
           taskId: id,
-          payload: { error: "The box restarted while this task was open" },
+          payload: { error: "The box restarted while this task was running" },
         });
-        await this.o.runner.reset(id).catch(() => {});
-      }
-    await this.report({ kind: "box.state", state: "idle" });
+        try {
+          await this.o.runner.reset(id);
+        } catch {
+          return this.end("A task left state behind that could not be removed");
+        }
+      } else if (entry.state === "queued" && entry.kind !== undefined)
+        // Acknowledged but never started: it still runs.
+        this.queue.push({ id, kind: entry.kind, payload: entry.payload ?? {} });
+    }
     let working: Promise<void> = Promise.resolve();
+    if (this.queue.length) working = this.work();
+    else await this.report({ kind: "box.state", state: "idle" });
     while (!this.stopped) {
-      if (this.remainingMs <= 0) return this.end("Box lifetime reached");
+      this.checkLimits();
+      if (this.stopped) break;
       const after = Number(this.o.store.read("cursor") ?? "0");
       let response: Response;
       try {
@@ -539,8 +737,10 @@ export class BoxAgent {
         await this.wait();
         continue;
       }
-      if (response.status === 401)
-        return this.end("The host refused this box's credential");
+      if (response.status === 401) {
+        await this.end("The host refused this box's credential");
+        break;
+      }
       if (!response.ok) {
         await this.wait();
         continue;
@@ -549,15 +749,16 @@ export class BoxAgent {
         messages: Message[];
         remainingMs: number;
       };
-      this.remainingMs = body.remainingMs;
+      this.contact(body.remainingMs);
       for (const message of body.messages) {
         this.handle(message);
-        // Acknowledged by the next poll only after the message is durably handled.
+        // Acknowledged by the next poll once handled; tasks are journalled durably first.
         this.o.store.write("cursor", String(message.seq));
       }
       if (this.queue.length && !this.current)
         working = working.then(() => this.work());
     }
+    if (this.watch) clearInterval(this.watch);
     await working.catch(() => {});
   }
 }

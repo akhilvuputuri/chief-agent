@@ -25,18 +25,17 @@ test(
     );
     const root = await mkdtemp(join(tmpdir(), "box-docker-"));
     t.after(() => rm(root, { recursive: true, force: true }));
-    const runner = new DockerRunner(
-      image!,
-      root,
-      "docker",
-      [
+    const runner = new DockerRunner(image!, root, {
+      extra: [
         "--entrypoint",
         "node",
         "--mount",
         `type=bind,source=${dist},target=/opt/box,readonly`,
       ],
-      ["/opt/box/boxes/echo-task.js"],
-    );
+      command: ["/opt/box/boxes/echo-task.js"],
+      memory: "1g",
+      cpus: "1",
+    });
     const run = async (
       id: string,
       payload: Record<string, unknown>,
@@ -71,27 +70,12 @@ test(
     ]);
     assert.deepEqual(steered.outcome.payload.messages, ["an answer"]);
 
-    // The task runs unprivileged on a read-only root with no capabilities.
-    const probe = spawnSync(
-      "docker",
-      [
-        "run",
-        "--rm",
-        "--user",
-        "1000:1000",
-        "--cap-drop",
-        "ALL",
-        "--security-opt",
-        "no-new-privileges",
-        "--read-only",
-        "--entrypoint",
-        "sh",
-        image!,
-        "-c",
-        'test "$(id -u)" = 1000 && ! touch /probe 2>/dev/null && grep -q "^CapEff:\\s*0000000000000000" /proc/self/status',
-      ],
-      { encoding: "utf8" },
-    );
-    assert.equal(probe.status, 0, probe.stderr);
+    // Seen from inside a task the runner started: unprivileged, no capabilities, read-only root.
+    const probe = await run("probe", { probe: true });
+    assert.deepEqual(probe.outcome.payload.probe, {
+      uid: 1000,
+      capEff: "0000000000000000",
+      rootReadOnly: true,
+    });
   },
 );

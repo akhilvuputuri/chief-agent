@@ -8,7 +8,16 @@ import { PGlite } from "@electric-sql/pglite";
 import { ensureUser, type Database } from "../src/db.js";
 import { BoxController } from "../src/boxes/controller.js";
 import { LocalProcessProvider } from "../src/boxes/local-provider.js";
-import { BoxAgent, StateStore, type TaskRunner } from "../src/boxes/agent.js";
+import { EventEmitter } from "node:events";
+import { PassThrough, Writable } from "node:stream";
+import {
+  BoxAgent,
+  lineProtocol,
+  ProcessRunner,
+  StateStore,
+  type TaskOutcome,
+  type TaskRunner,
+} from "../src/boxes/agent.js";
 import { boxApi } from "../src/boxes/api.js";
 import { server } from "../src/server.js";
 
@@ -320,4 +329,356 @@ test("end to end: a real agent runs tasks, is steered, stops warm, resumes and c
     (s) => s === "terminated",
   );
   assert.equal(await h.provider.describe(box.id), "terminated");
+});
+
+/** A scripted host for agent-only tests: records every request and answers from a plan. */
+function stubHost(plan: {
+  next?: (n: number) => Response | Promise<Response> | "throw";
+  events?: (body: any) => number;
+  hello?: () => Response;
+}) {
+  const calls: { path: string; body?: any }[] = [];
+  let polls = 0;
+  const fetch = (async (url: string, init: any = {}) => {
+    const path = new URL(url).pathname.split("/").pop()!;
+    const body = init.body ? JSON.parse(init.body) : undefined;
+    calls.push({ path, body });
+    if (path === "hello")
+      return (
+        plan.hello?.() ??
+        Response.json({
+          credential: "c".repeat(43),
+          epoch: 1,
+          remainingMs: 3_600_000,
+        })
+      );
+    if (path === "events")
+      return new Response("{}", { status: plan.events?.(body) ?? 200 });
+    const answer =
+      plan.next?.(polls++) ?? Response.json({ messages: [], remainingMs: 0 });
+    if (answer === "throw") throw new Error("network down");
+    await new Promise((r) => setTimeout(r, 5));
+    return answer;
+  }) as typeof fetch;
+  return { fetch, calls };
+}
+
+const taskId = "11111111-1111-4111-8111-111111111111";
+const assign = (seq: number, id = taskId, payload: object = {}) =>
+  Response.json({
+    messages: [
+      {
+        seq,
+        kind: "task.assign",
+        payload: { taskId: id, kind: "echo", payload },
+      },
+    ],
+    remainingMs: 3_600_000,
+  });
+
+function scriptedRunner(outcome: TaskOutcome, reset?: () => Promise<void>) {
+  const started: string[] = [];
+  const runner: TaskRunner = {
+    start: (task) => {
+      started.push(task.id);
+      return {
+        send: () => {},
+        cancel: () => {},
+        done: Promise.resolve(outcome),
+      };
+    },
+    reset: reset ?? (async () => {}),
+  };
+  return { runner, started };
+}
+
+async function agentDir(t: TestContext) {
+  const dir = await mkdtemp(join(tmpdir(), "box-agent-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  return dir;
+}
+
+test("a message after a task's result never crashes the agent, and a lingering task is killed", async (t) => {
+  const dir = await agentDir(t);
+  const lingering = join(dir, "linger.mjs");
+  await import("node:fs/promises").then((fs) =>
+    fs.writeFile(
+      lingering,
+      'process.stdin.once("data", () => { console.log(JSON.stringify({ type: "result", payload: { ok: true } })); setInterval(() => {}, 1000); });',
+    ),
+  );
+  const runner = new ProcessRunner(
+    [process.execPath, lingering],
+    join(dir, "work"),
+    {
+      deadlineMs: 60_000,
+      graceMs: 200,
+    },
+  );
+  const running = runner.start(
+    { id: taskId, kind: "echo", payload: {} },
+    () => {},
+  );
+  // Owner messages keep arriving through the moment the task's input is closed.
+  const spam = setInterval(() => running.send("a late answer"), 0);
+  const started = Date.now();
+  const outcome = await running.done;
+  clearInterval(spam);
+  assert.deepEqual(outcome, { type: "result", payload: { ok: true } });
+  assert.ok(Date.now() - started < 5000, "killed after the grace period");
+});
+
+test("unbounded or malformed results become failures, and a rejected result is replaced", async (t) => {
+  const dir = await agentDir(t);
+  const script = join(dir, "bad.mjs");
+  await import("node:fs/promises").then((fs) =>
+    fs.writeFile(
+      script,
+      'process.stdin.once("data", () => console.log(JSON.stringify({ type: "result", payload: "not an object" })));',
+    ),
+  );
+  const runner = new ProcessRunner(
+    [process.execPath, script],
+    join(dir, "work"),
+  );
+  const outcome = await runner.start(
+    { id: taskId, kind: "echo", payload: {} },
+    () => {},
+  ).done;
+  assert.equal(outcome.type, "failed");
+  assert.match(String(outcome.payload.error), /bounded JSON object/);
+
+  // The host rejects the result: the agent replaces it with a bounded failure.
+  const host = stubHost({
+    next: (n) =>
+      n === 0
+        ? assign(1)
+        : Response.json({ messages: [], remainingMs: n > 3 ? 0 : 3_600_000 }),
+    events: (body) => (body.events[0].kind === "task.result" ? 400 : 200),
+  });
+  const { runner: scripted } = scriptedRunner({
+    type: "result",
+    payload: { big: true },
+  });
+  await new BoxAgent({
+    origin: "https://host.example",
+    boxId: "00000000-0000-4000-8000-000000000000",
+    bootstrap: "s".repeat(43),
+    store: new StateStore(join(dir, "state")),
+    runner: scripted,
+    shutdown: () => {},
+    fetch: host.fetch,
+    retryMs: 1,
+  }).run();
+  const kinds = host.calls
+    .filter((c) => c.path === "events")
+    .map((c) => c.body.events[0]);
+  const result = kinds.findIndex((e) => e.kind === "task.result");
+  assert.ok(result >= 0);
+  assert.equal(kinds[result + 1].kind, "task.failed");
+  assert.match(kinds[result + 1].payload.error, /rejected/);
+  assert.ok(kinds[result + 1].seq > kinds[result].seq);
+});
+
+test("a reset that fails ends the box, even during restart recovery", async (t) => {
+  const dir = await agentDir(t);
+  const store = new StateStore(dir);
+  store.write("credential", "c".repeat(43));
+  store.write(
+    "tasks",
+    JSON.stringify({
+      [taskId]: { state: "running", kind: "echo", payload: {} },
+    }),
+  );
+  let ended = "";
+  const { runner } = scriptedRunner(
+    { type: "result", payload: {} },
+    async () => {
+      throw new Error("container survived");
+    },
+  );
+  await new BoxAgent({
+    origin: "https://host.example",
+    boxId: "00000000-0000-4000-8000-000000000000",
+    store,
+    runner,
+    shutdown: (reason) => {
+      ended = reason;
+    },
+    fetch: stubHost({}).fetch,
+    retryMs: 1,
+  }).run();
+  assert.match(ended, /left state behind/);
+});
+
+test("after a restart, running tasks fail honestly and acknowledged tasks still run", async (t) => {
+  const dir = await agentDir(t);
+  const store = new StateStore(dir);
+  const queued = "22222222-2222-4222-8222-222222222222";
+  store.write("credential", "c".repeat(43));
+  store.write(
+    "tasks",
+    JSON.stringify({
+      [taskId]: { state: "running", kind: "echo", payload: {} },
+      [queued]: {
+        state: "queued",
+        kind: "echo",
+        payload: { text: "still runs" },
+      },
+    }),
+  );
+  const host = stubHost({
+    next: (n) =>
+      Response.json({ messages: [], remainingMs: n > 2 ? 0 : 3_600_000 }),
+  });
+  const { runner, started } = scriptedRunner({
+    type: "result",
+    payload: { done: true },
+  });
+  await new BoxAgent({
+    origin: "https://host.example",
+    boxId: "00000000-0000-4000-8000-000000000000",
+    store,
+    runner,
+    shutdown: () => {},
+    fetch: host.fetch,
+    retryMs: 1,
+  }).run();
+  assert.deepEqual(started, [queued]);
+  const events = host.calls
+    .filter((c) => c.path === "events")
+    .map((c) => c.body.events[0]);
+  assert.ok(
+    events.some((e) => e.kind === "task.failed" && e.taskId === taskId),
+  );
+  assert.ok(
+    events.some((e) => e.kind === "task.result" && e.taskId === queued),
+  );
+});
+
+test("the agent enforces its lifetime and ends when the host stays unreachable", async (t) => {
+  const dir = await agentDir(t);
+  let ended = "";
+  await new BoxAgent({
+    origin: "https://host.example",
+    boxId: "00000000-0000-4000-8000-000000000000",
+    bootstrap: "s".repeat(43),
+    store: new StateStore(join(dir, "a")),
+    runner: scriptedRunner({ type: "result", payload: {} }).runner,
+    shutdown: (reason) => {
+      ended = reason;
+    },
+    fetch: stubHost({
+      hello: () =>
+        Response.json({
+          credential: "c".repeat(43),
+          epoch: 1,
+          remainingMs: 50,
+        }),
+      next: () => "throw",
+    }).fetch,
+    retryMs: 5,
+    watchMs: 10,
+  }).run();
+  assert.match(ended, /lifetime/);
+
+  let silent = "";
+  await new BoxAgent({
+    origin: "https://host.example",
+    boxId: "00000000-0000-4000-8000-000000000000",
+    bootstrap: "s".repeat(43),
+    store: new StateStore(join(dir, "b")),
+    runner: scriptedRunner({ type: "result", payload: {} }).runner,
+    shutdown: (reason) => {
+      silent = reason;
+    },
+    fetch: stubHost({ next: () => "throw" }).fetch,
+    retryMs: 5,
+    watchMs: 10,
+    maxSilentMs: 50,
+  }).run();
+  assert.match(silent, /unreachable/);
+});
+
+test("a not-yet-recorded box keeps retrying hello on 503, and malformed task IDs are ignored", async (t) => {
+  const dir = await agentDir(t);
+  let hellos = 0;
+  const host = stubHost({
+    hello: () =>
+      ++hellos < 3
+        ? new Response("{}", { status: 503 })
+        : Response.json({
+            credential: "c".repeat(43),
+            epoch: 1,
+            remainingMs: 3_600_000,
+          }),
+    next: (n) =>
+      n === 0
+        ? Response.json({
+            messages: [
+              {
+                seq: 1,
+                kind: "task.assign",
+                payload: { taskId: "../escape", kind: "echo" },
+              },
+            ],
+            remainingMs: 3_600_000,
+          })
+        : Response.json({ messages: [], remainingMs: 0 }),
+  });
+  const { runner, started } = scriptedRunner({ type: "result", payload: {} });
+  let ended = "";
+  await new BoxAgent({
+    origin: "https://host.example",
+    boxId: "00000000-0000-4000-8000-000000000000",
+    bootstrap: "s".repeat(43),
+    store: new StateStore(dir),
+    runner,
+    shutdown: (reason) => {
+      ended = reason;
+    },
+    fetch: host.fetch,
+    retryMs: 1,
+  }).run();
+  assert.equal(hellos, 3);
+  assert.deepEqual(started, []);
+  assert.match(ended, /lifetime/);
+});
+
+test("writing to a task whose input has ended is dropped, not an unhandled stream error", async () => {
+  const stdout = new PassThrough();
+  const written: string[] = [];
+  const stdin = new Writable({
+    write(chunk, _encoding, callback) {
+      written.push(String(chunk));
+      // Stay open long enough that `end()` has been called but the stream is not destroyed.
+      setTimeout(callback, 50);
+    },
+  });
+  const child = Object.assign(new EventEmitter(), { stdin, stdout }) as any;
+  let killed = 0;
+  const running = lineProtocol(
+    child,
+    { id: taskId, kind: "echo", payload: {} },
+    () => {},
+    () => {
+      killed++;
+    },
+    { deadlineMs: 60_000, graceMs: 20 },
+  );
+  stdout.write(
+    `${JSON.stringify({ type: "result", payload: { ok: true } })}\n`,
+  );
+  await new Promise((r) => setImmediate(r));
+  assert.equal(stdin.writableEnded, true);
+  assert.equal(stdin.destroyed, false);
+  running.send("a late answer");
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(written.length, 1);
+  assert.equal(killed, 1);
+  child.emit("close", 0);
+  assert.deepEqual(await running.done, {
+    type: "result",
+    payload: { ok: true },
+  });
 });

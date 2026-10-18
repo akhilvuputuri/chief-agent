@@ -12,7 +12,7 @@ Light sub-agents (`agent_run`, [agents.md](agents.md)) stay as they are: in-proc
 
 - **Coding moves first.** No new profile is built before coding runs on boxes.
 - **Short warm TTL.** A coding box stays alive for about 15 idle minutes so quick feedback reuses it, then it is put away. On EC2, "put away" means **stopped** (disk kept, compute released) rather than destroyed.
-- **Self-managed EC2 is the box provider.** On 19 October the owner asked why CodeBuild should stay at all. It does not need to be a box provider: a CodeBuild box cannot stop, cannot run a container per task, and would not exercise any of the EC2-specific risks. The fallback is simply **today's coding path on CodeBuild, left untouched** until coding has moved. Development and CI use a local Docker provider and a fake provider instead. Fargate and hosted sandboxes are deferred.
+- **Self-managed EC2 is the box provider.** On 19 October the owner asked why CodeBuild should stay at all. It does not need to be a box provider: a CodeBuild box cannot stop, cannot run a container per task, and would not exercise any of the EC2-specific risks. The fallback is simply **today's coding path on CodeBuild, left untouched** until coding has moved. Development and CI use a local process provider and a fake provider instead. Fargate and hosted sandboxes are deferred.
 - **The plan is approved, including paid EC2 infrastructure.** The owner applies the AWS resources (CloudFormation in `deploy/boxes/`); Claude and Chief never create AWS resources or IAM.
 - Cost is not the main concern provided boxes close themselves. Limits exist to stop runaways, not to save money; there are still no dollar caps ([cost-controls.md](cost-controls.md)).
 
@@ -44,7 +44,7 @@ The coding module ([coding.md](coding.md)) already contains a box system: the `S
 Chief (always on)
  ├─ light sub-agents (in process)                 agent_run, unchanged
  └─ box controller (host)                          new: src/boxes/
-       ├─ provider: EC2 (prod) | Docker (local) | fake (tests)   launch / find / describe / stop / start / terminate / sweep
+       ├─ provider: EC2 (prod) | local process (dev/CI) | fake (tests)   launch / find / describe / stop / start / terminate / sweep
        ├─ reconciler                               lifecycle truth, TTLs, orphan sweep, verified termination
        ├─ channel API  /boxes/:id/*                bootstrap, long-poll messages, events, heartbeat, artifacts
        └─ profiles: coding (first), analysis, crawl
@@ -273,7 +273,7 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
 1. **Design record.** This document and journal 91.
 2. **Box layer and EC2 provider (revised 19 October).** No CodeBuild box provider.
    - 2a. Foundation, dormant: tables, provider interface with a fake provider, credentials, the controller and reconciler (TTLs, sweep, verified termination, per-profile concurrency) and the channel routes.
-   - 2b. The box agent and a local Docker provider; an `echo` profile proves spawn, two tasks in one box with the trust reset, steering, inspection, idle stop and verified termination on a developer machine and in CI.
+   - 2b. The box agent and a local process provider; an `echo` profile proves spawn, two tasks in one box with the trust reset, steering, inspection, idle stop and verified termination on a developer machine and in CI.
    - 2c. The EC2 provider, `deploy/boxes/` CloudFormation and IAM for the owner to review and apply, the `/boxes/*` Caddy route, and wiring behind configuration.
 3. **Prove it on EC2.**
    - IAM negative tests.
@@ -342,7 +342,7 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
   - A box closed during an uncertain launch is found and ended.
   - A lost stop is repeated until its timeout.
   - Unexpected errors return a generic 500.
-- **Tests:** `tests/boxes.test.ts` (31 cases) covers:
+- **Tests:** `tests/boxes.test.ts` (33 cases) covers:
   - spawn, launch, concurrency and restarts;
   - bootstrap, rotation chains and lifelong bootstrap detection;
   - retired-credential alert versus compromise;
@@ -361,19 +361,33 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
   - **`src/boxes/agent.ts`.** The in-box supervisor:
     - stores its credential durably (temporary file, `fsync`, `rename`, then a directory `fsync`, with root-only modes);
     - never overlaps `hello` calls;
-    - long-polls with a persisted cursor, and acknowledges a message only after handling it durably;
+    - long-polls with a persisted cursor; assigned tasks are journalled durably before their acknowledgement, while owner messages for a task are held in memory until it runs;
     - runs one task at a time and never starts an assigned task twice;
     - reports ordered events per epoch, retrying them;
     - honestly fails a task that was open across a restart;
     - enforces the lifetime;
     - ends the box when its credential is refused or a task's reset fails.
-  - **Task protocol.** Tasks speak JSON lines (task, message → progress, question, result). `ProcessRunner` is for development and tests and is not a boundary. `DockerRunner` gives each task a fresh container as UID 1000, with all capabilities dropped, `no-new-privileges`, a read-only root, tmpfs home and `/tmp`, and a fresh workspace removed afterwards; it checks that no task container remains.
+  - **Task protocol.** Tasks speak JSON lines (task, message → progress, question, result).
+    - Output lines are bounded, and final payloads must be bounded JSON objects.
+    - Progress is limited to one event per second.
+    - A task is killed a grace period after its final line, or at its deadline.
+    - Messages sent after a task's input has ended are dropped.
+    - `ProcessRunner` is for development and tests and is not a boundary.
+    - `DockerRunner` gives each task a fresh container: UID 1000, all capabilities dropped, `no-new-privileges`, a read-only root, tmpfs home and `/tmp`, optional memory and CPU limits, and a fresh workspace removed afterwards. Its reset fails closed unless Docker confirms that no task container remains.
+  - **Behaviour settled in review of phase 2b:**
+    - A box whose launch the host has not recorded yet, or whose identity provider cannot be asked, is answered 503 and retries; only 401 ends a box.
+    - The agent enforces its lifetime locally, and ends itself if the host stays unreachable for 30 minutes.
+    - A task result the host rejects is replaced by a bounded failure, so the host's task never stays open.
+    - A reset failure ends the box, including during restart recovery.
+    - After a restart, acknowledged tasks that never started still run.
+    - Task IDs must be UUIDs before they reach paths, names or mounts.
+    - SIGTERM cancels the running task.
   - **`src/boxes/agent-main.ts`.** The entry point, configured by environment. On a box, shutdown is `systemctl poweroff`, which terminates the instance.
   - **`src/boxes/local-provider.ts`.** Runs each box as an agent process with its own state directory. Stopping ends the process but keeps the directory, like a stopped instance.
   - **`src/boxes/echo-task.ts`.** The `echo` profile's task program, including hostile and inspect modes for trust-reset tests.
   - **Tests:**
     - `tests/box-agent.test.ts` covers the durable store, refusal ending the box, and non-overlapping retried `hello`. It also has an end-to-end test with a real HTTP channel and real agent processes: two tasks in one box, a question answered by owner steering, idle stop, warm start with the stored credential (epoch 2), and a verified close.
-    - `tests/box-docker.test.ts` runs in CI against the built Pi image. A hostile task leaves files in its home, workspace and `/tmp`, plus a background process; the next task finds nothing. It also checks that no task container survives, that steering reaches the container, and that the container runs unprivileged with a read-only root and no capabilities.
+    - `tests/box-docker.test.ts` runs in CI against the built Pi image and checks privileges from inside a task the runner started (UID, effective capabilities, read-only root). A hostile task leaves files in its home, workspace and `/tmp`, plus a background process; the next task finds nothing. It also checks that no task container survives, that steering reaches the container, and that the container runs unprivileged with a read-only root and no capabilities.
 
 ## Deployment
 

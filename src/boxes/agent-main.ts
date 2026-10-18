@@ -8,6 +8,7 @@
  *   CHIEF_BOX_RUNNER=process|docker                   default docker
  *   CHIEF_BOX_TASK_COMMAND                            JSON array (process runner)
  *   CHIEF_BOX_TASK_IMAGE                              image digest (docker runner)
+ *   CHIEF_BOX_TASK_MEMORY, CHIEF_BOX_TASK_CPUS        per-task limits (docker runner)
  *   CHIEF_BOX_SHUTDOWN=exit|poweroff                  default poweroff
  */
 import { spawnSync } from "node:child_process";
@@ -27,7 +28,10 @@ const tasks = join(stateDir, "work");
 const runner =
   env.CHIEF_BOX_RUNNER === "process"
     ? new ProcessRunner(JSON.parse(required("CHIEF_BOX_TASK_COMMAND")), tasks)
-    : new DockerRunner(required("CHIEF_BOX_TASK_IMAGE"), tasks);
+    : new DockerRunner(required("CHIEF_BOX_TASK_IMAGE"), tasks, {
+        memory: env.CHIEF_BOX_TASK_MEMORY,
+        cpus: env.CHIEF_BOX_TASK_CPUS,
+      });
 
 const agent = new BoxAgent({
   origin: required("CHIEF_BOX_ORIGIN"),
@@ -45,5 +49,8 @@ const agent = new BoxAgent({
 });
 
 // A host stop (EC2 StopInstances) arrives as SIGTERM: exit quietly and resume on start.
-process.on("SIGTERM", () => process.exit(0));
+process.on("SIGTERM", () => {
+  agent.cancelCurrent();
+  process.exit(0);
+});
 await agent.run();

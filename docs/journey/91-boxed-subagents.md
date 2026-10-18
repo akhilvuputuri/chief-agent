@@ -135,7 +135,7 @@ After the design merged, the owner asked (reported) why phase 2 still used CodeB
 - It would leave the EC2-specific risks untested: IAM, stop and start, the trust reset and boot time.
 - Today's coding path on CodeBuild already provides the fallback without being wrapped as a box provider.
 
-The plan is now: build the box layer with a fake provider for tests and a local Docker provider for development, then the EC2 provider and its CloudFormation, which the owner applies. Coding moves onto EC2 boxes after that, and its current CodeBuild path stays untouched until then.
+The plan is now: build the box layer with a fake provider for tests and a local process provider for development, then the EC2 provider and its CloudFormation, which the owner applies. Coding moves onto EC2 boxes after that, and its current CodeBuild path stays untouched until then.
 
 ### Phase 2a: foundation (dormant)
 
@@ -220,6 +220,22 @@ The box agent dials out, keeps its credential durably, polls, runs tasks through
 - busy/idle reports from an earlier epoch are recorded but no longer applied;
 - the long-poll comment is now worded as a defensive choice;
 - the design states that removing or renaming a profile ends its boxes.
+
+**Review of phase 2b (`98754ca`, Claude Opus 5.5): changes requested.** Four blocking defects:
+
+1. **Late owner message.** An owner message arriving after a task's result crashed the agent with a write-after-end on the task's input. Late writes are now dropped. A deterministic test fails without the fix and passes with it; an earlier, timing-based test passed either way.
+2. **Fresh box killing itself.** A box whose launch the host had not recorded yet got a 401 at its first `hello` and shut itself down. A transient failure of the identity provider did the same. Both now return 503, which the agent retries.
+3. **Dropped results.** An oversized or malformed result was dropped with a 400, leaving the host's task open until the hard maximum. Final payloads are now validated in the box, and a result the host rejects is replaced by a bounded failure.
+4. **Trust reset failing open.** A reset failure during restart recovery was ignored, and an unreachable Docker daemon passed the leftover check. Both now end the box.
+
+Non-blocking findings, also adopted:
+
+- **Box lifetime:** the lifetime is enforced locally, and a box that cannot reach the host for too long ends itself.
+- **Task lifecycle:** tasks get a deadline and are killed a grace period after their result. Acknowledged tasks are requeued after a restart. SIGTERM cancels the running task.
+- **Output and input bounds:** output lines are bounded and progress is rate-limited. Task IDs are validated.
+- **Docker runner:** it takes memory and CPU limits, and its capability probe now runs through the runner itself.
+
+Still open, development only: the local provider keeps the bootstrap secret in its metadata, and it loses track of agents after a host restart.
 
 ### Release blocked by the migration, and unblocked — 19 October 2026
 

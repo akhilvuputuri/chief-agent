@@ -6,6 +6,7 @@ import { ensureUser, type Database } from "../src/db.js";
 import {
   BoxController,
   BoxCredentialRefused,
+  BoxNotReady,
   type BoxTimings,
 } from "../src/boxes/controller.js";
 import { FakeBoxProvider } from "../src/boxes/provider.js";
@@ -1059,4 +1060,59 @@ test("stale busy reports from an earlier epoch are recorded but not applied", as
     events: [{ seq: 1, kind: "box.state", state: "busy" }],
   });
   assert.equal((await f.row(id)).state, "busy");
+});
+
+test("a live credential before the launch is recorded, or while the provider cannot be asked, is told to retry", async (t) => {
+  const f = await fixture(t);
+  const box = await f.boxes.spawn("owner", {
+    requestKey: "k",
+    profile: "echo",
+    subject: "s",
+  });
+  f.provider.fail.add("launch");
+  await f.boxes.tick();
+  assert.equal((await f.row(box.id)).provider_id, null);
+  await assert.rejects(
+    f.boxes.hello(box.id, { protocol: 1, credential: f.secretOf(box.id) }),
+    BoxNotReady,
+  );
+  const app = server();
+  await boxApi(app, f.boxes);
+  t.after(() => app.close());
+  const http = await app.inject({
+    method: "POST",
+    url: `/boxes/${box.id}/hello`,
+    payload: { protocol: 1, credential: f.secretOf(box.id) },
+  });
+  assert.equal(http.statusCode, 503);
+  await f.boxes.tick();
+  assert.equal(
+    (
+      await f.boxes.hello(box.id, {
+        protocol: 1,
+        credential: f.secretOf(box.id),
+      })
+    ).epoch,
+    1,
+  );
+
+  const g = await fixture(t, { identity: true });
+  const other = await g.boxes.spawn("owner", {
+    requestKey: "k",
+    profile: "echo",
+    subject: "s",
+  });
+  await g.boxes.tick();
+  (g.provider as any).verifyIdentity = async () => {
+    throw new Error("certificate service down");
+  };
+  await assert.rejects(
+    g.boxes.hello(other.id, {
+      protocol: 1,
+      credential: g.secretOf(other.id),
+      identity: {},
+    }),
+    BoxNotReady,
+  );
+  assert.equal((await g.row(other.id)).state, "booting");
 });

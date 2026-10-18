@@ -19,6 +19,9 @@ import {
 
 /** The channel refuses a caller; the HTTP layer answers 401 without detail. */
 export class BoxCredentialRefused extends Error {}
+/** A live credential arrived before the host can answer it (launch not yet recorded, or
+ * the provider could not be asked); the HTTP layer answers 503 so the box retries. */
+export class BoxNotReady extends Error {}
 
 type Box = {
   id: string;
@@ -380,12 +383,7 @@ export class BoxController {
     const body = helloRequest.parse(raw);
     const presented = hashCredential(body.credential);
     const before = await this.load(boxId);
-    if (
-      !before ||
-      // Until the host has recorded the resource, it cannot verify, stop or end it.
-      !before.provider_id ||
-      [...closed, "requested"].includes(before.state)
-    )
+    if (!before || [...closed, "requested"].includes(before.state))
       throw new BoxCredentialRefused();
     const provider = this.providers[before.provider];
     // Only a caller holding a live credential reaches identity checks and their alerts.
@@ -400,10 +398,15 @@ export class BoxController {
         });
       throw new BoxCredentialRefused();
     }
+    // Until the host has recorded the resource it cannot verify, stop or end it; the box
+    // holds a live credential, so it is asked to retry rather than told to give up.
+    if (!before.provider_id) throw new BoxNotReady();
     if (provider?.verifyIdentity) {
       const verified = await this.bounded(
         provider.verifyIdentity(before.provider_id, body.identity),
-      ).catch(() => false);
+      ).catch(() => "unavailable" as const);
+      // A provider that cannot be asked is a reason to retry, not to give up.
+      if (verified === "unavailable") throw new BoxNotReady();
       if (!verified) {
         await this.notice(before.id, `alert:identity:${before.epoch}`, {
           summary:
@@ -418,7 +421,6 @@ export class BoxController {
         await db.query("SELECT * FROM boxes WHERE id=$1 FOR UPDATE", [boxId])
       ).rows[0] as Box;
       if (
-        !box.provider_id ||
         box.provider_id !== before.provider_id ||
         [...closed, "requested"].includes(box.state)
       )
