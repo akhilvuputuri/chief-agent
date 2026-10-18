@@ -6,6 +6,7 @@ import {
   type SubscriptionFields,
 } from "./subscription-schema.js";
 import { ToolValidationError } from "./tool-errors.js";
+import { opsLog } from "./ops-log.js";
 import {
   issuerIdentity,
   productEvidence,
@@ -120,6 +121,47 @@ const planFamily: Record<string, string> = {
   anthropic: "Claude",
   openai: "ChatGPT",
 };
+/** The invoice date that orders a file: an invoice-date match, or the PDF's only invoice date. */
+function recordedDate(row: MatchedInvoice) {
+  return row.date_basis === "invoice_date" && row.match_date.length === 10
+    ? row.match_date
+    : row.facts.invoiceDates.length === 1
+      ? row.facts.invoiceDates[0]!
+      : null;
+}
+/** Whether a matched invoice can belong to this item: issuer, plan and gathered account. */
+function identityRefusal(row: MatchedInvoice, data: SubscriptionFields) {
+  const target = row.scope.targets.find((t) => t.key === row.target_key);
+  const facts = row.facts;
+  // The issuer must match the item's merchant (or its label without one); a plan never decides the issuer.
+  const owner = data.merchant ?? data.label!;
+  const issuers = [target?.label ?? "", ...facts.issuerLabels].filter(Boolean);
+  // Any name of the item can place it in a plan family; that only adds conflict checks.
+  const family = [data.merchant, data.label]
+    .map((n) => (n ? planFamily[issuerOf(n)] : undefined))
+    .find(Boolean);
+  const plans = [
+    data.plan,
+    data.label,
+    data.plan && `${data.label} ${data.plan}`,
+    data.plan && data.merchant && `${data.merchant} ${data.plan}`,
+    data.plan && family && `${family} ${data.plan}`,
+  ];
+  if (!issuers.some((n) => sameIssuer(owner, n)))
+    return "This invoice's recorded issuer does not match this item's merchant (or its label when it has no merchant).";
+  if (
+    plans
+      .flatMap((n) => (n ? [n, planTier(n, family)] : []))
+      .some((n) => n && productEvidence(facts, n) === "conflict")
+  )
+    return "This invoice explicitly identifies a different plan or product from this item.";
+  if (
+    target?.accountLabel &&
+    subscriptionKey(target.accountLabel) !== subscriptionKey(data.accountLabel)
+  )
+    return `This invoice was gathered for account "${target.accountLabel}"; it can update only an item with that accountLabel.`;
+  return null;
+}
 // A findings agent has one host-recorded coordinator; it cannot choose another run.
 const inputScope = `user_id=$1 AND run_id IN ($2::uuid, (SELECT (data->>'parentRunId')::uuid FROM events WHERE user_id=$1 AND run_id=$2 AND type='agent.child_started' LIMIT 1))`;
 export const subscriptionKey = (value?: string | null) =>
@@ -150,12 +192,22 @@ function validate(data: SubscriptionFields) {
     "cancellationDeadline",
     "paidThroughDate",
     "lastInvoiceDate",
+    "pendingEffectiveDate",
   ] as const)
     if (data[key] && !validDate(data[key]!))
       throw new ToolValidationError("Use a real calendar date for " + key);
   if ((data.amount != null) !== (data.currency != null))
     throw new ToolValidationError(
       "An amount needs its stated currency; clear both to make the price unknown.",
+    );
+  const pending = [
+    data.pendingAmount,
+    data.pendingCurrency,
+    data.pendingEffectiveDate,
+  ].filter((v) => v != null).length;
+  if (pending !== 0 && pending !== 3)
+    throw new ToolValidationError(
+      "A pending price change needs pendingAmount, pendingCurrency and pendingEffectiveDate together; clear all three to drop it.",
     );
   if (data.cadence === "days" && !data.intervalDays)
     throw new ToolValidationError("A days cadence needs intervalDays.");
@@ -177,7 +229,55 @@ function validate(data: SubscriptionFields) {
         "Use a short merchant, plan or account label without payment numbers or a full address.",
       );
 }
-type Due = { date: string; events: string[]; days: number; estimated: boolean };
+type Due = {
+  date: string;
+  events: string[];
+  days: number;
+  estimated: boolean;
+  /** Default lead per event; a filtered date uses only its remaining events' leads. */
+  leads: Record<string, number>;
+};
+const priceNoticeDays = 3;
+const singaporeDay = (now: number) =>
+  new Date(now + 8 * 3600000).toISOString().slice(0, 10);
+/** The price in force on a date: a pending change applies from its effective date. */
+function priceOn(data: SubscriptionFields, date: string) {
+  const applied =
+    !!data.pendingEffectiveDate && data.pendingEffectiveDate <= date;
+  const amount = applied ? data.pendingAmount : data.amount,
+    currency = applied ? data.pendingCurrency : data.currency;
+  return amount != null
+    ? `${amount} ${currency} (${data.amountType ?? "unknown"} amount${applied ? ", after the saved price change" : ""}). `
+    : "Amount unknown. ";
+}
+/** From its effective date a pending price is the current price; the next write records it in history. */
+export function effectiveRow<
+  T extends {
+    data: SubscriptionFields;
+    field_sources: Record<string, unknown>;
+  },
+>(row: T, today: string): T & { appliedPending?: Record<string, unknown> } {
+  const d = row.data;
+  if (!d.pendingEffectiveDate || d.pendingEffectiveDate > today) return row;
+  const { pendingAmount, pendingCurrency, pendingEffectiveDate, ...rest } = d;
+  const {
+    pendingAmount: source,
+    pendingCurrency: _c,
+    pendingEffectiveDate: _d,
+    ...sources
+  } = row.field_sources ?? {};
+  const applied = { ...(source as object), appliedOn: pendingEffectiveDate };
+  return {
+    ...row,
+    data: { ...rest, amount: pendingAmount, currency: pendingCurrency },
+    field_sources: { ...sources, amount: applied, currency: applied },
+    appliedPending: {
+      from: { amount: d.amount ?? null, currency: d.currency ?? null },
+      to: { amount: pendingAmount, currency: pendingCurrency },
+      effectiveDate: pendingEffectiveDate,
+    },
+  };
+}
 export function subscriptionDates(data: SubscriptionFields): Due[] {
   if (!["active", "trial"].includes(data.status ?? "unknown")) return [];
   const dates: Due[] = [];
@@ -192,8 +292,16 @@ export function subscriptionDates(data: SubscriptionFields): Due[] {
     if (existing) {
       existing.events.push(event);
       existing.days = Math.max(existing.days, days ?? -1);
+      existing.leads[event] = days ?? -1;
       existing.estimated ||= estimated;
-    } else dates.push({ date, events: [event], days: days ?? -1, estimated });
+    } else
+      dates.push({
+        date,
+        events: [event],
+        days: days ?? -1,
+        estimated,
+        leads: { [event]: days ?? -1 },
+      });
   };
   add(
     data.nextChargeDate,
@@ -203,15 +311,26 @@ export function subscriptionDates(data: SubscriptionFields): Due[] {
   );
   if (data.status === "trial") add(data.trialEndDate, "trial ends", 3);
   add(data.cancellationDeadline, "cancellation deadline", 7);
+  add(data.pendingEffectiveDate, "price change", 3);
   return dates.sort((a, b) => a.date.localeCompare(b.date));
 }
 export function subscriptionReminders(data: SubscriptionFields, now: number) {
   const warnings: string[] = [];
   const plans: { id: string; date: string; content: string; fire: string }[] =
     [];
-  if (!data.reminderEnabled) return { plans, warnings };
+  // Price-change notices follow priceAlerts (on unless turned off); every other date needs reminders on.
+  const alerts = data.priceAlerts !== false;
   for (const due of subscriptionDates(data)) {
-    const lead = data.reminderDays ?? due.days;
+    // priceAlerts=false removes the price-change notice whether or not other reminders are on.
+    const events = (
+      data.reminderEnabled
+        ? due.events
+        : due.events.filter((e) => e === "price change")
+    ).filter((e) => alerts || e !== "price change");
+    if (!events.length) continue;
+    const lead = data.reminderEnabled
+      ? (data.reminderDays ?? Math.max(...events.map((e) => due.leads[e]!)))
+      : priceNoticeDays;
     if (lead < 0) continue; // Monthly and unknown cadences have no automatic lead time.
     const time = data.reminderTime ?? "09:00";
     const fire = new Date(
@@ -219,7 +338,7 @@ export function subscriptionReminders(data: SubscriptionFields, now: number) {
     ).toISOString();
     if (Date.parse(fire) <= now) {
       warnings.push(
-        `${data.label}: the ${due.events.join(" / ")} notice time has passed (${fire}); no late reminder was scheduled. Check the saved date ${due.date}.`,
+        `${data.label}: the ${events.join(" / ")} notice time has passed (${fire}); no late reminder was scheduled. Check the saved date ${due.date}.`,
       );
       continue;
     }
@@ -227,7 +346,9 @@ export function subscriptionReminders(data: SubscriptionFields, now: number) {
       id: randomUUID(),
       date: due.date,
       fire,
-      content: `${data.label}: ${due.events.join(" / ")} on ${due.date}${due.estimated ? " (estimated)" : " (saved date)"}. ${data.amount != null ? `${data.amount} ${data.currency} (${data.amountType ?? "unknown"} amount). ` : "Amount unknown. "}Review the terms before the decision or charge date. This reminder does not confirm a payment.`,
+      content: events.includes("price change")
+        ? `${data.label}: price changes on ${due.date} from ${data.amount != null ? `${data.amount} ${data.currency}` : "an unknown amount"} to ${data.pendingAmount} ${data.pendingCurrency} (saved notice).${events.length > 1 ? ` Also on that date: ${events.filter((e) => e !== "price change").join(" / ")}.` : ""} Review the terms before it takes effect. This reminder does not confirm a payment.`
+        : `${data.label}: ${events.join(" / ")} on ${due.date}${due.estimated ? " (estimated)" : " (saved date)"}. ${priceOn(data, due.date)}Review the terms before the decision or charge date. This reminder does not confirm a payment.`,
     });
   }
   return { plans, warnings };
@@ -336,6 +457,8 @@ export class SubscriptionTools {
     if (action.operation === "subscription_settings") {
       const fields: SubscriptionFields = {};
       if (action.enabled !== undefined) fields.reminderEnabled = action.enabled;
+      if (action.priceAlerts !== undefined)
+        fields.priceAlerts = action.priceAlerts;
       if (action.daysBefore !== undefined)
         fields.reminderDays = action.daysBefore;
       if (action.time !== undefined) fields.reminderTime = action.time;
@@ -357,6 +480,138 @@ export class SubscriptionTools {
       });
     }
     return this.record(user, run, action);
+  }
+  /**
+   * After gathering matches an invoice: does it agree with the one active tracked item it can belong to?
+   * Read-only; the same issuer, plan and account rules as invoice evidence decide the item.
+   */
+  async priceCheck(
+    user: string,
+    collectionId: string,
+    targetKey: string,
+    artifactId: string,
+  ) {
+    const row = (
+      await this.db.query(
+        `${matchedInvoices} AND g.collection_id=$2 AND g.target_key=$3 AND g.artifact_id=$4`,
+        [user, collectionId, targetKey, artifactId],
+      )
+    ).rows[0] as MatchedInvoice | undefined;
+    if (!row) return null;
+    const today = singaporeDay(this.now());
+    const items = (
+      (
+        await this.db.query(
+          "SELECT * FROM subscriptions WHERE user_id=$1 AND data->>'status' IN ('active','trial') ORDER BY id",
+          [user],
+        )
+      ).rows as Row[]
+    ).filter((item) => !identityRefusal(row, item.data));
+    if (!items.length) return null;
+    if (items.length > 1)
+      return {
+        status: "ambiguous" as const,
+        subscriptionIds: items.map((i) => i.id),
+        notice:
+          "Several tracked items could own this invoice; no price comparison was made. Ask the owner which item it belongs to.",
+      };
+    const item = items[0]!,
+      d = item.data,
+      date = recordedDate(row);
+    const base = {
+      subscriptionId: item.id,
+      label: d.label,
+      invoiceDate: date,
+      alerts: d.priceAlerts !== false,
+    };
+    if (d.lastInvoiceDate && (!date || date < d.lastInvoiceDate))
+      return {
+        status: "not_newer" as const,
+        ...base,
+        notice: `The tracker already reflects a later invoice (${d.lastInvoiceDate}); no comparison was made.`,
+      };
+    // Compare with the price in force on the invoice date, including a saved price change.
+    // An invoice dated before a change already recorded in history is compared with the price it replaced.
+    const on = date ?? today;
+    const pendingApplies =
+      !!d.pendingEffectiveDate && d.pendingEffectiveDate <= on;
+    let amount = pendingApplies ? d.pendingAmount : d.amount,
+      currency = pendingApplies ? d.pendingCurrency : d.currency;
+    const earlier = (
+      await this.db.query(
+        "SELECT source_ref->'appliedPending' AS applied FROM subscription_updates WHERE user_id=$1 AND subscription_id=$2 AND source_ref->'appliedPending'->>'effectiveDate' > $3 ORDER BY source_ref->'appliedPending'->>'effectiveDate' LIMIT 1",
+        [user, item.id, on],
+      )
+    ).rows[0]?.applied;
+    if (earlier) {
+      amount = earlier.from.amount;
+      currency = earlier.from.currency;
+    }
+    const invoiceAmounts = [...row.facts.amounts]
+      .sort(
+        (x, y) =>
+          Number(y.currency === currency) - Number(x.currency === currency),
+      )
+      .slice(0, 8);
+    if (amount == null || !currency)
+      return {
+        status: "no_saved_price" as const,
+        ...base,
+        invoiceAmounts,
+        notice: "The tracked item has no saved price to compare.",
+      };
+    const shows = row.facts.amounts.some(
+      (x) =>
+        x.currency === currency && decimalKey(x.amount) === decimalKey(amount),
+    );
+    return {
+      status: shows ? ("unchanged" as const) : ("differs" as const),
+      ...base,
+      saved: { amount, currency, pendingApplied: pendingApplies },
+      invoiceAmounts,
+      notice: shows
+        ? "The invoice shows the saved price."
+        : "The invoice does not show the saved price. It may have changed; the tracker was not changed. Applying it needs the owner's request.",
+    };
+  }
+  /** One Telegram alert per tracked item and invoice, never repeated; the tracker itself is unchanged. */
+  async queuePriceAlert(
+    user: string,
+    check: Awaited<ReturnType<SubscriptionTools["priceCheck"]>>,
+    artifactId: string,
+  ) {
+    if (!check || check.status !== "differs" || !check.alerts) return false;
+    const h = createHash("sha256")
+      .update(`price-alert:${user}:${check.subscriptionId}:${artifactId}`)
+      .digest("hex");
+    const id = `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-${((parseInt(h[16]!, 16) & 3) | 8).toString(16)}${h.slice(17, 20)}-${h.slice(20, 32)}`;
+    const fire = new Date(this.now()).toISOString();
+    const amounts = check.invoiceAmounts
+      .map((x) => `${x.amount} ${x.currency}`)
+      .join(", ");
+    const content = `${check.label}: possible price change. The invoice${check.invoiceDate ? ` dated ${check.invoiceDate}` : ""} does not show the saved ${check.saved.amount} ${check.saved.currency}${amounts ? `; amounts on it: ${amounts}` : ""}. The tracker was not changed. Ask Chief to update ${check.label} from this invoice if the price changed, or to turn off its price alerts.`;
+    try {
+      return (
+        (
+          await this.db.query(
+            "INSERT INTO daily_schedules(id,user_id,kind,content,schedule,parsed,next_run) VALUES($1,$2,'reminder',$3,$4,jsonb_build_object('kind','once','run_at',$4::text,'display',$4::text),$4::timestamptz) ON CONFLICT(id) DO NOTHING RETURNING id",
+            [id, user, content.slice(0, 1000), fire],
+          )
+        ).rows.length > 0
+      );
+    } catch (error) {
+      if (
+        (error as { constraint?: string }).constraint ===
+        "daily_schedule_capacity_limit"
+      ) {
+        opsLog("subscription.price_alert_skipped", "warn", {
+          ref: check.subscriptionId,
+          kind: "capacity",
+        });
+        return false;
+      }
+      throw error;
+    }
   }
   /** An agent bound to a gathering task works only with that task's collection. */
   private async assignedCollection(user: string, run?: string) {
@@ -470,46 +725,10 @@ export class SubscriptionTools {
       );
     let refusal = "";
     for (const row of rows) {
-      const target = row.scope.targets.find((t) => t.key === row.target_key);
       const facts = row.facts;
-      // The issuer must match the item's merchant (or its label without one); a plan never decides the issuer.
-      const owner = data.merchant ?? data.label!;
-      const issuers = [target?.label ?? "", ...facts.issuerLabels].filter(
-        Boolean,
-      );
-      // Any name of the item can place it in a plan family; that only adds conflict checks.
-      const family = [data.merchant, data.label]
-        .map((n) => (n ? planFamily[issuerOf(n)] : undefined))
-        .find(Boolean);
-      const plans = [
-        data.plan,
-        data.label,
-        data.plan && `${data.label} ${data.plan}`,
-        data.plan && data.merchant && `${data.merchant} ${data.plan}`,
-        data.plan && family && `${family} ${data.plan}`,
-      ];
-      const recorded =
-        row.date_basis === "invoice_date" && row.match_date.length === 10
-          ? row.match_date
-          : facts.invoiceDates.length === 1
-            ? facts.invoiceDates[0]!
-            : null;
-      if (!issuers.some((n) => sameIssuer(owner, n)))
-        refusal =
-          "This invoice's recorded issuer does not match this item's merchant (or its label when it has no merchant).";
-      else if (
-        plans
-          .flatMap((n) => (n ? [n, planTier(n, family)] : []))
-          .some((n) => n && productEvidence(facts, n) === "conflict")
-      )
-        refusal =
-          "This invoice explicitly identifies a different plan or product from this item.";
-      else if (
-        target?.accountLabel &&
-        subscriptionKey(target.accountLabel) !==
-          subscriptionKey(data.accountLabel)
-      )
-        refusal = `This invoice was gathered for account "${target.accountLabel}"; it can update only an item with that accountLabel.`;
+      const recorded = recordedDate(row);
+      const identity = identityRefusal(row, data);
+      if (identity) refusal = identity;
       else if (
         (fields.amount != null || fields.currency != null) &&
         !facts.amounts.some(
@@ -618,7 +837,9 @@ export class SubscriptionTools {
     return row;
   }
   async read(user: string, id: string, offset = 0) {
-    const row = await this.owned(user, id);
+    // Prices come from the effective view; dates from the stored row, so a price change stays dated on its day.
+    const stored = await this.owned(user, id);
+    const row = effectiveRow(stored, singaporeDay(this.now()));
     const history = (
       await this.db.query(
         "SELECT id,revision,source_kind,source_ref,changes,recorded_at FROM subscription_updates WHERE user_id=$1 AND subscription_id=$2 ORDER BY revision DESC LIMIT 11 OFFSET $3",
@@ -628,12 +849,21 @@ export class SubscriptionTools {
     const reminders = (
       await this.db.query(
         `SELECT id,to_char(subscription_date,'YYYY-MM-DD') AS date,next_run AS "firesAt",status,last_error,started_at FROM daily_schedules WHERE user_id=$1 AND subscription_id=$2 ORDER BY CASE WHEN status='scheduled' THEN 0 WHEN status='processing' THEN 1 WHEN subscription_date::text=ANY($3::text[]) THEN 2 ELSE 3 END, subscription_date DESC LIMIT 20`,
-        [user, id, subscriptionDates(row.data).map((d) => d.date)],
+        [user, id, subscriptionDates(stored.data).map((d) => d.date)],
       )
     ).rows;
     const result = {
       notice: NOTICE,
       ...shown(row),
+      ...(row.appliedPending
+        ? {
+            appliedPendingPrice: {
+              ...row.appliedPending,
+              notice:
+                "The saved price change is in effect; history records it with the next update.",
+            },
+          }
+        : {}),
       history: history.slice(0, 10),
       nextOffset: history.length > 10 ? offset + 10 : null,
       reminders,
@@ -655,11 +885,16 @@ export class SubscriptionTools {
       );
     if (a.id) return this.read(user, a.id, a.offset);
     const all = (
-      await this.db.query(
-        "SELECT * FROM subscriptions WHERE user_id=$1 ORDER BY updated_at DESC,id",
-        [user],
-      )
-    ).rows as Row[];
+      (
+        await this.db.query(
+          "SELECT * FROM subscriptions WHERE user_id=$1 ORDER BY updated_at DESC,id",
+          [user],
+        )
+      ).rows as Row[]
+    ).map((row) => ({
+      ...effectiveRow(row, singaporeDay(this.now())),
+      stored: row.data,
+    }));
     const merchant = subscriptionKey(a.merchant),
       plan = subscriptionKey(a.plan),
       account = subscriptionKey(a.accountLabel);
@@ -682,7 +917,7 @@ export class SubscriptionTools {
         .slice(0, 10);
     const upcoming = all
       .flatMap((row) =>
-        subscriptionDates(row.data)
+        subscriptionDates(row.stored)
           .filter((d) => d.date >= today && d.date < end)
           .map((d) => ({
             id: row.id,
@@ -790,7 +1025,10 @@ export class SubscriptionTools {
     };
     const previous = await replay();
     if (previous) return previous;
-    const old = a.id ? await this.owned(user, a.id) : null;
+    // A pending price already in effect becomes the base of this update and is recorded with it.
+    const old = a.id
+      ? effectiveRow(await this.owned(user, a.id), singaporeDay(this.now()))
+      : null;
     if (old && a.baseRevision !== old.revision)
       throw new ToolValidationError(
         "Subscription changed or baseRevision is missing; read it again before updating.",
@@ -803,6 +1041,13 @@ export class SubscriptionTools {
       throw new ToolValidationError("Supply at least one subscription field.");
     const data = { ...(old?.data ?? defaults), ...fields };
     validate(data);
+    if (
+      fields.pendingEffectiveDate &&
+      fields.pendingEffectiveDate <= singaporeDay(this.now())
+    )
+      throw new ToolValidationError(
+        "A pending price change needs a future effective date; for a price already in effect, set amount and currency instead.",
+      );
     const evidence = a.invoice
       ? await this.invoiceEvidence(user, run, a.invoice, fields, data, old)
       : null;
@@ -845,19 +1090,39 @@ export class SubscriptionTools {
       runId: run,
       inputIds: await this.sourceIds(user, run, a.sourceInputIds),
       ...(evidence ? { invoice: evidence.ref } : {}),
+      ...(old?.appliedPending ? { appliedPending: old.appliedPending } : {}),
     };
     // Any change to the amount/currency pair, including to or from unknown.
+    // Compare with the stored price, so a saved change first recorded by this write is reported too.
+    // An owner edit is compared with the price in force; a write without price fields
+    // that first records an applied change is compared with the stored price it replaced.
+    const supplied =
+      fields.amount !== undefined || fields.currency !== undefined;
+    const prior =
+      old?.appliedPending && !supplied
+        ? (old.appliedPending.from as {
+            amount: string | null;
+            currency: string | null;
+          })
+        : {
+            amount: old?.data.amount ?? null,
+            currency: old?.data.currency ?? null,
+          };
     const priceChange =
       old &&
-      (fields.amount !== undefined || fields.currency !== undefined) &&
-      (old.data.currency !== data.currency ||
-        (old.data.amount == null) !== (data.amount == null) ||
-        (old.data.amount != null &&
-          decimalKey(old.data.amount) !== decimalKey(data.amount!)))
+      (supplied || old.appliedPending) &&
+      (prior.currency !== (data.currency ?? null) ||
+        (prior.amount == null) !== (data.amount == null) ||
+        (prior.amount != null &&
+          decimalKey(prior.amount) !== decimalKey(data.amount!)))
         ? {
-            from: { amount: old.data.amount, currency: old.data.currency },
+            from: prior,
             to: { amount: data.amount, currency: data.currency },
-            source: evidence ? "invoice" : "owner",
+            source: supplied
+              ? evidence
+                ? "invoice"
+                : "owner"
+              : "saved price change",
           }
         : null;
     const { plans, warnings } = subscriptionReminders(data, this.now());
@@ -926,7 +1191,7 @@ export class SubscriptionTools {
           );
       if (priceChange)
         warnings.push(
-          `${data.label}: price changed from ${priceChange.from.amount == null ? "unknown" : `${priceChange.from.amount} ${priceChange.from.currency}`} to ${priceChange.to.amount == null ? "unknown" : `${priceChange.to.amount} ${priceChange.to.currency}`}${evidence ? ` (invoice ${evidence.ref.matchDate})` : ""}.`,
+          `${data.label}: price changed from ${priceChange.from.amount == null ? "unknown" : `${priceChange.from.amount} ${priceChange.from.currency}`} to ${priceChange.to.amount == null ? "unknown" : `${priceChange.to.amount} ${priceChange.to.currency}`}${priceChange.source === "invoice" ? ` (invoice ${evidence!.ref.matchDate})` : priceChange.source === "saved price change" ? " (saved price change)" : ""}.`,
         );
       return {
         ...read,
@@ -951,7 +1216,7 @@ export class SubscriptionTools {
         "daily_schedule_capacity_limit"
       )
         throw new ToolValidationError(
-          "Limit of 50 active schedules reached; pause another reminder before enabling these dates.",
+          "Limit of 50 active schedules reached; pause another reminder before enabling these dates. A saved price change also takes a slot for its notice unless priceAlerts is false.",
         );
       if ((error as { code?: string }).code === "23505") {
         const duplicate = await replay();

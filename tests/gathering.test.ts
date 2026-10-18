@@ -11,6 +11,7 @@ import { WorkTools } from "../src/work.js";
 import { collectionZip, crc32 } from "../src/gathering/zip.js";
 import { invoiceFacts } from "../src/gathering/facts.js";
 import { publicAddress, readUrl } from "../src/browser/policy.js";
+import { SubscriptionTools } from "../src/subscriptions.js";
 let pg: PGlite, db: Database, vault: FileVault, gather: Gathering;
 function pdf(text: string) {
   const body = `BT /F1 12 Tf 40 720 Td (${text.replace(/[\\()]/g, (c) => "\\" + c)}) Tj ET`;
@@ -454,4 +455,70 @@ test("public egress and agent navigation refuse private/special ranges and accou
     readUrl("https://billing.example.com/invoices"),
     "https://billing.example.com/invoices",
   );
+});
+test("a match reports the tracked price; only a background pass queues one alert", async () => {
+  await db.query(
+    "UPDATE work_tasks SET status='done' WHERE user_id='alice' AND status IN ('active','queued','running','paused')",
+  );
+  const owner = await turn("alice", "Track ChatGPT");
+  await new SubscriptionTools(db).call("alice", owner, {
+    operation: "subscription_record",
+    requestKey: randomUUID(),
+    fields: {
+      label: "ChatGPT",
+      merchant: "OpenAI",
+      status: "active",
+      amount: "18.00",
+      currency: "USD",
+    },
+  } as any);
+  const { f, run, c } = await fixture();
+  await gather.call(
+    "alice",
+    run,
+    action.parse({
+      operation: "gather_capture",
+      id: c.id,
+      targetKey: "one",
+      requestKey: randomUUID(),
+      source: { kind: "provided", artifactId: f.id },
+    }),
+  );
+  const match = () =>
+    gather.call(
+      "alice",
+      run,
+      action.parse({
+        operation: "gather_match",
+        id: c.id,
+        targetKey: "one",
+        requestKey: randomUUID(),
+        artifactId: f.id,
+        date: "2026-09-05",
+        dateBasis: "invoice_date",
+      }),
+    );
+  const alerts = async () =>
+    (
+      await db.query(
+        "SELECT content FROM daily_schedules WHERE user_id='alice' AND subscription_id IS NULL AND kind='reminder'",
+      )
+    ).rows;
+  const foreground = await match();
+  assert.equal(foreground.matched, true);
+  assert.equal(foreground.trackerPriceCheck.status, "differs");
+  assert.equal(foreground.trackerPriceCheck.alertQueued, false);
+  assert.equal((await alerts()).length, 0);
+  await db.query("UPDATE work_turns SET background=true WHERE run_id=$1", [
+    run,
+  ]);
+  assert.equal((await match()).trackerPriceCheck.alertQueued, true);
+  assert.equal((await match()).trackerPriceCheck.alertQueued, false);
+  const queued = await alerts();
+  assert.equal(queued.length, 1);
+  assert.match(
+    queued[0].content,
+    /ChatGPT: possible price change.*18\.00 USD.*20\.00 USD/,
+  );
+  await db.query("UPDATE work_tasks SET status='done' WHERE id=$1", [c.taskId]);
 });

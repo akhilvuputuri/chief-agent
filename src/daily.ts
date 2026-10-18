@@ -198,8 +198,9 @@ export class DailyWorker<T = string> {
             !j.subscription_id ||
             (
               await this.db.query(
-                "SELECT 1 FROM subscriptions WHERE id=$1 AND user_id=$2 AND revision=$3 AND data->>'reminderEnabled'='true' AND data->>'status' IN ('active','trial')",
-                [j.subscription_id, j.user_id, j.subscription_revision],
+                // A price-change notice follows priceAlerts; every other linked reminder needs reminders on.
+                "SELECT 1 FROM subscriptions s JOIN daily_schedules d ON d.id=$4 AND d.subscription_id=s.id WHERE s.id=$1 AND s.user_id=$2 AND s.revision=$3 AND s.data->>'status' IN ('active','trial') AND (s.data->>'reminderEnabled'='true' OR (s.data->>'pendingEffectiveDate'=to_char(d.subscription_date,'YYYY-MM-DD') AND coalesce(s.data->>'priceAlerts','true')<>'false'))",
+                [j.subscription_id, j.user_id, j.subscription_revision, j.id],
               )
             ).rows.length > 0;
           if (!valid || !currentSubscription) {
