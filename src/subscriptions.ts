@@ -8,6 +8,11 @@ import {
 import { ToolValidationError } from "./tool-errors.js";
 import { opsLog } from "./ops-log.js";
 import {
+  buildSubscriptionSummary,
+  setSubscriptionSummary,
+  summaryStatus,
+} from "./subscription-summary.js";
+import {
   issuerIdentity,
   productEvidence,
   type InvoiceFacts,
@@ -17,7 +22,7 @@ type SubscriptionAction = Extract<
   Action,
   { operation: `subscription_${string}` }
 >;
-type Row = {
+export type Row = {
   id: string;
   user_id: string;
   data: SubscriptionFields;
@@ -238,10 +243,10 @@ type Due = {
   leads: Record<string, number>;
 };
 const priceNoticeDays = 3;
-const singaporeDay = (now: number) =>
+export const singaporeDay = (now: number) =>
   new Date(now + 8 * 3600000).toISOString().slice(0, 10);
 /** The price in force on a date: a pending change applies from its effective date. */
-function priceOn(data: SubscriptionFields, date: string) {
+export function priceOn(data: SubscriptionFields, date: string) {
   const applied =
     !!data.pendingEffectiveDate && data.pendingEffectiveDate <= date;
   const amount = applied ? data.pendingAmount : data.amount,
@@ -448,6 +453,22 @@ export class SubscriptionTools {
     run: string,
     action: SubscriptionAction,
   ): Promise<any> {
+    if (action.operation === "subscription_summary")
+      return {
+        ...(await summaryStatus(this.db, user)),
+        summary: await buildSubscriptionSummary(
+          this.db,
+          user,
+          this.now(),
+          action.month,
+        ),
+        notice:
+          "Preview built from saved records; nothing was sent. The scheduled summary covers the previous calendar month.",
+      };
+    if (action.operation === "subscription_summary_set") {
+      await this.foreground(user, run);
+      return setSubscriptionSummary(this.db, user, this.now(), action);
+    }
     if (action.operation === "subscription_invoices")
       return this.invoices(user, action, run);
     if (action.operation === "subscription_list" && action.sourceInputs)
@@ -955,12 +976,8 @@ export class SubscriptionTools {
     }
     return result;
   }
-  private async record(
-    user: string,
-    run: string,
-    a: Extract<SubscriptionAction, { operation: "subscription_record" }>,
-  ) {
-    // This is host lane metadata, including a delegated child's inherited lane.
+  /** This is host lane metadata, including a delegated child's inherited lane. */
+  private async foreground(user: string, run: string) {
     const turn = (
       await this.db.query(
         "SELECT background FROM work_turns WHERE user_id=$1 AND run_id=$2",
@@ -971,6 +988,13 @@ export class SubscriptionTools {
       throw new ToolValidationError(
         "Only a foreground owner request may change subscriptions or their reminders.",
       );
+  }
+  private async record(
+    user: string,
+    run: string,
+    a: Extract<SubscriptionAction, { operation: "subscription_record" }>,
+  ) {
+    await this.foreground(user, run);
     const fields = { ...a.fields };
     if (fields.nextChargeDate === null) {
       if (fields.nextChargeEstimated === true)

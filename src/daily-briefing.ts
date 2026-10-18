@@ -1,6 +1,10 @@
 import type { Database } from "./db.js";
 import type { Delivery } from "./answer.js";
 import { unreadDigest } from "./gmail.js";
+import {
+  buildSubscriptionSummary,
+  summaryScheduleId,
+} from "./subscription-summary.js";
 
 type BriefingJob = {
   id: string;
@@ -36,6 +40,9 @@ export async function buildBriefing(
   deps: Deps,
 ): Promise<Delivery> {
   const now = deps.now?.() ?? new Date();
+  // The owner's monthly subscription summary is its own model-free briefing.
+  if (j.id === summaryScheduleId(j.user_id))
+    return buildSubscriptionSummary(deps.db, j.user_id, now.getTime());
   const sections: NonNullable<Delivery["sections"]> = [];
   const tasks = (
     await deps.db.query(

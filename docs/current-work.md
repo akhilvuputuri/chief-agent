@@ -1,3 +1,7 @@
+# Monthly subscription summary — in review, 19 October 2026
+
+Issue 132 S7. One opt-in Telegram message a month (`subscription_summary_set`, default the 1st at 09:00 Singapore), built from saved records with no model call. It covers per-currency monthly equivalents, the previous month's recorded changes (new, ended, price changes with the price they replaced) and the next 30 days. `subscription_summary` previews it. No migration. It builds on price-change alerts (PR 258). Branch `feat/monthly-summary`; review, merge, release and owner acceptance pending. [Journal 98](journey/98-monthly-subscription-summary.md), [design](subscriptions.md#monthly-summary).
+
 # Price-change alerts — in review, 19 October 2026
 
 Issue 132 price-change milestone.

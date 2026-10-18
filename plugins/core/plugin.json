@@ -50,14 +50,16 @@
     },
     {
       "id": "subscriptions",
-      "description": "Track subscriptions and recurring bills from owner statements, or from already-gathered invoices when the owner asks; report costs, decision dates, price changes and reminders. Cannot fetch invoices.",
+      "description": "Track subscriptions and recurring bills from owner statements, or from already-gathered invoices when the owner asks; report costs, decision dates, price changes, reminders and the monthly summary. Cannot fetch invoices.",
       "instructions": "agents/subscriptions.md",
       "contract": "findings/v1",
       "tools": [
         "subscription_record",
         "subscription_list",
         "subscription_settings",
-        "subscription_invoices"
+        "subscription_invoices",
+        "subscription_summary",
+        "subscription_summary_set"
       ],
       "skills": ["subscription-ledger", "invoice-ledger"],
       "limits": {

@@ -47,6 +47,7 @@ export const readOperations = new Set([
   "coding_models",
   "gather_status",
   "subscription_invoices",
+  "subscription_summary",
   "gather_progress",
   "gather_search",
   "gather_email_files",

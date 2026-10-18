@@ -92,6 +92,28 @@ Limits:
 - Detection runs only when invoices are matched. There is no scheduled refresh: owner-started collections and their background passes are the only automatic source until a responsibility watches receipts (issue 132 phase 3).
 - No email price notices are read.
 
+## Monthly summary
+
+Issue 132 S7 and R10: an optional monthly message built from saved records with no model call.
+
+- **Setting.** `subscription_summary_set(enabled, day?, time?)` is foreground-only and owner-wide. It schedules one message on `day` (1–28, default 1) at `time` (default 09:00) Singapore time. Turning it off cancels the schedule, which releases its slot in the shared 50-schedule capacity.
+- **Storage.** One `briefing`-kind `daily_schedules` row per owner, with an ID derived from the owner. No migration is needed. `DailyWorker`'s claim, lease, model-free delivery and no-replay rules apply, and `buildBriefing` hands that ID to the summary builder instead of building a to-do briefing. Generic schedule tools can still list, pause or cancel it.
+- **Content**, built when sent:
+  - per-currency monthly equivalents now, with the excluded count;
+  - the previous calendar month's recorded changes: new items, cancellations, and price changes with the price they replaced. Price changes come from owner edits, invoice-backed updates and saved price changes, dated on their effective day.
+  - the next 30 days of saved dates, at the price in force on each date;
+  - items left out of the totals.
+
+  Month boundaries are Singapore time. Price changes are found by replaying each item's history.
+
+- **Preview.** `subscription_summary(month?)` returns the same content without sending it, plus whether the schedule is on and when it next runs. It is a read.
+
+Limits:
+
+- Only saved records are summarised, not bank or card statements.
+- Changes are what was recorded in the month, not what was charged.
+- An owner amount edit carries no effective date, so it is dated when it was recorded.
+
 ## Capability and prompt cost
 
 [v0.3.34](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.34) shipped through [PR #142](https://github.com/akhilvuputuri/chief-agent/pull/142) at `b79fd27f8cdf5ecadb05622217ab61666a63f70b`. GPT-6 Astra approved exact head `142486080c9094bbab151636d48e767dfc7e7d99` (identical merged tree). It incorporates main `ae0237f`, preserving released responsibilities (023) and default-off coding foundation (024). Reviewed additive migration 025/operator installation, [normal release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37030523500), separate health/preservation and transaction-rolled-back deployed-module verification passed. Owner Telegram acceptance remains separate.
