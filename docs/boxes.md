@@ -356,6 +356,23 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
   - identity refusal;
   - long-poll wake-up;
   - the HTTP channel.
+- **2b, the box agent and local provider:**
+  - **`src/boxes/agent.ts`.** The in-box supervisor:
+    - stores its credential durably (temporary file, `fsync`, `rename`, then a directory `fsync`, with root-only modes);
+    - never overlaps `hello` calls;
+    - long-polls with a persisted cursor, and acknowledges a message only after handling it durably;
+    - runs one task at a time and never starts an assigned task twice;
+    - reports ordered events per epoch, retrying them;
+    - honestly fails a task that was open across a restart;
+    - enforces the lifetime;
+    - ends the box when its credential is refused or a task's reset fails.
+  - **Task protocol.** Tasks speak JSON lines (task, message → progress, question, result). `ProcessRunner` is for development and tests and is not a boundary. `DockerRunner` gives each task a fresh container as UID 1000, with all capabilities dropped, `no-new-privileges`, a read-only root, tmpfs home and `/tmp`, and a fresh workspace removed afterwards; it checks that no task container remains.
+  - **`src/boxes/agent-main.ts`.** The entry point, configured by environment. On a box, shutdown is `systemctl poweroff`, which terminates the instance.
+  - **`src/boxes/local-provider.ts`.** Runs each box as an agent process with its own state directory. Stopping ends the process but keeps the directory, like a stopped instance.
+  - **`src/boxes/echo-task.ts`.** The `echo` profile's task program, including hostile and inspect modes for trust-reset tests.
+  - **Tests:**
+    - `tests/box-agent.test.ts` covers the durable store, refusal ending the box, and non-overlapping retried `hello`. It also has an end-to-end test with a real HTTP channel and real agent processes: two tasks in one box, a question answered by owner steering, idle stop, warm start with the stored credential (epoch 2), and a verified close.
+    - `tests/box-docker.test.ts` runs in CI against the built Pi image. A hostile task leaves files in its home, workspace and `/tmp`, plus a background process; the next task finds nothing. It also checks that no task container survives, that steering reaches the container, and that the container runs unprivileged with a read-only root and no capabilities.
 
 ## Deployment
 

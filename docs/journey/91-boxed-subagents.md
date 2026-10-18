@@ -198,6 +198,22 @@ The other two points:
 - **Early long-poll abort.** Devin said a GET's request `close` aborts the long-poll at once. This was not reproduced on Node 22.19 with Fastify 5.12: a test with the old binding still waited the full interval. The abort is now bound to the response closing before it is written, which is correct on any version.
 - **Events from an earlier epoch.** These are kept deliberately. An agent sends events queued before a rotation under their original epoch, with its current credential. Task updates apply only to queued or running tasks, so an old event cannot overwrite a finished one.
 
+### Phase 2b: the box agent and local provider
+
+The box agent dials out, keeps its credential durably, polls, runs tasks through a runner, and ends the box when it must. A local provider runs agents as processes with stop-and-keep-disk semantics, so the whole loop runs on a developer machine and in CI without AWS.
+
+**Measured (tested).** The end-to-end test passes locally. A real agent process:
+
+- connects and completes two tasks in one box;
+- relays an owner answer to a waiting task;
+- stops after the idle TTL;
+- restarts warm on new work, rotating to epoch 2 with its stored credential;
+- closes with verified termination.
+
+**Not yet measured.** The container runner's trust-reset test runs only in CI, because Docker was unavailable on the development machine. EC2 boot and warm-start times wait for phase 2c.
+
+**Found while building.** The agent's task-journal file and the runner's work directory shared a name (`state/tasks`), and the agent crashed on its first task. The work directory is now `state/work`, and a runner that cannot start a task produces an honest task failure instead of a crash.
+
 ### Release blocked by the migration, and unblocked — 19 October 2026
 
 PR 259 merged with `db/032_boxes.sql` but no Compose inventory line and no operator rollout. The release guard in `scripts/cloud-release.py` refuses any change to `db/` or `compose.yaml` that a reviewed rollout has not installed, so the release of `860c45e` was refused (measured: release run 39157500387, "Database or Compose change requires a reviewed migration/deployment procedure"). Production stayed on `ef37e12`, and every later merge to main, from any session, would have been refused the same way.
