@@ -1,10 +1,10 @@
 # Live to-do reminders — released, 18 October 2026
 
-Reminder text is fixed at creation, while briefings list the owner's live open to-dos at send time. Briefings now lead with their own text and list open tasks inline, and `schedule_create` and the daily agent steer reminders to review the to-do list to briefings; single actions and checklists kept in a note stay reminders. PR 252 deployed as `3b93fa7`. See [journal 95](journey/95-live-todo-reminders.md).
+Reminder text is fixed at creation, while briefings list the owner's live open to-dos at send time. Briefings now lead with their own text and list open tasks inline, and `schedule_create` and the daily agent steer reminders to review the to-do list to briefings; single actions and checklists kept in a note stay reminders. PR 252 deployed as `3b93fa7`; live acceptance pending. See [journal 95](journey/95-live-todo-reminders.md).
 
 # Open loops in context — released, 18 October 2026
 
-Coding requirements and monitoring cards now stay valid for 24 hours instead of 15 minutes, and each turn's context lists coding jobs and expired cards that wait on the owner, so Chief covers them in status answers and avoids duplicate jobs. PR 251 deployed as `11d13c6`. See [journal 94](journey/94-open-loops-context.md).
+Coding requirements and monitoring cards now stay valid for 24 hours instead of 15 minutes, and each turn's context lists coding jobs and expired cards that wait on the owner, so Chief covers them in status answers and avoids duplicate jobs. PR 251 deployed as `11d13c6`; live acceptance pending. See [journal 94](journey/94-open-loops-context.md).
 
 # Invoices linked to the subscription tracker — live as v0.3.83, 19 October 2026
 
@@ -12,7 +12,7 @@ Issue 132 next milestone. A new `core/bills` agent gathers an exact invoice coll
 
 # Uncertain coding write lock — released, 18 October 2026
 
-A refused `coding_reply` on 16 October was recorded as uncertain and blocked every owner write until an operator settled it on 18 October; no uncertain calls remain. PR 249 (deployed `9437d86`) settles provably empty coding calls automatically, classifies pre-write coding refusals as validation errors and stops a turn from retrying a blocked write. See [journal 92](journey/92-uncertain-coding-write-lock.md).
+A refused `coding_reply` on 16 October was recorded as uncertain and blocked every owner write until an operator settled it on 18 October; no uncertain calls remain. PR 249 (deployed `9437d86`, part of v0.3.83; live acceptance pending) settles provably empty coding calls automatically, classifies pre-write coding refusals as validation errors and stops a turn from retrying a blocked write. See [journal 92](journey/92-uncertain-coding-write-lock.md).
 
 # Boxed sub-agents design — proposed, 17 October 2026
 

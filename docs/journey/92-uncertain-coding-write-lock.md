@@ -101,7 +101,7 @@ Not yet observed: a real coding refusal after this release.
 - **PR:** [249](https://github.com/akhilvuputuri/chief-agent/pull/249). The independent Opus 5.5 review approved the final head `7d36754a1c0343e0dbc1ac7d70671228df3a00f6` in round 4. Hosted CI and Devin passed there, and every Devin finding was resolved.
 - **Merge:** squash merge as `9437d860a15312933e82999d966a805889cd8cf1`.
 - **Release:** [run 39134957820](https://github.com/akhilvuputuri/chief-agent/actions/runs/39134957820). `npm run release:status` for the exact SHA returned `success` at 14:17:03Z (exact commit deployed, startup health passed), and CloudWatch shows `9437d86` running from 14:16 UTC.
-- **Versioning:** deployed after v0.3.83, without a version bump or tag ([releases](../releases.md)).
+- **Versioning:** deployed on package 0.3.82, untagged, before v0.3.83 (`1733d48`, deployed 16:07 UTC), which contains it ([releases](../releases.md)).
 - **Not yet observed:** a real coding refusal in production after this release.
 
 ## Follow-up and next iteration

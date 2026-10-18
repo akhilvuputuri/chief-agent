@@ -86,7 +86,7 @@ The stale proposal-time values for monitoring remain a documented limitation. Co
 
 ### Release closure — 2026-10-18
 
-- **PR:** [251](https://github.com/akhilvuputuri/chief-agent/pull/251). The independent Opus 5.5 review approved the final head `83a78f8eba86af117a2398dacd84671f1d5553de` (rebased onto #253, renumbered to 94) in round 8, after five Devin follow-ups. Hosted CI and Devin passed there. Devin's last open thread was re-anchored, described the earlier behaviour, and was verified fixed on the PR.
+- **PR:** [251](https://github.com/akhilvuputuri/chief-agent/pull/251). The independent Opus 5.5 review approved the final head `83a78f8eba86af117a2398dacd84671f1d5553de` (rebased onto #253, renumbered to 94) in round 8, after several Devin follow-up rounds. Hosted CI and Devin passed there. Devin's last open thread was re-anchored, described the earlier behaviour, and was verified fixed on the PR.
 - **Merge:** squash merge as `11d13c6a1932398f26d313c1e22d928977a33670`.
 - **Release:** [run 39145803289](https://github.com/akhilvuputuri/chief-agent/actions/runs/39145803289). `npm run release:status` returned `success` at 16:40:58Z, and CloudWatch shows `11d13c6` running from 16:40 UTC.
 - **Versioning:** deployed after v0.3.83, without a version bump or tag.
