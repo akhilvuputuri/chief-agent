@@ -1,6 +1,6 @@
 # Live to-do reminders — in review, 18 October 2026
 
-Reminder text is fixed at creation, while briefings list the owner's live open to-dos at send time. `schedule_create` and the daily agent now steer to-do and checklist reminders to briefings. See [journal 95](journey/95-live-todo-reminders.md).
+Reminder text is fixed at creation, while briefings list the owner's live open to-dos at send time. Briefings now lead with their own text and list open tasks inline, and `schedule_create` and the daily agent steer reminders to review the to-do list to briefings; single actions and checklists kept in a note stay reminders. See [journal 95](journey/95-live-todo-reminders.md).
 
 # Open loops in context — in review, 18 October 2026
 
