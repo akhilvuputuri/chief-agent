@@ -2,21 +2,21 @@
 
 The host now re-queues a paused coding job once, with a notice to the owner, when the pause came from a stopped sandbox, a lost heartbeat or a provider 429 or 5xx. A job that pauses again waits for the owner. The owner approved this exception on 17 October 2026. See [journal 96](journey/96-coding-transient-retry.md).
 
-# Live to-do reminders — in review, 18 October 2026
+# Live to-do reminders — released, 18 October 2026
 
-Reminder text is fixed at creation, while briefings list the owner's live open to-dos at send time. Briefings now lead with their own text and list open tasks inline, and `schedule_create` and the daily agent steer reminders to review the to-do list to briefings; single actions and checklists kept in a note stay reminders. See [journal 95](journey/95-live-todo-reminders.md).
+Reminder text is fixed at creation, while briefings list the owner's live open to-dos at send time. Briefings now lead with their own text and list open tasks inline, and `schedule_create` and the daily agent steer reminders to review the to-do list to briefings; single actions and checklists kept in a note stay reminders. PR 252 deployed as `3b93fa7`; live acceptance pending. See [journal 95](journey/95-live-todo-reminders.md).
 
-# Open loops in context — in review, 18 October 2026
+# Open loops in context — released, 18 October 2026
 
-Coding requirements and monitoring cards now stay valid for 24 hours instead of 15 minutes, and each turn's context lists coding jobs and expired cards that wait on the owner, so Chief covers them in status answers and avoids duplicate jobs. See [journal 94](journey/94-open-loops-context.md).
+Coding requirements and monitoring cards now stay valid for 24 hours instead of 15 minutes, and each turn's context lists coding jobs and expired cards that wait on the owner, so Chief covers them in status answers and avoids duplicate jobs. PR 251 deployed as `11d13c6`; live acceptance pending. See [journal 94](journey/94-open-loops-context.md).
 
 # Invoices linked to the subscription tracker — live as v0.3.83, 19 October 2026
 
 Issue 132 next milestone. A new `core/bills` agent gathers an exact invoice collection and then, when the owner asked for it, updates the subscription tracker from the matched invoices. `subscription_invoices` lists matched invoices with their recorded clues. `subscription_record` can cite one invoice; the host checks the amount and invoice date against that PDF's recorded clues, refuses issuer, plan, account and older-invoice mismatches, marks those fields invoice-sourced and reports price changes. Gathering, subscriptions and bills share the core `invoice-gathering`, `subscription-ledger` and `invoice-ledger` skills. No migration. [PR 253](https://github.com/akhilvuputuri/chief-agent/pull/253) deployed as `1733d48` with exact receipt and startup health. Next: owner acceptance (gather one month's invoice for a tracked subscription and ask Chief to update the tracker). [Journal 93](journey/93-invoice-backed-tracker.md), [design](subscriptions.md#invoice-backed-fields).
 
-# Uncertain coding write lock — in review, 18 October 2026
+# Uncertain coding write lock — released, 18 October 2026
 
-A refused `coding_reply` on 16 October was recorded as uncertain and blocked every owner write until an operator settled it on 18 October; no uncertain calls remain. This PR settles provably empty coding calls automatically, classifies pre-write coding refusals as validation errors and stops a turn from retrying a blocked write. See [journal 92](journey/92-uncertain-coding-write-lock.md).
+A refused `coding_reply` on 16 October was recorded as uncertain and blocked every owner write until an operator settled it on 18 October; no uncertain calls remain. PR 249 (deployed `9437d86`, part of v0.3.83; live acceptance pending) settles provably empty coding calls automatically, classifies pre-write coding refusals as validation errors and stops a turn from retrying a blocked write. See [journal 92](journey/92-uncertain-coding-write-lock.md).
 
 # Boxed sub-agents design — proposed, 17 October 2026
 

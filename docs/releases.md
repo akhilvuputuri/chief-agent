@@ -1,3 +1,22 @@
+## Deployed after v0.3.83 (untagged) — review-driven reliability fixes
+
+Two fixes from the two-week production review (3–17 October), deployed on package 0.3.83 without a version bump or tag. A third, PR 249, deployed before v0.3.83 and is part of it (below). Each had exact-head independent review (Claude Opus 5.5) and hosted CI. Every Devin finding was fixed; one #251 thread was verified fixed by PR comment rather than resolved in the tool.
+
+- **[PR 251](https://github.com/akhilvuputuri/chief-agent/pull/251), `11d13c6`.** Coding requirements and monitoring cards stay valid for 24 hours. Foreground turns list coding jobs and expired monitoring cards that wait on the owner. [Release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39145803289) receipt: `success`. [Journal 94](journey/94-open-loops-context.md).
+- **[PR 252](https://github.com/akhilvuputuri/chief-agent/pull/252), `3b93fa7`.** Briefings lead with their own text and list live open tasks inline. Reminders to review the to-do list become briefings. [Release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39148881889) receipt: `success`. [Journal 95](journey/95-live-todo-reminders.md).
+
+Live behavioural acceptance of both is still pending.
+
+## Deployed `9437d86` before v0.3.83 (package 0.3.82, untagged) — uncertain coding write lock
+
+[PR 249](https://github.com/akhilvuputuri/chief-agent/pull/249):
+
+- coding writes that provably saved nothing settle themselves;
+- coding refusals made before any write are validation errors;
+- a write refused by the uncertain guard (`WRITE_BLOCKED`) blocks the rest of the turn, including re-delegation to another agent.
+
+Exact-head independent review approved `7d36754` in round 4. Hosted CI and Devin passed. [Release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39134957820) receipt: `success` at 14:17:03Z, before v0.3.83 (`1733d48`), which contains it. Before this release, an operator cleared the 16 October uncertain `coding_reply` lock in production with the owner's approval. See [journal 92](journey/92-uncertain-coding-write-lock.md). Live acceptance (a real coding refusal) is pending.
+
 ## Released v0.3.83 — invoices linked to the subscription tracker
 
 [PR 253](https://github.com/akhilvuputuri/chief-agent/pull/253) merged as `1733d48ac0fb0600aab7971dabc8dd13e0caf5a5`.
