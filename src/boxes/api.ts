@@ -42,8 +42,8 @@ export async function boxApi(app: FastifyInstance, boxes: BoxController) {
         if (!id.success || !after.success)
           return reply.code(401).send({ error: "Box credential refused" });
         const abort = new AbortController();
-        // Abort only when the client goes away before the answer is written; a request's own
-        // `close` fires as soon as a bodiless GET has been read.
+        // Abort only when the client goes away before the answer is written. Binding to the
+        // response, not the request, does not depend on when a bodiless request is closed.
         reply.raw.on("close", () => {
           if (!reply.raw.writableFinished) abort.abort();
         });

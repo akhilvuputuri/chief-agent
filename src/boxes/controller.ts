@@ -602,7 +602,9 @@ export class BoxController {
           ],
         );
         if (!inserted.rows.length) return false;
-        await this.apply(db, box, event, now);
+        // A busy/idle report from an earlier epoch is stale; recorded, never applied.
+        if (event.kind !== "box.state" || batch.epoch === box.epoch)
+          await this.apply(db, box, event, now);
         return true;
       });
       if (done) applied++;
@@ -887,7 +889,15 @@ export class BoxController {
           since(box.idle_since) > profile.idleTtlMinutes * 60_000
         ) {
           const stop = provider.canStop && profile.retentionHours > 0;
-          if ((await this.idleClose(box, now, stop)) && stop)
+          if (
+            (await this.idleClose(
+              box,
+              now,
+              stop,
+              profile.idleTtlMinutes * 60_000,
+            )) &&
+            stop
+          )
             await call(provider.stop(box.provider_id!));
         }
         return;
@@ -984,12 +994,23 @@ export class BoxController {
    * Ends an idle box's running time, under the box lock that delegation also takes, so a
    * task delegated at the same moment either keeps the box running or arrives afterwards.
    */
-  private async idleClose(box: Box, now: Date, stop: boolean) {
+  private async idleClose(
+    box: Box,
+    now: Date,
+    stop: boolean,
+    idleTtlMs: number,
+  ) {
     return transaction(this.db, async (db) => {
       const current = (
         await db.query("SELECT * FROM boxes WHERE id=$1 FOR UPDATE", [box.id])
       ).rows[0] as Box;
-      if (current.state !== "ready") return false;
+      // Re-checked under the lock: the box may have been busy, then idle again, since.
+      if (
+        current.state !== "ready" ||
+        !current.idle_since ||
+        now.getTime() - new Date(current.idle_since).getTime() <= idleTtlMs
+      )
+        return false;
       const busy = (
         await db.query(
           `SELECT 1 FROM box_tasks WHERE box_id=$1 AND state IN ('queued','running')

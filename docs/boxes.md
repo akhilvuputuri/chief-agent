@@ -300,6 +300,7 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
 - **Routing.** Provider and profile selection are configuration, snapshotted per job. Rolling back routes new coding jobs to the existing CodeBuild path.
 - **Jobs already on EC2.** Jobs snapshotted onto EC2 keep it. If EC2 itself is the reason for the rollback, the owner cancels them, or resumes them from their checkpoint as fresh CodeBuild attempts through an explicit move action.
 - **Stopped boxes** are swept by retention.
+- **Profiles are live configuration.** Removing or renaming a profile ends that profile's running boxes and fails their open tasks at the next reconciliation; removing a provider holds its boxes for an operator. Rename profiles only when no box uses them.
 - **Infrastructure.** The CloudFormation stack is deleted only after the sweep shows every box terminated and every box volume gone.
 - **Data.** Box tables are additive; coding tables only gain a nullable column.
 

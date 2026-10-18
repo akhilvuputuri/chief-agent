@@ -1042,3 +1042,21 @@ test("an empty long-poll over HTTP waits for the poll interval", async (t) => {
   assert.deepEqual((await response.json()).messages, []);
   assert.ok(Date.now() - started >= 600, "the poll waited");
 });
+
+test("stale busy reports from an earlier epoch are recorded but not applied", async (t) => {
+  const f = await fixture(t);
+  const { id, credential: c1 } = await f.live();
+  await f.boxes.next(id, c1, 0);
+  const c2 = (await f.boxes.hello(id, { protocol: 1, credential: c1 }))
+    .credential;
+  await f.boxes.events(id, c2, {
+    epoch: 1,
+    events: [{ seq: 9, kind: "box.state", state: "busy" }],
+  });
+  assert.equal((await f.row(id)).state, "ready");
+  await f.boxes.events(id, c2, {
+    epoch: 2,
+    events: [{ seq: 1, kind: "box.state", state: "busy" }],
+  });
+  assert.equal((await f.row(id)).state, "busy");
+});

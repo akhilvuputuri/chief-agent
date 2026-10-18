@@ -214,6 +214,13 @@ The box agent dials out, keeps its credential durably, polls, runs tasks through
 
 **Found while building.** The agent's task-journal file and the runner's work directory shared a name (`state/tasks`), and the agent crashed on its first task. The work directory is now `state/work`, and a runner that cannot start a task produces an honest task failure instead of a crash.
 
+**Re-review of `7400212`: approved, with no deadlocks found.** Four non-blocking points were adopted with phase 2b:
+
+- the idle decision re-checks `idle_since` under the lock;
+- busy/idle reports from an earlier epoch are recorded but no longer applied;
+- the long-poll comment is now worded as a defensive choice;
+- the design states that removing or renaming a profile ends its boxes.
+
 ### Release blocked by the migration, and unblocked — 19 October 2026
 
 PR 259 merged with `db/032_boxes.sql` but no Compose inventory line and no operator rollout. The release guard in `scripts/cloud-release.py` refuses any change to `db/` or `compose.yaml` that a reviewed rollout has not installed, so the release of `860c45e` was refused (measured: release run 39157500387, "Database or Compose change requires a reviewed migration/deployment procedure"). Production stayed on `ef37e12`, and every later merge to main, from any session, would have been refused the same way.
