@@ -1462,18 +1462,19 @@ export class CodingController {
   /**
    * The owner's one automatic retry for a classified transient pause (owner-approved
    * 17 October 2026; AGENTS.md exception). Eligible pauses: the host saw the sandbox stop
-   * without a stated reason or lose its heartbeat, or the worker paused after its latest
-   * model request was rejected as a provider 429 or 5xx (the same predicate generation
-   * recovery trusts). Re-queues through the same guarded update as coding_resume, keyed
-   * auto-retry:<attempt> so it is idempotent, and never again for a revision that an
-   * automatic retry created. Publication, pending cleanup, leases and revoked owners block it.
+   * without a stated reason or lose its heartbeat, or the worker itself paused when its
+   * last model request was rejected as a provider 429 or 5xx (no model call completed after
+   * the rejection, so the fault ended the run). Re-queues through the same guarded update as
+   * coding_resume, keyed auto-retry:<attempt> so it is idempotent, and never again for a
+   * revision that an automatic retry created. Jobs with a PR, publication, pending cleanup,
+   * leases and revoked owners are left for the owner.
    */
   async autoRetryOnce() {
     if (this.settings.autoRetryTransientOnce === false) return;
-    const j = (
+    const candidates = (
       await this.db.query(
         `SELECT j.* FROM coding_jobs j
-         WHERE j.state='paused' AND NOT j.publication_started AND j.cleanup IN ('none','complete')
+         WHERE j.state='paused' AND NOT j.publication_started AND j.pr_url IS NULL AND j.cleanup IN ('none','complete')
            AND (j.lease IS NULL OR j.lease_until<now()) AND j.attempt_id IS NOT NULL
            AND j.updated_at < now() - interval '2 minutes' AND j.updated_at > now() - interval '1 day'
            AND NOT EXISTS(SELECT 1 FROM coding_revisions v WHERE v.job_id=j.id AND v.revision=j.revision
@@ -1483,7 +1484,7 @@ export class CodingController {
            AND (EXISTS(SELECT 1 FROM coding_events e WHERE e.job_id=j.id
                   AND e.event_key=j.attempt_id::text||':paused'
                   AND e.payload->>'cause' IN ('sandbox_stopped','heartbeat_lost'))
-             OR (EXISTS(SELECT 1 FROM coding_events e WHERE e.job_id=j.id
+             OR (j.result->>'kind'='paused' AND EXISTS(SELECT 1 FROM coding_events e WHERE e.job_id=j.id
                   AND e.event_key=j.attempt_id::text||':finished')
                AND (SELECT (p.payload->>'code'='model_rate_limited' AND p.payload->>'providerStatus'='429'
                          OR p.payload->>'code'='model_transient_failure'
@@ -1492,11 +1493,14 @@ export class CodingController {
                     FROM coding_events p WHERE p.job_id=j.id
                       AND p.event_key LIKE j.attempt_id::text||':request-rejected:%'
                       AND p.payload->>'kind'='worker_request_rejected'
+                      AND NOT EXISTS(SELECT 1 FROM coding_model_calls c WHERE c.job_id=j.id
+                        AND c.attempt_id=j.attempt_id AND c.state='complete' AND c.created_at>p.created_at)
                     ORDER BY p.created_at DESC,p.id DESC LIMIT 1)))
-         ORDER BY j.updated_at LIMIT 1`,
+         ORDER BY j.updated_at LIMIT 20`,
       )
-    ).rows[0] as CodingJob | undefined;
-    if (!j || !this.allowed(j.user_id)) return;
+    ).rows as CodingJob[];
+    const j = candidates.find((c) => this.allowed(c.user_id));
+    if (!j) return;
     const key = `auto-retry:${j.attempt_id}`;
     const message =
       "Automatic retry after a transient fault (the sandbox stopped, its heartbeat was lost, or the model provider failed temporarily)";
@@ -1630,7 +1634,7 @@ export class CodingController {
         else if (state === "terminal" && this.provider.terminalReason) {
           const reason = await this.provider
             .terminalReason(j.sandbox_id)
-            .catch(() => undefined);
+            .catch(() => null); // unknown, not "no stated reason"
           const expired =
             new Date(j.attempt_deadline).getTime() <= this.clock().getTime();
           await this.stopped(
@@ -1641,8 +1645,8 @@ export class CodingController {
                 : "Sandbox stopped before a result was recorded; saved work is retained"),
             true,
             undefined,
-            // A provider-stated reason is not classified as transient.
-            reason || expired ? undefined : "sandbox_stopped",
+            // Only a confirmed absence of a provider reason is transient.
+            reason === undefined && !expired ? "sandbox_stopped" : undefined,
           );
         } else if (
           new Date(j.attempt_deadline).getTime() <= this.clock().getTime()

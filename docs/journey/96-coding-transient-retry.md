@@ -33,10 +33,10 @@ Alternatives considered:
   - `stopped()` now records a `cause` (`sandbox_stopped` or `heartbeat_lost`) in the private `<attempt>:paused` event.
   - `autoRetryOnce()` runs on each tick. One guarded statement:
     - re-queues the oldest eligible job as a new revision keyed `auto-retry:<attempt>`;
-    - inserts a pending General notice saying the job is retrying once and will wait for the owner if it pauses again.
+    - inserts a pending notice, delivered to the Coding topic, saying the job is retrying once and will wait for the owner if it pauses again.
 
-  A job is eligible when it paused 2 minutes to 1 day ago and its pause is classified as transient. Worker pauses count only if the last rejected request was a 429 or 500/502/503/504 with no timeout, finish-reason or provider-failure classification. The job is skipped in any of these cases:
-  - publication started;
+  A job is eligible when it paused 2 minutes to 1 day ago and its pause is classified as transient. Worker pauses count only if the worker itself paused, its last rejected request was a 429 or 500/502/503/504 with no timeout, finish-reason or provider-failure classification, and no model call completed after that rejection. The job is skipped in any of these cases:
+  - publication started, or the job has a PR;
   - cleanup is pending;
   - a lease is held;
   - the owner was revoked;
@@ -50,9 +50,22 @@ Alternatives considered:
   - the transient classification (heartbeat, 503 and 429 retried; 400 and unclassified not);
   - no second retry;
   - the excluded states and the off switch;
+  - a recovered fault before a work-caused pause, a publication-mismatch pause and jobs with a PR;
+  - a revoked owner's older job not blocking another job;
+  - an unreadable stop reason not being classified as transient;
   - the real tick path that records the cause.
 
-Independent review: pending.
+Independent review (Opus 5.5, commit `9435234`) requested changes:
+
+- **F1, high.** An old 429 or 5xx that generation recovery had overcome made any later pause look transient, including failed checks or a missing report. Fixed: no model call may complete after the rejection.
+- **F2, high.** A host pause for an agent PR that did not match the reviewed artifact resets `publication_started` and leaves a `:finished` event, so it could be retried without the owner inspecting the PR. Fixed: the worker branch requires the worker's own result to be `paused`, and jobs with a PR are excluded.
+- **F3, low.** The oldest candidate belonging to a revoked owner blocked every other retry for a day. Fixed: the first allowed candidate of up to 20 is chosen.
+- **F4, low.** The docs named the General topic; coding notices go to the Coding topic. Corrected.
+- **S1.** A retried PR-feedback or rebase round would reset its ledger. This is avoided by excluding jobs with a PR.
+- **S2.** "Never a second time" overstated the guard: an owner resume creates a new revision that can be retried once. The wording is now exact.
+- **S3.** A failed stop-reason lookup was treated as no stated reason. It is now not classified as transient.
+
+While adding these tests, the off-switch test was found to mutate the fixture's shared settings, which silently disabled retries in later tests. It now restores them. The re-review is pending.
 
 ## Verification and outcome
 

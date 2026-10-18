@@ -12,6 +12,9 @@ async function paused(
     age = "5 minutes",
     cleanup = "complete",
     publication = false,
+    result = "paused",
+    recovered = false,
+    pr = false,
   } = {},
 ) {
   const f = await fixture(t);
@@ -19,8 +22,16 @@ async function paused(
   const attempt = randomUUID();
   await f.db.query(
     `UPDATE coding_jobs SET state='paused',stage='paused',attempt_id=$2,cleanup=$3,publication_started=$4,
-       lease=NULL,lease_until=NULL,updated_at=now()-$5::interval WHERE id=$1`,
-    [job.id, attempt, cleanup, publication, age],
+       lease=NULL,lease_until=NULL,updated_at=now()-$5::interval,result=$6::jsonb,pr_url=$7 WHERE id=$1`,
+    [
+      job.id,
+      attempt,
+      cleanup,
+      publication,
+      age,
+      worker ? JSON.stringify({ kind: result, summary: "Paused" }) : null,
+      pr ? "https://github.com/example/repo/pull/1" : null,
+    ],
   );
   if (worker) {
     await f.db.query(
@@ -39,6 +50,13 @@ async function paused(
         }),
       ],
     );
+    // Generation recovery retried the rejected request and it completed.
+    if (recovered)
+      await f.db.query(
+        `INSERT INTO coding_model_calls(id,job_id,attempt_id,role,request_hash,input,state,created_at)
+         VALUES($1,$2,$3,'coder','h','{}'::jsonb,'complete',now()+interval '1 second')`,
+        [randomUUID(), job.id, attempt],
+      );
   } else
     await f.db.query(
       "INSERT INTO coding_events(job_id,event_key,payload) VALUES($1,$2,$3::jsonb)",
@@ -140,9 +158,10 @@ test("recent pauses, pending cleanup, uncertain publication, revoked owners and 
   await revoked.f.c.autoRetryOnce();
   assert.equal((await revoked.f.row(revoked.job.id)).state, "paused");
   const off = await paused(t);
-  (
-    off.f.c.settings as { autoRetryTransientOnce?: boolean }
-  ).autoRetryTransientOnce = false;
+  // The fixture's settings object is shared by every test; restore it.
+  const shared = off.f.c.settings as { autoRetryTransientOnce?: boolean };
+  shared.autoRetryTransientOnce = false;
+  t.after(() => delete shared.autoRetryTransientOnce);
   await off.f.c.autoRetryOnce();
   assert.equal((await off.f.row(off.job.id)).state, "paused");
 });
@@ -167,4 +186,59 @@ test("the host records the transient cause when a sandbox stops or its heartbeat
     ).rows[0];
     assert.equal(event.payload.cause, cause, stop);
   }
+});
+
+const w503 = { code: "model_transient_failure", status: "503" };
+test("a recovered provider fault, a publication mismatch and a job with a PR are left for the owner", async (t) => {
+  for (const opts of [
+    // The 503 was recovered; the later pause (failed checks, no report) is work-caused.
+    { worker: w503, recovered: true },
+    // The candidate finished; the host paused it because the agent PR did not match.
+    { worker: w503, result: "candidate" },
+    { pr: true },
+    { worker: w503, pr: true },
+  ]) {
+    const { f, job } = await paused(t, opts);
+    await f.c.autoRetryOnce();
+    assert.equal((await f.row(job.id)).state, "paused", JSON.stringify(opts));
+  }
+});
+
+test("a revoked owner's older job does not block another owner's retry", async (t) => {
+  const { f, job: other } = await paused(t, { age: "10 minutes" });
+  await f.db.query("UPDATE coding_jobs SET user_id='b' WHERE id=$1", [
+    other.id,
+  ]);
+  const job = await f.start("second", "plan");
+  const attempt = randomUUID();
+  await f.db.query(
+    "UPDATE coding_jobs SET state='paused',stage='paused',attempt_id=$2,cleanup='complete',updated_at=now()-interval '5 minutes' WHERE id=$1",
+    [job.id, attempt],
+  );
+  await f.db.query(
+    'INSERT INTO coding_events(job_id,event_key,payload) VALUES($1,$2,\'{"summary":"Paused","cause":"heartbeat_lost"}\')',
+    [job.id, `${attempt}:paused`],
+  );
+  await f.c.autoRetryOnce();
+  assert.equal((await f.row(other.id)).state, "paused");
+  assert.equal((await f.row(job.id)).state, "queued");
+});
+
+test("a sandbox whose stop reason could not be read is not classified as transient", async (t) => {
+  const f = await fixture(t);
+  (f.provider as any).terminalReason = async () => {
+    throw new Error("lookup failed");
+  };
+  const job = await f.start("request", "plan");
+  await f.c.tick();
+  const j = await f.row(job.id);
+  await f.provider.terminate(j.sandbox_id);
+  await f.c.tick();
+  const event = (
+    await f.db.query(
+      "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key=$2",
+      [job.id, `${j.attempt_id}:paused`],
+    )
+  ).rows[0];
+  assert.equal(event.payload.cause, undefined);
 });

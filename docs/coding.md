@@ -28,17 +28,17 @@ The owner approved one host retry on 17 October 2026, after paused jobs from tra
 
 - the sandbox stopped without a reason or a recorded result (`sandbox_stopped`);
 - the worker heartbeat was lost (`heartbeat_lost`);
-- the worker's last rejected model request was a provider 429, 500, 502, 503 or 504, with no timeout, finish-reason or provider-failure classification.
+- the worker itself paused, and its last rejected model request was a provider 429, 500, 502, 503 or 504 with no timeout, finish-reason or provider-failure classification, and no model call completed after it. A fault that generation recovery already overcame does not make a later, work-caused pause transient.
 
-For that job, the controller re-queues the same approved scope as a new revision with request key `auto-retry:<attempt>`. In the same statement, it adds a pending General notice. The re-queue needs all of the following:
+For that job, the controller re-queues the same approved scope as a new revision with request key `auto-retry:<attempt>`. In the same statement, it adds a pending notice, which is delivered to the Coding topic like every coding event. The re-queue needs all of the following:
 
 - cleanup is complete or none;
 - no lease is held;
-- publication has not started;
+- publication has not started and the job has no PR (feedback and rebase rounds keep their ledgers for the owner);
 - the owner is still allowed;
 - the current revision was not itself created by an auto-retry.
 
-If the retried attempt pauses again, the job waits for the owner. Unclassified pauses, expired allocations, validation failures and other HTTP statuses are never retried. The cause is stored in the private `<attempt>:paused` event only. Set the coding setting `autoRetryTransientOnce` to `false` to turn retries off.
+If the retried attempt pauses again, the job waits for the owner. A later owner resume creates a new revision, which can again be retried once. A failed provider lookup of the stop reason is not classified as transient. Unclassified pauses, expired allocations, validation failures and other HTTP statuses are never retried. The cause is stored in the private `<attempt>:paused` event only. Set the coding setting `autoRetryTransientOnce` to `false` to turn retries off.
 
 Worker tokens are HMAC-derived from job and attempt IDs and a host key. They authorise only bounded worker endpoints, expire with the attempt and stop authorising work after cancellation or completion. The worker has no database, GitHub App, production model or Telegram credential. Model calls go through a job-scoped proxy using the existing OpenRouter adapter and price routing. Call IDs journal successful responses for reconciliation; pending or uncertain model calls are never replayed under the same ID. Diagnostic copies are filtered, while exact responses are encrypted with a derived key so a retry preserves source text rather than replaying a scrubbed approximation. Key rotation requires idle workers and reviewed rewrapping of retained response boxes. Model histories/results remain in private storage, not Actions logs.
 
