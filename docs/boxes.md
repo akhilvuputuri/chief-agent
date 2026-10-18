@@ -321,7 +321,7 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
 ## Implementation status
 
 - **2a, foundation (dormant; not wired into the gateway):**
-  - `db/032_boxes.sql` adds `boxes`, `box_tasks`, `box_messages`, `box_events` and `box_notices`.
+  - `db-staged/032_boxes.sql` adds `boxes`, `box_tasks`, `box_messages`, `box_events` and `box_notices`. It is staged outside `db/` until phase 2c installs it with a reviewed operator rollout and its Compose inventory line; see [Deployment](#deployment).
   - `src/boxes/` holds the provider interface and fake provider, credentials, the `BoxController` (owner operations, the channel and the reconciler) and the `/boxes/*` routes.
 - **Behaviour settled during review:**
   - Only a caller presenting a live credential reaches identity checks and their alerts. Identity is verified before a `hello` changes anything, so a stolen secret without the instance's proof is refused and alerted without harming the real box.
@@ -356,3 +356,13 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
   - identity refusal;
   - long-poll wake-up;
   - the HTTP channel.
+
+## Deployment
+
+The release guard refuses any change to `db/` or `compose.yaml` that a reviewed operator rollout has not installed. That makes the box migration a one-time operator step:
+
+1. **Staged, not installed.** `db-staged/032_boxes.sql` stays out of `db/` while the layer is dormant.
+2. **Rollout PR.** The PR that wires the layer moves it into `db/`, adds its Compose inventory line, and adds a reviewed `scripts/deploy-boxes.py` whose baseline is the live release at merge time.
+3. **Run immediately.** The rollout runs right after the merge, under the release lock with an idle gateway. Until it runs, every automatic release is refused.
+
+The automatic release for the same commit then succeeds as a no-op.
