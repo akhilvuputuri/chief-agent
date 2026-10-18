@@ -102,10 +102,18 @@ export async function buildBriefing(
       });
     }
   }
-  // Cut by code point so an emoji is never split, and mark the cut.
-  const chars = Array.from(j.content.trim());
+  // Cut by grapheme (what the owner sees as one character) so no emoji, including joined
+  // family or flag sequences, is ever split, and mark the cut.
+  const graphemes = Array.from(
+    new Intl.Segmenter("en", { granularity: "grapheme" }).segment(
+      j.content.trim(),
+    ),
+    (g) => g.segment,
+  );
   const lead =
-    chars.length > 300 ? chars.slice(0, 299).join("") + "…" : chars.join("");
+    graphemes.length > 300
+      ? graphemes.slice(0, 299).join("") + "…"
+      : graphemes.join("");
   const others = sections.slice(1).map((s) => s.title);
   return {
     reply: [

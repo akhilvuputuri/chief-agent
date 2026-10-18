@@ -111,3 +111,15 @@ test("a long lead is cut by code point with an ellipsis, and unread email appear
     "Unread inbox — past 24 hours (up to 5)",
   );
 });
+test("a long lead never splits a joined emoji such as a family sequence", async () => {
+  // Devin, PR 252: cutting by code point could leave part of a ZWJ family emoji.
+  const f = await fixture();
+  const family = "👨‍👩‍👧‍👦";
+  const brief = await buildBriefing(
+    f.job({ content: family.repeat(400) }),
+    f.deps,
+  );
+  const lead = brief.reply.split(" — ")[0];
+  assert.ok(lead.endsWith("…"));
+  assert.equal(lead.slice(0, -1), family.repeat(299));
+});

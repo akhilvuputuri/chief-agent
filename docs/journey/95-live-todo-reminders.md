@@ -54,7 +54,7 @@ Independent review of `0eb79fe` (Opus 5.5): REQUEST CHANGES.
 
 Fixes: the briefing builder change, the narrow steering above, a single-action carve-out, behaviour tests, and this record. The delta review approved `80cc130`. Its non-blocking notes:
 
-- **The 300-character lead cut could split an emoji and added no ellipsis.** It now cuts by code point and adds "…", with a test.
+- **The 300-character lead cut could split an emoji and added no ellipsis.** It now cuts by grapheme with `Intl.Segmenter`, so joined emoji such as family sequences stay whole (a code-point cut, flagged by Devin, still split them), and adds "…", with tests.
 - **The Gmail success path was untested.** It now has a test.
 - **The prompt grew by about 165 tokens,** in the daily agent only.
 
