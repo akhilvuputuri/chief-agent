@@ -135,7 +135,7 @@ After the design merged, the owner asked (reported) why phase 2 still used CodeB
 - It would leave the EC2-specific risks untested: IAM, stop and start, the trust reset and boot time.
 - Today's coding path on CodeBuild already provides the fallback without being wrapped as a box provider.
 
-The plan is now: build the box layer with a fake provider for tests and a local Docker provider for development, then the EC2 provider and its CloudFormation, which the owner applies. Coding moves onto EC2 boxes after that, and its current CodeBuild path stays untouched until then.
+The plan is now: build the box layer with a fake provider for tests and a local process provider for development, then the EC2 provider and its CloudFormation, which the owner applies. Coding moves onto EC2 boxes after that, and its current CodeBuild path stays untouched until then.
 
 ### Phase 2a: foundation (dormant)
 
@@ -198,6 +198,45 @@ The other two points:
 - **Early long-poll abort.** Devin said a GET's request `close` aborts the long-poll at once. This was not reproduced on Node 22.19 with Fastify 5.12: a test with the old binding still waited the full interval. The abort is now bound to the response closing before it is written, which is correct on any version.
 - **Events from an earlier epoch.** These are kept deliberately. An agent sends events queued before a rotation under their original epoch, with its current credential. Task updates apply only to queued or running tasks, so an old event cannot overwrite a finished one.
 
+### Phase 2b: the box agent and local provider
+
+The box agent dials out, keeps its credential durably, polls, runs tasks through a runner, and ends the box when it must. A local provider runs agents as processes with stop-and-keep-disk semantics, so the whole loop runs on a developer machine and in CI without AWS.
+
+**Measured (tested).** The end-to-end test passes locally. A real agent process:
+
+- connects and completes two tasks in one box;
+- relays an owner answer to a waiting task;
+- stops after the idle TTL;
+- restarts warm on new work, rotating to epoch 2 with its stored credential;
+- closes with verified termination.
+
+**Not yet measured.** The container runner's trust-reset test runs only in CI, because Docker was unavailable on the development machine. EC2 boot and warm-start times wait for phase 2c.
+
+**Found while building.** The agent's task-journal file and the runner's work directory shared a name (`state/tasks`), and the agent crashed on its first task. The work directory is now `state/work`, and a runner that cannot start a task produces an honest task failure instead of a crash.
+
+**Re-review of `7400212`: approved, with no deadlocks found.** Four non-blocking points were adopted with phase 2b:
+
+- the idle decision re-checks `idle_since` under the lock;
+- busy/idle reports from an earlier epoch are recorded but no longer applied;
+- the long-poll comment is now worded as a defensive choice;
+- the design states that removing or renaming a profile ends its boxes.
+
+**Review of phase 2b (`98754ca`, Claude Opus 5.5): changes requested.** Four blocking defects:
+
+1. **Late owner message.** An owner message arriving after a task's result crashed the agent with a write-after-end on the task's input. Late writes are now dropped. A deterministic test fails without the fix and passes with it; an earlier, timing-based test passed either way.
+2. **Fresh box killing itself.** A box whose launch the host had not recorded yet got a 401 at its first `hello` and shut itself down. A transient failure of the identity provider did the same. Both now return 503, which the agent retries.
+3. **Dropped results.** An oversized or malformed result was dropped with a 400, leaving the host's task open until the hard maximum. Final payloads are now validated in the box, and a result the host rejects is replaced by a bounded failure.
+4. **Trust reset failing open.** A reset failure during restart recovery was ignored, and an unreachable Docker daemon passed the leftover check. Both now end the box.
+
+Non-blocking findings, also adopted:
+
+- **Box lifetime:** the lifetime is enforced locally, and a box that cannot reach the host for too long ends itself.
+- **Task lifecycle:** tasks get a deadline and are killed a grace period after their result. Acknowledged tasks are requeued after a restart. SIGTERM cancels the running task.
+- **Output and input bounds:** output lines are bounded and progress is rate-limited. Task IDs are validated.
+- **Docker runner:** it takes memory and CPU limits, and its capability probe now runs through the runner itself.
+
+Still open, development only: the local provider keeps the bootstrap secret in its metadata, and it loses track of agents after a host restart.
+
 ### Release blocked by the migration, and unblocked — 19 October 2026
 
 PR 259 merged with `db/032_boxes.sql` but no Compose inventory line and no operator rollout. The release guard in `scripts/cloud-release.py` refuses any change to `db/` or `compose.yaml` that a reviewed rollout has not installed, so the release of `860c45e` was refused (measured: release run 39157500387, "Database or Compose change requires a reviewed migration/deployment procedure"). Production stayed on `ef37e12`, and every later merge to main, from any session, would have been refused the same way.
@@ -205,3 +244,22 @@ PR 259 merged with `db/032_boxes.sql` but no Compose inventory line and no opera
 The box layer is dormant and nothing reads its tables, so the migration moved to `db-staged/` until phase 2c installs it with a reviewed rollout. The guard then sees `db/` unchanged, and the normal release proceeds.
 
 Lesson: a migration enters `db/` only together with its Compose inventory line and a reviewed rollout that runs right after the merge, never with dormant code alone.
+
+**Re-review of `816b873` and `e4e8470`: approved.** Two of the reviewer's last points were adopted after rebasing on the unblocked main:
+
+- a question that exceeds its one-per-second budget is delayed to the next free slot rather than dropped, so a task asking two questions quickly cannot wait forever for the second;
+- the rate-limit wording in the docs now matches the code.
+
+The phase 2b tests load the staged box migration.
+
+**Devin review of PR 260.** Of twelve findings, several described earlier commits and were already fixed. Six applied to the current head, and five of them are now fixed and tested:
+
+- **Interrupted cleanup and lost outcomes.** A restart between reporting a task's outcome and cleaning up after it could leave the task's container behind, which would then end the box. A restart before the outcome reached the host could lose the result. The task journal now records each step, so recovery re-reports a recorded outcome and completes an interrupted cleanup.
+- **Oversized instructions.** Instructions larger than the box limit were run as an empty task. They are now refused, at delegation by the host and on arrival by the agent.
+- **Late or bursting questions.** Questions are sent by a single drainer, one per second, and only while their task is active. A question can no longer arrive after its task's result, and an event-loop stall cannot burst several at once.
+- **Shared daemon.** Task containers are labelled with their box ID, so two boxes sharing a Docker daemon cannot fail each other's reset. On EC2 each box has its own daemon.
+- **Admission order.** A flaky test exposed that first-come admission tied on `created_at` at the database clock's millisecond resolution. Boxes now carry an arrival sequence.
+
+Not changed, with reasons replied on the threads: task network egress (phase 2c), the local provider's stored bootstrap secret (development only, documented), and an answer acknowledged before an agent crash (the interrupted task is failed, not resumed, so no answer is silently lost).
+
+The re-review of `5686ed1` approved it and noted three small points, all adopted. A refusal is now journalled as a finished failure, so a restart cannot run the refused task with empty instructions. The Docker test's own leftover check matches any task label. A task with more than 20 questions waiting is stopped.

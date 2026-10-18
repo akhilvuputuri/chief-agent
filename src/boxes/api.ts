@@ -1,7 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { z, ZodError } from "zod";
 import { ToolValidationError } from "../tool-errors.js";
-import { BoxCredentialRefused, type BoxController } from "./controller.js";
+import {
+  BoxCredentialRefused,
+  BoxNotReady,
+  type BoxController,
+} from "./controller.js";
 
 const boxId = z.string().uuid();
 const bearer = (header: string | undefined) =>
@@ -20,6 +24,8 @@ export async function boxApi(app: FastifyInstance, boxes: BoxController) {
         } catch (error) {
           if (error instanceof BoxCredentialRefused)
             return reply.code(401).send({ error: "Box credential refused" });
+          if (error instanceof BoxNotReady)
+            return reply.code(503).send({ error: "Box not ready; retry" });
           if (error instanceof ZodError || error instanceof ToolValidationError)
             return reply.code(400).send({ error: "Invalid box request" });
           // Never echo internal detail (SQL, provider errors) to a box.
@@ -42,8 +48,8 @@ export async function boxApi(app: FastifyInstance, boxes: BoxController) {
         if (!id.success || !after.success)
           return reply.code(401).send({ error: "Box credential refused" });
         const abort = new AbortController();
-        // Abort only when the client goes away before the answer is written; a request's own
-        // `close` fires as soon as a bodiless GET has been read.
+        // Abort only when the client goes away before the answer is written. Binding to the
+        // response, not the request, does not depend on when a bodiless request is closed.
         reply.raw.on("close", () => {
           if (!reply.raw.writableFinished) abort.abort();
         });

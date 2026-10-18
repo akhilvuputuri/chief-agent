@@ -38,6 +38,7 @@ jobs:
           docker build -t pi-runtime-standalone:test coding_runtime_pi
           node scripts/pi-cli-container-smoke.mjs
           docker run --rm --user root --env CODING_TEST_SECRET=synthetic --entrypoint setpriv chief-pi:test --reuid=1000 --regid=1000 --clear-groups --no-new-privs --bounding-set=-all node --disable-sigusr1 /opt/chief-worker/coding_runtime_pi/dist/security-smoke.js
+          CHIEF_BOX_DOCKER_IMAGE=chief-pi:test npx tsx --test tests/box-docker.test.ts
           cp -R coding_runtime_pi /tmp/pi-runtime-independent
           cd /tmp/pi-runtime-independent
           npm ci --ignore-scripts
