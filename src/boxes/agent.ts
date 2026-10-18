@@ -195,6 +195,11 @@ export function lineProtocol(
         kill();
       }
     });
+    // A last line without a trailing newline still counts.
+    child.stdout?.on("end", () => {
+      if (buffer && buffer.length <= MAX_LINE) line(buffer);
+      buffer = "";
+    });
     timers.push(
       setTimeout(() => {
         settle({
@@ -373,7 +378,10 @@ export class DockerRunner implements TaskRunner {
     );
     const kill = () => {
       child.kill("SIGKILL");
-      void exec(this.docker, ["rm", "-f", this.name(task.id)]);
+      this.removing.set(
+        task.id,
+        exec(this.docker, ["rm", "-f", this.name(task.id)]),
+      );
     };
     return lineProtocol(
       child,
@@ -383,19 +391,28 @@ export class DockerRunner implements TaskRunner {
       this.options.limits ?? defaultLimits,
     );
   }
+  private removing = new Map<string, Promise<unknown>>();
   async reset(taskId: string) {
+    // A kill may already be removing the container; wait for it before checking.
+    await this.removing.get(taskId);
+    this.removing.delete(taskId);
     // `rm -f` of a container that is already gone is fine; the listing below is the check.
     await exec(this.docker, ["rm", "-f", this.name(taskId)]);
     rmSync(this.work(taskId), { recursive: true, force: true });
-    const left = await exec(this.docker, [
-      "ps",
-      "-aq",
-      "--filter",
-      "label=chief.box.task=1",
-    ]);
-    if (left.code !== 0)
-      throw new Error("Could not confirm that no task container remains");
-    if (left.out.trim()) throw new Error("A task container survived its reset");
+    for (let attempt = 0; ; attempt++) {
+      const left = await exec(this.docker, [
+        "ps",
+        "-aq",
+        "--filter",
+        "label=chief.box.task=1",
+      ]);
+      if (left.code !== 0)
+        throw new Error("Could not confirm that no task container remains");
+      if (!left.out.trim()) return;
+      // Removal can lag briefly behind `rm -f`; persisting leftovers end the box.
+      if (attempt >= 5) throw new Error("A task container survived its reset");
+      await new Promise((r) => setTimeout(r, 1000));
+    }
   }
 }
 
@@ -553,6 +570,7 @@ export class BoxAgent {
     const epoch = this.epoch;
     let seq = this.nextSeq();
     let body = event;
+    let replaced = false;
     this.events = this.events.then(async () => {
       while (!this.stopped) {
         try {
@@ -574,13 +592,13 @@ export class BoxAgent {
           if (response.status === 400) {
             const terminal =
               body.kind === "task.result" || body.kind === "task.failed";
-            if (!terminal || body.rejected) return;
+            if (!terminal || replaced) return;
+            replaced = true;
             seq = this.nextSeq();
             body = {
               kind: "task.failed",
               taskId: body.taskId,
               payload: { error: "The host rejected the task's result" },
-              rejected: true,
             };
             continue;
           }
@@ -604,12 +622,19 @@ export class BoxAgent {
     task?: { kind: string; payload: Record<string, unknown> },
   ) {
     const journal = this.journal();
-    journal[id] = task ? { state, ...task } : { ...journal[id], state };
+    // Finished tasks keep only their state: enough to refuse a redelivered assignment.
+    journal[id] = task
+      ? { state, ...task }
+      : state === "done"
+        ? { state }
+        : { ...journal[id], state };
     this.o.store.write("tasks", JSON.stringify(journal));
   }
 
   private handle(message: Message) {
     const p = message.payload ?? {};
+    // Task messages must name a well-formed task; anything else is for a later protocol version.
+    if (!message.kind.startsWith("task.")) return;
     if (typeof p.taskId !== "string" || !uuid.test(p.taskId)) return;
     if (message.kind === "task.assign") {
       // At-least-once delivery: a task already known is never started twice.
@@ -634,12 +659,13 @@ export class BoxAgent {
   }
 
   private output(taskId: string, output: TaskOutput) {
-    if (output.type === "progress") {
-      // Progress is advisory: at most one per second, so a chatty task cannot bury its result.
-      const last = this.progressAt.get(taskId) ?? -Infinity;
-      if (this.clock() - last < 1000) return;
-      this.progressAt.set(taskId, this.clock());
-    }
+    // Progress and questions are advisory: at most one per second, so a chatty task cannot
+    // bury its result.
+    // Each kind has its own budget, so progress never crowds out a question.
+    const key = `${taskId}:${output.type}`;
+    const last = this.progressAt.get(key) ?? -Infinity;
+    if (this.clock() - last < 1000) return;
+    this.progressAt.set(key, this.clock());
     void this.report({
       kind: output.type === "question" ? "task.question" : "task.progress",
       taskId,
@@ -675,7 +701,8 @@ export class BoxAgent {
       this.pendingMessages.delete(task.id);
       const outcome = await running.done;
       this.current = undefined;
-      this.progressAt.delete(task.id);
+      for (const kind of ["progress", "question"])
+        this.progressAt.delete(`${task.id}:${kind}`);
       await this.report({
         kind: outcome.type === "result" ? "task.result" : "task.failed",
         taskId: task.id,

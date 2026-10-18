@@ -682,3 +682,23 @@ test("writing to a task whose input has ended is dropped, not an unhandled strea
     payload: { ok: true },
   });
 });
+
+test("a final result line without a trailing newline still counts", async () => {
+  const stdout = new PassThrough();
+  const stdin = new Writable({ write: (_c, _e, cb) => cb() });
+  const child = Object.assign(new EventEmitter(), { stdin, stdout }) as any;
+  const running = lineProtocol(
+    child,
+    { id: taskId, kind: "echo", payload: {} },
+    () => {},
+    () => {},
+    { deadlineMs: 60_000, graceMs: 1000 },
+  );
+  stdout.end(JSON.stringify({ type: "result", payload: { last: true } }));
+  await new Promise((r) => setImmediate(r));
+  child.emit("close", 0);
+  assert.deepEqual(await running.done, {
+    type: "result",
+    payload: { last: true },
+  });
+});

@@ -382,12 +382,14 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
     - After a restart, acknowledged tasks that never started still run.
     - Task IDs must be UUIDs before they reach paths, names or mounts.
     - SIGTERM cancels the running task.
+    - A kill waits for its container removal before the reset checks, and a final line without a trailing newline still counts. Questions share progress's rate limit.
+    - For 2c, the EC2 identity verifier must return `false` for a malformed or invalid proof and throw only when it cannot reach what it needs, because a throw means retry.
   - **`src/boxes/agent-main.ts`.** The entry point, configured by environment. On a box, shutdown is `systemctl poweroff`, which terminates the instance.
   - **`src/boxes/local-provider.ts`.** Runs each box as an agent process with its own state directory. Stopping ends the process but keeps the directory, like a stopped instance.
   - **`src/boxes/echo-task.ts`.** The `echo` profile's task program, including hostile and inspect modes for trust-reset tests.
   - **Tests:**
     - `tests/box-agent.test.ts` covers the durable store, refusal ending the box, and non-overlapping retried `hello`. It also has an end-to-end test with a real HTTP channel and real agent processes: two tasks in one box, a question answered by owner steering, idle stop, warm start with the stored credential (epoch 2), and a verified close.
-    - `tests/box-docker.test.ts` runs in CI against the built Pi image and checks privileges from inside a task the runner started (UID, effective capabilities, read-only root). A hostile task leaves files in its home, workspace and `/tmp`, plus a background process; the next task finds nothing. It also checks that no task container survives, that steering reaches the container, and that the container runs unprivileged with a read-only root and no capabilities.
+    - `tests/box-docker.test.ts` runs in CI against the built Pi image and checks privileges from inside a task the runner started (UID, effective capabilities, read-only root). A hostile task leaves files in its home, workspace and `/tmp`, plus a background process; the next task finds nothing. It also checks that no task container survives and that steering reaches the container.
 
 ## Deployment
 
