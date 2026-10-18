@@ -804,6 +804,7 @@ export class CodingController {
     const {
       contextWindows,
       prWorkflow: _hostOnly,
+      autoRetryTransientOnce: _hostRetry,
       agentGit,
       ...settings
     } = job.settings;
@@ -1486,19 +1487,21 @@ export class CodingController {
                   AND e.payload->>'cause' IN ('sandbox_stopped','heartbeat_lost'))
              OR (j.result->>'kind'='paused' AND EXISTS(SELECT 1 FROM coding_events e WHERE e.job_id=j.id
                   AND e.event_key=j.attempt_id::text||':finished')
+               -- Judge only the latest rejection: an older fault is never a fallback.
                AND (SELECT (p.payload->>'code'='model_rate_limited' AND p.payload->>'providerStatus'='429'
                          OR p.payload->>'code'='model_transient_failure'
                             AND p.payload->>'providerStatus' IN ('500','502','503','504'))
                        AND NOT (p.payload ? 'timeoutKind' OR p.payload ? 'finishReason' OR p.payload ? 'providerFailure')
+                       AND NOT EXISTS(SELECT 1 FROM coding_model_calls c WHERE c.job_id=j.id
+                         AND c.attempt_id=j.attempt_id AND c.state='complete' AND c.created_at>p.created_at)
                     FROM coding_events p WHERE p.job_id=j.id
                       AND p.event_key LIKE j.attempt_id::text||':request-rejected:%'
                       AND p.payload->>'kind'='worker_request_rejected'
-                      AND NOT EXISTS(SELECT 1 FROM coding_model_calls c WHERE c.job_id=j.id
-                        AND c.attempt_id=j.attempt_id AND c.state='complete' AND c.created_at>p.created_at)
                     ORDER BY p.created_at DESC,p.id DESC LIMIT 1)))
-         ORDER BY j.updated_at LIMIT 20`,
+         ORDER BY j.updated_at`,
       )
     ).rows as CodingJob[];
+    // Unbounded on purpose (pauses from the last day): revoked owners must not crowd out others.
     const j = candidates.find((c) => this.allowed(c.user_id));
     if (!j) return;
     const key = `auto-retry:${j.attempt_id}`;

@@ -242,3 +242,46 @@ test("a sandbox whose stop reason could not be read is not classified as transie
   ).rows[0];
   assert.equal(event.payload.cause, undefined);
 });
+
+test("the host-only retry switch never reaches the strict worker settings", async (t) => {
+  const f = await fixture(t);
+  const job = await f.start("request", "plan");
+  await f.db.query(
+    "UPDATE coding_jobs SET settings=settings||'{\"autoRetryTransientOnce\":false}'::jsonb WHERE id=$1",
+    [job.id],
+  );
+  await f.c.tick();
+  const assignment = await f.c.assignment(await f.row(job.id));
+  assert.equal("autoRetryTransientOnce" in assignment.settings, false);
+});
+
+test("more than twenty revoked owners' pauses do not crowd out an allowed retry", async (t) => {
+  const { f, job: first } = await paused(t, { age: "20 minutes" });
+  const pause = async (key: string, age: string, cause: string) => {
+    const job = await f.start(key, "plan");
+    const attempt = randomUUID();
+    await f.db.query(
+      "UPDATE coding_jobs SET state='paused',stage='paused',attempt_id=$2,cleanup='complete',updated_at=now()-$3::interval WHERE id=$1",
+      [job.id, attempt, age],
+    );
+    await f.db.query(
+      "INSERT INTO coding_events(job_id,event_key,payload) VALUES($1,$2,$3::jsonb)",
+      [
+        job.id,
+        `${attempt}:paused`,
+        JSON.stringify({ summary: "Paused", cause }),
+      ],
+    );
+    return job;
+  };
+  const revoked = [first];
+  for (let i = 0; i < 21; i++)
+    revoked.push(await pause(`revoked-${i}`, "15 minutes", "sandbox_stopped"));
+  await f.db.query(
+    "UPDATE coding_jobs SET user_id='b' WHERE id=ANY($1::uuid[])",
+    [revoked.map((j) => j.id)],
+  );
+  const allowed = await pause("allowed", "5 minutes", "heartbeat_lost");
+  await f.c.autoRetryOnce();
+  assert.equal((await f.row(allowed.id)).state, "queued");
+});

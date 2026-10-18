@@ -67,6 +67,14 @@ Independent review (Opus 5.5, commit `9435234`) requested changes:
 
 While adding these tests, the off-switch test was found to mutate the fixture's shared settings, which silently disabled retries in later tests. It now restores them. The delta re-review approved `b01d226`; the remaining nit was a wording fix in this entry.
 
+Devin Review on `282d907` found three more:
+
+- **High, confirmed.** The host stored `autoRetryTransientOnce` in each job's pinned settings and sent it to workers, whose strict Python settings reject unknown fields. Once the switch was configured, every new Python job would have failed before starting. Fixed: the switch is stripped from the assignment, like `prWorkflow`, with a test.
+- **Medium.** Revoked owners' pauses could fill the 20-candidate limit and hide an allowed job. Fixed: the candidate list for the last day is unbounded, with a test using 22 revoked pauses.
+- **High, as reported.** A recovered later rejection could let an older one count. The `NOT EXISTS` filter ran before the latest rejection was chosen. Any model call completing after the newer rejection also completes after the older one, so the reported case does not occur through time ordering. The query now judges only the latest rejection, which makes the guarantee explicit.
+
+Both new tests fail on the previous controller.
+
 ## Verification and outcome
 
 Tested only: the focused tests pass on PGlite. Pending:
