@@ -65,7 +65,17 @@ Fixes:
 - Skipped alerts log `subscription.price_alert_skipped`.
 - The docs say once in effect, correct the amount directly.
 
-Regression tests cover these. Re-review pending.
+Regression tests cover these. The reviewer **APPROVED** exact head `7ee3226`.
+
+Devin Review on `7ee3226` then raised four findings; three were accepted and one declined.
+
+- **Fixed: pre-change invoices.** After a saved change was recorded, an invoice dated before it was compared with the new price. It is now compared with the price the change replaced, using the history's `appliedPending`.
+- **Fixed: effective-day timeline.** On the effective day, the change vanished from the timeline because dates came from the effective view. Dates now come from the stored row.
+- **Fixed: owner edits.** An owner price edit after the change took effect was compared with the stored pre-change price. It is now compared with the price in force.
+- **Declined: custom lead time.** With reminders on, `daysBefore` also moves the price notice. That is the documented rule ("daysBefore overrides all dates") and is now stated explicitly.
+- **Cosmetic.** The reviewer's note about the warning suffix is fixed.
+
+The fixed head needs exact-head re-review.
 
 ## Verification and outcome
 

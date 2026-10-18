@@ -73,7 +73,7 @@ Issue 132 asks Chief to flag price increases (S5, R8, R11). Two sources feed ale
   - Like other linked reminders, the notice takes one of the shared 50 schedule slots. At capacity, saving a price change is refused unless `priceAlerts` is false.
   - `DailyWorker` delivers it model-free, after checking the item's revision, status and that the date is still the saved effective date with alerts on.
 - **Invoice price check.** After every successful `gather_match`, the host looks for the one active tracked item the invoice can belong to. It uses the same issuer, plan and account rules as invoice evidence, and compares the price in force on the invoice date with the PDF's recorded amounts. The match result carries `trackerPriceCheck`:
-  - `unchanged` or `differs`;
+  - `unchanged` or `differs` (an invoice dated before a change already recorded in history is compared with the price that change replaced);
   - `ambiguous`, with candidate IDs, when several items could own the invoice;
   - `not_newer`, when the tracker already reflects a later invoice;
   - `no_saved_price`.
