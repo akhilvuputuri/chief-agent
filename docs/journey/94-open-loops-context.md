@@ -1,4 +1,4 @@
-# 93 — Why did Chief forget plans and cards that were waiting on the owner?
+# 94 — Why did Chief forget plans and cards that were waiting on the owner?
 
 Work date(s): 2026-10-18. Written/revised: 2026-10-18.
 Status: in review.

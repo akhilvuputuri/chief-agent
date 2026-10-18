@@ -1,6 +1,6 @@
 # Open loops in context — in review, 18 October 2026
 
-Coding requirements and monitoring cards now stay valid for 24 hours instead of 15 minutes, and each turn's context lists coding jobs and expired cards that wait on the owner, so Chief covers them in status answers and avoids duplicate jobs. See [journal 93](journey/93-open-loops-context.md).
+Coding requirements and monitoring cards now stay valid for 24 hours instead of 15 minutes, and each turn's context lists coding jobs and expired cards that wait on the owner, so Chief covers them in status answers and avoids duplicate jobs. See [journal 94](journey/94-open-loops-context.md).
 
 # Invoices linked to the subscription tracker — in review, 18 October 2026
 

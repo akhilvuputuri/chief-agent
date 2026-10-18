@@ -145,7 +145,7 @@ Acceptance requires the reproduced long runs to answer or pause for a real depen
 
 ## Open loops
 
-Each foreground turn's runtime context carries `openLoops` when something waits on the owner (`src/open-loops.ts`, [journal 93](journey/93-open-loops-context.md)). Background job lanes don't receive it.
+Each foreground turn's runtime context carries `openLoops` when something waits on the owner (`src/open-loops.ts`, [journal 94](journey/94-open-loops-context.md)). Background job lanes don't receive it.
 
 **Coding jobs.** Up to five jobs updated in the last 14 days, each with a host-written `awaiting` label:
 
