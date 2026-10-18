@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "model": "typesafe/jev-1.13-20260917",
+  "order": "jev",
+  "rrfK": 60,
+  "exploreWindow": 20,
+  "timeoutMs": 4000,
+  "deadlineMs": 10000,
+  "retries": 1,
+  "concurrency": 8,
+  "maxCandidates": 30,
+  "state": {
+    "recentSaves": 10,
+    "titleChars": 200,
+    "excerptChars": 300
+  },
+  "question": {
+    "instructions": "Would the owner want to read and save the article in `candidate`, given what they follow (`owner_topics`) and what they recently saved to their read-later library (`recent_saves`)?",
+    "true": "It fits the owner's interests as shown by their topics and recent saves: a subject, angle or kind of story they tend to save.",
+    "false": "It is outside what the owner saves: unrelated subject, routine update, promotion, or low-interest filler."
+  }
+}

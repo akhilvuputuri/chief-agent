@@ -17,6 +17,8 @@ import {
   type ReaderLink,
 } from "../src/news.js";
 import { ToolValidationError } from "../src/tool-errors.js";
+import { JevNewsRanker, readNewsRankerConfig } from "../src/news-ranker.js";
+import { setOpsSink } from "../src/ops-log.js";
 import {
   affinity,
   contentWords,
@@ -96,7 +98,10 @@ function rss(
 const hoursBefore = (d: Date, h: number) => new Date(d.getTime() - h * 3600000);
 const sgtAt = (iso: string) => new Date(`${iso}+08:00`);
 
-async function fixture(now: Date) {
+async function fixture(
+  now: Date,
+  options: { ranker?: () => JevNewsRanker | undefined } = {},
+) {
   const pg = new PGlite();
   for (const file of (await readdir(new URL("../db/", import.meta.url)))
     .filter((f) => /^\d.*sql$/.test(f))
@@ -134,6 +139,8 @@ async function fixture(now: Date) {
     () => clock,
     undefined,
     () => (readerOn ? reader : undefined),
+    // Exploration takes the lowest-ranked spare candidate and appends it: deterministic tests.
+    { random: () => 0.999999, ...options },
   );
   const tools = new NewsTools(db, fetcher, bulletin, () => clock);
   const call = (a: any, user = "a", r = run) => tools.call(user, r, a);
@@ -1435,6 +1442,317 @@ test("after a same-day outage, a bulletin more than six hours late is skipped", 
     f.setNow(sgtAt("2026-09-29T08:00"));
     await f.bulletin.tick();
     assert.equal(f.sent.length, 1);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+const jevReply = (answers: Record<string, number>, cost = 0.00004) =>
+  new Response(
+    JSON.stringify({
+      answers: Object.fromEntries(
+        Object.entries(answers).map(([k, p]) => [k, { noul: p }]),
+      ),
+      usage: { cost },
+      model: "typesafe/jev-1.13-20260917",
+    }),
+  );
+
+test("Jev ranks the bulletin: its order is used, and every candidate and decision is logged", async () => {
+  const now = sgtAt("2026-09-28T07:00");
+  const bodies: any[] = [];
+  const ranker = new JevNewsRanker("key", readNewsRankerConfig(), (async (
+    _url: string,
+    init: RequestInit,
+  ) => {
+    const body = JSON.parse(String(init.body));
+    bodies.push(body);
+    // Jev prefers gardening, then local elections, over the AI stories the rules favour.
+    const title = body.state.candidate.title;
+    return jevReply({
+      save: /Gardening/.test(title) ? 0.9 : /elections/.test(title) ? 0.6 : 0.1,
+    });
+  }) as typeof fetch);
+  const f = await fixture(now, { ranker: () => ranker });
+  const lines: string[] = [];
+  const previousSink = setOpsSink((line) => lines.push(line));
+  try {
+    await followTwoSites(f, now);
+    await f.call({
+      operation: "news_settings",
+      deliveryTime: "08:00",
+      topics: ["AI"],
+      itemsPerEdition: 2,
+      enabled: true,
+    });
+    f.setNow(sgtAt("2026-09-28T08:00"));
+    await f.bulletin.tick();
+    assert.equal(f.sent.length, 1);
+    // One regular pick by Jev's order, plus the exploration slot.
+    const items = (
+      await f.db.query(
+        "SELECT title,position,score FROM news_items ORDER BY position",
+      )
+    ).rows;
+    assert.equal(items.length, 2);
+    assert.equal(items[0].title, "Gardening in small flats");
+    assert.equal(items[0].score.rankedBy, "jev");
+    assert.equal(items[0].score.jev, 0.9);
+    const explored = items.filter((i: any) => i.score.explore);
+    assert.equal(explored.length, 1);
+    assert.ok(explored[0].score.exploreProbability > 0);
+    assert.ok(explored[0].score.exploreProbability <= 1);
+    // Jev saw the owner's topics and the candidates, never more than the shortlist.
+    assert.deepEqual(bodies[0].state.owner_topics, ["ai"]);
+    assert.deepEqual(Object.keys(bodies[0].questions), ["save"]);
+    assert.ok(bodies.length <= readNewsRankerConfig().maxCandidates);
+    const trace = (await f.db.query("SELECT trace FROM news_editions")).rows[0]
+      .trace;
+    assert.equal(trace.ranker.by, "jev");
+    assert.equal(trace.ranker.ok, true);
+    assert.equal(trace.ranker.version, ranker.version);
+    assert.equal(trace.modelCalls, trace.ranker.requests);
+    // Shown and unshown candidates, each with both scores and its position if shown.
+    assert.ok(trace.candidates.length >= 3);
+    assert.ok(trace.candidates.some((c: any) => !c.shown));
+    // Jev moved gardening to the top: its order rank is 1, its deterministic rank is not.
+    const garden = trace.candidates.find((c: any) => /Gardening/.test(c.title));
+    assert.equal(garden.orderRank, 1);
+    assert.ok(garden.rank > 1);
+    for (const c of trace.candidates) {
+      assert.equal(typeof c.total, "number");
+      assert.equal(typeof c.jev, "number");
+      assert.equal(
+        c.shown ? typeof c.position : c.position,
+        c.shown ? "number" : null,
+      );
+    }
+    const ranked = lines
+      .map((l) => JSON.parse(l))
+      .filter((l) => l.event === "news.ranked");
+    assert.equal(ranked.length, 1);
+    assert.equal(ranked[0].kind, "jev");
+    assert.doesNotMatch(lines.join("\n"), /Gardening/);
+  } finally {
+    setOpsSink(previousSink);
+    await f.pg.close();
+  }
+});
+
+test("when Jev fails, the rules rank the bulletin and it is still sent", async () => {
+  const now = sgtAt("2026-09-28T07:00");
+  const ranker = new JevNewsRanker(
+    "key",
+    readNewsRankerConfig(),
+    (async () => new Response("no", { status: 503 })) as typeof fetch,
+  );
+  const f = await fixture(now, { ranker: () => ranker });
+  try {
+    await followTwoSites(f, now);
+    await f.call({
+      operation: "news_settings",
+      deliveryTime: "08:00",
+      topics: ["AI"],
+      itemsPerEdition: 3,
+      enabled: true,
+    });
+    f.setNow(sgtAt("2026-09-28T08:00"));
+    await f.bulletin.tick();
+    assert.equal(f.sent.length, 1);
+    const trace = (await f.db.query("SELECT trace FROM news_editions")).rows[0]
+      .trace;
+    assert.equal(trace.ranker.by, "rules");
+    assert.equal(trace.ranker.error, "http_503");
+    const first = (
+      await f.db.query("SELECT title,score FROM news_items WHERE position=1")
+    ).rows[0];
+    // The rules favour the AI topic match.
+    assert.match(first.title, /AI chips/);
+    assert.equal(first.score.rankedBy, "rules");
+    assert.equal(first.score.jev, null);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("the blended order is labelled jev_rrf in the record and the log", async () => {
+  const now = sgtAt("2026-09-28T07:00");
+  const ranker = new JevNewsRanker(
+    "key",
+    { ...readNewsRankerConfig(), order: "rrf" },
+    (async (_url: string, init: RequestInit) => {
+      const title = JSON.parse(String(init.body)).state.candidate.title;
+      return jevReply({ save: /Gardening/.test(title) ? 0.9 : 0.2 });
+    }) as typeof fetch,
+  );
+  const f = await fixture(now, { ranker: () => ranker });
+  const lines: string[] = [];
+  const previousSink = setOpsSink((line) => lines.push(line));
+  try {
+    await followTwoSites(f, now);
+    await f.call({
+      operation: "news_settings",
+      deliveryTime: "08:00",
+      itemsPerEdition: 3,
+      enabled: true,
+    });
+    f.setNow(sgtAt("2026-09-28T08:00"));
+    await f.bulletin.tick();
+    assert.equal(f.sent.length, 1);
+    const trace = (await f.db.query("SELECT trace FROM news_editions")).rows[0]
+      .trace;
+    assert.equal(trace.ranker.by, "jev_rrf");
+    const ranked = lines
+      .map((l) => JSON.parse(l))
+      .find((l) => l.event === "news.ranked");
+    assert.equal(ranked.kind, "jev_rrf");
+  } finally {
+    setOpsSink(previousSink);
+    await f.pg.close();
+  }
+});
+
+test("a long title with an emoji at the cut point is stored safely", async () => {
+  const now = sgtAt("2026-09-28T07:00");
+  const f = await fixture(now);
+  try {
+    // 199 letters then an emoji: cutting at 200 UTF-16 units would split its surrogate pair.
+    const title = "a".repeat(199) + "\u{1F600}" + "b".repeat(48);
+    f.fetcher.pages.set(
+      "https://alpha.example/",
+      rss("Alpha", [
+        { title, url: "https://alpha.example/long", at: hoursBefore(now, 1) },
+        {
+          title: "Short one",
+          url: "https://alpha.example/s",
+          at: hoursBefore(now, 2),
+        },
+      ]),
+    );
+    await f.call({ operation: "news_source_add", site: "alpha.example" });
+    await f.call({
+      operation: "news_settings",
+      deliveryTime: "08:00",
+      itemsPerEdition: 2,
+      enabled: true,
+    });
+    f.setNow(sgtAt("2026-09-28T08:00"));
+    await f.bulletin.tick();
+    assert.equal(f.sent.length, 1);
+    const trace = (await f.db.query("SELECT trace FROM news_editions")).rows[0]
+      .trace;
+    const logged = trace.candidates.find((c: any) => c.title.startsWith("aaa"));
+    assert.equal(logged.title, "a".repeat(199));
+  } finally {
+    await f.pg.close();
+  }
+});
+
+const words = (n: number) =>
+  Array.from({ length: 4 }, (_, k) => `w${n}x${k}${"q".repeat(k)}`).join(" ");
+
+test("the candidate log keeps delivered items beyond its cap and marks only what was sent", async () => {
+  const now = sgtAt("2026-09-28T07:00");
+  const f = await fixture(now);
+  try {
+    // Fifty topic matches from one site outrank everything else; the per-site cap then
+    // fills the edition from the second site, ranked beyond the log's top 50.
+    f.fetcher.pages.set(
+      "https://alpha.example/",
+      rss(
+        "Alpha",
+        Array.from({ length: 50 }, (_, i) => ({
+          title: `AI ${words(i)}`,
+          url: `https://alpha.example/${i}`,
+          at: hoursBefore(now, 1),
+        })),
+      ),
+    );
+    f.fetcher.pages.set(
+      "https://beta.example/",
+      rss(
+        "Beta",
+        Array.from({ length: 5 }, (_, i) => ({
+          title: `Other ${words(100 + i)}`,
+          url: `https://beta.example/${i}`,
+          at: hoursBefore(now, 30),
+        })),
+      ),
+    );
+    await f.call({ operation: "news_source_add", site: "alpha.example" });
+    await f.call({ operation: "news_source_add", site: "beta.example" });
+    await f.call({
+      operation: "news_settings",
+      deliveryTime: "08:00",
+      topics: ["AI"],
+      enabled: true,
+    });
+    f.setNow(sgtAt("2026-09-28T08:00"));
+    await f.bulletin.tick();
+    assert.equal(f.sent.length, 1);
+    const trace = (await f.db.query("SELECT trace FROM news_editions")).rows[0]
+      .trace;
+    const sent = (
+      await f.db.query("SELECT canonical_url FROM news_items ORDER BY position")
+    ).rows.map((r: any) => r.canonical_url);
+    const logged = new Map(trace.candidates.map((c: any) => [c.canonical, c]));
+    // Every delivered item is in the log, as shown, with its delivered position.
+    for (const [i, url] of sent.entries()) {
+      assert.ok(logged.has(url), url);
+      assert.equal((logged.get(url) as any).shown, true);
+      assert.equal((logged.get(url) as any).position, i + 1);
+    }
+    assert.ok(trace.candidates.some((c: any) => c.rank > 50 && c.shown));
+    assert.equal(
+      trace.candidates.filter((c: any) => c.shown).length,
+      sent.length,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("items dropped to fit one Telegram message are not logged as shown", async () => {
+  const now = sgtAt("2026-09-28T07:00");
+  const f = await fixture(now);
+  try {
+    // Long titles and links: five items cannot fit one message, so trailing ones are dropped.
+    for (const [n, site] of ["alpha", "beta", "gamma"].entries())
+      f.fetcher.pages.set(
+        `https://${site}.example/`,
+        rss(
+          site,
+          [0, 1].map((i) => ({
+            title: `${site} ${words(10 * n + i)} ${"t".repeat(250)}`,
+            url: `https://${site}.example/${i}/${"p".repeat(540)}`,
+            at: hoursBefore(now, 1 + i),
+          })),
+        ),
+      );
+    for (const site of ["alpha", "beta", "gamma"])
+      await f.call({ operation: "news_source_add", site: `${site}.example` });
+    await f.call({
+      operation: "news_settings",
+      deliveryTime: "08:00",
+      enabled: true,
+    });
+    f.setNow(sgtAt("2026-09-28T08:00"));
+    await f.bulletin.tick();
+    assert.equal(f.sent.length, 1);
+    const delivered = (
+      await f.db.query("SELECT count(*)::int n FROM news_items")
+    ).rows[0].n;
+    assert.ok(delivered < 5, `delivered ${delivered}`);
+    // More were selected than sent: the dropped ones exist in the log as not shown.
+    const trace0 = (await f.db.query("SELECT trace FROM news_editions")).rows[0]
+      .trace;
+    assert.ok(trace0.candidates.length >= 5);
+    const trace = (await f.db.query("SELECT trace FROM news_editions")).rows[0]
+      .trace;
+    assert.equal(
+      trace.candidates.filter((c: any) => c.shown).length,
+      delivered,
+    );
   } finally {
     await f.pg.close();
   }

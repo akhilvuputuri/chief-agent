@@ -69,6 +69,11 @@ const LONE_SURROGATE = new RegExp(
   "[\\ud800-\\udbff](?![\\udc00-\\udfff])|(?<![\\ud800-\\udbff])[\\udc00-\\udfff]",
   "g",
 );
+/** The first `max` UTF-16 units without splitting a surrogate pair: a lone surrogate
+ * cannot be stored as JSON in Postgres. */
+export function clip(s: string, max: number) {
+  return s.slice(0, max).replace(LONE_SURROGATE, "");
+}
 // Zero-width and bidirectional-override characters can disguise a title or link.
 const INVISIBLE = new RegExp(
   "[\\u200b-\\u200f\\u202a-\\u202e\\u2066-\\u2069\\ufeff]",
