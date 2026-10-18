@@ -201,3 +201,27 @@ test("calendar is read-only, bounded and verifies owner/account before event rea
     /Wrong/,
   );
 });
+test("to-do reminders are steered to the live briefing kind, not frozen reminder text", async () => {
+  // Two generic to-do reminders on 7 October drew "what was this?": reminder text is fixed at creation.
+  const { runtimeContext } = await import("../src/runtime.js");
+  const { readFile } = await import("node:fs/promises");
+  const tool = runtimeContext({}, null).tools.find(
+    (t: { name: string }) => t.name === "schedule_create",
+  )!;
+  assert.match(
+    tool.description,
+    /kind reminder sends its content exactly as written now/,
+  );
+  assert.match(
+    tool.description,
+    /to-do list, open tasks or a checklist, use briefing/,
+  );
+  const daily = await readFile(
+    new URL("../plugins/core/agents/daily.md", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    daily,
+    /reminder about the to-do list, pending tasks or a checklist is a briefing/,
+  );
+});

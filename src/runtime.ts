@@ -159,6 +159,8 @@ export function runtimeContext(
         ? "Load the approved active skill or default using its catalogue key. Optional offset reads a bounded page; follow nextOffset until null."
         : ((
             {
+              schedule_create:
+                "Schedule a fixed Telegram message. kind reminder sends its content exactly as written now. kind briefing builds the message at send time from the owner's live open to-dos (up to 10), plus calendar or email when included. For a reminder about the to-do list, open tasks or a checklist, use briefing so it shows the current items, not a frozen description. Singapore time: ISO, in 30m, every 2h, daily at 11pm, or five-field cron (hourly minimum).",
               routine_create:
                 "On explicit user request, schedule an independent agent job with a self-contained instruction. Singapore time: ISO, in 30m, every 2h, daily at 11pm, or five-field cron (hourly minimum). latest catches up one slot; skip ignores slots over 5 minutes late. Use schedule_create for fixed reminders.",
               responsibility_create:

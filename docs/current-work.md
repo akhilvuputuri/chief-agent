@@ -1,3 +1,7 @@
+# Live to-do reminders — in review, 18 October 2026
+
+Reminder text is fixed at creation, while briefings list the owner's live open to-dos at send time. `schedule_create` and the daily agent now steer to-do and checklist reminders to briefings. See [journal 94](journey/94-live-todo-reminders.md).
+
 # Open loops in context — in review, 18 October 2026
 
 Coding requirements and monitoring cards now stay valid for 24 hours instead of 15 minutes, and each turn's context lists coding jobs and expired cards that wait on the owner, so Chief covers them in status answers and avoids duplicate jobs. See [journal 94](journey/94-open-loops-context.md).

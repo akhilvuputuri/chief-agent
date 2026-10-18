@@ -103,6 +103,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 16–18 October | [92 — Uncertain coding write lock](92-uncertain-coding-write-lock.md): why did one refused coding reply block every write for a day? | Operator-settled in production; self-settlement, reclassified refusals and a per-turn write block in review |
 | 18 October | [93 — Invoice-backed tracker](93-invoice-backed-tracker.md): can one agent fetch invoices and keep the subscription tracker in step? | In progress: bills agent, shared core skills and host-checked invoice fields tested locally; review and release pending |
 | 18 October | [94 — Open loops in context](94-open-loops-context.md): why did Chief forget plans and cards that were waiting on the owner? | In review: 24-hour requirements and monitoring cards; coding jobs and expired cards in the turn context |
+| 18 October | [94 — Live to-do reminders](94-live-todo-reminders.md): why did to-do reminders say "review your list" instead of showing it? | In review: to-do reminders steered to the live briefing kind |
 
 ## Coding-agent learning path
 
