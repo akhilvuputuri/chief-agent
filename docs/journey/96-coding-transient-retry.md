@@ -1,7 +1,7 @@
 # 96 — Can the host retry a coding job once after a transient fault?
 
 Work date(s): 2026-10-19. Written/revised: 2026-10-19.
-Status: in review. The host re-queues a paused coding job once after a classified transient fault, with an owner notice. No live job has exercised it yet.
+Status: released (`496fd50`, first deployed in `c1d556b`). The host re-queues a paused coding job once after a classified transient fault, with an owner notice. No live job has exercised it yet.
 
 ## User-visible problem and preceding iteration
 
@@ -77,11 +77,13 @@ Both new tests fail on the previous controller.
 
 ## Verification and outcome
 
-Tested only: the focused tests pass on PGlite. Pending:
+Tested: 10 focused tests on PGlite, the local application suite (1,010 TypeScript and 51 JavaScript script tests) and hosted CI on the merged head. The local Python coding benchmark test fails on the `chief-protocol-*` fixtures on this Mac, and fails the same way on unchanged main; hosted CI passed. Pending: a live transient pause that is retried once and either completes or waits for the owner.
 
-- the full suite, CI and exact-head review;
-- the release;
-- a live transient pause that is retried once and either completes or waits for the owner.
+### Release closure — 19 October 2026
+
+[PR 257](https://github.com/akhilvuputuri/chief-agent/pull/257) merged as `496fd50`. Exact-head independent review approved `44cfeef` in round 6, and hosted CI and Devin passed there. `496fd50` had no release run of its own: releases after `860c45e` failed until [PR 262](https://github.com/akhilvuputuri/chief-agent/pull/262) moved the box migration out of `db/`. The change first deployed in `c1d556b` (package 0.3.84), whose [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39161166544) receipt is `success` at 20:02:44Z on 18 October. It is also in `af33a68` (package 0.3.85, [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39164490351) `success` at 20:45:56Z). Neither is tagged.
+
+This verifies deployment and startup health only. No `coding.auto_retry` event has been observed yet.
 
 ## Coding-harness learning record
 
