@@ -1953,3 +1953,235 @@ test("invoice listings return every recorded amount and page past large historie
     await f.pg.close();
   }
 });
+const netflix = {
+  label: "Netflix",
+  merchant: "Netflix",
+  status: "active",
+  amount: "22.98",
+  currency: "SGD",
+  amountType: "fixed",
+  cadence: "monthly",
+};
+test("a pending price change is shown before its date, noticed even with reminders off, and applied from it", async () => {
+  const f = await fixture();
+  try {
+    await assert.rejects(
+      f.record({ ...netflix, pendingAmount: "24.98" }),
+      /together/,
+    );
+    const r = await f.record({
+      ...netflix,
+      pendingAmount: "24.98",
+      pendingCurrency: "SGD",
+      pendingEffectiveDate: "2026-12-01",
+    });
+    // Before the date: the current price stays, and one notice is planned 3 days ahead at 09:00 SGT.
+    assert.equal(r.amount, "22.98");
+    assert.equal(r.monthlyEquivalent, "22.98");
+    assert.equal(r.pendingAmount, "24.98");
+    assert.deepEqual(
+      r.reminders.map((x: any) => [x.date, x.status]),
+      [["2026-12-01", "scheduled"]],
+    );
+    assert.equal(
+      new Date(r.reminders[0].firesAt).toISOString(),
+      "2026-11-28T01:00:00.000Z",
+    );
+    // The scheduler delivers it with reminders off, model-free.
+    await f.db.query(
+      "UPDATE daily_schedules SET next_run=now()-interval '1 second' WHERE subscription_id=$1",
+      [r.id],
+    );
+    const sent: string[] = [];
+    await new DailyWorker(
+      f.db,
+      new ScheduleParser(),
+      async (_u, text) => {
+        sent.push(String(text));
+      },
+      async () => {
+        throw new Error("Model/briefing must not be used");
+      },
+      async () => {},
+    ).tick();
+    assert.equal(sent.length, 1);
+    assert.match(
+      sent[0]!,
+      /price changes on 2026-12-01 from 22.98 SGD to 24.98 SGD/,
+    );
+    // Turning price alerts off withdraws the notice; turning them on plans it again.
+    const off = await f.tools.call("a", f.run, {
+      operation: "subscription_settings",
+      id: r.id,
+      requestKey: randomUUID(),
+      baseRevision: r.revision,
+      priceAlerts: false,
+    } as any);
+    assert.equal(off.priceAlerts, false);
+    assert.ok(off.reminders.every((x: any) => x.status !== "scheduled"));
+    // From the effective date the new price is current in reads and totals.
+    const later = new SubscriptionTools(f.db, () =>
+      Date.parse("2026-12-02T00:00:00Z"),
+    );
+    const read = await later.read("a", r.id);
+    assert.equal(read.amount, "24.98");
+    assert.equal(read.pendingAmount, undefined);
+    assert.equal(read.appliedPendingPrice.effectiveDate, "2026-12-01");
+    assert.equal(read.fieldSources.amount.appliedOn, "2026-12-01");
+    assert.deepEqual(
+      (await later.list("a", { operation: "subscription_list" })).totals,
+      [{ currency: "SGD", monthlyEquivalent: "24.98", items: 1 }],
+    );
+    // The next update records the applied change in history.
+    const updated = await later.call("a", f.run, {
+      operation: "subscription_record",
+      requestKey: randomUUID(),
+      id: r.id,
+      baseRevision: off.revision,
+      fields: { plan: "Standard" },
+    } as any);
+    assert.equal(updated.amount, "24.98");
+    assert.equal(updated.pendingEffectiveDate, undefined);
+    assert.deepEqual(updated.history[0].source_ref.appliedPending.to, {
+      amount: "24.98",
+      currency: "SGD",
+    });
+    assert.equal(updated.priceChange, undefined);
+  } finally {
+    await f.pg.close();
+  }
+});
+test("renewal reminders after a saved price change quote the new price", () => {
+  const plans = subscriptionReminders(
+    {
+      label: "Gym",
+      status: "active",
+      amount: "120",
+      currency: "SGD",
+      amountType: "fixed",
+      cadence: "annual",
+      nextChargeDate: "2026-12-10",
+      nextChargeEstimated: false,
+      pendingAmount: "150",
+      pendingCurrency: "SGD",
+      pendingEffectiveDate: "2026-12-01",
+      reminderEnabled: true,
+    },
+    Date.parse("2026-10-01T00:00:00Z"),
+  ).plans;
+  const renewal = plans.find((p) => p.date === "2026-12-10")!;
+  assert.match(renewal.content, /150 SGD .*after the saved price change/);
+  const notice = plans.find((p) => p.date === "2026-12-01")!;
+  assert.match(notice.content, /from 120 SGD to 150 SGD/);
+});
+test("invoice price checks compare with the one owning item and alert once per invoice", async () => {
+  const f = await fixture();
+  try {
+    const sep = await matchedInvoice(f.db, {
+      label: "Netflix",
+      date: "2026-09-05",
+      amounts: [{ currency: "SGD", amount: "22.98" }],
+      productLabels: [],
+    });
+    const oct = await matchedInvoice(f.db, {
+      label: "Netflix",
+      date: "2026-10-05",
+      amounts: [
+        { currency: "SGD", amount: "24.98" },
+        { currency: "SGD", amount: "2.06" },
+      ],
+      productLabels: [],
+    });
+    const check = (x: {
+      collectionId: string;
+      key: string;
+      artifactId: string;
+    }) => f.tools.priceCheck("a", x.collectionId, x.key, x.artifactId);
+    assert.equal(await check(sep), null);
+    const item = await f.record({ ...netflix, lastInvoiceDate: "2026-09-05" });
+    assert.equal((await check(sep)).status, "unchanged");
+    const differs: any = await check(oct);
+    assert.equal(differs.status, "differs");
+    assert.equal(differs.subscriptionId, item.id);
+    assert.deepEqual(differs.saved, {
+      amount: "22.98",
+      currency: "SGD",
+      pendingApplied: false,
+    });
+    assert.equal(differs.invoiceAmounts[0].amount, "24.98");
+    // One alert per item and invoice, never repeated, and the tracker is unchanged.
+    assert.equal(
+      await f.tools.queuePriceAlert("a", differs, oct.artifactId),
+      true,
+    );
+    assert.equal(
+      await f.tools.queuePriceAlert("a", differs, oct.artifactId),
+      false,
+    );
+    const alerts = (
+      await f.db.query(
+        "SELECT content FROM daily_schedules WHERE user_id='a' AND subscription_id IS NULL",
+      )
+    ).rows;
+    assert.equal(alerts.length, 1);
+    assert.match(
+      alerts[0].content,
+      /possible price change.*22\.98 SGD.*24\.98 SGD.*not changed/,
+    );
+    assert.equal((await f.tools.read("a", item.id)).amount, "22.98");
+    // A saved price change in force on the invoice date is the price compared.
+    const pending = await f.record(
+      {
+        pendingAmount: "24.98",
+        pendingCurrency: "SGD",
+        pendingEffectiveDate: "2026-10-01",
+      },
+      { id: item.id, baseRevision: item.revision },
+    );
+    assert.equal((await check(oct)).status, "unchanged");
+    // An older invoice than the saved one is not compared.
+    await f.record(
+      {
+        pendingAmount: null,
+        pendingCurrency: null,
+        pendingEffectiveDate: null,
+        lastInvoiceDate: "2026-11-05",
+      },
+      { id: item.id, baseRevision: pending.revision },
+    );
+    assert.equal((await check(oct)).status, "not_newer");
+    // Two items that could own the invoice: no comparison.
+    await f.record({
+      ...netflix,
+      plan: "Family",
+      amount: "30",
+      lastInvoiceDate: null,
+    });
+    assert.equal((await check(oct)).status, "ambiguous");
+  } finally {
+    await f.pg.close();
+  }
+});
+test("price alerts respect the item's setting", async () => {
+  const f = await fixture();
+  try {
+    const nov = await matchedInvoice(f.db, {
+      label: "Netflix",
+      date: "2026-11-05",
+      amounts: [{ currency: "SGD", amount: "26.98" }],
+      productLabels: [],
+    });
+    await f.record({ ...netflix, priceAlerts: false });
+    const c: any = await f.tools.priceCheck(
+      "a",
+      nov.collectionId,
+      nov.key,
+      nov.artifactId,
+    );
+    assert.equal(c.status, "differs");
+    assert.equal(c.alerts, false);
+    assert.equal(await f.tools.queuePriceAlert("a", c, nov.artifactId), false);
+  } finally {
+    await f.pg.close();
+  }
+});

@@ -408,6 +408,14 @@ async function subscriptions(id?: string) {
       ["Cancellation deadline", r.cancellationDeadline ?? "Unknown"],
       ["Paid through", r.paidThroughDate ?? "Unknown"],
       [
+        "Price change",
+        r.pendingEffectiveDate
+          ? `${r.pendingAmount} ${r.pendingCurrency} from ${r.pendingEffectiveDate} (saved notice)`
+          : r.appliedPendingPrice
+            ? `${r.appliedPendingPrice.to.amount} ${r.appliedPendingPrice.to.currency} since ${r.appliedPendingPrice.effectiveDate}`
+            : null,
+      ],
+      [
         "Last invoice",
         r.lastInvoiceDate
           ? r.lastInvoiceDate +
@@ -429,6 +437,13 @@ async function subscriptions(id?: string) {
     reminders.append(
       el("h2", "Reminders"),
       el("p", r.reminderEnabled ? "Enabled for saved dates" : "Off"),
+      el(
+        "p",
+        r.priceAlerts === false
+          ? "Price alerts: off"
+          : "Price alerts: on (saved price changes and invoices that do not show the saved price)",
+        "muted",
+      ),
     );
     for (const reminder of r.reminders)
       reminders.append(
@@ -467,6 +482,14 @@ async function subscriptions(id?: string) {
               el(
                 "p",
                 `${key.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase())}: ${value === null ? "cleared" : String(value)}`,
+              ),
+            );
+          const applied = update.source_ref?.appliedPending;
+          if (applied)
+            entry.append(
+              el(
+                "p",
+                `Saved price change applied from ${applied.effectiveDate}: ${applied.from.amount ?? "unknown"} ${applied.from.currency ?? ""} → ${applied.to.amount} ${applied.to.currency}`,
               ),
             );
           const invoice = update.source_ref?.invoice;

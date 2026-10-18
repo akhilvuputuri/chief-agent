@@ -104,6 +104,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 18 October | [93 — Invoice-backed tracker](93-invoice-backed-tracker.md): can one agent fetch invoices and keep the subscription tracker in step? | Released v0.3.83 (`1733d48`); exact receipt and startup verified; owner acceptance pending |
 | 18 October | [94 — Open loops in context](94-open-loops-context.md): why did Chief forget plans and cards that were waiting on the owner? | In review: 24-hour requirements and monitoring cards; coding jobs and expired cards in the turn context |
 | 18 October | [95 — Live to-do reminders](95-live-todo-reminders.md): why did to-do reminders say "review your list" instead of showing it? | In review: to-do reminders steered to the live briefing kind |
+| 19 October | [97 — Price-change alerts](97-price-change-alerts.md): how does Chief flag a price change without changing the tracker on its own? | In progress: saved price changes with notices, invoice price checks and one-time alerts tested locally; review and release pending |
 
 ## Coding-agent learning path
 
@@ -130,7 +131,7 @@ Start with [coding-agent engineering: changes, failures and evidence](coding-age
 | UI           | [19 — Voice/text delivery](19-foundation-and-voice.md) → [11 — Telegram views](11-telegram-views.md) → [13 — HTTPS](13-miniapp-https.md) → [14 — Canvases](14-persistent-canvases.md) → [18 — Reply delivery fences](18-checkpoint-steering.md)                                                                                                                                                                                                                                                                                                                                       |
 | DevOps       | [01 — Runtime cutover](01-owned-runtime.md) → [04 — Provider failure diagnostics](04-empty-responses.md) → [05 — Cloud development](05-cloud-development.md) → [10 — Independent review](10-foundation-review.md) → [13 — Ingress](13-miniapp-https.md) → [16 — Storage migration](16-authoritative-storage.md) → [18 — Release guard and rollout](18-checkpoint-steering.md) → [32 — Model releases](32-repo-controlled-model.md) → [33 — Hosted checks](33-actions-usage.md) → [84 — Shared workflow](84-shared-agent-workflow.md) → [91 — Boxed sub-agents](91-boxed-subagents.md) |
 
-Recurring payments: [33 — Delivery provenance](33-delivery-tracker.md) → [24 — Scheduled work](24-scheduled-routines.md) → [49 — Domain agents](49-coordinator-agents.md) → [54 — Subscriptions](54-subscriptions.md) → [62 — Durable gathering](62-gathering-harness.md) → [93 — Invoice-backed tracker](93-invoice-backed-tracker.md).
+Recurring payments: [33 — Delivery provenance](33-delivery-tracker.md) → [24 — Scheduled work](24-scheduled-routines.md) → [49 — Domain agents](49-coordinator-agents.md) → [54 — Subscriptions](54-subscriptions.md) → [62 — Durable gathering](62-gathering-harness.md) → [93 — Invoice-backed tracker](93-invoice-backed-tracker.md) → [97 — Price-change alerts](97-price-change-alerts.md).
 
 Preparation continuity: [09 — Job alignment](09-job-alignment.md) → [21 — Preserving preparation evidence](21-preparation-chain.md).
 

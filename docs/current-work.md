@@ -1,3 +1,13 @@
+# Price-change alerts — in review, 19 October 2026
+
+Issue 132 price-change milestone.
+
+- **Announced prices.** A stated future price (`pendingAmount`, `pendingCurrency`, `pendingEffectiveDate`) is shown before its date, with a notice 3 days ahead even when reminders are off. From the date it is used everywhere and recorded with the next update.
+- **Invoice price checks.** Every invoice match is compared with the one tracked item it belongs to. A background pass sends one Telegram alert when the invoice doesn't show the saved price; the tracker is never changed by it.
+- **Setting.** `priceAlerts` per item, on by default.
+
+No migration. Branch `feat/price-alerts`; review, merge, release and owner acceptance pending. [Journal 97](journey/97-price-change-alerts.md), [design](subscriptions.md#price-change-alerts).
+
 # Live to-do reminders — in review, 18 October 2026
 
 Reminder text is fixed at creation, while briefings list the owner's live open to-dos at send time. Briefings now lead with their own text and list open tasks inline, and `schedule_create` and the daily agent steer reminders to review the to-do list to briefings; single actions and checklists kept in a note stay reminders. See [journal 95](journey/95-live-todo-reminders.md).

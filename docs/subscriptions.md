@@ -60,6 +60,37 @@ The `core/bills` agent combines gathering and the tracker in one delegation: it 
 
 Limits: plan conflicts are recognised for Claude and ChatGPT tiers, including sized names such as "Max 5x". Other vendors rely on the issuer check and the agent's plan matching, so a different product from the same vendor (a Google Cloud invoice for a Google-merchant YouTube item) is not refused. The evidence check runs just before the write, outside its transaction, as source-input checks already do, so a scope revision landing in between is not re-checked. Amount selection among several recorded amounts is the agent's choice, checked only for presence in the document, not for semantic correctness. A single invoice does not establish a fixed recurring price, and cadence is never inferred from invoices. No automatic intake runs without an owner request, and no monthly summary or price alert schedule is added.
 
+## Price-change alerts
+
+Issue 132 asks Chief to flag price increases (S5, R8, R11). Two sources feed alerts; neither changes the tracker in the background.
+
+- **Saved price changes.** An owner-stated future price goes in `pendingAmount`, `pendingCurrency` and `pendingEffectiveDate`, which must be set or cleared together. The current `amount` stays until the effective date.
+  - From that Singapore date, reads, the Mini App, totals and later reminders use the new price.
+  - The next update writes it into the stored record and history (`source_ref.appliedPending`), and the amount's field source carries `appliedOn`.
+  - No background job writes the record. The change is applied in every view, and history records it with the owner's next update.
+- **Price-change notice.** The effective date is a `price change` event for linked reminders, 3 days ahead at the reminder time (09:00 Singapore by default).
+  - It is planned when `priceAlerts` is on (the default) even if `reminderEnabled` is off. Other reminder dates still need reminders on.
+  - `DailyWorker` delivers it model-free, after checking the item's revision, status and that the date is still the saved effective date with alerts on.
+- **Invoice price check.** After every successful `gather_match`, the host looks for the one active tracked item the invoice can belong to. It uses the same issuer, plan and account rules as invoice evidence, and compares the price in force on the invoice date with the PDF's recorded amounts. The match result carries `trackerPriceCheck`:
+  - `unchanged` or `differs`;
+  - `ambiguous`, with candidate IDs, when several items could own the invoice;
+  - `not_newer`, when the tracker already reflects a later invoice;
+  - `no_saved_price`.
+
+  A failed check is logged as `gathering.price_check_failed` and never fails the committed match.
+
+- **Invoice alert.** In a background gathering pass, a `differs` result for an item with alerts on queues one model-free Telegram message with the saved price and the invoice's amounts. A foreground agent reports the result instead.
+  - The message's schedule ID is derived from the item and the invoice, so retries and re-matches never repeat it. It counts briefly against the shared 50-schedule capacity, and at capacity no alert is queued.
+  - The tracker is not changed. Applying the new price needs the owner's request, through the invoice-backed update above.
+  - Queued alerts log `subscription.price_alert_queued`.
+- **Setting.** `subscription_settings(priceAlerts)` turns both notices off or on per item.
+
+Limits:
+
+- An invoice price differs only when no recorded amount equals the saved price in its currency. A saved pre-tax price on an invoice that lists only a total will alert; that is the price to confirm with the owner.
+- Detection runs only when invoices are matched. There is no scheduled refresh: owner-started collections and their background passes are the only automatic source until a responsibility watches receipts (issue 132 phase 3).
+- No email price notices are read.
+
 ## Capability and prompt cost
 
 [v0.3.34](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.34) shipped through [PR #142](https://github.com/akhilvuputuri/chief-agent/pull/142) at `b79fd27f8cdf5ecadb05622217ab61666a63f70b`. GPT-6 Astra approved exact head `142486080c9094bbab151636d48e767dfc7e7d99` (identical merged tree). It incorporates main `ae0237f`, preserving released responsibilities (023) and default-off coding foundation (024). Reviewed additive migration 025/operator installation, [normal release](https://github.com/akhilvuputuri/chief-agent/actions/runs/37030523500), separate health/preservation and transaction-rolled-back deployed-module verification passed. Owner Telegram acceptance remains separate.
