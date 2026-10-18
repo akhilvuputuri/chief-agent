@@ -24,9 +24,9 @@ Issue 132 next milestone. A new `core/bills` agent gathers an exact invoice coll
 
 A refused `coding_reply` on 16 October was recorded as uncertain and blocked every owner write until an operator settled it on 18 October; no uncertain calls remain. PR 249 (deployed `9437d86`, part of v0.3.83; live acceptance pending) settles provably empty coding calls automatically, classifies pre-write coding refusals as validation errors and stops a turn from retrying a blocked write. See [journal 92](journey/92-uncertain-coding-write-lock.md).
 
-# Boxed sub-agents design — proposed, 17 October 2026
+# Boxed sub-agents — foundation in review, 19 October 2026
 
-Heavy delegated work moves to sub-agents with their own on-demand boxes that Chief can steer and close (issue #245). The owner decided that coding moves first, boxes keep a short warm TTL (about 15 idle minutes, then stop), and self-managed EC2 replaces CodeBuild, with CodeBuild kept as fallback. Design only; no AWS resources yet. [Design](boxes.md), [journal 91](journey/91-boxed-subagents.md).
+Heavy delegated work moves to sub-agents with their own on-demand boxes that Chief can steer and close (issue #245). The owner decided that coding moves first, boxes keep a short warm TTL (about 15 idle minutes, then stop), and self-managed EC2 replaces CodeBuild. No AWS resources yet. [Design](boxes.md), [journal 91](journey/91-boxed-subagents.md). On 19 October the owner dropped CodeBuild as a box provider: the layer is built on a fake provider (tests), a local Docker provider (development) and EC2, and coding keeps its current CodeBuild path only until it moves. The dormant foundation (phase 2a) is in review.
 
 # Reasoning effort chosen per message — 17 October 2026
 

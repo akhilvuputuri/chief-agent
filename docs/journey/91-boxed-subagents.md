@@ -1,7 +1,7 @@
 # 91 — Can Chief delegate heavy work to sub-agents with their own boxes?
 
 Work date(s): 2026-10-17. Written/revised: 2026-10-17.
-Status: proposed. [Design](../boxes.md) recorded with owner decisions. No implementation yet, and no AWS resources created.
+Status: in progress. [Design](../boxes.md) recorded with owner decisions; the box-layer foundation (phase 2a) is implemented and dormant. No AWS resources yet.
 
 ## User-visible problem and preceding iteration
 
@@ -126,3 +126,74 @@ The reviewer approved `6054397` and asked for the rotation rule to be stated pre
 - the predecessor may only retry `hello`;
 - the box persists the replacement before using it;
 - any use of a retired credential is handled as compromise.
+
+## Revised plan: no CodeBuild box provider — 19 October 2026
+
+After the design merged, the owner asked (reported) why phase 2 still used CodeBuild. Phase 2 had been placed on CodeBuild only so that it could start before any AWS changes, and that reason does not hold up:
+
+- A CodeBuild box cannot stop or run a container per task, so the provider would be built only to be retired.
+- It would leave the EC2-specific risks untested: IAM, stop and start, the trust reset and boot time.
+- Today's coding path on CodeBuild already provides the fallback without being wrapped as a box provider.
+
+The plan is now: build the box layer with a fake provider for tests and a local Docker provider for development, then the EC2 provider and its CloudFormation, which the owner applies. Coding moves onto EC2 boxes after that, and its current CodeBuild path stays untouched until then.
+
+### Phase 2a: foundation (dormant)
+
+Added:
+
+- `db/032_boxes.sql`;
+- `src/boxes/` (provider interface and fake provider, credentials, `BoxController`, `/boxes/*` routes);
+- `tests/boxes.test.ts`.
+
+Nothing is wired into the gateway yet.
+
+Implemented as designed:
+
+- The bootstrap secret is the epoch-0 credential, so the bootstrap exchange and later restarts share one rotation path, which is idempotent until first use.
+- Credentials are derived (HMAC of host key, box, predecessor hash and epoch), so only hashes are stored.
+- A retired credential sent to `hello` is refused and alerted; one used on the channel is compromise.
+- A box cannot complete `hello` before its provider resource is recorded.
+- Restarts of stopped boxes count against concurrency.
+
+Long-polls last 8 s, well inside the proxy's timeouts.
+
+**Review of `9c27cd2` (Claude Opus 5.5): changes requested.** The credential design held up: none of the races examined could leave a box with no valid credential, two live credentials, or a credential an attacker could obtain. Two reconciler defects blocked approval:
+
+1. **Idle stop.** A box that had acknowledged a freshly delegated task, but not yet reported busy, could be stopped as idle, and the task would then sit queued until retention expired. A box with any open task is now never idle.
+2. **Orphaned tasks.** Tasks could be left open on a dead box in two ways: the stopping-to-ended path skipped task failure, and `delegate` could race a close. Delegation now locks the box row in one transaction, and every path that ends or holds a box fails its open tasks.
+
+Non-blocking findings, all adopted:
+
+- events are recorded and applied in one transaction;
+- the sweep checks each resource's environment tag;
+- steering is bound to an owner input of the current turn;
+- `hold` is guarded against overwriting a close;
+- the bootstrap hash is kept for the box's life;
+- identity is verified before rotation, so a thief cannot get the real box terminated;
+- message sequencing runs under the box lock;
+- provider calls are time-bounded and sweep errors are contained;
+- claims rotate by last reconciliation;
+- a box closed during an uncertain launch is found and ended;
+- a lost stop is retried;
+- unknown errors return a generic 500;
+- the documentation was corrected.
+
+Ten new tests cover these fixes.
+
+**Re-review of `87e19ee`: approved.** Three non-blocking points were adopted:
+
+- **Restart for open tasks.** A stopped box now restarts for an open task, not only for an unacknowledged message. This covers a task acknowledged during the stop.
+- **Identity checks gated.** Identity verification and its alert are reached only with a live credential, so knowing a box ID is not enough to trigger an alert.
+- **Lease length.** The reconciler lease now outlasts a worst-case pass.
+
+**Devin review of `8841ae6`.** Devin raised six points. Four were defects, now fixed and tested:
+
+- **Stuck in starting.** A retried `hello` after a lost rotation answer returned the right credential but left a warm-starting box marked `starting`. The idle and lifetime checks then never applied to it. The retry now connects the box, and a connected box found still `starting` is repaired to `ready`.
+- **Idle race.** The idle check ran outside the box lock, so a task delegated at that moment could be failed by the idle shutdown. The idle decision is now taken under the same row lock that delegation takes.
+- **Stranded boxes.** Removing a profile held its boxes without ending them, and the sweep skipped providers that no profile used. Termination now needs only the provider. A box whose profile is gone is ended; a box whose provider is gone is held for an operator. The sweep visits every configured provider.
+- **Concurrency across hosts.** Admission was not serialised across hosts. A per-profile advisory lock now guards launch and restart admission. Only one host runs today, so this is defensive.
+
+The other two points:
+
+- **Early long-poll abort.** Devin said a GET's request `close` aborts the long-poll at once. This was not reproduced on Node 22.19 with Fastify 5.12: a test with the old binding still waited the full interval. The abort is now bound to the response closing before it is written, which is correct on any version.
+- **Events from an earlier epoch.** These are kept deliberately. An agent sends events queued before a rotation under their original epoch, with its current credential. Task updates apply only to queued or running tasks, so an old event cannot overwrite a finished one.
