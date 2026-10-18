@@ -62,7 +62,15 @@ Second round at `926a1f9`: the reviewer confirmed the first-round fixes and ran 
 - The undated-invoice message now points to the recorded invoice dates.
 - Same-vendor different products remain a documented limit.
 
-All 20 probes now give the expected result. Re-review pending.
+All 20 probes now give the expected result.
+
+Third round at `d83a5f8` requested changes for one blocking regression introduced by suffix stripping. Merchants such as "Anthropic PBC" or "OpenAI Inc" now passed the issuer check, but the plan-family lookup still used the raw name, so a Claude Pro or ChatGPT Plus invoice could update a Max or Pro item. The fix:
+
+- The family now comes from the suffix-stripped name of the merchant or the label.
+- The label fallback for issuer matching was removed (the label counts only when there is no merchant), which also closes a merchant-Netflix, label-Disney+ acceptance.
+- Suffixes are kept when what remains is under three characters ("X Corp" stays distinct from "X.ai").
+
+Across the reviewer's 47 probes, the remaining acceptances are the documented same-vendor case and a contrived "AI" merchant. Known safe-side refusals: "ChatGPT Team" against a "ChatGPT Business" invoice. Re-review pending.
 
 ## Verification and outcome
 

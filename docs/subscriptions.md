@@ -45,7 +45,7 @@ The tracker can take amounts and invoice dates from invoices that [gathering](ga
   - the file is a current-scope match owned by this owner;
   - the amount and currency occur in its recorded amounts, compared as decimals;
   - `lastInvoiceDate` is its recorded invoice date;
-  - the item's merchant or label names the invoice's issuer, ignoring trailing legal or domain suffixes such as "AB", "PBC" or ".ai": the same known vendor group, or one name leading the other ("YouTube" and "YouTube Premium"); a shared later word such as "Premium" or "Max" does not count, and the plan never decides the issuer;
+  - the item's merchant (or its label when it has no merchant) names the invoice's issuer, ignoring trailing legal or domain suffixes such as "AB", "PBC" or ".ai" unless what remains is under three characters: the same known vendor group, or one name leading the other ("YouTube" and "YouTube Premium"); a shared later word such as "Premium" or "Max" does not count, and the plan never decides the issuer;
   - no plan conflicts with the invoice's product, checked on the plan, the label and their combinations with the merchant or vendor family (a Claude Pro invoice cannot update an item saved as "Claude" plan "Max", "Max 5x" or "Max20");
   - the gathered account label, when set, matches the item's;
   - once a `lastInvoiceDate` is saved, the cited invoice has a single recorded invoice date that is not older, for any invoice-backed field;

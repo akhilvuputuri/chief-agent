@@ -77,18 +77,25 @@ const words = (value: string) => {
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter(Boolean);
-  while (w.length > 1 && legal.has(w[w.length - 1]!)) w.pop();
+  // Keep a suffix when what remains would be too short to name an issuer ("X Corp" stays distinct from "X.ai").
+  while (
+    w.length > 1 &&
+    legal.has(w[w.length - 1]!) &&
+    w.slice(0, -1).join("").length >= 3
+  )
+    w.pop();
   return w;
 };
+/** Vendor identity of a name, ignoring legal suffixes and reading sized plan names as their tier. */
+const issuerOf = (name: string) =>
+  issuerIdentity(planTier(name) ?? words(name).join(" "));
 const leads = (a: string[], b: string[]) =>
   a.length > 0 && a.length <= b.length && a.every((w, i) => w === b[i]);
 /** One issuer: known vendor groups, or one name leading the other ("YouTube" / "YouTube Premium"). A shared later word ("Premium", "Max") is not enough. */
 function sameIssuer(owner: string, issuer: string) {
+  if (issuerOf(owner) === issuerOf(issuer)) return true;
   const a = words(owner),
     b = words(issuer);
-  const id = (n: string, w: string[]) =>
-    issuerIdentity(planTier(n) ?? w.join(" "));
-  if (id(owner, a) === id(issuer, b)) return true;
   return leads(a, b) || leads(b, a);
 }
 /** "Claude Max 5x", or "Max20" with an Anthropic merchant, reads as "Claude Max": the family and tier productEvidence recognises. */
@@ -467,13 +474,13 @@ export class SubscriptionTools {
       const facts = row.facts;
       // The issuer must match the item's merchant (or its label without one); a plan never decides the issuer.
       const owner = data.merchant ?? data.label!;
-      const owners = [data.merchant, data.label].filter(
-        (n): n is string => !!n,
-      );
       const issuers = [target?.label ?? "", ...facts.issuerLabels].filter(
         Boolean,
       );
-      const family = planFamily[issuerIdentity(owner)];
+      // Any name of the item can place it in a plan family; that only adds conflict checks.
+      const family = [data.merchant, data.label]
+        .map((n) => (n ? planFamily[issuerOf(n)] : undefined))
+        .find(Boolean);
       const plans = [
         data.plan,
         data.label,
@@ -488,9 +495,9 @@ export class SubscriptionTools {
             ? facts.invoiceDates[0]!
             : null;
       const invoiceDate = fields.lastInvoiceDate ?? recorded;
-      if (!owners.some((o) => issuers.some((n) => sameIssuer(o, n))))
+      if (!issuers.some((n) => sameIssuer(owner, n)))
         refusal =
-          "This invoice's recorded issuer does not match this item's merchant (or label).";
+          "This invoice's recorded issuer does not match this item's merchant (or its label when it has no merchant).";
       else if (
         plans
           .flatMap((n) => (n ? [n, planTier(n, family)] : []))

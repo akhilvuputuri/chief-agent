@@ -1576,7 +1576,63 @@ test("invoice identity needs the merchant's issuer, plan conflicts use combined 
         ),
         /different plan/,
       );
-    // Legal suffixes do not change the issuer; the label is a fallback.
+    // Suffixed merchants keep their plan family, so the conflict check still applies.
+    for (const item of [
+      { label: "Anthropic", merchant: "Anthropic PBC", plan: "Max" },
+      {
+        label: "Anthropic subscription",
+        merchant: "Anthropic, PBC",
+        plan: "Max",
+      },
+      { label: "Anthropic PBC", plan: "Max" },
+    ])
+      await assert.rejects(
+        f.record(
+          {
+            ...item,
+            amount: "20.00",
+            currency: "USD",
+            lastInvoiceDate: "2026-09-05",
+          },
+          cite(pro),
+        ),
+        /different plan/,
+      );
+    // A merchant naming another issuer is refused even when the label matches.
+    await assert.rejects(
+      f.record(
+        {
+          label: "Claude Pro",
+          merchant: "Netflix",
+          amount: "20.00",
+          currency: "USD",
+          lastInvoiceDate: "2026-09-05",
+        },
+        cite(pro),
+      ),
+      /does not match this item's merchant/,
+    );
+    // A suffix is kept when the rest is too short to name an issuer.
+    const xai = await matchedInvoice(f.db, {
+      label: "X.ai",
+      date: "2026-09-11",
+      amounts: [{ currency: "USD", amount: "8" }],
+      productLabels: [],
+    });
+    await assert.rejects(
+      f.record(
+        {
+          label: "X Corp",
+          merchant: "X Corp",
+          amount: "8",
+          currency: "USD",
+          lastInvoiceDate: "2026-09-11",
+        },
+        cite(xai),
+      ),
+      /does not match this item's merchant/,
+    );
+    // Legal and domain suffixes do not change the issuer.
     for (const item of [
       { label: "Claude Pro", merchant: "Anthropic PBC", plan: "Pro" },
       { label: "Claude Pro", merchant: "Claude.ai" },
