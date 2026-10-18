@@ -369,7 +369,7 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
     - ends the box when its credential is refused or a task's reset fails.
   - **Task protocol.** Tasks speak JSON lines (task, message → progress, question, result).
     - Output lines are bounded, and final payloads must be bounded JSON objects.
-    - Progress is limited to one event per second.
+    - Progress and questions are limited to one event per second each; a question is delayed, never dropped.
     - A task is killed a grace period after its final line, or at its deadline.
     - Messages sent after a task's input has ended are dropped.
     - `ProcessRunner` is for development and tests and is not a boundary.
@@ -382,7 +382,7 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
     - After a restart, acknowledged tasks that never started still run.
     - Task IDs must be UUIDs before they reach paths, names or mounts.
     - SIGTERM cancels the running task.
-    - A kill waits for its container removal before the reset checks, and a final line without a trailing newline still counts. Questions share progress's rate limit.
+    - A kill waits for its container removal before the reset checks, and a final line without a trailing newline still counts. Questions and progress each have their own one-per-second budget per task; excess progress is dropped, while a question waits for the next free slot.
     - For 2c, the EC2 identity verifier must return `false` for a malformed or invalid proof and throw only when it cannot reach what it needs, because a throw means retry.
   - **`src/boxes/agent-main.ts`.** The entry point, configured by environment. On a box, shutdown is `systemctl poweroff`, which terminates the instance.
   - **`src/boxes/local-provider.ts`.** Runs each box as an agent process with its own state directory. Stopping ends the process but keeps the directory, like a stopped instance.

@@ -244,3 +244,10 @@ PR 259 merged with `db/032_boxes.sql` but no Compose inventory line and no opera
 The box layer is dormant and nothing reads its tables, so the migration moved to `db-staged/` until phase 2c installs it with a reviewed rollout. The guard then sees `db/` unchanged, and the normal release proceeds.
 
 Lesson: a migration enters `db/` only together with its Compose inventory line and a reviewed rollout that runs right after the merge, never with dormant code alone.
+
+**Re-review of `816b873` and `e4e8470`: approved.** Two of the reviewer's last points were adopted after rebasing on the unblocked main:
+
+- a question that exceeds its one-per-second budget is delayed to the next free slot rather than dropped, so a task asking two questions quickly cannot wait forever for the second;
+- the rate-limit wording in the docs now matches the code.
+
+The phase 2b tests load the staged box migration.

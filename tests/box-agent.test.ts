@@ -141,6 +141,13 @@ async function harness(t: TestContext) {
     await pg.exec(
       await readFile(new URL("../db/" + f, import.meta.url), "utf8"),
     );
+  // The box migration is staged outside db/ until its reviewed rollout.
+  await pg.exec(
+    await readFile(
+      new URL("../db-staged/032_boxes.sql", import.meta.url),
+      "utf8",
+    ),
+  );
   const db = pg as unknown as Database;
   await ensureUser(db, "owner");
   let offset = 0;
@@ -701,4 +708,60 @@ test("a final result line without a trailing newline still counts", async () => 
     type: "result",
     payload: { last: true },
   });
+});
+
+test("questions asked in quick succession are delayed in order, never dropped", async (t) => {
+  const dir = await agentDir(t);
+  const host = stubHost({
+    next: (n) =>
+      n === 0
+        ? assign(1)
+        : new Promise<Response>((resolve) =>
+            setTimeout(
+              () =>
+                resolve(
+                  Response.json({
+                    messages: [],
+                    remainingMs: n > 40 ? 0 : 3_600_000,
+                  }),
+                ),
+              100,
+            ),
+          ),
+  });
+  const runner: TaskRunner = {
+    start: (task, onOutput) => {
+      onOutput({ type: "question", payload: { n: 1 } });
+      onOutput({ type: "question", payload: { n: 2 } });
+      onOutput({ type: "question", payload: { n: 3 } });
+      onOutput({ type: "progress", payload: { dropped: true } });
+      onOutput({ type: "progress", payload: { dropped: true } });
+      return {
+        send: () => {},
+        cancel: () => {},
+        done: new Promise((r) =>
+          setTimeout(() => r({ type: "result", payload: { ok: true } }), 2500),
+        ),
+      };
+    },
+    reset: async () => {},
+  };
+  await new BoxAgent({
+    origin: "https://host.example",
+    boxId: "00000000-0000-4000-8000-000000000000",
+    bootstrap: "s".repeat(43),
+    store: new StateStore(dir),
+    runner,
+    shutdown: () => {},
+    fetch: host.fetch,
+    retryMs: 1,
+  }).run();
+  const sent = host.calls
+    .filter((c) => c.path === "events")
+    .map((c) => c.body.events[0]);
+  assert.deepEqual(
+    sent.filter((e) => e.kind === "task.question").map((e) => e.payload.n),
+    [1, 2, 3],
+  );
+  assert.equal(sent.filter((e) => e.kind === "task.progress").length, 1);
 });

@@ -659,18 +659,29 @@ export class BoxAgent {
   }
 
   private output(taskId: string, output: TaskOutput) {
-    // Progress and questions are advisory: at most one per second, so a chatty task cannot
-    // bury its result.
-    // Each kind has its own budget, so progress never crowds out a question.
+    // Each kind has its own budget of one event per second. Progress beyond it is dropped,
+    // since only the latest matters; a question is delayed to the next free slot, never lost.
     const key = `${taskId}:${output.type}`;
-    const last = this.progressAt.get(key) ?? -Infinity;
-    if (this.clock() - last < 1000) return;
-    this.progressAt.set(key, this.clock());
-    void this.report({
-      kind: output.type === "question" ? "task.question" : "task.progress",
-      taskId,
-      payload: output.payload ?? {},
-    });
+    const wait = (this.progressAt.get(key) ?? -Infinity) + 1000 - this.clock();
+    const send = () => {
+      // Never move a later reservation backwards.
+      this.progressAt.set(
+        key,
+        Math.max(this.progressAt.get(key) ?? -Infinity, this.clock()),
+      );
+      void this.report({
+        kind: output.type === "question" ? "task.question" : "task.progress",
+        taskId,
+        payload: output.payload ?? {},
+      });
+    };
+    if (wait <= 0) return send();
+    if (output.type !== "question") return;
+    // Reserve the slot now so later questions queue behind this one, in order.
+    this.progressAt.set(key, this.clock() + wait);
+    setTimeout(() => {
+      if (!this.stopped) send();
+    }, wait).unref?.();
   }
 
   private async work() {
