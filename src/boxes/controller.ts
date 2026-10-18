@@ -388,6 +388,18 @@ export class BoxController {
     )
       throw new BoxCredentialRefused();
     const provider = this.providers[before.provider];
+    // Only a caller holding a live credential reaches identity checks and their alerts.
+    if (
+      !sameHash(before.credential_hash, presented) &&
+      !sameHash(before.previous_hash, presented)
+    ) {
+      if (this.retired(before, presented))
+        await this.notice(boxId, `alert:retired-hello:${before.epoch}`, {
+          summary:
+            "A box presented a retired credential to hello; it was refused. Inspect if this repeats.",
+        });
+      throw new BoxCredentialRefused();
+    }
     if (provider?.verifyIdentity) {
       const verified = await this.bounded(
         provider.verifyIdentity(before.provider_id, body.identity),
@@ -683,7 +695,15 @@ export class BoxController {
             `UPDATE boxes SET lease=$1,lease_until=$2,reconciled_at=$3 WHERE id=(SELECT id FROM boxes
                WHERE state NOT IN ('terminated','held') AND (lease IS NULL OR lease_until<$3) AND NOT (id = ANY($4::uuid[]))
                ORDER BY reconciled_at NULLS FIRST,created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *`,
-            [lease, new Date(now.getTime() + 120_000), now, seen],
+            // Longer than a worst-case pass: three provider calls at their time bound.
+            [
+              lease,
+              new Date(
+                now.getTime() + 4 * this.timings.providerCallMs + 60_000,
+              ),
+              now,
+              seen,
+            ],
           )
         ).rows[0] as Box | undefined;
         if (!box) break;
@@ -887,7 +907,14 @@ export class BoxController {
           await this.terminate(box, "Stopped retention reached");
           return;
         }
-        if (!(await this.pending(box.id))) return;
+        // Restart for undelivered messages, or for a task acknowledged just before the stop.
+        const open = (
+          await this.db.query(
+            "SELECT 1 FROM box_tasks WHERE box_id=$1 AND state IN ('queued','running') LIMIT 1",
+            [box.id],
+          )
+        ).rows.length;
+        if (!open && !(await this.pending(box.id))) return;
         if ((await this.running(box.profile)) >= profile.concurrency) return;
         if (
           !(await this.set(box, "stopped", {

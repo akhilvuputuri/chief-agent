@@ -324,9 +324,9 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
   - `db/032_boxes.sql` adds `boxes`, `box_tasks`, `box_messages`, `box_events` and `box_notices`.
   - `src/boxes/` holds the provider interface and fake provider, credentials, the `BoxController` (owner operations, the channel and the reconciler) and the `/boxes/*` routes.
 - **Behaviour settled during review:**
-  - Identity is verified before a `hello` changes anything, so a stolen secret without the instance's proof is refused and alerted without harming the real box.
+  - Only a caller presenting a live credential reaches identity checks and their alerts. Identity is verified before a `hello` changes anything, so a stolen secret without the instance's proof is refused and alerted without harming the real box.
   - The bootstrap hash is kept for the box's life.
-  - A box with any open task is never stopped as idle.
+  - A box with any open task is never stopped as idle, and a stopped box restarts for open tasks as well as undelivered messages.
   - Delegation, steering and termination lock the box row, so no task is orphaned on a closing box. Every path that ends or holds a box fails its open tasks.
   - Events are recorded and applied atomically.
   - Steering is bound to an owner input of the current turn.
@@ -336,7 +336,7 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
   - A box closed during an uncertain launch is found and ended.
   - A lost stop is repeated until its timeout.
   - Unexpected errors return a generic 500.
-- **Tests:** `tests/boxes.test.ts` (25 cases) covers:
+- **Tests:** `tests/boxes.test.ts` (27 cases) covers:
   - spawn, launch, concurrency and restarts;
   - bootstrap, rotation chains and lifelong bootstrap detection;
   - retired-credential alert versus compromise;

@@ -893,3 +893,51 @@ test("a long-poll returns as soon as a message arrives", async (t) => {
   });
   assert.equal(missing.statusCode, 401);
 });
+
+test("a task acknowledged just before a stop restarts the box", async (t) => {
+  const f = await fixture(t);
+  const { id, credential } = await f.live();
+  f.advance(16 * MIN);
+  await f.boxes.next(id, credential, 0);
+  await f.boxes.tick();
+  assert.equal((await f.row(id)).state, "stopping");
+  await f.boxes.delegate("owner", id, {
+    requestKey: "t",
+    kind: "echo",
+    payload: {},
+  });
+  const polled = await f.boxes.next(id, credential, 0);
+  await f.boxes.next(id, credential, polled.messages[0].seq);
+  await f.boxes.tick();
+  assert.equal((await f.row(id)).state, "stopped");
+  await f.boxes.tick();
+  assert.equal((await f.row(id)).state, "starting");
+});
+
+test("identity checks and their alerts are reachable only with a live credential", async (t) => {
+  const f = await fixture(t, { identity: true });
+  const box = await f.boxes.spawn("owner", {
+    requestKey: "k",
+    profile: "echo",
+    subject: "s",
+  });
+  await f.boxes.tick();
+  f.identityOk.value = false;
+  await assert.rejects(
+    f.boxes.hello(box.id, {
+      protocol: 1,
+      credential: "y".repeat(43),
+      identity: {},
+    }),
+    BoxCredentialRefused,
+  );
+  assert.equal(
+    (
+      await f.db.query(
+        "SELECT count(*)::int AS n FROM box_notices WHERE box_id=$1",
+        [box.id],
+      )
+    ).rows[0].n,
+    0,
+  );
+});

@@ -179,3 +179,9 @@ Non-blocking findings, all adopted:
 - the documentation was corrected.
 
 Ten new tests cover these fixes.
+
+**Re-review of `87e19ee`: approved.** Three non-blocking points were adopted:
+
+- **Restart for open tasks.** A stopped box now restarts for an open task, not only for an unacknowledged message. This covers a task acknowledged during the stop.
+- **Identity checks gated.** Identity verification and its alert are reached only with a live credential, so knowing a box ID is not enough to trigger an alert.
+- **Lease length.** The reconciler lease now outlasts a worst-case pass.
