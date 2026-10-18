@@ -324,7 +324,9 @@ export class Responsibilities {
     const approval = randomUUID(),
       id = old?.id ?? randomUUID();
     await this.db.query(
-      `INSERT INTO approvals(id,user_id,run_id,operation,payload) VALUES($1,$2,$3,'responsibility_confirm',$4::jsonb)`,
+      // A day, not the 15-minute default: the card binds to this exact revision and spec,
+      // and a monitoring request is often answered hours later (a flight-monitoring card lapsed this way).
+      `INSERT INTO approvals(id,user_id,run_id,operation,payload,expires_at) VALUES($1,$2,$3,'responsibility_confirm',$4::jsonb,now()+interval '24 hours')`,
       [
         approval,
         user,
@@ -338,7 +340,7 @@ export class Responsibilities {
       status: "awaiting_confirmation",
       preview: preview(spec, pinnedEmail),
       notice:
-        "Monitoring starts only after the owner confirms this exact Telegram card.",
+        "Monitoring starts only after the owner confirms this exact Telegram card. It stays valid for 24 hours.",
     };
   }
   async confirm(user: string, id: string, yes: boolean) {

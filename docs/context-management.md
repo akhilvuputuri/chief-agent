@@ -142,3 +142,14 @@ The 400,000 hard limit remains as a backstop. It now leaves more than 280,000 ch
 5. **Observe and release.** Trace projection version, trigger, component sizes/estimated tokens, tool names/count, omitted/compacted groups, source-reference counts, provider usage and stop reason without raw content. Compare before/after on the same fixtures and a small live acceptance check. Keep the internal hard guard as an emergency backstop, not the normal operating target.
 
 Acceptance requires the reproduced long runs to answer or pause for a real dependency without an internal context overflow; retain the selected mailbox, role IDs, source provenance and approval state; keep tool-call/result groups valid; and show prompt size leveling off rather than rising with each tool call. Report actual token/cost measurements and any cache tradeoff before claiming savings. No framework rewrite, RAG layer, data reset, dollar cap or new infrastructure is required for this work.
+
+## Open loops
+
+Each turn's runtime context carries `openLoops` when something waits on the owner (`src/open-loops.ts`, [journal 93](journey/93-open-loops-context.md)). It holds:
+
+- **Coding jobs**, up to five, updated in the last 14 days. These are jobs with a requirements card awaiting confirmation or already expired, a question, a pause, a PR stopped for owner attention, or a failure in the last three days.
+- **Cards**, up to three, for monitoring or Calendar confirmations that expired unanswered in the last three days.
+
+Each coding item says what the owner needs to do. The note tells Chief to cover these items when asked for status, to revise or resume a listed job instead of starting a duplicate, and to mention an expired card at most once without re-sending it.
+
+The section is omitted when empty. It is bounded to a few kilobytes and read-only, and a failed read logs `context.open_loops_failed` without failing the turn.

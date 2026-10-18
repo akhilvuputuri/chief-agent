@@ -1746,7 +1746,7 @@ export class CodingController {
           .slice(0, 180)
           .join("");
         const caption = attachment
-          ? `**Coding plan — revision ${req.revision}**\n\n${summaryPreview}\n\nThe complete plan and original request are attached. Review the document, then approve the requirements or request changes. You can also reply yes directly to this message. Confirmation expires in 15 minutes.\n\nJob: ${e.job_id}`
+          ? `**Coding plan — revision ${req.revision}**\n\n${summaryPreview}\n\nThe complete plan and original request are attached. Review the document, then approve the requirements or request changes. You can also reply yes directly to this message. Confirmation stays valid for 24 hours.\n\nJob: ${e.job_id}`
           : undefined;
         attempted = true;
         const sent = await send(
@@ -1766,7 +1766,7 @@ export class CodingController {
               e.payload.url,
               req ? req.plan : undefined,
               req
-                ? `**Execution**\nLeader: ${j.settings.leaderModel ?? j.settings.model}\nCoder: ${j.settings.model}\nReviewer: ${j.settings.reviewerModel}\n${j.settings.autoMerge ? "Ordinary changes may merge after exact-artifact review and GitHub checks; protected changes stop for explicit review." : "Draft PR for owner review."}\n\nApprove this scope, or reply directly to this message with yes. To revise it, tell Chief what to change. Confirmation expires in 15 minutes.\nJob: ${e.job_id}`
+                ? `**Execution**\nLeader: ${j.settings.leaderModel ?? j.settings.model}\nCoder: ${j.settings.model}\nReviewer: ${j.settings.reviewerModel}\n${j.settings.autoMerge ? "Ordinary changes may merge after exact-artifact review and GitHub checks; protected changes stop for explicit review." : "Draft PR for owner review."}\n\nApprove this scope, or reply directly to this message with yes. To revise it, tell Chief what to change. Confirmation stays valid for 24 hours.\nJob: ${e.job_id}`
                 : undefined,
             ]
               .filter(Boolean)
@@ -1792,7 +1792,7 @@ export class CodingController {
               e.id,
               receipt!.message_id,
               new Date(
-                this.clock().getTime() + (merge ? 7 * 86400000 : 900000),
+                this.clock().getTime() + (merge ? 7 * 86400000 : 86400000),
               ).toISOString(),
             ],
           );

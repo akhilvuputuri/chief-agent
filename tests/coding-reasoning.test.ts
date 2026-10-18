@@ -220,7 +220,7 @@ test("requirements reject another owner, another message, stale scope and expiry
   await assert.rejects(
     f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId + 1),
   );
-  f.advance(900001);
+  f.advance(86400001);
   await assert.rejects(
     f.c.requirements.confirm("a", r.approvalId, true, "a", r.messageId),
     /expired/,
