@@ -154,11 +154,26 @@ test("questions, pauses, merge cards and stopped PRs say what the owner needs; w
     summary: "sandbox restarted",
     age: "3 hours",
   });
-  await f.job({
+  const merge = await f.job({
     state: "pr_ready",
     stage: "awaiting_merge_approval",
     age: "2 hours",
   });
+  await f.db.query("UPDATE coding_jobs SET head_sha=$2 WHERE id=$1", [
+    merge,
+    "b".repeat(40),
+  ]);
+  await f.db.query(
+    "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'merge:2',$2::jsonb,'sent')",
+    [
+      merge,
+      JSON.stringify({
+        merge: { revision: 2, head: "b".repeat(40), tree: "t" },
+        confirmUntil: hour(100),
+        telegramMessageId: 9,
+      }),
+    ],
+  );
   await f.job({
     state: "pr_ready",
     stage: "manual_review",
@@ -220,4 +235,53 @@ test("only delivered monitoring cards that expired in the last day and were not 
     [["responsibility_confirm", "Track the return flight"]],
   );
   assert.equal(loops!.coding, undefined);
+});
+test("a merge stage without a live card for the current head is not reported as actionable", async () => {
+  // Devin, PR 251: a pending or expired merge card was still labelled "choose Merge or Keep open".
+  const f = await fixture();
+  const lapsed = await f.job({
+    state: "pr_ready",
+    stage: "awaiting_merge_approval",
+    age: "2 hours",
+  });
+  await f.db.query("UPDATE coding_jobs SET head_sha=$2 WHERE id=$1", [
+    lapsed,
+    "c".repeat(40),
+  ]);
+  await f.db.query(
+    "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'merge:2',$2::jsonb,'sent')",
+    [
+      lapsed,
+      JSON.stringify({
+        merge: { revision: 2, head: "c".repeat(40) },
+        confirmUntil: hour(-1),
+        telegramMessageId: 9,
+      }),
+    ],
+  );
+  const moved = await f.job({
+    state: "pr_ready",
+    stage: "awaiting_merge_approval",
+    age: "1 hour",
+  });
+  await f.db.query("UPDATE coding_jobs SET head_sha=$2 WHERE id=$1", [
+    moved,
+    "d".repeat(40),
+  ]);
+  // A card for an older head no longer applies.
+  await f.db.query(
+    "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'merge:2',$2::jsonb,'sent')",
+    [
+      moved,
+      JSON.stringify({
+        merge: { revision: 2, head: "e".repeat(40) },
+        confirmUntil: hour(100),
+        telegramMessageId: 9,
+      }),
+    ],
+  );
+  assert.deepEqual(await awaiting(f.db), [
+    "merge card not delivered yet; read coding_status before telling the owner to act",
+    "merge card expired; read coding_status before offering the owner anything",
+  ]);
 });

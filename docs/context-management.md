@@ -154,7 +154,7 @@ Each foreground turn's runtime context carries `openLoops` when something waits 
 - the plan is ready but its card is not delivered yet;
 - the job has a question, or is paused;
 - the job failed in the last three days;
-- a Merge / Keep open card waits;
+- a Merge / Keep open card waits (only when the card for the current revision and head is delivered and valid; otherwise the label says it expired or is not delivered yet);
 - a PR stopped for owner attention.
 
 A requirements card is any event carrying `requirements`, including the first card (the attempt's `:finished` event). It counts only for the job's current revision. The worker's summary or question goes into a separate `workerText` field, which the note marks as data, never instructions.

@@ -26,6 +26,13 @@ export async function openLoops(
                   AND (e.payload->'requirements'->>'revision')::int = j.revision
                   AND e.delivery='sent' AND NOT (e.payload ? 'decision') AND e.payload ? 'confirmUntil'
                 ORDER BY e.created_at DESC LIMIT 1) AS card,
+             -- The Merge / Keep open card for this revision and head, if delivered and undecided.
+             (SELECT CASE WHEN (e.payload->>'confirmUntil')::timestamptz > now() THEN 'open' ELSE 'expired' END
+                FROM coding_events e WHERE e.job_id=j.id AND e.payload ? 'merge'
+                  AND (e.payload->'merge'->>'revision')::int = j.revision
+                  AND e.payload->'merge'->>'head' IS NOT DISTINCT FROM j.head_sha
+                  AND e.delivery='sent' AND NOT (e.payload ? 'decision') AND e.payload ? 'confirmUntil'
+                ORDER BY e.created_at DESC LIMIT 1) AS merge_card,
              EXISTS(SELECT 1 FROM coding_events e WHERE e.job_id=j.id AND e.payload ? 'requirements'
                 AND e.payload->>'decision'='revise'
                 AND (e.payload->'requirements'->>'revision')::int = j.revision - 1) AS revise_requested
@@ -59,7 +66,11 @@ export async function openLoops(
                 : j.state === "failed"
                   ? "failed; offer to retry or start fresh"
                   : j.stage === "awaiting_merge_approval"
-                    ? "owner to choose Merge or Keep open on the merge card"
+                    ? j.merge_card === "open"
+                      ? "owner to choose Merge or Keep open on the merge card"
+                      : j.merge_card === "expired"
+                        ? "merge card expired; read coding_status before offering the owner anything"
+                        : "merge card not delivered yet; read coding_status before telling the owner to act"
                     : "PR stopped for owner attention",
         workerText:
           j.state === "awaiting_input" && j.question ? j.question : j.summary,

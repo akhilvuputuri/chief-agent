@@ -74,7 +74,7 @@ Fixes:
 - Expired cards are monitoring only: delivered, from the last day, with their title, and dropped when a later proposal revised the same concern.
 - Tests are added, including mutation-checked pins.
 
-The stale proposal-time values for monitoring remain a documented limitation. Confirming still binds the exact spec, and the worker treats a passed expiry as expired. The delta review approved `049cf39`. It noted that supersession detection only catches revisions of an existing concern: a re-proposal of a never-confirmed concern gets a new id, so its earlier card can stay listed for a day. The docs overstated this, and are now corrected. Detecting it would need a stable proposal identity and is left as a follow-up.
+The stale proposal-time values for monitoring remain a documented limitation. Confirming still binds the exact spec, and the worker treats a passed expiry as expired. The delta review approved `049cf39`. It noted that supersession detection only catches revisions of an existing concern: a re-proposal of a never-confirmed concern gets a new id, so its earlier card can stay listed for a day. The docs overstated this, and are now corrected. Detecting it would need a stable proposal identity and is left as a follow-up. The re-review approved the rebased `ac37f67`. Devin then reported that a job at the merge stage was labelled "choose Merge or Keep open" even when its card had expired or was not yet delivered. The merge label now checks the card for the current revision and head (delivered, undecided, still valid), with separate labels for expired and undelivered cards, and a test covers it.
 
 ## Verification and outcome
 
