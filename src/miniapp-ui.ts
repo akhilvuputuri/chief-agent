@@ -384,7 +384,11 @@ async function subscriptions(id?: string) {
       el("div", "SAVED SUBSCRIPTION", "eyebrow"),
       el("h1", r.label),
       el("p", subscriptionPrice(r), "prose"),
-      el("p", `${r.status} · Owner stated · Updated ${date(r.asOf)}`, "muted"),
+      el(
+        "p",
+        `${r.status} · ${r.confidence === "owner stated" ? "Owner stated" : "Owner stated, some fields from invoices"} · Updated ${date(r.asOf)}`,
+        "muted",
+      ),
       el("p", r.notice, "muted"),
     );
     const details = el("section", undefined, "block");
@@ -403,6 +407,15 @@ async function subscriptions(id?: string) {
       ["Trial ends", r.trialEndDate ?? "Unknown"],
       ["Cancellation deadline", r.cancellationDeadline ?? "Unknown"],
       ["Paid through", r.paidThroughDate ?? "Unknown"],
+      [
+        "Last invoice",
+        r.lastInvoiceDate
+          ? r.lastInvoiceDate +
+            (r.fieldSources?.lastInvoiceDate?.sourceKind === "invoice"
+              ? " (from matched invoice)"
+              : "")
+          : null,
+      ],
       [
         "Monthly equivalent",
         r.monthlyEquivalent == null
@@ -456,7 +469,21 @@ async function subscriptions(id?: string) {
                 `${key.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase())}: ${value === null ? "cleared" : String(value)}`,
               ),
             );
-          entry.append(el("small", "Source: owner statement"));
+          const invoice = update.source_ref?.invoice;
+          entry.append(
+            el(
+              "small",
+              invoice
+                ? `Source: owner request, with invoice-sourced fields from the invoice matched for ${invoice.matchDate}`
+                : "Source: owner statement",
+            ),
+          );
+          if (invoice?.collectionId)
+            entry.append(
+              btn("Open invoice collection", () =>
+                go({ view: "gathering", gather: invoice.collectionId }),
+              ),
+            );
           history.append(entry);
         }
         offset = page.nextOffset;

@@ -37,6 +37,7 @@ import {
   subscriptionRecord,
   subscriptionList,
   subscriptionSettings,
+  subscriptionInvoices,
 } from "./subscription-schema.js";
 import { parcelRecord, parcelList, parcelMatch } from "./parcel-schema.js";
 import {
@@ -478,6 +479,7 @@ export const action = z.discriminatedUnion("operation", [
   subscriptionRecord,
   subscriptionList,
   subscriptionSettings,
+  subscriptionInvoices,
   gatherStart,
   gatherRevise,
   gatherStatus,

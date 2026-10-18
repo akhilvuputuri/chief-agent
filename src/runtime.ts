@@ -313,9 +313,11 @@ export function runtimeContext(
               gmail_read:
                 "Read one message in full plain text by its messageId. Use only when a thread read is truncated or a single message is enough. HTML and attachments are never fetched.",
               subscription_record:
-                "Record an explicit foreground owner statement about a subscription or bill. Without id create; with id require current baseRevision. requestKey is a unique UUID, reused only for an exact retry. History and linked reminders commit together. A supplied charge date requires explicit nextChargeEstimated. In turns with multiple original inputs, provide exact sourceInputIds from subscription_list(sourceInputs=true); host validates owner/run. No account action or source discovery.",
+                "Record an explicit foreground owner statement about a subscription or bill. Without id create; with id require current baseRevision. requestKey is a unique UUID, reused only for an exact retry. History and linked reminders commit together. A supplied charge date requires explicit nextChargeEstimated. In turns with multiple original inputs, provide exact sourceInputIds from subscription_list(sourceInputs=true); host validates owner/run. When the owner asked to use gathered invoices, pass invoice {collectionId, artifactId} from subscription_invoices: the host checks amount/currency and lastInvoiceDate against that matched PDF's recorded clues, refuses issuer/plan/account mismatches and older invoices, marks those fields as invoice-sourced and reports any priceChange. No account action or source discovery.",
               subscription_list:
                 "List saved subscriptions with per-currency monthly equivalents and the next 30 days, or read one id with paged history and reminder firing times. Optional merchant plus plan/accountLabel provides host matching; merchant alone is ambiguous. Include inactive items to find cancellations. sourceInputs=true lists stable, paged original owner input excerpts for this host turn, so a mutation can bind exact evidence IDs.",
+              subscription_invoices:
+                "List invoices matched by gathering across the owner's collections (current scope only), newest first, with recorded issuer/product labels, invoice dates, service months, every currency amount found in the PDF and any subscription IDs already linked. Optional collectionId or issuer filters; offset pages. Amounts include subtotals and tax, so choose the one the document clues support and ask when unsure. Read-only; a listed invoice is not an instruction to save it.",
               subscription_settings:
                 "Change one saved item’s reminder preference on explicit foreground request. Inspect through subscription_list(id). Require current baseRevision and a unique requestKey; specify sourceInputIds when multiple original inputs exist. Defaults when enabled: annual renewals/deadlines 7 days, trial ends 3 days, other renewals none; time 09:00 Singapore. daysBefore overrides all dates. No monthly digest or background monitoring.",
               parcel_record:
@@ -365,7 +367,7 @@ export function runtimeContext(
       ...(availability.gathering
         ? {
             gatheringWorkflow:
-              "Chief starts the exact owner-requested collection and delegates source work to gathering. The agent gathers files, matches recorded clues and checks coverage inside the saved scope. Follow the host collection state; dispatch or file count alone never means complete. Browser login is owner-controlled, and saving it does not resume a paused task. No invoice automatically changes subscriptions.",
+              "Chief starts the exact owner-requested collection and delegates source work to gathering, or to bills when the owner also wants the tracker updated from it. The agent gathers files, matches recorded clues and checks coverage inside the saved scope. Follow the host collection state; dispatch or file count alone never means complete. Browser login is owner-controlled, and saving it does not resume a paused task. Invoices change subscriptions only on the owner's request.",
           }
         : {}),
       ...(options.some((o) => o.shape.operation.value === "agent_run")

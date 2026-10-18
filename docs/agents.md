@@ -46,19 +46,22 @@ An ID the owner does not own stays plain text: it never becomes a target. The re
 
 Every agent is a plugin agent, including the built-in ones. The built-ins live in the `core` plugin (`plugins/core/`), in the same format as any other package:
 
-| Type       | Does                                                             | Tools                                                            |
-| ---------- | ---------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `email`    | search and read Gmail, read-only                                 | `gmail_*`, `observation_read`                                    |
-| `parcels`  | the delivery tracker, from email or owner updates                | `gmail_*`, `parcel_*`                                            |
-| `calendar` | calendar reads and event drafts                                  | `calendar_list`, `calendar_draft`                                |
-| `daily`    | items, reminders, briefings, daily Sheet, routines               | `item_*`, `schedule_*`, `daily_sync`, `routine_*`                |
-| `jobs`     | saved roles                                                      | `job_save/list/update/analyze/delete`, `web_read`, `source_read` |
-| `stocks`   | the watchlist                                                    | `watchlist_*`                                                    |
-| `news`     | the daily bulletin                                               | `news_*`                                                         |
-| `library`  | NLB availability and the linked shelf                            | `library_*`                                                      |
-| `web`      | quick public-web lookups                                         | `web_search`, `web_read`, `source_read`                          |
-| `media`    | attached images and stored documents                             | `source_read`                                                    |
-| `research` | evidence-backed research (alias of `public-research/researcher`) | `web_search`, `web_read`, `source_read`                          |
+| Type            | Does                                                                        | Tools                                                            |
+| --------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `email`         | search and read Gmail, read-only                                            | `gmail_*`, `observation_read`                                    |
+| `parcels`       | the delivery tracker, from email or owner updates                           | `gmail_*`, `parcel_*`                                            |
+| `calendar`      | calendar reads and event drafts                                             | `calendar_list`, `calendar_draft`                                |
+| `daily`         | items, reminders, briefings, daily Sheet, routines                          | `item_*`, `schedule_*`, `daily_sync`, `routine_*`                |
+| `jobs`          | saved roles                                                                 | `job_save/list/update/analyze/delete`, `web_read`, `source_read` |
+| `stocks`        | the watchlist                                                               | `watchlist_*`                                                    |
+| `news`          | the daily bulletin                                                          | `news_*`                                                         |
+| `library`       | NLB availability and the linked shelf                                       | `library_*`                                                      |
+| `web`           | quick public-web lookups                                                    | `web_search`, `web_read`, `source_read`                          |
+| `media`         | attached images and stored documents                                        | `source_read`                                                    |
+| `subscriptions` | the subscription tracker from owner statements and already-matched invoices | `subscription_*`                                                 |
+| `gathering`     | invoice PDFs for an exact collection, files only                            | `gather_*` (not start/revise)                                    |
+| `bills`         | invoice collection plus owner-requested tracker updates from it             | `gather_*` (not start/revise), `subscription_*`                  |
+| `research`      | evidence-backed research (alias of `public-research/researcher`)            | `web_search`, `web_read`, `source_read`                          |
 
 A definition in `plugin.json` declares:
 
@@ -69,6 +72,8 @@ A definition in `plugin.json` declares:
 - `skills`, `limits` (time, model calls, tool calls);
 - `model` (default tier) and `effort` (default effort);
 - `invocable`: false keeps an agent for host workflows only.
+
+Agents in one package can share skills: each lists the package skill IDs it uses, and every listed skill appears in that agent's pinned catalogue for `skill_read`. The `core` package holds `invoice-gathering`, `subscription-ledger` and `invoice-ledger`; `gathering`, `subscriptions` and `bills` each name the ones their work needs, so the procedure lives in one place. A skill is guidance only; the definition's `tools` and the registry grant decide what an agent can do.
 
 The host registry (`plugins/registry.json`) pins each package's content hash and grants its tools. It also holds:
 

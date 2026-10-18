@@ -345,7 +345,8 @@ export class JobTools {
     if (
       a.operation === "subscription_record" ||
       a.operation === "subscription_list" ||
-      a.operation === "subscription_settings"
+      a.operation === "subscription_settings" ||
+      a.operation === "subscription_invoices"
     )
       return new SubscriptionTools(db).call(user, run, a);
     if (
