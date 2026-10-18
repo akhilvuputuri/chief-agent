@@ -40,15 +40,41 @@ Alternatives considered:
 
 - **Requirements cards** stay valid for 24 hours, and the card text says so. Merge cards keep 7 days.
 - **Monitoring confirmation cards** stay valid for 24 hours, and the tool notice says so.
-- **`src/open-loops.ts`** adds `openLoops` to the turn context when something waits on the owner (see [context management](../context-management.md#open-loops)):
-  - up to five coding jobs, each with what the owner needs to do;
-  - up to three monitoring or Calendar cards that expired unanswered in the last three days.
+- **`src/open-loops.ts`** adds `openLoops` to the foreground turn context when something waits on the owner (see [context management](../context-management.md#open-loops)):
+  - up to five coding jobs, each with a host-written `awaiting` label and the worker's text in a separate field, marked as data;
+  - up to three delivered, unsuperseded monitoring cards that expired unanswered in the last day.
 
-  A note tells Chief to cover these when asked for status, to revise or resume a listed job instead of starting a duplicate, and to mention an expired card at most once. The section is omitted when empty, and a failed read logs `context.open_loops_failed` without failing the turn.
+  The note tells Chief to cover these when asked for status, to revise or resume a listed job instead of starting a duplicate, and to mention an expired card only when relevant. A failed read logs `context.open_loops_failed` without failing the turn.
 
-- **Tests:** `tests/open-loops.test.ts` has 4 cases: an empty context, the waiting states in order, the exclusions, and expired cards. The expiry test in `tests/coding-reasoning.test.ts` now advances past 24 hours.
+- **Tests:**
+  - `tests/open-loops.test.ts` has 7 cases, using the real card shapes (`:finished` and `requirements:` keys).
+  - `tests/coding-reasoning.test.ts` confirms a card 23 hours after delivery and rejects one after 24 hours.
 
-Independent review: pending.
+Independent review of `631a402` (Opus 5.5): REQUEST CHANGES. The reviewer confirmed that 24-hour validity is safe for both cards, then found two blocking defects, both reproduced:
+
+- **The first card was always "expired".** It is the attempt's `:finished` event. The view matched only `requirements:` keys, so every live first card was reported as expired, and Chief would have offered a duplicate.
+- **A plan the owner asked to change showed as ready.** The view said "offer a fresh card" instead of asking what to change. An undecided card from an older revision could also count as open.
+
+It also found non-blocking issues:
+
+- expired cards that were superseded or never delivered were listed, with no subject;
+- Merge cards were missing;
+- worker-written text was spliced into host guidance, and background lanes received the section;
+- no test pinned the 24-hour value;
+- a day-old monitoring confirmation uses values computed at proposal time.
+
+Fixes:
+
+- Cards are matched by their `requirements` payload at the current revision.
+- A revise decision is reported as such.
+- An undelivered card has its own label.
+- Merge cards are included.
+- Worker text is in a separate field.
+- The section is foreground only.
+- Expired cards are monitoring only: delivered, not superseded, from the last day, with their title.
+- Tests are added, including mutation-checked pins.
+
+The stale proposal-time values for monitoring remain a documented limitation. Confirming still binds the exact spec, and the worker treats a passed expiry as expired. Re-review is pending.
 
 ## Verification and outcome
 

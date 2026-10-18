@@ -899,9 +899,12 @@ export class Assistant {
               library: await libraryAccountContext(this.db, user),
             }
           : {}),
-        ...(await openLoopsContext(this.db, user, {
-          coding: Boolean(this.tools.coding),
-        })),
+        // Foreground only: a background job lane answers its own job, not the owner's status.
+        ...(background
+          ? {}
+          : await openLoopsContext(this.db, user, {
+              coding: Boolean(this.tools.coding),
+            })),
       });
       if (topic && !background)
         runtime.context = JSON.stringify({

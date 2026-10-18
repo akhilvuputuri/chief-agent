@@ -145,11 +145,26 @@ Acceptance requires the reproduced long runs to answer or pause for a real depen
 
 ## Open loops
 
-Each turn's runtime context carries `openLoops` when something waits on the owner (`src/open-loops.ts`, [journal 93](journey/93-open-loops-context.md)). It holds:
+Each foreground turn's runtime context carries `openLoops` when something waits on the owner (`src/open-loops.ts`, [journal 93](journey/93-open-loops-context.md)). Background job lanes don't receive it.
 
-- **Coding jobs**, up to five, updated in the last 14 days. These are jobs with a requirements card awaiting confirmation or already expired, a question, a pause, a PR stopped for owner attention, or a failure in the last three days.
-- **Cards**, up to three, for monitoring or Calendar confirmations that expired unanswered in the last three days.
+**Coding jobs.** Up to five jobs updated in the last 14 days, each with a host-written `awaiting` label:
 
-Each coding item says what the owner needs to do. The note tells Chief to cover these items when asked for status, to revise or resume a listed job instead of starting a duplicate, and to mention an expired card at most once without re-sending it.
+- a requirements card is open, or it expired (a fresh one can be offered);
+- the owner asked for plan changes;
+- the plan is ready but its card is not delivered yet;
+- the job has a question, or is paused;
+- the job failed in the last three days;
+- a Merge / Keep open card waits;
+- a PR stopped for owner attention.
 
-The section is omitted when empty. It is bounded to a few kilobytes and read-only, and a failed read logs `context.open_loops_failed` without failing the turn.
+A requirements card is any event carrying `requirements`, including the first card (the attempt's `:finished` event). It counts only for the job's current revision. The worker's summary or question goes into a separate `workerText` field, which the note marks as data, never instructions.
+
+**Monitoring cards.** Up to three monitoring confirmation cards that were delivered, expired unanswered in the last day, and were not superseded by a later proposal for the same concern. Each carries its title.
+
+The note tells Chief to:
+
+- cover these items when asked for status;
+- revise or resume a listed job instead of starting a duplicate;
+- mention an expired card only when relevant, without re-sending it.
+
+The section is omitted when empty and is bounded to a few kilobytes. A failed read logs `context.open_loops_failed` without failing the turn.

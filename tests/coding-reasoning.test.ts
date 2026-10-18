@@ -208,6 +208,20 @@ test("natural coding dispatch plans first; model tools cannot authorise implemen
   await f.c.tick();
   assert.equal(f.creates(), 2);
 });
+test("a requirements card is still confirmable 23 hours after delivery", async (t) => {
+  // It lapsed after 15 minutes before 18 October; five complete plans expired that way.
+  const f = await fixture(t),
+    r = await requirementBrief(f);
+  f.advance(23 * 3600000);
+  const result = await f.c.requirements.confirm(
+    "a",
+    r.approvalId,
+    true,
+    "a",
+    r.messageId,
+  );
+  assert.equal(result.status, "approved");
+});
 test("requirements reject another owner, another message, stale scope and expiry", async (t) => {
   const f = await fixture(t),
     r = await requirementBrief(f);
