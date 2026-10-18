@@ -142,3 +142,29 @@ The 400,000 hard limit remains as a backstop. It now leaves more than 280,000 ch
 5. **Observe and release.** Trace projection version, trigger, component sizes/estimated tokens, tool names/count, omitted/compacted groups, source-reference counts, provider usage and stop reason without raw content. Compare before/after on the same fixtures and a small live acceptance check. Keep the internal hard guard as an emergency backstop, not the normal operating target.
 
 Acceptance requires the reproduced long runs to answer or pause for a real dependency without an internal context overflow; retain the selected mailbox, role IDs, source provenance and approval state; keep tool-call/result groups valid; and show prompt size leveling off rather than rising with each tool call. Report actual token/cost measurements and any cache tradeoff before claiming savings. No framework rewrite, RAG layer, data reset, dollar cap or new infrastructure is required for this work.
+
+## Open loops
+
+Each foreground turn's runtime context carries `openLoops` when something waits on the owner (`src/open-loops.ts`, [journal 94](journey/94-open-loops-context.md)). Background job lanes don't receive it.
+
+**Coding jobs.** Up to five jobs updated in the last 14 days, each with a host-written `awaiting` label:
+
+- a requirements card is open, or it expired (a fresh one can be offered);
+- the owner asked for plan changes;
+- the plan is ready but its card is not delivered yet;
+- the job has a question, or is paused;
+- the job failed in the last three days;
+- a Merge / Keep open card waits (only when the card for the current revision and head is delivered and valid; otherwise the label says it expired or is not delivered yet);
+- a PR stopped for owner attention.
+
+A requirements card is any event carrying `requirements`, including the first card (the attempt's `:finished` event). It counts only for the job's current revision. The worker's summary or question goes into a separate `workerText` field, which the note marks as data, never instructions.
+
+**Monitoring cards.** Up to three monitoring confirmation cards that were delivered and expired unanswered in the last day, each with its title. A card is dropped when a later proposal revised the same existing concern (same responsibility id). A re-proposal of a concern that was never confirmed gets a new id, so its earlier card can still be listed for that day.
+
+The note tells Chief to:
+
+- cover these items when asked for status;
+- revise or resume a listed job instead of starting a duplicate;
+- mention an expired card only when relevant, without re-sending it.
+
+The section is omitted when empty and is bounded to a few kilobytes. A failed read logs `context.open_loops_failed` without failing the turn.

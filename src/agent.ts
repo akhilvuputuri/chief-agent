@@ -19,6 +19,7 @@ import { researchReads } from "./research-schema.js";
 import { spending, Spending } from "./spending.js";
 import { recordContext } from "./record-context.js";
 import { compactWork } from "./observations.js";
+import { openLoops } from "./open-loops.js";
 import {
   Execution,
   Stop,
@@ -76,6 +77,20 @@ export type Incoming = {
   /** Whether that topic may start the turn with its agent (TELEGRAM_TOPICS=auto). */
   threadId?: number;
 };
+/** Open loops are context, not a requirement: a failed read must not fail the turn. */
+async function openLoopsContext(
+  db: Database,
+  user: string,
+  options: { coding: boolean },
+) {
+  try {
+    const loops = await openLoops(db, user, options);
+    return loops ? { openLoops: loops } : {};
+  } catch (error) {
+    opsLog("context.open_loops_failed", "warn", errorFields(error));
+    return {};
+  }
+}
 export class Assistant {
   private queue = new SerialQueue();
   private controllers = new Map<string, AbortController>();
@@ -884,6 +899,12 @@ export class Assistant {
               library: await libraryAccountContext(this.db, user),
             }
           : {}),
+        // Foreground only: a background job lane answers its own job, not the owner's status.
+        ...(background
+          ? {}
+          : await openLoopsContext(this.db, user, {
+              coding: Boolean(this.tools.coding),
+            })),
       });
       if (topic && !background)
         runtime.context = JSON.stringify({
