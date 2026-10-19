@@ -2777,3 +2777,50 @@ test("a saved price change on an ended item is not reported", async () => {
     await f.pg.close();
   }
 });
+test("a create recorded as already cancelled is new, not ended, and a back-only month shows in the headline", async () => {
+  const f = await fixture();
+  try {
+    const at = (iso: string) => async (id: string, revision: number) =>
+      f.db.query(
+        "UPDATE subscription_updates SET recorded_at=$3 WHERE subscription_id=$1 AND revision=$2",
+        [id, revision, iso],
+      );
+    const old = await f.record({ ...annual, status: "cancelled" });
+    await at("2026-09-08T04:00:00Z")(old.id, 1);
+    const tv = await f.record({ ...netflix });
+    await at("2026-09-09T04:00:00Z")(tv.id, 1);
+    const ended = await f.record(
+      { status: "cancelled" },
+      { id: tv.id, baseRevision: 1 },
+    );
+    await at("2026-09-20T04:00:00Z")(tv.id, ended.revision);
+    const s = await buildSubscriptionSummary(
+      f.db,
+      "a",
+      Date.parse("2026-10-01T01:00:00Z"),
+    );
+    const changes = s.sections!.find((x) =>
+      x.title.startsWith("Changes"),
+    )!.body;
+    assert.match(changes, /New · Gym/);
+    assert.doesNotMatch(changes, /Ended · Gym/);
+    assert.match(changes, /Ended · Netflix: cancelled/);
+    // October: only a reactivation.
+    const back = await f.record(
+      { status: "active" },
+      { id: tv.id, baseRevision: ended.revision },
+    );
+    await at("2026-10-10T04:00:00Z")(tv.id, back.revision);
+    const oct = await buildSubscriptionSummary(
+      f.db,
+      "a",
+      Date.parse("2026-11-01T01:00:00Z"),
+    );
+    assert.match(
+      oct.reply,
+      /October 2026: 0 new, 0 ended, 1 back, 0 price changes\./,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});

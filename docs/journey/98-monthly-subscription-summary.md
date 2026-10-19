@@ -52,7 +52,14 @@ Review, 19 October 2026: the independent reviewer (Claude Opus 5.5) **APPROVED**
 
 Left as is: unbounded totals lines with dozens of currencies.
 
-Regression tests cover the fixes. The reviewer **APPROVED** `d70ecfd`. Its remaining note was a narrow race: the worker could claim the row between the setter's check and its upsert. The upsert itself now skips a row being processed, and an empty result is refused the same way. Two doc wording fixes followed. Main then advanced to `8456b86`: price alerts were released with the box rollout, so this branch merges that main and uses version 0.3.88. The merged head needs exact-head approval.
+Regression tests cover the fixes. The reviewer **APPROVED** `d70ecfd`. Its remaining note was a narrow race: the worker could claim the row between the setter's check and its upsert. The upsert itself now skips a row being processed, and an empty result is refused the same way. Two doc wording fixes followed. Main then advanced to `8456b86`: price alerts were released with the box rollout, so this branch merges that main and uses version 0.3.88. The reviewer **APPROVED** the merged head `d1bc1a5`.
+
+Devin then found two more issues:
+
+- An item first recorded as already cancelled was listed as New and Ended. A create inside the month is now its own status baseline.
+- A month with only a reactivation showed zero changes in the headline. The headline now counts Back lines.
+
+The fixed head needs exact-head re-review.
 
 ## Verification and outcome
 

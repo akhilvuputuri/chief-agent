@@ -127,8 +127,9 @@ export async function buildSubscriptionSummary(
     const st = status.get(u.subscription_id) ?? {};
     if ("status" in u.changes || u.revision === 1) {
       const value = u.changes.status ?? "unknown";
-      if (!inWindow(at)) st.start = value;
-      else {
+      // Before the month: the baseline. A create inside the month is its own baseline.
+      if (!inWindow(at) || u.revision === 1) st.start = value;
+      if (inWindow(at)) {
         st.end = value;
         st.at = dayOf(at);
       }
@@ -268,7 +269,7 @@ export async function buildSubscriptionSummary(
       `Subscriptions — ${window.label} summary`,
       totalText,
       changes.length
-        ? `${window.label}: ${added.length} new, ${ended.length} ended, ${prices.length} price change${prices.length === 1 ? "" : "s"}.`
+        ? `${window.label}: ${added.length} new, ${ended.length} ended, ${reactivated.length ? `${reactivated.length} back, ` : ""}${prices.length} price change${prices.length === 1 ? "" : "s"}.`
         : `${window.label}: no recorded changes.`,
       `Next 30 days:\n${cap(
         upcoming.map((u) => u.text),

@@ -95,7 +95,7 @@ Not established: how often the saved price is absent from an invoice that did no
 ### Release closure — 19 October 2026 (SGT)
 
 - **Merge.** [PR 258](https://github.com/akhilvuputuri/chief-agent/pull/258) merged as `18662ba1a1746cd843f65da8c723068bfd07cee4` from approved head `f8e0f57`.
-- **Review.** Approved in its fourth exact-head round, after one round of requested changes plus fixes for Devin's findings. Hosted CI and Devin passed.
+- **Review.** Exact-head approvals, all by Claude Opus 5.5: `7ee3226` (after the requested changes above), `04a2811` (after the Devin fixes) and the merged head `f8e0f57`. The last was a merge-only check of docs conflicts with main `ef37e12`. Hosted CI and Devin passed on `f8e0f57`.
 - **Blocked releases.** Its own release was refused because main had already moved to `860c45e` (#259). The next releases were refused for #259's database migration.
 - **Release.** Once #262 staged that migration outside `db/`, the [release of `c1d556b`](https://github.com/akhilvuputuri/chief-agent/actions/runs/39161166544) recorded exact deployment and startup health. Logs show `gateway.started` for that release at 20:02 UTC on 18 October. Later releases up to `8456b86` include it.
 - **Migration.** None of its own.
