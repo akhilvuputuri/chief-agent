@@ -135,7 +135,8 @@ export class DataMall {
             ...(services.length && empty.size && !service
               ? { servicesWithoutEstimates: [...empty] }
               : {}),
-            note: "scheduleAtStop covers only services without an arrival estimate. Compare the current Singapore time with their first and last bus times: outside them that service is not in operation; inside them say no estimate is available. Services with arrivals are running.",
+            scheduleNote:
+              "scheduleAtStop covers only services without an arrival estimate. Compare the current Singapore time with their first and last bus times: outside them that service is not in operation; inside them say no estimate is available. Services with arrivals are running.",
           }
         : {}),
       note: "live false means a scheduled time, not a tracked bus.",

@@ -95,6 +95,7 @@ The owner then asked for LTA DataMall as well, mainly for bus arrivals, and supp
   - **Flood alerts:** they ignored the region filter. Alerts with a readable location (location fields or a "lat lon radius" circle) are now filtered by region. Alerts without one are kept and counted as `unlocatedAlerts`, because the live alert shape is still unverified.
   - **DataMall pages:** a page without a `value` array became an empty result. It now raises an error instead of reporting no matches.
 - **Devin Review, second pass (head `00a1639`):** the bus fix above set the stop-wide `noEstimates` flag even while other services had live arrivals. `noEstimates` now means nothing is arriving (at the stop, or for the requested service). A mixed result keeps its arrivals and names the services without one in `servicesWithoutEstimates`. The transport skill and a test match this.
+- **Final review (head `ad506d6`, APPROVE with one low finding):** the schedule guidance used a `note` key that a later `note` in the same object overwrote, so it never reached the model. This had been true since the first version. It is now `scheduleNote`, with a test assertion.
 - **Recorded as follow-ups:**
   - Cancellation signals are not passed into the Singapore tools.
   - The body cap counts characters after buffering rather than streamed bytes.
