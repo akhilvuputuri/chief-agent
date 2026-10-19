@@ -1,7 +1,7 @@
 # 98 — Can the monthly subscription summary be built without a model?
 
 Work date(s): 2026-10-19. Written/revised: 2026-10-19.
-Status: in progress. Implementation and tests pass locally; it builds on price-change alerts ([journal 97](97-price-change-alerts.md), PR 258). Independent review, merge and release are pending.
+Status: released as v0.3.88 (deployed `293bb0d`). It builds on price-change alerts ([journal 97](97-price-change-alerts.md)). Owner acceptance is pending.
 
 ## User-visible problem and preceding iteration
 
@@ -59,7 +59,7 @@ Devin then found two more issues:
 - An item first recorded as already cancelled was listed as New and Ended. A create inside the month is now its own status baseline.
 - A month with only a reactivation showed zero changes in the headline. The headline now counts Back lines.
 
-The fixed head needs exact-head re-review.
+The reviewer **APPROVED** exact head `c3c522f`, and hosted CI and Devin passed on it.
 
 ## Verification and outcome
 
@@ -73,6 +73,15 @@ Tested with PGlite:
 - **Delivery.** The scheduler sends the summary with calendar and Gmail stubs that throw if called, and there is no model in the path.
 
 Not established: whether the message reads well on a phone, and live delivery.
+
+### Release closure — 19 October 2026
+
+- **Merge.** [PR 261](https://github.com/akhilvuputuri/chief-agent/pull/261) merged as `293bb0d9e4f7ae77c5d8cdd06751e0535a06d36f` from approved head `c3c522f`.
+- **Release.** The [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39239270629) recorded exact deployment and startup health (`npm run release:status`).
+- **Logs.** Private logs show `gateway.started` for that release at 10:45:54 UTC. No warn or error lines were logged in the 30 minutes before the check, about one minute after startup.
+- **Migration.** None.
+- **Local checks.** 1,094 application and 51 script tests passed on the merged branch before the last Devin fixes; the focused suite passed after them.
+- **Not yet measured.** Owner opt-in, the first delivered summary and how it reads on a phone.
 
 ## Follow-up and next iteration
 

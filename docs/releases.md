@@ -1,3 +1,16 @@
+## Released v0.3.88 — monthly subscription summary
+
+[PR 261](https://github.com/akhilvuputuri/chief-agent/pull/261) merged as `293bb0d9e4f7ae77c5d8cdd06751e0535a06d36f`.
+
+- **Review.** Exact-head independent review (Claude Opus 5.5) approved `c3c522f`. Its earlier rounds and Devin's findings were fixed with regressions. They covered a setter change lost during a delivery, the excluded-item list, stale wording, decimal-equal prices, per-item status lines with reactivations, schedule protection and failure visibility. Hosted CI and Devin passed.
+- **Release.** The [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39239270629) recorded exact deployment and startup health. Logs show `gateway.started` for that release at 10:45:54 UTC on 19 October, with no warn or error lines in the 30 minutes before the check (about one minute after startup). No migration.
+- **Behaviour.**
+  - `subscription_summary_set` turns on one Telegram message a month (default the 1st at 09:00 Singapore), built from saved records with no model call.
+  - It covers monthly equivalents, the previous month's recorded changes (new, ended or back, price changes with the price they replaced) and the next 30 days.
+  - `subscription_summary` previews it.
+- **Not yet measured.** Owner acceptance.
+- No tag created yet. [Journal 98](journey/98-monthly-subscription-summary.md), [design](subscriptions.md#monthly-summary).
+
 ## Released v0.3.87 (untagged) — boxed sub-agents installed, off by default (`5f46cb4`)
 
 [PR 265](https://github.com/akhilvuputuri/chief-agent/pull/265) merged as `5f46cb4f417dda258623626d5347f9ff80ff2ced`. Independent review (Claude Opus 5.5) approved the exact head `4f4bf33` after two rounds of fixes. Hosted CI, Devin, 1,087 application tests, 51 script tests, 107 Pi tests and 27 rollout tests passed.
