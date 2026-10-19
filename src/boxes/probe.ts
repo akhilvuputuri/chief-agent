@@ -1,17 +1,22 @@
 /**
  * Operator probe for boxed sub-agents (docs/boxes.md, phase 3). Runs inside the gateway
- * container against the production database, as the configured owner. It only writes box
- * requests; the running gateway's reconciler launches, serves and ends the boxes.
+ * container against the production database, as the configured owner. Apart from `orphan`
+ * it only writes box requests; the running gateway's reconciler launches, serves and ends
+ * the boxes.
  *
  *   node dist/boxes/probe.js spawn <profile> <request-key>
- *   node dist/boxes/probe.js delegate <box-id> <request-key> <text>
+ *   node dist/boxes/probe.js delegate <box-id> <request-key> [--wait] [--hostile] [--inspect] [--probe] <text>
+ *   node dist/boxes/probe.js steer <box-id> <task-id> <request-key> <text>
  *   node dist/boxes/probe.js status <box-id>
  *   node dist/boxes/probe.js timings <box-id>
  *   node dist/boxes/probe.js close <box-id>
+ *   node dist/boxes/probe.js orphan <profile>
  */
+import { randomBytes, randomUUID } from "node:crypto";
 import { connect } from "../db.js";
 import { BoxController } from "./controller.js";
 import { boxSettings, loadBoxesFile } from "./config.js";
+import { delegateArgs, steerArgs } from "./probe-args.js";
 import type { BoxProvider } from "./provider.js";
 
 const env = process.env;
@@ -38,6 +43,13 @@ const boxes = new BoxController(
   ),
   env.BOX_AUTH_KEY,
   env.CODING_PUBLIC_ORIGIN ?? "",
+  undefined,
+  {},
+  // Steering from the probe is the operator acting for the owner from a shell that can
+  // already write box messages. Chief's own controller still refuses all steering: no
+  // owner-input check is wired there yet.
+  async (_user, run, inputId) =>
+    run === "probe" && inputId.startsWith("probe:"),
 );
 
 async function timings(id: string) {
@@ -69,6 +81,72 @@ async function timings(id: string) {
   };
 }
 
+/**
+ * Launches one instance from the profile's own template for a box the database has never
+ * heard of, then stops it as soon as it runs, long before its agent could say hello (a
+ * cold boot takes minutes). A refused hello would power the instance off by itself; a
+ * stopped one can only be ended by an API call, and the probe never terminates it, so a
+ * later TerminateInstances for it in CloudTrail proves the gateway's sweep. Its bootstrap
+ * secret is random in any case.
+ */
+async function orphan(profile: string) {
+  if (settings.config.profiles[profile]?.provider !== "ec2")
+    throw new Error(`${profile} is not an EC2 profile`);
+  const { Ec2BoxProvider } = await import("./ec2-provider.js");
+  const { EC2Client } = await import("@aws-sdk/client-ec2");
+  const provider = new Ec2BoxProvider(
+    new EC2Client({ region: file.region, maxAttempts: 1 }),
+    file.environment,
+    settings.ec2,
+  );
+  const boxId = randomUUID();
+  const providerId = await provider.launch({
+    boxId,
+    clientToken: boxId,
+    profile,
+    image: settings.config.profiles[profile]!.image,
+    environment: file.environment,
+    bootstrap: {
+      origin: env.CODING_PUBLIC_ORIGIN ?? "",
+      boxId,
+      secret: randomBytes(32).toString("hex"),
+    },
+  });
+  const launchedAt = new Date().toISOString();
+  const base = { boxId, providerId, launchedAt };
+  // Waits for a state. A just-launched instance can briefly be "missing" and the client
+  // makes one attempt per call, so early misses and errors are retried. "terminated" means
+  // the sweep got there first, which is a result, not a failure (check CloudTrail).
+  const until = async (state: string) => {
+    for (let i = 0; i < 60; i++) {
+      const now = await provider.describe(providerId).catch(() => "error");
+      if (now === state || now === "terminated") return now;
+      if (now === "missing" && i >= 10)
+        throw new Error(`Orphan ${providerId} is missing`);
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+    throw new Error(`Orphan ${providerId} did not reach ${state}`);
+  };
+  if ((await until("running")) === "terminated")
+    return { ...base, sweptBeforeStop: true };
+  try {
+    await provider.stop(providerId);
+  } catch (error) {
+    // The sweep may have terminated it between "running" and the stop.
+    if (
+      (await provider.describe(providerId).catch(() => "error")) ===
+      "terminated"
+    )
+      return { ...base, sweptBeforeStop: true };
+    throw new Error(`Stopping orphan ${providerId} (box ${boxId}) failed`, {
+      cause: error,
+    });
+  }
+  if ((await until("stopped")) === "terminated")
+    return { ...base, sweptBeforeStop: true };
+  return { ...base, stoppedAt: new Date().toISOString() };
+}
+
 try {
   let result: unknown;
   switch (command) {
@@ -79,13 +157,25 @@ try {
         subject: `probe:${args[1]}`,
       });
       break;
-    case "delegate":
-      result = await boxes.delegate(owner, args[0]!, {
-        requestKey: args[1]!,
+    case "delegate": {
+      const a = delegateArgs(args);
+      result = await boxes.delegate(owner, a.boxId, {
+        requestKey: a.requestKey,
         kind: "echo",
-        payload: { text: args.slice(2).join(" ") },
+        payload: a.payload,
       });
       break;
+    }
+    case "steer": {
+      const a = steerArgs(args);
+      result = await boxes.send(owner, "probe", a.boxId, {
+        requestKey: a.requestKey,
+        taskId: a.taskId,
+        text: a.text,
+        ownerInputId: `probe:${a.requestKey}`,
+      });
+      break;
+    }
     case "status":
       result = await boxes.status(owner, args[0]!);
       break;
@@ -95,8 +185,13 @@ try {
     case "close":
       result = await boxes.close(owner, args[0]!);
       break;
+    case "orphan":
+      result = await orphan(args[0]!);
+      break;
     default:
-      throw new Error("Commands: spawn, delegate, status, timings, close");
+      throw new Error(
+        "Commands: spawn, delegate, steer, status, timings, close, orphan",
+      );
   }
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 } finally {

@@ -2,6 +2,10 @@
 
 The fixed coordinator prompt had outgrown the 48k soft budget, so older conversation was never sent: 142 of 151 foreground calls were over budget. Coding tools now form their own domain. The canvas, jobs and work guidance arrives only with those tools. Older history keeps a 6,000-character floor, and the over-budget event fires once per turn with its reason. Instructions drop from 11.1k to 8.4k characters when those domains are not loaded, and `work` turns that do not need coding lose a further 4.2k of coding schemas. See [journal 101](journey/101-lean-coordinator-prompt.md).
 
+# Opus 5.5 main model and prompt caching — in review, 19 October 2026
+
+The main model and the `standard` agent tier move from Gemini 4 Argon to Claude Opus 5.5. The owner approved raising the price ceilings to $4/$20 in the reviewed model policy. Synthetic probes showed why caching stopped: Argon's implicit cache missed whenever the request tail changed, and Chief adds the current time to every call. Anthropic models cache only when the request is marked, and a Chief-shaped tool-loop probe confirmed that two markers also cache the growing in-turn history. Requests now carry provider-specific markers. See [journal 100](journey/100-opus-main-model-and-caching.md).
+
 # Monthly subscription summary — live as v0.3.88, 19 October 2026
 
 Issue 132 S7. One opt-in Telegram message a month (`subscription_summary_set`, default the 1st at 09:00 Singapore), built from saved records with no model call. It covers per-currency monthly equivalents, the previous month's recorded changes (new, ended or back, price changes with the price they replaced) and the next 30 days. `subscription_summary` previews it. No migration. [PR 261](https://github.com/akhilvuputuri/chief-agent/pull/261) deployed as `293bb0d` with exact receipt and startup health. Next: owner acceptance (turn it on, preview it, check the first delivered message). [Journal 98](journey/98-monthly-subscription-summary.md), [design](subscriptions.md#monthly-summary).
@@ -51,8 +55,8 @@ Heavy delegated work moves to sub-agents with their own on-demand boxes that Chi
 
 **Next:**
 
-1. The rest of phase 3: steering, the trust reset, the orphan sweep and retention on EC2 (the probe needs steering and payload options).
-2. Phase 4: coding on boxes, when the owner starts it.
+1. The rest of phase 3 with the extended probe: steering across a gateway restart, the trust reset, the orphan sweep and retention on EC2.
+2. Phase 4: coding on EC2 boxes. On 19 October the owner said to close out CodeBuild and focus on EC2; read as no CodeBuild fallback, with the CodeBuild path removed once coding runs on boxes (to be confirmed).
 
 [Design](boxes.md), [journal 91](journey/91-boxed-subagents.md), [release records](releases.md).
 

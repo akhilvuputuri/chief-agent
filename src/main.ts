@@ -47,7 +47,7 @@ import { PublicFeedFetcher } from "./news-feed.js";
 import { run as runTelegram } from "@grammyjs/runner";
 import { CustomAgent } from "./custom-agent.js";
 import { OpenRouter } from "./model.js";
-import { resolveMainModel } from "./model-policy.js";
+import { resolveMainModel, resolvePriceCeilings } from "./model-policy.js";
 import { recoverRuntime } from "./execution.js";
 import { TelegramViews } from "./telegram-views.js";
 import type { Delivery } from "./answer.js";
@@ -92,6 +92,10 @@ const startupError = (code: string, message: string) =>
   Object.assign(new Error(message), { code });
 const c = readConfig();
 const mainModel = resolveMainModel(c.AGENT_MODEL);
+const priceCeilings = resolvePriceCeilings({
+  input: c.OPENROUTER_MAX_INPUT_PRICE,
+  output: c.OPENROUTER_MAX_OUTPUT_PRICE,
+});
 const db = connect(c.DATABASE_URL);
 await db.query("SELECT 1");
 // Refuse a stale/missing migration rather than silently losing legacy conversation context.
@@ -472,8 +476,8 @@ if (c.CODING_RUNTIME === "on") {
       new OpenRouter(
         c.OPENROUTER_API_KEY,
         model,
-        c.OPENROUTER_MAX_INPUT_PRICE,
-        c.OPENROUTER_MAX_OUTPUT_PRICE,
+        priceCeilings.input,
+        priceCeilings.output,
       ),
     undefined,
     async () => {
@@ -501,8 +505,8 @@ if (c.CODING_RUNTIME === "on") {
         }));
     },
     {
-      input: c.OPENROUTER_MAX_INPUT_PRICE,
-      output: c.OPENROUTER_MAX_OUTPUT_PRICE,
+      input: priceCeilings.input,
+      output: priceCeilings.output,
     },
     legacySettings.autoMerge === true,
     c.CODING_AGENT_GITHUB_APP_ID &&
@@ -651,8 +655,8 @@ const assistant = new Assistant(
     new OpenRouter(
       c.OPENROUTER_API_KEY,
       mainModel,
-      c.OPENROUTER_MAX_INPUT_PRICE,
-      c.OPENROUTER_MAX_OUTPUT_PRICE,
+      priceCeilings.input,
+      priceCeilings.output,
     ),
     // Optional task-specific vision/document model; the main model is used when unset.
     c.MEDIA_MODEL
@@ -660,8 +664,8 @@ const assistant = new Assistant(
           media: new OpenRouter(
             c.OPENROUTER_API_KEY,
             c.MEDIA_MODEL,
-            c.OPENROUTER_MAX_INPUT_PRICE,
-            c.OPENROUTER_MAX_OUTPUT_PRICE,
+            priceCeilings.input,
+            priceCeilings.output,
           ),
         }
       : {},
@@ -669,8 +673,8 @@ const assistant = new Assistant(
       new OpenRouter(
         c.OPENROUTER_API_KEY,
         model,
-        c.OPENROUTER_MAX_INPUT_PRICE,
-        c.OPENROUTER_MAX_OUTPUT_PRICE,
+        priceCeilings.input,
+        priceCeilings.output,
       ),
   ),
   new JobTools(
