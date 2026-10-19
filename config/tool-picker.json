@@ -83,6 +83,10 @@
       "description": "The user's daily news bulletin: following news sites or blogs, delivery time, topics, sending one now, and what their thumbs up/down taught.",
       "examples": "follow theverge.com, send my news at 8am, add AI as a topic, send me a bulletin now, stop following that blog"
     },
+    "singapore": {
+      "description": "Live Singapore government data: NEA weather forecasts, rain, haze/PSI, UV and heat, flood and lightning alerts, carpark lots, speed cameras, public holidays, hawker centre closures, LTA bus arrivals, MRT service status and traffic incidents.",
+      "examples": "will it rain in the east later, is the haze bad today, when's the next 65 at my stop, any MRT delays, lots free at my carpark, is next Monday a public holiday, is the hawker centre closed this week"
+    },
     "routines": {
       "description": "Recurring automated agent routines that run on a schedule.",
       "examples": "every Monday at 9 summarise my inbox, pause my weekly routine, what automations run"

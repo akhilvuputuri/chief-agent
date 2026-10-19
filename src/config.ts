@@ -128,6 +128,10 @@ const schema = z.object({
   // prepost quotes are a Pro+ feature; only set with a plan that includes them.
   MARKET_DATA_EXTENDED: z.enum(["", "true"]).default(""),
   TWELVE_DATA_API_KEY: z.string().default(""),
+  // Singapore open data (docs/singapore-open-data.md). data.gov.sg works without a key at
+  // low rate limits; LTA DataMall tools are offered only with its account key.
+  DATAGOVSG_API_KEY: z.string().default(""),
+  LTA_DATAMALL_ACCOUNT_KEY: z.string().default(""),
   STT_MODEL: z.string().default("whisper-1"),
   TTS_MODEL: z.string().default("tts-1"),
   TTS_VOICE: z.string().default("alloy"),

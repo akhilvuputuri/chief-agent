@@ -38,7 +38,7 @@
   {
     "id": "none-7",
     "message": "what's the weather in Singapore this week?",
-    "gold": [],
+    "gold": ["singapore"],
     "split": "tuning"
   },
   {
@@ -1274,6 +1274,30 @@
     "id": "t-coding-3",
     "message": "cancel the coding sandbox job",
     "gold": ["coding"],
+    "split": "held-out"
+  },
+  {
+    "id": "sg-1",
+    "message": "is the haze bad today?",
+    "gold": ["singapore"],
+    "split": "tuning"
+  },
+  {
+    "id": "sg-2",
+    "message": "when's the next 65 at my stop?",
+    "gold": ["singapore"],
+    "split": "held-out"
+  },
+  {
+    "id": "sg-3",
+    "message": "any MRT delays on the east-west line?",
+    "gold": ["singapore"],
+    "split": "tuning"
+  },
+  {
+    "id": "sg-4",
+    "message": "is Old Airport Road food centre closed this week?",
+    "gold": ["singapore"],
     "split": "held-out"
   }
 ]

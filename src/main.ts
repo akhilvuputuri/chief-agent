@@ -35,6 +35,7 @@ import { StockMonitor, StockDelivery, WatchlistTools } from "./stocks.js";
 import { TwelveDataProvider } from "./stock-provider.js";
 import { CreditBucket } from "./market-credits.js";
 import { StockLookup } from "./stock-lookup.js";
+import { SingaporeTools } from "./singapore/tools.js";
 import { MarketHistory } from "./market-history.js";
 import { RuleDelivery, RuleEngine } from "./stock-rules.js";
 import {
@@ -282,6 +283,11 @@ if (c.MARKET_DATA_PROVIDER === "twelvedata" && !c.TWELVE_DATA_API_KEY)
     "STARTUP_MARKET_DATA_KEY",
     "MARKET_DATA_PROVIDER=twelvedata requires TWELVE_DATA_API_KEY",
   );
+// Read-only Singapore open data; DataMall tools appear only with its account key.
+const singapore = new SingaporeTools({
+  dataGovKey: c.DATAGOVSG_API_KEY || undefined,
+  dataMallKey: c.LTA_DATAMALL_ACCOUNT_KEY || undefined,
+});
 const parser = new ScheduleParser();
 // Editions are plain text with link previews off; Save buttons carry item ids.
 const newsFetcher = new PublicFeedFetcher();
@@ -728,6 +734,7 @@ const assistant = new Assistant(
     gathering,
     mcp,
     links,
+    singapore,
   ),
   {
     links: !!links,
@@ -744,6 +751,8 @@ const assistant = new Assistant(
     dailySheet: !!(c.SHEETS_REFRESH_TOKEN && c.DAILY_SPREADSHEET_ID),
     stocks: !!stockProvider,
     news: true,
+    singapore: true,
+    ltaDataMall: singapore.dataMallConfigured,
     ...(responsibilities ? { responsibilities: true } : {}),
     ...(coding ? { coding: true } : {}),
     ...(portfolio ? { portfolio: true } : {}),

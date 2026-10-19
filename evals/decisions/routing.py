@@ -45,6 +45,7 @@ CUE_AGENT = {
     "library": "library",
     "watchlist": "stocks",
     "news": "news",
+    "singapore": "singapore",
 }
 
 
@@ -53,6 +54,9 @@ def _options() -> dict[str, str]:
     research = json.loads((ROOT / "plugins" / "public-research" / "plugin.json").read_text(encoding="utf-8"))
     options = {a["id"]: a["description"] for a in core["agents"]}
     options["research"] = research["agents"][0]["description"]
+    singapore = json.loads((ROOT / "plugins" / "singapore" / "plugin.json").read_text(encoding="utf-8"))
+    for agent, alias in (("local", "singapore"), ("transport", "transport")):
+        options[alias] = next(a["description"] for a in singapore["agents"] if a["id"] == agent)
     options["chief"] = DECISIONS["routing"]["chief"]
     return options
 

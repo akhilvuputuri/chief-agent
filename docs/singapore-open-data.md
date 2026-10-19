@@ -1,6 +1,6 @@
 # Singapore open data
 
-Status: researched 19 October 2026, not implemented. Tracking: [issue 271](https://github.com/akhilvuputuri/chief-agent/issues/271) (data.gov.sg) and [issue 270](https://github.com/akhilvuputuri/chief-agent/issues/270) (LTA DataMall). Research record: [journal 99](journey/99-singapore-open-data.md). Full dataset reference: [catalogue](singapore-open-data-catalogue.md).
+Status: researched 19 October 2026; phase 1 implemented 20 October 2026 ([journal 101](journey/101-singapore-plugin.md)), deployment pending. Tracking: [issue 271](https://github.com/akhilvuputuri/chief-agent/issues/271) (data.gov.sg) and [issue 270](https://github.com/akhilvuputuri/chief-agent/issues/270) (LTA DataMall). Research record: [journal 99](journey/99-singapore-open-data.md). Full dataset reference: [catalogue](singapore-open-data-catalogue.md).
 
 Chief gets Singapore government data through a `singapore` plugin: weather and air quality now, alerts, parking, public holidays and hawker centre closures. The plugin holds the agent and skills. A small read-only host client does the fetching, because plugins cannot make HTTP calls.
 
@@ -82,56 +82,69 @@ Location is coarse. The owner has a home region and optionally a work region: No
 
 ## Architecture
 
-Plugins are text and configuration only. They "cannot execute scripts … add HTTP endpoints, grant themselves tools" ([plugins](plugins.md)). The work is therefore split in two.
+Plugins are text and configuration only. They "cannot execute scripts … add HTTP endpoints, grant themselves tools" ([plugins](plugins.md)). The work is split into a read-only host client in `src/singapore/` and the `singapore` plugin. Both run inside the existing gateway process; there is no new service or infrastructure.
 
-### Host
+### Host (`src/singapore/`)
 
-A read-only client in core code, modelled on the library client ([library](library.md)) and `stock_lookup`:
+- **Routes (`routes.ts`):** the only module that names the API origins. It holds a fixed inventory of GET routes with validated parameters. Download links are followed only to the data.gov.sg S3 bucket. A boundary test fails if an origin appears anywhere else in `src`.
+- **Client (`http.ts`):** one serial queue and one 429 breaker (60 seconds) per rate-limit group, because data.gov.sg limits real-time APIs, datastore search and downloads separately. It sends an honest User-Agent, uses 15-second timeouts, refuses redirects and caps bodies at 4 MB (8 MB for files). A data.gov.sg key is sent only to data.gov.sg and the DataMall `AccountKey` only to DataMall. Minimum spacing between requests:
 
-- **Routes:** all hosts and route templates in one routes module. A boundary test fails if a hostname appears anywhere else.
-- **Pacing and backoff:**
-  - one serial queue with at least about 2.5 seconds between v2 and datastore calls when no key is configured, shorter with a key;
-  - a 429 breaker with at least 60 seconds of cooldown;
-  - 15-second timeouts and body caps.
-- **Caches** in memory per endpoint, matched to cadence:
-  - forecasts 30 minutes, PSI and PM2.5 one hour;
-  - stations and alerts 1–5 minutes, carpark availability one minute;
-  - datasets daily, holidays monthly.
-- **Reducers** turn each feed into a compact, region-aware answer with reading ages and a source line. Raw carpark or rainfall payloads never reach the model.
-- **Tools** in a new domain, all in `readOperations`:
-  - **conditions** for a region: current forecast, PSI and PM2.5 band, UV, heat stress, rain now and the age of each reading;
-  - **outlook:** 24-hour and 4-day forecasts;
-  - **alerts:** active flood alerts, recent lightning near a region, high heat stress;
-  - **carparks:** search by carpark code, address text or town; joins HDB information and URA places with live lots; capped result count;
-  - **domain registration:** a prefix, summary, picker entry and cue words in `src/tool-domains.ts`, so foreground turns and background routines both find the tools;
-  - **dataset query:** a paced datastore search for CSV datasets (holidays, hawker closures), with field selection and capped rows.
-  - Exact names and schemas are settled in the implementation review.
-- **Dataset access:** the dataset query tool accepts any `d_` plus 32-hex dataset ID on the fixed hosts. Which datasets Chief uses is decided by the plugin's catalogue skill, so adding a dataset later needs a plugin change, not new host code. The host still enforces pacing, size caps and read-only access.
-- **Key:** optional `DATAGOVSG_API_KEY`. Without it the client runs at the anonymous pace.
+  | Group            | Without key                                                         | With key |
+  | ---------------- | ------------------------------------------------------------------- | -------- |
+  | Real-time feeds  | 2.5 s                                                               | 0.4 s    |
+  | Datastore search | 3 s                                                                 | 0.6 s    |
+  | Downloads        | 12 s (also documented as 5 a minute; one patient retry after a 429) | 12 s     |
+  | DataMall         | 0.2 s                                                               | 0.2 s    |
 
-### Plugin
+- **Caches:** in memory, with in-flight sharing and failures never cached.
+  - Forecast 10 minutes (24-hour 30, 4-day 60).
+  - Rain 3 minutes.
+  - PSI, PM2.5 and UV 15 minutes.
+  - Alerts 2 minutes.
+  - Carpark lots 1 minute.
+  - Bus arrivals 20 seconds.
+  - Bus stops and routes, holidays, carpark reference and camera layers daily.
+  - Hawker closures 6 hours.
+- **Reducers** (`datagov.ts`, `datamall.ts`, `carparks.ts`) turn each feed into a compact answer. Every reading carries `observedAt`, `ageMinutes` and `stale`, and every answer ends with a source line. Raw carpark, rainfall and bus route payloads never reach the model.
+- **Tools** in the new `singapore` domain (prefixes `sg_` and `lta_`), all in `readOperations`:
 
-The `singapore` plugin package (`plugins/singapore`):
+  | Tool                                                                 | Returns                                                                                                              |
+  | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+  | `sg_weather(region?, outlook?)`                                      | 2-hour forecast areas grouped by region, 24-hour periods, rain falling now; optionally the 4-day outlook             |
+  | `sg_air(region?)`                                                    | 24-hour PSI and band, 1-hour PM2.5 and band, UV (07:00–19:00), worst heat stress per region                          |
+  | `sg_alerts(region?)`                                                 | PUB flood alerts, lightning in Singapore in the last 30 minutes, heat stress above Low                               |
+  | `sg_carparks(query/codes/region, limit?)`                            | HDB, JTC and URA reference data joined with live lots, including mall carparks when DataMall is configured. No rates |
+  | `sg_holidays(from?, to?)`                                            | Gazetted public holidays, with the last published date                                                               |
+  | `sg_hawker_closures(query?, region?, from?, to?)`                    | Cleaning and repair closures that overlap the range; for a query, the next closure of open centres                   |
+  | `sg_cameras(query?, region?, kind?)`                                 | Red-light and fixed speed cameras; laser or mobile sites on request                                                  |
+  | `sg_dataset(dataset, filters?, fields?, sort?, q?, limit?, offset?)` | A paced datastore search on a CSV dataset the catalogue skill names                                                  |
+  | `lta_bus_arrival(stop, service?)`                                    | The next three buses per service, or first and last bus times when nothing runs                                      |
+  | `lta_bus_stops(query)`                                               | Bus stop codes by description, road or code                                                                          |
+  | `lta_train_alerts()`                                                 | MRT/LRT status, affected segments, free bus and shuttle arrangements, LTA messages                                   |
+  | `lta_traffic(query?)`                                                | Current traffic incidents, optionally by road or expressway                                                          |
 
-- **Agent:** `singapore/sgdata`, a `findings/v1` agent for multi-step questions, such as carpark comparisons or holiday planning.
-- **Skills:**
-  - **weather and air:** feeds, the region table, PSI bands (0–50 good, 51–100 moderate, 101–200 unhealthy, 201–300 very unhealthy, above 300 hazardous), heat-stress bands, and staleness rules;
-  - **catalogue:** the enabled datasets with IDs, fields, query recipes and caveats. It is generated from this document's scope and the [catalogue](singapore-open-data-catalogue.md);
-  - **parking:** carpark sources, free and night parking rules, camera layers;
-  - **attribution:** how to name sources in answers, plus the licence notice.
-- **Registry:** an entry with the content hash and tool grants.
-- **Coordinator access:** quick weather and air questions should not pay for an extra agent call. The coordinator keeps the conditions and outlook tools; heavier questions go to the agent. This is decided by the registry's `delegated` list.
+- **Availability:** `sg_` tools are always offered, because data.gov.sg works without a key. `lta_` tools are offered only when `LTA_DATAMALL_ACCOUNT_KEY` is set. A throttled provider returns `{status: "busy", retryAfterSeconds}` instead of failing the turn.
+- **Dataset access:** `sg_dataset` accepts any `d_` dataset ID on the fixed host. Which datasets Chief uses is decided by the plugin's catalogue skill, so enabling a CSV dataset later is a plugin change, not host code.
+
+### Plugin (`plugins/singapore`)
+
+There are two agents, because an agent appears in Chief's catalogue only when all of its tools are available. The DataMall agent therefore stays hidden until its key exists.
+
+- **`singapore/local` (alias `singapore`):** the eight `sg_` tools, with the skills `sg-weather`, `sg-places` and `sg-catalogue`.
+- **`singapore/transport` (alias `transport`):** the four `lta_` tools, with the skill `sg-transport`.
+- Both use `findings/v1`, the fast tier and low effort.
+- **Delegation:** the registry lists every `sg_` and `lta_` tool as `delegated`, so Chief does not see them. Chief briefs an agent with `agent_run`, including the owner's region and saved stop or carpark codes from its explicit memories. This matches every other Chief domain. Each question costs one extra cheap model call.
 
 ### Proactive use
 
-- **Routines, no new feature code:** scheduled routines run agent tasks, for example "every weekday at 7:30, tell me if rain or haze is expected in the East". Background steps skip the tool picker and get domains only from the deterministic word cues in `src/tool-domains.ts` (see [context management](context-management.md)). The new domain therefore needs cue words (weather, rain, haze, PSI, carpark, parking, public holiday, hawker) in `CUES`; otherwise a routine has to load the tools with an extra step. Each run costs model calls.
-- **Deterministic alerts, later:** alerts without model calls, modelled on the stock monitor. Examples: a flood alert in a saved region, PSI crossing 100 or 200, a favourite hawker centre closing this week. These need tables for dedupe and settings, so a migration and an operator rollout.
+- **Routines, no new feature code:** scheduled routines run agent tasks, for example "every weekday at 7:30, tell me if rain or haze is expected in the East". `agent_run` is a core tool and the catalogue is always in context, so a routine can delegate. The domain also has cue words (weather, rain, haze, PSI, carpark, bus, MRT, traffic, public holiday, hawker) in `CUES` for background steps, which skip the picker.
+- **Deterministic alerts, later:** examples include a flood alert in a saved region, PSI crossing 100 or 200, an MRT disruption, or a favourite hawker centre closing. They need tables for dedupe and settings, so a migration and an operator rollout.
 
 ## Release path
 
-- **Automatic release:** host client, tools, plugin and tests with no key: no migration and no Compose change.
-- **Operator rollout:** adding `DATAGOVSG_API_KEY` (and later `LTA_DATAMALL_ACCOUNT_KEY`) changes the gateway environment list in `compose.yaml`. That needs the reviewed operator rollout ([cloud development](cloud-development.md)). The keys live only in the production environment, never in the repository, logs or PRs.
-- **Picker and cues:** the new domain needs an entry in `config/tool-picker.json` and cue words in `CUES` in `src/tool-domains.ts`. Changing the picker config requires a manual `npm run eval:picker` run. Existing eval fixtures that treat weather questions as web search must be updated.
+1. **Code release (automatic):** host client, tools, plugin, picker entry, eval fixtures and tests. No migration and no Compose change. In production, data.gov.sg tools then run at the anonymous pace, and DataMall tools stay hidden.
+2. **Key rollout (operator):** `DATAGOVSG_API_KEY` and `LTA_DATAMALL_ACCOUNT_KEY` are added to the gateway environment list in `compose.yaml` and to the production `.env`, through the reviewed operator procedure ([cloud development](cloud-development.md)). The keys live only in the production environment, never in the repository, logs or PRs.
+3. **Picker eval:** `config/tool-picker.json` gains the `singapore` domain, so `npm run eval:picker` is run by hand and recorded in the journal.
 
 ## Expanding later
 
@@ -143,11 +156,8 @@ The `singapore` plugin package (`plugins/singapore`):
 
 ## Other official sources
 
-- **LTA DataMall** ([issue 270](https://github.com/akhilvuputuri/chief-agent/issues/270)):
-  - bus arrivals, train service alerts, traffic incidents, station crowding;
-  - carpark availability across HDB, URA and mall carparks with coordinates;
-  - PUB flood alerts with severity and an alert radius.
-  - The ERP rates API was removed in 2024.
+- **LTA DataMall** ([issue 270](https://github.com/akhilvuputuri/chief-agent/issues/270)): bus arrivals, stops and routes, train service alerts, traffic incidents and carpark lots are in phase 1. The full live-checked API list is in the [DataMall catalogue](lta-datamall-catalogue.md). The ERP rates API was removed in 2024.
+- **LTA Extended OBU Library:** a native Android/iOS SDK. It talks Bluetooth to a vehicle's ERP 2.0 on-board unit and reports ERP and parking charges, card balance and traffic messages. A server cannot use it. It would need a companion phone app relaying events to Chief, which is not planned.
 - **NLB Open Web API:**
   - read-only discovery: physical-book availability per copy and branch, reservation queue length, new arrivals, branch opening hours and closures, recommendations;
   - no borrowing, holds or patron accounts.
