@@ -280,6 +280,7 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
 3. **Prove it on EC2.**
    - IAM negative tests.
    - Measure boot to `hello`, warm start to `hello`, the stop/start cycle, the orphan sweep and the trust reset with the `echo` profile.
+   - Measured on 19 October, apart from retention, which is still being watched ([journal 91](journey/91-boxed-subagents.md#phase-3-on-ec2--19-october-2026)). `LaunchTime` changes on every start; the identity document's `pendingTime` was not observed, so it is still not checked.
 4. **Coding on boxes.**
    - Hooks extracted, warm reuse, `coding_status` box view, steering.
    - Canary jobs on EC2, then switch coding to EC2. No CodeBuild fallback (owner decision, 19 October).

@@ -5,7 +5,7 @@
  * the boxes.
  *
  *   node dist/boxes/probe.js spawn <profile> <request-key>
- *   node dist/boxes/probe.js delegate <box-id> <request-key> [--wait] [--hostile] [--inspect] [--probe] <text>
+ *   node dist/boxes/probe.js delegate <box-id> <request-key> [--wait] [--hostile] [--inspect] [--probe] [--] <text>
  *   node dist/boxes/probe.js steer <box-id> <task-id> <request-key> <text>
  *   node dist/boxes/probe.js status <box-id>
  *   node dist/boxes/probe.js timings <box-id>

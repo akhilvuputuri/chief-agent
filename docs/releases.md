@@ -1,3 +1,21 @@
+## Deployed `a229d91` (untagged) — box probe for phase 3, and the phase 3 results
+
+[PR 269](https://github.com/akhilvuputuri/chief-agent/pull/269) merged as `a229d91398fb4312c0909c22b0865cd850648684`.
+
+- **Review.** Exact-head independent review (Claude Opus 5.5) approved `a06900d` after three rounds. The first round blocked an orphan check that could not tell the sweep from the instance powering itself off. Devin's two findings were fixed, and hosted CI passed.
+- **Release.** The [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39287014208) succeeded, and the host ran `a229d91` with `dist/boxes/probe-args.js`. The earlier release attempt for `0aadc97` (PR 268, docs) was correctly refused because main had already moved.
+- **What it adds.** An operator probe only: `delegate` flags, `steer` and `orphan`. No gateway behaviour changed.
+- **Phase 3 measured on EC2:**
+  - privileges;
+  - the trust reset, including after a warm start;
+  - steering across a gateway restart, with no duplicated task;
+  - the orphan sweep, confirmed in CloudTrail;
+  - idle stop and warm start (about 24 s);
+  - `LaunchTime` changing on every start.
+- **Still open.** Retention, which is being watched.
+
+[Journal 91](journey/91-boxed-subagents.md#phase-3-on-ec2--19-october-2026).
+
 ## Enabled — boxed sub-agents on in production (configuration only, 19 October)
 
 No new release: production stays on `0e33cfe`.
