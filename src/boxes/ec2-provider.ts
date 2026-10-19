@@ -3,6 +3,7 @@ import {
   DescribeInstanceAttributeCommand,
   DescribeInstancesCommand,
   RunInstancesCommand,
+  type RunInstancesCommandInput,
   StartInstancesCommand,
   StopInstancesCommand,
   TerminateInstancesCommand,
@@ -161,6 +162,33 @@ systemctl enable --now chief-box-agent
 }
 
 /**
+ * The exact RunInstances request for a box. The IAM check builds its legitimate case from
+ * this same function, so it tests what the provider really sends.
+ */
+export function runInstancesInput(
+  request: LaunchRequest,
+  profile: Ec2ProfileSettings,
+): RunInstancesCommandInput {
+  const tags = [
+    { Key: "chief:box", Value: request.boxId },
+    { Key: "chief:env", Value: request.environment },
+  ];
+  return {
+    LaunchTemplate: { LaunchTemplateName: profile.launchTemplate },
+    MinCount: 1,
+    MaxCount: 1,
+    ClientToken: request.clientToken,
+    UserData: Buffer.from(boxUserData(request, profile)).toString("base64"),
+    TagSpecifications: [
+      { ResourceType: "instance", Tags: tags },
+      { ResourceType: "volume", Tags: tags },
+    ],
+  };
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
  * Self-managed EC2 boxes (docs/boxes.md, "EC2 provider"). Instances launch only from the
  * profile's launch template, carry this environment's tags, and are found, described and
  * swept by those tags. The controller's IAM permissions bound every call it can make.
@@ -173,6 +201,9 @@ export class Ec2BoxProvider implements BoxProvider {
     private client: Pick<EC2Client, "send">,
     private environment: string,
     private settings: Ec2Settings,
+    /** Retries for attribute reads that EC2 has not caught up with yet. */
+    private attempts = 4,
+    private backoffMs = 2000,
   ) {
     this.certificate =
       settings.identityCertificate ?? AP_SOUTHEAST_1_IDENTITY_CERT;
@@ -188,53 +219,53 @@ export class Ec2BoxProvider implements BoxProvider {
     if (request.environment !== this.environment)
       throw new Error("Box launch is for another environment");
     const profile = this.profile(request.profile);
-    const tags = [
-      { Key: "chief:box", Value: request.boxId },
-      { Key: "chief:env", Value: this.environment },
-    ];
     const result = await this.client.send(
-      new RunInstancesCommand({
-        LaunchTemplate: { LaunchTemplateName: profile.launchTemplate },
-        MinCount: 1,
-        MaxCount: 1,
-        ClientToken: request.clientToken,
-        UserData: Buffer.from(boxUserData(request, profile)).toString("base64"),
-        TagSpecifications: [
-          { ResourceType: "instance", Tags: tags },
-          { ResourceType: "volume", Tags: tags },
-        ],
-      }),
+      new RunInstancesCommand(runInstancesInput(request, profile)),
     );
     const id = result.Instances?.[0]?.InstanceId;
     if (!id) throw new Error("EC2 returned no instance");
-    await this.checkAttributes(id);
+    await this.refuseUnsafe(id);
     return id;
   }
 
+  /** Waits out EC2's eventual consistency right after a launch. */
+  private async attribute(id: string, attribute: string) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.client.send(
+          new DescribeInstanceAttributeCommand({
+            InstanceId: id,
+            Attribute: attribute as any,
+          }),
+        );
+      } catch (error) {
+        const notYet =
+          (error as { name?: string })?.name === "InvalidInstanceID.NotFound";
+        if (!notYet || attempt >= this.attempts) throw error;
+        await sleep(this.backoffMs * (attempt + 1));
+      }
+    }
+  }
+
   /**
-   * IAM cannot constrain termination protection or shutdown behaviour at launch, so they
-   * are read back: a box that could not be terminated, or would only stop at its hard
-   * maximum, is refused (docs/boxes.md, "Residual risk").
+   * IAM cannot constrain termination protection, stop protection or shutdown behaviour at
+   * launch, so they are read back before a box is ever recorded: one that could not be
+   * terminated or stopped, or would only stop at its hard maximum, is ended and refused.
+   * Both launch and adoption by search go through this check, so a refused instance is
+   * never adopted; an unresolved launch is held for an operator by the reconciler.
    */
-  private async checkAttributes(id: string) {
-    const protection = await this.client.send(
-      new DescribeInstanceAttributeCommand({
-        InstanceId: id,
-        Attribute: "disableApiTermination",
-      }),
-    );
-    const shutdown = await this.client.send(
-      new DescribeInstanceAttributeCommand({
-        InstanceId: id,
-        Attribute: "instanceInitiatedShutdownBehavior",
-      }),
+  private async refuseUnsafe(id: string) {
+    const protection = await this.attribute(id, "disableApiTermination");
+    const stop = await this.attribute(id, "disableApiStop");
+    const shutdown = await this.attribute(
+      id,
+      "instanceInitiatedShutdownBehavior",
     );
     if (
       protection.DisableApiTermination?.Value === true ||
+      stop.DisableApiStop?.Value === true ||
       shutdown.InstanceInitiatedShutdownBehavior?.Value !== "terminate"
     ) {
-      // End it before reporting failure, so the reconciler's search cannot adopt it; an
-      // unresolved launch is then held for an operator.
       await this.client
         .send(new TerminateInstancesCommand({ InstanceIds: [id] }))
         .catch(() => {});
@@ -266,7 +297,10 @@ export class Ec2BoxProvider implements BoxProvider {
       { Name: "tag:chief:env", Values: [this.environment] },
       { Name: "instance-state-name", Values: live },
     ]);
-    return found[0]?.InstanceId;
+    const id = found[0]?.InstanceId;
+    // A resource found after an uncertain launch is checked exactly as a launch would be.
+    if (id) await this.refuseUnsafe(id);
+    return id;
   }
 
   async describe(id: string): Promise<ProviderState> {
@@ -336,9 +370,8 @@ export class Ec2BoxProvider implements BoxProvider {
       const key = createPublicKey(this.certificate);
       const bytes = Buffer.from(document);
       const sig = Buffer.from(signature.replace(/\s+/g, ""), "base64");
-      // AWS documents SHA-256; SHA-1 is accepted until the EC2 proof pins which one is used.
-      const signed =
-        verify("sha256", bytes, key, sig) || verify("sha1", bytes, key, sig);
+      // AWS's base64 identity signature is SHA-256 with RSA over the exact document bytes.
+      const signed = verify("sha256", bytes, key, sig);
       if (!signed) return false;
       const identity = JSON.parse(document) as Record<string, unknown>;
       return (

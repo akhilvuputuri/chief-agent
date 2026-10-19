@@ -57,7 +57,7 @@ Box (EC2 instance; a local container in development)
 - **Box:** one compute lifetime, bound to exactly **one job, owner and repository**. Boxes are never reused across jobs. On EC2 a box can survive stop and start cycles with its disk intact.
 - **Profile:** the image, runtime, instance size, egress policy, TTLs, concurrency and host hooks for one kind of work.
 - **Task:** one delegated unit of work inside a box. A coding round is a task: planning, implementation, a feedback round or a rebase.
-- **Box agent:** a small supervisor installed outside Docker, in root-owned read-only locations, from a pinned and checksum-verified artifact. It holds the box credential, long-polls the host, creates and destroys task containers, enforces the hard lifetime and streams events.
+- **Box agent:** a small supervisor installed outside Docker, in root-owned read-only locations, taken from the digest-pinned worker image. It holds the box credential, long-polls the host, creates and destroys task containers, enforces the hard lifetime and streams events.
 - **Task container:** a fresh container per task from the digest-pinned worker image. It runs as UID 1000 with:
   - `no-new-privileges`, all capabilities dropped and the default seccomp profile;
   - a read-only root filesystem;
@@ -204,7 +204,7 @@ Starting a box creates infrastructure and spends money. `agent_run` is classed a
   - encrypted gp3 root with delete-on-termination;
   - `InstanceInitiatedShutdownBehavior=terminate`;
   - tag specifications.
-- **Bootstrap script.** First boot installs Docker and the box agent (pinned and checksum-verified), then pulls the digest-pinned worker image from public GHCR. Warm starts reuse all three. Stopped boxes resume with whatever packages they had, so patching happens through retention limits and, later, a baked AMI.
+- **Bootstrap script.** First boot installs Docker from Amazon Linux's signed package repository (its version follows the AMI release, which resolves to the latest Amazon Linux 2023), pulls the digest-pinned worker image from public GHCR, and takes the box agent and its Node runtime from that image. Warm starts reuse all of it. Stopped boxes resume with whatever packages they had, so patching happens through retention limits and, later, a baked AMI.
 - **Controller IAM.** A launch-template condition alone does not stop a caller from overriding the template's parameters in `RunInstances`, so each resource type is constrained separately:
 
   | Resource or action                                                  | Allowed only when                                                                                                                                                                                                                                                                                                                                    |
@@ -224,7 +224,8 @@ Starting a box creates infrastructure and spends money. `agent_run` is classed a
   - There is no `ModifyInstanceAttribute`, so it cannot change the instance type, security groups, shutdown behaviour or volume deletion.
   - Phase 3 includes negative tests: every override must fail with `UnauthorizedOperation`, including instance type, image, IMDS options, key pair, security group, subnet, unencrypted or oversized volume, and extra tags.
 
-  - **Residual risk.** No condition key is known for `DisableApiTermination`, `DisableApiStop` or `InstanceInitiatedShutdownBehavior`; phase 3 checks this. If none exists, a compromised controller could launch a box that the sweep cannot terminate, or that only stops at its hard maximum. The reconciler therefore reads these attributes with `DescribeInstanceAttribute` (read-only) right after launch, and holds and alerts on any mismatch.
+  - **Residual risk.** No condition key is known for `DisableApiTermination`, `DisableApiStop` or `InstanceInitiatedShutdownBehavior`; phase 3 checks this. If none exists, a compromised controller could launch a box that the sweep cannot terminate, or that only stops at its hard maximum. The provider therefore reads `disableApiTermination`, `disableApiStop` and `instanceInitiatedShutdownBehavior` back after launch and when it finds an instance after an uncertain launch, retrying while EC2 catches up. An unsafe instance is terminated and never recorded, and the reconciler then holds the box after the launch timeout ("Launch outcome unknown").
+  - **Also not bounded by IAM:** `MaxCount` and extra volumes in one launch. Only the account's vCPU quota limits a compromised controller there; the provider itself always launches one instance with the template's single volume.
 
 - **Sweep.** Each reconciler pass lists the instances and volumes tagged for this environment. It terminates instances, and deletes leftover volumes, that no live box row owns or that are past their limits.
 - **Quotas.** Check the account's on-demand vCPU quota for standard instances in `ap-southeast-1` before enabling concurrency above 1.
@@ -406,7 +407,7 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
     - takes the agent and its Node runtime from the digest-pinned worker image;
     - adds `DOCKER-USER` rules that keep task containers away from the instance metadata service;
     - runs the agent as a root systemd service.
-  - **Identity.** The agent reads the instance identity document and its signature through IMDSv2. The host verifies them with AWS's pinned regional certificate (valid until 2029-04-28) against the recorded instance, account and region. Verification never throws, so a bad proof is refused, not retried. SHA-256 is expected; SHA-1 is accepted until the EC2 proof shows which one AWS uses.
+  - **Identity.** The agent reads the instance identity document and its signature through IMDSv2. The host verifies them with AWS's pinned regional certificate (valid until 2029-04-28) against the recorded instance, account and region. Verification never throws, so a bad proof is refused, not retried. The signature is SHA-256 with RSA, as AWS documents. The pinned certificate is AWS's 1024-bit RSA one for this path; the stronger `/rsa2048` PKCS#7 path is a possible later upgrade.
   - **`deploy/boxes/boxes.json`.** The CloudFormation stack: a security group with no inbound rules, two launch templates and the controller's managed policy, as in the IAM table above.
   - **`deploy/boxes/README.md`.** The owner's runbook.
   - **`src/boxes/iam-check.ts`.** Checks the controller's credentials with `DryRun` launches: the template launch must be allowed, and 15 overrides must be refused.

@@ -283,3 +283,17 @@ The EC2 provider, the first-boot script, identity verification, the CloudFormati
 - The template keeps boxes closed and the controller narrow.
 - The IAM check classifies every outcome correctly.
 - A task flooding questions is stopped once, with a clear reason.
+
+**Review of `d111769` (Claude Opus 5.5): changes requested.** The blocking finding was that the IAM check never tagged the volume, so it did not send the request the provider sends. Its "allowed" case would have been refused, and refusals could pass for the wrong reason. The check now builds its legitimate case from the provider's own request function, with two more cases for a wrong or missing volume tag and two for network overrides.
+
+Also adopted:
+
+- **Metadata errors:** a throttled or failed metadata read now throws and is retried. Before, its error page was sent as proof, refused, and the box powered itself off.
+- **Attribute check:**
+  - The read-back now retries while EC2 catches up after a launch.
+  - It also runs when an instance is found after an uncertain launch, so a refused instance is never adopted.
+  - It now also checks `disableApiStop`.
+- **Signature:** only SHA-256 is accepted. AWS's documentation confirms SHA-256 for this signature, and the pinned certificate matches AWS's published one.
+- **Tests:** the identity tests now use a real X.509 certificate and check that the pinned certificate parses.
+- **Inconclusive cases:** these no longer fail the IAM check, matching the runbook, and the runbook checks both launch templates.
+- **Docs:** they now state that Docker comes from Amazon Linux's signed repository rather than a pinned artifact, and they name the limits IAM cannot bound (`MaxCount` and extra volumes).

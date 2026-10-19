@@ -5,13 +5,15 @@
  *
  *   node dist/boxes/iam-check.js <launch-template-name> <environment> [region]
  *
- * The legitimate launch must be allowed; every override must be refused.
+ * The legitimate launch must be allowed; every override must be refused. A case that AWS
+ * rejects before checking permissions is reported as inconclusive, never as a pass.
  */
 import {
   EC2Client,
   RunInstancesCommand,
   type RunInstancesCommandInput,
 } from "@aws-sdk/client-ec2";
+import { runInstancesInput } from "./ec2-provider.js";
 
 export type IamCase = {
   name: string;
@@ -19,138 +21,92 @@ export type IamCase = {
   input: RunInstancesCommandInput;
 };
 
+type Tag = { Key: string; Value: string };
+
 export function iamCases(template: string, environment: string): IamCase[] {
-  const tags = (extra: { Key: string; Value: string }[] = []) => [
-    {
-      ResourceType: "instance" as const,
-      Tags: [
-        { Key: "chief:box", Value: "00000000-0000-4000-8000-000000000000" },
-        { Key: "chief:env", Value: environment },
-        ...extra,
-      ],
-    },
-  ];
+  const boxId = "00000000-0000-4000-8000-000000000000";
+  // The legitimate request is exactly what the provider sends, plus DryRun.
   const base: RunInstancesCommandInput = {
+    ...runInstancesInput(
+      {
+        boxId,
+        clientToken: boxId,
+        profile: "check",
+        image: `ghcr.io/akhilvuputuri/chief-agent-coding@sha256:${"0".repeat(64)}`,
+        environment,
+        bootstrap: {
+          origin: "https://iam-check.invalid",
+          boxId,
+          secret: "c".repeat(43),
+        },
+      },
+      { launchTemplate: template },
+    ),
     DryRun: true,
-    MinCount: 1,
-    MaxCount: 1,
-    LaunchTemplate: { LaunchTemplateName: template },
-    TagSpecifications: tags(),
   };
+  const own: Tag[] = [
+    { Key: "chief:box", Value: boxId },
+    { Key: "chief:env", Value: environment },
+  ];
+  const other: Tag[] = [
+    { Key: "chief:box", Value: boxId },
+    { Key: "chief:env", Value: `${environment}-other` },
+  ];
+  const tags = (instance: Tag[], volume: Tag[] = instance) => [
+    { ResourceType: "instance" as const, Tags: instance },
+    { ResourceType: "volume" as const, Tags: volume },
+  ];
+  const with_ = (
+    name: string,
+    input: Partial<RunInstancesCommandInput>,
+  ): IamCase => ({ name, expect: "refused", input: { ...base, ...input } });
   return [
     { name: "launch from the template", expect: "allowed", input: base },
-    {
-      name: "a larger instance type",
-      expect: "refused",
-      input: { ...base, InstanceType: "m7i.16xlarge" },
-    },
-    {
-      name: "another image",
-      expect: "refused",
-      // A Canonical-owned image: anything not owned by Amazon must be refused.
-      input: { ...base, ImageId: "ami-0dad20bd1b9c8c004" },
-    },
-    {
-      name: "optional metadata tokens",
-      expect: "refused",
-      input: { ...base, MetadataOptions: { HttpTokens: "optional" } },
-    },
-    {
-      name: "a higher metadata hop limit",
-      expect: "refused",
-      input: { ...base, MetadataOptions: { HttpPutResponseHopLimit: 2 } },
-    },
-    {
-      name: "metadata tags",
-      expect: "refused",
-      input: { ...base, MetadataOptions: { InstanceMetadataTags: "enabled" } },
-    },
-    {
-      name: "a key pair",
-      expect: "refused",
-      input: { ...base, KeyName: "chief-box-check" },
-    },
-    {
-      name: "an unencrypted volume",
-      expect: "refused",
-      input: {
-        ...base,
-        BlockDeviceMappings: [
-          {
-            DeviceName: "/dev/xvda",
-            Ebs: { Encrypted: false, VolumeSize: 20 },
-          },
-        ],
-      },
-    },
-    {
-      name: "an oversized volume",
-      expect: "refused",
-      input: {
-        ...base,
-        BlockDeviceMappings: [
-          {
-            DeviceName: "/dev/xvda",
-            Ebs: { Encrypted: true, VolumeSize: 1000 },
-          },
-        ],
-      },
-    },
-    {
-      name: "spot capacity",
-      expect: "refused",
-      input: { ...base, InstanceMarketOptions: { MarketType: "spot" } },
-    },
-    {
-      name: "dedicated tenancy",
-      expect: "refused",
-      input: { ...base, Placement: { Tenancy: "dedicated" } },
-    },
-    {
-      name: "an instance profile",
-      expect: "refused",
-      input: { ...base, IamInstanceProfile: { Name: "chief-box-check" } },
-    },
-    {
-      name: "another environment's tag",
-      expect: "refused",
-      input: {
-        ...base,
-        TagSpecifications: [
-          {
-            ResourceType: "instance",
-            Tags: [
-              {
-                Key: "chief:box",
-                Value: "00000000-0000-4000-8000-000000000000",
-              },
-              { Key: "chief:env", Value: `${environment}-other` },
-            ],
-          },
-        ],
-      },
-    },
-    {
-      name: "an extra tag",
-      expect: "refused",
-      input: {
-        ...base,
-        TagSpecifications: tags([{ Key: "owner", Value: "x" }]),
-      },
-    },
-    {
-      name: "no box tag",
-      expect: "refused",
-      input: {
-        ...base,
-        TagSpecifications: [
-          {
-            ResourceType: "instance",
-            Tags: [{ Key: "chief:env", Value: environment }],
-          },
-        ],
-      },
-    },
+    with_("a larger instance type", { InstanceType: "m7i.16xlarge" }),
+    // A Canonical-owned image: anything not owned by Amazon must be refused.
+    with_("another image", { ImageId: "ami-0dad20bd1b9c8c004" }),
+    with_("optional metadata tokens", {
+      MetadataOptions: { HttpTokens: "optional" },
+    }),
+    with_("a higher metadata hop limit", {
+      MetadataOptions: { HttpPutResponseHopLimit: 2 },
+    }),
+    with_("metadata tags", {
+      MetadataOptions: { InstanceMetadataTags: "enabled" },
+    }),
+    with_("a key pair", { KeyName: "chief-box-check" }),
+    with_("an unencrypted volume", {
+      BlockDeviceMappings: [
+        { DeviceName: "/dev/xvda", Ebs: { Encrypted: false, VolumeSize: 20 } },
+      ],
+    }),
+    with_("an oversized volume", {
+      BlockDeviceMappings: [
+        { DeviceName: "/dev/xvda", Ebs: { Encrypted: true, VolumeSize: 1000 } },
+      ],
+    }),
+    with_("spot capacity", { InstanceMarketOptions: { MarketType: "spot" } }),
+    with_("dedicated tenancy", { Placement: { Tenancy: "dedicated" } }),
+    with_("an instance profile", {
+      IamInstanceProfile: { Name: "chief-box-check" },
+    }),
+    with_("another security group", {
+      SecurityGroupIds: ["sg-00000000000000000"],
+    }),
+    with_("another subnet", { SubnetId: "subnet-00000000000000000" }),
+    with_("another environment's tag", { TagSpecifications: tags(other) }),
+    with_("an extra tag", {
+      TagSpecifications: tags([...own, { Key: "owner", Value: "x" }]),
+    }),
+    with_("no box tag", {
+      TagSpecifications: tags([{ Key: "chief:env", Value: environment }]),
+    }),
+    with_("an untagged volume", {
+      TagSpecifications: [{ ResourceType: "instance", Tags: own }],
+    }),
+    with_("a volume tagged for another environment", {
+      TagSpecifications: tags(own, other),
+    }),
     {
       name: "no launch template",
       expect: "refused",
@@ -161,7 +117,7 @@ export function iamCases(template: string, environment: string): IamCase[] {
         ImageId:
           "resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64",
         InstanceType: "t3.small",
-        TagSpecifications: tags(),
+        TagSpecifications: tags(own),
       },
     },
   ];
@@ -175,6 +131,12 @@ export function outcome(error: unknown): string {
   // Anything else (e.g. a validation error before authorisation) is reported by name, so
   // the operator can tell it apart from a real refusal.
   return `other (${name ?? "unknown error"})`;
+}
+
+/** PASS when the answer matches, INCONCLUSIVE when AWS never reached authorisation. */
+export function verdict(result: { expect: string; got: string }) {
+  if (result.got === result.expect) return "PASS";
+  return result.got.startsWith("other") ? "INCONCLUSIVE" : "FAIL";
 }
 
 export async function runIamCheck(
@@ -210,13 +172,16 @@ if (process.argv[1]?.endsWith("iam-check.js")) {
     template,
     environment,
   );
-  let failed = 0;
+  const counts = { PASS: 0, FAIL: 0, INCONCLUSIVE: 0 };
   for (const r of results) {
-    const ok = r.got === r.expect;
-    if (!ok) failed++;
+    const label = verdict(r);
+    counts[label]++;
     process.stdout.write(
-      `${ok ? "PASS" : "FAIL"}  ${r.name}: expected ${r.expect}, got ${r.got}\n`,
+      `${label}  ${r.name}: expected ${r.expect}, got ${r.got}\n`,
     );
   }
-  process.exit(failed ? 1 : 0);
+  process.stdout.write(
+    `${counts.PASS} passed, ${counts.FAIL} failed, ${counts.INCONCLUSIVE} inconclusive\n`,
+  );
+  process.exit(counts.FAIL ? 1 : 0);
 }

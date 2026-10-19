@@ -1,14 +1,23 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { generateKeyPairSync, sign } from "node:crypto";
+import { createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { readFile } from "node:fs/promises";
 import {
   AP_SOUTHEAST_1_IDENTITY_CERT,
   Ec2BoxProvider,
   boxUserData,
+  runInstancesInput,
 } from "../src/boxes/ec2-provider.js";
-import { iamCases, outcome, runIamCheck } from "../src/boxes/iam-check.js";
+import {
+  iamCases,
+  outcome,
+  runIamCheck,
+  verdict,
+} from "../src/boxes/iam-check.js";
 import type { LaunchRequest } from "../src/boxes/provider.js";
 
 const boxId = "11111111-1111-4111-8111-111111111111";
@@ -98,17 +107,54 @@ const settings = {
   profiles: { echo: { launchTemplate: "chief-box-prod-echo" } },
 };
 
-test("a launch uses the profile's template, an idempotent token, tags and checked attributes", async () => {
-  const safeAttributes = (input: any) =>
-    input.Attribute === "disableApiTermination"
-      ? { DisableApiTermination: { Value: false } }
+const safeAttributes = (input: any) =>
+  input.Attribute === "disableApiTermination"
+    ? { DisableApiTermination: { Value: false } }
+    : input.Attribute === "disableApiStop"
+      ? { DisableApiStop: { Value: false } }
       : { InstanceInitiatedShutdownBehavior: { Value: "terminate" } };
+
+test("a launch uses the profile's template, an idempotent token, tags and checked attributes", async () => {
+  // EC2 is eventually consistent: the first attribute read after launch may not see it.
+  let notYet = true;
   const ec2 = fakeEc2({
     RunInstancesCommand: () => ({ Instances: [{ InstanceId: "i-123" }] }),
-    DescribeInstanceAttributeCommand: safeAttributes,
+    DescribeInstanceAttributeCommand: (input: any) => {
+      if (notYet) {
+        notYet = false;
+        throw Object.assign(new Error("not yet"), {
+          name: "InvalidInstanceID.NotFound",
+        });
+      }
+      return safeAttributes(input);
+    },
   });
-  const provider = new Ec2BoxProvider(ec2.client as any, "prod", settings);
+  const provider = new Ec2BoxProvider(
+    ec2.client as any,
+    "prod",
+    settings,
+    4,
+    1,
+  );
   assert.equal(await provider.launch(request), "i-123");
+  assert.deepEqual(
+    ec2.calls
+      .filter((c) => c.name === "DescribeInstanceAttributeCommand")
+      .map((c) => c.input.Attribute),
+    [
+      "disableApiTermination",
+      "disableApiTermination",
+      "disableApiStop",
+      "instanceInitiatedShutdownBehavior",
+    ],
+  );
+  // The provider's request is the shared one the IAM check also uses.
+  const { UserData: _sent, ...sent } = ec2.calls[0]!.input;
+  const { UserData: _built, ...built } = runInstancesInput(
+    request,
+    settings.profiles.echo,
+  );
+  assert.deepEqual(sent, built);
   const run = ec2.calls[0]!.input;
   assert.deepEqual(run.LaunchTemplate, {
     LaunchTemplateName: "chief-box-prod-echo",
@@ -144,23 +190,32 @@ test("a launch uses the profile's template, an idempotent token, tags and checke
     /another environment/,
   );
 
-  // An instance that could not be terminated, or would only stop, is ended and refused.
-  const unsafe = fakeEc2({
-    RunInstancesCommand: () => ({ Instances: [{ InstanceId: "i-bad" }] }),
-    DescribeInstanceAttributeCommand: (input: any) =>
-      input.Attribute === "disableApiTermination"
-        ? { DisableApiTermination: { Value: false } }
-        : { InstanceInitiatedShutdownBehavior: { Value: "stop" } },
-    TerminateInstancesCommand: () => ({}),
-  });
-  await assert.rejects(
-    new Ec2BoxProvider(unsafe.client as any, "prod", settings).launch(request),
-    /unsafe instance attributes/,
-  );
-  assert.deepEqual(
-    unsafe.calls.find((c) => c.name === "TerminateInstancesCommand")!.input,
-    { InstanceIds: ["i-bad"] },
-  );
+  // Instances that could not be terminated or stopped, or would only stop, are refused,
+  // whether launched or found after an uncertain launch.
+  for (const bad of [
+    { DisableApiTermination: { Value: true } },
+    { DisableApiStop: { Value: true } },
+    { InstanceInitiatedShutdownBehavior: { Value: "stop" } },
+  ]) {
+    const respond = (input: any) => ({ ...safeAttributes(input), ...bad });
+    const unsafe = fakeEc2({
+      RunInstancesCommand: () => ({ Instances: [{ InstanceId: "i-bad" }] }),
+      DescribeInstancesCommand: () => ({
+        Reservations: [{ Instances: [{ InstanceId: "i-bad" }] }],
+      }),
+      DescribeInstanceAttributeCommand: respond,
+      TerminateInstancesCommand: () => ({}),
+    });
+    const p = new Ec2BoxProvider(unsafe.client as any, "prod", settings, 0, 1);
+    await assert.rejects(p.launch(request), /unsafe instance attributes/);
+    await assert.rejects(p.find(boxId), /unsafe instance attributes/);
+    assert.deepEqual(
+      unsafe.calls
+        .filter((c) => c.name === "TerminateInstancesCommand")
+        .map((c) => c.input),
+      [{ InstanceIds: ["i-bad"] }, { InstanceIds: ["i-bad"] }],
+    );
+  }
 });
 
 test("find, describe and list see only this environment's live boxes", async () => {
@@ -244,12 +299,13 @@ test("identity is verified against the signed document, instance, account and re
     }),
     true,
   );
+  // Only SHA-256, as AWS documents for this signature.
   assert.equal(
     await provider.verifyIdentity("i-123", {
       document,
       signature: signed(document, "sha1"),
     }),
-    true,
+    false,
   );
   assert.equal(
     await provider.verifyIdentity("i-999", {
@@ -281,20 +337,11 @@ test("identity is verified against the signed document, instance, account and re
     "x",
   ])
     assert.equal(await provider.verifyIdentity("i-123", malformed), false);
-  // The pinned regional certificate parses.
-  const real = new Ec2BoxProvider(
-    { send: async () => ({}) } as any,
-    "prod",
-    settings,
-  );
+  // The pinned regional certificate is a real RSA certificate.
   assert.equal(
-    await real.verifyIdentity("i-123", {
-      document,
-      signature: signed(document),
-    }),
-    false,
+    createPublicKey(AP_SOUTHEAST_1_IDENTITY_CERT).asymmetricKeyType,
+    "rsa",
   );
-  assert.ok(AP_SOUTHEAST_1_IDENTITY_CERT.includes("BEGIN CERTIFICATE"));
 });
 
 test("the CloudFormation template keeps boxes closed and the controller narrow", async () => {
@@ -408,4 +455,88 @@ test("the IAM check expects one allowed launch and refusals for every override",
     "prod",
   );
   assert.ok(results.every((r) => r.got === r.expect));
+});
+
+test("identity verification works from an X.509 certificate, as AWS publishes it", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "box-cert-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const made = spawnSync("openssl", [
+    "req",
+    "-x509",
+    "-newkey",
+    "rsa:2048",
+    "-nodes",
+    "-days",
+    "1",
+    "-subj",
+    "/CN=box-test",
+    "-keyout",
+    join(dir, "key.pem"),
+    "-out",
+    join(dir, "cert.pem"),
+  ]);
+  assert.equal(made.status, 0, String(made.stderr));
+  const certificate = await readFile(join(dir, "cert.pem"), "utf8");
+  const key = await readFile(join(dir, "key.pem"), "utf8");
+  const provider = new Ec2BoxProvider(
+    { send: async () => ({}) } as any,
+    "prod",
+    {
+      ...settings,
+      identityCertificate: certificate,
+    },
+  );
+  const document = JSON.stringify({
+    instanceId: "i-1",
+    accountId: "123456789012",
+    region: "ap-southeast-1",
+  });
+  const signature = sign("sha256", Buffer.from(document), key).toString(
+    "base64",
+  );
+  assert.equal(
+    await provider.verifyIdentity("i-1", { document, signature }),
+    true,
+  );
+});
+
+test("the IAM check's legitimate case is the provider's request, and its verdicts are honest", () => {
+  const cases = iamCases("chief-box-prod-echo", "prod");
+  const base = cases[0]!.input;
+  const { UserData: _a, DryRun, ...checked } = base;
+  const { UserData: _b, ...real } = runInstancesInput(
+    {
+      ...request,
+      boxId: "00000000-0000-4000-8000-000000000000",
+      clientToken: "00000000-0000-4000-8000-000000000000",
+      bootstrap: {
+        ...request.bootstrap,
+        boxId: "00000000-0000-4000-8000-000000000000",
+      },
+    },
+    { launchTemplate: "chief-box-prod-echo" },
+  );
+  assert.equal(DryRun, true);
+  assert.deepEqual(checked, real);
+  assert.deepEqual(
+    (base.TagSpecifications ?? []).map((t) => t.ResourceType),
+    ["instance", "volume"],
+  );
+  for (const name of [
+    "an untagged volume",
+    "a volume tagged for another environment",
+    "another subnet",
+    "another security group",
+  ])
+    assert.ok(
+      cases.some((c) => c.name === name),
+      name,
+    );
+  assert.equal(verdict({ expect: "refused", got: "refused" }), "PASS");
+  assert.equal(verdict({ expect: "allowed", got: "refused" }), "FAIL");
+  assert.equal(verdict({ expect: "refused", got: "launched" }), "FAIL");
+  assert.equal(
+    verdict({ expect: "refused", got: "other (InvalidAMIID.NotFound)" }),
+    "INCONCLUSIVE",
+  );
 });

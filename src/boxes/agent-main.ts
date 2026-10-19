@@ -41,20 +41,27 @@ const runner =
  */
 async function ec2Identity() {
   const imds = "http://169.254.169.254/latest";
-  const token = await (
+  // A throttled or failed metadata read throws, so hello is retried rather than sending an
+  // error page as proof (which the host would refuse, ending the box).
+  const text = async (response: Response) => {
+    if (!response.ok)
+      throw new Error(`Instance metadata answered ${response.status}`);
+    return response.text();
+  };
+  const token = await text(
     await fetch(`${imds}/api/token`, {
       method: "PUT",
       headers: { "X-aws-ec2-metadata-token-ttl-seconds": "60" },
       signal: AbortSignal.timeout(5000),
-    })
-  ).text();
+    }),
+  );
   const read = async (path: string) =>
-    (
+    text(
       await fetch(`${imds}/dynamic/instance-identity/${path}`, {
         headers: { "X-aws-ec2-metadata-token": token },
         signal: AbortSignal.timeout(5000),
-      })
-    ).text();
+      }),
+    );
   return {
     document: await read("document"),
     signature: await read("signature"),

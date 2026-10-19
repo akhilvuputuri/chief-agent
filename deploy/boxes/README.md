@@ -59,12 +59,12 @@ aws cloudformation describe-stacks --region ap-southeast-1 --stack-name chief-bo
 After the gateway runs a release that contains `dist/boxes/iam-check.js`, check that the controller's own credentials allow only the legitimate launch. Every call is a `DryRun`:
 
 ```bash
-ssh -F <ops>/ssh_config chief-lightsail 'cd /opt/hermes-companion && docker compose exec -T gateway node dist/boxes/iam-check.js chief-box-prod-echo prod'
+ssh -F <ops>/ssh_config chief-lightsail 'cd /opt/hermes-companion && docker compose exec -T gateway node dist/boxes/iam-check.js chief-box-prod-echo prod && docker compose exec -T gateway node dist/boxes/iam-check.js chief-box-prod-coding prod'
 ```
 
 - **Expected result:** one `PASS … allowed` line for the template launch, and `PASS … refused` for every override (instance type, image, metadata options, key pair, volume, spot, tenancy, instance profile, tags, no template).
 - **Any `FAIL`:** stop and review the policy.
-- **An `other (...)` line:** AWS rejected the call before checking permissions, so that case proves nothing yet.
+- **An `INCONCLUSIVE` line:** AWS rejected the call before checking permissions (for example a made-up image or subnet ID), so that case proves nothing either way. Inconclusive cases do not fail the check; review each one.
 
 ## Rollback
 
