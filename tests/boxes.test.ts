@@ -7,6 +7,7 @@ import {
   BoxController,
   BoxCredentialRefused,
   BoxNotReady,
+  NoticeRetry,
   type BoxTimings,
 } from "../src/boxes/controller.js";
 import { FakeBoxProvider } from "../src/boxes/provider.js";
@@ -1250,4 +1251,30 @@ test("notices for an owner who is no longer allowed are suppressed", async (t) =
       .rows[0].delivery,
     "suppressed",
   );
+});
+
+test("a notice the transport definitely refused is retried later", async (t) => {
+  const f = await fixture(t);
+  const box = await f.boxes.spawn("owner", {
+    requestKey: "k",
+    profile: "echo",
+    subject: "s",
+  });
+  await f.db.query(
+    "INSERT INTO box_notices(box_id,notice_key,payload) VALUES($1,'x','{}')",
+    [box.id],
+  );
+  await f.boxes.deliverNotices(async () => {
+    throw new NoticeRetry();
+  });
+  assert.equal(
+    (await f.db.query("SELECT delivery FROM box_notices WHERE notice_key='x'"))
+      .rows[0].delivery,
+    "pending",
+  );
+  const sent: string[] = [];
+  await f.boxes.deliverNotices(async (_user, text) => {
+    sent.push(text);
+  });
+  assert.equal(sent.length, 1);
 });

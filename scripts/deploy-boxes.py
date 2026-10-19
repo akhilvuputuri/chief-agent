@@ -272,8 +272,10 @@ def main():
     with open(LOCK, 'w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         old_release = (LIVE / 'RELEASE').read_bytes()
-        if old_release.decode().strip() == sha:
+        if old_release.decode().strip() == sha and sha not in BASES:
             # This rollout already installed the gateway and migration: only the route remains.
+            if sql('SELECT count(*) FROM runtime_migrations WHERE version=32') != '1':
+                raise RuntimeError('Release matches but migration 032 is not installed; inspect before retrying')
             print(json.dumps({'deployed': sha, 'caddy': install_caddy_route()}))
             return
         if old_release.decode().strip() not in BASES:

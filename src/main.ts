@@ -337,9 +337,12 @@ const responsibilities =
     ? new Responsibilities(db, { gmail, calendar })
     : undefined;
 let boxes: import("./boxes/controller.js").BoxController | undefined;
+let NoticeRetry: typeof import("./boxes/controller.js").NoticeRetry =
+  Error as any;
 if (c.BOXES_RUNTIME === "on") {
   // Loaded only when boxes are on, so a gateway without them pays nothing.
   const { BoxController } = await import("./boxes/controller.js");
+  ({ NoticeRetry } = await import("./boxes/controller.js"));
   const { Ec2BoxProvider } = await import("./boxes/ec2-provider.js");
   const { boxOrigin, boxSettings, loadBoxesFile } =
     await import("./boxes/config.js");
@@ -348,6 +351,12 @@ if (c.BOXES_RUNTIME === "on") {
     throw startupError(
       "STARTUP_BOXES_CONFIG",
       "Boxes need BOX_AUTH_KEY, BOX_AWS_ACCOUNT_ID and CODING_PUBLIC_ORIGIN",
+    );
+  // Box and coding credentials are separate trust domains.
+  if (c.BOX_AUTH_KEY === c.CODING_AUTH_KEY)
+    throw startupError(
+      "STARTUP_BOXES_KEY",
+      "BOX_AUTH_KEY must differ from CODING_AUTH_KEY",
     );
   if (
     !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=32")).rows
@@ -1070,9 +1079,16 @@ const boxTimer = boxes
         );
       void boxes
         .deliverNotices(async (user, text) => {
-          await bot.api.sendMessage(user, text, {
-            link_preview_options: { is_disabled: true },
-          });
+          try {
+            await bot.api.sendMessage(user, text, {
+              link_preview_options: { is_disabled: true },
+            });
+          } catch (error) {
+            // Telegram definitely refused (rate limit): safe to try again later.
+            if ((error as { error_code?: number })?.error_code === 429)
+              throw new NoticeRetry();
+            throw error;
+          }
         })
         .catch((error) =>
           opsLog("boxes.notice_failed", "error", errorFields(error)),

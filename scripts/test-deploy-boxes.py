@@ -324,12 +324,29 @@ class CaddyRouteTests(unittest.TestCase):
                     patch.object(release, 'LOCK', live / 'release.lock'), \
                     patch.object(sys, 'argv', ['deploy-boxes.py', str(live / 'unused.tar'), SHA]), \
                     patch.object(release, 'install_caddy_route', return_value='added') as install, \
+                    patch.object(release, 'sql', return_value='1'), \
                     patch.object(release, 'run') as run, \
                     contextlib.redirect_stdout(io.StringIO()) as output:
                 release.main()
             install.assert_called_once()
             run.assert_not_called()
             self.assertIn('"caddy": "added"', output.getvalue())
+
+    def test_the_caddy_only_path_needs_the_installed_migration_and_never_the_baseline(self):
+        for release_sha, marker, message in [(SHA, '0', 'migration 032 is not installed'),
+                                             (release.BASE, '1', 'Archive|archive|Expected')]:
+            with self.subTest(release_sha=release_sha), tempfile.TemporaryDirectory() as directory:
+                live = pathlib.Path(directory)
+                (live / 'RELEASE').write_text(release_sha + '\n')
+                with patch.object(release, 'LIVE', live), \
+                        patch.object(release, 'LOCK', live / 'release.lock'), \
+                        patch.object(sys, 'argv', ['deploy-boxes.py', str(live / 'missing.tar'), release_sha]), \
+                        patch.object(release, 'install_caddy_route', return_value='added') as install, \
+                        patch.object(release, 'caddy_preflight'), \
+                        patch.object(release, 'sql', return_value=marker):
+                    with self.assertRaisesRegex(RuntimeError, message):
+                        release.main()
+                install.assert_not_called()
 
     def test_the_public_host_is_read_robustly(self):
         for line in ['CODING_PUBLIC_ORIGIN=https://Companion.Example.com',

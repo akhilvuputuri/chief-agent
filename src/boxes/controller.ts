@@ -17,6 +17,9 @@ import {
   type BoxProfile,
 } from "./schema.js";
 
+/** A notice the transport definitely did not send (e.g. rate-limited); it is retried. */
+export class NoticeRetry extends Error {}
+
 /** The channel refuses a caller; the HTTP layer answers 401 without detail. */
 export class BoxCredentialRefused extends Error {}
 /** A live credential arrived before the host can answer it (launch not yet recorded, or
@@ -185,11 +188,13 @@ export class BoxController {
           "UPDATE box_notices SET delivery='sent' WHERE id=$1",
           [notice.id],
         );
-      } catch {
-        await this.db.query(
-          "UPDATE box_notices SET delivery='uncertain' WHERE id=$1",
-          [notice.id],
-        );
+      } catch (error) {
+        // A definite refusal goes back to pending; an unknown outcome is never repeated.
+        await this.db.query("UPDATE box_notices SET delivery=$2 WHERE id=$1", [
+          notice.id,
+          error instanceof NoticeRetry ? "pending" : "uncertain",
+        ]);
+        if (error instanceof NoticeRetry) return;
       }
     }
   }

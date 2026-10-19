@@ -339,3 +339,9 @@ Non-blocking findings, all adopted:
   - The box modules load only when boxes are on.
   - Launch settings, the image digest and the public origin are validated at startup.
   - A second hold gets its own notice.
+
+The re-review of `fc97cef` approved it. Devin then found three more issues, all fixed:
+
+- **Rerun guard.** The Caddy-only rerun path would accept the baseline commit as "already deployed". It now runs only when the release equals the requested commit, that commit is not the baseline, and migration 032 is installed.
+- **Key separation.** `BOX_AUTH_KEY` must differ from `CODING_AUTH_KEY`.
+- **Notice retry.** A notice Telegram definitely refused (rate limit) goes back to pending and is retried. An unknown outcome stays uncertain and is never repeated.
