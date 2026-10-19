@@ -19,7 +19,7 @@ import { researchReads } from "./research-schema.js";
 import { spending, Spending } from "./spending.js";
 import { recordContext } from "./record-context.js";
 import { compactWork } from "./observations.js";
-import { openLoops } from "./open-loops.js";
+import { codingWaitsOnOwner, openLoops } from "./open-loops.js";
 import {
   Execution,
   Stop,
@@ -703,12 +703,7 @@ export class Assistant {
         pendingCoding:
           !background &&
           !!this.availability.coding &&
-          (
-            await this.db.query(
-              "SELECT 1 FROM coding_jobs WHERE user_id=$1 AND state IN ('plan_ready','awaiting_input','paused','pr_ready') LIMIT 1",
-              [user],
-            )
-          ).rows.length > 0,
+          (await codingWaitsOnOwner(this.db, user)),
         recentOperations,
         pendingCalendarApproval: pendingApprovals.calendar === true,
         pendingLibraryApproval: pendingApprovals.library === true,

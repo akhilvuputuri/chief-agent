@@ -159,7 +159,7 @@ const CUES: [ToolDomain, RegExp][] = [
   ],
   [
     "coding",
-    /\b(coding|sandbox|pull requests?|prd|repo(sitory)?|code ?base|fix.*bug|implement.*feature)\b/i,
+    /\b(coding|sandbox|pull requests?|prd|repo(sitory)?|code ?base|fix.*bug|implement.*feature)\b|\b(open|create|raise|make)\b.{0,20}\bprs?\b/i,
   ],
   [
     "research",

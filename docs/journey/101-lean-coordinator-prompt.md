@@ -68,6 +68,8 @@ Independent review (Opus 5.5, commit `ed74f5c`) requested changes:
   - A continuity assertion that passed trivially was hardened.
   - Two docs were stale: operational logs and cost controls.
 
+Delta review (`94733b2`) found one new medium bug. The `pendingCoding` query treated every `pr_ready` or paused job as waiting, including merged and deployed ones. That would have loaded coding tools on nearly every turn. It now shares the open-loops definition (`CODING_WAITS_ON_OWNER`), with a database test. "Open a PR" also counts as a coding cue again.
+
 The shadow continuity eval was not re-run; the floor now admits older exchanges that the earlier assertions kept out.
 
 ## Verification and outcome

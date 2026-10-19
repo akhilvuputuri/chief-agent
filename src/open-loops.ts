@@ -1,5 +1,23 @@
 import type { Database } from "./db.js";
 
+/** A coding job (alias j) that waits on its owner: one definition for context and tool loading. */
+export const CODING_WAITS_ON_OWNER = `j.updated_at > now() - interval '14 days'
+  AND (j.state IN ('plan_ready','awaiting_input','paused')
+    OR (j.state='pr_ready' AND j.stage IN ('awaiting_merge_approval','manual_review','merge_declined'))
+    OR (j.state='failed' AND j.updated_at > now() - interval '3 days'))`;
+
+/** Whether any of the owner's coding jobs waits on them, so a short reply keeps coding tools. */
+export async function codingWaitsOnOwner(db: Database, user: string) {
+  return (
+    (
+      await db.query(
+        `SELECT 1 FROM coding_jobs j WHERE j.user_id=$1 AND ${CODING_WAITS_ON_OWNER} LIMIT 1`,
+        [user],
+      )
+    ).rows.length > 0
+  );
+}
+
 /**
  * Items that wait on the owner, for the foreground turn context: coding jobs that need the
  * owner (a requirements or merge card, a question, a pause, a failure, a PR stopped for
@@ -43,10 +61,7 @@ export async function openLoops(
                 AND e.payload->>'decision'='revise'
                 AND (e.payload->'requirements'->>'revision')::int = j.revision - 1) AS revise_requested
            FROM coding_jobs j
-           WHERE j.user_id=$1 AND j.updated_at > now() - interval '14 days'
-             AND (j.state IN ('plan_ready','awaiting_input','paused')
-               OR (j.state='pr_ready' AND j.stage IN ('awaiting_merge_approval','manual_review','merge_declined'))
-               OR (j.state='failed' AND j.updated_at > now() - interval '3 days'))
+           WHERE j.user_id=$1 AND ${CODING_WAITS_ON_OWNER}
            ORDER BY j.updated_at DESC LIMIT 5`,
           [user],
         )

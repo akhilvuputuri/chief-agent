@@ -336,6 +336,7 @@ test("a waiting coding job keeps coding tools offered; conversational words no l
     [...selectDomains({ message, ...extra })].sort();
   assert.deepEqual(pick("merge it", { pendingCoding: true }), ["coding"]);
   assert.deepEqual(pick("merge it"), []);
+  assert.deepEqual(pick("open a PR for this"), ["coding"]);
   // Background steps say "Continue the existing task"; that is work, not coding.
   assert.deepEqual(pick("Continue the existing task", { taskBound: true }), [
     "work",
