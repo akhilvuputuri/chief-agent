@@ -587,5 +587,19 @@ test("the committed boxes configuration is valid and its EC2 profiles have launc
     if (profile.provider === "ec2")
       assert.ok(settings.ec2.profiles[name], name);
   assert.throws(() => boxSettings(file, "not-an-account"), /12-digit/);
+  const echo = file.profiles.echo!;
+  for (const bad of [
+    { ...file, profiles: { echo: { ...echo, image: "ghcr.io/x/y:latest" } } },
+    { ...file, ec2: { echo: { ...file.ec2.echo!, taskMemory: "1g; reboot" } } },
+    { ...file, ec2: { echo: { ...file.ec2.echo!, taskCommand: ["$(id)"] } } },
+  ])
+    assert.throws(() => boxesFile.parse(bad));
+  const { boxOrigin } = await import("../src/boxes/config.js");
+  assert.equal(
+    boxOrigin("https://companion.example.com"),
+    "https://companion.example.com",
+  );
+  for (const bad of ["https://x.example.com/", "http://x.example.com", ""])
+    assert.throws(() => boxOrigin(bad), /https origin/);
   assert.throws(() => boxesFile.parse({ ...file, ec2: {} }));
 });

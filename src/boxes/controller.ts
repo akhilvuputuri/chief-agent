@@ -117,6 +117,8 @@ export class BoxController {
     private clock: () => Date = () => new Date(),
     timings: Partial<BoxTimings> = {},
     private ownerInput: OwnerInputCheck = async () => false,
+    /** Whether a user is still an allowed owner; notices to anyone else are suppressed. */
+    private allowed: (user: string) => boolean = () => true,
   ) {
     if (!/^[a-f0-9]{64}$/.test(key))
       throw new Error("Box credential key must be 64 hex characters");
@@ -166,6 +168,14 @@ export class BoxController {
       ).rows[0];
       if (!notice) return;
       const box = (await this.load(notice.box_id))!;
+      // Notices go only to an owner who is still allowed; others are suppressed.
+      if (!this.allowed(box.user_id)) {
+        await this.db.query(
+          "UPDATE box_notices SET delivery='suppressed' WHERE id=$1",
+          [notice.id],
+        );
+        continue;
+      }
       try {
         await send(
           box.user_id,
@@ -1122,7 +1132,7 @@ export class BoxController {
       await this.failTasks(db, box.id, reason, now);
       await this.notice(
         box.id,
-        "held",
+        closing ? "held:closing" : "held",
         { summary: `Box held for an operator: ${reason}` },
         db,
       );

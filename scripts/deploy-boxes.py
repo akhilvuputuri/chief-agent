@@ -25,6 +25,11 @@ IMAGE = 'hermes-companion-gateway'
 MIGRATION = '032_boxes.sql'
 COMPOSE_ANCHOR = b'        "/migrations/031_link_resolution.sql",\n'
 COMPOSE_ADDITION = b'        "-f",\n        "/migrations/032_boxes.sql",\n'
+# The gateway's environment lists every variable explicitly; the box settings join it here.
+ENV_ANCHOR = b'      CODING_RUNTIME: ${CODING_RUNTIME:-off}\n'
+BOXES_ENVIRONMENT = (b'      BOXES_RUNTIME: ${BOXES_RUNTIME:-off}\n'
+                     b'      BOX_AUTH_KEY: ${BOX_AUTH_KEY:-}\n'
+                     b'      BOX_AWS_ACCOUNT_ID: ${BOX_AWS_ACCOUNT_ID:-}\n')
 MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
 CADDYFILE = pathlib.Path('/etc/caddy/Caddyfile')
 # The live site's final catch-all; the box route is inserted just before it.
@@ -114,11 +119,13 @@ def validate_changes(stage):
     if new.keys() - old.keys() != {MIGRATION}:
         raise RuntimeError('Unexpected migration set; only 032 is permitted')
     baseline_compose = (LIVE / 'compose.yaml').read_bytes()
-    if baseline_compose.count(COMPOSE_ANCHOR) != 1 or MIGRATION.encode() in baseline_compose:
+    if (baseline_compose.count(COMPOSE_ANCHOR) != 1 or MIGRATION.encode() in baseline_compose
+            or baseline_compose.count(ENV_ANCHOR) != 1 or b'BOXES_RUNTIME' in baseline_compose):
         raise RuntimeError('Compose baseline does not match the reviewed migration list')
     expected = baseline_compose.replace(COMPOSE_ANCHOR, COMPOSE_ANCHOR + COMPOSE_ADDITION)
+    expected = expected.replace(ENV_ANCHOR, BOXES_ENVIRONMENT + ENV_ANCHOR)
     if (stage / 'compose.yaml').read_bytes() != expected:
-        raise RuntimeError('Unexpected Compose change; only the migration 032 entry is permitted')
+        raise RuntimeError('Unexpected Compose change; only the migration 032 entry and the box settings are permitted')
     if (stage / 'scripts/cloud-release.py').read_bytes() != (LIVE / 'scripts/cloud-release.py').read_bytes():
         raise RuntimeError('Trusted release-handler source changed; requires separate review')
 
@@ -169,49 +176,92 @@ def write_release(content):
         pending.unlink(missing_ok=True)
 
 
-def caddy_reaches_gateway():
-    """A box route answered by the gateway: 401 (boxes on) or the gateway's JSON 404."""
-    origin = dict(line.split('=', 1) for line in (LIVE / '.env').read_text().splitlines()
-                  if line.startswith('CODING_PUBLIC_ORIGIN=')).get('CODING_PUBLIC_ORIGIN', '')
-    if not re.fullmatch(r'https://[a-z0-9.-]+', origin):
+def public_host():
+    """The box origin's host from .env, tolerating quotes, whitespace and a trailing slash."""
+    value = ''
+    for line in (LIVE / '.env').read_text().splitlines():
+        if line.startswith('CODING_PUBLIC_ORIGIN='):
+            value = line.split('=', 1)[1].strip().strip('"').strip("'").strip().rstrip('/').lower()
+    match = re.fullmatch(r'https://([a-z0-9.-]+)', value)
+    if not match:
         raise RuntimeError('CODING_PUBLIC_ORIGIN unavailable for the route check')
+    return match.group(1)
+
+
+def caddy_reaches_gateway():
+    """Through the local Caddy, a box route is answered by the gateway: 401 (boxes on) or
+    the gateway's JSON 404 (boxes off), never Caddy's plain-text 404."""
+    host = public_host()
     probe = subprocess.run(
-        ['curl', '--silent', '--max-time', '10', '--output', '-', '--write-out', '\\n%{http_code}',
-         origin + '/boxes/00000000-0000-4000-8000-000000000000/next?after=0'],
+        ['curl', '--silent', '--max-time', '10', '--resolve', host + ':443:127.0.0.1',
+         '--output', '-', '--write-out', '\\n%{http_code}',
+         'https://' + host + '/boxes/00000000-0000-4000-8000-000000000000/next?after=0'],
         capture_output=True, text=True)
     body, _, code = probe.stdout.rpartition('\n')
     return code == '401' or (code == '404' and body.strip().startswith('{'))
 
 
-def install_caddy_route():
-    """Adds the /boxes/* route before the site's catch-all, validates, reloads, verifies.
-    On any failure the previous Caddyfile is restored and reloaded."""
+def caddy_candidate():
+    """The live Caddyfile with the box route, or None when the route is already present.
+    Refuses a Caddyfile that does not match the reviewed anchor."""
     original = CADDYFILE.read_text()
     if CADDY_ROUTE in original:
-        return 'present'
+        return original, None
     if original.count(CADDY_ANCHOR) != 1 or '/boxes/' in original:
-        raise RuntimeError('Gateway and migration installed; live Caddyfile does not match the reviewed anchor, so the route was not added')
-    candidate = original.replace(CADDY_ANCHOR, CADDY_ROUTE + CADDY_ANCHOR)
-    with tempfile.NamedTemporaryFile('w', suffix='.Caddyfile', delete=False) as staged:
-        staged.write(candidate)
-    staged_path = pathlib.Path(staged.name)
+        raise RuntimeError('live Caddyfile does not match the reviewed anchor')
+    return original, original.replace(CADDY_ANCHOR, CADDY_ROUTE + CADDY_ANCHOR)
+
+
+def validate_caddy(candidate):
+    """Validates beside the live file, so any relative imports resolve as they will live."""
+    staged = CADDYFILE.with_name('.Caddyfile.boxes-candidate')
     try:
-        run(['caddy', 'validate', '--config', str(staged_path), '--adapter', 'caddyfile'])
-        backup = CADDYFILE.with_name('Caddyfile.before-boxes')
-        backup.write_text(original)
+        staged.write_text(candidate)
+        run(['caddy', 'validate', '--config', str(staged), '--adapter', 'caddyfile'])
+    finally:
+        staged.unlink(missing_ok=True)
+
+
+def caddy_preflight():
+    """Checks the Caddy change before anything else changes."""
+    try:
+        _, candidate = caddy_candidate()
+        if candidate is not None:
+            validate_caddy(candidate)
+    except Exception:
+        raise RuntimeError('Caddy route cannot be installed (anchor or validation); nothing was changed. '
+                           'Inspect /etc/caddy/Caddyfile') from None
+
+
+def install_caddy_route():
+    """Adds the /boxes/* route before the site's catch-all, validates, reloads, verifies.
+    On any failure the previous Caddyfile is restored and reloaded. Every error states that
+    the gateway and migration are already installed."""
+    prefix = 'Gateway and migration installed; '
+    try:
+        original, candidate = caddy_candidate()
+    except Exception:
+        raise RuntimeError(prefix + 'live Caddyfile does not match the reviewed anchor, so the route was not added') from None
+    if candidate is None:
+        return 'present'
+    try:
+        validate_caddy(candidate)
+    except Exception:
+        raise RuntimeError(prefix + 'Caddy route failed validation and was not added') from None
+    try:
+        CADDYFILE.with_name('Caddyfile.before-boxes').write_text(original)
+        CADDYFILE.write_text(candidate)
+        run(['systemctl', 'reload', 'caddy'])
+        if not caddy_reaches_gateway():
+            raise RuntimeError('route check failed')
+    except Exception:
         try:
-            CADDYFILE.write_text(candidate)
-            run(['systemctl', 'reload', 'caddy'])
-            if not caddy_reaches_gateway():
-                raise RuntimeError('route check failed')
-        except Exception:
             CADDYFILE.write_text(original)
             run(['systemctl', 'reload', 'caddy'])
-            raise RuntimeError('Gateway and migration installed; Caddy route failed and the previous Caddyfile was restored') from None
-    except subprocess.CalledProcessError:
-        raise RuntimeError('Gateway and migration installed; Caddy route failed validation and was not added') from None
-    finally:
-        staged_path.unlink(missing_ok=True)
+        except Exception:
+            raise RuntimeError(prefix + 'Caddy route failed and restoring the previous Caddyfile also failed; '
+                               'inspect /etc/caddy/Caddyfile and Caddyfile.before-boxes') from None
+        raise RuntimeError(prefix + 'Caddy route failed and the previous Caddyfile was restored') from None
     return 'added'
 
 
@@ -222,8 +272,13 @@ def main():
     with open(LOCK, 'w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         old_release = (LIVE / 'RELEASE').read_bytes()
+        if old_release.decode().strip() == sha:
+            # This rollout already installed the gateway and migration: only the route remains.
+            print(json.dumps({'deployed': sha, 'caddy': install_caddy_route()}))
+            return
         if old_release.decode().strip() not in BASES:
             raise RuntimeError('Box rollout requires the exact documented baseline; reconcile newer releases first')
+        caddy_preflight()
         with tempfile.TemporaryDirectory(prefix='companion-boxes-') as temporary:
             stage, backup = pathlib.Path(temporary) / 'stage', pathlib.Path(temporary) / 'backup'
             stage.mkdir()

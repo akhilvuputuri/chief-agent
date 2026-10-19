@@ -20,21 +20,24 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 SHA = 'a' * 40
 BASE_COMPOSE = ('services:\n  migrate:\n    command:\n      [\n'
                 '        "-f",\n        "/migrations/031_link_resolution.sql",\n'
-                '      ]\n  gateway:\n    read_only: true\n')
+                '      ]\n  gateway:\n    build: .\n    environment:\n'
+                '      CODING_RUNTIME: ${CODING_RUNTIME:-off}\n    read_only: true\n')
 
 
 def candidate_compose(base=BASE_COMPOSE):
     return base.replace(release.COMPOSE_ANCHOR.decode(),
-                        (release.COMPOSE_ANCHOR + release.COMPOSE_ADDITION).decode())
+                        (release.COMPOSE_ANCHOR + release.COMPOSE_ADDITION).decode()).replace(
+        release.ENV_ANCHOR.decode(), (release.BOXES_ENVIRONMENT + release.ENV_ANCHOR).decode())
 
 
 class BoxRolloutTests(unittest.TestCase):
     def test_single_verified_baseline(self):
         self.assertEqual(release.BASES, {release.BASE})
 
-    def test_live_compose_carries_exactly_the_reviewed_entry(self):
+    def test_live_compose_carries_exactly_the_reviewed_entries(self):
         live = (ROOT / 'compose.yaml').read_bytes()
         self.assertEqual(live.count(release.COMPOSE_ANCHOR + release.COMPOSE_ADDITION), 1)
+        self.assertEqual(live.count(release.BOXES_ENVIRONMENT + release.ENV_ANCHOR), 1)
 
     def test_unreviewed_baseline_is_refused(self):
         self.scenario(baseline='b' * 40, expected_error='exact documented baseline')
@@ -42,6 +45,7 @@ class BoxRolloutTests(unittest.TestCase):
     def scenario(self, *, running=0, pending=0, baseline=None, requested_sha=SHA,
                  archive_sha=SHA, changes=None, unsafe=None, health=None,
                  build_failure=False, migration_failure=False, publish_failure=False,
+                 caddy_refused=False,
                  expected_error=None, expected_migration=False):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -119,6 +123,10 @@ class BoxRolloutTests(unittest.TestCase):
                 database['migration32'] = True
                 return ''
 
+            def preflight():
+                if caddy_refused:
+                    raise RuntimeError('Caddy route cannot be installed (anchor or validation); nothing was changed.')
+
             real_publish = release.publish_source
 
             def publish(stage):
@@ -134,6 +142,7 @@ class BoxRolloutTests(unittest.TestCase):
                     patch.object(release, 'LOCK', root / 'release.lock'), \
                     patch.object(sys, 'argv', ['deploy-boxes.py', str(archive_path), requested_sha]), \
                     patch.object(release, 'install_caddy_route', return_value='added'), \
+                    patch.object(release, 'caddy_preflight', side_effect=preflight), \
                     patch.object(release, 'run', side_effect=run), \
                     patch.object(release, 'compose', side_effect=compose), \
                     patch.object(release, 'sql', side_effect=sql), \
@@ -209,6 +218,19 @@ class BoxRolloutTests(unittest.TestCase):
                         correct.replace(release.COMPOSE_ADDITION.decode(), release.COMPOSE_ADDITION.decode() * 2)]:
             with self.subTest(compose=invalid):
                 self.scenario(changes={'compose.yaml': invalid}, expected_error='Unexpected Compose change')
+
+    def test_box_settings_reach_the_gateway_and_nothing_else_changes(self):
+        correct = candidate_compose()
+        without_settings = correct.replace(release.BOXES_ENVIRONMENT.decode(), '')
+        extra = correct.replace(release.BOXES_ENVIRONMENT.decode(),
+                                release.BOXES_ENVIRONMENT.decode() + '      SECRET: x\n')
+        for invalid in [without_settings, extra]:
+            with self.subTest(compose=invalid):
+                self.scenario(changes={'compose.yaml': invalid}, expected_error='Unexpected Compose change')
+
+    def test_a_caddyfile_that_cannot_take_the_route_refuses_before_any_change(self):
+        commands = self.scenario(caddy_refused=True, expected_error='nothing was changed')
+        self.assertFalse(any(c[:2] == ('docker', 'build') for c in commands))
 
     def test_trusted_release_handler_cannot_change_incidentally(self):
         self.scenario(changes={'scripts/cloud-release.py': '# modified'}, expected_error='Trusted release-handler source changed')
@@ -293,6 +315,45 @@ class CaddyRouteTests(unittest.TestCase):
         self.assertRegex(error, 'previous Caddyfile was restored')
         self.assertEqual(text, self.SITE)
         self.assertEqual(commands.count(('systemctl', 'reload', 'caddy')), 2)
+
+    def test_a_completed_rollout_reruns_only_the_caddy_step(self):
+        with tempfile.TemporaryDirectory() as directory:
+            live = pathlib.Path(directory)
+            (live / 'RELEASE').write_text(SHA + '\n')
+            with patch.object(release, 'LIVE', live), \
+                    patch.object(release, 'LOCK', live / 'release.lock'), \
+                    patch.object(sys, 'argv', ['deploy-boxes.py', str(live / 'unused.tar'), SHA]), \
+                    patch.object(release, 'install_caddy_route', return_value='added') as install, \
+                    patch.object(release, 'run') as run, \
+                    contextlib.redirect_stdout(io.StringIO()) as output:
+                release.main()
+            install.assert_called_once()
+            run.assert_not_called()
+            self.assertIn('"caddy": "added"', output.getvalue())
+
+    def test_the_public_host_is_read_robustly(self):
+        for line in ['CODING_PUBLIC_ORIGIN=https://Companion.Example.com',
+                     'CODING_PUBLIC_ORIGIN="https://companion.example.com/"',
+                     "CODING_PUBLIC_ORIGIN='https://companion.example.com'  "]:
+            with self.subTest(line=line), tempfile.TemporaryDirectory() as directory:
+                (pathlib.Path(directory) / '.env').write_text('OTHER=1\n' + line + '\n')
+                with patch.object(release, 'LIVE', pathlib.Path(directory)):
+                    self.assertEqual(release.public_host(), 'companion.example.com')
+        with tempfile.TemporaryDirectory() as directory:
+            (pathlib.Path(directory) / '.env').write_text('CODING_PUBLIC_ORIGIN=http://x.y\n')
+            with patch.object(release, 'LIVE', pathlib.Path(directory)):
+                with self.assertRaisesRegex(RuntimeError, 'unavailable'):
+                    release.public_host()
+
+    def test_the_route_check_accepts_only_gateway_answers_through_local_caddy(self):
+        for stdout, expected in [('{"error":"Box credential refused"}\n401', True),
+                                 ('{"error":"Not found"}\n404', True),
+                                 ('Not found\n404', False), ('\n502', False)]:
+            with self.subTest(stdout=stdout), patch.object(release, 'public_host', return_value='h.example'), \
+                    patch.object(release.subprocess, 'run',
+                                 return_value=subprocess.CompletedProcess([], 0, stdout=stdout)) as run:
+                self.assertEqual(release.caddy_reaches_gateway(), expected)
+                self.assertIn('h.example:443:127.0.0.1', run.call_args[0][0])
 
     def test_the_route_matches_the_live_site_structure(self):
         live = (ROOT / 'ops/oauth-site/Caddyfile').read_text()

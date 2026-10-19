@@ -80,11 +80,6 @@ import { ToolPicker } from "./tool-picker.js";
 import { ShadowDecisions } from "./shadow.js";
 import { EffortPicker } from "./effort.js";
 import { server } from "./server.js";
-import { BoxController } from "./boxes/controller.js";
-import { boxApi } from "./boxes/api.js";
-import { Ec2BoxProvider } from "./boxes/ec2-provider.js";
-import { boxSettings, loadBoxesFile } from "./boxes/config.js";
-import { EC2Client } from "@aws-sdk/client-ec2";
 import {
   telegram,
   sendCalendarApprovals,
@@ -341,8 +336,14 @@ const responsibilities =
   c.RESPONSIBILITIES === "on"
     ? new Responsibilities(db, { gmail, calendar })
     : undefined;
-let boxes: BoxController | undefined;
+let boxes: import("./boxes/controller.js").BoxController | undefined;
 if (c.BOXES_RUNTIME === "on") {
+  // Loaded only when boxes are on, so a gateway without them pays nothing.
+  const { BoxController } = await import("./boxes/controller.js");
+  const { Ec2BoxProvider } = await import("./boxes/ec2-provider.js");
+  const { boxOrigin, boxSettings, loadBoxesFile } =
+    await import("./boxes/config.js");
+  const { EC2Client } = await import("@aws-sdk/client-ec2");
   if (!c.BOX_AUTH_KEY || !c.BOX_AWS_ACCOUNT_ID || !c.CODING_PUBLIC_ORIGIN)
     throw startupError(
       "STARTUP_BOXES_CONFIG",
@@ -369,7 +370,11 @@ if (c.BOXES_RUNTIME === "on") {
       ),
     },
     c.BOX_AUTH_KEY,
-    c.CODING_PUBLIC_ORIGIN,
+    boxOrigin(c.CODING_PUBLIC_ORIGIN),
+    undefined,
+    {},
+    undefined,
+    (user) => c.TELEGRAM_ALLOWED_USER_IDS.split(",").includes(user),
   );
   await boxes.recoverNotices();
 }
@@ -747,7 +752,7 @@ const app = server(
 );
 const bot = telegram(c, assistant, db);
 if (coding) await codingApi(app, coding);
-if (boxes) await boxApi(app, boxes);
+if (boxes) await (await import("./boxes/api.js")).boxApi(app, boxes);
 if (portfolio) {
   notifyUser = async (user, text) => {
     await bot.api.sendMessage(user, text, {
