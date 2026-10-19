@@ -320,9 +320,9 @@ export async function setSubscriptionSummary(
         `INSERT INTO daily_schedules(id,user_id,kind,content,schedule,parsed,next_run,status)
          VALUES($1,$2,'briefing',$3,$4,$5::jsonb,$6::timestamptz,$7)
          ON CONFLICT(id) DO UPDATE SET schedule=EXCLUDED.schedule,parsed=EXCLUDED.parsed,next_run=EXCLUDED.next_run,
-           status=CASE WHEN daily_schedules.status='processing' THEN daily_schedules.status ELSE EXCLUDED.status END,
+           status=EXCLUDED.status,
            content=EXCLUDED.content,include_email=false,include_calendar=false,updated_at=now()
-         WHERE daily_schedules.user_id=EXCLUDED.user_id
+         WHERE daily_schedules.user_id=EXCLUDED.user_id AND daily_schedules.status<>'processing'
          RETURNING status,next_run AS "nextRun"`,
         [
           id,
@@ -335,18 +335,17 @@ export async function setSubscriptionSummary(
         ],
       )
     ).rows[0];
+    // No row: the worker claimed it after the check above; refuse as for a delivery in progress.
     if (!row)
       throw new ToolValidationError(
-        "The monthly summary schedule is unavailable.",
+        "The monthly summary is being sent right now; try the change again in a minute.",
       );
     return {
       enabled: row.status === "scheduled",
       schedule: display,
       nextRun: settings.enabled ? row.nextRun : null,
       notice:
-        row.status === "processing"
-          ? "A summary is being delivered now; the new setting applies from its next run."
-          : "Built from saved records with no model call: monthly equivalents, the previous month's recorded changes and the next 30 days.",
+        "Built from saved records with no model call: monthly equivalents, the previous month's recorded changes and the next 30 days.",
     };
   } catch (error) {
     if (
