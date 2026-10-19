@@ -431,3 +431,61 @@ No warn or error lines were logged and no owner notices were raised.
 - **Retention.** The box was left to idle-stop again and should be terminated about 24 hours after that stop (`retentionHours` 24). An hourly watcher is checking.
 - **`pendingTime`.** Only `LaunchTime` was observed. The identity document's `pendingTime` was not, so the design still does not check it.
 - **Steering from Chief.** Chief cannot steer yet: no owner-input check is wired, and that arrives with phase 4.
+
+### Phase 4a: coding attempts in boxes — 20 October 2026
+
+**Owner decision confirmed.** "Confirmed, start phase 4": coding moves to EC2 with no CodeBuild fallback, and CodeBuild is removed once coding runs on boxes.
+
+**Exploration.** Two read-only explorations of main `5e53e8f` covered the Pi worker's runtime needs and the coding controller's provider semantics. Findings, from code:
+
+- Coding already runs behind a five-method `SandboxProvider`, so a box-backed provider keeps every host policy and per-call check unchanged.
+- The worker reads its identity only from four environment variables and never uses stdin or stdout. It needs a small adapter that speaks the box task protocol.
+- The worker puts everything under `TMPDIR`: clones (one more per review round), `npm ci`, the npm cache and tests. That is an estimated 450–650 MB, beyond the task container's 512 MB `/tmp` tmpfs, so the adapter points `TMPDIR` at the box disk.
+- The controller's 180-second heartbeat rule starts at claim. A cold EC2 box (113–161 s to first report, plus container start) would be paused as `heartbeat_lost` before the worker spoke.
+- `terminal` from `inspect` must mean the compute is gone, because cleanup completes on it.
+- Box rows store their own image, but a job snapshots its image at start. Older images predate box support, so routing has to be by image.
+
+**Design.** Phase 4a is recorded in the [design](../boxes.md#phase-4a-coding-attempts-in-boxes): `BoxSandbox`, `RoutedSandbox`, the `coding-task` adapter, a provider startup grace and a `sandbox` switch in `config/coding-backend.json`, with the default left on CodeBuild. No schema or Compose change.
+
+**Status.** Implemented and tested locally; not yet reviewed or deployed. To go live after merge:
+
+1. Rebuild the Pi image so it contains the adapter.
+2. Re-pin `config/coding-pi.json` and add the `coding` box profile with that image.
+3. Switch `sandbox` to `box`.
+4. Run a canary job on EC2.
+
+**Review of `e82c4c2` (Claude Opus 5.5): changes requested.** Two blocking defects, both fixed:
+
+1. **The task program undid the worker's token protection.**
+   - On CodeBuild the worker locks itself down: it becomes non-dumpable and a subreaper, and its parent is CodeBuild's root agent. In a box, the task program is the container's main process, runs as the same user as repository commands, and held the token without either protection.
+   - A command could have sent it SIGUSR1 and attached Node's inspector, or read its memory through `/proc`.
+   - **Fix:** the task program now requires `--disable-sigusr1` and the native lockdown before it reads the task, and refuses the task otherwise. The gateway pins the coding profile's task command at startup. Tests cover both refusals and the lockdown order.
+2. **Switching back to CodeBuild would have wedged coding.**
+   - With the switch on `codebuild`, the provider was CodeBuild alone. An attempt with a `box:` sandbox ID would then have errored on every tick and blocked the coding queue.
+   - **Fix:** whenever a coding box profile exists, box attempts stay routable and the switch only gates new attempts. Without one, startup is refused while an attempt still depends on a box. A test covers this.
+
+Non-blocking findings adopted:
+
+- **Held boxes.** A held box is no longer an error: the attempt pauses normally, and its box is never closed over the hold.
+- **Unstated reasons.**
+  - The idle close and infrastructure faults are now unstated, so they are retried once like a CodeBuild failure.
+  - Limits, a compromise and an operator close remain stated.
+- **Token storage.** The token is removed from stored payloads once the box is gone.
+- **Task program.** It ignores `null` input and a second task, and exits without forcing the process.
+- **Startup.** The coding profile must admit one box at a time.
+- **New test.** A controller-level test runs the real `BoxSandbox` through `CodingController.tick`: grace, a worker exit, closing before cleanup, `sandbox_stopped`, and cleanup completing.
+
+**Re-review of `be366aa` (Claude Opus 5.5): approved.** Its remaining notes:
+
+- **Duplicated reason strings.** They err safe: reworded text becomes stated.
+- **Unrecorded boxes.** The stranded check missed a box whose create was never recorded. Fixed below.
+- **Test title.** One title overstated the retry and was renamed.
+- **Canary check.** Subreaper cleanup needs checking on the AL2023 kernel during the canary.
+
+**Devin on PR 276.** Three findings, all fixed:
+
+1. **An unrecorded box could still strand coding.** The rollback check now also refuses while a live `coding` box exists, and a test covers it.
+2. **A CodeBuild outage blocked startup on boxes.** With `sandbox: box`, a failed CodeBuild project check is now logged instead of fatal.
+3. **The coding-agent learning guide was missing an entry.** It now has one.
+
+**Re-review of `082a1e7` (Claude Opus 5.5): approved.** It noted that older-image attempts can still launch on CodeBuild after a skipped startup check. A lazy re-check before each launch would put a misconfiguration on the stuck-for-operator path and block box jobs as well, so the docs now state the limit and treat the warning as an operator alert.

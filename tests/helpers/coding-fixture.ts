@@ -54,6 +54,7 @@ import {
   WorkerRequestError,
 } from "../../src/coding/worker.js";
 import { runtimeContext } from "../../src/runtime.js";
+import type { SandboxProvider } from "../../src/coding/provider.js";
 import { server } from "../../src/server.js";
 import { recoverRuntime } from "../../src/execution.js";
 import { Assistant } from "../../src/agent.js";
@@ -95,7 +96,14 @@ export const candidate = () => {
     },
   });
 };
-export async function fixture(t: TestContext) {
+export async function fixture(
+  t: TestContext,
+  options: {
+    /** Replaces the in-memory sandbox, e.g. with a real box sandbox on this database. */
+    provider?: (db: Database) => SandboxProvider;
+    settings?: typeof settings;
+  } = {},
+) {
   const pg = new PGlite();
   t.after(() => pg.close());
   for (const file of (await readdir(new URL("../../db/", import.meta.url)))
@@ -121,6 +129,7 @@ export async function fixture(t: TestContext) {
     uncertainPublish = false,
     failModel = false;
   let stallModel = false;
+  let startupGrace = 0;
   const sandboxes = new Map<
     string,
     { id: string; state: "running" | "terminal" }
@@ -146,6 +155,7 @@ export async function fixture(t: TestContext) {
       const s = [...sandboxes.values()].find((v) => v.id === id)!;
       s.state = "terminal";
     },
+    startupGraceMs: () => startupGrace,
   };
   let failModelError = new Error("private model error");
   let published = false;
@@ -167,8 +177,8 @@ export async function fixture(t: TestContext) {
   };
   const c = new CodingController(
     db,
-    settings,
-    provider,
+    options.settings ?? settings,
+    options.provider?.(db) ?? provider,
     publisher,
     "c".repeat(64),
     "https://coding.example.com",
@@ -239,6 +249,9 @@ export async function fixture(t: TestContext) {
   const row = async (id: string) =>
     (await db.query("SELECT * FROM coding_jobs WHERE id=$1", [id])).rows[0];
   return {
+    startupGrace: (ms: number) => {
+      startupGrace = ms;
+    },
     db,
     c,
     run,

@@ -256,3 +256,18 @@ Independent review then found two inputs that would have settled a call that did
 A transient fault should not cost the owner hours. Over two weeks, paused coding jobs waited a median of 7 hours for the owner to come back, and some of those pauses needed only another attempt. The host now classifies a pause when it observes it, and retries once after a stopped sandbox, a lost heartbeat or a provider 429 or 5xx ([journal 96](96-coding-transient-retry.md)). The retry is keyed to the attempt, so a second pause waits for the owner. It never runs for a job with a PR, while cleanup is pending, or for work-caused pauses such as an exhausted allocation. Independent review found the key subtlety: a provider fault that recovery already overcame must not make a later, work-caused pause look transient, so the rejection must be the attempt's last model event. Unmeasured: the share of real pauses this covers, and whether retried attempts complete.
 
 Prompt caching depends on the provider, and a passing request says nothing about it. On 19 October synthetic probes showed that Anthropic models cache only when the request is marked. Gemini 4 Argon's implicit cache missed whenever the request tail changed. Gemini Flash cached only with an explicit marker on the opening system message. The shared OpenRouter adapter now adds these markers for coding models too, and the owner-approved $4/$20 ceilings also widen the coding model catalog ([journal 100](100-opus-main-model-and-caching.md)). After any model change, check cached tokens on repeated calls rather than assuming the provider caches.
+
+## Coding attempts move into EC2 boxes — 20 October 2026
+
+The owner decided to close out CodeBuild and run coding on self-managed EC2 boxes ([journal 91](91-boxed-subagents.md#phase-4a-coding-attempts-in-boxes--20-october-2026)). The first step changes where the worker runs, not what it does. Each attempt becomes one task in its own box, behind the same five-method sandbox interface, so approval, review proof, publication and every per-call check stay on the host.
+
+Moving a worker moves its boundary too, and that is where review found the real defect. On CodeBuild the worker is the first process and locks itself down (non-dumpable, subreaper) before reading its token. In a box, a small task program starts the worker. It is the container's main process and runs as the same user as repository commands, and it held the token with neither protection, so a test or install script could have read it through Node's inspector or `/proc`. The task program now refuses to read the task without `--disable-sigusr1` and the native lockdown, and the gateway pins its exact command at startup. Lessons:
+
+- When a credential holder changes, re-derive who shares its user, process tree and namespace.
+- Make a rollback safe before the rollout. Switching new attempts back to CodeBuild must not strand an attempt already in a box, including one whose box exists but whose ID was never recorded.
+- Measure the new boundary's resources. The worker's clones, `npm ci` and tests do not fit the task container's 512 MB `/tmp`. A cold box also needs minutes before the first heartbeat, which the 180-second loss rule would have treated as a dead worker.
+
+Evidence boundary:
+
+- **Reproduced:** synthetic tests for the box sandbox, routing, rollback, the task program's refusals and a controller-level attempt.
+- **Not yet measured:** a real coding job on EC2, and whether boxes change completion, speed or cost.

@@ -42,6 +42,8 @@ export interface SandboxProvider {
   inspect(id: string): Promise<"running" | "terminal">;
   terminate(id: string): Promise<void>;
   terminalReason?(id: string): Promise<string | undefined>;
+  /** Extra time before the first heartbeat is expected from this sandbox. */
+  startupGraceMs?(id: string | null | undefined): number;
 }
 
 /** Reviewed NO_SOURCE project. Repository code never selects buildspec, role or image. */

@@ -1,6 +1,6 @@
 import { InputFile } from "grammy";
 import { sendCodingDelivery } from "./coding/delivery.js";
-import { selectCodingBackend } from "./coding/backend.js";
+import { codingBackend, selectCodingBackend } from "./coding/backend.js";
 import { randomUUID } from "node:crypto";
 import { LinkResolver, postEvidenceSchema } from "./link-resolution.js";
 import { McpTools, loadMcpRegistry, parseMcpCredentials } from "./mcp.js";
@@ -13,7 +13,7 @@ import { recordFeedSent } from "./telegram-feeds.js";
 import { readFileSync } from "node:fs";
 import { CodeBuildClient } from "@aws-sdk/client-codebuild";
 import { CodingController } from "./coding/controller.js";
-import { CodeBuildSandbox } from "./coding/provider.js";
+import { CodeBuildSandbox, type SandboxProvider } from "./coding/provider.js";
 import { GitHubPublisher } from "./coding/github.js";
 import { AgentGitHubTokens } from "./coding/agent-github.js";
 import { codingSettings } from "./coding/schema.js";
@@ -341,6 +341,8 @@ const responsibilities =
     ? new Responsibilities(db, { gmail, calendar })
     : undefined;
 let boxes: import("./boxes/controller.js").BoxController | undefined;
+/** Each EC2 box profile's task command, for the coding sandbox's startup check. */
+let boxTaskCommands: Record<string, string[] | undefined> = {};
 let NoticeRetry: typeof import("./boxes/controller.js").NoticeRetry =
   Error as any;
 if (c.BOXES_RUNTIME === "on") {
@@ -372,6 +374,9 @@ if (c.BOXES_RUNTIME === "on") {
     );
   const file = loadBoxesFile(new URL("../config/boxes.json", import.meta.url));
   const settings = boxSettings(file, c.BOX_AWS_ACCOUNT_ID);
+  boxTaskCommands = Object.fromEntries(
+    Object.entries(file.ec2).map(([name, ec2]) => [name, ec2.taskCommand]),
+  );
   boxes = new BoxController(
     db,
     settings.config,
@@ -417,13 +422,14 @@ if (c.CODING_RUNTIME === "on") {
       readFileSync(new URL("../config/coding.json", import.meta.url), "utf8"),
     ),
   );
-  const settings = selectCodingBackend(
-    JSON.parse(
-      readFileSync(
-        new URL("../config/coding-backend.json", import.meta.url),
-        "utf8",
-      ),
+  const backend = JSON.parse(
+    readFileSync(
+      new URL("../config/coding-backend.json", import.meta.url),
+      "utf8",
     ),
+  );
+  const settings = selectCodingBackend(
+    backend,
     JSON.parse(
       readFileSync(new URL("../config/coding.json", import.meta.url), "utf8"),
     ),
@@ -448,11 +454,32 @@ if (c.CODING_RUNTIME === "on") {
       "STARTUP_MIGRATION_027",
       "Coding squad migration 027 must be installed before activation",
     );
-  const provider = new CodeBuildSandbox(
+  const codebuild = new CodeBuildSandbox(
     new CodeBuildClient({ region: c.CODING_AWS_REGION, maxAttempts: 1 }),
     c.CODING_CODEBUILD_PROJECT,
   );
-  await provider.validate();
+  const sandbox = codingBackend.parse(backend).sandbox;
+  try {
+    await codebuild.validate();
+  } catch (error) {
+    // With coding on boxes, CodeBuild only serves older attempts; it must not block startup.
+    if (sandbox !== "box") throw error;
+    opsLog("coding.codebuild_unavailable", "warn", errorFields(error));
+  }
+  let provider: SandboxProvider;
+  try {
+    const { codingSandbox } = await import("./coding/box-sandbox.js");
+    provider = await codingSandbox({
+      db,
+      codebuild,
+      sandbox,
+      settings,
+      boxes,
+      taskCommand: boxTaskCommands.coding,
+    });
+  } catch (error) {
+    throw startupError("STARTUP_CODING_SANDBOX", (error as Error).message);
+  }
   const owners = new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(","));
   coding = new CodingController(
     db,

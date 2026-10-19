@@ -15,7 +15,7 @@ Light sub-agents (`agent_run`, [agents.md](agents.md)) stay as they are: in-proc
 - **Self-managed EC2 is the box provider.** On 19 October the owner asked why CodeBuild should stay at all. It does not need to be a box provider: a CodeBuild box cannot stop, cannot run a container per task, and would not exercise any of the EC2-specific risks. The fallback is simply **today's coding path on CodeBuild, left untouched** until coding has moved. Development and CI use a local process provider and a fake provider instead. Fargate and hosted sandboxes are deferred.
 - **The plan is approved, including paid EC2 infrastructure.** The owner applies the AWS resources (CloudFormation in `deploy/boxes/`); Claude and Chief never create AWS resources or IAM.
 - Cost is not the main concern provided boxes close themselves. Limits exist to stop runaways, not to save money; there are still no dollar caps ([cost-controls.md](cost-controls.md)).
-- **CodeBuild closes out (19 October).** After the first EC2 proof the owner said: "we can close out codebuild btw and focus on this ec2". Claude's reading, to be confirmed by the owner: phase 4 moves coding onto EC2 boxes with **no CodeBuild fallback**, and phase 6 removes the CodeBuild path, its controller policy and project as soon as coding runs on boxes, rather than after a long fallback period. Until coding has moved, today's CodeBuild path keeps running coding jobs, because removing it first would leave coding with nowhere to run.
+- **CodeBuild closes out (19 October).** After the first EC2 proof the owner said: "we can close out codebuild btw and focus on this ec2". Claude's reading, which the owner confirmed on 20 October ("Confirmed, start phase 4"): phase 4 moves coding onto EC2 boxes with **no CodeBuild fallback**, and phase 6 removes the CodeBuild path, its controller policy and project as soon as coding runs on boxes, rather than after a long fallback period. Until coding has moved, today's CodeBuild path keeps running coding jobs, because removing it first would leave coding with nowhere to run.
 
 Default pending an owner answer: **only Chief spawns boxes.** A box cannot spawn child boxes, matching the existing rule that sub-agents cannot run `agent_run` (`NEVER_GRANTED` in `src/plugins.ts`).
 
@@ -281,10 +281,10 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
    - IAM negative tests.
    - Measure boot to `hello`, warm start to `hello`, the stop/start cycle, the orphan sweep and the trust reset with the `echo` profile.
    - Measured on 19 October, apart from retention, which is still being watched ([journal 91](journey/91-boxed-subagents.md#phase-3-on-ec2--19-october-2026)). `LaunchTime` changes on every start; the identity document's `pendingTime` was not observed, so it is still not checked.
-4. **Coding on boxes.**
-   - Hooks extracted, warm reuse, `coding_status` box view, steering.
-   - Canary jobs on EC2, then switch coding to EC2. No CodeBuild fallback (owner decision, 19 October).
-   - In-flight jobs keep their snapshotted path.
+4. **Coding on boxes.** No CodeBuild fallback (owner decision, confirmed 20 October). In-flight jobs keep their snapshotted path.
+   - **4a. Attempts run in boxes.** Each coding attempt runs as one task in its own EC2 box, behind the existing sandbox interface, so every host policy and per-call check stays exactly as it is. See [Phase 4a](#phase-4a-coding-attempts-in-boxes). Then: canary jobs on EC2, and switch new attempts to boxes by configuration.
+   - **4b. Warm reuse.** Reuse across the rounds that follow implementation approval, with the trust reset, and coding concurrency of 2 boxes. The coding hooks are extracted here, where reuse needs them.
+   - **4c. Owner view and steering.** `coding_status` box view, and Chief relays owner answers into a running task.
 5. **Generic boxed agent.** `agent_run` with `placement: box` and `requestKey`, plus `agent_send`, `agent_status` and `agent_close`; first non-coding profile (analysis or crawl).
 6. **Retire CodeBuild** (the coding-specific sandbox path, its project and its controller policy) as soon as coding runs on boxes and no snapshotted job uses it.
 
@@ -321,6 +321,51 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
 - **Child boxes.** Should boxes ever spawn child boxes? Default no.
 - **Owner view.** How much of the live box view should the owner see in Telegram or the Mini App, as opposed to only Chief?
 - **Egress.** When do we want a domain-allowlisting egress proxy?
+
+## Phase 4a: coding attempts in boxes
+
+The smallest move that puts coding on EC2 without weakening anything. Coding already runs its worker behind a small `SandboxProvider` interface (`create`, `find`, `inspect`, `terminate`, `terminalReason`); phase 4a adds a box-backed one.
+
+- **`BoxSandbox`** (`src/coding/box-sandbox.ts`):
+  - `create` spawns a `coding` box and delegates one `coding` task, both keyed `coding:<attempt>`, so a retry reuses them. It returns `box:<box id>` as the sandbox ID.
+  - `find` looks the box up by that key. The database is the box layer's truth, so a missing row means nothing was created.
+  - `inspect` reports `terminal` only once the box is terminated, so cleanup never leaves compute behind. A task that has ended closes its box first.
+  - A **held** box is left alone and reported as running. The attempt then pauses through its deadline or heartbeat, and cleanup waits for an operator.
+  - Once the box is gone, the attempt token is removed from the stored task and message payloads.
+  - `terminalReason` gives a stated reason, which is not retried, when the task's deadline, the box's limits, a compromise or an operator close ended the attempt. It gives none when the worker exited, its own close or the idle close ended the box, or the infrastructure failed (lost, never connected, ended by the provider, could not start). The controller retries those once, as it does after a CodeBuild failure.
+- **`RoutedSandbox`:**
+  - New attempts go to boxes only when the `sandbox` switch is `box`, the job's snapshotted image is the coding box profile's image, and the runtime is Pi. Other jobs stay on CodeBuild, because their images predate box support.
+  - Existing sandbox IDs (`box:` or a CodeBuild build ID) keep the provider that created them.
+  - Whenever boxes are on and a `coding` profile exists, box attempts stay routable even with the switch back on `codebuild`. Without one, the gateway refuses to start while any attempt still depends on a box (a recorded `box:` sandbox ID, or a live `coding` box whose ID a failed create never recorded), so a rollback cannot strand a job or block the coding queue.
+- **The worker is unchanged.** The `coding` profile's task program (`src/boxes/coding-task.ts`) runs `pi-worker.js` as a child:
+  - It turns the task payload into the worker's environment: `CODING_JOB_ID`, `CODING_ATTEMPT_ID`, `CODING_JOB_TOKEN` and `CODING_ORIGIN`, plus `PATH`, `HOME` and `TMPDIR`.
+  - It keeps the worker's output off the task protocol and reports only the exit.
+  - `TMPDIR` points at the box disk (`/workspace/tmp`), because the clones, `npm ci` and tests do not fit the 512 MB `/tmp` tmpfs.
+- **The task program's own boundary.** It holds the attempt token while repository commands run as the same user in the same container. Before it reads the task, it therefore:
+  - requires `--disable-sigusr1`, so no inspector can be attached;
+  - calls the worker image's native lockdown, which makes it non-dumpable (so `/proc` cannot read its memory) and a subreaper.
+
+  Without both, it refuses the task. The gateway checks at startup that the coding profile's task command is exactly `node --disable-sigusr1 /opt/chief-worker/dist/boxes/coding-task.js`.
+
+- **Startup grace.**
+  - A cold box takes about two to three minutes before the worker's first heartbeat. While the attempt is still `provisioning`, the controller's 180-second heartbeat-loss rule therefore allows a provider-specific grace: 12 minutes for boxes, none for CodeBuild.
+  - The first heartbeat sets the attempt deadline, so boot time does not consume coding time.
+- **Configuration.** `config/coding-backend.json` gains `sandbox`: `codebuild` by default, or `box`. With `box`, the gateway refuses to start unless:
+  - boxes are on;
+  - a `coding` box profile uses the selected Pi worker image;
+  - that profile admits one box at a time;
+  - its task command is the pinned one above.
+
+  With `box`, a failed CodeBuild project check is logged (`coding.codebuild_unavailable`) instead of stopping the gateway, because CodeBuild then only serves attempts for jobs snapshotted with an older image (including such jobs queued or resumed later). Those still launch on CodeBuild with the safeguards `create` always sets (no source, no privileged mode, no logs), but without the startup check of the project's environment variables and secondary sources. Treat that warning as an operator alert. There is no schema or Compose change.
+
+- **One box per attempt.** The box is closed when its attempt ends, so concurrency stays at one coding worker (`coding_one_active_worker`).
+- **Residual risk.** The attempt token is in `box_tasks.payload` and `box_messages` while the box runs, and reaches the box over TLS. On CodeBuild it sits in the build's plain environment, readable through `BatchGetBuilds` for as long as the build history is kept. In both cases it works only for its attempt: while the attempt is active and before its deadline, and for the `finish` route afterwards.
+- **To go live:**
+  1. Rebuild the Pi image so it contains the task program.
+  2. Re-pin `config/coding-pi.json`.
+  3. Add the `coding` box profile with that image (concurrency 1) and its `ec2.coding` entry: the `chief-box-prod-coding` launch template, task memory and CPUs within `m7i.xlarge`, and the pinned task command.
+  4. Switch `sandbox` to `box`.
+  5. Run a canary job. In the canary, check that the worker's subreaper cleanup works on the box kernel.
 
 ## Implementation status
 
