@@ -27,7 +27,7 @@ After the owner-directed switch to Gemini 4 Argon on 14 October ([journal 85](85
 
   Independent review found a confound in those last Opus rows. Their reads match the entries the earlier runs had just written, and the Anthropic cache is not partitioned by OpenRouter `session_id`. So they don't show that a changing tail leaves the prefix cached.
 
-- **Measured, Chief-shaped tool loop, 19 October 2026.** Each run used a fresh nonce in the system prompt, about 12.8k tokens and 25 tools. The model called `lookup` twice, then answered, so each run made 3 calls. Every call sent back the model's `reasoning_details` and rebuilt the trailing time message. The adapter's provider block was used (`max_price` $4/$20, `require_parameters: true`, medium effort). Total spend was about $0.25.
+- **Measured, synthetic tool loop shaped like Chief's, 19 October 2026.** Each run used a fresh nonce in the system prompt, about 12.8k tokens and 25 tools. The model called `lookup` twice, then answered, so each run made 3 calls. Every call sent back the model's `reasoning_details` and rebuilt the trailing time message. The adapter's provider block was used (`max_price` $4/$20, `require_parameters: true`, medium effort). Total spend was about $0.25.
 
   | Opus 5.5 markers                                    | HTTP status   | Cached tokens, calls 1→2→3 | Cost, calls 1→2→3          |
   | --------------------------------------------------- | ------------- | -------------------------- | -------------------------- |
@@ -44,10 +44,10 @@ After the owner-directed switch to Gemini 4 Argon on 14 October ([journal 85](85
 
 - **Why Argon never cached.** Its implicit cache hit only identical requests in the probe, and every Chief request has a different tail (the time line). An explicit marker did not help Argon either. Sol cached within a turn because OpenAI matches the shared prefix. These causes are measured on synthetic requests. They are consistent with, but not re-measured on, the production prompts.
 - **What Opus needs.** Anthropic models on OpenRouter cache nothing unless the request is marked.
-  - A top-level marker alone re-read only the opening prefix (tools, system and first user message). Its automatic breakpoint lands on the per-call time message, so each call wrote an entry the next call could not read.
+  - With a top-level marker alone, measured reads stopped growing after the opening prefix (tools, system and first user message): 12,773 tokens on both later calls. The inferred mechanism is that the automatic breakpoint lands on the per-call time message, so each call's new entry ends in a timestamp the next call does not repeat.
   - Adding a marker on the last message before the time line also cached the growing in-turn history (12,878 tokens on the third call).
   - On these short loops the saving over top-level only is small. It grows with large tool results, but that is a hypothesis until production calls are measured.
-- **Thinking-signature risk.** Opus binds a thinking block to the prefix before it, and Chief deletes and re-adds the time message on every call. Review flagged that this could fail continuations. All 12 loop calls returned 200 while replaying `reasoning_details`. This is measured for the upstream account OpenRouter routed to; other upstream accounts may enforce the check differently.
+- **Thinking-signature risk.** Opus binds a thinking block to the prefix before it, and Chief deletes and re-adds the time message on every call. Review flagged that this could fail continuations. All 12 loop calls returned 200 while replaying `reasoning_details`. A 200 shows the edit is not blocked on the upstream account OpenRouter routed to, not that the signature check passed; other accounts may enforce it. The probe also replayed reasoning on every earlier assistant message, while Chief keeps only the latest, and it never reached wire compaction, so those edits were not exercised.
 - **What Flash needs.** An explicit marker on the opening system message, which is the stable instructions block. Flash serves the default `fast` agent tier.
 - **Alternatives.**
   - Removing the time line would help implicit caches, but the model needs the current time.
@@ -77,8 +77,8 @@ After the owner-directed switch to Gemini 4 Argon on 14 October ([journal 85](85
 
 Independent review (Opus 5.5, commit `3a26ad0`) requested changes:
 
-- **High.** The thinking-signature risk, untested in a real tool loop. The loop probe above settled it for the routed provider.
-- **High.** The top-level marker may never produce a read beyond the opening prefix, and the first probe was confounded. Confirmed by the loop probe and fixed with the extra marker.
+- **High.** The thinking-signature risk, untested in a real tool loop. The loop probe above showed that the routed provider does not block it, with the caveats below.
+- **High.** The top-level marker may never produce a read beyond the opening prefix, and the first probe was confounded. Confirmed by the loop probe and fixed with the extra marker. A delta review then found that the acceptance helper's offline test fixture lacked the new `model-policy.js` import; fixed.
 - **Medium.** The docs overclaimed. Corrected.
 - **Low.** Stale ceiling statements in docs/operating-model.md, docs/deployment.md, docs/configuration.md and the acceptance scripts. Fixed.
 - **Low, noted.**
