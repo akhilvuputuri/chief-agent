@@ -529,3 +529,24 @@ test("same-titled roles are distinguished by authoritative company in lists and 
     await f.pg.close();
   }
 });
+
+test("model-written answers and progress lose internal names; schedule text is sent as written", async () => {
+  const f = await fixture();
+  try {
+    const job = "1a6cf84e-4a86-47f6-b60a-c07c8238e9ef";
+    const text = `I called coding_resume for job ${job}.`;
+    await f.views.deliver("123", "123", text, "answer");
+    await f.views.deliver("123", "123", text, "progress");
+    await f.views.deliver("123", "123", text, "schedule");
+    assert.deepEqual(
+      f.sent.map((m) => m.text),
+      [
+        "I called coding resume for job 1a6cf84e.",
+        "I called coding resume for job 1a6cf84e.",
+        text,
+      ],
+    );
+  } finally {
+    await f.pg.close();
+  }
+});

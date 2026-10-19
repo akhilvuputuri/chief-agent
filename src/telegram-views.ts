@@ -1,3 +1,4 @@
+import { tidyOwnerText } from "./owner-text.js";
 import {
   withTelegramSendGuard,
   TelegramSendWithheld,
@@ -265,12 +266,17 @@ export class TelegramViews {
   ) {
     const delivery = typeof input === "string" ? { reply: input } : input;
     const { id: chat, extra } = target(to);
+    // Model-written answers and progress lose internal names and long IDs; schedules keep their text.
+    const tidy = kind === "schedule" ? (text: string) => text : tidyOwnerText;
     const answer = answerSchema.parse({
-      reply: delivery.reply,
+      reply: tidy(delivery.reply),
       canvases: delivery.canvases,
       records: delivery.records,
       numbers: delivery.numbers,
-      sections: delivery.sections,
+      sections: delivery.sections?.map((section) => ({
+        ...section,
+        body: tidy(section.body),
+      })),
       sources: delivery.sources,
     });
     const parts = formatTelegram(answer.reply);

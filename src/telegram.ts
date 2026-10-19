@@ -1,3 +1,4 @@
+import { tidyOwnerText } from "./owner-text.js";
 import { invoiceFacts, privateInvoiceIntake } from "./gathering/facts.js";
 import { mutePending } from "./stocks.js";
 import { preview as responsibilityPreview } from "./responsibilities.js";
@@ -1229,7 +1230,7 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
           ) {
             try {
               const audio = await voice.speak(
-                formatTelegram(reply.reply)
+                formatTelegram(tidyOwnerText(reply.reply))
                   .map((part) => part.text)
                   .join(""),
               );

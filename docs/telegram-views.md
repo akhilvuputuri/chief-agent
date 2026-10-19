@@ -2,6 +2,16 @@
 
 The model still writes conversational prose. An optional answer envelope gives it places for detailed sections, numbers, sources and references to actual saved records. Telegram renders these on demand in one editable message. Plain prose longer than 1,800 rendered UTF-16 units uses the same progressive disclosure automatically; the full text is preserved. This is not a Mini App, generated image or new response template.
 
+## Reply tidy-up for any model
+
+Model-written answers, progress and voice replies pass through `tidyOwnerText` (`src/owner-text.ts`) before delivery ([journal 102](journey/102-reply-style-for-any-model.md)).
+
+- Chief's own operation names and a fixed list of internal record fields become plain words, and backticks around them are removed.
+- Full UUIDs shrink to 8 characters, and 40–64-character hex strings to 7.
+- Fenced code, Markdown links, URLs, and an ID right after a slash command (for example `/continue <id>`) are kept exactly.
+- Other identifiers, such as code the owner discusses, are never changed.
+- Schedule deliveries and host-written notices are not filtered.
+
 ## Using it
 
 - `/roles`, `/items`, `/schedules`, `/drafts`: six-record pages with authoritative employer/title labels for roles, active/all filter, default/newest sort, detail and Back. Details read current saved data; they do not re-run analysis. `/drafts` has no approval action: use the original Telegram approval card.
