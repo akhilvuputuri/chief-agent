@@ -39,15 +39,22 @@ Alternatives considered:
   - do not repeat sensitive identifiers;
   - do not take up a one-off nickname.
 - `src/owner-text.ts` `tidyOwnerText`:
-  - Chief's operation names (from the action schema) and a fixed list of internal fields become plain words, with backticks removed.
-  - Full UUIDs shrink to their first 8 characters, and 40–64-character hex strings to 7.
-  - Fenced code, Markdown links, URLs, and an ID right after a slash command stay verbatim. Other identifiers are untouched.
+  - Chief's operation names (from the action schema) and a fixed list of internal fields become plain words. This applies in prose, or when they form a whole inline-code span.
+  - Full UUIDs in prose shrink to their first 8 characters, and 40–64-character hex strings with a letter to 7.
+  - Fenced and inline code, links, URLs, bare domains with a path, file paths, dotted or call-like names, decimal numbers, and an ID right after a slash command are delivered exactly.
+  - The instructions tell the model to put exact values the owner asks for in inline code.
 - Where it applies:
-  - `src/telegram-views.ts` applies it to answer and progress replies and section bodies, not to schedule deliveries;
+  - `src/telegram-views.ts` applies it to answer and progress replies, section titles and bodies, number labels and values, and source labels. Schedule deliveries, notices and direct Bot API senders are not filtered;
   - `src/telegram.ts` applies it to voice replies.
 - Tests: `tests/owner-text.test.ts` and a delivery test in `tests/telegram-views.test.ts`.
 
-Independent review: pending.
+Independent review (Opus 5.5, commit `08ea023`) requested changes. Three medium issues were confirmed:
+
+- An internal name inside a longer inline-code span lost one backtick, so Telegram showed a stray backtick.
+- IDs in inline-code or bracketed slash commands were shortened. `/continue` needs the full ID.
+- Exact values the owner asked for were shortened with no way to avoid it. So were code identifiers and file paths in coding discussions.
+
+The docs also overclaimed what was untouched. The rework keeps all inline code verbatim unless the whole span is an internal name. It also leaves paths, call-like names, decimal numbers, parenthesised links and bare domains alone, filters the remaining envelope labels, and corrects the docs. Generic field names such as `run_id` and `pr_url` are no longer rewritten.
 
 ## Verification and outcome
 
@@ -55,6 +62,8 @@ Tested locally. Pending:
 
 - review, CI and the release;
 - a post-release read of reply lengths and leaks over a week of owner turns on Opus 5.5.
+
+That read will separate the two effects. The pre-filter text is in history, so it shows the instruction's effect. The delivered text, also recorded as `telegram.delivered.characters`, shows the filter's effect. Opus may leak less than Argon to begin with, so the "any model" claim stays untested until a different model runs.
 
 Expected: fewer leaks. That is a hypothesis; the filter's effect is directly testable, while length still depends on the model.
 

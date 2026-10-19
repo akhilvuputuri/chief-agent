@@ -272,12 +272,21 @@ export class TelegramViews {
       reply: tidy(delivery.reply),
       canvases: delivery.canvases,
       records: delivery.records,
-      numbers: delivery.numbers,
+      numbers: delivery.numbers?.map((n) => ({
+        ...n,
+        label: tidy(n.label),
+        value: tidy(n.value),
+      })),
       sections: delivery.sections?.map((section) => ({
         ...section,
+        title: tidy(section.title),
         body: tidy(section.body),
       })),
-      sources: delivery.sources,
+      // Source URLs stay exact; only their labels are prose.
+      sources: delivery.sources?.map((source) => ({
+        ...source,
+        label: tidy(source.label),
+      })),
     });
     const parts = formatTelegram(answer.reply);
     const interactive =
