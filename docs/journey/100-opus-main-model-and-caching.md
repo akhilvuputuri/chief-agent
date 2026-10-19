@@ -99,13 +99,14 @@ Cost per turn on Opus is unmeasured. Opus costs twice Argon's per-token price, a
 
 [PR 273](https://github.com/akhilvuputuri/chief-agent/pull/273) merged as `f94e699` (package 0.3.89). Exact-head independent review approved `6af07f8` in round 4, and hosted CI and Devin passed there. The [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39291865454) recorded an exact-commit `success` receipt with startup health at 17:14:44Z on 19 October. Current main, `becf234`, keeps the same policy.
 
-This verifies deployment only. No foreground model call happened in the hours after release, so these remain pending:
+This verifies deployment only. No `model.completed` line had been observed in CloudWatch (`models` query, 16:27–20:27Z on 19 October) at closure, so these remain pending:
 
 - the model name;
 - `cachedTokens` on later calls of a turn;
 - cost per call against the uncached estimate;
 - `finishReason=length`.
-  They are listed in the weekly review's fixes ledger.
+
+They are listed in the weekly review's fixes ledger.
 
 ## Follow-up and next iteration
 
