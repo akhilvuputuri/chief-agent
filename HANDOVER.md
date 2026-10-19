@@ -21,7 +21,7 @@ Four fixes from the review of two weeks of logs and conversations are deployed, 
 
 A new `core/bills` agent gathers an exact invoice collection, then updates the subscription tracker from the matched invoices when the owner asks. Tracker updates can cite one matched invoice, and the host checks its amount and invoice date against the PDF's recorded clues. Gathering, subscriptions and bills share the core `invoice-gathering`, `subscription-ledger` and `invoice-ledger` skills. Released as v0.3.83 (`1733d48`), with no migration. Next: owner acceptance with one real invoice. [Journal 93](docs/journey/93-invoice-backed-tracker.md).
 
-# Boxed sub-agents — enabled, first EC2 proof passed, 19 October 2026
+# Boxed sub-agents — enabled, phase 3 measured on EC2, 19 October 2026
 
 Heavy delegated work moves to sub-agents with their own on-demand boxes that Chief can steer and close (issue #245). The owner decided that coding moves first, boxes stop after about 15 idle minutes, and self-managed EC2 replaces CodeBuild. Coding keeps its current CodeBuild path until it moves.
 
@@ -32,11 +32,21 @@ Heavy delegated work moves to sub-agents with their own on-demand boxes that Chi
 - the `chief-boxes-prod` AWS stack, applied by the owner;
 - only the `echo` profile, pinned to worker image `sha256:3963041…`.
 
-**Measured:** the IAM dry-run check had no failures for either template. A real `echo` box booted cold to its first report in 161 s, ran two tasks, stopped after the 15-minute idle TTL, warm-started for a third task in about 28 s, and terminated on close with nothing left in AWS.
+**Measured on EC2 (phase 3):**
+
+- IAM dry-run check with no failures;
+- cold boot to first report in 113–161 s, and warm start in about 24–28 s;
+- tasks run as uid 1000 with no capabilities and a read-only root;
+- nothing a hostile task leaves behind reaches the next task, including after a warm start;
+- steering works across a gateway restart, with no duplicated task;
+- an orphan instance was swept;
+- idle stop, and verified termination on close.
+
+Retention termination (24 hours after the stop) is being watched.
 
 **Next:**
 
-1. The rest of phase 3 with the extended probe: steering across a gateway restart, the trust reset, the orphan sweep and retention on EC2.
+1. Record retention on the phase 3 box.
 2. Phase 4: coding on EC2 boxes. On 19 October the owner said to close out CodeBuild and focus on EC2; read as no CodeBuild fallback, with the CodeBuild path removed once coding runs on boxes (to be confirmed).
 
 [Design](docs/boxes.md), [journal 91](docs/journey/91-boxed-subagents.md), [release records](docs/releases.md).

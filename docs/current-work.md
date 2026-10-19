@@ -40,7 +40,7 @@ Issue 132 next milestone. A new `core/bills` agent gathers an exact invoice coll
 
 A refused `coding_reply` on 16 October was recorded as uncertain and blocked every owner write until an operator settled it on 18 October; no uncertain calls remain. PR 249 (deployed `9437d86`, part of v0.3.83; live acceptance pending) settles provably empty coding calls automatically, classifies pre-write coding refusals as validation errors and stops a turn from retrying a blocked write. See [journal 92](journey/92-uncertain-coding-write-lock.md).
 
-# Boxed sub-agents — enabled, first EC2 proof passed, 19 October 2026
+# Boxed sub-agents — enabled, phase 3 measured on EC2, 19 October 2026
 
 Heavy delegated work moves to sub-agents with their own on-demand boxes that Chief can steer and close (issue #245). The owner decided that coding moves first, boxes stop after about 15 idle minutes, and self-managed EC2 replaces CodeBuild. Coding keeps its current CodeBuild path until it moves.
 
@@ -51,11 +51,21 @@ Heavy delegated work moves to sub-agents with their own on-demand boxes that Chi
 - the `chief-boxes-prod` AWS stack, applied by the owner;
 - only the `echo` profile, pinned to worker image `sha256:3963041…`.
 
-**Measured:** the IAM dry-run check had no failures for either template. A real `echo` box booted cold to its first report in 161 s, ran two tasks, stopped after the 15-minute idle TTL, warm-started for a third task in about 28 s, and terminated on close with nothing left in AWS.
+**Measured on EC2 (phase 3):**
+
+- IAM dry-run check with no failures;
+- cold boot to first report in 113–161 s, and warm start in about 24–28 s;
+- tasks run as uid 1000 with no capabilities and a read-only root;
+- nothing a hostile task leaves behind reaches the next task, including after a warm start;
+- steering works across a gateway restart, with no duplicated task;
+- an orphan instance was swept;
+- idle stop, and verified termination on close.
+
+Retention termination (24 hours after the stop) is being watched.
 
 **Next:**
 
-1. The rest of phase 3 with the extended probe: steering across a gateway restart, the trust reset, the orphan sweep and retention on EC2.
+1. Record retention on the phase 3 box.
 2. Phase 4: coding on EC2 boxes. On 19 October the owner said to close out CodeBuild and focus on EC2; read as no CodeBuild fallback, with the CodeBuild path removed once coding runs on boxes (to be confirmed).
 
 [Design](boxes.md), [journal 91](journey/91-boxed-subagents.md), [release records](releases.md).
