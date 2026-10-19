@@ -85,8 +85,9 @@ async function timings(id: string) {
  * Launches one instance from the profile's own template for a box the database has never
  * heard of, then stops it as soon as it runs, long before its agent could say hello (a
  * cold boot takes minutes). A refused hello would power the instance off by itself; a
- * stopped one can only be ended by an API call, so its termination proves the gateway's
- * sweep. Its bootstrap secret is random in any case.
+ * stopped one can only be ended by an API call, and the probe never terminates it, so a
+ * later TerminateInstances for it in CloudTrail proves the gateway's sweep. Its bootstrap
+ * secret is random in any case.
  */
 async function orphan(profile: string) {
   if (settings.config.profiles[profile]?.provider !== "ec2")
@@ -112,25 +113,26 @@ async function orphan(profile: string) {
     },
   });
   const launchedAt = new Date().toISOString();
+  const base = { boxId, providerId, launchedAt };
+  // Waits for a state. A just-launched instance can briefly be "missing" and the client
+  // makes one attempt per call, so early misses and errors are retried. "terminated" means
+  // the sweep got there first, which is a result, not a failure (check CloudTrail).
   const until = async (state: string) => {
     for (let i = 0; i < 60; i++) {
-      const now = await provider.describe(providerId);
-      if (now === state) return;
-      if (now === "terminated" || now === "missing")
-        throw new Error(`Orphan ${providerId} is ${now} before ${state}`);
+      const now = await provider.describe(providerId).catch(() => "error");
+      if (now === state || now === "terminated") return now;
+      if (now === "missing" && i >= 10)
+        throw new Error(`Orphan ${providerId} is missing`);
       await new Promise((resolve) => setTimeout(resolve, 3000));
     }
     throw new Error(`Orphan ${providerId} did not reach ${state}`);
   };
-  await until("running");
+  if ((await until("running")) === "terminated")
+    return { ...base, sweptBeforeStop: true };
   await provider.stop(providerId);
-  await until("stopped");
-  return {
-    boxId,
-    providerId,
-    launchedAt,
-    stoppedAt: new Date().toISOString(),
-  };
+  if ((await until("stopped")) === "terminated")
+    return { ...base, sweptBeforeStop: true };
+  return { ...base, stoppedAt: new Date().toISOString() };
 }
 
 try {
