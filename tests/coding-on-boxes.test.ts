@@ -6,7 +6,7 @@ import { codingSettings } from "../src/coding/schema.js";
 import { BoxSandbox, RoutedSandbox } from "../src/coding/box-sandbox.js";
 import { fixture, settings } from "./helpers/coding-fixture.js";
 
-test("a coding attempt in a box: the controller pauses a worker that exited, retries once, and cleans up only once the box is gone", async (t) => {
+test("a coding attempt in a box: the controller pauses a worker that exited as transient (sandbox_stopped) and cleans up only once the box is gone", async (t) => {
   const pi = codingSettings.parse({ ...settings, runtime: "pi" });
   const provider = new FakeBoxProvider({ canStop: true });
   let boxes!: BoxController;
