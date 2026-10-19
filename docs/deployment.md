@@ -4,7 +4,7 @@ Production runs on one AWS Lightsail VM in Singapore. It moved from DigitalOcean
 
 The Hermes-to-custom migration was a historical cutover; do not rerun its reset or migration procedure to change a model. Current releases follow [cloud development](cloud-development.md), with reviewed operator procedures for Compose and database changes.
 
-The current checked-in defaults are `AGENT_MODEL=openai/gpt-5.6-sol`, medium reasoning and provider price ceilings of $2/M input and $10/M output. `SEARCH_MODEL` is the separate Gemini research helper. Existing speech and Google credentials remain unchanged. `HERMES_URL`, `HERMES_MODEL`, and `INTERNAL_API_TOKEN` are not used by the custom production path.
+The code defaults are `AGENT_MODEL=openai/gpt-5.6-sol`, medium reasoning and provider price ceilings of $2/M input and $10/M output. The reviewed `config/model-policy.json` overrides the model and, through `priceCeilings`, the ceilings (now Opus 5.5 at $4/$20). `SEARCH_MODEL` is the separate Gemini research helper. Existing speech and Google credentials remain unchanged. `HERMES_URL`, `HERMES_MODEL`, and `INTERNAL_API_TOKEN` are not used by the custom production path.
 
 ## Changing the production model through a release
 
@@ -19,7 +19,12 @@ For future model changes, a coding agent should:
 
 The release SHA plus the policy file at that SHA identifies the intended model. The first `null` policy is intentionally different: its effective model still depends on the private server environment, which can be checked only through authorized runtime evidence. The normal release pipeline refuses Compose/database changes, but a policy-file edit is an ordinary application release. Cloud coding tasks therefore need repository and release permissions, not server SSH, to make a reviewed model change. There is no Telegram model-switch command or hot reload. Record the exact deployed SHA, policy value and smoke result without private prompts or credentials.
 
-**Prompt caching.** `cacheHints` in `src/model.ts` adds the provider-specific cache marker: Anthropic models get a top-level marker, and Google models get a marker on the opening system message. Without these, Anthropic caches nothing, and Gemini's implicit cache misses whenever the request tail changes, which is every call. Check `cachedTokens` in `model.completed` after a model change. See [journal 100](journey/100-opus-main-model-and-caching.md).
+**Prompt caching.** `cacheHints` in `src/model.ts` adds provider-specific cache markers.
+
+- **Anthropic models:** a top-level marker, plus a marker on the last message before the per-call state line.
+- **Google models:** a marker on the opening system message.
+
+In synthetic probes, Anthropic cached nothing unmarked, and Gemini's implicit cache missed whenever the request tail changed, which happens on every Chief call. After a model change, compare `cachedTokens` and `cost` across the calls of one turn in `model.completed`. Cached tokens alone do not show cache-write premiums. See [journal 100](journey/100-opus-main-model-and-caching.md).
 
 **Agent models.** The same file maps subagent model tiers under `agents`: `default` names the tier an agent uses when neither the call nor its definition picks one, and `tiers` maps `fast`, `standard` and `strong` to OpenRouter model IDs. A tier left out is refused if requested. Change it the same way as `main`: verify the model's tools, reasoning and image support and its prices against the ceilings, edit only this file, and release through a reviewed PR. See [coordinator and agents](agents.md#models-and-effort).
 

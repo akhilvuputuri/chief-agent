@@ -25,12 +25,29 @@ After the owner-directed switch to Gemini 4 Argon on 14 October ([journal 85](85
   | Opus 5.5, top-level marker                                                 | 11,750 of 11,754        | $0.0025 (first write $0.0589) |
   | Opus 5.5, top-level marker, plus a trailing time (system or user role)     | 11,673–11,750 of 11,791 | $0.0027–0.0030                |
 
+  Independent review found a confound in those last Opus rows. Their reads match the entries the earlier runs had just written, and the Anthropic cache is not partitioned by OpenRouter `session_id`. So they don't show that a changing tail leaves the prefix cached.
+
+- **Measured, Chief-shaped tool loop, 19 October 2026.** Each run used a fresh nonce in the system prompt, about 12.8k tokens and 25 tools. The model called `lookup` twice, then answered, so each run made 3 calls. Every call sent back the model's `reasoning_details` and rebuilt the trailing time message. The adapter's provider block was used (`max_price` $4/$20, `require_parameters: true`, medium effort). Total spend was about $0.25.
+
+  | Opus 5.5 markers                                    | HTTP status   | Cached tokens, calls 1→2→3 | Cost, calls 1→2→3          |
+  | --------------------------------------------------- | ------------- | -------------------------- | -------------------------- |
+  | Top-level only                                      | 200, 200, 200 | 0 → 12,773 → 12,773        | $0.065 → $0.0042 → $0.0050 |
+  | Opening system message only                         | 200, 200, 200 | 0 → 12,667 → 12,667        | $0.065 → $0.0045 → $0.0053 |
+  | Top-level and opening system message                | 200, 200, 200 | 0 → 12,772 → 12,772        | $0.065 → $0.0041 → $0.0050 |
+  | Top-level and the last message before the time line | 200, 200, 200 | 0 → 12,768 → 12,878        | $0.066 → $0.0043 → $0.0045 |
+
+  Every call was served by Claude Platform on AWS.
+
 - **Code-confirmed.** `src/context.ts` ends every request with a system message holding the current state and the Singapore time to the second. No request carried a cache marker.
 
 ## Diagnosis and alternatives
 
 - **Why Argon never cached.** Its implicit cache hit only identical requests in the probe, and every Chief request has a different tail (the time line). An explicit marker did not help Argon either. Sol cached within a turn because OpenAI matches the shared prefix. These causes are measured on synthetic requests. They are consistent with, but not re-measured on, the production prompts.
-- **What Opus needs.** Anthropic models on OpenRouter cache nothing unless the request is marked. A top-level marker caches the whole prefix, including the growing in-turn history, and a changing tail does not break it. A repeat call is about 19 times cheaper.
+- **What Opus needs.** Anthropic models on OpenRouter cache nothing unless the request is marked.
+  - A top-level marker alone re-read only the opening prefix (tools, system and first user message). Its automatic breakpoint lands on the per-call time message, so each call wrote an entry the next call could not read.
+  - Adding a marker on the last message before the time line also cached the growing in-turn history (12,878 tokens on the third call).
+  - On these short loops the saving over top-level only is small. It grows with large tool results, but that is a hypothesis until production calls are measured.
+- **Thinking-signature risk.** Opus binds a thinking block to the prefix before it, and Chief deletes and re-adds the time message on every call. Review flagged that this could fail continuations. All 12 loop calls returned 200 while replaying `reasoning_details`. This is measured for the upstream account OpenRouter routed to; other upstream accounts may enforce the check differently.
 - **What Flash needs.** An explicit marker on the opening system message, which is the stable instructions block. Flash serves the default `fast` agent tier.
 - **Alternatives.**
   - Removing the time line would help implicit caches, but the model needs the current time.
@@ -44,14 +61,29 @@ After the owner-directed switch to Gemini 4 Argon on 14 October ([journal 85](85
   - `main` and the `standard` tier are `anthropic/claude-opus-5.5`;
   - `priceCeilings` is `{input: 4, output: 20}`.
 - `src/model-policy.ts`: the optional, bounded `priceCeilings` and `resolvePriceCeilings`. `src/main.ts` uses them for every OpenRouter caller.
-- `src/model.ts`: `cacheHints` adds a top-level marker for `anthropic/` models and a marker on the opening system message for `google/` models. Other models are unchanged.
+- `src/model.ts`: `cacheHints` adds, on the wire only:
+  - for `anthropic/` models, a top-level marker and a marker on the last markable message before the trailing state line;
+  - for `google/` models, a marker on the opening system message.
+
+  Other models are unchanged.
+
 - Tests:
   - `tests/model-cache-hints.test.ts` checks the wire bodies.
   - `tests/model-policy.test.ts` covers ceilings, their bounds and the bundled pin.
   - Agent tests use the new `standard` tier.
 - Docs: [deployment](../deployment.md#changing-the-production-model-through-a-release), [agents](../agents.md), AGENTS.md and the handover.
 
-Independent review: pending.
+- `scripts/pi-acceptance/provider-helper.mjs` and `scripts/fixtures/pi-report-proxy.mjs` use the resolved ceilings, so acceptance runs filter like production.
+
+Independent review (Opus 5.5, commit `3a26ad0`) requested changes:
+
+- **High.** The thinking-signature risk, untested in a real tool loop. The loop probe above settled it for the routed provider.
+- **High.** The top-level marker may never produce a read beyond the opening prefix, and the first probe was confounded. Confirmed by the loop probe and fixed with the extra marker.
+- **Medium.** The docs overclaimed. Corrected.
+- **Low.** Stale ceiling statements in docs/operating-model.md, docs/deployment.md, docs/configuration.md and the acceptance scripts. Fixed.
+- **Low, noted.**
+  - The shared 8,000-token `max_tokens` covers Opus thinking and the reply. Watch `finishReason=length` after release.
+  - It is unverified whether `require_parameters` narrows routing when `cache_control` is present.
 
 ## Verification and outcome
 
@@ -59,7 +91,7 @@ Tested: focused tests pass. Pending:
 
 - the full suite, CI and review;
 - the release;
-- a post-release owner turn whose `model.completed` names `anthropic/claude-opus-5.5` and reports `cachedTokens > 0` on the second call of a turn.
+- a post-release owner turn whose `model.completed` names `anthropic/claude-opus-5.5`, reports `cachedTokens > 0` on later calls of the turn, and costs less per call than an uncached estimate. The logs record cached tokens but not cache writes.
 
 Cost per turn on Opus is unmeasured. Opus costs twice Argon's per-token price, and caching is expected to offset part of that, but that is a hypothesis.
 

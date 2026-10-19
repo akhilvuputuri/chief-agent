@@ -1,6 +1,6 @@
 # Opus 5.5 main model and prompt caching — in review, 19 October 2026
 
-The main model and the `standard` agent tier move from Gemini 4 Argon to Claude Opus 5.5. The owner approved raising the price ceilings to $4/$20 in the reviewed model policy. Synthetic probes showed why caching stopped: Argon's implicit cache missed whenever the request tail changed, and Chief adds the current time to every call. Anthropic models cache only when the request is marked. Requests now carry provider-specific markers. See [journal 100](journey/100-opus-main-model-and-caching.md).
+The main model and the `standard` agent tier move from Gemini 4 Argon to Claude Opus 5.5. The owner approved raising the price ceilings to $4/$20 in the reviewed model policy. Synthetic probes showed why caching stopped: Argon's implicit cache missed whenever the request tail changed, and Chief adds the current time to every call. Anthropic models cache only when the request is marked, and a Chief-shaped tool-loop probe confirmed that two markers also cache the growing in-turn history. Requests now carry provider-specific markers. See [journal 100](journey/100-opus-main-model-and-caching.md).
 
 # Monthly subscription summary — live as v0.3.88, 19 October 2026
 

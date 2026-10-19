@@ -10,7 +10,7 @@ Issue [#143](https://github.com/akhilvuputuri/chief-agent/issues/143) separates 
 
 Other reviewed policy files already in the repo:
 
-- `config/model-policy.json`: main and agent models. A pinned main model wins over `AGENT_MODEL`.
+- `config/model-policy.json`: main and agent models, and optional `priceCeilings`. A pinned main model wins over `AGENT_MODEL`. When `priceCeilings` is set, it wins over `OPENROUTER_MAX_INPUT_PRICE`/`OPENROUTER_MAX_OUTPUT_PRICE` from both the environment and `config/runtime.json`, which keeps mirroring the code defaults.
 - `config/tool-picker.json`: the Jev domain picker.
 - `config/decisions.json`: the shadow decisions.
 - `config/reasoning-effort.json`: Jev's reasoning-effort question, thresholds and escalation schedule ([reasoning effort](reasoning-effort.md)).

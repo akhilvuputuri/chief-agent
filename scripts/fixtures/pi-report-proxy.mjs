@@ -1,8 +1,13 @@
 import { readFileSync } from "node:fs";
 import { OpenRouter, ModelError } from "./dist/model.js";
 import { readConfig } from "./dist/config.js";
+import { resolvePriceCeilings } from "./dist/model-policy.js";
 const q = JSON.parse(readFileSync(0, "utf8")),
-  c = readConfig();
+  c = readConfig(),
+  ceilings = resolvePriceCeilings({
+    input: c.OPENROUTER_MAX_INPUT_PRICE,
+    output: c.OPENROUTER_MAX_OUTPUT_PRICE,
+  });
 const allowed = [
   "deepseek/deepseek-v4.1-flash",
   "openai/gpt-6.1-sol",
@@ -16,8 +21,8 @@ try {
   const r = await new OpenRouter(
     c.OPENROUTER_API_KEY,
     q.model,
-    c.OPENROUTER_MAX_INPUT_PRICE,
-    c.OPENROUTER_MAX_OUTPUT_PRICE,
+    ceilings.input,
+    ceilings.output,
   ).generate({
     messages: q.messages,
     tools: q.tools,
