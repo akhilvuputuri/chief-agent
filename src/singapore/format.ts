@@ -71,10 +71,13 @@ const words = (text: string) =>
  */
 export function matchesQuery(query: string | undefined, ...fields: unknown[]) {
   if (!query) return true;
+  const wanted = words(query);
+  // A query with no letters or digits (punctuation, another script) matches nothing.
+  if (!wanted.length) return false;
   const hay = words(
     fields.filter((f) => f !== null && f !== undefined).join(" "),
   );
-  return words(query).every((w) =>
+  return wanted.every((w) =>
     hay.some((h) => (/^\d+$/.test(w) ? h === w : h.startsWith(w))),
   );
 }

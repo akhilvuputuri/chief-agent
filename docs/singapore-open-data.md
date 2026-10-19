@@ -34,7 +34,7 @@ The data.gov.sg facts below were measured on 19 October 2026 from a Singapore IP
 ### Keys and limits
 
 - **Documented limits per 10 seconds** ([rate limits](https://guide.data.gov.sg/developer-guide/api-overview/api-rate-limits)):
-  - real-time: 6 without a key, 12 with a developer key, 30 with a production key;
+  - real-time: 6 without a key, 12 with a developer key, 30 with a production key (the keyed spacing in the client assumes a production key; with a developer key or an expired one, which data.gov.sg silently treats as anonymous, it can be throttled and backs off);
   - datastore: 4 / 8 / 20;
   - downloads: 2 / 4 / 10.
 - **Measured:** without a key, v2 throttled after 4–6 quick requests. The limit is shared across endpoints. Recovery took up to about a minute, longer than the body's "Please try again in 10 seconds" suggests. One request every 2–3 seconds ran 15–22 times in a row without a 429.
@@ -89,12 +89,12 @@ Plugins are text and configuration only. They "cannot execute scripts … add HT
 - **Routes (`routes.ts`):** the only module that names the API origins. It holds a fixed inventory of GET routes with validated parameters. Download links are followed only to the data.gov.sg S3 bucket. A boundary test fails if an origin appears anywhere else in `src`.
 - **Client (`http.ts`):** one serial queue and one 429 breaker (60 seconds) per rate-limit group, because data.gov.sg limits real-time APIs, datastore search and downloads separately. It sends an honest User-Agent, uses 15-second timeouts, refuses redirects and caps bodies at 4 MB (8 MB for files). A data.gov.sg key is sent only to data.gov.sg and the DataMall `AccountKey` only to DataMall. Minimum spacing between requests:
 
-  | Group            | Without key                                                         | With key |
-  | ---------------- | ------------------------------------------------------------------- | -------- |
-  | Real-time feeds  | 2.5 s                                                               | 0.4 s    |
-  | Datastore search | 3 s                                                                 | 0.6 s    |
-  | Downloads        | 12 s (also documented as 5 a minute; one patient retry after a 429) | 12 s     |
-  | DataMall         | 0.2 s                                                               | 0.2 s    |
+  | Group            | Without key                                                                                  | With key |
+  | ---------------- | -------------------------------------------------------------------------------------------- | -------- |
+  | Real-time feeds  | 2.5 s                                                                                        | 0.4 s    |
+  | Datastore search | 3 s                                                                                          | 0.6 s    |
+  | Downloads        | 12 s (also documented as 5 a minute; one patient retry after a 429, timeout or server error) | 12 s     |
+  | DataMall         | 0.2 s                                                                                        | 0.2 s    |
 
 - **Caches:** in memory, with in-flight sharing and failures never cached.
   - Forecast 10 minutes (24-hour 30, 4-day 60).

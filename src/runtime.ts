@@ -322,7 +322,7 @@ export function runtimeContext(
               sg_holidays:
                 "Singapore public holidays between from and to (YYYY-MM-DD; default the next 12 months), from the gazetted MOM list, with the last year published.",
               sg_hawker_closures:
-                "NEA hawker centre cleaning and repair closures overlapping from..to (default the next 14 days). query matches centre name or address words; region filters by location. With a query, also returns the next closure of matched centres that are open in the range.",
+                "NEA hawker centre cleaning and repair closures overlapping from..to (default the next 14 days). query matches centre name or address words; region filters by location. Closures without a published end date are treated as continuing. With a query, also returns matched centres open in the range with their next closure, and centres that are not trading.",
               sg_cameras:
                 "Traffic Police red-light and fixed speed camera locations from data.gov.sg, filtered by road words or region; kind laser or mobile lists those deployment sites instead. Records are old; say so. The first call downloads the layers and can take about half a minute.",
               sg_dataset:

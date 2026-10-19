@@ -43,9 +43,11 @@ description: How to answer Singapore carpark, free and night parking, traffic ca
 ## Hawker centres (sg_hawker_closures)
 
 - **Arguments:** pass the centre's name or address words as `query`, and a date range. The default is the next 14 days.
-- **Closed or open:** `closures` lists cleaning and repair periods that overlap the range. A matched centre with no overlapping closure is open in that range as far as NEA's schedule shows, and `openInRangeNextClosure` gives its next closure.
+- **Closed:** `closures` lists cleaning and repair periods that overlap the range. `endPublished: false` means NEA has not published an end date. Treat that closure as continuing, and say the end date is not published.
+- **Open:** `openInRange` lists matched centres with no closure in the range, with their `status` and next closure. Say "open as far as NEA's schedule shows".
+  - If `closureDatesTbc` is present, NEA has not fixed the dates of a closure in those quarters, so say a closure may still be scheduled.
+  - `notTrading` lists matched centres whose status is not an existing, trading centre. Never call them open.
 - **Ambiguous names:** several centres can match one name, for example two on Old Airport Road. Name the one you mean, or ask the owner.
-- **Missing dates:** dates marked TBC are not listed.
 
 ## Source
 

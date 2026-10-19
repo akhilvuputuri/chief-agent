@@ -56,7 +56,8 @@ export class SgHttp {
   }
   /**
    * Minimum spacing between requests in one rate-limit group. Documented limits per
-   * 10 seconds without / with a production key: real-time 6 / 30, datastore 4 / 20,
+   * 10 seconds without a key / with a production key: real-time 6 / 30, datastore 4 / 20,
+   * (a developer key allows 12 / 8 / 4, and an invalid key is treated as anonymous),
    * downloads 2 / 10 (journal 99). DataMall documents only a daily ceiling.
    */
   gap(provider: Provider) {

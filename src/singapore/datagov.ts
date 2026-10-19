@@ -365,50 +365,81 @@ export class DataGov {
     });
     const periods = (r: J) => {
       const out: {
-        from: string | null;
+        from: string;
+        /** null: NEA has not published an end date, so the closure is open-ended. */
         to: string | null;
+        endPublished: boolean;
         reason: string;
         remarks: string | null;
       }[] = [];
-      for (const q of ["q1", "q2", "q3", "q4"]) {
-        const f = dmy(r[`${q}_cleaningstartdate`]);
-        if (f)
-          out.push({
-            from: f,
-            to: dmy(r[`${q}_cleaningenddate`]) ?? f,
-            reason: "cleaning",
-            remarks: remark(r[`remarks_${q}`]),
-          });
-      }
-      const f = dmy(r.other_works_startdate);
-      if (f)
+      const tbc: string[] = [];
+      const add = (
+        start: unknown,
+        finish: unknown,
+        reason: string,
+        note: unknown,
+        label: string,
+      ) => {
+        const f = dmy(start);
+        if (!f) {
+          if (/tbc/i.test(String(start ?? ""))) tbc.push(label);
+          return;
+        }
+        const t = dmy(finish);
         out.push({
           from: f,
-          to: dmy(r.other_works_enddate) ?? f,
-          reason: "other works",
-          remarks: remark(r.remarks_other_works),
+          to: t,
+          endPublished: !!t,
+          reason,
+          remarks: remark(note),
         });
-      return out;
+      };
+      for (const q of ["q1", "q2", "q3", "q4"])
+        add(
+          r[`${q}_cleaningstartdate`],
+          r[`${q}_cleaningenddate`],
+          "cleaning",
+          r[`remarks_${q}`],
+          q.toUpperCase(),
+        );
+      add(
+        r.other_works_startdate,
+        r.other_works_enddate,
+        "other works",
+        r.remarks_other_works,
+        "other works",
+      );
+      return { out, tbc };
     };
+    const overlaps = (p: { from: string; to: string | null }) =>
+      p.from <= end && (p.to === null || p.to >= start);
+    const trading = (r: J) => /^existing/i.test(String(r.status ?? "Existing"));
     const closures = [];
-    const upcoming = [];
+    const open = [];
+    const notTrading = [];
     for (const r of matched) {
-      const all = periods(r);
-      const overlapping = all.filter((p) => p.to! >= start && p.from! <= end);
+      const { out: all, tbc } = periods(r);
+      const centre = clip(r.name, 120);
+      if (!trading(r)) {
+        notTrading.push({ centre, status: clip(r.status, 60) });
+        continue;
+      }
+      const overlapping = all.filter(overlaps);
       for (const p of overlapping)
-        closures.push({
-          centre: clip(r.name, 120),
-          address: clip(r.address_myenv, 160),
-          ...p,
-        });
+        closures.push({ centre, address: clip(r.address_myenv, 160), ...p });
       if (query && !overlapping.length) {
         const next = all
-          .filter((p) => p.from! > end)
-          .sort((a, b) => a.from!.localeCompare(b.from!))[0];
-        upcoming.push({ centre: clip(r.name, 120), nextClosure: next ?? null });
+          .filter((p) => p.from > end)
+          .sort((x, y) => x.from.localeCompare(y.from))[0];
+        open.push({
+          centre,
+          status: clip(r.status, 60),
+          nextClosure: next ?? null,
+          ...(tbc.length ? { closureDatesTbc: tbc } : {}),
+        });
       }
     }
-    closures.sort((a, b) => a.from!.localeCompare(b.from!));
+    closures.sort((x, y) => x.from.localeCompare(y.from));
     return {
       from: start,
       to: end,
@@ -416,8 +447,9 @@ export class DataGov {
       matchedCentres: matched.length,
       closures: closures.slice(0, 25),
       truncated: closures.length > 25,
-      ...(query ? { openInRangeNextClosure: upcoming.slice(0, 10) } : {}),
-      note: "NEA cleaning and repair closure schedule; dates marked TBC are not listed.",
+      ...(query ? { openInRange: open.slice(0, 10) } : {}),
+      ...(notTrading.length ? { notTrading: notTrading.slice(0, 10) } : {}),
+      note: "NEA cleaning and repair schedule. A closure with endPublished false has no published end date and is treated as continuing. closureDatesTbc lists quarters whose dates NEA has not fixed, so a closure may still come.",
       source: SOURCE_NOTE,
     };
   }

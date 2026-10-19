@@ -51,7 +51,7 @@ The owner then asked for LTA DataMall as well, mainly for bus arrivals, and supp
 ## Diagnosis and alternatives
 
 - **Separate breakers per rate-limit group.** The smoke-run 429 showed that one shared data.gov.sg breaker turns a datastore throttle into a weather outage. data.gov.sg documents separate limits for real-time APIs, datastore search and downloads, so each now has its own queue and breaker.
-- **Patient downloads.** Downloads are spaced 12 seconds apart and retried once after a 429. They are rare, because results are cached for a day.
+- **Patient downloads.** Downloads are spaced 12 seconds apart and retried once after a 429, timeout or server error. They are rare, because results are cached for a day.
 - **Two agents instead of one.** An agent appears in Chief's catalogue only when all of its tools are available ([plugins](../plugins.md)). DataMall tools must stay hidden without the key, so they form a separate `transport` agent. A single agent would either vanish without the key or carry tools that always fail.
 - **Delegated tools.** Chief does not hold the `sg_`/`lta_` tools; it delegates with `agent_run`, as for every other domain. Each question costs one extra fast-model call.
   - Rejected: keeping quick weather tools on the coordinator. That would break the pattern and lengthen Chief's tool list.
@@ -73,7 +73,22 @@ The owner then asked for LTA DataMall as well, mainly for bus arrivals, and supp
 - **Generator not rerun:** `gen_routing.py` was updated, but it already fails on `main` (`KeyError: 'mcp'`), so `routing.json` was edited by hand.
 - **Local checks:**
   - `evals/coding` fails locally with Python 3.14 on the two `chief-protocol` fixtures. It fails the same way on unmodified `main`.
-- **Independent review:** pending.
+- **Independent review, first round (Claude Opus 5.5, head `3537db2`): REQUEST CHANGES.**
+  - **Blocking:** a closure with a known start and a "TBC" end date became a one-day closure, and the dataset's `status` was ignored. A centre under open-ended works was therefore reported as open, which is a wrong answer to the very question the tool exists for.
+    - Fixed: an unpublished end date now means the closure continues (`endPublished: false`).
+    - Centres that are not trading go into `notTrading`.
+    - Quarters with TBC dates are reported as `closureDatesTbc`.
+    - The skill wording now matches, and there are regression tests.
+  - **Smaller findings, fixed:**
+    - A query with no ASCII letters or digits matched everything; it now matches nothing.
+    - DataMall carpark lots claimed an age of 0. They now report null, with the feed's fetch age.
+    - One failed reference download (for example URA) failed every carpark search. Reference loads are now settled independently and live-lot outages degrade to null lots.
+    - Docs now say downloads retry after a 429, timeout or server error, and that keyed spacing assumes a production key.
+    - Tests now check that file downloads carry no API key and that only `http.ts` calls `fetch`.
+  - **Recorded as follow-ups:**
+    - Cancellation signals are not passed into the Singapore tools.
+    - The body cap counts characters after buffering rather than streamed bytes.
+    - The registry's `delegated` list (76 of 80) and the agent catalogue (about 11k of 12k characters) are close to their limits for the next plugin.
 
 ## Verification and outcome
 

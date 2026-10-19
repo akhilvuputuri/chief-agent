@@ -246,6 +246,21 @@ const hawkers = datastore([
     other_works_startdate: "TBC",
     latitude_hc: "1.325",
     longitude_hc: "103.932",
+    status: "Existing",
+  },
+  {
+    // Works started but NEA has published no end date: closed until further notice.
+    name: "Reno Centre",
+    address_myenv: "1 Reno Road",
+    other_works_startdate: "1/3/2026",
+    other_works_enddate: "TBC",
+    remarks_other_works: "Repairs and Redecoration",
+    status: "Existing",
+  },
+  {
+    name: "Future Hawker Centre",
+    address_myenv: "9 New Town Way",
+    status: "Under construction",
   },
 ]);
 const hdbCarparks = datastore([
@@ -421,6 +436,8 @@ test("SVY21 converts to WGS84 and places map to NEA regions", () => {
   assert.equal(psiBand(114), "unhealthy");
   assert.ok(matchesQuery("bishan st 22", "BLK 232 BISHAN ST 22"));
   assert.ok(!matchesQuery("bishan street 22", "BLK 218-227 BISHAN STREET 23"));
+  assert.ok(!matchesQuery("!!!", "anything"));
+  assert.ok(!matchesQuery("宏茂桥", "BLK 1 ANG MO KIO"));
 });
 
 test("requests are paced per rate-limit group and a 429 opens that group's breaker only", async () => {
@@ -557,15 +574,51 @@ test("holidays and hawker closures come from cached datasets", async () => {
   );
   const c: any = await t.call({ operation: "sg_hawker_closures" });
   assert.deepEqual(
-    c.closures.map((x: any) => [x.centre, x.from, x.to, x.reason]),
-    [["Old Airport Road Food Centre", "2026-10-26", "2026-10-29", "cleaning"]],
+    c.closures.map((x: any) => [
+      x.centre,
+      x.from,
+      x.to,
+      x.endPublished,
+      x.reason,
+    ]),
+    [
+      ["Reno Centre", "2026-03-01", null, false, "other works"],
+      [
+        "Old Airport Road Food Centre",
+        "2026-10-26",
+        "2026-10-29",
+        true,
+        "cleaning",
+      ],
+    ],
   );
+  // An open-ended closure is never reported as open.
+  const reno: any = await t.call({
+    operation: "sg_hawker_closures",
+    query: "reno",
+  });
+  assert.equal(reno.closures.length, 1);
+  assert.deepEqual(reno.openInRange, []);
+  const future: any = await t.call({
+    operation: "sg_hawker_closures",
+    query: "future hawker",
+  });
+  assert.deepEqual(future.openInRange, []);
+  assert.deepEqual(future.notTrading, [
+    { centre: "Future Hawker Centre", status: "Under construction" },
+  ]);
+  const unicode: any = await t.call({
+    operation: "sg_hawker_closures",
+    query: "宏茂桥",
+  });
+  assert.equal(unicode.matchedCentres, 0);
   const bedok: any = await t.call({
     operation: "sg_hawker_closures",
     query: "bedok interchange",
   });
   assert.deepEqual(bedok.closures, []);
-  assert.equal(bedok.openInRangeNextClosure[0].nextClosure.from, "2026-12-07");
+  assert.equal(bedok.openInRange[0].nextClosure.from, "2026-12-07");
+  assert.deepEqual(bedok.openInRange[0].closureDatesTbc, ["other works"]);
   const east: any = await t.call({
     operation: "sg_hawker_closures",
     region: "east",
@@ -854,4 +907,55 @@ test("Singapore tools are read-only, in their own domain and offered only when c
   assert.ok(
     !selectDomains({ message: "summarise my unread email" }).has("singapore"),
   );
+});
+
+test("carpark search survives a failed reference download and live-lot outage", async () => {
+  const { t } = tools((url) => {
+    // URA's download link points outside the data.gov.sg bucket and is refused.
+    if (url.pathname.endsWith("/poll-download"))
+      return {
+        body: { code: 0, data: { url: "https://evil.example/x.geojson" } },
+      };
+    if (url.pathname.endsWith("/carpark-availability"))
+      return { status: 503, body: "" };
+    return dataGovHandler()(url);
+  });
+  const r: any = await t.call({ operation: "sg_carparks", codes: ["HE12"] });
+  assert.deepEqual(r.referenceUnavailable, ["URA"]);
+  assert.equal(r.carparks[0].id, "HE12");
+  assert.equal(r.carparks[0].lots, null);
+  assert.match(r.liveLots, /unavailable/);
+});
+
+test("dataset file downloads never carry an API key and only http.ts calls fetch", async () => {
+  const f = fakeFetch(dataGovHandler());
+  const withKeys = new SingaporeTools({
+    fetch: f.fn,
+    now: () => NOW,
+    sleep: noSleep,
+    dataGovKey: "dg",
+    dataMallKey: "lta",
+  });
+  await withKeys.call({ operation: "sg_cameras" });
+  const s3 = f.calls.filter(
+    (c) => c.url.hostname === "s3.ap-southeast-1.amazonaws.com",
+  );
+  assert.equal(s3.length, 2);
+  for (const c of s3) {
+    assert.equal(c.headers["x-api-key"], undefined);
+    assert.equal(c.headers.AccountKey, undefined);
+  }
+  assert.ok(
+    f.calls.some(
+      (c) =>
+        c.url.pathname.endsWith("/poll-download") &&
+        c.headers["x-api-key"] === "dg",
+    ),
+  );
+  const dir = new URL("../src/singapore/", import.meta.url);
+  for (const file of await readdir(dir)) {
+    const text = await readFile(new URL(file, dir), "utf8");
+    if (file !== "http.ts")
+      assert.ok(!/\bfetch\s*\(/.test(text), `${file} calls fetch`);
+  }
 });

@@ -32,12 +32,24 @@ export class Carparks {
     private readonly dataMall: DataMall,
     private readonly now: () => number = Date.now,
   ) {}
-  private async reference(): Promise<Carpark[]> {
-    const [hdb, jtc, ura] = await Promise.all([
+  /** Reference rows by agency; one agency failing to load leaves the others usable. */
+  private async reference(): Promise<{
+    carparks: Carpark[];
+    missing: string[];
+  }> {
+    const settled = await Promise.allSettled([
       this.dataGov.hdbCarparks(),
       this.dataGov.jtcCarparks(),
       this.dataGov.uraCarparks(),
     ]);
+    const missing = ["HDB", "JTC", "URA"].filter(
+      (_, i) => settled[i]!.status === "rejected",
+    );
+    const value = (i: number) => {
+      const s = settled[i]!;
+      return s.status === "fulfilled" ? (s.value as J[]) : [];
+    };
+    const [hdb, jtc, ura] = [value(0), value(1), value(2)];
     const fromSvy = (x: unknown, y: unknown) => {
       const e = num(x);
       const n = num(y);
@@ -62,7 +74,7 @@ export class Carparks {
           decks: num(r.car_park_decks),
         },
       });
-    return [
+    const carparks = [
       ...hdb.map(flat("HDB")),
       ...jtc.map(flat("JTC")),
       ...ura.map((f: J) => {
@@ -83,9 +95,25 @@ export class Carparks {
         };
       }),
     ];
+    return { carparks, missing };
   }
   /** Live lots keyed by agency:id. DataMall covers HDB, URA and malls; otherwise HDB only. */
   private async lots() {
+    try {
+      return await this.loadLots();
+    } catch {
+      // Reference details still answer free-parking and gantry questions without live lots.
+      return {
+        lots: new Map<
+          string,
+          { lots: J[]; updated: string | null; place?: J }
+        >(),
+        source: "unavailable right now (provider busy or failing)",
+        fetchedAgeMinutes: null as number | null,
+      };
+    }
+  }
+  private async loadLots() {
     const out = new Map<
       string,
       { lots: J[]; updated: string | null; place?: J }
@@ -100,7 +128,16 @@ export class Carparks {
         });
         out.set(key, entry);
       }
-      return { lots: out, source: "LTA DataMall (HDB, URA and mall carparks)" };
+      const fetched = this.dataMall.cache.fetchedAt("carparks");
+      return {
+        lots: out,
+        source:
+          "LTA DataMall (HDB, URA and mall carparks); DataMall publishes no update time per carpark",
+        fetchedAgeMinutes:
+          fetched === undefined
+            ? null
+            : Math.round((this.now() - fetched) / 60_000),
+      };
     }
     const item = await this.dataGov.hdbLots();
     for (const c of item.carpark_data ?? []) {
@@ -117,7 +154,11 @@ export class Carparks {
         })),
       });
     }
-    return { lots: out, source: "data.gov.sg HDB carpark availability" };
+    return {
+      lots: out,
+      source: "data.gov.sg HDB carpark availability",
+      fetchedAgeMinutes: null as number | null,
+    };
   }
 
   async search(input: {
@@ -127,7 +168,7 @@ export class Carparks {
     limit?: number;
   }) {
     const limit = input.limit ?? 5;
-    const [reference, live] = await Promise.all([
+    const [{ carparks: reference, missing }, live] = await Promise.all([
       this.reference(),
       this.lots(),
     ]);
@@ -156,11 +197,10 @@ export class Carparks {
             : null,
         ...c.details,
         lots: lot?.lots ?? null,
+        // DataMall has no per-carpark time; its fetch age is reported once below.
         lotsAgeMinutes: lot?.updated
           ? ageMinutes(lot.updated, this.now())
-          : lot
-            ? 0
-            : null,
+          : null,
       });
     }
     // Mall carparks exist only in the live DataMall feed.
@@ -184,7 +224,7 @@ export class Carparks {
         area: clip(p.Area, 40),
         region: lat && lon ? regionOf({ lat, lon }) : null,
         lots: entry.lots,
-        lotsAgeMinutes: 0,
+        lotsAgeMinutes: null,
       });
     }
     return {
@@ -193,6 +233,8 @@ export class Carparks {
       carparks: results.slice(0, limit),
       truncated: results.length > limit,
       liveLots: live.source,
+      liveLotsFetchedAgeMinutes: live.fetchedAgeMinutes,
+      ...(missing.length ? { referenceUnavailable: missing } : {}),
       note: "lots null means no live count for that carpark. Rates are not included; HDB, URA and mall rates differ.",
       source: this.dataMall.configured
         ? `${SOURCE_NOTE} ${DATAMALL_NOTE}`
