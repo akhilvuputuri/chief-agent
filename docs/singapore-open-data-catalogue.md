@@ -4,7 +4,7 @@ Snapshot of everything [data.gov.sg](https://data.gov.sg) offered on 19 October 
 
 All 4,663 catalogue datasets and the real-time APIs were checked. 250 entries are listed below by theme; related datasets are folded into one entry. Every other dataset is counted under its theme's "set aside" table with a reason. Entries marked **Selected** are in the first release scope; the rest are candidates for later.
 
-How each entry was checked: **rows** means sample rows were fetched; **metadata** means only the dataset metadata (columns, coverage, last update) was read; **listing-only** means only the catalogue listing. Freshness is as of 19 October 2026 and will drift. Recheck a dataset's metadata before enabling it.
+How each entry was checked: **rows** means sample rows were fetched; **metadata** means only the dataset metadata (columns, coverage, last update) was read; **listing-only** means only the catalogue listing; **rows (first catalogue pass)** means rows were sampled in the shortlist pass that ran before the sweep (23 datasets, listed in [journal 99](journey/99-singapore-open-data.md#evidence)). Freshness is as of 19 October 2026 and will drift. Recheck a dataset's metadata before enabling it.
 
 Tiers are a judgement of usefulness to a single resident's assistant: high, medium or low.
 
@@ -222,7 +222,6 @@ Coverage: 389 datasets, 110 in 40 entries, 279 set aside.
 - Location: point (lat/lon or SVY21 or address) · checked: rows (first catalogue pass)
 - Use: Alert when a dengue cluster appears near the owner's town.
 - Example question: "Are there dengue clusters near Sengkang right now?"
-- Caveats: Rows sampled in the first catalogue pass.
 
 #### Areas with high Aedes mosquito population (Gravitrap) and Wolbachia release sites
 
@@ -276,7 +275,6 @@ Coverage: 389 datasets, 110 in 40 entries, 279 set aside.
 - Fields: `serial_no`, `name`, `q1_cleaningstartdate`, `q1_cleaningenddate`, `remarks_q1`, `q2_cleaningstartdate`, `q2_cleaningenddate`, `remarks_q2`, `q3_cleaningstartdate`, `q3_cleaningenddate`, `remarks_q3`, `q4_cleaningstartdate`, `q4_cleaningenddate`, `remarks_q4`, `other_works_startdate`, `other_works_enddate`, `remarks_other_works`, `latitude_hc`, `longitude_hc`, `photourl`, `address_myenv`, `no_of_market_stalls`, `no_of_food_stalls`, `description_myenv`, `status`, `google_3d_view`, `google_for_stall`
 - Use: Warn in the daily briefing when the owner's usual hawker centre is closed for cleaning.
 - Example question: "Is Old Airport Road hawker open this Thursday?"
-- Caveats: Rows sampled in the first catalogue pass.
 
 #### Hawker centres (locations, stall counts) — **Selected**
 
@@ -285,7 +283,7 @@ Coverage: 389 datasets, 110 in 40 entries, 279 set aside.
 - Location: point (lat/lon or SVY21 or address) · checked: rows (first catalogue pass)
 - Use: Answer "nearest hawker centre" and pair with closure dates for food suggestions.
 - Example question: "Which hawker centres are in Tampines?"
-- Caveats: Rows sampled in the first catalogue pass. NEA Market and Food Centre layer adds stall counts; d_68a42f09 list is a stale 2016 snapshot.
+- Caveats: NEA Market and Food Centre layer adds stall counts; d_68a42f09 list is a stale 2016 snapshot.
 
 #### Healthier Dining Partners - F&B outlets (with healthier menu items), plus Healthier Eateries/Caterers maps
 
@@ -775,7 +773,7 @@ Coverage: 544 datasets, 86 in 36 entries, 458 set aside.
 - Fields: `month`, `town`, `flat_type`, `block`, `street_name`, `storey_range`, `floor_area_sqm`, `flat_model`, `lease_commence_date`, `remaining_lease`, `resale_price`
 - Use: Answer "what did flats in my block/street sell for" and track resale prices for a target town/flat type; older archives give long history.
 - Example question: "What did 4-room flats on my street sell for in the last 6 months?"
-- Caveats: Rows sampled in the first catalogue pass. Related archives (1990-2016) are static and only useful for long-run history.
+- Caveats: Related archives (1990-2016) are static and only useful for long-run history.
 
 #### Median HDB Resale Prices by Town and Flat Type (quarterly)
 
@@ -816,7 +814,6 @@ Coverage: 544 datasets, 86 in 36 entries, 458 set aside.
 - Fields: `quarter`, `town`, `flat_type`, `median_rent`
 - Use: Quarterly town-level rent benchmark to complement block-level rentals.
 - Example question: "What is the median rent for a 3-room in Bedok?"
-- Caveats: Rows sampled in the first catalogue pass.
 
 #### HDB Resale Price Index (1Q2009=100)
 
@@ -826,7 +823,6 @@ Coverage: 544 datasets, 86 in 36 entries, 458 set aside.
 - Fields: `quarter`, `index`
 - Use: Quarterly island-wide HDB price trend for a briefing line when URA/HDB release new figures.
 - Example question: "Did HDB resale prices go up last quarter?"
-- Caveats: Rows sampled in the first catalogue pass.
 
 #### Price Range of HDB Flats Offered (new flats by town and room type, annual)
 
@@ -858,7 +854,7 @@ Coverage: 544 datasets, 86 in 36 entries, 458 set aside.
 - Fields: `car_park_no`, `address`, `x_coord`, `y_coord`, `car_park_type`, `type_of_parking_system`, `short_term_parking`, `free_parking`, `night_parking`, `car_park_decks`, `gantry_height`, `car_park_basement`
 - Use: HDB car park attributes (free parking, night parking, type) near the owner.
 - Example question: "Is there free parking on Sunday at the HDB car park near Blk 123?"
-- Caveats: Rows sampled in the first catalogue pass. Realtime carpark availability API (ca933a64) is the live feed rt:carpark-availability; car park outline polygons folded in.
+- Caveats: Realtime carpark availability API (ca933a64) is the live feed rt:carpark-availability; car park outline polygons folded in.
 
 #### URA Parking Places and Capacity (street/backlane/public car parks) — **Selected**
 
@@ -979,7 +975,6 @@ Coverage: 544 datasets, 86 in 36 entries, 458 set aside.
 - Fields: `qtr`, `project_name`, `postal_district`, `25th_percentile`, `median`, `75th_percentile`, `rental_contracts`
 - Use: Quarterly rental benchmarks for private non-landed homes.
 - Example question: "What do condos rent for in my area?"
-- Caveats: Rows sampled in the first catalogue pass.
 
 #### URA Executive Condominium Units Launched/Sold and Sale Position
 
@@ -1213,7 +1208,6 @@ Coverage: 184 datasets, 37 in 21 entries, 147 set aside.
 - Fields: `month`, `bidding_no`, `vehicle_class`, `quota`, `bids_success`, `bids_received`, `premium`
 - Use: Report each COE bidding result and trend by category; alert when Cat A/B premium crosses a threshold.
 - Example question: "What did Cat A COE close at this round?"
-- Caveats: Rows sampled in the first catalogue pass. reused, not re-sampled.
 
 #### Car market by make (new registrations monthly; population & annual registrations by make/fuel)
 
@@ -1336,7 +1330,7 @@ Coverage: 464 datasets, 264 in 36 entries, 200 set aside.
 - Fields: `date`, `day`, `holiday`
 - Use: Calendar awareness for briefings, reminders and leave planning.
 - Example question: "When is the next public holiday, and is there a long weekend?"
-- Caveats: Rows sampled in the first catalogue pass. per-year files are redundant with the consolidated one.
+- Caveats: Per-year files are redundant with the consolidated one.
 
 ### Money, work & energy: Employer lookup
 
@@ -2303,7 +2297,6 @@ Coverage: 1156 datasets, 141 in 34 entries, 1015 set aside.
 - Fields: one row per data series, one column per period (latest `20262Q`)
 - Use: Show where vacancies are concentrated for job-search questions.
 - Example question: "How many PMET vacancies are there in ICT?"
-- Caveats: Rows sampled in the first catalogue pass. not re-sampled here).
 
 #### Median gross monthly income from employment (incl. employer CPF) of full-time employed residents by occupation and sex
 
@@ -2357,7 +2350,6 @@ Coverage: 1156 datasets, 141 in 34 entries, 1015 set aside.
 - Fields: one row per data series, one column per period (latest `2026Aug`)
 - Use: Quote prevailing bank savings/fixed-deposit/prime lending rates when the owner compares deposits or loans.
 - Example question: "What are banks paying on 12-month fixed deposits now?"
-- Caveats: Rows sampled in the first catalogue pass. not re-sampled here).
 
 #### Exchange rates (average for period), monthly; annual averages folded in
 
@@ -2367,7 +2359,7 @@ Coverage: 1156 datasets, 141 in 34 entries, 1015 set aside.
 - Fields: one row per data series, one column per period (latest `2026Aug`)
 - Use: Give monthly-average SGD rates against major currencies for travel budgeting and expense conversion.
 - Example question: "What was the average SGD/JPY rate last month?"
-- Caveats: Rows sampled in the first catalogue pass. not re-sampled here). d_3c62d5ee is an older duplicate of the monthly-average table that stops at 2026-05; prefer b2b7ffe0.
+- Caveats: d_3c62d5ee is an older duplicate of the monthly-average table that stops at 2026-05; prefer b2b7ffe0.
 
 #### Exchange rates (as at end of period), monthly
 
@@ -2401,7 +2393,6 @@ Coverage: 1156 datasets, 141 in 34 entries, 1015 set aside.
 - Fields: one row per data series, one column per period (latest `2026Aug`)
 - Use: Report headline and item-level inflation (food, transport, housing, etc.) in briefings and answer cost-of-living questions.
 - Example question: "How much have food prices gone up compared with a year ago?"
-- Caveats: Rows sampled in the first catalogue pass. not re-sampled here).
 
 #### Electricity tariff (monthly; annual companion folded in)
 
@@ -2411,7 +2402,7 @@ Coverage: 1156 datasets, 141 in 34 entries, 1015 set aside.
 - Fields: one row per data series, one column per period (latest `2026Jun`)
 - Use: Tell the owner the current household electricity tariff and estimate the monthly bill.
 - Example question: "What is the electricity tariff this quarter?"
-- Caveats: Rows sampled in the first catalogue pass. not re-sampled here). Monthly table last updated 2026-04-06.
+- Caveats: Monthly table last updated 2026-04-06.
 
 #### Gas tariffs (monthly; annual companion folded in)
 
@@ -2421,7 +2412,7 @@ Coverage: 1156 datasets, 141 in 34 entries, 1015 set aside.
 - Fields: one row per data series, one column per period (latest `2026Jun`)
 - Use: Report the current town-gas tariff for household bill checks.
 - Example question: "Has the gas tariff changed this quarter?"
-- Caveats: Rows sampled in the first catalogue pass. not re-sampled here). Monthly table last updated 2026-05-11.
+- Caveats: Monthly table last updated 2026-05-11.
 
 ### Statistics (SingStat) A: Property
 
@@ -2707,7 +2698,7 @@ Coverage: 1156 datasets, 124 in 21 entries, 1032 set aside.
 
 - ID: `d_b816a930bca0eb19fdf20fcbfcdd4c39` (plus 3 related: `d_285a079d823a1cc22dffb9cac325f81a`, `d_750c4fcebb690a88d19884ad3e1417a9`, `d_b0da22a41f952764376a2b7b5b0f2533`)
 - SingStat / MOM · tier medium · CSV via datastore · updates quarterly · latest 2026-Q2 · last updated 2026-10-09
-- Location: none · checked: rows (first catalogue pass)
+- Location: none · checked: metadata
 - Fields: one row per data series, one column per period (latest `20262Q`)
 - Use: Quarterly labour-market headline for briefings and job-search context; complements the already-verified unemployment dataset d_ca32584c.
 - Example question: "What's Singapore's unemployment rate right now?"

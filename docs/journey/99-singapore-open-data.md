@@ -31,6 +31,9 @@ All measurements were taken on 19 October 2026 between about 22:20 and 23:30 SGT
   - Datastore search throttled after about 5 quick calls. At one call per 21 seconds, 7 parallel sweep agents saw 4 throttles in about 110 samples, all recovered after 60 seconds.
   - Legacy v1 accepted 30 requests in 2.3 seconds.
   - No response carried `Retry-After` or rate-limit headers.
+- **Measured: first catalogue pass.** Before the sweep, one agent shortlisted 23 datasets and sampled their rows on 19 October 2026: through datastore search, or for hawker centres and dengue clusters through a GeoJSON download.
+  - Datasets: public holidays, HDB resale prices, the HDB resale price index, HDB median rents, URA private non-landed rentals, COE results, HDB carpark information, hawker centre closures, hawker centres, dengue clusters, CPI, bank interest rates, monthly exchange rates, electricity and gas tariffs, MRT/LRT and trunk bus fares, CPF contribution rates, occupational wages, job vacancies, the unemployment rate, licensed pharmacies and general school information.
+  - The sweep agents reused these results instead of re-sampling. The catalogue marks them "rows (first catalogue pass)".
 - **Measured: catalogue.** The metadata API listed 4,663 datasets from 74 agencies, in 1,370 collections. Seven agents split the catalogue by theme. Each read metadata for its candidates and fetched sample rows for unclear ones; the totals were 41–127 metadata calls and 14–20 row samples per agent. Every dataset was assigned to a listed entry or to a "set aside" group with a reason. The result has 250 entries, recorded in the [catalogue](../singapore-open-data-catalogue.md).
 - **Measured: parking datasets.** On 19 October 2026, paced metadata calls and small downloads measured:
   - HDB carpark information: 2,273 rows; `free_parking` "SUN & PH FR 7AM-10.30PM" 1,675, "NO" 587.
