@@ -437,7 +437,7 @@ The release guard refuses any change to `db/` or `compose.yaml` that a reviewed 
    - It checks the Caddy change before changing anything, and refuses if the live Caddyfile does not match the reviewed anchor.
    - If only the Caddy step fails after the gateway and migration are installed, rerunning the same command with the same SHA performs just the Caddy step.
    - **Manual fallback:** add the `@boxes path /boxes/*` handle (reverse-proxied to `127.0.0.1:3000`) before the site's catch-all, `caddy validate`, then reload Caddy.
-4. **Before enabling boxes.** Rebuild the Pi worker image from main after this merge, and re-pin `config/boxes.json` in a normal PR. The image pinned at merge time was built before the agent learned the profile's task command, so its echo task would start the wrong program.
+4. **Before enabling boxes.** Rebuild the Pi worker image from main after this merge, and re-pin `config/boxes.json` in a normal PR. The image pinned at merge time was built before the agent learned the profile's task command, so its echo task would start the wrong program. Done on 19 October: `echo` uses `sha256:3963041…`, built from `5f46cb4`.
 5. **Enable.** Add `BOX_AUTH_KEY` and `BOX_AWS_ACCOUNT_ID` to the production `.env`, set `BOXES_RUNTIME=on`, and restart the gateway. These are passed through `compose.yaml`.
 
 The automatic release for the same commit then succeeds as a no-op.

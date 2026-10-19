@@ -4,7 +4,7 @@
   "profiles": {
     "echo": {
       "provider": "ec2",
-      "image": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:734e2dcb96ea14f60df1ca00720e16c60f1d8c8b50d116d796d9088aa2db2649",
+      "image": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:3963041707149df106d0c11238f1792e1145b58bbe1108f0cf0b1bdeaad5734d",
       "idleTtlMinutes": 15,
       "retentionHours": 24,
       "hardMaxHours": 6,
