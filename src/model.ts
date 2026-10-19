@@ -69,6 +69,39 @@ export interface ModelAdapter {
     onProgress?: (value: StreamProgress) => Promise<void> | void;
   }): Promise<Generation>;
 }
+/**
+ * Provider prompt-cache hints (journal 100). Measured on OpenRouter, 19 October 2026:
+ * Anthropic models cache nothing without a marker, and a top-level marker caches the whole
+ * prefix (tools, system, history). Gemini's implicit cache never hit once the request tail
+ * changed (Chief appends the current time), but Flash keeps an explicit cache on the opening
+ * system message. Other providers cache automatically, so their requests are unchanged.
+ */
+export function cacheHints(model: string, messages: ModelMessage[]) {
+  if (model.startsWith("anthropic/"))
+    return { cache_control: { type: "ephemeral" as const }, messages };
+  const first = messages[0];
+  if (
+    model.startsWith("google/") &&
+    first?.role === "system" &&
+    typeof first.content === "string"
+  )
+    return {
+      messages: [
+        {
+          ...first,
+          content: [
+            {
+              type: "text",
+              text: first.content,
+              cache_control: { type: "ephemeral" },
+            },
+          ],
+        },
+        ...messages.slice(1),
+      ],
+    };
+  return { messages };
+}
 export class ModelError extends Error {
   constructor(
     message: string,
@@ -125,7 +158,7 @@ export class OpenRouter implements ModelAdapter {
             ...((input.cacheKey ?? input.sessionId)
               ? { session_id: input.cacheKey ?? input.sessionId }
               : {}),
-            messages: input.messages,
+            ...cacheHints(this.model, input.messages),
             tools: input.tools.map((f) => ({ type: "function", function: f })),
             reasoning: { enabled: true, effort: input.reasoning },
             // No price sort: OpenRouter's default routing avoids providers with recent

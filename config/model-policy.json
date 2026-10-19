@@ -1,11 +1,12 @@
 {
   "schemaVersion": 1,
-  "main": "google/gemini-4-argon",
+  "main": "anthropic/claude-opus-5.5",
+  "priceCeilings": { "input": 4, "output": 20 },
   "agents": {
     "default": "fast",
     "tiers": {
       "fast": "google/gemini-3.8-flash",
-      "standard": "google/gemini-4-argon"
+      "standard": "anthropic/claude-opus-5.5"
     }
   }
 }

@@ -25,6 +25,16 @@ const schema = z
       .strict()
       .refine((a) => !!a.tiers[a.default], "the default tier needs a model")
       .optional(),
+    // Provider price ceilings ($ per million tokens) for every OpenRouter caller. When set, this
+    // reviewed value replaces OPENROUTER_MAX_INPUT_PRICE/OPENROUTER_MAX_OUTPUT_PRICE; raising it
+    // needs an explicit owner request (owner-approved $4/$20 on 19 October 2026 for Opus 5.5).
+    priceCeilings: z
+      .object({
+        input: z.number().positive().finite().max(100),
+        output: z.number().positive().finite().max(400),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -65,6 +75,14 @@ export function resolveAgentModel(
       `Agent validation: model tier "${tier}" is not configured; use ${MODEL_TIERS.filter((t) => agents.tiers[t]).join(" or ")}`,
     );
   return { tier, model };
+}
+
+/** The effective provider price ceilings: the reviewed policy value, else the environment's. */
+export function resolvePriceCeilings(
+  environment: { input: number; output: number },
+  policy: ModelPolicy = readModelPolicy(),
+): { input: number; output: number } {
+  return policy.priceCeilings ?? environment;
 }
 
 export function configuredTiers(policy: ModelPolicy = readModelPolicy()) {

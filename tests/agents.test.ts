@@ -135,7 +135,7 @@ test("model tiers map to reviewed model IDs and fall back to the main model with
   });
   assert.deepEqual(resolveAgentModel("standard", "main/model", policy), {
     tier: "standard",
-    model: "google/gemini-4-argon",
+    model: "anthropic/claude-opus-5.5",
   });
   assert.throws(
     () => resolveAgentModel("strong", "main/model", policy),
@@ -233,7 +233,7 @@ test("a domain agent runs on its tier and effort, writes under its own run, and 
     assert.equal(result.approvals[0].operation, "job_delete");
     assert.deepEqual(result.model, {
       tier: "standard",
-      id: "google/gemini-4-argon",
+      id: "anthropic/claude-opus-5.5",
     });
     assert.equal(result.effort, "high");
     return text("Deleting the Acme role needs your approval.");
@@ -293,7 +293,7 @@ test("a domain agent runs on its tier and effort, writes under its own run, and 
     assert.notEqual(approval.run_id, approval.parent);
     assert.deepEqual(
       used.filter((u) => u.who === "agent").map((u) => [u.model, u.effort])[0],
-      ["google/gemini-4-argon", "high"],
+      ["anthropic/claude-opus-5.5", "high"],
     );
     assert(
       used

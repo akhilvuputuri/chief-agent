@@ -98,7 +98,7 @@ A package chooses one of the host's contracts. It cannot add its own validation 
 ```json
 "agents": {
   "default": "fast",
-  "tiers": { "fast": "google/gemini-3.8-flash", "standard": "google/gemini-4-argon" }
+  "tiers": { "fast": "google/gemini-3.8-flash", "standard": "anthropic/claude-opus-5.5" }
 }
 ```
 
