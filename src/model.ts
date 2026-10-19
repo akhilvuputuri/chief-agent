@@ -13,7 +13,8 @@ export type Message = {
 };
 /** OpenAI-style multimodal parts. Only the current turn's model input carries them; persisted history stays text. */
 export type ContentPart =
-  | { type: "text"; text: string }
+  // cache_control is a wire-only provider prompt-cache marker (see cacheHints).
+  | { type: "text"; text: string; cache_control?: { type: "ephemeral" } }
   | { type: "image_url"; image_url: { url: string } };
 export type ModelMessage = Omit<Message, "content"> & {
   content: string | ContentPart[] | null;
@@ -68,6 +69,63 @@ export interface ModelAdapter {
     stream?: boolean;
     onProgress?: (value: StreamProgress) => Promise<void> | void;
   }): Promise<Generation>;
+}
+/** Mark one message for prompt caching; text content becomes a single marked text block. */
+function marked(message: ModelMessage): ModelMessage | undefined {
+  const cache_control = { type: "ephemeral" as const };
+  if (typeof message.content === "string" && message.content)
+    return {
+      ...message,
+      content: [{ type: "text", text: message.content, cache_control }],
+    };
+  const last = Array.isArray(message.content)
+    ? message.content.at(-1)
+    : undefined;
+  if (last?.type === "text")
+    return {
+      ...message,
+      content: [
+        ...(message.content as ContentPart[]).slice(0, -1),
+        { ...last, cache_control },
+      ],
+    };
+  return undefined;
+}
+/**
+ * Provider prompt-cache hints (journal 100), measured on OpenRouter on 19 October 2026 with
+ * synthetic Chief-shaped requests:
+ * - Anthropic models cache nothing unmarked. A top-level marker alone re-read only the opening
+ *   prefix, because its automatic breakpoint lands on the per-call state message at the end.
+ *   An extra marker on the last message before that state message also caches the growing
+ *   in-turn history.
+ * - Gemini Flash keeps an explicit cache on the opening system message although the request
+ *   tail changes; Argon's implicit cache never hit with a changing tail.
+ * Other providers cache automatically, so their requests are unchanged. Wire-only: callers'
+ * messages, journals and hashes keep the original content.
+ */
+export function cacheHints(model: string, messages: ModelMessage[]) {
+  const at = (index: number) => {
+    const message = index >= 0 ? messages[index] : undefined;
+    const replacement = message && marked(message);
+    return replacement
+      ? messages.map((m, i) => (i === index ? replacement : m))
+      : undefined;
+  };
+  if (model.startsWith("anthropic/")) {
+    const end =
+      messages.at(-1)?.role === "system" && messages.length > 1
+        ? messages.length - 2
+        : messages.length - 1;
+    let index = end;
+    while (index >= 0 && !marked(messages[index]!)) index--;
+    return {
+      cache_control: { type: "ephemeral" as const },
+      messages: at(index) ?? messages,
+    };
+  }
+  if (model.startsWith("google/") && messages[0]?.role === "system")
+    return { messages: at(0) ?? messages };
+  return { messages };
 }
 export class ModelError extends Error {
   constructor(
@@ -125,7 +183,7 @@ export class OpenRouter implements ModelAdapter {
             ...((input.cacheKey ?? input.sessionId)
               ? { session_id: input.cacheKey ?? input.sessionId }
               : {}),
-            messages: input.messages,
+            ...cacheHints(this.model, input.messages),
             tools: input.tools.map((f) => ({ type: "function", function: f })),
             reasoning: { enabled: true, effort: input.reasoning },
             // No price sort: OpenRouter's default routing avoids providers with recent

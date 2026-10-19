@@ -4,7 +4,7 @@ Production runs on one AWS Lightsail VM in Singapore. It moved from DigitalOcean
 
 The Hermes-to-custom migration was a historical cutover; do not rerun its reset or migration procedure to change a model. Current releases follow [cloud development](cloud-development.md), with reviewed operator procedures for Compose and database changes.
 
-The current checked-in defaults are `AGENT_MODEL=openai/gpt-5.6-sol`, medium reasoning and provider price ceilings of $2/M input and $10/M output. `SEARCH_MODEL` is the separate Gemini research helper. Existing speech and Google credentials remain unchanged. `HERMES_URL`, `HERMES_MODEL`, and `INTERNAL_API_TOKEN` are not used by the custom production path.
+The code defaults are `AGENT_MODEL=openai/gpt-5.6-sol`, medium reasoning and provider price ceilings of $2/M input and $10/M output. The reviewed `config/model-policy.json` overrides the model and, through `priceCeilings`, the ceilings (now Opus 5.5 at $4/$20). `SEARCH_MODEL` is the separate Gemini research helper. Existing speech and Google credentials remain unchanged. `HERMES_URL`, `HERMES_MODEL`, and `INTERNAL_API_TOKEN` are not used by the custom production path.
 
 ## Changing the production model through a release
 
@@ -12,12 +12,19 @@ The current checked-in defaults are `AGENT_MODEL=openai/gpt-5.6-sol`, medium rea
 
 For future model changes, a coding agent should:
 
-1. Verify the exact OpenRouter model ID, tool/reasoning support and provider prices. The runtime requests medium reasoning, OpenRouter's default outage-aware provider routing (no price sort) and the existing $2/M input / $10/M output provider ceilings; it fails explicitly when no provider meets those filters. Do not loosen those ceilings silently.
+1. Verify the exact OpenRouter model ID, tool/reasoning support and provider prices. The runtime requests medium reasoning and OpenRouter's default outage-aware provider routing (no price sort). It applies the provider price ceilings from the policy's `priceCeilings` when set ($4/M input and $20/M output since the owner-approved Opus 5.5 switch on 19 October 2026), otherwise `OPENROUTER_MAX_INPUT_PRICE`/`OPENROUTER_MAX_OUTPUT_PRICE` ($2/$10 by default). It fails explicitly when no provider meets those filters. The ceilings apply to every OpenRouter caller, including agents and coding models. Change them only on an explicit owner request, in the same reviewed file; never loosen them silently.
 2. Edit **only** `config/model-policy.json` to set `main` to that ID. `null` reverts to the existing `AGENT_MODEL` environment behavior. No API keys or account data belong in this file. Run the normal checks and open a PR for independent review.
 3. Merge the reviewed PR. The ordinary main-branch checks and release rebuild the gateway image, wait for idle work, recreate the gateway, check startup health and preserve a rollback image. A PR branch or passing CI is not a production model change; verify the exact release receipt.
 4. Make a small owner-initiated Telegram request and confirm its `model.started`/`model.completed` record names the new model and reports an eligible provider outcome. Startup health alone cannot prove OpenRouter accepted the model. If that check fails, revert the policy change by PR and follow the normal release path; do not change the server `.env` to override a pinned policy.
 
 The release SHA plus the policy file at that SHA identifies the intended model. The first `null` policy is intentionally different: its effective model still depends on the private server environment, which can be checked only through authorized runtime evidence. The normal release pipeline refuses Compose/database changes, but a policy-file edit is an ordinary application release. Cloud coding tasks therefore need repository and release permissions, not server SSH, to make a reviewed model change. There is no Telegram model-switch command or hot reload. Record the exact deployed SHA, policy value and smoke result without private prompts or credentials.
+
+**Prompt caching.** `cacheHints` in `src/model.ts` adds provider-specific cache markers.
+
+- **Anthropic models:** a top-level marker, plus a marker on the last message before the per-call state line.
+- **Google models:** a marker on the opening system message.
+
+In synthetic probes, Anthropic cached nothing unmarked, and Gemini's implicit cache missed whenever the request tail changed, which happens on every Chief call. After a model change, compare `cachedTokens` and `cost` across the calls of one turn in `model.completed`. Cached tokens alone do not show cache-write premiums. See [journal 100](journey/100-opus-main-model-and-caching.md).
 
 **Agent models.** The same file maps subagent model tiers under `agents`: `default` names the tier an agent uses when neither the call nor its definition picks one, and `tiers` maps `fast`, `standard` and `strong` to OpenRouter model IDs. A tier left out is refused if requested. Change it the same way as `main`: verify the model's tools, reasoning and image support and its prices against the ceilings, edit only this file, and release through a reviewed PR. See [coordinator and agents](agents.md#models-and-effort).
 

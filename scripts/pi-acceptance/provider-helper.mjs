@@ -6,6 +6,7 @@ import { createInterface } from "node:readline";
 import { z } from "zod";
 import { OpenRouter, ModelError } from "./dist/model.js";
 import { readConfig } from "./dist/config.js";
+import { resolvePriceCeilings } from "./dist/model-policy.js";
 const stop = new AbortController();
 process.stdin.on("end", () => stop.abort());
 const input = createInterface({ input: process.stdin });
@@ -37,12 +38,16 @@ try {
     .strict()
     .parse(JSON.parse(request));
   const config = readConfig();
+  const ceilings = resolvePriceCeilings({
+    input: config.OPENROUTER_MAX_INPUT_PRICE,
+    output: config.OPENROUTER_MAX_OUTPUT_PRICE,
+  });
   let lastProgress = 0;
   const generation = await new OpenRouter(
     config.OPENROUTER_API_KEY,
     q.model,
-    config.OPENROUTER_MAX_INPUT_PRICE,
-    config.OPENROUTER_MAX_OUTPUT_PRICE,
+    ceilings.input,
+    ceilings.output,
     (url, options) => {
       options?.signal?.throwIfAborted();
       dispatchAttempted = true;
@@ -84,8 +89,8 @@ try {
       adapterSha: createHash("sha256")
         .update(readFileSync("./dist/model.js"))
         .digest("hex"),
-      inputPriceFilter: config.OPENROUTER_MAX_INPUT_PRICE,
-      outputPriceFilter: config.OPENROUTER_MAX_OUTPUT_PRICE,
+      inputPriceFilter: ceilings.input,
+      outputPriceFilter: ceilings.output,
       model: generation.model,
       provider: generation.provider,
       promptTokens: generation.usage?.prompt_tokens,
