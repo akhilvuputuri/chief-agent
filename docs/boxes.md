@@ -16,6 +16,8 @@ Light sub-agents (`agent_run`, [agents.md](agents.md)) stay as they are: in-proc
 - **The plan is approved, including paid EC2 infrastructure.** The owner applies the AWS resources (CloudFormation in `deploy/boxes/`); Claude and Chief never create AWS resources or IAM.
 - Cost is not the main concern provided boxes close themselves. Limits exist to stop runaways, not to save money; there are still no dollar caps ([cost-controls.md](cost-controls.md)).
 
+- **CodeBuild closes out (19 October).** With boxes proven on EC2, the owner decided to close out CodeBuild and focus on EC2. Phase 4 moves coding onto EC2 boxes with **no CodeBuild fallback**, and phase 6 removes the CodeBuild path, its controller policy and project as soon as coding runs on boxes, rather than waiting for a long fallback period. Until coding has moved, today's CodeBuild path keeps running coding jobs, because removing it first would leave coding with nowhere to run.
+
 Default pending an owner answer: **only Chief spawns boxes.** A box cannot spawn child boxes, matching the existing rule that sub-agents cannot run `agent_run` (`NEVER_GRANTED` in `src/plugins.ts`).
 
 ## What exists today and why it is not enough
@@ -281,10 +283,10 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
    - Measure boot to `hello`, warm start to `hello`, the stop/start cycle, the orphan sweep and the trust reset with the `echo` profile.
 4. **Coding on boxes.**
    - Hooks extracted, warm reuse, `coding_status` box view, steering.
-   - Canary jobs on EC2; switch the coding default by configuration; the existing CodeBuild path stays as fallback.
+   - Canary jobs on EC2, then switch coding to EC2. No CodeBuild fallback (owner decision, 19 October).
    - In-flight jobs keep their snapshotted path.
 5. **Generic boxed agent.** `agent_run` with `placement: box` and `requestKey`, plus `agent_send`, `agent_status` and `agent_close`; first non-coding profile (analysis or crawl).
-6. **Retire the coding-specific sandbox path** once no snapshotted job uses it.
+6. **Retire CodeBuild** (the coding-specific sandbox path, its project and its controller policy) as soon as coding runs on boxes and no snapshotted job uses it.
 
 ## Acceptance
 
@@ -298,7 +300,7 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
 
 ## Rollback
 
-- **Routing.** Provider and profile selection are configuration, snapshotted per job. Rolling back routes new coding jobs to the existing CodeBuild path.
+- **Routing.** Provider and profile selection are configuration, snapshotted per job. Until phase 6 removes it, rolling back can route new coding jobs to the existing CodeBuild path; after that, rollback means fixing forward on EC2.
 - **Jobs already on EC2.** Jobs snapshotted onto EC2 keep it. If EC2 itself is the reason for the rollback, the owner cancels them, or resumes them from their checkpoint as fresh CodeBuild attempts through an explicit move action.
 - **Stopped boxes** are swept by retention.
 - **Profiles are live configuration.** Removing or renaming a profile ends that profile's running boxes and fails their open tasks at the next reconciliation; removing a provider holds its boxes for an operator. Rename profiles only when no box uses them.
@@ -423,7 +425,11 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
     It stays off by default.
 
   - **`config/boxes.json`.** Profiles and their EC2 launch settings. For now only `echo` is defined, to prove the loop. Its task command (`dist/boxes/echo-task.js`) reaches the box as base64 JSON, because systemd environment files would reinterpret the quotes.
-  - **`src/boxes/probe.ts`.** Run inside the gateway container (`node dist/boxes/probe.js spawn|delegate|status|timings|close`). It writes box requests as the owner, and `timings` reports launch-to-first-report and each epoch's first report. It never calls a provider; the gateway's reconciler does that.
+  - **`src/boxes/probe.ts`.** Run inside the gateway container (`node dist/boxes/probe.js spawn|delegate|steer|status|timings|close|orphan`). It writes box requests as the owner, and `timings` reports launch-to-first-report and each epoch's first report.
+    - `delegate` takes the `echo` task's flags: `--wait` (ask a question and wait for steering), `--hostile` (leave files and a detached process behind), `--inspect` (report leftovers from earlier tasks) and `--probe` (report the task's uid, capabilities and read-only root).
+    - `steer` sends an owner message into a running task. The probe's controller accepts only its own `probe:` input IDs, on a run named `probe`: the operator acts for the owner from a shell that can already write box messages. Chief's controller keeps its check that steering is bound to the owner's own message.
+    - `orphan` is the only command that calls a provider. It launches one instance from the profile's own template for a box ID the database has never seen, with a random bootstrap secret, so the gateway's sweep must find and terminate it and its hello is refused.
+    - The other commands never call a provider; the gateway's reconciler does that.
   - **Controller.** A launch or close whose provider search keeps failing is held after the launch timeout instead of looping forever.
   - **IAM check.** An inconclusive legitimate launch now fails the check.
 

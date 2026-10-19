@@ -392,3 +392,15 @@ The worker image was rebuilt from `5f46cb4` (`sha256:3963041707149df106d0c11238f
 No owner notices were raised and no warn or error lines were logged during the proof.
 
 **Not yet measured on EC2:** steering (the probe cannot send an owner message), the trust reset with the hostile and inspect tasks, inspection, the orphan sweep after a gateway restart, retention termination, and whether `pendingTime` changes on every start. Those need probe support or a gateway restart test and are the rest of phase 3.
+
+### Owner decision and probe for the rest of phase 3 — 19 October 2026
+
+**Owner decision.** "We can close out CodeBuild and focus on this EC2." Phase 4 moves coding onto EC2 boxes with no CodeBuild fallback, and phase 6 removes the CodeBuild path as soon as coding runs on boxes. Until then the CodeBuild path keeps running coding jobs.
+
+**Probe extension.** The first proof could not steer, run the hostile and inspect tasks, or create an orphan. The probe now has:
+
+- `delegate` flags for the `echo` task (`--wait`, `--hostile`, `--inspect`, `--probe`);
+- `steer`, which sends an owner message into a running task. Its controller accepts only the probe's own input IDs; Chief's owner-input check is unchanged.
+- `orphan`, which launches one instance from the profile's template for an unknown box ID, so the sweep must terminate it.
+
+The planned phase 3 run, after this ships: steering with a gateway restart while the task waits, hostile then inspect in one box (trust reset), the task's privileges, an orphan swept, `LaunchTime` before and after a warm start, and a stopped box left to reach the 24-hour retention.
