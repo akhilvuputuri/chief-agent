@@ -315,7 +315,7 @@ It also carries the review points from 2c-1:
 
 **Not yet done:**
 
-- The `echo` profile's image digest must point to a worker image built after phase 2b, because older images do not contain `dist/boxes`.
+- The `echo` profile uses worker image `sha256:734e2dcb96ea14f60df1ca00720e16c60f1d8c8b50d116d796d9088aa2db2649`, built from main `3feef85` (Pi image workflow run 39196451508), so it contains `dist/boxes`. Coding keeps its own pinned image until it moves onto boxes.
 - The rollout baseline must be set to the live release just before merging. The rollout itself runs right after the merge, with the owner's go-ahead.
 
 The controller policy now also pins the subnet and security-group resource ARNs to the stack's own IDs, in addition to `ec2:IsLaunchTemplateResource`. This responds to a Devin comment on PR 264; the condition already refused overrides.
