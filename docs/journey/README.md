@@ -107,6 +107,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 19 October | [96 — Coding transient retry](96-coding-transient-retry.md): can the host retry a coding job once after a transient fault? | Released `496fd50` (deployed in `c1d556b`): one host retry after a stopped sandbox, lost heartbeat or provider 429/5xx, with an owner notice; live acceptance pending |
 | 19 October | [97 — Price-change alerts](97-price-change-alerts.md): how does Chief flag a price change without changing the tracker on its own? | Released v0.3.84 (merged `18662ba`, first deployed with `c1d556b`); owner acceptance pending |
 | 19 October | [98 — Monthly subscription summary](98-monthly-subscription-summary.md): can the monthly subscription summary be built without a model? | Released v0.3.88 (`293bb0d`); exact receipt and startup verified; owner acceptance pending |
+| 19 October | [99 — Singapore open data](99-singapore-open-data.md): which government data is worth wiring into Chief, and how? | Proposed: data.gov.sg surveyed and probed, design and catalogue written; not implemented (issues 271, 270) |
 | 19 October | [100 — Opus main model and caching](100-opus-main-model-and-caching.md): why did prompt caching stop, and what does Opus 5.5 need? | In review: Opus 5.5 main and standard tier, $4/$20 policy ceilings, provider-specific cache markers |
 
 ## Coding-agent learning path
