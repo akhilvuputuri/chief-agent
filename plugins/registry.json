@@ -99,7 +99,7 @@
     },
     {
       "path": "singapore",
-      "sha256": "b15a49ccc59c2740fc214b8e53f68b871b7f63deae2ffa77c9ef697fffa26138",
+      "sha256": "78517ce23b65f363e6966936727f2205d440d58438a99715a2b308ce91b4f1e7",
       "agents": ["local", "transport"],
       "allowTools": [
         "lta_bus_arrival",

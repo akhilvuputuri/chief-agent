@@ -1052,6 +1052,9 @@ test("bus services listed without estimates still get their schedule, and bad pa
     r.scheduleAtStop.map((s: any) => s.service),
     ["66"],
   );
+  // Service 65 is arriving, so the stop as a whole is not "no estimates".
+  assert.equal(r.noEstimates, false);
+  assert.deepEqual(r.servicesWithoutEstimates, ["66"]);
   stopsBody = { error: "unexpected" };
   const fresh = tools((url) => {
     if (url.pathname.endsWith("/BusStops")) return { body: stopsBody };

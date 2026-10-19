@@ -126,9 +126,16 @@ export class DataMall {
       services,
       ...(notRunning
         ? {
-            noEstimates: true,
+            // noEstimates is stop-wide (or for the requested service): nothing is arriving.
+            // A mixed result keeps its live arrivals and lists only the services without one.
+            noEstimates: !services.some(
+              (s: J) => s.next.length && (!service || s.service === service),
+            ),
             scheduleAtStop: notRunning,
-            note: "No arrival estimates were returned. Compare the current Singapore time with first and last bus times: outside them the service is not in operation; inside them say no estimate is available.",
+            ...(services.length && empty.size && !service
+              ? { servicesWithoutEstimates: [...empty] }
+              : {}),
+            note: "scheduleAtStop covers only services without an arrival estimate. Compare the current Singapore time with their first and last bus times: outside them that service is not in operation; inside them say no estimate is available. Services with arrivals are running.",
           }
         : {}),
       note: "live false means a scheduled time, not a tracked bus.",

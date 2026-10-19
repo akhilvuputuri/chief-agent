@@ -17,7 +17,7 @@ Each service returns up to three next buses:
 
 Lead with what the owner asked: "65: 3 min (seats), 11 min, 19 min". Mention load only when it is limited standing or the owner asked.
 
-When `noEstimates` is true, `scheduleAtStop` gives the first and last bus by day type: weekday, Saturday, or Sunday and public holidays. Use the current Singapore time and day.
+`scheduleAtStop` gives first and last bus times by day type (weekday, Saturday, or Sunday and public holidays) for services without an arrival estimate. `noEstimates` true means nothing is arriving at the stop, or for the service asked about. When it is false, report the live arrivals normally and add a line only for the services listed in `servicesWithoutEstimates`. Use the current Singapore time and day.
 
 - Outside those times, say the service is not running and give the next first bus.
 - Inside them, say there is no estimate right now.
