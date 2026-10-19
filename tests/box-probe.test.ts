@@ -20,6 +20,11 @@ test("probe delegate turns flags into the echo payload and keeps the rest as tex
     hostile: true,
   });
   assert.throws(() => delegateArgs(["box", "k4", "--sudo"]), /Unknown flag/);
+  // A lone "--" is not an end-of-flags marker; text cannot start with "--".
+  assert.throws(
+    () => delegateArgs(["box", "k5", "--", "text"]),
+    /Unknown flag/,
+  );
   assert.throws(() => delegateArgs(["box"]), /delegate/);
 });
 
@@ -31,4 +36,5 @@ test("probe steer needs a box, task, request key and text", () => {
     text: "use this",
   });
   assert.throws(() => steerArgs(["box", "task", "k"]), /steer/);
+  assert.throws(() => steerArgs(["box", "", "k", "text"]), /steer/);
 });

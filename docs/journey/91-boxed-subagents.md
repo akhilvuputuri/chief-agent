@@ -395,12 +395,14 @@ No owner notices were raised and no warn or error lines were logged during the p
 
 ### Owner decision and probe for the rest of phase 3 — 19 October 2026
 
-**Owner decision.** "We can close out CodeBuild and focus on this EC2." Phase 4 moves coding onto EC2 boxes with no CodeBuild fallback, and phase 6 removes the CodeBuild path as soon as coding runs on boxes. Until then the CodeBuild path keeps running coding jobs.
+**Owner decision.** The owner said "we can close out codebuild btw and focus on this ec2". Claude's reading, to be confirmed by the owner: phase 4 moves coding onto EC2 boxes with no CodeBuild fallback, and phase 6 removes the CodeBuild path as soon as coding runs on boxes. Until then the CodeBuild path keeps running coding jobs.
 
 **Probe extension.** The first proof could not steer, run the hostile and inspect tasks, or create an orphan. The probe now has:
 
 - `delegate` flags for the `echo` task (`--wait`, `--hostile`, `--inspect`, `--probe`);
-- `steer`, which sends an owner message into a running task. Its controller accepts only the probe's own input IDs; Chief's owner-input check is unchanged.
-- `orphan`, which launches one instance from the profile's template for an unknown box ID, so the sweep must terminate it.
+- `steer`, which sends an owner message into a queued or running task. Its controller accepts only the probe's own input IDs; Chief's controller still refuses all steering (no owner-input check is wired yet).
+- `orphan`, which launches one instance from the profile's template for an unknown box ID and stops it as soon as it runs, so only an API call (the sweep) can end it.
+
+**Review of `ccd91d5` (Claude Opus 5.5): changes requested.** The first `orphan` launched and left the instance running. Its hello would be refused about 160 s after launch, and the agent then powers the instance off, which with `terminate` shutdown behaviour ends it. The sweep runs every 5 minutes, so about half the runs would have shown a terminated orphan without the sweep doing anything. The orphan is now stopped before it can say hello, and acceptance checks the termination reason and the CloudTrail caller. The steering wording was also corrected: Chief's controller has no owner-input check wired yet and refuses all steering.
 
 The planned phase 3 run, after this ships: steering with a gateway restart while the task waits, hostile then inspect in one box (trust reset), the task's privileges, an orphan swept, `LaunchTime` before and after a warm start, and a stopped box left to reach the 24-hour retention.

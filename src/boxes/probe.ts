@@ -46,7 +46,8 @@ const boxes = new BoxController(
   undefined,
   {},
   // Steering from the probe is the operator acting for the owner from a shell that can
-  // already write box messages; Chief's own controller keeps its owner-input check.
+  // already write box messages. Chief's own controller still refuses all steering: no
+  // owner-input check is wired there yet.
   async (_user, run, inputId) =>
     run === "probe" && inputId.startsWith("probe:"),
 );
@@ -82,8 +83,10 @@ async function timings(id: string) {
 
 /**
  * Launches one instance from the profile's own template for a box the database has never
- * heard of, so the gateway's sweep must find and terminate it. Its bootstrap secret is
- * random, so its hello is refused.
+ * heard of, then stops it as soon as it runs, long before its agent could say hello (a
+ * cold boot takes minutes). A refused hello would power the instance off by itself; a
+ * stopped one can only be ended by an API call, so its termination proves the gateway's
+ * sweep. Its bootstrap secret is random in any case.
  */
 async function orphan(profile: string) {
   if (settings.config.profiles[profile]?.provider !== "ec2")
@@ -108,7 +111,26 @@ async function orphan(profile: string) {
       secret: randomBytes(32).toString("hex"),
     },
   });
-  return { boxId, providerId, launchedAt: new Date().toISOString() };
+  const launchedAt = new Date().toISOString();
+  const until = async (state: string) => {
+    for (let i = 0; i < 60; i++) {
+      const now = await provider.describe(providerId);
+      if (now === state) return;
+      if (now === "terminated" || now === "missing")
+        throw new Error(`Orphan ${providerId} is ${now} before ${state}`);
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+    throw new Error(`Orphan ${providerId} did not reach ${state}`);
+  };
+  await until("running");
+  await provider.stop(providerId);
+  await until("stopped");
+  return {
+    boxId,
+    providerId,
+    launchedAt,
+    stoppedAt: new Date().toISOString(),
+  };
 }
 
 try {
