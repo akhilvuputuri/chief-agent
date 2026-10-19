@@ -487,3 +487,5 @@ Non-blocking findings adopted:
 1. **An unrecorded box could still strand coding.** The rollback check now also refuses while a live `coding` box exists, and a test covers it.
 2. **A CodeBuild outage blocked startup on boxes.** With `sandbox: box`, a failed CodeBuild project check is now logged instead of fatal.
 3. **The coding-agent learning guide was missing an entry.** It now has one.
+
+**Re-review of `082a1e7` (Claude Opus 5.5): approved.** It noted that older-image attempts can still launch on CodeBuild after a skipped startup check. A lazy re-check before each launch would put a misconfiguration on the stuck-for-operator path and block box jobs as well, so the docs now state the limit and treat the warning as an operator alert.

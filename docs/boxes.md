@@ -356,7 +356,7 @@ The smallest move that puts coding on EC2 without weakening anything. Coding alr
   - that profile admits one box at a time;
   - its task command is the pinned one above.
 
-  With `box`, a failed CodeBuild project check is logged (`coding.codebuild_unavailable`) instead of stopping the gateway, because CodeBuild then only serves older attempts. There is no schema or Compose change.
+  With `box`, a failed CodeBuild project check is logged (`coding.codebuild_unavailable`) instead of stopping the gateway, because CodeBuild then only serves attempts for jobs snapshotted with an older image (including such jobs queued or resumed later). Those still launch on CodeBuild with the safeguards `create` always sets (no source, no privileged mode, no logs), but without the startup check of the project's environment variables and secondary sources. Treat that warning as an operator alert. There is no schema or Compose change.
 
 - **One box per attempt.** The box is closed when its attempt ends, so concurrency stays at one coding worker (`coding_one_active_worker`).
 - **Residual risk.** The attempt token is in `box_tasks.payload` and `box_messages` while the box runs, and reaches the box over TLS. On CodeBuild it sits in the build's plain environment, readable through `BatchGetBuilds` for as long as the build history is kept. In both cases it works only for its attempt: while the attempt is active and before its deadline, and for the `finish` route afterwards.
