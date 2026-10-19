@@ -149,9 +149,11 @@ const names = (tools: ToolDefinition[]) => tools.map((t) => t.name);
 
 test("tools_load offers a domain's tools on the next model call and is recorded", async () => {
   const seen: string[][] = [];
+  const states: string[] = [];
   const f = await fixture({
     generate: async (input) => {
       seen.push(names(input.tools));
+      states.push(String(input.messages.at(-1)?.content));
       if (seen.length === 1) return call("tools_load", { domains: ["jobs"] });
       if (seen.length === 2) return call("job_list", {});
       return text("You have no saved roles.");
@@ -165,6 +167,9 @@ test("tools_load offers a domain's tools on the next model call and is recorded"
     assert.ok(!seen[0]!.includes("job_list"));
     assert.ok(seen[0]!.includes("tools_load"));
     assert.ok(seen[1]!.includes("job_list"));
+    // The loaded domain's guidance arrives with its tools, at the end of the request.
+    assert.doesNotMatch(states[0]!, /job-alignment skill/);
+    assert.match(states[1]!, /job-alignment skill/);
     const events = (
       await f.db.query(
         "SELECT type,data FROM events WHERE type IN ('tools.selected','tools.loaded') ORDER BY id",
@@ -324,4 +329,17 @@ test("domain guidance travels with its offered domain instead of the fixed instr
   ]);
   for (const [domain, text] of Object.entries(DOMAIN_GUIDANCE))
     assert.ok(TOOL_DOMAINS.includes(domain as ToolDomain) && text, domain);
+});
+
+test("a waiting coding job keeps coding tools offered; conversational words no longer load them", () => {
+  const pick = (message: string, extra = {}) =>
+    [...selectDomains({ message, ...extra })].sort();
+  assert.deepEqual(pick("merge it", { pendingCoding: true }), ["coding"]);
+  assert.deepEqual(pick("merge it"), []);
+  // Background steps say "Continue the existing task"; that is work, not coding.
+  assert.deepEqual(pick("Continue the existing task", { taskBound: true }), [
+    "work",
+  ]);
+  for (const message of ["update my resume", "I have a promo code"])
+    assert.ok(!pick(message).includes("coding"), message);
 });

@@ -77,7 +77,8 @@ export const DOMAIN_SUMMARIES: Record<ToolDomain, string> = {
 /**
  * Coordinator guidance that matters only when a domain's tools are offered. It travels in the
  * per-call runtime context instead of the fixed instructions, so turns without the domain do
- * not carry it and a mid-turn tools_load adds it without changing the cached prefix.
+ * not carry it, and a mid-turn load (tools_load or an auto-loaded call) adds it at the end of
+ * the request instead of changing the cached prefix.
  */
 export const DOMAIN_GUIDANCE: Partial<Record<ToolDomain, string>> = {
   canvas:
@@ -158,7 +159,7 @@ const CUES: [ToolDomain, RegExp][] = [
   ],
   [
     "coding",
-    /\b(coding|code|sandbox|pull request|prs?|prd|repo(sitory)?|merge|rebase|fix.*bug|implement.*feature|continue|resume)\b/i,
+    /\b(coding|sandbox|pull requests?|prd|repo(sitory)?|code ?base|fix.*bug|implement.*feature)\b/i,
   ],
   [
     "research",
@@ -203,6 +204,8 @@ export interface DomainSignals {
   /** Operations used recently by this owner or by the bound task. */
   recentOperations?: Iterable<string>;
   pendingCalendarApproval?: boolean;
+  /** A coding job of this owner waits on them (plan, question, pause or merge card). */
+  pendingCoding?: boolean;
   pendingLibraryApproval?: boolean;
 }
 
@@ -213,6 +216,7 @@ export function selectDomains(signals: DomainSignals): Set<ToolDomain> {
     if (cue.test(signals.message)) selected.add(domain);
   if (signals.taskBound) selected.add("work");
   if (signals.pendingCalendarApproval) selected.add("calendar");
+  if (signals.pendingCoding) selected.add("coding");
   if (signals.pendingLibraryApproval) selected.add("library");
   for (const op of signals.recentOperations ?? []) {
     const domain = domainOf(op);

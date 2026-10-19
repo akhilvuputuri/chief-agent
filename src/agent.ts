@@ -699,6 +699,16 @@ export class Assistant {
       );
       const signals = {
         taskBound: background || !!current,
+        // A coding job waiting on the owner keeps coding tools offered for short replies.
+        pendingCoding:
+          !background &&
+          !!this.availability.coding &&
+          (
+            await this.db.query(
+              "SELECT 1 FROM coding_jobs WHERE user_id=$1 AND state IN ('plan_ready','awaiting_input','paused','pr_ready') LIMIT 1",
+              [user],
+            )
+          ).rows.length > 0,
         recentOperations,
         pendingCalendarApproval: pendingApprovals.calendar === true,
         pendingLibraryApproval: pendingApprovals.library === true,
@@ -836,9 +846,12 @@ export class Assistant {
           this.coordinator,
         );
         runtime.tools = fresh.tools;
+        // Guidance follows the loaded domains (journal 101), so a mid-turn load brings it too.
+        const { toolDomains, domainGuidance } = JSON.parse(fresh.context);
         runtime.context = JSON.stringify({
           ...JSON.parse(runtime.context),
-          toolDomains: JSON.parse(fresh.context).toolDomains,
+          toolDomains,
+          ...(domainGuidance ? { domainGuidance } : {}),
         });
         const loaded = [...loadedDomains].sort();
         await execution.trace("tools.loaded", {
