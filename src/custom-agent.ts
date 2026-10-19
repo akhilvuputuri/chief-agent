@@ -203,6 +203,8 @@ export class CustomAgent implements Agent {
       return false;
     };
     await execution.checkpoint(messages);
+    // context.over_budget is reported once per turn, not on every model call.
+    let overBudgetReported = false;
     try {
       turn: while (true) {
         if (await steer()) {
@@ -290,12 +292,18 @@ export class CustomAgent implements Agent {
               await execution.trace("context.omitted", {
                 messages: input.omitted,
               });
-            if (input.overBudget)
+            if (input.overBudget && !overBudgetReported) {
+              overBudgetReported = true;
               await execution.trace("context.over_budget", {
                 fixedSize: input.fixedSize,
                 reservedSize: input.reservedSize,
+                exchangeSize: input.exchangeSize,
+                workingSize: input.workingSize,
                 budget: contextBudget,
+                reason:
+                  input.fixedSize >= contextBudget ? "fixed" : "protected",
               });
+            }
             if (req.specialist)
               await execution.trace("research.model_input", {
                 version: 1,

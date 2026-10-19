@@ -87,11 +87,12 @@ test("an over-budget turn keeps the preceding exchange and its own tool results"
         "SELECT data FROM events WHERE type='context.over_budget' ORDER BY id",
       )
     ).rows as any[];
-    assert.equal(events.length, 2);
+    // Reported once per turn, with the part that exceeded the soft budget.
+    assert.equal(events.length, 1);
     assert.ok(events[0].data.fixedSize > contextBudget);
     assert.equal(events[0].data.budget, contextBudget);
     assert.equal(events[0].data.reservedSize, 0);
-    assert.ok(events[1].data.reservedSize > 0);
+    assert.equal(events[0].data.reason, "fixed");
     assert.equal(
       (
         await db.query(

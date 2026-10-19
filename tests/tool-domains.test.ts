@@ -11,10 +11,13 @@ import { runtimeContext } from "../src/runtime.js";
 import { action } from "../src/protocol.js";
 import {
   CORE_OPERATIONS,
+  DOMAIN_GUIDANCE,
   domainOf,
   selectDomains,
   TOOL_DOMAINS,
+  type ToolDomain,
 } from "../src/tool-domains.js";
+import { instructions } from "../src/context.js";
 import type { Database } from "../src/db.js";
 
 const allOn = {
@@ -285,4 +288,40 @@ test("loading a domain appends its tools after the existing ones", () => {
   );
   assert.deepEqual(after.slice(0, before.length), before);
   assert.ok(after.slice(before.length).every((n) => domainOf(n) === "jobs"));
+});
+
+test("coding tools form their own domain, so ordinary work turns do not carry them", () => {
+  assert.equal(domainOf("coding_start"), "coding");
+  assert.equal(domainOf("work_start"), "work");
+  // coding_status stays in the core so status answers never need a load.
+  assert.equal(domainOf("coding_status"), undefined);
+  const pick = (message: string) => [...selectDomains({ message })].sort();
+  assert.deepEqual(pick("do this in the background step by step"), ["work"]);
+  assert.deepEqual(pick("open a pull request for that bug fix"), ["coding"]);
+  const enabled = { ...allOn, coding: true };
+  const work = runtimeContext(enabled, null, undefined, new Set(["work"]));
+  assert.ok(!work.tools.some((t) => t.name === "coding_start"));
+  assert.ok(work.tools.some((t) => t.name === "work_start"));
+  const coding = runtimeContext(enabled, null, undefined, new Set(["coding"]));
+  assert.ok(coding.tools.some((t) => t.name === "coding_start"));
+});
+
+test("domain guidance travels with its offered domain instead of the fixed instructions", () => {
+  assert.doesNotMatch(instructions, /When canvas tools are available/);
+  assert.doesNotMatch(instructions, /job-alignment skill/);
+  assert.doesNotMatch(instructions, /Work in small batches/);
+  const guidance = (domains: string[]) =>
+    JSON.parse(
+      runtimeContext(allOn, null, undefined, new Set(domains as ToolDomain[]))
+        .context,
+    ).domainGuidance;
+  assert.equal(guidance([]), undefined);
+  assert.deepEqual(Object.keys(guidance(["canvas"])), ["canvas"]);
+  assert.match(guidance(["canvas"]).canvas, /When canvas tools are available/);
+  assert.deepEqual(Object.keys(guidance(["jobs", "work"])).sort(), [
+    "jobs",
+    "work",
+  ]);
+  for (const [domain, text] of Object.entries(DOMAIN_GUIDANCE))
+    assert.ok(TOOL_DOMAINS.includes(domain as ToolDomain) && text, domain);
 });

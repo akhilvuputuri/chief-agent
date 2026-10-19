@@ -202,14 +202,14 @@ test("expanded coding allocations survive assignment, provisioning, status and c
     }),
   );
 });
-test("coding is unavailable by default and discovered through the work tools when enabled", () => {
+test("coding is unavailable by default and discovered through its own domain when enabled", () => {
   const off = runtimeContext({}, null).tools;
   assert(!off.some((t) => t.name.startsWith("coding_")));
   const on = runtimeContext(
     { coding: true },
     null,
     undefined,
-    new Set(["work"]),
+    new Set(["coding"]),
   ).tools;
   for (const name of [
     "coding_start",

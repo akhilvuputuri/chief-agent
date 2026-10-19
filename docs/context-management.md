@@ -2,6 +2,14 @@
 
 Status: stage 1 (measurement) is released. Stage 2 (relevant tool loading) is implemented on a review branch. Stages 3–4 are proposed. The v0.3.22 increase to a 400,000-character internal ceiling is temporary headroom, not a provider-token budget or a bounded-context design. [Issue #77](https://github.com/akhilvuputuri/chief-agent/issues/77) tracks implementation; [journal 28](journey/28-context-wire-compaction.md) contains the measured incidents.
 
+**Lean coordinator prompt (20 October 2026, [journal 101](journey/101-lean-coordinator-prompt.md)).**
+
+- `coding_*` tools form a `coding` domain separate from `work`.
+- `DOMAIN_GUIDANCE` (canvas, jobs, work) travels in the runtime context only when that domain's tools are offered.
+- Older history keeps a `historyFloor` of 6,000 characters even when the fixed envelope fills the soft budget.
+- The per-turn summary has its own system message after the stable instructions and memories.
+- `context.over_budget` is logged once per turn, at info level, with `kind` (`fixed` or `protected`), `fixedChars` and `protectedHistoryChars`.
+
 ## Why the current projection fails
 
 `context.ts` retains the entire preceding exchange and all complete tool-call/result groups from the current turn. It can shorten recoverable result bodies but has no bound on the number of retained groups, assistant arguments, or unreferenced results. `history.ts` also protects the preceding exchange during reload. The 48,000-character soft allowance only removes optional older history. It does not constrain the fixed instructions/state/tool schemas or those protected groups.

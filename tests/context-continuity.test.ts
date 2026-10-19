@@ -97,20 +97,32 @@ test("54k fixed context preserves the actual invitation question and source when
   const input = context(req, [...history, user(message)]);
   assert.equal(input.fixedSize, 54264);
   assert.equal(input.overBudget, true);
-  assert.equal(input.omitted, 473);
+  // The history floor keeps a few older messages even with a full fixed envelope.
+  assert.equal(input.omitted, 469);
   const text = JSON.stringify(input.messages);
   assert.match(text, /Mira and Dev/);
   assert.match(text, /2028-04-19/);
   assert.match(text, /00000000-0000-4000-8000-000000000002/);
   assert.match(text, /What start and end time should I use/);
   assert.match(text, /Use 8am to 11am/);
-  assert.doesNotMatch(
-    text,
-    /Another couple|Review 22 saved roles|Internal reasoning/,
-  );
+  // The floor admits older exchanges, but always before the latest one, and never reasoning.
+  assert.doesNotMatch(text, /Internal reasoning/);
+  assert.ok(text.indexOf("Another couple") < text.indexOf("Mira and Dev"));
   assert.deepEqual(
     input.messages.map((m) => m.role),
-    ["system", "user", "assistant", "tool", "assistant", "user", "system"],
+    [
+      "system",
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+      "tool",
+      "assistant",
+      "user",
+      "system",
+    ],
   );
   assert.equal(JSON.stringify(history), before);
 });
@@ -362,8 +374,11 @@ test("exchange index lists earlier exchanges with read references and excludes t
   req.conversationSummary = index;
   const input = context(req, [user(req.message)]);
   assert.equal(input.fixedSize, beforeSize + index.length);
+  // The summary follows the stable instructions in its own system message.
+  assert.doesNotMatch(String(input.messages[0]!.content), /Exchange index/);
+  assert.equal(input.messages[1]!.role, "system");
   assert.match(
-    String(input.messages[0]!.content),
+    String(input.messages[1]!.content),
     /Exchange index \(historical data/,
   );
 });

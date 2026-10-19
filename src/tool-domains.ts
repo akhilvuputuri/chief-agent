@@ -31,6 +31,7 @@ export const TOOL_DOMAINS = [
   "daily",
   "jobs",
   "work",
+  "coding",
   "research",
   "media",
   "canvas",
@@ -53,7 +54,9 @@ export const DOMAIN_SUMMARIES: Record<ToolDomain, string> = {
   calendar: "Calendar lookups and approval-gated event drafts",
   daily: "saved items, reminders, briefings and the daily Sheet",
   jobs: "saved roles, analysis, alignment scopes, preparation and its Sheet",
-  work: "durable background tasks and separate coding sandbox jobs: dispatch, status, reply, resume, cancel",
+  work: "durable background tasks: start, revise, steps, evidence, yield, cancel",
+  coding:
+    "coding sandbox jobs on the owner's repository: start, reply, resume, cancel, models",
   research: "isolated public-research specialist and plugin agents",
   media: "specialist reading of attached images and stored documents",
   canvas: "saved Mini App canvases: create, update, read, list",
@@ -71,6 +74,18 @@ export const DOMAIN_SUMMARIES: Record<ToolDomain, string> = {
   skills: "skill version history, drafts, evaluation and activation",
 };
 
+/**
+ * Coordinator guidance that matters only when a domain's tools are offered. It travels in the
+ * per-call runtime context instead of the fixed instructions, so turns without the domain do
+ * not carry it and a mid-turn tools_load adds it without changing the cached prefix.
+ */
+export const DOMAIN_GUIDANCE: Partial<Record<ToolDomain, string>> = {
+  canvas:
+    "When canvas tools are available, use saved canvases for rich results worth revisiting (tables of roles, evidence-backed analyses, preparation plans). Choose useful components based on the request; short conversation stays in Telegram. canvas_list finds earlier documents; canvas_read retrieves exact revisions in chunks. Refining the same topic updates that canvas; a new topic creates a separate canvas. Updates must reconcile the latest base revision and preserve block IDs. A saved canvas is a snapshot, not an independently verified finding. Ground content in actual records/sources; do not invent URLs or data. Use finish_turn.canvases with saved IDs and optional exact revisions to attach open buttons. The Mini App never authorizes sensitive actions. Do not promise a canvas or link before a successful save.",
+  jobs: "For job fit, interview research and preparation, use the job-alignment skill and job_alignment_start/resume/read. The scope can be selected roles or all saved roles, never force a one-role workflow. Get exact role IDs from the jobs agent (its refs) or allSaved, and select relevant memory keys. For substantial work establish durable work tracking. Automatically resume pending roles within the existing allocation, keeping scopeId in the task checkpoint; do not restart the scope on each pass. Read full reports before synthesis and requested prep/Sheet saves. Combine overlapping preparation while retaining role/evidence links. Scope history is context, not authorization to resume old work. Reports distinguish unknown experience and interview uncertainty; do not upgrade those to gaps or confirmed stages.",
+  work: "Reuse successful research for the current task; do not repeat identical searches. Read a promising original page before searching for more snippets. If a quote is rejected, inspect the source and correct the quote rather than repeating the same claim. Stop discovery when enough evidence supports an answer or a clear limitation. Reserve remaining work for synthesis and recording outcomes. Work in small batches and persist useful findings, evidence and completed steps before collecting many more sources. Older tool observations can leave the bounded context; do not defer all assessment and saving until after exhaustive browsing. For each researched target use an evidence step; writes/exports use action steps with expectedOperation. Use web_read sourceId for work_evidence, observationId for observation_read, and receiptId for execution proofs; these IDs are not interchangeable. Successful tools return receiptId; use those and matched evidence IDs as proofs. Analysis is synthesis, not proof of a write.",
+};
+
 const PREFIXES: [string, ToolDomain][] = [
   ["mcp_", "mcp"],
   ["gmail_", "gmail"],
@@ -82,7 +97,7 @@ const PREFIXES: [string, ToolDomain][] = [
   ["prep_", "jobs"],
   ["sheet_", "jobs"],
   ["work_", "work"],
-  ["coding_", "work"],
+  ["coding_", "coding"],
   ["research_", "research"],
   ["agent_", "research"],
   ["media_", "media"],
@@ -139,7 +154,11 @@ const CUES: [ToolDomain, RegExp][] = [
   ],
   [
     "work",
-    /\b(background|continue|resume|keep going|keep working|pause|cancel|long task|work on it|step by step|coding|sandbox|pull request|prd|fix.*bug|implement.*feature)\b/i,
+    /\b(background|continue|resume|keep going|keep working|pause|cancel|long task|work on it|step by step)\b/i,
+  ],
+  [
+    "coding",
+    /\b(coding|code|sandbox|pull request|prs?|prd|repo(sitory)?|merge|rebase|fix.*bug|implement.*feature|continue|resume)\b/i,
   ],
   [
     "research",

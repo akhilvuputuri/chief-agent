@@ -1,3 +1,7 @@
+# Lean coordinator prompt — in review, 20 October 2026
+
+The fixed coordinator prompt had outgrown the 48k soft budget, so older conversation was never sent: 142 of 151 foreground calls were over budget. Coding tools now form their own domain. The canvas, jobs and work guidance arrives only with those tools. Older history keeps a 6,000-character floor, and the over-budget event fires once per turn with its reason. Instructions drop from 11.1k to 8.4k characters, and `work` turns lose a further 4.2k of coding schemas. See [journal 101](journey/101-lean-coordinator-prompt.md).
+
 # Monthly subscription summary — live as v0.3.88, 19 October 2026
 
 Issue 132 S7. One opt-in Telegram message a month (`subscription_summary_set`, default the 1st at 09:00 Singapore), built from saved records with no model call. It covers per-currency monthly equivalents, the previous month's recorded changes (new, ended or back, price changes with the price they replaced) and the next 30 days. `subscription_summary` previews it. No migration. [PR 261](https://github.com/akhilvuputuri/chief-agent/pull/261) deployed as `293bb0d` with exact receipt and startup health. Next: owner acceptance (turn it on, preview it, check the first delivered message). [Journal 98](journey/98-monthly-subscription-summary.md), [design](subscriptions.md#monthly-summary).
