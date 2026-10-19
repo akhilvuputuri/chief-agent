@@ -420,6 +420,19 @@ test("the CloudFormation template keeps boxes closed and the controller narrow",
   );
   const manage = statements.find((s: any) => s.Sid === "ManageOwnBoxesOnly");
   assert.ok(manage.Condition.StringEquals["ec2:ResourceTag/chief:env"]);
+  // Network resources come from the template, and are pinned to the stack's own IDs.
+  const network = statements.find(
+    (s: any) => s.Sid === "LaunchNetworkFromTemplateOnly",
+  );
+  assert.deepEqual(
+    network.Resource.map((r: any) => r["Fn::Sub"].split(":").pop()),
+    [
+      "subnet/${SubnetId}",
+      "security-group/${BoxSecurityGroup}",
+      "network-interface/*",
+    ],
+  );
+  assert.equal(network.Condition.Bool["ec2:IsLaunchTemplateResource"], "true");
   const tagging = statements.find((s: any) => s.Sid === "TagOnlyAtLaunch");
   assert.equal(
     tagging.Condition.StringEquals["ec2:CreateAction"],
@@ -533,10 +546,46 @@ test("the IAM check's legitimate case is the provider's request, and its verdict
       name,
     );
   assert.equal(verdict({ expect: "refused", got: "refused" }), "PASS");
+  assert.equal(
+    verdict({ expect: "allowed", got: "other (InvalidParameterCombination)" }),
+    "FAIL",
+  );
   assert.equal(verdict({ expect: "allowed", got: "refused" }), "FAIL");
   assert.equal(verdict({ expect: "refused", got: "launched" }), "FAIL");
   assert.equal(
     verdict({ expect: "refused", got: "other (InvalidAMIID.NotFound)" }),
     "INCONCLUSIVE",
   );
+});
+
+test("a profile's task command reaches the box safely encoded", () => {
+  const script = boxUserData(request, {
+    launchTemplate: "t",
+    taskCommand: ["node", "/opt/chief-worker/dist/boxes/echo-task.js"],
+  });
+  const line = script
+    .split("\n")
+    .find((l) => l.startsWith("CHIEF_BOX_TASK_COMMAND_B64="))!;
+  assert.deepEqual(
+    JSON.parse(Buffer.from(line.split("=")[1]!, "base64").toString()),
+    ["node", "/opt/chief-worker/dist/boxes/echo-task.js"],
+  );
+  for (const bad of [["node", "x; reboot"], ["$(id)"], Array(9).fill("x")])
+    assert.throws(
+      () => boxUserData(request, { launchTemplate: "t", taskCommand: bad }),
+      /task command/,
+    );
+});
+
+test("the committed boxes configuration is valid and its EC2 profiles have launch settings", async () => {
+  const { loadBoxesFile, boxSettings, boxesFile } =
+    await import("../src/boxes/config.js");
+  const file = loadBoxesFile(new URL("../config/boxes.json", import.meta.url));
+  assert.equal(file.environment, "prod");
+  const settings = boxSettings(file, "123456789012");
+  for (const [name, profile] of Object.entries(settings.config.profiles))
+    if (profile.provider === "ec2")
+      assert.ok(settings.ec2.profiles[name], name);
+  assert.throws(() => boxSettings(file, "not-an-account"), /12-digit/);
+  assert.throws(() => boxesFile.parse({ ...file, ec2: {} }));
 });

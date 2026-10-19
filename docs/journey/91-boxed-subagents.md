@@ -297,3 +297,25 @@ Also adopted:
 - **Tests:** the identity tests now use a real X.509 certificate and check that the pinned certificate parses.
 - **Inconclusive cases:** these no longer fail the IAM check, matching the runbook, and the runbook checks both launch templates.
 - **Docs:** they now state that Docker comes from Amazon Linux's signed repository rather than a pinned artifact, and they name the limits IAM cannot bound (`MaxCount` and extra volumes).
+
+### Phase 2c-2: wiring and installation — 19 October 2026
+
+This phase turns the dormant layer into something the owner can enable. It adds:
+
+- the gateway wiring behind `BOXES_RUNTIME`, off by default;
+- `config/boxes.json`, with an `echo` profile for the EC2 proof;
+- an operator probe;
+- delivery of owner notices;
+- the reviewed rollout (`scripts/deploy-boxes.py`), which installs migration 032, its Compose line and the `/boxes/*` Caddy route.
+
+It also carries the review points from 2c-1:
+
+- a launch or close whose provider search keeps failing is held after the timeout instead of looping;
+- an inconclusive legitimate launch fails the IAM check.
+
+**Not yet done:**
+
+- The `echo` profile's image digest must point to a worker image built after phase 2b, because older images do not contain `dist/boxes`.
+- The rollout baseline must be set to the live release just before merging. The rollout itself runs right after the merge, with the owner's go-ahead.
+
+The controller policy now also pins the subnet and security-group resource ARNs to the stack's own IDs, in addition to `ec2:IsLaunchTemplateResource`. This responds to a Devin comment on PR 264; the condition already refused overrides.

@@ -151,6 +151,46 @@ export class BoxController {
     return box;
   }
 
+  /**
+   * Delivers pending owner notices (alerts, holds, compromise). A send whose outcome is
+   * unknown is marked uncertain and never repeated, as the coding outbox does.
+   */
+  async deliverNotices(send: (user: string, text: string) => Promise<void>) {
+    for (let i = 0; i < 10; i++) {
+      const notice = (
+        await this.db.query(
+          `UPDATE box_notices SET delivery='sending' WHERE id=(SELECT n.id FROM box_notices n
+             WHERE n.delivery='pending' ORDER BY n.created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
+           RETURNING id,box_id,payload`,
+        )
+      ).rows[0];
+      if (!notice) return;
+      const box = (await this.load(notice.box_id))!;
+      try {
+        await send(
+          box.user_id,
+          `Box ${box.profile} (${box.id.slice(0, 8)}): ${String(notice.payload?.summary ?? "needs attention")}`,
+        );
+        await this.db.query(
+          "UPDATE box_notices SET delivery='sent' WHERE id=$1",
+          [notice.id],
+        );
+      } catch {
+        await this.db.query(
+          "UPDATE box_notices SET delivery='uncertain' WHERE id=$1",
+          [notice.id],
+        );
+      }
+    }
+  }
+
+  /** Marks notices interrupted mid-send as uncertain after a restart. */
+  async recoverNotices() {
+    await this.db.query(
+      "UPDATE box_notices SET delivery='uncertain' WHERE delivery='sending'",
+    );
+  }
+
   private async notice(
     boxId: string,
     key: string,
@@ -785,7 +825,17 @@ export class BoxController {
       let providerId = box.provider_id;
       if (!providerId && box.launch_started_at) {
         // Closed during an uncertain launch: find the resource before declaring it gone.
-        providerId = (await call(provider.find(box.id))) ?? null;
+        try {
+          providerId = (await call(provider.find(box.id))) ?? null;
+        } catch (error) {
+          if (since(box.launch_started_at) > this.timings.launchTimeoutMs)
+            await this.hold(
+              box,
+              "Closing a box whose launch is unresolved; the provider search keeps failing. Inspect the provider",
+              true,
+            );
+          throw error;
+        }
         if (!providerId) {
           if (since(box.launch_started_at) > this.timings.launchTimeoutMs)
             await this.set(box, "terminating", { state: "terminated" });
@@ -842,7 +892,19 @@ export class BoxController {
         return;
       }
       case "launching": {
-        const found = await call(provider.find(box.id));
+        // A search that keeps failing (an unsafe instance that cannot be ended, a provider
+        // outage) must not keep the box launching forever: past the timeout it is held.
+        let found: string | undefined;
+        try {
+          found = await call(provider.find(box.id));
+        } catch (error) {
+          if (since(box.launch_started_at) > this.timings.launchTimeoutMs)
+            await this.hold(
+              box,
+              "Launch outcome unresolved; the provider search keeps failing. Inspect the provider",
+            );
+          throw error;
+        }
         if (found) {
           await this.set(box, "launching", {
             provider_id: found,
@@ -1046,12 +1108,15 @@ export class BoxController {
     });
   }
 
-  private async hold(box: Box, reason: string) {
+  /** Holds a box for an operator. A closing box is held only when closing itself is stuck. */
+  private async hold(box: Box, reason: string, closing = false) {
     const now = this.clock();
     const held = await transaction(this.db, async (db) => {
       const changed = await db.query(
-        "UPDATE boxes SET state='held',reason=$2,updated_at=$3 WHERE id=$1 AND state NOT IN ('terminating','terminated','held') RETURNING id",
-        [box.id, reason, now],
+        `UPDATE boxes SET state='held',reason=$2,updated_at=$3 WHERE id=$1
+           AND state NOT IN ('terminated','held') AND (state<>'terminating' OR $4)
+         RETURNING id`,
+        [box.id, reason, now, closing],
       );
       if (!changed.rows.length) return false;
       await this.failTasks(db, box.id, reason, now);

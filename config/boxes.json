@@ -1,0 +1,23 @@
+{
+  "environment": "prod",
+  "region": "ap-southeast-1",
+  "profiles": {
+    "echo": {
+      "provider": "ec2",
+      "image": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:637a956d25e6ff110e88f0c6e19e061a4f20bb101a3630bcdd16b8cf7c2e2ec0",
+      "idleTtlMinutes": 15,
+      "retentionHours": 24,
+      "hardMaxHours": 6,
+      "absoluteDays": 2,
+      "concurrency": 1
+    }
+  },
+  "ec2": {
+    "echo": {
+      "launchTemplate": "chief-box-prod-echo",
+      "taskMemory": "1g",
+      "taskCpus": "1",
+      "taskCommand": ["node", "/opt/chief-worker/dist/boxes/echo-task.js"]
+    }
+  }
+}

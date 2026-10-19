@@ -136,6 +136,8 @@ export function outcome(error: unknown): string {
 /** PASS when the answer matches, INCONCLUSIVE when AWS never reached authorisation. */
 export function verdict(result: { expect: string; got: string }) {
   if (result.got === result.expect) return "PASS";
+  // The legitimate launch must be proven allowed; anything else there is a failure.
+  if (result.expect === "allowed") return "FAIL";
   return result.got.startsWith("other") ? "INCONCLUSIVE" : "FAIL";
 }
 

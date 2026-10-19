@@ -9,6 +9,7 @@
  *   CHIEF_BOX_TASK_COMMAND                            JSON array (process runner)
  *   CHIEF_BOX_TASK_IMAGE                              image digest (docker runner)
  *   CHIEF_BOX_TASK_MEMORY, CHIEF_BOX_TASK_CPUS        per-task limits (docker runner)
+ *   CHIEF_BOX_TASK_COMMAND_B64                        base64 JSON command override (docker runner)
  *   CHIEF_BOX_SHUTDOWN=exit|poweroff                  default poweroff
  *   CHIEF_BOX_IDENTITY=ec2                            present the EC2 identity document
  */
@@ -30,6 +31,11 @@ const runner =
   env.CHIEF_BOX_RUNNER === "process"
     ? new ProcessRunner(JSON.parse(required("CHIEF_BOX_TASK_COMMAND")), tasks)
     : new DockerRunner(required("CHIEF_BOX_TASK_IMAGE"), tasks, {
+        command: env.CHIEF_BOX_TASK_COMMAND_B64
+          ? (JSON.parse(
+              Buffer.from(env.CHIEF_BOX_TASK_COMMAND_B64, "base64").toString(),
+            ) as string[])
+          : undefined,
         memory: env.CHIEF_BOX_TASK_MEMORY,
         scope: env.CHIEF_BOX_ID,
         cpus: env.CHIEF_BOX_TASK_CPUS,

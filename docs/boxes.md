@@ -413,12 +413,26 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
   - **`src/boxes/iam-check.ts`.** Checks the controller's credentials with `DryRun` launches: the template launch must be allowed, and 15 overrides must be refused.
   - **Agent.** A task that floods questions is stopped once, with a readable reason.
 
+- **2c-2, wiring and installation (this phase's PR):**
+  - **Gateway wiring.** `BOXES_RUNTIME=on` turns boxes on. It requires `BOX_AUTH_KEY`, `BOX_AWS_ACCOUNT_ID`, `CODING_PUBLIC_ORIGIN` and migration 032 to be installed. The gateway then:
+    - builds the controller with the EC2 provider from `config/boxes.json`;
+    - serves `/boxes/*`;
+    - reconciles every 15 seconds;
+    - delivers owner notices to the owner's chat.
+
+    It stays off by default.
+
+  - **`config/boxes.json`.** Profiles and their EC2 launch settings. For now only `echo` is defined, to prove the loop. Its task command (`dist/boxes/echo-task.js`) reaches the box as base64 JSON, because systemd environment files would reinterpret the quotes.
+  - **`src/boxes/probe.ts`.** Run inside the gateway container (`node dist/boxes/probe.js spawn|delegate|status|timings|close`). It writes box requests as the owner, and `timings` reports launch-to-first-report and each epoch's first report. It never calls a provider; the gateway's reconciler does that.
+  - **Controller.** A launch or close whose provider search keeps failing is held after the launch timeout instead of looping forever.
+  - **IAM check.** An inconclusive legitimate launch now fails the check.
+
 ## Deployment
 
 The release guard refuses any change to `db/` or `compose.yaml` that a reviewed operator rollout has not installed. That makes the box migration a one-time operator step:
 
 1. **Staged, not installed.** `db-staged/032_boxes.sql` stays out of `db/` while the layer is dormant.
-2. **Rollout PR.** The PR that wires the layer moves it into `db/`, adds its Compose inventory line, and adds a reviewed `scripts/deploy-boxes.py` whose baseline is the live release at merge time.
+2. **Rollout PR.** The PR that wires the layer (phase 2c-2) moves it into `db/`, adds its Compose inventory line, and adds the reviewed `scripts/deploy-boxes.py`, whose baseline is set to the live release at merge time. The script also installs the `/boxes/*` Caddy route: it inserts the route before the site's catch-all, validates and reloads Caddy, checks that the route reaches the gateway, and restores the previous Caddyfile on any failure.
 3. **Run immediately.** The rollout runs right after the merge, under the release lock with an idle gateway. Until it runs, every automatic release is refused.
 
 The automatic release for the same commit then succeeds as a no-op.

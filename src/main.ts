@@ -80,6 +80,11 @@ import { ToolPicker } from "./tool-picker.js";
 import { ShadowDecisions } from "./shadow.js";
 import { EffortPicker } from "./effort.js";
 import { server } from "./server.js";
+import { BoxController } from "./boxes/controller.js";
+import { boxApi } from "./boxes/api.js";
+import { Ec2BoxProvider } from "./boxes/ec2-provider.js";
+import { boxSettings, loadBoxesFile } from "./boxes/config.js";
+import { EC2Client } from "@aws-sdk/client-ec2";
 import {
   telegram,
   sendCalendarApprovals,
@@ -336,6 +341,38 @@ const responsibilities =
   c.RESPONSIBILITIES === "on"
     ? new Responsibilities(db, { gmail, calendar })
     : undefined;
+let boxes: BoxController | undefined;
+if (c.BOXES_RUNTIME === "on") {
+  if (!c.BOX_AUTH_KEY || !c.BOX_AWS_ACCOUNT_ID || !c.CODING_PUBLIC_ORIGIN)
+    throw startupError(
+      "STARTUP_BOXES_CONFIG",
+      "Boxes need BOX_AUTH_KEY, BOX_AWS_ACCOUNT_ID and CODING_PUBLIC_ORIGIN",
+    );
+  if (
+    !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=32")).rows
+      .length
+  )
+    throw startupError(
+      "STARTUP_MIGRATION_032",
+      "Box migration 032 must be installed before boxes are enabled",
+    );
+  const file = loadBoxesFile(new URL("../config/boxes.json", import.meta.url));
+  const settings = boxSettings(file, c.BOX_AWS_ACCOUNT_ID);
+  boxes = new BoxController(
+    db,
+    settings.config,
+    {
+      ec2: new Ec2BoxProvider(
+        new EC2Client({ region: file.region, maxAttempts: 1 }),
+        file.environment,
+        settings.ec2,
+      ),
+    },
+    c.BOX_AUTH_KEY,
+    c.CODING_PUBLIC_ORIGIN,
+  );
+  await boxes.recoverNotices();
+}
 let coding: CodingController | undefined;
 if (c.CODING_RUNTIME === "on") {
   if (
@@ -710,6 +747,7 @@ const app = server(
 );
 const bot = telegram(c, assistant, db);
 if (coding) await codingApi(app, coding);
+if (boxes) await boxApi(app, boxes);
 if (portfolio) {
   notifyUser = async (user, text) => {
     await bot.api.sendMessage(user, text, {
@@ -1018,6 +1056,24 @@ const ruleDelivery = new RuleDelivery(db, async (user, payload) => {
 await ruleDelivery.recover();
 await newsBulletin.recover();
 await coding?.recoverDelivery();
+const boxTimer = boxes
+  ? setInterval(() => {
+      void boxes
+        .tick()
+        .catch((error) =>
+          opsLog("boxes.tick_failed", "error", errorFields(error)),
+        );
+      void boxes
+        .deliverNotices(async (user, text) => {
+          await bot.api.sendMessage(user, text, {
+            link_preview_options: { is_disabled: true },
+          });
+        })
+        .catch((error) =>
+          opsLog("boxes.notice_failed", "error", errorFields(error)),
+        );
+    }, 15000)
+  : undefined;
 const routineTimer = setInterval(() => {
   void coding
     ?.automationTick()
@@ -1173,6 +1229,7 @@ for (const signal of ["SIGINT", "SIGTERM"])
       clearInterval(gatheringTimer);
       clearInterval(workTimer);
       clearInterval(routineTimer);
+      if (boxTimer) clearInterval(boxTimer);
       shutdown.abort();
       assistant.shutdown();
       await runner.stop();

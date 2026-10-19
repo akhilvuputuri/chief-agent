@@ -88,6 +88,8 @@ services:
         "/migrations/030_mcp.sql",
         "-f",
         "/migrations/031_link_resolution.sql",
+        "-f",
+        "/migrations/032_boxes.sql",
       ]
     depends_on:
       postgres: { condition: service_healthy }
