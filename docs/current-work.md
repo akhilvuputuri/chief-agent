@@ -1,3 +1,7 @@
+# Reply style for any model — in review, 20 October 2026
+
+On Argon, median replies were 844 characters, and 7 of 10 replies leaked internal names or IDs. Chief's reply instructions now ask for the answer first and short replies for simple requests. A host filter turns Chief's operation and field names into plain words and shortens long IDs in model-written answers, progress and voice replies; code, links and slash-command IDs are left untouched. See [journal 102](journey/102-reply-style-for-any-model.md).
+
 # Lean coordinator prompt — in review, 20 October 2026
 
 The fixed coordinator prompt had outgrown the 48k soft budget, so older conversation was never sent: 142 of 151 foreground calls were over budget. Coding tools now form their own domain. The canvas, jobs and work guidance arrives only with those tools. Older history keeps a 6,000-character floor, and the over-budget event fires once per turn with its reason. Instructions drop from 11.1k to 8.4k characters when those domains are not loaded, and `work` turns that do not need coding lose a further 4.2k of coding schemas. See [journal 101](journey/101-lean-coordinator-prompt.md).

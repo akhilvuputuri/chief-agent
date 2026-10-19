@@ -2,6 +2,29 @@
 
 The model still writes conversational prose. An optional answer envelope gives it places for detailed sections, numbers, sources and references to actual saved records. Telegram renders these on demand in one editable message. Plain prose longer than 1,800 rendered UTF-16 units uses the same progressive disclosure automatically; the full text is preserved. This is not a Mini App, generated image or new response template.
 
+## Reply tidy-up for any model
+
+Answer and progress deliveries pass through `tidyOwnerText` (`src/owner-text.ts`) before sending ([journal 102](journey/102-reply-style-for-any-model.md)). This covers the reply, section titles and bodies, number labels and values, and source labels. Voice replies pass through it too.
+
+- Chief's own operation names and a fixed list of internal record fields become plain words, in prose or as a whole inline-code span.
+- Full UUIDs in prose shrink to 8 characters. Hex strings of 40–64 characters that contain a letter shrink to 7.
+- These are delivered exactly:
+  - fenced and inline code;
+  - Markdown links, URLs and bare domains with a path;
+  - file paths, dotted fields and call-like names (`coding_reply(x)`);
+  - long decimal numbers;
+  - an ID right after a slash command, such as `/continue <id>`.
+
+  IDs inside a file path or filename, and a slash-command ID wrapped in emphasis, are kept too. A value the owner asks for should therefore go in inline code. An inline-code span that is exactly one of Chief's own names is still treated as a leak, so an exact tool or field name the owner asks for goes in a code block.
+
+- Shortened IDs are for reading only. `/continue` and `/cancel` still need the full ID, which `/status` shows.
+- Host text placed in an answer's reply is filtered too, for example failure notices or a topic notice. These keep their slash-command IDs.
+- Not filtered:
+  - `delivery.notices` and schedule deliveries;
+  - messages sent directly through the Bot API: coding job events, responsibility findings, market and news deliveries.
+
+  Coding job events include worker-written summaries and intentional full job IDs.
+
 ## Using it
 
 - `/roles`, `/items`, `/schedules`, `/drafts`: six-record pages with authoritative employer/title labels for roles, active/all filter, default/newest sort, detail and Back. Details read current saved data; they do not re-run analysis. `/drafts` has no approval action: use the original Telegram approval card.

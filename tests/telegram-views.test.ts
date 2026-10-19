@@ -529,3 +529,62 @@ test("same-titled roles are distinguished by authoritative company in lists and 
     await f.pg.close();
   }
 });
+
+test("model-written answers and progress lose internal names; schedule text is sent as written", async () => {
+  const f = await fixture();
+  try {
+    const job = "1a6cf84e-4a86-47f6-b60a-c07c8238e9ef";
+    const text = `I called coding_resume for job ${job}.`;
+    await f.views.deliver("123", "123", text, "answer");
+    await f.views.deliver("123", "123", text, "progress");
+    await f.views.deliver("123", "123", text, "schedule");
+    assert.deepEqual(
+      f.sent.map((m) => m.text),
+      [
+        "I called coding resume for job 1a6cf84e.",
+        "I called coding resume for job 1a6cf84e.",
+        text,
+      ],
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("an interactive answer's sections, numbers and source labels are tidied; URLs stay exact", async () => {
+  const f = await fixture();
+  try {
+    const job = "1a6cf84e-4a86-47f6-b60a-c07c8238e9ef";
+    let opened: any;
+    f.views.open = (async (_user: string, _to: unknown, view: unknown) => {
+      opened = view;
+    }) as typeof f.views.open;
+    await f.views.deliver(
+      "123",
+      "123",
+      {
+        reply: "Done.",
+        sections: [{ title: "About coding_resume", body: `Job ${job}` }],
+        numbers: [
+          {
+            label: "head_sha",
+            value: "0123456789abcdef0123456789abcdef01234567",
+          },
+        ],
+        sources: [{ label: `Job ${job}`, url: `https://example.com/${job}` }],
+      },
+      "answer",
+    );
+    assert.deepEqual(opened.answer.sections, [
+      { title: "About coding resume", body: "Job 1a6cf84e" },
+    ]);
+    assert.deepEqual(opened.answer.numbers, [
+      { label: "head sha", value: "0123456" },
+    ]);
+    assert.deepEqual(opened.answer.sources, [
+      { label: "Job 1a6cf84e", url: `https://example.com/${job}` },
+    ]);
+  } finally {
+    await f.pg.close();
+  }
+});
