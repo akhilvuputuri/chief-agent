@@ -5,7 +5,8 @@ import { action } from "./protocol.js";
 // replies readable without depending on the model: Chief's own operation and field names
 // become plain words, and long IDs in prose shrink to short references. Code (fenced or
 // inline), links, URLs, paths and an ID right after a slash command are delivered exactly,
-// so a value the owner asked for belongs in inline code. Shortened IDs are for reading only;
+// so a value the owner asked for belongs in inline code. An inline span that is exactly one of
+// Chief's own names is treated as a leak (the Argon pattern); a code block keeps it exact. Shortened IDs are for reading only;
 // commands such as /continue still need the full ID, which /status shows.
 
 /** Internal record fields seen in owner replies; generic names (run_id, pr_url) are left alone. */
@@ -27,10 +28,12 @@ const internalNames = new Set([
 // A full stop ends a sentence; a dot followed by a word, slash or call is a path or field.
 const name =
   /(?<![\w./\\-])([a-z][a-z0-9]*(?:_[a-z0-9]+)+)(?![\w/\\(-]|\.[\w/(])/g;
+// IDs inside paths (/tmp/<id>/report.txt) or filenames (<id>.json) are left whole.
 const uuid =
-  /(?<![\w-])([0-9a-f]{8})-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\w-])/gi;
+  /(?<![\w/\\-])([0-9a-f]{8})-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\w/\\-]|\.\w)/gi;
 // 40–64 hex characters with at least one letter, so long decimal numbers stay whole.
-const longHex = /(?<!\w)(?=[0-9]*[a-f])([0-9a-f]{7})[0-9a-f]{33,57}(?!\w)/gi;
+const longHex =
+  /(?<![\w/\\])(?=[0-9]*[a-f])([0-9a-f]{7})[0-9a-f]{33,57}(?![\w/\\]|\.\w)/gi;
 const verbatim = new RegExp(
   [
     "```[\\s\\S]*?```", // fenced code
@@ -38,7 +41,7 @@ const verbatim = new RegExp(
     "\\[[^\\]\\n]{0,500}\\]\\((?:[^()\\s]|\\([^()\\s]*\\))*\\)", // Markdown link, one level of parentheses
     "https?:\\/\\/\\S+", // URL
     "\\b[a-z0-9-]{1,63}(?:\\.[a-z0-9-]{1,63}){1,8}\\/\\S*", // bare domain with a path (bounded labels)
-    "(?:^|(?<=[\\s(]))\\/[a-z_]+(?: [0-9a-f-]{8,})?", // slash command and its ID
+    "(?:^|(?<=[\\s(]))\\/[a-z_]+(?: (?:\\*\\*|__|[*_`])?[0-9a-f-]{8,}(?:\\*\\*|__|[*_`])?)?", // slash command and its ID, even emphasised
   ].join("|"),
   "gim",
 );

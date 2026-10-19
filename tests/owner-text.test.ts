@@ -35,6 +35,9 @@ test("code, links, paths, numbers and command IDs are delivered exactly", () => 
     `[the page](https://example.com/Foo_(bar)/${job})`,
     "```\ncoding_reply(x)\n```",
     `A 40-digit number: ${"1".repeat(40)}`,
+    `Open /tmp/${job}/report.txt or ${job}.json`,
+    `Use /continue **${job}** to resume.`,
+    "```\ncoding_reply\n```",
     "and/or a 2/3 split",
   ])
     assert.equal(tidyOwnerText(text), text);

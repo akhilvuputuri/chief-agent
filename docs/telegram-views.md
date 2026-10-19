@@ -15,7 +15,7 @@ Answer and progress deliveries pass through `tidyOwnerText` (`src/owner-text.ts`
   - long decimal numbers;
   - an ID right after a slash command, such as `/continue <id>`.
 
-  A value the owner asks for should therefore go in inline code.
+  IDs inside a file path or filename, and a slash-command ID wrapped in emphasis, are kept too. A value the owner asks for should therefore go in inline code. An inline-code span that is exactly one of Chief's own names is still treated as a leak, so an exact tool or field name the owner asks for goes in a code block.
 
 - Shortened IDs are for reading only. `/continue` and `/cancel` still need the full ID, which `/status` shows.
 - Host text placed in an answer's reply is filtered too, for example failure notices or a topic notice. These keep their slash-command IDs.
