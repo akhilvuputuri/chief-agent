@@ -1,7 +1,7 @@
 # 91 — Can Chief delegate heavy work to sub-agents with their own boxes?
 
-Work date(s): 2026-10-17. Written/revised: 2026-10-17.
-Status: in progress. [Design](../boxes.md) recorded with owner decisions; the box-layer foundation (phase 2a) is implemented and dormant. No AWS resources yet.
+Work date(s): 2026-10-17 to 2026-10-19. Written/revised: 2026-10-19.
+Status: in progress. Boxes are on in production since 19 October (`BOXES_RUNTIME=on`, `echo` profile only), with the owner-applied `chief-boxes-prod` AWS stack. The IAM check and the first EC2 echo proof passed; the rest of phase 3 (steering, trust reset, orphan sweep, retention on EC2) is open. Coding still runs on CodeBuild.
 
 ## User-visible problem and preceding iteration
 
