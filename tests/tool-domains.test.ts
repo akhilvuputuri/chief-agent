@@ -11,10 +11,13 @@ import { runtimeContext } from "../src/runtime.js";
 import { action } from "../src/protocol.js";
 import {
   CORE_OPERATIONS,
+  DOMAIN_GUIDANCE,
   domainOf,
   selectDomains,
   TOOL_DOMAINS,
+  type ToolDomain,
 } from "../src/tool-domains.js";
+import { instructions } from "../src/context.js";
 import type { Database } from "../src/db.js";
 
 const allOn = {
@@ -146,9 +149,11 @@ const names = (tools: ToolDefinition[]) => tools.map((t) => t.name);
 
 test("tools_load offers a domain's tools on the next model call and is recorded", async () => {
   const seen: string[][] = [];
+  const states: string[] = [];
   const f = await fixture({
     generate: async (input) => {
       seen.push(names(input.tools));
+      states.push(String(input.messages.at(-1)?.content));
       if (seen.length === 1) return call("tools_load", { domains: ["jobs"] });
       if (seen.length === 2) return call("job_list", {});
       return text("You have no saved roles.");
@@ -162,6 +167,9 @@ test("tools_load offers a domain's tools on the next model call and is recorded"
     assert.ok(!seen[0]!.includes("job_list"));
     assert.ok(seen[0]!.includes("tools_load"));
     assert.ok(seen[1]!.includes("job_list"));
+    // The loaded domain's guidance arrives with its tools, at the end of the request.
+    assert.doesNotMatch(states[0]!, /job-alignment skill/);
+    assert.match(states[1]!, /job-alignment skill/);
     const events = (
       await f.db.query(
         "SELECT type,data FROM events WHERE type IN ('tools.selected','tools.loaded') ORDER BY id",
@@ -285,4 +293,54 @@ test("loading a domain appends its tools after the existing ones", () => {
   );
   assert.deepEqual(after.slice(0, before.length), before);
   assert.ok(after.slice(before.length).every((n) => domainOf(n) === "jobs"));
+});
+
+test("coding tools form their own domain, so ordinary work turns do not carry them", () => {
+  assert.equal(domainOf("coding_start"), "coding");
+  assert.equal(domainOf("work_start"), "work");
+  // coding_status stays in the core so status answers never need a load.
+  assert.equal(domainOf("coding_status"), undefined);
+  const pick = (message: string) => [...selectDomains({ message })].sort();
+  assert.deepEqual(pick("do this in the background step by step"), ["work"]);
+  assert.deepEqual(pick("open a pull request for that bug fix"), ["coding"]);
+  const enabled = { ...allOn, coding: true };
+  const work = runtimeContext(enabled, null, undefined, new Set(["work"]));
+  assert.ok(!work.tools.some((t) => t.name === "coding_start"));
+  assert.ok(work.tools.some((t) => t.name === "work_start"));
+  const coding = runtimeContext(enabled, null, undefined, new Set(["coding"]));
+  assert.ok(coding.tools.some((t) => t.name === "coding_start"));
+});
+
+test("domain guidance travels with its offered domain instead of the fixed instructions", () => {
+  assert.doesNotMatch(instructions, /When canvas tools are available/);
+  assert.doesNotMatch(instructions, /job-alignment skill/);
+  assert.doesNotMatch(instructions, /Work in small batches/);
+  const guidance = (domains: string[]) =>
+    JSON.parse(
+      runtimeContext(allOn, null, undefined, new Set(domains as ToolDomain[]))
+        .context,
+    ).domainGuidance;
+  assert.equal(guidance([]), undefined);
+  assert.deepEqual(Object.keys(guidance(["canvas"])), ["canvas"]);
+  assert.match(guidance(["canvas"]).canvas, /When canvas tools are available/);
+  assert.deepEqual(Object.keys(guidance(["jobs", "work"])).sort(), [
+    "jobs",
+    "work",
+  ]);
+  for (const [domain, text] of Object.entries(DOMAIN_GUIDANCE))
+    assert.ok(TOOL_DOMAINS.includes(domain as ToolDomain) && text, domain);
+});
+
+test("a waiting coding job keeps coding tools offered; conversational words no longer load them", () => {
+  const pick = (message: string, extra = {}) =>
+    [...selectDomains({ message, ...extra })].sort();
+  assert.deepEqual(pick("merge it", { pendingCoding: true }), ["coding"]);
+  assert.deepEqual(pick("merge it"), []);
+  assert.deepEqual(pick("open a PR for this"), ["coding"]);
+  // Background steps say "Continue the existing task"; that is work, not coding.
+  assert.deepEqual(pick("Continue the existing task", { taskBound: true }), [
+    "work",
+  ]);
+  for (const message of ["update my resume", "I have a promo code"])
+    assert.ok(!pick(message).includes("coding"), message);
 });

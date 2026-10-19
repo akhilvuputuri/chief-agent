@@ -97,6 +97,6 @@ Cost per turn on Opus is unmeasured. Opus costs twice Argon's per-token price, a
 
 ## Follow-up and next iteration
 
-- The opening system message also carries the per-turn conversation summary, so the prefix still changes between turns. Moving the summary is part of the prompt-size work.
+- The opening system message carried the per-turn conversation summary. [Journal 101](101-lean-coordinator-prompt.md) moves it into its own message, so instructions and memories form a stable prefix. For Anthropic this gives no cross-turn reuse yet, because no breakpoint sits after that message and the tool list, which comes first, changes with each turn's domains. A marker on the opening message is the next thing to measure.
 - Domain-gated tools change the tool list, which comes first in the prefix. Keep tool order stable when gating.
 - Reply style rules that hold for any model.

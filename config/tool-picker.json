@@ -43,6 +43,10 @@
       "description": "Start, continue, check, pause or cancel a long-running multi-step background task.",
       "examples": "keep going on that task, cancel the background job, do this in the background step by step"
     },
+    "coding": {
+      "description": "Start, answer, resume, cancel or choose models for a coding sandbox job that changes the owner's repository and opens a pull request.",
+      "examples": "fix that bug in the repo, open a PR for this, continue the coding job, merge it, use a different coder model"
+    },
     "research": {
       "description": "Delegate an in-depth multi-source research report with citations (not a quick fact).",
       "examples": "deep dive on X with sources, thorough sourced comparison"

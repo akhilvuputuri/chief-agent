@@ -4,7 +4,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { PGlite } from "@electric-sql/pglite";
 import { ensureUser, type Database } from "../src/db.js";
-import { openLoops } from "../src/open-loops.js";
+import { codingWaitsOnOwner, openLoops } from "../src/open-loops.js";
 async function fixture() {
   const pg = new PGlite();
   // Every migration in order, so the approvals operation check matches production.
@@ -367,4 +367,18 @@ test("a re-send still pending does not hide an earlier card that is still confir
   assert.deepEqual(await awaiting(f.db), [
     "owner to confirm the requirements card",
   ]);
+});
+
+test("only a job that actually waits on its owner keeps coding tools offered", async () => {
+  const f = await fixture();
+  const waits = () => codingWaitsOnOwner(f.db, "123");
+  // Merged, deployed, mid-automation and old jobs never leave their state, but wait on no one.
+  await f.job({ state: "pr_ready", stage: "deployed" });
+  await f.job({ state: "pr_ready", stage: "pr_ready" });
+  await f.job({ state: "pr_ready", stage: "awaiting_ci" });
+  await f.job({ state: "paused", stage: "paused", age: "20 days" });
+  await f.job({ user: "456", state: "plan_ready" });
+  assert.equal(await waits(), false);
+  await f.job({ state: "pr_ready", stage: "awaiting_merge_approval" });
+  assert.equal(await waits(), true);
 });

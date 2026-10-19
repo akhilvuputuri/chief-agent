@@ -2,7 +2,12 @@ import { plugins } from "./plugin-registry.js";
 import { z } from "zod";
 import { action } from "./protocol.js";
 import { baselineSkills } from "./baseline-skills.js";
-import { DOMAIN_SUMMARIES, domainOf, type ToolDomain } from "./tool-domains.js";
+import {
+  DOMAIN_GUIDANCE,
+  DOMAIN_SUMMARIES,
+  domainOf,
+  type ToolDomain,
+} from "./tool-domains.js";
 export function jsonSchema(v: z.ZodTypeAny): any {
   if (
     v instanceof z.ZodOptional ||
@@ -64,6 +69,18 @@ export function jsonSchema(v: z.ZodTypeAny): any {
  * plus those domains, a catalogue of the rest (loadable with tools_load), and
  * `allTools` keeps every enabled definition for specialist delegation.
  */
+/** Guidance for the domains whose tools are offered, in TOOL_DOMAINS order. */
+function guidanceFor(offered: { shape: { operation: { value: string } } }[]) {
+  const present = new Set(
+    offered.map((o) => domainOf(o.shape.operation.value)),
+  );
+  const guidance = Object.fromEntries(
+    Object.entries(DOMAIN_GUIDANCE).filter(([d]) =>
+      present.has(d as ToolDomain),
+    ),
+  );
+  return Object.keys(guidance).length ? { domainGuidance: guidance } : {};
+}
 export function runtimeContext(
   availability: Record<string, boolean>,
   work: unknown,
@@ -370,6 +387,7 @@ export function runtimeContext(
           }
         : { operations: options.map((o) => o.shape.operation.value) }),
       work,
+      ...guidanceFor(offered),
       ...(availability.gathering
         ? {
             gatheringWorkflow:

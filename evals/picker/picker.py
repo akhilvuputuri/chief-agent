@@ -18,6 +18,7 @@ DOMAINS = (
     "daily",
     "jobs",
     "work",
+    "coding",
     "research",
     "media",
     "canvas",

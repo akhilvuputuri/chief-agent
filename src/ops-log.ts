@@ -379,7 +379,20 @@ const projections: Record<string, Projection> = {
     },
   ],
   "tools.loaded": (run, d) => ["info", { runId: run, toolCount: d.offered }],
-  "context.over_budget": (run) => ["warn", { runId: run, phase: "context" }],
+  // Once per turn; the soft budget is a target, so this is information, not a warning.
+  "context.over_budget": (run, d) => [
+    "info",
+    {
+      runId: run,
+      phase: "context",
+      kind: d.reason,
+      fixedChars: d.fixedSize,
+      protectedHistoryChars:
+        typeof d.exchangeSize === "number" && typeof d.workingSize === "number"
+          ? d.exchangeSize + d.workingSize + (d.reservedSize ?? 0)
+          : undefined,
+    },
+  ],
   "context.failed": (run) => ["error", { runId: run, phase: "context" }],
   "conversation.routed": (run, d) => [
     "info",

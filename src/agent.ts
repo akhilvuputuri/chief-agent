@@ -19,7 +19,7 @@ import { researchReads } from "./research-schema.js";
 import { spending, Spending } from "./spending.js";
 import { recordContext } from "./record-context.js";
 import { compactWork } from "./observations.js";
-import { openLoops } from "./open-loops.js";
+import { codingWaitsOnOwner, openLoops } from "./open-loops.js";
 import {
   Execution,
   Stop,
@@ -699,6 +699,11 @@ export class Assistant {
       );
       const signals = {
         taskBound: background || !!current,
+        // A coding job waiting on the owner keeps coding tools offered for short replies.
+        pendingCoding:
+          !background &&
+          !!this.availability.coding &&
+          (await codingWaitsOnOwner(this.db, user)),
         recentOperations,
         pendingCalendarApproval: pendingApprovals.calendar === true,
         pendingLibraryApproval: pendingApprovals.library === true,
@@ -836,9 +841,12 @@ export class Assistant {
           this.coordinator,
         );
         runtime.tools = fresh.tools;
+        // Guidance follows the loaded domains (journal 101), so a mid-turn load brings it too.
+        const { toolDomains, domainGuidance } = JSON.parse(fresh.context);
         runtime.context = JSON.stringify({
           ...JSON.parse(runtime.context),
-          toolDomains: JSON.parse(fresh.context).toolDomains,
+          toolDomains,
+          ...(domainGuidance ? { domainGuidance } : {}),
         });
         const loaded = [...loadedDomains].sort();
         await execution.trace("tools.loaded", {

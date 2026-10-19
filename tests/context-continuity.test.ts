@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  boundHistory,
   context,
   contextHardLimit,
   ContextLimitError,
@@ -97,20 +98,33 @@ test("54k fixed context preserves the actual invitation question and source when
   const input = context(req, [...history, user(message)]);
   assert.equal(input.fixedSize, 54264);
   assert.equal(input.overBudget, true);
-  assert.equal(input.omitted, 473);
+  // The history floor keeps a few older messages even with a full fixed envelope.
+  assert.equal(input.omitted, 469);
   const text = JSON.stringify(input.messages);
   assert.match(text, /Mira and Dev/);
   assert.match(text, /2028-04-19/);
   assert.match(text, /00000000-0000-4000-8000-000000000002/);
   assert.match(text, /What start and end time should I use/);
   assert.match(text, /Use 8am to 11am/);
-  assert.doesNotMatch(
-    text,
-    /Another couple|Review 22 saved roles|Internal reasoning/,
-  );
+  // The floor admits older exchanges, but always before the latest one, and never reasoning.
+  assert.doesNotMatch(text, /Internal reasoning/);
+  assert.ok(text.includes("Another couple") && text.includes("Mira and Dev"));
+  assert.ok(text.indexOf("Another couple") < text.indexOf("Mira and Dev"));
   assert.deepEqual(
     input.messages.map((m) => m.role),
-    ["system", "user", "assistant", "tool", "assistant", "user", "system"],
+    [
+      "system",
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+      "tool",
+      "assistant",
+      "user",
+      "system",
+    ],
   );
   assert.equal(JSON.stringify(history), before);
 });
@@ -362,8 +376,11 @@ test("exchange index lists earlier exchanges with read references and excludes t
   req.conversationSummary = index;
   const input = context(req, [user(req.message)]);
   assert.equal(input.fixedSize, beforeSize + index.length);
+  // The summary follows the stable instructions in its own system message.
+  assert.doesNotMatch(String(input.messages[0]!.content), /Exchange index/);
+  assert.equal(input.messages[1]!.role, "system");
   assert.match(
-    String(input.messages[0]!.content),
+    String(input.messages[1]!.content),
     /Exchange index \(historical data/,
   );
 });
@@ -897,5 +914,92 @@ test("the digest keeps a failed call's error message", () => {
   assert.match(
     turnDigest([failed]),
     /parcel_record\(.*\) · failed "Unknown parcel id; call parcel_list for ids\."/,
+  );
+});
+
+test("the history floor never pushes a request into wire compaction or starts at a bare reply", () => {
+  const older = [
+    user("Older question about the lease"),
+    answer("Older answer about the lease. ".repeat(60)),
+    // The previous exchange is protected separately; the floor governs what comes before it.
+    user("Thanks"),
+    answer("You are welcome."),
+  ];
+  const latest = { result: "x".repeat(20000) };
+  const turn: Message[] = [
+    user("Read"),
+    {
+      role: "assistant",
+      content: null,
+      tool_calls: [
+        {
+          id: "big",
+          type: "function",
+          function: { name: "source_read", arguments: "{}" },
+        },
+      ],
+    },
+    { role: "tool", tool_call_id: "big", content: JSON.stringify(latest) },
+  ];
+  const at = (padding: number) => {
+    const runtime = runtimeContext({ web: true }, null);
+    runtime.context += " ".repeat(padding);
+    return context(
+      {
+        runId: "fixture",
+        capability: "fixture",
+        message: "Read",
+        history: older,
+        memories: [],
+        runtime,
+      },
+      [...older, ...turn],
+    );
+  };
+  // About 118.6k without older history: an uncapped 6k floor would cross the 120k
+  // compaction threshold and shrink the result this turn just read.
+  const crowded = at(60000);
+  assert.equal(crowded.wireCompacted, false);
+  assert.equal(
+    crowded.messages.find((m) => m.role === "tool")?.content,
+    JSON.stringify(latest),
+  );
+  assert.doesNotMatch(JSON.stringify(crowded.messages), /Older answer/);
+  // With room, the floor admits older history, which begins with the owner's question.
+  const roomy = at(40000);
+  assert.equal(roomy.wireCompacted, false);
+  assert.match(
+    JSON.stringify(roomy.messages),
+    /Older question about the lease/,
+  );
+  assert.equal(roomy.messages.find((m) => m.role !== "system")?.role, "user");
+});
+
+test("bounded history stays contiguous, so a reply never loses its question mid-history", () => {
+  const history = [
+    user("First question"),
+    answer("First answer"),
+    user("A very long question. ".repeat(400)),
+    answer("Its short answer"),
+    user("Latest question"),
+    answer("Latest answer"),
+  ];
+  assert.deepEqual(
+    boundHistory(history, 20, 2000).messages.map((m) => m.content),
+    ["Latest question", "Latest answer"],
+  );
+});
+
+test("bounded history never opens with a reply whose question did not fit", () => {
+  const history = [
+    user("A very long question. ".repeat(400)),
+    answer("A short answer."),
+    user("Short question"),
+    answer("Short reply"),
+  ];
+  const bounded = boundHistory(history, 20, 2000);
+  assert.deepEqual(
+    bounded.messages.map((m) => m.content),
+    ["Short question", "Short reply"],
   );
 });

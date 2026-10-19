@@ -1239,5 +1239,41 @@
     "message": "Check whether that Reader submission is ready.",
     "gold": ["mcp"],
     "split": "held-out"
+  },
+  {
+    "id": "coding-1",
+    "message": "fix the reminder bug in the repo and open a pull request",
+    "gold": ["coding"],
+    "split": "tuning"
+  },
+  {
+    "id": "coding-2",
+    "message": "continue the coding job you paused yesterday",
+    "gold": ["coding"],
+    "split": "tuning"
+  },
+  {
+    "id": "coding-3",
+    "message": "use a different coder model for that job",
+    "gold": ["coding"],
+    "split": "tuning"
+  },
+  {
+    "id": "t-coding-1",
+    "message": "implement the monthly summary feature in Chief's codebase",
+    "gold": ["coding"],
+    "split": "held-out"
+  },
+  {
+    "id": "t-coding-2",
+    "message": "merge that PR now",
+    "gold": ["coding"],
+    "split": "held-out"
+  },
+  {
+    "id": "t-coding-3",
+    "message": "cancel the coding sandbox job",
+    "gold": ["coding"],
+    "split": "held-out"
   }
 ]
