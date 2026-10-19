@@ -212,7 +212,7 @@ Starting a box creates infrastructure and spends money. `agent_run` is classed a
   | `RunInstances` on `instance`                                        | `ec2:LaunchTemplate` is a box template; `ec2:InstanceType` is in the profile list; `ec2:MetadataHttpTokens=required`; `ec2:MetadataHttpPutResponseHopLimit` ≤ 1; `ec2:InstanceMetadataTags=disabled`; `ec2:Tenancy=default`; `ec2:InstanceMarketType=on-demand`; request tags include `chief:box` and `chief:env`, and no other tag keys are allowed |
   | `RunInstances` on `volume`                                          | `ec2:Encrypted=true`; `ec2:VolumeType=gp3`; `ec2:VolumeSize` ≤ the profile maximum                                                                                                                                                                                                                                                                   |
   | `RunInstances` on `image`                                           | the image is the profile's AMI, or is owned by Amazon (`ec2:Owner`) while the stock image is used                                                                                                                                                                                                                                                    |
-  | `RunInstances` on `subnet`, `security-group`, `network-interface`   | `ec2:IsLaunchTemplateResource=true`                                                                                                                                                                                                                                                                                                                  |
+  | `RunInstances` on `subnet`, `security-group`, `network-interface`   | `ec2:IsLaunchTemplateResource=true`, and the subnet and security group are pinned to the stack's own IDs                                                                                                                                                                                                                                             |
   | `RunInstances` on `launch-template`                                 | the exact box template ARNs                                                                                                                                                                                                                                                                                                                          |
   | `key-pair`                                                          | never granted, so no key pair can be attached                                                                                                                                                                                                                                                                                                        |
   | `CreateTags`                                                        | only with `ec2:CreateAction=RunInstances`                                                                                                                                                                                                                                                                                                            |
@@ -413,12 +413,31 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
   - **`src/boxes/iam-check.ts`.** Checks the controller's credentials with `DryRun` launches: the template launch must be allowed, and 15 overrides must be refused.
   - **Agent.** A task that floods questions is stopped once, with a readable reason.
 
+- **2c-2, wiring and installation (this phase's PR):**
+  - **Gateway wiring.** `BOXES_RUNTIME=on` turns boxes on. It requires `BOX_AUTH_KEY`, `BOX_AWS_ACCOUNT_ID`, `CODING_PUBLIC_ORIGIN` and migration 032 to be installed. The gateway then:
+    - builds the controller with the EC2 provider from `config/boxes.json`;
+    - serves `/boxes/*`;
+    - reconciles every 15 seconds;
+    - delivers owner notices to the owner's chat.
+
+    It stays off by default.
+
+  - **`config/boxes.json`.** Profiles and their EC2 launch settings. For now only `echo` is defined, to prove the loop. Its task command (`dist/boxes/echo-task.js`) reaches the box as base64 JSON, because systemd environment files would reinterpret the quotes.
+  - **`src/boxes/probe.ts`.** Run inside the gateway container (`node dist/boxes/probe.js spawn|delegate|status|timings|close`). It writes box requests as the owner, and `timings` reports launch-to-first-report and each epoch's first report. It never calls a provider; the gateway's reconciler does that.
+  - **Controller.** A launch or close whose provider search keeps failing is held after the launch timeout instead of looping forever.
+  - **IAM check.** An inconclusive legitimate launch now fails the check.
+
 ## Deployment
 
 The release guard refuses any change to `db/` or `compose.yaml` that a reviewed operator rollout has not installed. That makes the box migration a one-time operator step:
 
-1. **Staged, not installed.** `db-staged/032_boxes.sql` stays out of `db/` while the layer is dormant.
-2. **Rollout PR.** The PR that wires the layer moves it into `db/`, adds its Compose inventory line, and adds a reviewed `scripts/deploy-boxes.py` whose baseline is the live release at merge time.
+1. **Staged until 2c-2.** The migration stayed in `db-staged/` while the layer was dormant; phase 2c-2 moves it into `db/`.
+2. **Rollout PR.** The PR that wires the layer (phase 2c-2) moves it into `db/`, adds its Compose inventory line, and adds the reviewed `scripts/deploy-boxes.py`, whose baseline is set to the live release at merge time. The script also installs the `/boxes/*` Caddy route: it inserts the route before the site's catch-all, validates and reloads Caddy, checks that the route reaches the gateway, and restores the previous Caddyfile on any failure.
 3. **Run immediately.** The rollout runs right after the merge, under the release lock with an idle gateway. Until it runs, every automatic release is refused.
+   - It checks the Caddy change before changing anything, and refuses if the live Caddyfile does not match the reviewed anchor.
+   - If only the Caddy step fails after the gateway and migration are installed, rerunning the same command with the same SHA performs just the Caddy step.
+   - **Manual fallback:** add the `@boxes path /boxes/*` handle (reverse-proxied to `127.0.0.1:3000`) before the site's catch-all, `caddy validate`, then reload Caddy.
+4. **Before enabling boxes.** Rebuild the Pi worker image from main after this merge, and re-pin `config/boxes.json` in a normal PR. The image pinned at merge time was built before the agent learned the profile's task command, so its echo task would start the wrong program.
+5. **Enable.** Add `BOX_AUTH_KEY` and `BOX_AWS_ACCOUNT_ID` to the production `.env`, set `BOXES_RUNTIME=on`, and restart the gateway. These are passed through `compose.yaml`.
 
 The automatic release for the same commit then succeeds as a no-op.

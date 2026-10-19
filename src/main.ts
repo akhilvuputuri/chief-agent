@@ -336,6 +336,57 @@ const responsibilities =
   c.RESPONSIBILITIES === "on"
     ? new Responsibilities(db, { gmail, calendar })
     : undefined;
+let boxes: import("./boxes/controller.js").BoxController | undefined;
+let NoticeRetry: typeof import("./boxes/controller.js").NoticeRetry =
+  Error as any;
+if (c.BOXES_RUNTIME === "on") {
+  // Loaded only when boxes are on, so a gateway without them pays nothing.
+  const { BoxController } = await import("./boxes/controller.js");
+  ({ NoticeRetry } = await import("./boxes/controller.js"));
+  const { Ec2BoxProvider } = await import("./boxes/ec2-provider.js");
+  const { boxOrigin, boxSettings, loadBoxesFile } =
+    await import("./boxes/config.js");
+  const { EC2Client } = await import("@aws-sdk/client-ec2");
+  if (!c.BOX_AUTH_KEY || !c.BOX_AWS_ACCOUNT_ID || !c.CODING_PUBLIC_ORIGIN)
+    throw startupError(
+      "STARTUP_BOXES_CONFIG",
+      "Boxes need BOX_AUTH_KEY, BOX_AWS_ACCOUNT_ID and CODING_PUBLIC_ORIGIN",
+    );
+  // Box and coding credentials are separate trust domains.
+  if (c.BOX_AUTH_KEY === c.CODING_AUTH_KEY)
+    throw startupError(
+      "STARTUP_BOXES_KEY",
+      "BOX_AUTH_KEY must differ from CODING_AUTH_KEY",
+    );
+  if (
+    !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=32")).rows
+      .length
+  )
+    throw startupError(
+      "STARTUP_MIGRATION_032",
+      "Box migration 032 must be installed before boxes are enabled",
+    );
+  const file = loadBoxesFile(new URL("../config/boxes.json", import.meta.url));
+  const settings = boxSettings(file, c.BOX_AWS_ACCOUNT_ID);
+  boxes = new BoxController(
+    db,
+    settings.config,
+    {
+      ec2: new Ec2BoxProvider(
+        new EC2Client({ region: file.region, maxAttempts: 1 }),
+        file.environment,
+        settings.ec2,
+      ),
+    },
+    c.BOX_AUTH_KEY,
+    boxOrigin(c.CODING_PUBLIC_ORIGIN),
+    undefined,
+    {},
+    undefined,
+    (user) => c.TELEGRAM_ALLOWED_USER_IDS.split(",").includes(user),
+  );
+  await boxes.recoverNotices();
+}
 let coding: CodingController | undefined;
 if (c.CODING_RUNTIME === "on") {
   if (
@@ -710,6 +761,7 @@ const app = server(
 );
 const bot = telegram(c, assistant, db);
 if (coding) await codingApi(app, coding);
+if (boxes) await (await import("./boxes/api.js")).boxApi(app, boxes);
 if (portfolio) {
   notifyUser = async (user, text) => {
     await bot.api.sendMessage(user, text, {
@@ -1018,6 +1070,31 @@ const ruleDelivery = new RuleDelivery(db, async (user, payload) => {
 await ruleDelivery.recover();
 await newsBulletin.recover();
 await coding?.recoverDelivery();
+const boxTimer = boxes
+  ? setInterval(() => {
+      void boxes
+        .tick()
+        .catch((error) =>
+          opsLog("boxes.tick_failed", "error", errorFields(error)),
+        );
+      void boxes
+        .deliverNotices(async (user, text) => {
+          try {
+            await bot.api.sendMessage(user, text, {
+              link_preview_options: { is_disabled: true },
+            });
+          } catch (error) {
+            // Telegram definitely refused (rate limit): safe to try again later.
+            if ((error as { error_code?: number })?.error_code === 429)
+              throw new NoticeRetry();
+            throw error;
+          }
+        })
+        .catch((error) =>
+          opsLog("boxes.notice_failed", "error", errorFields(error)),
+        );
+    }, 15000)
+  : undefined;
 const routineTimer = setInterval(() => {
   void coding
     ?.automationTick()
@@ -1173,6 +1250,7 @@ for (const signal of ["SIGINT", "SIGTERM"])
       clearInterval(gatheringTimer);
       clearInterval(workTimer);
       clearInterval(routineTimer);
+      if (boxTimer) clearInterval(boxTimer);
       shutdown.abort();
       assistant.shutdown();
       await runner.stop();

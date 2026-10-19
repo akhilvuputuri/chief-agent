@@ -44,6 +44,8 @@ export interface Ec2ProfileSettings {
   /** Per-task container limits passed to the box agent, e.g. "12g" and "3". */
   taskMemory?: string;
   taskCpus?: string;
+  /** Overrides the image's command for this profile's tasks, e.g. the echo task program. */
+  taskCommand?: string[];
 }
 
 export interface Ec2Settings {
@@ -65,13 +67,15 @@ const states: Record<string, ProviderState> = {
   terminated: "terminated",
 };
 
-const safe = {
+/** Patterns every value that reaches a box's first-boot script must match. */
+export const launchPatterns = {
   origin: /^https:\/\/[a-z0-9.-]+(:\d+)?$/,
   uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
   secret: /^[A-Za-z0-9_-]{32,128}$/,
   image: /^[a-z0-9./_-]+@sha256:[a-f0-9]{64}$/,
   memory: /^\d{1,4}[mg]$/,
   cpus: /^\d{1,2}(\.\d)?$/,
+  argument: /^[A-Za-z0-9_./=:-]{1,200}$/,
 };
 
 /**
@@ -86,14 +90,21 @@ export function boxUserData(
 ) {
   const { origin, boxId, secret } = request.bootstrap;
   const checks: [string, RegExp, string | undefined][] = [
-    ["origin", safe.origin, origin],
-    ["box id", safe.uuid, boxId],
-    ["bootstrap secret", safe.secret, secret],
-    ["image", safe.image, request.image],
+    ["origin", launchPatterns.origin, origin],
+    ["box id", launchPatterns.uuid, boxId],
+    ["bootstrap secret", launchPatterns.secret, secret],
+    ["image", launchPatterns.image, request.image],
   ];
   if (profile.taskMemory)
-    checks.push(["task memory", safe.memory, profile.taskMemory]);
-  if (profile.taskCpus) checks.push(["task cpus", safe.cpus, profile.taskCpus]);
+    checks.push(["task memory", launchPatterns.memory, profile.taskMemory]);
+  if (profile.taskCpus)
+    checks.push(["task cpus", launchPatterns.cpus, profile.taskCpus]);
+  if (profile.taskCommand) {
+    if (profile.taskCommand.length > 8)
+      throw new Error("Unsafe box launch value: task command");
+    for (const part of profile.taskCommand)
+      checks.push(["task command", launchPatterns.argument, part]);
+  }
   for (const [name, pattern, value] of checks)
     if (!value || !pattern.test(value))
       throw new Error(`Unsafe box launch value: ${name}`);
@@ -108,6 +119,12 @@ export function boxUserData(
       ? [`CHIEF_BOX_TASK_MEMORY=${profile.taskMemory}`]
       : []),
     ...(profile.taskCpus ? [`CHIEF_BOX_TASK_CPUS=${profile.taskCpus}`] : []),
+    // Base64 JSON: systemd's environment files would otherwise reinterpret the quotes.
+    ...(profile.taskCommand
+      ? [
+          `CHIEF_BOX_TASK_COMMAND_B64=${Buffer.from(JSON.stringify(profile.taskCommand)).toString("base64")}`,
+        ]
+      : []),
     "CHIEF_BOX_IDENTITY=ec2",
   ].join("\n");
   return `#!/bin/bash

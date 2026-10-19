@@ -88,6 +88,8 @@ services:
         "/migrations/030_mcp.sql",
         "-f",
         "/migrations/031_link_resolution.sql",
+        "-f",
+        "/migrations/032_boxes.sql",
       ]
     depends_on:
       postgres: { condition: service_healthy }
@@ -100,6 +102,9 @@ services:
       GATHERING_BROWSER: ${GATHERING_BROWSER:-off}
       GATHERING_ARTIFACT_KEY: ${GATHERING_ARTIFACT_KEY:-}
       GATHERING_BROWSER_KEY: ${GATHERING_BROWSER_KEY:-}
+      BOXES_RUNTIME: ${BOXES_RUNTIME:-off}
+      BOX_AUTH_KEY: ${BOX_AUTH_KEY:-}
+      BOX_AWS_ACCOUNT_ID: ${BOX_AWS_ACCOUNT_ID:-}
       CODING_RUNTIME: ${CODING_RUNTIME:-off}
       CODING_PUBLIC_ORIGIN: ${CODING_PUBLIC_ORIGIN:-}
       CODING_CODEBUILD_PROJECT: ${CODING_CODEBUILD_PROJECT:-}

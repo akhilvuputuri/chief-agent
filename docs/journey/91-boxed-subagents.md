@@ -297,3 +297,51 @@ Also adopted:
 - **Tests:** the identity tests now use a real X.509 certificate and check that the pinned certificate parses.
 - **Inconclusive cases:** these no longer fail the IAM check, matching the runbook, and the runbook checks both launch templates.
 - **Docs:** they now state that Docker comes from Amazon Linux's signed repository rather than a pinned artifact, and they name the limits IAM cannot bound (`MaxCount` and extra volumes).
+
+### Phase 2c-2: wiring and installation — 19 October 2026
+
+This phase turns the dormant layer into something the owner can enable. It adds:
+
+- the gateway wiring behind `BOXES_RUNTIME`, off by default;
+- `config/boxes.json`, with an `echo` profile for the EC2 proof;
+- an operator probe;
+- delivery of owner notices;
+- the reviewed rollout (`scripts/deploy-boxes.py`), which installs migration 032, its Compose line and the `/boxes/*` Caddy route.
+
+It also carries the review points from 2c-1:
+
+- a launch or close whose provider search keeps failing is held after the timeout instead of looping;
+- an inconclusive legitimate launch fails the IAM check.
+
+**Not yet done:**
+
+- The `echo` profile is pinned to worker image `sha256:734e2dcb…`, built from main `3feef85` (Pi image workflow run 39196451508). That image contains `dist/boxes`, but it predates the agent's support for the profile's task command, so its echo tasks would start the image's default program. The image must be rebuilt from main after this merge and re-pinned before boxes are enabled.
+- The rollout baseline must be set to the live release just before merging. The rollout itself runs right after the merge, with the owner's go-ahead.
+
+The controller policy now also pins the subnet and security-group resource ARNs to the stack's own IDs, in addition to `ec2:IsLaunchTemplateResource`. This responds to a Devin comment on PR 264; the condition already refused overrides.
+
+**Review of `a5e6bdd` (Claude Opus 5.5): changes requested.** Two blocking defects:
+
+1. **Settings never reached the gateway.** Compose passes the gateway's environment explicitly, so `BOXES_RUNTIME`, `BOX_AUTH_KEY` and `BOX_AWS_ACCOUNT_ID` would not have arrived. Adding them later would have needed a second operator rollout. They are now in `compose.yaml`, and the rollout accepts exactly that addition.
+2. **The pinned image could not run the echo task.** That image predates the task-command support. The docs now require a rebuild and re-pin before enabling.
+
+Non-blocking findings, all adopted:
+
+- **Caddy step:**
+  - The Caddy change is checked before anything changes.
+  - A Caddy-only rerun is possible after a partial rollout, and a manual fallback is documented.
+  - Validation runs beside the live file.
+  - Every error says what is already installed, and a failed restore is reported specifically.
+  - The route check parses the origin robustly and goes through local Caddy with `--resolve`.
+- **Gateway and configuration:**
+  - The AWS rollback runbook now closes boxes before turning them off.
+  - Notices are suppressed for owners who are no longer allowed.
+  - The box modules load only when boxes are on.
+  - Launch settings, the image digest and the public origin are validated at startup.
+  - A second hold gets its own notice.
+
+The re-review of `fc97cef` approved it. Devin then found three more issues, all fixed:
+
+- **Rerun guard.** The Caddy-only rerun path would accept the baseline commit as "already deployed". It now runs only when the release equals the requested commit, that commit is not the baseline, and migration 032 is installed.
+- **Key separation.** `BOX_AUTH_KEY` must differ from `CODING_AUTH_KEY`.
+- **Notice retry.** A notice Telegram definitely refused (rate limit) goes back to pending and is retried. An unknown outcome stays uncertain and is never repeated.

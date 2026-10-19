@@ -34,7 +34,7 @@ Heavy delegated work moves to sub-agents with their own on-demand boxes that Chi
 
 - **Live and dormant:** the box layer (phase 2a, [PR 259](https://github.com/akhilvuputuri/chief-agent/pull/259)) and the box agent with its local provider (phase 2b, [PR 260](https://github.com/akhilvuputuri/chief-agent/pull/260), v0.3.85).
 - **In review (phase 2c-1, v0.3.86):** the EC2 provider, its first-boot script, identity verification, and the CloudFormation stack and IAM check in `deploy/boxes/`. The owner applies the stack.
-- **Next (2c-2):** wiring, the reviewed rollout of the staged box migration, and the Caddy route.
+- **In review (2c-2, v0.3.87):** gateway wiring behind `BOXES_RUNTIME` (off by default), `config/boxes.json`, an operator probe, and the reviewed rollout of migration 032 with its Compose line and Caddy route. The rollout must run right after the merge.
 
 [Design](boxes.md), [journal 91](journey/91-boxed-subagents.md).
 

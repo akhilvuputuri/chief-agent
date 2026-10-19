@@ -64,12 +64,12 @@ ssh -F <ops>/ssh_config chief-lightsail 'cd /opt/hermes-companion && docker comp
 
 - **Expected result:** one `PASS … allowed` line for the template launch, and `PASS … refused` for every override (instance type, image, metadata options, key pair, volume, spot, tenancy, instance profile, tags, no template).
 - **Any `FAIL`:** stop and review the policy.
-- **An `INCONCLUSIVE` line:** AWS rejected the call before checking permissions (for example a made-up image or subnet ID), so that case proves nothing either way. Inconclusive cases do not fail the check; review each one.
+- **An `INCONCLUSIVE` line:** AWS rejected an override before checking permissions (for example a made-up image or subnet ID), so that case proves nothing either way. These do not fail the check; review each one. The legitimate launch is different: anything other than `allowed` for it is a `FAIL`.
 
 ## Rollback
 
-1. Turn boxes off in configuration.
-2. Let the sweep terminate every box.
+1. While boxes are still on, close every box with the probe (`docker compose exec -T gateway node dist/boxes/probe.js close <box-id>`), and wait until each one shows `terminated` in `probe.js status`. Turning boxes off first would also stop the reconciler and its sweep.
+2. Set `BOXES_RUNTIME=off` and restart the gateway.
 3. Confirm that no `chief:env=prod` instance or volume remains:
 
    ```bash

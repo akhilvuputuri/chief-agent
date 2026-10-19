@@ -7,6 +7,7 @@ import {
   BoxController,
   BoxCredentialRefused,
   BoxNotReady,
+  NoticeRetry,
   type BoxTimings,
 } from "../src/boxes/controller.js";
 import { FakeBoxProvider } from "../src/boxes/provider.js";
@@ -38,13 +39,6 @@ async function fixture(
     await pg.exec(
       await readFile(new URL("../db/" + f, import.meta.url), "utf8"),
     );
-  // The box migration is staged outside db/ until its reviewed rollout (docs/boxes.md).
-  await pg.exec(
-    await readFile(
-      new URL("../db-staged/032_boxes.sql", import.meta.url),
-      "utf8",
-    ),
-  );
   const db = pg as unknown as Database;
   await ensureUser(db, "owner");
   await ensureUser(db, "other");
@@ -1128,4 +1122,159 @@ test("the host refuses task instructions too large for a box", async (t) => {
     }),
     /too large for a box/,
   );
+});
+
+test("a launch whose provider search keeps failing is held after the timeout, even while closing", async (t) => {
+  const f = await fixture(t);
+  const box = await f.boxes.spawn("owner", {
+    requestKey: "k",
+    profile: "echo",
+    subject: "s",
+  });
+  f.provider.fail.add("launch");
+  await f.boxes.tick();
+  assert.equal((await f.row(box.id)).state, "launching");
+  (f.provider as any).find = async () => {
+    throw new Error("unsafe instance could not be ended");
+  };
+  await f.boxes.tick();
+  assert.equal((await f.row(box.id)).state, "launching");
+  f.advance(6 * MIN);
+  await f.boxes.tick();
+  const held = await f.row(box.id);
+  assert.equal(held.state, "held");
+  assert.match(held.reason, /search keeps failing/);
+
+  const g = await fixture(t);
+  const other = await g.boxes.spawn("owner", {
+    requestKey: "k",
+    profile: "echo",
+    subject: "s",
+  });
+  g.provider.fail.add("launch");
+  await g.boxes.tick();
+  await g.boxes.close("owner", other.id);
+  (g.provider as any).find = async () => {
+    throw new Error("unsafe instance could not be ended");
+  };
+  g.advance(6 * MIN);
+  await g.boxes.tick();
+  const closing = await g.row(other.id);
+  assert.equal(closing.state, "held");
+  assert.match(closing.reason, /Closing a box/);
+  assert.ok(
+    (
+      await g.db.query(
+        "SELECT 1 FROM box_notices WHERE box_id=$1 AND notice_key='held:closing'",
+        [other.id],
+      )
+    ).rows.length,
+  );
+});
+
+test("pending notices are delivered once to the box owner; failures become uncertain", async (t) => {
+  const f = await fixture(t);
+  const box = await f.boxes.spawn("owner", {
+    requestKey: "k",
+    profile: "echo",
+    subject: "s",
+  });
+  f.provider.fail.add("launch");
+  await f.boxes.tick();
+  f.provider.boxes.clear();
+  f.advance(6 * MIN);
+  await f.boxes.tick();
+  const sent: [string, string][] = [];
+  await f.boxes.deliverNotices(async (user, text) => {
+    sent.push([user, text]);
+  });
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0]![0], "owner");
+  assert.match(sent[0]![1], /held for an operator/);
+  await f.boxes.deliverNotices(async () => {
+    throw new Error("must not resend");
+  });
+  await f.db.query(
+    "INSERT INTO box_notices(box_id,notice_key,payload) VALUES($1,'x','{}')",
+    [box.id],
+  );
+  await f.boxes.deliverNotices(async () => {
+    throw new Error("telegram down");
+  });
+  assert.equal(
+    (await f.db.query("SELECT delivery FROM box_notices WHERE notice_key='x'"))
+      .rows[0].delivery,
+    "uncertain",
+  );
+});
+
+test("notices for an owner who is no longer allowed are suppressed", async (t) => {
+  const f = await fixture(t);
+  const box = await f.boxes.spawn("owner", {
+    requestKey: "k",
+    profile: "echo",
+    subject: "s",
+  });
+  const restricted = new BoxController(
+    f.db,
+    {
+      environment: "test",
+      profiles: {
+        echo: {
+          provider: "fake",
+          image: `ghcr.io/example/box@sha256:${"a".repeat(64)}`,
+          idleTtlMinutes: 15,
+          retentionHours: 24,
+          hardMaxHours: 24,
+          absoluteDays: 7,
+          concurrency: 2,
+        },
+      },
+    },
+    { fake: f.provider },
+    "b".repeat(64),
+    "https://companion.example.com",
+    undefined,
+    {},
+    undefined,
+    () => false,
+  );
+  await f.db.query(
+    "INSERT INTO box_notices(box_id,notice_key,payload) VALUES($1,'x','{}')",
+    [box.id],
+  );
+  await restricted.deliverNotices(async () => {
+    throw new Error("must not send");
+  });
+  assert.equal(
+    (await f.db.query("SELECT delivery FROM box_notices WHERE notice_key='x'"))
+      .rows[0].delivery,
+    "suppressed",
+  );
+});
+
+test("a notice the transport definitely refused is retried later", async (t) => {
+  const f = await fixture(t);
+  const box = await f.boxes.spawn("owner", {
+    requestKey: "k",
+    profile: "echo",
+    subject: "s",
+  });
+  await f.db.query(
+    "INSERT INTO box_notices(box_id,notice_key,payload) VALUES($1,'x','{}')",
+    [box.id],
+  );
+  await f.boxes.deliverNotices(async () => {
+    throw new NoticeRetry();
+  });
+  assert.equal(
+    (await f.db.query("SELECT delivery FROM box_notices WHERE notice_key='x'"))
+      .rows[0].delivery,
+    "pending",
+  );
+  const sent: string[] = [];
+  await f.boxes.deliverNotices(async (_user, text) => {
+    sent.push(text);
+  });
+  assert.equal(sent.length, 1);
 });

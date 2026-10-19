@@ -212,10 +212,10 @@
               "Action": "ec2:RunInstances",
               "Resource": [
                 {
-                  "Fn::Sub": "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:subnet/*"
+                  "Fn::Sub": "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:subnet/${SubnetId}"
                 },
                 {
-                  "Fn::Sub": "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*"
+                  "Fn::Sub": "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/${BoxSecurityGroup}"
                 },
                 {
                   "Fn::Sub": "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*"
