@@ -20,10 +20,10 @@ test("probe delegate turns flags into the echo payload and keeps the rest as tex
     hostile: true,
   });
   assert.throws(() => delegateArgs(["box", "k4", "--sudo"]), /Unknown flag/);
-  // A lone "--" is not an end-of-flags marker; text cannot start with "--".
-  assert.throws(
-    () => delegateArgs(["box", "k5", "--", "text"]),
-    /Unknown flag/,
+  // "--" ends the flags, so the text itself can start with "--".
+  assert.deepEqual(
+    delegateArgs(["box", "k5", "--wait", "--", "--x", "y"]).payload,
+    { waitForMessage: true, text: "--x y" },
   );
   assert.throws(() => delegateArgs(["box"]), /delegate/);
 });
