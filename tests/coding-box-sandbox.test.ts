@@ -340,6 +340,12 @@ test("startup keeps box attempts routable whenever a coding profile exists, and 
     /still depend on boxes/,
   );
   await f.db.query("UPDATE coding_jobs SET state='paused',cleanup='complete'");
+  // A box spawned by a create that never recorded its ID still depends on boxes.
+  await assert.rejects(
+    codingSandbox({ ...base, sandbox: "codebuild" }),
+    /still depend on boxes/,
+  );
+  await f.db.query("UPDATE boxes SET state='terminated'");
   assert.equal(
     await codingSandbox({ ...base, sandbox: "codebuild" }),
     codebuild,

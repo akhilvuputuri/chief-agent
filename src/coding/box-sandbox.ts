@@ -268,9 +268,14 @@ export async function codingSandbox(o: {
       ),
       o.codebuild,
     );
+  // An attempt depends on a box once it records one, and also when a create spawned a
+  // box but failed before the ID was recorded: then only the live box row shows it.
   const stranded = await o.db.query(
     `SELECT 1 FROM coding_jobs WHERE sandbox_id LIKE 'box:%'
-       AND (state IN ('provisioning','running','publishing') OR cleanup='pending') LIMIT 1`,
+       AND (state IN ('provisioning','running','publishing') OR cleanup='pending')
+     UNION ALL
+     SELECT 1 FROM boxes WHERE profile='coding' AND state<>'terminated'
+     LIMIT 1`,
   );
   if (stranded.rows.length)
     throw new Error(

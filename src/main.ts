@@ -458,14 +458,21 @@ if (c.CODING_RUNTIME === "on") {
     new CodeBuildClient({ region: c.CODING_AWS_REGION, maxAttempts: 1 }),
     c.CODING_CODEBUILD_PROJECT,
   );
-  await codebuild.validate();
+  const sandbox = codingBackend.parse(backend).sandbox;
+  try {
+    await codebuild.validate();
+  } catch (error) {
+    // With coding on boxes, CodeBuild only serves older attempts; it must not block startup.
+    if (sandbox !== "box") throw error;
+    opsLog("coding.codebuild_unavailable", "warn", errorFields(error));
+  }
   let provider: SandboxProvider;
   try {
     const { codingSandbox } = await import("./coding/box-sandbox.js");
     provider = await codingSandbox({
       db,
       codebuild,
-      sandbox: codingBackend.parse(backend).sandbox,
+      sandbox,
       settings,
       boxes,
       taskCommand: boxTaskCommands.coding,

@@ -474,3 +474,16 @@ Non-blocking findings adopted:
 - **Task program.** It ignores `null` input and a second task, and exits without forcing the process.
 - **Startup.** The coding profile must admit one box at a time.
 - **New test.** A controller-level test runs the real `BoxSandbox` through `CodingController.tick`: grace, a worker exit, closing before cleanup, `sandbox_stopped`, and cleanup completing.
+
+**Re-review of `be366aa` (Claude Opus 5.5): approved.** Its remaining notes:
+
+- **Duplicated reason strings.** They err safe: reworded text becomes stated.
+- **Unrecorded boxes.** The stranded check missed a box whose create was never recorded. Fixed below.
+- **Test title.** One title overstated the retry and was renamed.
+- **Canary check.** Subreaper cleanup needs checking on the AL2023 kernel during the canary.
+
+**Devin on PR 276.** Three findings, all fixed:
+
+1. **An unrecorded box could still strand coding.** The rollback check now also refuses while a live `coding` box exists, and a test covers it.
+2. **A CodeBuild outage blocked startup on boxes.** With `sandbox: box`, a failed CodeBuild project check is now logged instead of fatal.
+3. **The coding-agent learning guide was missing an entry.** It now has one.

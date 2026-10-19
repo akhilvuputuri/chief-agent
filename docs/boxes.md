@@ -336,7 +336,7 @@ The smallest move that puts coding on EC2 without weakening anything. Coding alr
 - **`RoutedSandbox`:**
   - New attempts go to boxes only when the `sandbox` switch is `box`, the job's snapshotted image is the coding box profile's image, and the runtime is Pi. Other jobs stay on CodeBuild, because their images predate box support.
   - Existing sandbox IDs (`box:` or a CodeBuild build ID) keep the provider that created them.
-  - Whenever boxes are on and a `coding` profile exists, box attempts stay routable even with the switch back on `codebuild`. Without one, the gateway refuses to start while any attempt still depends on a box, so a rollback cannot strand a job or block the coding queue.
+  - Whenever boxes are on and a `coding` profile exists, box attempts stay routable even with the switch back on `codebuild`. Without one, the gateway refuses to start while any attempt still depends on a box (a recorded `box:` sandbox ID, or a live `coding` box whose ID a failed create never recorded), so a rollback cannot strand a job or block the coding queue.
 - **The worker is unchanged.** The `coding` profile's task program (`src/boxes/coding-task.ts`) runs `pi-worker.js` as a child:
   - It turns the task payload into the worker's environment: `CODING_JOB_ID`, `CODING_ATTEMPT_ID`, `CODING_JOB_TOKEN` and `CODING_ORIGIN`, plus `PATH`, `HOME` and `TMPDIR`.
   - It keeps the worker's output off the task protocol and reports only the exit.
@@ -356,7 +356,7 @@ The smallest move that puts coding on EC2 without weakening anything. Coding alr
   - that profile admits one box at a time;
   - its task command is the pinned one above.
 
-  There is no schema or Compose change.
+  With `box`, a failed CodeBuild project check is logged (`coding.codebuild_unavailable`) instead of stopping the gateway, because CodeBuild then only serves older attempts. There is no schema or Compose change.
 
 - **One box per attempt.** The box is closed when its attempt ends, so concurrency stays at one coding worker (`coding_one_active_worker`).
 - **Residual risk.** The attempt token is in `box_tasks.payload` and `box_messages` while the box runs, and reaches the box over TLS. On CodeBuild it sits in the build's plain environment, readable through `BatchGetBuilds` for as long as the build history is kept. In both cases it works only for its attempt: while the attempt is active and before its deadline, and for the `finish` route afterwards.
