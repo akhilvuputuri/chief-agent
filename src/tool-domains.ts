@@ -41,6 +41,7 @@ export const TOOL_DOMAINS = [
   "library",
   "watchlist",
   "news",
+  "singapore",
   "routines",
   "responsibilities",
   "skills",
@@ -68,6 +69,8 @@ export const DOMAIN_SUMMARIES: Record<ToolDomain, string> = {
   library: "NLB ebook availability and the linked card's shelf",
   watchlist: "stock price-drop watchlist and read-only IBKR holdings",
   news: "daily news bulletin from followed sites, topics and learning from Reader saves",
+  singapore:
+    "Singapore weather, haze, flood and lightning alerts, carparks, cameras, holidays, hawker closures, bus arrivals, MRT status and traffic",
   routines: "scheduled independent agent routines",
   responsibilities:
     "owner-confirmed ongoing concerns, changes, attention and monitoring history",
@@ -111,6 +114,8 @@ const PREFIXES: [string, ToolDomain][] = [
   ["portfolio_", "watchlist"],
   ["stock_", "watchlist"],
   ["news_", "news"],
+  ["sg_", "singapore"],
+  ["lta_", "singapore"],
   ["routine_", "routines"],
   ["responsibility_", "responsibilities"],
   ["skill_", "skills"],
@@ -186,6 +191,10 @@ const CUES: [ToolDomain, RegExp][] = [
   [
     "news",
     /\b(news|bulletin|headlines?|digest|blogs?|articles?|substack|feeds?|reading picks?)\b/i,
+  ],
+  [
+    "singapore",
+    /\b(weather|rain(ing|y)?|forecast|thunder\w*|showers?|haze|psi|pm ?2\.?5|air quality|uv|heat stress|humid\w*|flood\w*|lightning|car ?parks?|parking|speed cameras?|red.?light cameras?|public holidays?|long weekend|hawker|food centre|bus(es)?|bus stop|mrt|lrt|train (delay|disruption|breakdown)s?|traffic|expressway)\b/i,
   ],
   [
     "routines",

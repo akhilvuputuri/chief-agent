@@ -31,6 +31,8 @@ import type { WatchlistTools } from "./stocks.js";
 import type { Portfolio } from "./portfolio.js";
 import type { StockLookup } from "./stock-lookup.js";
 import { RuleTools } from "./stock-rules.js";
+import type { SingaporeTools } from "./singapore/tools.js";
+import { isSingaporeAction } from "./singapore/schema.js";
 export class JobTools {
   constructor(
     private db: Database,
@@ -51,6 +53,7 @@ export class JobTools {
     readonly gathering?: Gathering,
     readonly mcp?: McpTools,
     readonly links?: LinkResolver,
+    readonly singapore?: SingaporeTools,
   ) {}
   get searchUsesModel() {
     return this.web.usesModelSearch === true;
@@ -129,6 +132,10 @@ export class JobTools {
     ) {
       if (!this.mcp) throw new Error("MCP is not configured");
       return this.mcp.call(user, a, signal);
+    }
+    if (isSingaporeAction(a)) {
+      if (!this.singapore) throw new Error("Singapore data is not configured");
+      return this.singapore.call(a);
     }
     if (a.operation === "link_resolve") {
       if (!this.links) throw new Error("Link resolution is not configured");

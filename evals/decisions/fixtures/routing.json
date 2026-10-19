@@ -46,7 +46,7 @@
     "split": "tuning",
     "message": "what's the weather in Singapore this week?",
     "prior": [],
-    "gold": "web"
+    "gold": "singapore"
   },
   {
     "id": "none-8",
@@ -1367,5 +1367,33 @@
     "message": "stop sending me articles from that site",
     "prior": [],
     "gold": "news"
+  },
+  {
+    "id": "sg-1",
+    "split": "tuning",
+    "message": "is the haze bad today?",
+    "prior": [],
+    "gold": "singapore"
+  },
+  {
+    "id": "sg-2",
+    "split": "held-out",
+    "message": "when's the next 65 at my stop?",
+    "prior": [],
+    "gold": "transport"
+  },
+  {
+    "id": "sg-3",
+    "split": "tuning",
+    "message": "any MRT delays on the east-west line?",
+    "prior": [],
+    "gold": "transport"
+  },
+  {
+    "id": "sg-4",
+    "split": "held-out",
+    "message": "is Old Airport Road food centre closed this week?",
+    "prior": [],
+    "gold": "singapore"
   }
 ]

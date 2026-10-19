@@ -1,0 +1,58 @@
+{
+  "format": "companion.plugin/v1",
+  "id": "singapore",
+  "version": "1.0.0",
+  "description": "Singapore government open data: NEA weather and air quality, PUB flood alerts, carparks, cameras, public holidays and hawker closures from data.gov.sg, and bus, MRT and traffic from LTA DataMall.",
+  "agents": [
+    {
+      "id": "local",
+      "description": "Answer Singapore weather, rain, haze/PSI, UV and heat questions; flood and lightning alerts; carpark lots and free or night parking; speed and red-light cameras; public holidays; and hawker centre closures. Brief it with the owner's region (north, south, east, west or central) and any saved carpark codes or favourite hawker centres when relevant.",
+      "instructions": "agents/local.md",
+      "contract": "findings/v1",
+      "tools": [
+        "sg_weather",
+        "sg_air",
+        "sg_alerts",
+        "sg_carparks",
+        "sg_holidays",
+        "sg_hawker_closures",
+        "sg_cameras",
+        "sg_dataset"
+      ],
+      "skills": ["sg-weather", "sg-places", "sg-catalogue"],
+      "limits": {
+        "ms": 90000,
+        "models": 6,
+        "tools": 12
+      },
+      "model": "fast",
+      "effort": "low"
+    },
+    {
+      "id": "transport",
+      "description": "Live Singapore bus arrivals at a stop, bus stop lookup by name or road, MRT/LRT service status and disruptions, and traffic incidents. Brief it with the owner's saved bus stop codes and services when relevant.",
+      "instructions": "agents/transport.md",
+      "contract": "findings/v1",
+      "tools": [
+        "lta_bus_arrival",
+        "lta_bus_stops",
+        "lta_train_alerts",
+        "lta_traffic"
+      ],
+      "skills": ["sg-transport"],
+      "limits": {
+        "ms": 60000,
+        "models": 6,
+        "tools": 10
+      },
+      "model": "fast",
+      "effort": "low"
+    }
+  ],
+  "skills": [
+    { "id": "sg-weather", "path": "skills/sg-weather/SKILL.md" },
+    { "id": "sg-places", "path": "skills/sg-places/SKILL.md" },
+    { "id": "sg-transport", "path": "skills/sg-transport/SKILL.md" },
+    { "id": "sg-catalogue", "path": "skills/sg-catalogue/SKILL.md" }
+  ]
+}

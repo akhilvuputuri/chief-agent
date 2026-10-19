@@ -28,6 +28,7 @@ DOMAINS = (
     "library",
     "watchlist",
     "news",
+    "singapore",
     "routines",
     "responsibilities",
     "skills",

@@ -96,6 +96,25 @@
       "sha256": "d11e1cc6df488bb6014dcd95cbfd44f1773a91c74e6507ee16af6f8d8267c872",
       "agents": ["researcher"],
       "allowTools": ["web_search", "web_read", "source_read"]
+    },
+    {
+      "path": "singapore",
+      "sha256": "78517ce23b65f363e6966936727f2205d440d58438a99715a2b308ce91b4f1e7",
+      "agents": ["local", "transport"],
+      "allowTools": [
+        "lta_bus_arrival",
+        "lta_bus_stops",
+        "lta_traffic",
+        "lta_train_alerts",
+        "sg_air",
+        "sg_alerts",
+        "sg_cameras",
+        "sg_carparks",
+        "sg_dataset",
+        "sg_hawker_closures",
+        "sg_holidays",
+        "sg_weather"
+      ]
     }
   ],
   "aliases": {
@@ -112,7 +131,9 @@
     "subscriptions": "core/subscriptions",
     "portfolio": "core/portfolio",
     "gathering": "core/gathering",
-    "bills": "core/bills"
+    "bills": "core/bills",
+    "singapore": "singapore/local",
+    "transport": "singapore/transport"
   },
   "delegated": [
     "calendar_draft",
@@ -142,6 +163,10 @@
     "library_availability",
     "library_check",
     "library_shelf",
+    "lta_bus_arrival",
+    "lta_bus_stops",
+    "lta_traffic",
+    "lta_train_alerts",
     "news_edition_now",
     "news_settings",
     "news_source_add",
@@ -161,6 +186,14 @@
     "schedule_create",
     "schedule_list",
     "schedule_update",
+    "sg_air",
+    "sg_alerts",
+    "sg_cameras",
+    "sg_carparks",
+    "sg_dataset",
+    "sg_hawker_closures",
+    "sg_holidays",
+    "sg_weather",
     "stock_lookup",
     "stock_rule_add",
     "stock_rule_list",

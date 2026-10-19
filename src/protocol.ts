@@ -1,4 +1,5 @@
 import { linkResolve } from "./link-schema.js";
+import { singaporeSchemas } from "./singapore/schema.js";
 import { mcpTools, mcpRead, mcpWrite, mcpOperation } from "./mcp-schema.js";
 import {
   start as gatherStart,
@@ -119,6 +120,7 @@ const workSteps = z
   );
 export const action = z.discriminatedUnion("operation", [
   linkResolve,
+  ...singaporeSchemas,
   mcpTools,
   mcpRead,
   mcpWrite,
