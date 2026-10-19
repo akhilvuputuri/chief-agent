@@ -1,1 +1,1 @@
-{ "default": "pi", "sandbox": "codebuild" }
+{ "default": "pi", "sandbox": "box" }

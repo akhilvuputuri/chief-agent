@@ -489,3 +489,24 @@ Non-blocking findings adopted:
 3. **The coding-agent learning guide was missing an entry.** It now has one.
 
 **Re-review of `082a1e7` (Claude Opus 5.5): approved.** It noted that older-image attempts can still launch on CodeBuild after a skipped startup check. A lazy re-check before each launch would put a misconfiguration on the stuck-for-operator path and block box jobs as well, so the docs now state the limit and treat the warning as an operator alert.
+
+### Phase 4a go-live — 19 October 2026
+
+PR 276 merged as `7e648f9`. The Pi worker image was rebuilt from it ([run 39302600676](https://github.com/akhilvuputuri/chief-agent/actions/runs/39302600676)) as `sha256:ba99d9555bbeb3df5eb4f5ce57488c1ce2aaccf22f68ebf75750df75af34af05`, so it contains the coding task program.
+
+The go-live change:
+
+- re-pins `config/coding-pi.json` to that image;
+- adds the `coding` box profile with that image:
+  - limits: one box at a time, a 3-hour hard maximum, a 1-day absolute limit, and no stopped retention, because each box serves one attempt;
+  - EC2 settings: the `chief-box-prod-coding` template (`m7i.xlarge`, 60 GiB), 12 GiB of memory and 3 CPUs for the task, and the pinned task command;
+- switches `sandbox` to `box`.
+
+A new test runs the gateway's coding sandbox startup checks against the reviewed configuration files, so a mismatch fails in CI rather than at release.
+
+**Pending:** the release, then a canary coding job on EC2, which needs an owner request through Chief. The canary checks:
+
+- the cold boot until the worker's first heartbeat;
+- the worker's checks and review inside the box;
+- that the attempt's box is terminated;
+- that the worker's subreaper cleanup works on the AL2023 kernel.

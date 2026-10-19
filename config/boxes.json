@@ -10,6 +10,15 @@
       "hardMaxHours": 6,
       "absoluteDays": 2,
       "concurrency": 1
+    },
+    "coding": {
+      "provider": "ec2",
+      "image": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:ba99d9555bbeb3df5eb4f5ce57488c1ce2aaccf22f68ebf75750df75af34af05",
+      "idleTtlMinutes": 15,
+      "retentionHours": 0,
+      "hardMaxHours": 3,
+      "absoluteDays": 1,
+      "concurrency": 1
     }
   },
   "ec2": {
@@ -18,6 +27,16 @@
       "taskMemory": "1g",
       "taskCpus": "1",
       "taskCommand": ["node", "/opt/chief-worker/dist/boxes/echo-task.js"]
+    },
+    "coding": {
+      "launchTemplate": "chief-box-prod-coding",
+      "taskMemory": "12g",
+      "taskCpus": "3",
+      "taskCommand": [
+        "node",
+        "--disable-sigusr1",
+        "/opt/chief-worker/dist/boxes/coding-task.js"
+      ]
     }
   }
 }

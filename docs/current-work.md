@@ -70,7 +70,7 @@ Retention termination (24 hours after the stop) is being watched.
 **Next:**
 
 1. Record retention on the phase 3 box.
-2. Phase 4: coding on EC2 boxes, with no CodeBuild fallback and CodeBuild removed once coding runs on boxes (owner confirmed 20 October). Phase 4a, one box per attempt behind the sandbox interface, is in review as PR 276, with coding still defaulting to CodeBuild. After merge: rebuild and re-pin the Pi image, add the `coding` box profile, switch `sandbox` to `box`, then a canary job.
+2. Phase 4: coding on EC2 boxes, with no CodeBuild fallback and CodeBuild removed once coding runs on boxes (owner confirmed 20 October). Phase 4a, one box per attempt behind the sandbox interface, merged as `7e648f9`. The go-live change re-pins the Pi image (`sha256:ba99d955…`), adds the `coding` box profile and switches `sandbox` to `box`. Next: a canary coding job on EC2, requested by the owner.
 
 [Design](boxes.md), [journal 91](journey/91-boxed-subagents.md), [release records](releases.md).
 
