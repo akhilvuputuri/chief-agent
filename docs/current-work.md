@@ -18,7 +18,7 @@ Phase 1 of issues [271](https://github.com/akhilvuputuri/chief-agent/issues/271)
 - `transport` agent: bus arrivals, MRT status and traffic.
 - No migration. The picker eval passed.
 
-Next: merge, then the operator rollout adding `DATAGOVSG_API_KEY` and `LTA_DATAMALL_ACCOUNT_KEY` to `compose.yaml` and production, then live acceptance. [Design](singapore-open-data.md), [catalogue](singapore-open-data-catalogue.md), [DataMall catalogue](lta-datamall-catalogue.md), journals [99](journey/99-singapore-open-data.md) and [101](journey/101-singapore-plugin.md).
+Next: merge, then the operator rollout adding `DATAGOVSG_API_KEY` and `LTA_DATAMALL_ACCOUNT_KEY` to `compose.yaml` and production, then live acceptance. [Design](singapore-open-data.md), [catalogue](singapore-open-data-catalogue.md), [DataMall catalogue](lta-datamall-catalogue.md), journals [99](journey/99-singapore-open-data.md) and [102](journey/102-singapore-plugin.md).
 
 # Monthly subscription summary — live as v0.3.88, 19 October 2026
 

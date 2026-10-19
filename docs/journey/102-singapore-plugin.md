@@ -1,4 +1,4 @@
-# 101 — Singapore plugin: can Chief answer weather, haze, carpark and bus questions from government data?
+# 102 — Singapore plugin: can Chief answer weather, haze, carpark and bus questions from government data?
 
 Work date: 2026-10-20. Written: 2026-10-20.
 Status: tested; not deployed. Phase 1 of [issue 271](https://github.com/akhilvuputuri/chief-agent/issues/271) (data.gov.sg) and [issue 270](https://github.com/akhilvuputuri/chief-agent/issues/270) (LTA DataMall). Design: [Singapore open data](../singapore-open-data.md).
