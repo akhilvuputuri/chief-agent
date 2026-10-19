@@ -396,6 +396,22 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
     - `tests/box-agent.test.ts` covers the durable store, refusal ending the box, and non-overlapping retried `hello`. It also has an end-to-end test with a real HTTP channel and real agent processes: two tasks in one box, a question answered by owner steering, idle stop, warm start with the stored credential (epoch 2), and a verified close.
     - `tests/box-docker.test.ts` runs in CI against the built Pi image and checks privileges from inside a task the runner started (UID, effective capabilities, read-only root). A hostile task leaves files in its home, workspace and `/tmp`, plus a background process; the next task finds nothing. It also checks that no task container survives and that steering reaches the container.
 
+- **2c-1, the EC2 provider (dormant until 2c-2 wires it):**
+  - **`src/boxes/ec2-provider.ts`.** Each operation is scoped to this environment's tagged instances:
+    - **Launch:** only from the profile's launch template, with the box ID as the idempotent client token, and with `chief:box` and `chief:env` tags on the instance and its volume.
+    - **Attribute check:** termination protection and shutdown behaviour are read back after launch. An unsafe instance is terminated and the launch refused.
+    - **Lookups:** find, describe, list, stop, start and terminate all act only on this environment's tagged instances.
+  - **First-boot script.** It validates every value and writes the agent's environment file through a quoted heredoc. It then:
+    - installs Docker;
+    - takes the agent and its Node runtime from the digest-pinned worker image;
+    - adds `DOCKER-USER` rules that keep task containers away from the instance metadata service;
+    - runs the agent as a root systemd service.
+  - **Identity.** The agent reads the instance identity document and its signature through IMDSv2. The host verifies them with AWS's pinned regional certificate (valid until 2029-04-28) against the recorded instance, account and region. Verification never throws, so a bad proof is refused, not retried. SHA-256 is expected; SHA-1 is accepted until the EC2 proof shows which one AWS uses.
+  - **`deploy/boxes/boxes.json`.** The CloudFormation stack: a security group with no inbound rules, two launch templates and the controller's managed policy, as in the IAM table above.
+  - **`deploy/boxes/README.md`.** The owner's runbook.
+  - **`src/boxes/iam-check.ts`.** Checks the controller's credentials with `DryRun` launches: the template launch must be allowed, and 15 overrides must be refused.
+  - **Agent.** A task that floods questions is stopped once, with a readable reason.
+
 ## Deployment
 
 The release guard refuses any change to `db/` or `compose.yaml` that a reviewed operator rollout has not installed. That makes the box migration a one-time operator step:

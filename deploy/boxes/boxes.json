@@ -1,0 +1,322 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Chief boxed sub-agents (docs/boxes.md): one security group, a launch template per profile, and the controller's tightly scoped EC2 permissions. Boxes have no instance profile, no inbound access and no key pair.",
+  "Parameters": {
+    "Environment": {
+      "Type": "String",
+      "Default": "prod",
+      "AllowedPattern": "^[a-z][a-z0-9-]{1,30}$",
+      "Description": "chief:env tag value; must equal config/boxes.json environment"
+    },
+    "VpcId": { "Type": "AWS::EC2::VPC::Id" },
+    "SubnetId": {
+      "Type": "AWS::EC2::Subnet::Id",
+      "Description": "A public subnet; boxes get a public IP so no NAT gateway is needed"
+    },
+    "ControllerUserName": {
+      "Type": "String",
+      "Description": "The existing IAM user whose keys the gateway uses (the one holding the CodeBuild controller policy)"
+    },
+    "CodingInstanceType": { "Type": "String", "Default": "m7i.xlarge" },
+    "CodingVolumeGiB": {
+      "Type": "Number",
+      "Default": 60,
+      "MinValue": 20,
+      "MaxValue": 200
+    },
+    "EchoInstanceType": { "Type": "String", "Default": "t3.small" },
+    "EchoVolumeGiB": {
+      "Type": "Number",
+      "Default": 20,
+      "MinValue": 20,
+      "MaxValue": 200
+    }
+  },
+  "Resources": {
+    "BoxSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Chief boxes: no inbound access; outbound HTTPS and HTTP only",
+        "VpcId": { "Ref": "VpcId" },
+        "SecurityGroupEgress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 443,
+            "ToPort": 443,
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 80,
+            "ToPort": 80,
+            "CidrIp": "0.0.0.0/0"
+          }
+        ],
+        "Tags": [{ "Key": "chief:env", "Value": { "Ref": "Environment" } }]
+      }
+    },
+    "CodingLaunchTemplate": {
+      "Type": "AWS::EC2::LaunchTemplate",
+      "Properties": {
+        "LaunchTemplateName": { "Fn::Sub": "chief-box-${Environment}-coding" },
+        "LaunchTemplateData": {
+          "ImageId": "resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64",
+          "InstanceType": { "Ref": "CodingInstanceType" },
+          "InstanceInitiatedShutdownBehavior": "terminate",
+          "DisableApiTermination": false,
+          "EbsOptimized": true,
+          "MetadataOptions": {
+            "HttpEndpoint": "enabled",
+            "HttpTokens": "required",
+            "HttpPutResponseHopLimit": 1,
+            "HttpProtocolIpv6": "disabled",
+            "InstanceMetadataTags": "disabled"
+          },
+          "BlockDeviceMappings": [
+            {
+              "DeviceName": "/dev/xvda",
+              "Ebs": {
+                "VolumeType": "gp3",
+                "VolumeSize": { "Ref": "CodingVolumeGiB" },
+                "Encrypted": true,
+                "DeleteOnTermination": true
+              }
+            }
+          ],
+          "NetworkInterfaces": [
+            {
+              "DeviceIndex": 0,
+              "SubnetId": { "Ref": "SubnetId" },
+              "Groups": [{ "Ref": "BoxSecurityGroup" }],
+              "AssociatePublicIpAddress": true,
+              "DeleteOnTermination": true
+            }
+          ]
+        }
+      }
+    },
+    "EchoLaunchTemplate": {
+      "Type": "AWS::EC2::LaunchTemplate",
+      "Properties": {
+        "LaunchTemplateName": { "Fn::Sub": "chief-box-${Environment}-echo" },
+        "LaunchTemplateData": {
+          "ImageId": "resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64",
+          "InstanceType": { "Ref": "EchoInstanceType" },
+          "InstanceInitiatedShutdownBehavior": "terminate",
+          "DisableApiTermination": false,
+          "MetadataOptions": {
+            "HttpEndpoint": "enabled",
+            "HttpTokens": "required",
+            "HttpPutResponseHopLimit": 1,
+            "HttpProtocolIpv6": "disabled",
+            "InstanceMetadataTags": "disabled"
+          },
+          "BlockDeviceMappings": [
+            {
+              "DeviceName": "/dev/xvda",
+              "Ebs": {
+                "VolumeType": "gp3",
+                "VolumeSize": { "Ref": "EchoVolumeGiB" },
+                "Encrypted": true,
+                "DeleteOnTermination": true
+              }
+            }
+          ],
+          "NetworkInterfaces": [
+            {
+              "DeviceIndex": 0,
+              "SubnetId": { "Ref": "SubnetId" },
+              "Groups": [{ "Ref": "BoxSecurityGroup" }],
+              "AssociatePublicIpAddress": true,
+              "DeleteOnTermination": true
+            }
+          ]
+        }
+      }
+    },
+    "ControllerPolicy": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "Description": "Chief box controller: launch only from the box launch templates, act only on this environment's tagged boxes",
+        "Users": [{ "Ref": "ControllerUserName" }],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "LaunchInstancesFromBoxTemplatesOnly",
+              "Effect": "Allow",
+              "Action": "ec2:RunInstances",
+              "Resource": {
+                "Fn::Sub": "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"
+              },
+              "Condition": {
+                "ArnLike": {
+                  "ec2:LaunchTemplate": [
+                    {
+                      "Fn::Sub": "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/${CodingLaunchTemplate}"
+                    },
+                    {
+                      "Fn::Sub": "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/${EchoLaunchTemplate}"
+                    }
+                  ]
+                },
+                "StringEquals": {
+                  "ec2:InstanceType": [
+                    { "Ref": "CodingInstanceType" },
+                    { "Ref": "EchoInstanceType" }
+                  ],
+                  "ec2:MetadataHttpTokens": "required",
+                  "ec2:InstanceMetadataTags": "disabled",
+                  "ec2:Tenancy": "default",
+                  "ec2:InstanceMarketType": "on-demand",
+                  "aws:RequestTag/chief:env": { "Ref": "Environment" }
+                },
+                "NumericLessThanEquals": {
+                  "ec2:MetadataHttpPutResponseHopLimit": "1"
+                },
+                "Null": { "aws:RequestTag/chief:box": "false" },
+                "ForAllValues:StringEquals": {
+                  "aws:TagKeys": ["chief:box", "chief:env"]
+                }
+              }
+            },
+            {
+              "Sid": "LaunchEncryptedBoundedVolumes",
+              "Effect": "Allow",
+              "Action": "ec2:RunInstances",
+              "Resource": {
+                "Fn::Sub": "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:volume/*"
+              },
+              "Condition": {
+                "Bool": { "ec2:Encrypted": "true" },
+                "StringEquals": {
+                  "ec2:VolumeType": "gp3",
+                  "aws:RequestTag/chief:env": { "Ref": "Environment" }
+                },
+                "NumericLessThanEquals": { "ec2:VolumeSize": "200" },
+                "ForAllValues:StringEquals": {
+                  "aws:TagKeys": ["chief:box", "chief:env"]
+                }
+              }
+            },
+            {
+              "Sid": "LaunchAmazonImagesOnly",
+              "Effect": "Allow",
+              "Action": "ec2:RunInstances",
+              "Resource": { "Fn::Sub": "arn:aws:ec2:${AWS::Region}::image/*" },
+              "Condition": { "StringEquals": { "ec2:Owner": "amazon" } }
+            },
+            {
+              "Sid": "LaunchNetworkFromTemplateOnly",
+              "Effect": "Allow",
+              "Action": "ec2:RunInstances",
+              "Resource": [
+                {
+                  "Fn::Sub": "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:subnet/*"
+                },
+                {
+                  "Fn::Sub": "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*"
+                },
+                {
+                  "Fn::Sub": "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*"
+                }
+              ],
+              "Condition": {
+                "Bool": { "ec2:IsLaunchTemplateResource": "true" }
+              }
+            },
+            {
+              "Sid": "UseBoxLaunchTemplates",
+              "Effect": "Allow",
+              "Action": "ec2:RunInstances",
+              "Resource": [
+                {
+                  "Fn::Sub": "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/${CodingLaunchTemplate}"
+                },
+                {
+                  "Fn::Sub": "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/${EchoLaunchTemplate}"
+                }
+              ]
+            },
+            {
+              "Sid": "TagOnlyAtLaunch",
+              "Effect": "Allow",
+              "Action": "ec2:CreateTags",
+              "Resource": [
+                {
+                  "Fn::Sub": "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"
+                },
+                {
+                  "Fn::Sub": "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:volume/*"
+                }
+              ],
+              "Condition": {
+                "StringEquals": { "ec2:CreateAction": "RunInstances" }
+              }
+            },
+            {
+              "Sid": "ManageOwnBoxesOnly",
+              "Effect": "Allow",
+              "Action": [
+                "ec2:StartInstances",
+                "ec2:StopInstances",
+                "ec2:TerminateInstances"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"
+              },
+              "Condition": {
+                "StringEquals": {
+                  "ec2:ResourceTag/chief:env": { "Ref": "Environment" }
+                },
+                "Null": { "ec2:ResourceTag/chief:box": "false" }
+              }
+            },
+            {
+              "Sid": "SweepOwnLeftoverVolumes",
+              "Effect": "Allow",
+              "Action": "ec2:DeleteVolume",
+              "Resource": {
+                "Fn::Sub": "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:volume/*"
+              },
+              "Condition": {
+                "StringEquals": {
+                  "ec2:ResourceTag/chief:env": { "Ref": "Environment" }
+                },
+                "Null": { "ec2:ResourceTag/chief:box": "false" }
+              }
+            },
+            {
+              "Sid": "ReadBoxState",
+              "Effect": "Allow",
+              "Action": [
+                "ec2:DescribeInstances",
+                "ec2:DescribeVolumes",
+                "ec2:DescribeInstanceAttribute"
+              ],
+              "Resource": "*"
+            },
+            {
+              "Sid": "ResolveAmazonLinuxImage",
+              "Effect": "Allow",
+              "Action": "ssm:GetParameters",
+              "Resource": {
+                "Fn::Sub": "arn:aws:ssm:${AWS::Region}::parameter/aws/service/ami-amazon-linux-latest/*"
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "CodingLaunchTemplateName": {
+      "Value": { "Fn::Sub": "chief-box-${Environment}-coding" }
+    },
+    "EchoLaunchTemplateName": {
+      "Value": { "Fn::Sub": "chief-box-${Environment}-echo" }
+    },
+    "SecurityGroupId": { "Value": { "Ref": "BoxSecurityGroup" } },
+    "AccountId": { "Value": { "Ref": "AWS::AccountId" } }
+  }
+}

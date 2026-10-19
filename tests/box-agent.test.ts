@@ -957,3 +957,49 @@ test("a refused task stays refused across a restart", async (t) => {
     .find((e) => e.kind === "task.failed");
   assert.match(failed.payload.error, /exceed the box payload limit/);
 });
+
+test("a task flooding questions is stopped once, with a reason the owner can read", async (t) => {
+  const dir = await agentDir(t);
+  const host = stubHost({
+    next: (n) =>
+      n === 0
+        ? assign(1)
+        : Response.json({ messages: [], remainingMs: n > 5 ? 0 : 3_600_000 }),
+  });
+  let cancels = 0;
+  let finish!: (o: TaskOutcome) => void;
+  const runner: TaskRunner = {
+    start: (_task, onOutput) => {
+      for (let i = 0; i < 40; i++)
+        onOutput({ type: "question", payload: { i } });
+      return {
+        send: () => {},
+        cancel: () => {
+          cancels++;
+          finish({
+            type: "failed",
+            payload: { error: "Task exited without a result (code null)" },
+          });
+        },
+        done: new Promise<TaskOutcome>((r) => (finish = r)),
+      };
+    },
+    reset: async () => {},
+  };
+  await new BoxAgent({
+    origin: "https://host.example",
+    boxId: "00000000-0000-4000-8000-000000000000",
+    bootstrap: "s".repeat(43),
+    store: new StateStore(dir),
+    runner,
+    shutdown: () => {},
+    fetch: host.fetch,
+    retryMs: 1,
+  }).run();
+  assert.equal(cancels, 1);
+  const failed = host.calls
+    .filter((c) => c.path === "events")
+    .map((c) => c.body.events[0])
+    .find((e) => e.kind === "task.failed");
+  assert.match(failed.payload.error, /more than 20 questions without answers/);
+});

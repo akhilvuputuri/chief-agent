@@ -28,9 +28,15 @@ Issue 132 next milestone. A new `core/bills` agent gathers an exact invoice coll
 
 A refused `coding_reply` on 16 October was recorded as uncertain and blocked every owner write until an operator settled it on 18 October; no uncertain calls remain. PR 249 (deployed `9437d86`, part of v0.3.83; live acceptance pending) settles provably empty coding calls automatically, classifies pre-write coding refusals as validation errors and stops a turn from retrying a blocked write. See [journal 92](journey/92-uncertain-coding-write-lock.md).
 
-# Boxed sub-agents — box agent in review, 19 October 2026
+# Boxed sub-agents — EC2 provider in review, 19 October 2026
 
-Heavy delegated work moves to sub-agents with their own on-demand boxes that Chief can steer and close (issue #245). The owner decided that coding moves first, boxes keep a short warm TTL (about 15 idle minutes, then stop), and self-managed EC2 replaces CodeBuild. No AWS resources yet. [Design](boxes.md), [journal 91](journey/91-boxed-subagents.md). On 19 October the owner dropped CodeBuild as a box provider: the layer is built on a fake provider (tests), a local process provider (development) and EC2, and coding keeps its current CodeBuild path only until it moves. The dormant foundation (phase 2a, [PR 259](https://github.com/akhilvuputuri/chief-agent/pull/259)) merged as `860c45e`. The box agent and a local provider (phase 2b), which run the whole loop without AWS, are in review as v0.3.85.
+Heavy delegated work moves to sub-agents with their own on-demand boxes that Chief can steer and close (issue #245). The owner decided that coding moves first, boxes stop after about 15 idle minutes, and self-managed EC2 replaces CodeBuild. Coding keeps its current CodeBuild path until it moves.
+
+- **Live and dormant:** the box layer (phase 2a, [PR 259](https://github.com/akhilvuputuri/chief-agent/pull/259)) and the box agent with its local provider (phase 2b, [PR 260](https://github.com/akhilvuputuri/chief-agent/pull/260), v0.3.85).
+- **In review (phase 2c-1, v0.3.86):** the EC2 provider, its first-boot script, identity verification, and the CloudFormation stack and IAM check in `deploy/boxes/`. The owner applies the stack.
+- **Next (2c-2):** wiring, the reviewed rollout of the staged box migration, and the Caddy route.
+
+[Design](boxes.md), [journal 91](journey/91-boxed-subagents.md).
 
 # Reasoning effort chosen per message — 17 October 2026
 

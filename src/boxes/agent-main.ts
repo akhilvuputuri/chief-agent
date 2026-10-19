@@ -10,6 +10,7 @@
  *   CHIEF_BOX_TASK_IMAGE                              image digest (docker runner)
  *   CHIEF_BOX_TASK_MEMORY, CHIEF_BOX_TASK_CPUS        per-task limits (docker runner)
  *   CHIEF_BOX_SHUTDOWN=exit|poweroff                  default poweroff
+ *   CHIEF_BOX_IDENTITY=ec2                            present the EC2 identity document
  */
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
@@ -34,7 +35,34 @@ const runner =
         cpus: env.CHIEF_BOX_TASK_CPUS,
       });
 
+/**
+ * On EC2, the AWS-signed instance identity document and its signature, read through
+ * IMDSv2 by the agent on the host (task containers are blocked from the service).
+ */
+async function ec2Identity() {
+  const imds = "http://169.254.169.254/latest";
+  const token = await (
+    await fetch(`${imds}/api/token`, {
+      method: "PUT",
+      headers: { "X-aws-ec2-metadata-token-ttl-seconds": "60" },
+      signal: AbortSignal.timeout(5000),
+    })
+  ).text();
+  const read = async (path: string) =>
+    (
+      await fetch(`${imds}/dynamic/instance-identity/${path}`, {
+        headers: { "X-aws-ec2-metadata-token": token },
+        signal: AbortSignal.timeout(5000),
+      })
+    ).text();
+  return {
+    document: await read("document"),
+    signature: await read("signature"),
+  };
+}
+
 const agent = new BoxAgent({
+  identity: env.CHIEF_BOX_IDENTITY === "ec2" ? ec2Identity : undefined,
   origin: required("CHIEF_BOX_ORIGIN"),
   boxId: required("CHIEF_BOX_ID"),
   bootstrap: env.CHIEF_BOX_BOOTSTRAP,
