@@ -47,6 +47,10 @@ The owner then asked for LTA DataMall as well, mainly for bus arrivals, and supp
   - the five Singapore scenarios (the updated weather case none-7 and the new sg-1 to sg-4) picked `singapore` in all 3 runs;
   - no other scenario loaded `singapore`;
   - the three misses (jobs-8, lib-6, t-rout-1) are in other domains.
+- **Measured: picker eval rerun after rebasing onto #274**, which added a `coding` domain (20 October, 3 runs, 194 scenarios; cost $0.066):
+  - recall 98.2% pooled, fully covered 98.3%, 0.42 extra groups per call, result pass;
+  - the Singapore scenarios were picked in 15 of 15 cases, and no other scenario loaded `singapore`;
+  - the misses are jobs-8, lib-6, t-rout-1 and t-work-2 (1 of 3 runs), all in other domains.
 
 ## Diagnosis and alternatives
 
