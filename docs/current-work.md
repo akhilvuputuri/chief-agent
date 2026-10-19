@@ -28,15 +28,24 @@ Issue 132 next milestone. A new `core/bills` agent gathers an exact invoice coll
 
 A refused `coding_reply` on 16 October was recorded as uncertain and blocked every owner write until an operator settled it on 18 October; no uncertain calls remain. PR 249 (deployed `9437d86`, part of v0.3.83; live acceptance pending) settles provably empty coding calls automatically, classifies pre-write coding refusals as validation errors and stops a turn from retrying a blocked write. See [journal 92](journey/92-uncertain-coding-write-lock.md).
 
-# Boxed sub-agents — EC2 provider in review, 19 October 2026
+# Boxed sub-agents — installed and off, 19 October 2026
 
 Heavy delegated work moves to sub-agents with their own on-demand boxes that Chief can steer and close (issue #245). The owner decided that coding moves first, boxes stop after about 15 idle minutes, and self-managed EC2 replaces CodeBuild. Coding keeps its current CodeBuild path until it moves.
 
-- **Live and dormant:** the box layer (phase 2a, [PR 259](https://github.com/akhilvuputuri/chief-agent/pull/259)) and the box agent with its local provider (phase 2b, [PR 260](https://github.com/akhilvuputuri/chief-agent/pull/260), v0.3.85).
-- **In review (phase 2c-1, v0.3.86):** the EC2 provider, its first-boot script, identity verification, and the CloudFormation stack and IAM check in `deploy/boxes/`. The owner applies the stack.
-- **In review (2c-2, v0.3.87):** gateway wiring behind `BOXES_RUNTIME` (off by default), `config/boxes.json`, an operator probe, and the reviewed rollout of migration 032 with its Compose line and Caddy route. The rollout must run right after the merge.
+**Live in production, with boxes off (`BOXES_RUNTIME=off`):**
 
-[Design](boxes.md), [journal 91](journey/91-boxed-subagents.md).
+- the box layer, the box agent, the EC2 provider and the gateway wiring (v0.3.85–v0.3.87);
+- migration 032;
+- the `/boxes/*` Caddy route, installed by the reviewed `scripts/deploy-boxes.py` rollout on 19 October.
+
+The `echo` profile is pinned to worker image `sha256:3963041…`, built from `5f46cb4`.
+
+**Next:**
+
+1. The owner applies the AWS stack (`deploy/boxes/README.md`) and adds `BOX_AUTH_KEY`, `BOX_AWS_ACCOUNT_ID` and `BOXES_RUNTIME=on`.
+2. Phase 3: the IAM check, then the EC2 echo proof with measured boot and warm-start times.
+
+[Design](boxes.md), [journal 91](journey/91-boxed-subagents.md), [release records](releases.md).
 
 # Reasoning effort chosen per message — 17 October 2026
 
