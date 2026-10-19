@@ -263,3 +263,37 @@ The phase 2b tests load the staged box migration.
 Not changed, with reasons replied on the threads: task network egress (phase 2c), the local provider's stored bootstrap secret (development only, documented), and an answer acknowledged before an agent crash (the interrupted task is failed, not resumed, so no answer is silently lost).
 
 The re-review of `5686ed1` approved it and noted three small points, all adopted. A refusal is now journalled as a finished failure, so a restart cannot run the refused task with empty instructions. The Docker test's own leftover check matches any task label. A task with more than 20 questions waiting is stopped.
+
+### Phase 2c-1: the EC2 provider — 19 October 2026
+
+The EC2 provider, the first-boot script, identity verification, the CloudFormation stack and its runbook, and a `DryRun` IAM check are built and tested against fakes. Nothing launches yet; the owner applies the stack, and phase 2c-2 wires the layer.
+
+**From documentation, not yet measured:**
+
+- The base64 instance identity signature is verified with the region's RSA certificate, copied from the EC2 User Guide's regional certificate list. It is valid until 29 April 2029.
+- The guide's procedure uses SHA-256. Both SHA-256 and SHA-1 are accepted until the first real box shows which one AWS uses.
+- `DryRun` answers with DryRunOperation when a call would be allowed and with UnauthorizedOperation when it would not, so the IAM check launches nothing. A case that fails validation before authorisation is reported by name, so it is never mistaken for a refusal.
+
+**Tested:**
+
+- The first-boot script parses with `bash -n`, and unsafe values are refused.
+- Launch uses the template, the client token, the tags and the attribute check.
+- Lookups are scoped to this environment and handle pagination.
+- Identity verification accepts a correctly signed document and refuses a wrong instance, a wrong account, a tampered document or a malformed proof.
+- The template keeps boxes closed and the controller narrow.
+- The IAM check classifies every outcome correctly.
+- A task flooding questions is stopped once, with a clear reason.
+
+**Review of `d111769` (Claude Opus 5.5): changes requested.** The blocking finding was that the IAM check never tagged the volume, so it did not send the request the provider sends. Its "allowed" case would have been refused, and refusals could pass for the wrong reason. The check now builds its legitimate case from the provider's own request function, with two more cases for a wrong or missing volume tag and two for network overrides.
+
+Also adopted:
+
+- **Metadata errors:** a throttled or failed metadata read now throws and is retried. Before, its error page was sent as proof, refused, and the box powered itself off.
+- **Attribute check:**
+  - The read-back now retries while EC2 catches up after a launch.
+  - It also runs when an instance is found after an uncertain launch, so a refused instance is never adopted.
+  - It now also checks `disableApiStop`.
+- **Signature:** only SHA-256 is accepted. AWS's documentation confirms SHA-256 for this signature, and the pinned certificate matches AWS's published one.
+- **Tests:** the identity tests now use a real X.509 certificate and check that the pinned certificate parses.
+- **Inconclusive cases:** these no longer fail the IAM check, matching the runbook, and the runbook checks both launch templates.
+- **Docs:** they now state that Docker comes from Amazon Linux's signed repository rather than a pinned artifact, and they name the limits IAM cannot bound (`MaxCount` and extra volumes).

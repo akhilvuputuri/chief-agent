@@ -382,7 +382,11 @@ export class DockerRunner implements TaskRunner {
       ],
       { stdio: ["pipe", "pipe", "ignore"] },
     );
+    let killed = false;
     const kill = () => {
+      // Idempotent: repeated kills start one removal, not one docker process each.
+      if (killed) return;
+      killed = true;
       child.kill("SIGKILL");
       this.removing.set(
         task.id,
@@ -473,6 +477,8 @@ export class BoxAgent {
   }[] = [];
   /** The task being started or run; questions for any other task are discarded. */
   private active?: string;
+  /** A task the agent stopped for asking too many unanswered questions. */
+  private stopping?: string;
   private questions = new Map<string, Record<string, unknown>[]>();
   private current?: { id: string; running: RunningTask };
   private pendingMessages = new Map<string, string[]>();
@@ -740,7 +746,11 @@ export class BoxAgent {
     const queue = this.questions.get(taskId) ?? [];
     // A task flooding questions is cut off rather than allowed to grow the agent's memory.
     if (queue.length >= MAX_PENDING_QUESTIONS) {
-      this.current?.running.cancel();
+      // Stopped once, with a reason the owner can read.
+      if (this.stopping !== taskId) {
+        this.stopping = taskId;
+        this.current?.running.cancel();
+      }
       return;
     }
     queue.push(output.payload ?? {});
@@ -795,10 +805,22 @@ export class BoxAgent {
         };
       }
       this.current = { id: task.id, running };
+      // A task that flooded questions while starting is stopped as soon as it is running.
+      if (this.stopping === task.id) running.cancel();
       for (const text of this.pendingMessages.get(task.id) ?? [])
         running.send(text);
       this.pendingMessages.delete(task.id);
-      const outcome = await running.done;
+      const finished = await running.done;
+      const outcome: TaskOutcome =
+        this.stopping === task.id
+          ? {
+              type: "failed",
+              payload: {
+                error: `The task was stopped for asking more than ${MAX_PENDING_QUESTIONS} questions without answers`,
+              },
+            }
+          : finished;
+      this.stopping = undefined;
       this.current = undefined;
       this.active = undefined;
       this.questions.delete(task.id);
