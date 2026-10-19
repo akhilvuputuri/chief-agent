@@ -72,7 +72,7 @@ Delta review (`94733b2`) found one new medium bug. The `pendingCoding` query tre
 
 Devin Review on `94733b2` raised two more findings:
 
-- **Non-contiguous history.** `boundHistory` could keep a short reply further back while dropping its long question. It now stops at the first group that does not fit.
+- **Non-contiguous history.** `boundHistory` could keep a short reply further back while dropping its long question. It now stops at the first owner message that does not fit. An oversized reply or tool group is still skipped, so its compact saved-answer reference, which is a later group, keeps the details retrievable. A first version that stopped at any group failed CI on `543952f`, because it lost that reference (`tests/custom-runtime.test.ts`).
 - **Missing picker eval.** The `eval:picker` run that AGENTS.md requires after a picker-config change had not been recorded. The eval's own domain list also needed `coding`. Without it, the offline picker test failed in CI on `6b191be`.
 
 **Picker eval** (`npm run eval:picker`, Jev 1.13, 20 October 2026). Six synthetic coding scenarios were added: three tuning, three held out. Over 190 scenarios × 3 runs (570 calls):

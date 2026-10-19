@@ -37,9 +37,13 @@ export function boundHistory(
   let size = 0;
   for (const group of groups.reverse()) {
     const n = JSON.stringify(group).length;
-    // Stop at the first group that does not fit: history stays contiguous, so a short
-    // reply is never kept while its long question is dropped.
-    if (size + n > maxChars) break;
+    if (size + n > maxChars) {
+      // An owner message that does not fit ends the selection, so a reply is never kept
+      // without its question. A large reply or tool group is skipped instead: its compact
+      // saved-answer reference, a later group, keeps the details retrievable.
+      if (group[0]?.role === "user") break;
+      continue;
+    }
     selected.unshift(group);
     size += n;
   }

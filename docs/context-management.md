@@ -6,7 +6,7 @@ Status: stage 1 (measurement) is released. Stage 2 (relevant tool loading) is im
 
 - `coding_*` tools form a `coding` domain separate from `work`.
 - `DOMAIN_GUIDANCE` (canvas, jobs, work) travels in the runtime context only when that domain's tools are offered.
-- Older history keeps a `historyFloor` of 6,000 characters even when the fixed envelope fills the soft budget.
+- Older history keeps a `historyFloor` of 6,000 characters even when the fixed envelope fills the soft budget. The floor is capped by the compaction headroom. Older history starts at an owner message, and selection stops at the first owner message that does not fit; an oversized reply or tool group is skipped instead, so its compact saved-answer reference survives.
 - The per-turn summary has its own system message after the stable instructions and memories.
 - `context.over_budget` is logged once per turn, at info level, with `kind` (`fixed` or `protected`), `fixedChars` and `protectedHistoryChars`.
 
