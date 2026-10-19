@@ -10,9 +10,9 @@ const flags = {
 } as const;
 
 /**
- * `delegate <box-id> <request-key> [--wait] [--hostile] [--inspect] [--probe] <text…>`:
+ * `delegate <box-id> <request-key> [--wait] [--hostile] [--inspect] [--probe] [--] <text…>`:
  * the `echo` task's payload. Flags come before the text; anything after the first
- * non-flag word is text.
+ * non-flag word, or after `--`, is text.
  */
 export function delegateArgs(args: string[]) {
   const [boxId, requestKey, ...rest] = args;
@@ -21,6 +21,10 @@ export function delegateArgs(args: string[]) {
   const payload: Record<string, unknown> = {};
   let i = 0;
   for (; i < rest.length && rest[i]!.startsWith("--"); i++) {
+    if (rest[i] === "--") {
+      i++;
+      break;
+    }
     const flag = flags[rest[i] as keyof typeof flags];
     if (!flag) throw new Error(`Unknown flag ${rest[i]}`);
     payload[flag] = true;

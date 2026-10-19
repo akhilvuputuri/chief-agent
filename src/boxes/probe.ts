@@ -129,7 +129,19 @@ async function orphan(profile: string) {
   };
   if ((await until("running")) === "terminated")
     return { ...base, sweptBeforeStop: true };
-  await provider.stop(providerId);
+  try {
+    await provider.stop(providerId);
+  } catch (error) {
+    // The sweep may have terminated it between "running" and the stop.
+    if (
+      (await provider.describe(providerId).catch(() => "error")) ===
+      "terminated"
+    )
+      return { ...base, sweptBeforeStop: true };
+    throw new Error(`Stopping orphan ${providerId} (box ${boxId}) failed`, {
+      cause: error,
+    });
+  }
   if ((await until("stopped")) === "terminated")
     return { ...base, sweptBeforeStop: true };
   return { ...base, stoppedAt: new Date().toISOString() };
