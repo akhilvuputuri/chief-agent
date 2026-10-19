@@ -24,7 +24,9 @@ const internalNames = new Set([
   ...INTERNAL_FIELDS,
 ]);
 // A bare name, not part of a path, a dotted field, a call or a longer identifier.
-const name = /(?<![\w./\\-])([a-z][a-z0-9]*(?:_[a-z0-9]+)+)(?![\w./\\(-])/g;
+// A full stop ends a sentence; a dot followed by a word, slash or call is a path or field.
+const name =
+  /(?<![\w./\\-])([a-z][a-z0-9]*(?:_[a-z0-9]+)+)(?![\w/\\(-]|\.[\w/(])/g;
 const uuid =
   /(?<![\w-])([0-9a-f]{8})-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\w-])/gi;
 // 40–64 hex characters with at least one letter, so long decimal numbers stay whole.
@@ -35,7 +37,7 @@ const verbatim = new RegExp(
     "`[^`\\n]+`", // inline code (an exact internal name is handled below)
     "\\[[^\\]\\n]{0,500}\\]\\((?:[^()\\s]|\\([^()\\s]*\\))*\\)", // Markdown link, one level of parentheses
     "https?:\\/\\/\\S+", // URL
-    "\\b[a-z0-9-]+(?:\\.[a-z0-9-]+)+\\/\\S*", // bare domain with a path
+    "\\b[a-z0-9-]{1,63}(?:\\.[a-z0-9-]{1,63}){1,8}\\/\\S*", // bare domain with a path (bounded labels)
     "(?:^|(?<=[\\s(]))\\/[a-z_]+(?: [0-9a-f-]{8,})?", // slash command and its ID
   ].join("|"),
   "gim",

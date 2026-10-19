@@ -12,6 +12,11 @@ test("Chief's own operation and field names become plain words, and long IDs in 
     ),
     "I called coding reply; the owner merge job 1a6cf84e is at head sha 0123456.",
   );
+  // A name that ends a sentence is still prose.
+  assert.equal(
+    tidyOwnerText("I asked it via coding_reply. The job is owner_merge."),
+    "I asked it via coding reply. The job is owner merge.",
+  );
   // A 64-character review hash shrinks too.
   assert.equal(tidyOwnerText(`review ${"ab".repeat(32)}`), "review abababa");
 });
@@ -43,5 +48,6 @@ test("pathological input stays fast", () => {
   const started = Date.now();
   tidyOwnerText("[".repeat(100000));
   tidyOwnerText("```".repeat(30000));
+  tidyOwnerText("a.".repeat(50000));
   assert.ok(Date.now() - started < 2000);
 });

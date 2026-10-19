@@ -54,7 +54,9 @@ Independent review (Opus 5.5, commit `08ea023`) requested changes. Three medium 
 - IDs in inline-code or bracketed slash commands were shortened. `/continue` needs the full ID.
 - Exact values the owner asked for were shortened with no way to avoid it. So were code identifiers and file paths in coding discussions.
 
-The docs also overclaimed what was untouched. The rework keeps all inline code verbatim unless the whole span is an internal name. It also leaves paths, call-like names, decimal numbers, parenthesised links and bare domains alone, filters the remaining envelope labels, and corrects the docs. Generic field names such as `run_id` and `pr_url` are no longer rewritten.
+The docs also overclaimed what was untouched. The rework keeps all inline code verbatim unless the whole span is an internal name. It also leaves paths, call-like names, decimal numbers, parenthesised links and bare domains alone, filters the remaining envelope labels, and corrects the docs. Generic field names such as `run_id` and `pr_url` are no longer rewritten. A delta review (`8a2c44e`) found that the path rule also stopped a name at the end of a sentence from being rewritten; fixed, with a test. It also bounded a bare-domain pattern that was quadratic on long dotted runs.
+
+Limitation: inline code is delivered exactly, so a model that backticks every hash or ID gets no shortening there. Only a span that is exactly an internal name is rewritten.
 
 ## Verification and outcome
 
