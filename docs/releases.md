@@ -1,3 +1,35 @@
+## Released v0.3.87 (untagged) — boxed sub-agents installed, off by default (`5f46cb4`)
+
+[PR 265](https://github.com/akhilvuputuri/chief-agent/pull/265) merged as `5f46cb4f417dda258623626d5347f9ff80ff2ced`. Independent review (Claude Opus 5.5) approved the exact head `4f4bf33` after two rounds of fixes. Hosted CI, Devin, 1,087 application tests, 51 script tests, 107 Pi tests and 27 rollout tests passed.
+
+**Operator rollout.** On 19 October `scripts/deploy-boxes.py` ran over the operator SSH connection, with the owner's approval:
+
+- **Pre-checks:** the live `RELEASE` and main at merge time were both the baseline `3feef85`, the gateway was healthy, and the live Caddyfile's catch-all matched the reviewed anchor byte for byte. The archive and script hashes matched on the host.
+- **Result:** deployed and healthy, migration 32 installed, Caddy route added.
+- **Separate checks:**
+  - the `RELEASE` and health checks;
+  - marker 32 present, with `boxes` and `box_tasks` empty;
+  - the route present in `/etc/caddy/Caddyfile`;
+  - publicly, `/boxes/...` returns the gateway's JSON 404 (boxes are off) while other paths keep Caddy's plain 404;
+  - `gateway.started` for `5f46cb4`, with no errors.
+- **Automatic release:** the [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39214571810) for the same commit then succeeded as a no-op.
+
+Boxes stay off (`BOXES_RUNTIME=off`) until the owner applies `deploy/boxes/boxes.json` and adds the box settings. [Journal 91](journey/91-boxed-subagents.md).
+
+## Released v0.3.86 (untagged) — EC2 box provider, dormant (`3feef85`)
+
+[PR 264](https://github.com/akhilvuputuri/chief-agent/pull/264) merged as `3feef85c63b18bbea9b9c7b56502b224ca0523c9` after exact-head review, CI and the full suite. Its [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39197933021) recorded exact deployment and startup health.
+
+## Released v0.3.85 (untagged) — box agent and local provider, dormant (`af33a68`)
+
+[PR 260](https://github.com/akhilvuputuri/chief-agent/pull/260) merged as `af33a68a326a7474662544c92e07345d8d1a31a7` after exact-head review, CI (including the first Docker-runner test against the real worker image) and the full suite. Its [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39164490351) recorded exact deployment and startup health. The box-layer foundation ([PR 259](https://github.com/akhilvuputuri/chief-agent/pull/259), `860c45e`) deployed in `c1d556b` after [PR 262](https://github.com/akhilvuputuri/chief-agent/pull/262) staged its migration to unblock releases.
+
+## Deployed in `c1d556b` (package 0.3.84, untagged) — coding transient retry
+
+The host re-queues a paused coding job once, with a notice in the Coding topic, when the pause came from a stopped sandbox, a lost heartbeat or a provider 429/5xx that the worker did not recover from. A retried revision that pauses again waits for the owner. Jobs with a PR, pending cleanup or a revoked owner are never retried. `autoRetryTransientOnce: false` turns it off and is never sent to workers. This is an owner-approved exception to the no-automatic-resumption rule.
+
+[PR 257](https://github.com/akhilvuputuri/chief-agent/pull/257) merged as `496fd50`. Exact-head independent review approved `44cfeef` in round 6, and hosted CI and Devin passed there. `496fd50`'s own release attempt ([run 39159688807](https://github.com/akhilvuputuri/chief-agent/actions/runs/39159688807)) failed the current-main guard because [PR 262](https://github.com/akhilvuputuri/chief-agent/pull/262) had already merged as `c1d556b`. The earlier `860c45e` release failed the database/Compose guard, which PR 262 cleared by moving the box migration out of `db/`. The change first deployed in `c1d556b` (package 0.3.84), whose [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39161166544) receipt is `success` at 20:02:44Z on 18 October. It is also in `af33a68` (package 0.3.85, [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39164490351) `success` at 20:45:56Z). Neither is tagged. [Journal 96](journey/96-coding-transient-retry.md). Live acceptance (a real transient pause) is pending.
+
 ## Deployed after v0.3.83 (untagged) — review-driven reliability fixes
 
 Two fixes from the two-week production review (3–17 October), deployed on package 0.3.83 without a version bump or tag. A third, PR 249, deployed before v0.3.83 and is part of it (below). Each had exact-head independent review (Claude Opus 5.5) and hosted CI. Every Devin finding was fixed; one #251 thread was verified fixed by PR comment rather than resolved in the tool.
@@ -16,6 +48,19 @@ Live behavioural acceptance of both is still pending.
 - a write refused by the uncertain guard (`WRITE_BLOCKED`) blocks the rest of the turn, including re-delegation to another agent.
 
 Exact-head independent review approved `7d36754` in round 4. Hosted CI and Devin passed. [Release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39134957820) receipt: `success` at 14:17:03Z, before v0.3.83 (`1733d48`), which contains it. Before this release, an operator cleared the 16 October uncertain `coding_reply` lock in production with the owner's approval. See [journal 92](journey/92-uncertain-coding-write-lock.md). Live acceptance (a real coding refusal) is pending.
+
+## Released v0.3.84 — price-change alerts (in the `c1d556b` deployment)
+
+[PR 258](https://github.com/akhilvuputuri/chief-agent/pull/258) merged as `18662ba1a1746cd843f65da8c723068bfd07cee4`.
+
+- **Review.** Exact-head independent review (Claude Opus 5.5) approved `f8e0f57`. An earlier round blocked on price alerts that could not be turned off while reminders were on; it was fixed with regressions, as were Devin's later findings on pre-change invoices, the effective-day timeline and owner edits. Hosted CI and Devin passed.
+- **Release.** Its own release was refused because main had moved to #259, and the next ones were refused for #259's migration. The [release of `c1d556b`](https://github.com/akhilvuputuri/chief-agent/actions/runs/39161166544) deployed it with exact receipt and startup health, and logs show `gateway.started` for that release at 20:02 UTC on 18 October. No migration of its own.
+- **Behaviour.**
+  - Saved price changes (`pendingAmount`, `pendingCurrency`, `pendingEffectiveDate`) are shown before their date, with a notice 3 days ahead even when reminders are off. From that date they are used in every view, and the next update records them.
+  - Each invoice match is compared with its one tracked item. A background pass sends one Telegram alert per item and invoice when the saved price is absent.
+  - `priceAlerts` per item.
+- **Not yet measured.** Owner acceptance.
+- No tag created yet. [Journal 97](journey/97-price-change-alerts.md), [design](subscriptions.md#price-change-alerts).
 
 ## Released v0.3.83 — invoices linked to the subscription tracker
 

@@ -1,6 +1,6 @@
 # Boxed sub-agents — design
 
-Status: design, 17 October 2026. Nothing here is implemented yet. Tracking issue: [#245](https://github.com/akhilvuputuri/chief-agent/issues/245). Exploration: [journal 91](journey/91-boxed-subagents.md).
+Status: design, 17 October 2026, revised 19 October 2026 (CodeBuild is no longer a box provider). The box-layer foundation is implemented and dormant; see [Implementation status](#implementation-status). Tracking issue: [#245](https://github.com/akhilvuputuri/chief-agent/issues/245). Exploration: [journal 91](journey/91-boxed-subagents.md).
 
 ## Goal
 
@@ -12,7 +12,7 @@ Light sub-agents (`agent_run`, [agents.md](agents.md)) stay as they are: in-proc
 
 - **Coding moves first.** No new profile is built before coding runs on boxes.
 - **Short warm TTL.** A coding box stays alive for about 15 idle minutes so quick feedback reuses it, then it is put away. On EC2, "put away" means **stopped** (disk kept, compute released) rather than destroyed.
-- **Self-managed EC2 is the target provider.** CodeBuild stays behind the same interface as the fallback until EC2 has passed a real coding job. Fargate and hosted sandboxes are deferred.
+- **Self-managed EC2 is the box provider.** On 19 October the owner asked why CodeBuild should stay at all. It does not need to be a box provider: a CodeBuild box cannot stop, cannot run a container per task, and would not exercise any of the EC2-specific risks. The fallback is simply **today's coding path on CodeBuild, left untouched** until coding has moved. Development and CI use a local process provider and a fake provider instead. Fargate and hosted sandboxes are deferred.
 - **The plan is approved, including paid EC2 infrastructure.** The owner applies the AWS resources (CloudFormation in `deploy/boxes/`); Claude and Chief never create AWS resources or IAM.
 - Cost is not the main concern provided boxes close themselves. Limits exist to stop runaways, not to save money; there are still no dollar caps ([cost-controls.md](cost-controls.md)).
 
@@ -44,12 +44,12 @@ The coding module ([coding.md](coding.md)) already contains a box system: the `S
 Chief (always on)
  ├─ light sub-agents (in process)                 agent_run, unchanged
  └─ box controller (host)                          new: src/boxes/
-       ├─ provider: EC2 | CodeBuild               launch / find / describe / stop / start / terminate / sweep
+       ├─ provider: EC2 (prod) | local process (dev/CI) | fake (tests)   launch / find / describe / stop / start / terminate / sweep
        ├─ reconciler                               lifecycle truth, TTLs, orphan sweep, verified termination
        ├─ channel API  /boxes/:id/*                bootstrap, long-poll messages, events, heartbeat, artifacts
        └─ profiles: coding (first), analysis, crawl
                  │  host hooks: authorise task, validate checkpoint/result, publish
-Box (EC2 instance; CodeBuild build as fallback)
+Box (EC2 instance; a local container in development)
  ├─ box agent (host systemd service, root, read-only install)   connects out, runs tasks, enforces TTL, reports
  └─ task container (fresh per task, UID 1000, locked down)      e.g. Pi coding runtime; repository code runs here
 ```
@@ -57,7 +57,7 @@ Box (EC2 instance; CodeBuild build as fallback)
 - **Box:** one compute lifetime, bound to exactly **one job, owner and repository**. Boxes are never reused across jobs. On EC2 a box can survive stop and start cycles with its disk intact.
 - **Profile:** the image, runtime, instance size, egress policy, TTLs, concurrency and host hooks for one kind of work.
 - **Task:** one delegated unit of work inside a box. A coding round is a task: planning, implementation, a feedback round or a rebase.
-- **Box agent:** a small supervisor installed outside Docker, in root-owned read-only locations, from a pinned and checksum-verified artifact. It holds the box credential, long-polls the host, creates and destroys task containers, enforces the hard lifetime and streams events.
+- **Box agent:** a small supervisor installed outside Docker, in root-owned read-only locations, taken from the digest-pinned worker image. It holds the box credential, long-polls the host, creates and destroys task containers, enforces the hard lifetime and streams events.
 - **Task container:** a fresh container per task from the digest-pinned worker image. It runs as UID 1000 with:
   - `no-new-privileges`, all capabilities dropped and the default seccomp profile;
   - a read-only root filesystem;
@@ -65,7 +65,7 @@ Box (EC2 instance; CodeBuild build as fallback)
 
   The existing in-runtime lockdown (`setpriv`, `PR_SET_DUMPABLE=0`, subreaper, stripped environment) still applies inside it. No host user is in the `docker` group.
 
-- **CodeBuild fallback.** CodeBuild cannot run Docker under our unprivileged configuration. A CodeBuild box therefore runs the box agent and one task as processes in the build container, as today, with **one task per box and a warm TTL of 0**, so it never holds the single build slot while idle.
+- **Fallback.** Coding keeps its current CodeBuild path, unchanged, until coding jobs run on EC2 boxes. It is not wrapped as a box provider.
 
 ## Lifecycle
 
@@ -73,14 +73,14 @@ Box (EC2 instance; CodeBuild build as fallback)
 requested → launching → booting → ready ⇄ busy
                                     │ idle 15 min (warm TTL)
                                     ▼
-                         stopping → stopped ──(new task, within retention)──► starting → booting → ready
+                         stopping → stopped ──(new task, within retention)──► starting → ready (on hello)
                                     │ retention expires / job ends / hard max
                                     ▼
                                terminating → terminated (verified)
 any state → lost (no provider identity or heartbeat) → reconciler terminates or holds for an operator
 ```
 
-- **Warm idle TTL:** 15 minutes running with no task, then stop (EC2). CodeBuild boxes terminate at once because they cannot stop.
+- **Warm idle TTL:** 15 minutes running with no task, then stop (EC2). A provider that cannot stop terminates instead.
 - **Stopped retention:** proposed 24 hours, after which the box is terminated. Owner merge cards can wait longer than that; a later round then starts a fresh box from the job's checkpoint, exactly as today.
 - **Hard maximum lifetime:** two limits, both kept on the host:
   - cumulative running time across stop and start cycles (about 24 hours);
@@ -93,26 +93,25 @@ any state → lost (no provider identity or heartbeat) → reconciler terminates
 - **Task active window:** unchanged. Each coding round has its own active window (currently 40 minutes for Pi), with shared model-call and tool totals ([coding-automation.md](coding-automation.md)).
 - **Terminal receipts are verified.** A provider's accepted lifetime is read back from the provider, not assumed from the request, and termination is confirmed by `describe`. This is the lesson of the 45-minute clamp.
 - **Never retry an unknown launch.** Each launch carries an idempotent client token derived from the box ID, and the box row and token are written **before** the provider call:
-  - EC2 uses the `RunInstances` `ClientToken`;
-  - CodeBuild uses `idempotencyToken`, which is only honoured for 5 minutes, so "never retry" is the real guarantee.
+  - EC2 uses the `RunInstances` `ClientToken`. Retrying with the same token but different user data fails, so "never retry" is the real guarantee: an uncertain launch is only ever searched for.
 
   An uncertain launch is reconciled by the box-ID tag or the token.
 
 - **The sweep is scoped.** Tags carry both the box ID and a deployment tag (`chief:env`). A sweep only touches its own environment's resources, and treats rows in `requested` or `launching` as owners of matching instances.
-- **One stuck box never blocks the system.** Concurrency is limited per profile and provider; the single global `coding_one_active_worker` index is replaced. A box whose identity cannot be resolved is held for an operator without blocking others, and the owner is told.
+- **One stuck box never blocks the system.** Concurrency is limited per profile, and restarts of stopped boxes count against it; the single global `coding_one_active_worker` index is replaced. A box whose identity cannot be resolved is held for an operator without blocking others, and the owner is told.
 - **Host-side side effects stay serialised where they need to be.** The old global index also serialised publication and merge automation. Coding keeps that guarantee with a **per-repository publication lock** on the host, so two coding boxes can run while PR writes, rebases and Merge cards for one repository still happen one at a time.
 
 ## Channel (two-way, box dials out)
 
 All traffic goes over the existing HTTPS origin through Caddy. Boxes never accept inbound connections. Long-polling is used rather than WebSockets because it works through the current proxy, survives restarts on both sides, and behaves the same on every provider.
 
-| Route                         | Direction | Purpose                                                                                                                                                                                                   |
-| ----------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /boxes/:id/hello`       | box→host  | Exchange the one-time bootstrap secret (plus EC2 identity proof), or the stored session credential after a restart, for a session credential. Returns protocol version, box epoch and remaining lifetime. |
-| `GET /boxes/:id/next?after=N` | host→box  | Long-poll (up to 25 s) for ordered messages: `task.assign`, `task.message` (steering, answers, follow-ups), `task.cancel`, `box.inspect`, `box.stop`. Doubles as heartbeat.                               |
-| `POST /boxes/:id/events`      | box→host  | Ordered, idempotent event batches: task progress, tool calls, questions, artifacts, task results and box state.                                                                                           |
-| `POST /boxes/:id/artifacts`   | box→host  | Bounded uploads of typed results (patch, files, report, dataset) stored owner-scoped on the host.                                                                                                         |
-| Task-scoped routes            | box→host  | The existing model proxy and session store, authorised by a **per-task** token the box agent passes to the task runtime only.                                                                             |
+| Route                         | Direction | Purpose                                                                                                                                                                                                      |
+| ----------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `POST /boxes/:id/hello`       | box→host  | Exchange the one-time bootstrap secret (plus EC2 identity proof), or the stored session credential after a restart, for a session credential. Returns protocol version, box epoch and remaining lifetime.    |
+| `GET /boxes/:id/next?after=N` | host→box  | Long-poll (up to 8 s, well inside the proxy's timeouts) for ordered messages: `task.assign`, `task.message` (steering, answers, follow-ups), `task.cancel`, `box.inspect`, `box.stop`. Doubles as heartbeat. |
+| `POST /boxes/:id/events`      | box→host  | Ordered, idempotent event batches: task progress, tool calls, questions, artifacts, task results and box state.                                                                                              |
+| `POST /boxes/:id/artifacts`   | box→host  | Bounded uploads of typed results (patch, files, report, dataset) stored owner-scoped on the host.                                                                                                            |
+| Task-scoped routes            | box→host  | The existing model proxy and session store, authorised by a **per-task** token the box agent passes to the task runtime only.                                                                                |
 
 - **Ordering and delivery.**
   - Messages carry a sequence number per box and are acknowledged by the next poll's `after`. Delivery is at least once.
@@ -148,17 +147,19 @@ Today the attempt token is a plaintext CodeBuild environment variable. It is val
 
 1. **Launch.** The host generates a random 256-bit **bootstrap secret**, stores only its hash, and passes the box ID and secret to the provider:
    - EC2: in user data. Anyone with `ec2:DescribeInstanceAttribute` can read user data, including read-only administrators, which is acceptable only because the secret is single-use.
-   - CodeBuild: in the environment.
+   - Local Docker: in the container environment.
 2. **First `hello`.** The box agent fetches user data from IMDS on every boot (cloud-init runs user-data scripts only once) and calls `hello`.
    - On EC2 it also presents the AWS-signed **instance identity document**. The host verifies the signature against the region certificate, and checks the instance ID and account against its record. A check of `pendingTime` against the latest start is added only once phase 3 has verified that `pendingTime` changes on every start.
    - The document is static and carries no nonce, so it binds the box to the instance; it does not prove freshness.
-3. **Exchange.** The host consumes the secret atomically and returns a session credential bound to the box and epoch. The agent stores it in a root-only file on the encrypted disk.
+3. **Exchange.** The bootstrap secret is the epoch-0 credential, so the exchange is the same rotation as step 4: idempotent until first use. The host returns a session credential bound to the box and epoch, derived as HMAC(host key, box, predecessor hash, epoch), so it stores only hashes and can answer a retry with the same credential. A box cannot complete `hello` before the host has recorded its provider resource. The agent stores it in a root-only file on the encrypted disk.
 4. **Restarts and warm starts.** After an agent restart, reboot or warm start, the agent calls `hello` with its stored session credential (the predecessor). The host rotates it to a new credential and epoch:
    - **Idempotent rotation.** The host records the replacement durably before replying. A retried `hello` with the same predecessor returns that same replacement and epoch, never a new one, so overlapping retries cannot produce two live credentials or leave the box holding a superseded one.
    - **Narrow overlap.** Until the replacement is first used, the predecessor is accepted **only to retry `hello`**, never for `next`, `events`, `artifacts` or task routes. The first successful call with the replacement retires the predecessor atomically.
-   - **Durable before use.** The agent writes the replacement durably (temporary file, `fsync`, `rename`) before its first call with it, so a crash cannot leave it holding only a retired credential.
+   - **Durable before use.** The agent writes the replacement durably (temporary file, `fsync`, `rename`, then `fsync` of the parent directory) before its first call with it, and never lets `hello` calls overlap, so a crash cannot leave it holding only a retired credential.
    - **No user-data changes.** User data is never modified, so the controller needs no `ModifyInstanceAttribute` permission.
-5. **Replay.** An agent never presents a bootstrap secret twice. An agent that has lost its session credential reports itself lost, if it can, and shuts the box down; the host replaces the box. Any second use of a consumed bootstrap secret, and any use of a retired session credential, therefore means **compromise**: the host stops the box's tasks, revokes its capabilities, terminates it and tells the owner.
+5. **Replay.** An agent never presents a retired credential. An agent that has lost its session credential shuts the box down; the host replaces it.
+   - A retired credential (including the consumed bootstrap secret) presented to `hello` is **refused and alerted**, not treated as compromise. A delayed duplicate is the benign explanation, and the caller gains nothing.
+   - A retired credential used on any other route means **compromise**: the host stops the box's tasks, revokes its capabilities, terminates it and tells the owner.
 
 The bootstrap secret is useless seconds after boot, and its theft is detected rather than silent.
 
@@ -203,7 +204,7 @@ Starting a box creates infrastructure and spends money. `agent_run` is classed a
   - encrypted gp3 root with delete-on-termination;
   - `InstanceInitiatedShutdownBehavior=terminate`;
   - tag specifications.
-- **Bootstrap script.** First boot installs Docker and the box agent (pinned and checksum-verified), then pulls the digest-pinned worker image from public GHCR. Warm starts reuse all three. Stopped boxes resume with whatever packages they had, so patching happens through retention limits and, later, a baked AMI.
+- **Bootstrap script.** First boot installs Docker from Amazon Linux's signed package repository (its version follows the AMI release, which resolves to the latest Amazon Linux 2023), pulls the digest-pinned worker image from public GHCR, and takes the box agent and its Node runtime from that image. Warm starts reuse all of it. Stopped boxes resume with whatever packages they had, so patching happens through retention limits and, later, a baked AMI.
 - **Controller IAM.** A launch-template condition alone does not stop a caller from overriding the template's parameters in `RunInstances`, so each resource type is constrained separately:
 
   | Resource or action                                                  | Allowed only when                                                                                                                                                                                                                                                                                                                                    |
@@ -211,7 +212,7 @@ Starting a box creates infrastructure and spends money. `agent_run` is classed a
   | `RunInstances` on `instance`                                        | `ec2:LaunchTemplate` is a box template; `ec2:InstanceType` is in the profile list; `ec2:MetadataHttpTokens=required`; `ec2:MetadataHttpPutResponseHopLimit` ≤ 1; `ec2:InstanceMetadataTags=disabled`; `ec2:Tenancy=default`; `ec2:InstanceMarketType=on-demand`; request tags include `chief:box` and `chief:env`, and no other tag keys are allowed |
   | `RunInstances` on `volume`                                          | `ec2:Encrypted=true`; `ec2:VolumeType=gp3`; `ec2:VolumeSize` ≤ the profile maximum                                                                                                                                                                                                                                                                   |
   | `RunInstances` on `image`                                           | the image is the profile's AMI, or is owned by Amazon (`ec2:Owner`) while the stock image is used                                                                                                                                                                                                                                                    |
-  | `RunInstances` on `subnet`, `security-group`, `network-interface`   | `ec2:IsLaunchTemplateResource=true`                                                                                                                                                                                                                                                                                                                  |
+  | `RunInstances` on `subnet`, `security-group`, `network-interface`   | `ec2:IsLaunchTemplateResource=true`, and the subnet and security group are pinned to the stack's own IDs                                                                                                                                                                                                                                             |
   | `RunInstances` on `launch-template`                                 | the exact box template ARNs                                                                                                                                                                                                                                                                                                                          |
   | `key-pair`                                                          | never granted, so no key pair can be attached                                                                                                                                                                                                                                                                                                        |
   | `CreateTags`                                                        | only with `ec2:CreateAction=RunInstances`                                                                                                                                                                                                                                                                                                            |
@@ -223,7 +224,8 @@ Starting a box creates infrastructure and spends money. `agent_run` is classed a
   - There is no `ModifyInstanceAttribute`, so it cannot change the instance type, security groups, shutdown behaviour or volume deletion.
   - Phase 3 includes negative tests: every override must fail with `UnauthorizedOperation`, including instance type, image, IMDS options, key pair, security group, subnet, unencrypted or oversized volume, and extra tags.
 
-  - **Residual risk.** No condition key is known for `DisableApiTermination`, `DisableApiStop` or `InstanceInitiatedShutdownBehavior`; phase 3 checks this. If none exists, a compromised controller could launch a box that the sweep cannot terminate, or that only stops at its hard maximum. The reconciler therefore reads these attributes with `DescribeInstanceAttribute` (read-only) right after launch, and holds and alerts on any mismatch.
+  - **Residual risk.** No condition key is known for `DisableApiTermination`, `DisableApiStop` or `InstanceInitiatedShutdownBehavior`; phase 3 checks this. If none exists, a compromised controller could launch a box that the sweep cannot terminate, or that only stops at its hard maximum. The provider therefore reads `disableApiTermination`, `disableApiStop` and `instanceInitiatedShutdownBehavior` back after launch and when it finds an instance after an uncertain launch, retrying while EC2 catches up. An unsafe instance is terminated and never recorded, and the reconciler then holds the box after the launch timeout ("Launch outcome unknown").
+  - **Also not bounded by IAM:** `MaxCount` and extra volumes in one launch. Only the account's vCPU quota limits a compromised controller there; the provider itself always launches one instance with the template's single volume.
 
 - **Sweep.** Each reconciler pass lists the instances and volumes tagged for this environment. It terminates instances, and deletes leftover volumes, that no live box row owns or that are past their limits.
 - **Quotas.** Check the account's on-demand vCPU quota for standard instances in `ap-southeast-1` before enabling concurrency above 1.
@@ -247,7 +249,7 @@ Starting a box creates infrastructure and spends money. `agent_run` is classed a
 
   Each round runs in the same box if it is running, starts it if it is stopped, and falls back to a fresh box if neither works. Every round begins with the trust reset above.
 
-- **Concurrency.** Coding defaults to 2 running EC2 boxes; stopped boxes count against a separate retention cap. Through the CodeBuild fallback, coding stays at 1, with no warm TTL.
+- **Concurrency.** Coding defaults to 2 running EC2 boxes; stopped boxes count against a separate retention cap. On the existing CodeBuild path, coding stays at 1.
 - **Owner view and steering.** `coding_status` gains:
   - box state: running, idle or stopped;
   - the current step;
@@ -270,17 +272,16 @@ Pi sessions and model-call journals keep their storage, keyed by task.
 Each phase is a separate PR with exact-head independent review, CI, a release record and a journal entry.
 
 1. **Design record.** This document and journal 91.
-2. **Box layer with a CodeBuild provider; no new infrastructure.**
-   - The tables, the reconciler (TTLs, sweep, verified termination, per-profile concurrency), the channel with bootstrap, and the box agent.
-   - An `echo` profile proves spawn, steering, inspection, idle close and verified termination end to end, one task per box.
-   - CodeBuild cannot run the per-task container reset, so the two-tasks-in-one-box proof moves to phase 3, on EC2.
-3. **EC2 provider.**
-   - Provider code plus `deploy/boxes/` CloudFormation and IAM for the owner to review and apply.
+2. **Box layer and EC2 provider (revised 19 October).** No CodeBuild box provider.
+   - 2a. Foundation, dormant: tables, provider interface with a fake provider, credentials, the controller and reconciler (TTLs, sweep, verified termination, per-profile concurrency) and the channel routes.
+   - 2b. The box agent and a local process provider; an `echo` profile proves spawn, two tasks in one box with the trust reset, steering, inspection, idle stop and verified termination on a developer machine and in CI.
+   - 2c. The EC2 provider, `deploy/boxes/` CloudFormation and IAM for the owner to review and apply, the `/boxes/*` Caddy route, and wiring behind configuration.
+3. **Prove it on EC2.**
    - IAM negative tests.
    - Measure boot to `hello`, warm start to `hello`, the stop/start cycle, the orphan sweep and the trust reset with the `echo` profile.
 4. **Coding on boxes.**
    - Hooks extracted, warm reuse, `coding_status` box view, steering.
-   - Canary jobs on EC2; switch the coding default by configuration; keep CodeBuild as fallback.
+   - Canary jobs on EC2; switch the coding default by configuration; the existing CodeBuild path stays as fallback.
    - In-flight jobs keep their snapshotted path.
 5. **Generic boxed agent.** `agent_run` with `placement: box` and `requestKey`, plus `agent_send`, `agent_status` and `agent_close`; first non-coding profile (analysis or crawl).
 6. **Retire the coding-specific sandbox path** once no snapshotted job uses it.
@@ -289,7 +290,7 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
 
 - Chief can spawn a box, run two tasks in it one after the other, send a message to the running task, inspect its workspace, get typed artifacts back, and see it stop when idle and terminate at retention. Termination is verified.
 - Restarting Chief mid-task neither leaks a box nor duplicates a task. Orphans are found and terminated, and their capabilities revoked.
-- No production credential exists in any box. A replayed bootstrap secret terminates the box; an agent restart does not.
+- No production credential exists in any box. A retired credential, including the bootstrap secret at any age, is refused and alerted at `hello` and is treated as compromise on the channel; an agent restart is neither.
 - A task cannot leave anything behind for the next task in the same box: no processes, git configuration, hooks, dependencies, home-directory files or caches survive. This is tested with a deliberately hostile `echo` task.
 - Every IAM override attempt fails.
 - A coding job runs end to end on EC2 with the current approval, review and merge guarantees, and its feedback and rebase rounds reuse the box (measured provisions per job against today's).
@@ -297,9 +298,10 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
 
 ## Rollback
 
-- **Routing.** Provider and profile selection are configuration, snapshotted per job. Rolling back routes new jobs to CodeBuild.
+- **Routing.** Provider and profile selection are configuration, snapshotted per job. Rolling back routes new coding jobs to the existing CodeBuild path.
 - **Jobs already on EC2.** Jobs snapshotted onto EC2 keep it. If EC2 itself is the reason for the rollback, the owner cancels them, or resumes them from their checkpoint as fresh CodeBuild attempts through an explicit move action.
 - **Stopped boxes** are swept by retention.
+- **Profiles are live configuration.** Removing or renaming a profile ends that profile's running boxes and fails their open tasks at the next reconciliation; removing a provider holds its boxes for an operator. Rename profiles only when no box uses them.
 - **Infrastructure.** The CloudFormation stack is deleted only after the sweep shows every box terminated and every box volume gone.
 - **Data.** Box tables are additive; coding tables only gain a nullable column.
 
@@ -317,3 +319,125 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
 - **Child boxes.** Should boxes ever spawn child boxes? Default no.
 - **Owner view.** How much of the live box view should the owner see in Telegram or the Mini App, as opposed to only Chief?
 - **Egress.** When do we want a domain-allowlisting egress proxy?
+
+## Implementation status
+
+- **2a, foundation (dormant; not wired into the gateway):**
+  - `db-staged/032_boxes.sql` adds `boxes`, `box_tasks`, `box_messages`, `box_events` and `box_notices`. It is staged outside `db/` until phase 2c installs it with a reviewed operator rollout and its Compose inventory line; see [Deployment](#deployment).
+  - `src/boxes/` holds the provider interface and fake provider, credentials, the `BoxController` (owner operations, the channel and the reconciler) and the `/boxes/*` routes.
+- **Behaviour settled during review:**
+  - Only a caller presenting a live credential reaches identity checks and their alerts. Identity is verified before a `hello` changes anything, so a stolen secret without the instance's proof is refused and alerted without harming the real box.
+  - The bootstrap hash is kept for the box's life.
+  - A box with any open task is never stopped as idle, and a stopped box restarts for open tasks as well as undelivered messages.
+  - Delegation, steering and termination lock the box row, so no task is orphaned on a closing box. Every path that ends or holds a box fails its open tasks.
+  - Events are recorded and applied atomically.
+  - Steering is bound to an owner input of the current turn.
+  - Provider calls are time-bounded.
+  - The sweep only touches resources tagged with this environment. Held and launching rows keep theirs.
+  - Claims rotate fairly by last reconciliation.
+  - Admission into a profile's capacity is serialised with a per-profile advisory lock.
+  - The idle decision is taken under the box row lock.
+  - A retried `hello` connects a starting box, and a connected box is repaired to `ready`.
+  - Removing a profile ends its boxes; removing a provider holds them.
+  - The sweep visits every configured provider.
+  - A box closed during an uncertain launch is found and ended.
+  - A lost stop is repeated until its timeout.
+  - Unexpected errors return a generic 500.
+- **Tests:** `tests/boxes.test.ts` (33 cases) covers:
+  - spawn, launch, concurrency and restarts;
+  - bootstrap, rotation chains and lifelong bootstrap detection;
+  - retired-credential alert versus compromise;
+  - ordered messages and atomic events;
+  - owner- and turn-bound steering;
+  - the idle-stop race;
+  - task failure on close, provider end and hold;
+  - stop and warm start, stop retries and escalation;
+  - start failure; retention, lifetime and idle limits; host grace and lost boxes; boot timeout;
+  - uncertain, unresolvable and closed-during launches;
+  - the sweep's ownership rules;
+  - identity refusal;
+  - long-poll wake-up;
+  - the HTTP channel.
+- **2b, the box agent and local provider:**
+  - **`src/boxes/agent.ts`.** The in-box supervisor:
+    - stores its credential durably (temporary file, `fsync`, `rename`, then a directory `fsync`, with root-only modes);
+    - never overlaps `hello` calls;
+    - long-polls with a persisted cursor; assigned tasks are journalled durably before their acknowledgement, while owner messages for a task are held in memory until it runs;
+    - runs one task at a time and never starts an assigned task twice;
+    - reports ordered events per epoch, retrying them;
+    - honestly fails a task that was open across a restart;
+    - enforces the lifetime;
+    - ends the box when its credential is refused or a task's reset fails.
+  - **Task protocol.** Tasks speak JSON lines (task, message → progress, question, result).
+    - Output lines are bounded, and final payloads must be bounded JSON objects.
+    - Progress and questions are limited to one event per second each; a question is delayed, never dropped.
+    - A task is killed a grace period after its final line, or at its deadline.
+    - Messages sent after a task's input has ended are dropped.
+    - `ProcessRunner` is for development and tests and is not a boundary.
+    - `DockerRunner` gives each task a fresh container: UID 1000, all capabilities dropped, `no-new-privileges`, a read-only root, tmpfs home and `/tmp`, optional memory and CPU limits, and a fresh workspace removed afterwards. Its reset fails closed unless Docker confirms that no task container remains.
+  - **Behaviour settled in review of phase 2b:**
+    - A box whose launch the host has not recorded yet, or whose identity provider cannot be asked, is answered 503 and retries; only 401 ends a box.
+    - The agent enforces its lifetime locally, and ends itself if the host stays unreachable for 30 minutes.
+    - A task result the host rejects is replaced by a bounded failure, so the host's task never stays open.
+    - A reset failure ends the box, including during restart recovery.
+    - After a restart, acknowledged tasks that never started still run.
+    - Task IDs must be UUIDs before they reach paths, names or mounts.
+    - SIGTERM cancels the running task.
+    - The task journal records each step (queued, running, finished with its outcome, reported, done), so a restart re-reports an outcome the host may not have received and finishes an interrupted cleanup.
+    - Instructions too large for a box are refused by the host at delegation, and by the agent if they arrive anyway (journalled as a finished failure, so a restart cannot run them); they are never run as an empty task.
+    - Questions are sent one per second by a single drainer, in order, and only while their task is active. A task with more than 20 questions waiting is stopped.
+    - Task containers are labelled with their box ID, so a reset inspects only its own box's containers.
+    - The agent's compiled files import only Node built-ins, so a box runs them with the image's Node and no `node_modules`.
+    - A kill waits for its container removal before the reset checks, and a final line without a trailing newline still counts. Questions and progress each have their own one-per-second budget per task; excess progress is dropped, while a question waits for the next free slot.
+    - For 2c, the EC2 identity verifier must return `false` for a malformed or invalid proof and throw only when it cannot reach what it needs, because a throw means retry.
+  - **`src/boxes/agent-main.ts`.** The entry point, configured by environment. On a box, shutdown is `systemctl poweroff`, which terminates the instance.
+  - **`src/boxes/local-provider.ts`.** Runs each box as an agent process with its own state directory. Stopping ends the process but keeps the directory, like a stopped instance.
+  - **`src/boxes/echo-task.ts`.** The `echo` profile's task program, including hostile and inspect modes for trust-reset tests.
+  - **Tests:**
+    - `tests/box-agent.test.ts` covers the durable store, refusal ending the box, and non-overlapping retried `hello`. It also has an end-to-end test with a real HTTP channel and real agent processes: two tasks in one box, a question answered by owner steering, idle stop, warm start with the stored credential (epoch 2), and a verified close.
+    - `tests/box-docker.test.ts` runs in CI against the built Pi image and checks privileges from inside a task the runner started (UID, effective capabilities, read-only root). A hostile task leaves files in its home, workspace and `/tmp`, plus a background process; the next task finds nothing. It also checks that no task container survives and that steering reaches the container.
+
+- **2c-1, the EC2 provider (dormant until 2c-2 wires it):**
+  - **`src/boxes/ec2-provider.ts`.** Each operation is scoped to this environment's tagged instances:
+    - **Launch:** only from the profile's launch template, with the box ID as the idempotent client token, and with `chief:box` and `chief:env` tags on the instance and its volume.
+    - **Attribute check:** termination protection and shutdown behaviour are read back after launch. An unsafe instance is terminated and the launch refused.
+    - **Lookups:** find, describe, list, stop, start and terminate all act only on this environment's tagged instances.
+  - **First-boot script.** It validates every value and writes the agent's environment file through a quoted heredoc. It then:
+    - installs Docker;
+    - takes the agent and its Node runtime from the digest-pinned worker image;
+    - adds `DOCKER-USER` rules that keep task containers away from the instance metadata service;
+    - runs the agent as a root systemd service.
+  - **Identity.** The agent reads the instance identity document and its signature through IMDSv2. The host verifies them with AWS's pinned regional certificate (valid until 2029-04-28) against the recorded instance, account and region. Verification never throws, so a bad proof is refused, not retried. The signature is SHA-256 with RSA, as AWS documents. The pinned certificate is AWS's 1024-bit RSA one for this path; the stronger `/rsa2048` PKCS#7 path is a possible later upgrade.
+  - **`deploy/boxes/boxes.json`.** The CloudFormation stack: a security group with no inbound rules, two launch templates and the controller's managed policy, as in the IAM table above.
+  - **`deploy/boxes/README.md`.** The owner's runbook.
+  - **`src/boxes/iam-check.ts`.** Checks the controller's credentials with `DryRun` launches: the template launch must be allowed, and 15 overrides must be refused.
+  - **Agent.** A task that floods questions is stopped once, with a readable reason.
+
+- **2c-2, wiring and installation (this phase's PR):**
+  - **Gateway wiring.** `BOXES_RUNTIME=on` turns boxes on. It requires `BOX_AUTH_KEY`, `BOX_AWS_ACCOUNT_ID`, `CODING_PUBLIC_ORIGIN` and migration 032 to be installed. The gateway then:
+    - builds the controller with the EC2 provider from `config/boxes.json`;
+    - serves `/boxes/*`;
+    - reconciles every 15 seconds;
+    - delivers owner notices to the owner's chat.
+
+    It stays off by default.
+
+  - **`config/boxes.json`.** Profiles and their EC2 launch settings. For now only `echo` is defined, to prove the loop. Its task command (`dist/boxes/echo-task.js`) reaches the box as base64 JSON, because systemd environment files would reinterpret the quotes.
+  - **`src/boxes/probe.ts`.** Run inside the gateway container (`node dist/boxes/probe.js spawn|delegate|status|timings|close`). It writes box requests as the owner, and `timings` reports launch-to-first-report and each epoch's first report. It never calls a provider; the gateway's reconciler does that.
+  - **Controller.** A launch or close whose provider search keeps failing is held after the launch timeout instead of looping forever.
+  - **IAM check.** An inconclusive legitimate launch now fails the check.
+
+## Deployment
+
+The release guard refuses any change to `db/` or `compose.yaml` that a reviewed operator rollout has not installed. That makes the box migration a one-time operator step:
+
+1. **Staged until 2c-2.** The migration stayed in `db-staged/` while the layer was dormant; phase 2c-2 moves it into `db/`.
+2. **Rollout PR.** The PR that wires the layer (phase 2c-2) moves it into `db/`, adds its Compose inventory line, and adds the reviewed `scripts/deploy-boxes.py`, whose baseline is set to the live release at merge time. The script also installs the `/boxes/*` Caddy route: it inserts the route before the site's catch-all, validates and reloads Caddy, checks that the route reaches the gateway, and restores the previous Caddyfile on any failure.
+3. **Run immediately.** The rollout runs right after the merge, under the release lock with an idle gateway. Until it runs, every automatic release is refused.
+   - It checks the Caddy change before changing anything, and refuses if the live Caddyfile does not match the reviewed anchor.
+   - If only the Caddy step fails after the gateway and migration are installed, rerunning the same command with the same SHA performs just the Caddy step.
+   - **Manual fallback:** add the `@boxes path /boxes/*` handle (reverse-proxied to `127.0.0.1:3000`) before the site's catch-all, `caddy validate`, then reload Caddy.
+4. **Before enabling boxes.** Rebuild the Pi worker image from main after this merge, and re-pin `config/boxes.json` in a normal PR. The image pinned at merge time was built before the agent learned the profile's task command, so its echo task would start the wrong program. Done on 19 October: `echo` uses `sha256:3963041…`, built from `5f46cb4`.
+5. **Enable.** Add `BOX_AUTH_KEY` and `BOX_AWS_ACCOUNT_ID` to the production `.env`, set `BOXES_RUNTIME=on`, and restart the gateway. These are passed through `compose.yaml`.
+
+The automatic release for the same commit then succeeds as a no-op.

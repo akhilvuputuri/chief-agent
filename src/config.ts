@@ -12,6 +12,15 @@ const schema = z.object({
   GATHERING_BROWSER_KEY: z
     .union([z.literal(""), z.string().regex(/^[0-9a-f]{64}$/i)])
     .default(""),
+  // Boxed sub-agents (docs/boxes.md). Off unless the AWS stack, migration 032 and the
+  // /boxes route are installed.
+  BOXES_RUNTIME: z.enum(["on", "off"]).default("off"),
+  BOX_AUTH_KEY: z
+    .union([z.literal(""), z.string().regex(/^[0-9a-f]{64}$/)])
+    .default(""),
+  BOX_AWS_ACCOUNT_ID: z
+    .union([z.literal(""), z.string().regex(/^\d{12}$/)])
+    .default(""),
   CODING_RUNTIME: z.enum(["on", "off"]).default("off"),
   CODING_PUBLIC_ORIGIN: z.string().default(""),
   CODING_CODEBUILD_PROJECT: z.string().default(""),

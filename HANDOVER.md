@@ -1,18 +1,34 @@
 # Reliability fixes from the two-week review — live, 19 October 2026
 
-Three fixes from the review of two weeks of logs and conversations are deployed, each with an exact release receipt; live acceptance is pending for all three. [Release record](docs/releases.md).
+Four fixes from the review of two weeks of logs and conversations are deployed, each with an exact release receipt; live acceptance is pending for all four. [Release record](docs/releases.md).
 
 - A refused coding request can no longer block every owner write: provably empty coding calls settle themselves, pre-write refusals are validation errors and a blocked write stops the turn. PR 249, `9437d86`, in v0.3.83. [Journal 92](docs/journey/92-uncertain-coding-write-lock.md).
 - Requirements and monitoring cards stay valid for 24 hours, and each foreground turn lists coding jobs and expired cards that wait on the owner. PR 251, `11d13c6`. [Journal 94](docs/journey/94-open-loops-context.md).
 - Briefings lead with their own text and list live open to-dos; to-do review reminders become briefings. PR 252, `3b93fa7`. [Journal 95](docs/journey/95-live-todo-reminders.md).
+- A coding job paused by a transient fault (stopped sandbox, lost heartbeat, provider 429/5xx) is retried once automatically, with a notice; a second pause waits for the owner. Owner-approved exception. PR 257, `496fd50`, first deployed in `c1d556b`. [Journal 96](docs/journey/96-coding-transient-retry.md).
 
 # Invoices linked to the subscription tracker — live as v0.3.83, 19 October 2026
 
 A new `core/bills` agent gathers an exact invoice collection, then updates the subscription tracker from the matched invoices when the owner asks. Tracker updates can cite one matched invoice, and the host checks its amount and invoice date against the PDF's recorded clues. Gathering, subscriptions and bills share the core `invoice-gathering`, `subscription-ledger` and `invoice-ledger` skills. Released as v0.3.83 (`1733d48`), with no migration. Next: owner acceptance with one real invoice. [Journal 93](docs/journey/93-invoice-backed-tracker.md).
 
-# Boxed sub-agents design — proposed, 17 October 2026
+# Boxed sub-agents — installed and off, 19 October 2026
 
-Heavy delegated work moves to sub-agents with their own on-demand boxes that Chief can steer and close (issue #245). The owner decided that coding moves first, boxes keep a short warm TTL (about 15 idle minutes, then stop), and self-managed EC2 replaces CodeBuild, with CodeBuild kept as fallback. Design only; no AWS resources yet. [Design](docs/boxes.md), [journal 91](docs/journey/91-boxed-subagents.md).
+Heavy delegated work moves to sub-agents with their own on-demand boxes that Chief can steer and close (issue #245). The owner decided that coding moves first, boxes stop after about 15 idle minutes, and self-managed EC2 replaces CodeBuild. Coding keeps its current CodeBuild path until it moves.
+
+**Live in production, with boxes off (`BOXES_RUNTIME=off`):**
+
+- the box layer, the box agent, the EC2 provider and the gateway wiring (v0.3.85–v0.3.87);
+- migration 032;
+- the `/boxes/*` Caddy route, installed by the reviewed `scripts/deploy-boxes.py` rollout on 19 October.
+
+The `echo` profile is pinned to worker image `sha256:3963041…`, built from `5f46cb4`.
+
+**Next:**
+
+1. The owner applies the AWS stack (`deploy/boxes/README.md`) and adds `BOX_AUTH_KEY`, `BOX_AWS_ACCOUNT_ID` and `BOXES_RUNTIME=on`.
+2. Phase 3: the IAM check, then the EC2 echo proof with measured boot and warm-start times.
+
+[Design](docs/boxes.md), [journal 91](docs/journey/91-boxed-subagents.md), [release records](docs/releases.md).
 
 # Reasoning effort chosen per message — 17 October 2026
 
