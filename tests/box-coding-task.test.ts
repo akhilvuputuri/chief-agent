@@ -17,7 +17,10 @@ const payload = {
 };
 
 /** Runs the adapter with a fake worker; returns its protocol lines and the worker's env. */
-async function runAdapter(input: object, workerExit = 3) {
+async function runAdapter(
+  input: object,
+  o: { flags?: string[]; locks?: boolean; extra?: string[] } = {},
+) {
   const dir = await mkdtemp(join(tmpdir(), "coding-task-"));
   try {
     const worker = join(dir, "worker.mjs");
@@ -26,19 +29,37 @@ async function runAdapter(input: object, workerExit = 3) {
       `import { writeFileSync } from "node:fs";
 writeFileSync(${JSON.stringify(join(dir, "env.json"))}, JSON.stringify(process.env));
 process.stdout.write("worker noise that must not reach the protocol\\n");
-process.exit(${workerExit});`,
+process.exit(3);`,
     );
     const runner = join(dir, "run.mjs");
     await writeFile(
       runner,
       `import { run } from ${JSON.stringify(adapter)};
-run([${JSON.stringify(worker)}], ${JSON.stringify(dir)});`,
+import { writeFileSync } from "node:fs";
+run([${JSON.stringify(worker)}], ${JSON.stringify(dir)}, () => {
+  writeFileSync(${JSON.stringify(join(dir, "locked"))}, "yes");
+  return ${o.locks ?? true};
+});`,
     );
-    const result = spawnSync(process.execPath, ["--import", "tsx", runner], {
-      input: `${JSON.stringify({ type: "task", id: "t1", kind: "coding", payload: input })}\n`,
-      env: { ...process.env, PRIVATE_HOST_SECRET: "never-forwarded" },
-      timeout: 30_000,
-    });
+    const result = spawnSync(
+      process.execPath,
+      [...(o.flags ?? ["--disable-sigusr1"]), "--import", "tsx", runner],
+      {
+        input:
+          [
+            "null",
+            JSON.stringify({
+              type: "task",
+              id: "t1",
+              kind: "coding",
+              payload: input,
+            }),
+            ...(o.extra ?? []),
+          ].join("\n") + "\n",
+        env: { ...process.env, PRIVATE_HOST_SECRET: "never-forwarded" },
+        timeout: 30_000,
+      },
+    );
     const lines = result.stdout
       .toString()
       .trim()
@@ -47,14 +68,26 @@ run([${JSON.stringify(worker)}], ${JSON.stringify(dir)});`,
     const env = await readFile(join(dir, "env.json"), "utf8")
       .then((t) => JSON.parse(t))
       .catch(() => undefined);
-    return { lines, env, dir };
+    const locked = await readFile(join(dir, "locked"), "utf8").catch(
+      () => undefined,
+    );
+    return { lines, env, dir, locked };
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 }
 
 test("the coding task runs the worker with only its attempt identity and reports its exit", async () => {
-  const { lines, env, dir } = await runAdapter(payload);
+  const second = JSON.stringify({
+    type: "task",
+    id: "t2",
+    kind: "coding",
+    payload: { ...payload, jobId: "1f1d2c3b-1a2b-4c3d-8e9f-0a1b2c3d4e5f" },
+  });
+  const { lines, env, dir, locked } = await runAdapter(payload, {
+    extra: [second],
+  });
+  assert.equal(locked, "yes");
   assert.deepEqual(lines, [
     { type: "progress", payload: { step: "worker started" } },
     { type: "result", payload: { exitCode: 3, signal: null } },
@@ -86,6 +119,19 @@ test("an invalid coding task is refused without starting the worker", async () =
     const { lines, env } = await runAdapter(bad);
     assert.deepEqual(lines, [
       { type: "result", payload: { error: "Invalid coding task" } },
+    ]);
+    assert.equal(env, undefined);
+  }
+});
+
+test("the coding task refuses to hold a token without its process boundary", async () => {
+  for (const o of [{ flags: [] as string[] }, { locks: false }]) {
+    const { lines, env } = await runAdapter(payload, o);
+    assert.deepEqual(lines, [
+      {
+        type: "result",
+        payload: { error: "Coding task boundary unavailable" },
+      },
     ]);
     assert.equal(env, undefined);
   }

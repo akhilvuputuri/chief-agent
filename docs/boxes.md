@@ -326,17 +326,46 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
 
 The smallest move that puts coding on EC2 without weakening anything. Coding already runs its worker behind a small `SandboxProvider` interface (`create`, `find`, `inspect`, `terminate`, `terminalReason`); phase 4a adds a box-backed one.
 
-- **`BoxSandbox`** (`src/coding/box-sandbox.ts`).
-  - `create` spawns a `coding` box and delegates one `coding` task, both keyed `coding:<attempt>` so a retry reuses them, and returns `box:<box id>` as the sandbox ID.
+- **`BoxSandbox`** (`src/coding/box-sandbox.ts`):
+  - `create` spawns a `coding` box and delegates one `coding` task, both keyed `coding:<attempt>`, so a retry reuses them. It returns `box:<box id>` as the sandbox ID.
   - `find` looks the box up by that key. The database is the box layer's truth, so a missing row means nothing was created.
-  - `inspect` is `terminal` only once the box is terminated, so cleanup never leaves compute behind. A task that has ended closes its box first. A held box throws, so cleanup waits for an operator.
-  - `terminalReason` states a reason when the box's own limits or the task deadline ended the attempt, and none when the worker merely exited, which the controller may retry once.
-- **`RoutedSandbox`.** New attempts go to boxes only when the job's snapshotted image is the coding box profile's image and the runtime is Pi. Older jobs stay on CodeBuild, because their images predate box support. Existing sandbox IDs keep the provider that created them (`box:` or a CodeBuild build ID).
-- **The worker is unchanged.** The `coding` profile's task program (`src/boxes/coding-task.ts`) turns the task payload into the worker's environment (`CODING_JOB_ID`, `CODING_ATTEMPT_ID`, `CODING_JOB_TOKEN`, `CODING_ORIGIN`, plus `PATH`, `HOME` and `TMPDIR`) and runs `pi-worker.js` as a child. It keeps the worker's output off the task protocol and reports only its exit. `TMPDIR` points at the box disk (`/workspace/tmp`), because the clones, `npm ci` and tests do not fit the 512 MB `/tmp` tmpfs.
-- **Startup grace.** A cold box takes about two to three minutes before the worker's first heartbeat. The controller's 180-second heartbeat-loss rule therefore allows a provider-specific grace (12 minutes for boxes, none for CodeBuild) while the attempt is still `provisioning`. The first heartbeat sets the attempt deadline, so boot time does not consume coding time.
-- **Configuration.** `config/coding-backend.json` gains `sandbox` (`codebuild` by default, or `box`). `box` needs boxes on and a `coding` box profile whose image is the selected Pi worker image; the gateway refuses to start otherwise. No schema or Compose change.
-- **One box per attempt.** The box is closed when its attempt ends, so concurrency stays at one coding worker (`coding_one_active_worker`), and the coding profile's admission limit is 1.
-- **Residual risk.** The attempt token now sits in `box_tasks.payload` and `box_messages` in the database, as well as reaching the box over TLS. On CodeBuild it sits in the build's plain environment, readable through `BatchGetBuilds`. In both cases it is valid only while its attempt is active and before its deadline.
+  - `inspect` reports `terminal` only once the box is terminated, so cleanup never leaves compute behind. A task that has ended closes its box first.
+  - A **held** box is left alone and reported as running. The attempt then pauses through its deadline or heartbeat, and cleanup waits for an operator.
+  - Once the box is gone, the attempt token is removed from the stored task and message payloads.
+  - `terminalReason` gives a stated reason, which is not retried, when the task's deadline, the box's limits, a compromise or an operator close ended the attempt. It gives none when the worker exited, its own close or the idle close ended the box, or the infrastructure failed (lost, never connected, ended by the provider, could not start). The controller retries those once, as it does after a CodeBuild failure.
+- **`RoutedSandbox`:**
+  - New attempts go to boxes only when the `sandbox` switch is `box`, the job's snapshotted image is the coding box profile's image, and the runtime is Pi. Other jobs stay on CodeBuild, because their images predate box support.
+  - Existing sandbox IDs (`box:` or a CodeBuild build ID) keep the provider that created them.
+  - Whenever boxes are on and a `coding` profile exists, box attempts stay routable even with the switch back on `codebuild`. Without one, the gateway refuses to start while any attempt still depends on a box, so a rollback cannot strand a job or block the coding queue.
+- **The worker is unchanged.** The `coding` profile's task program (`src/boxes/coding-task.ts`) runs `pi-worker.js` as a child:
+  - It turns the task payload into the worker's environment: `CODING_JOB_ID`, `CODING_ATTEMPT_ID`, `CODING_JOB_TOKEN` and `CODING_ORIGIN`, plus `PATH`, `HOME` and `TMPDIR`.
+  - It keeps the worker's output off the task protocol and reports only the exit.
+  - `TMPDIR` points at the box disk (`/workspace/tmp`), because the clones, `npm ci` and tests do not fit the 512 MB `/tmp` tmpfs.
+- **The task program's own boundary.** It holds the attempt token while repository commands run as the same user in the same container. Before it reads the task, it therefore:
+  - requires `--disable-sigusr1`, so no inspector can be attached;
+  - calls the worker image's native lockdown, which makes it non-dumpable (so `/proc` cannot read its memory) and a subreaper.
+
+  Without both, it refuses the task. The gateway checks at startup that the coding profile's task command is exactly `node --disable-sigusr1 /opt/chief-worker/dist/boxes/coding-task.js`.
+
+- **Startup grace.**
+  - A cold box takes about two to three minutes before the worker's first heartbeat. While the attempt is still `provisioning`, the controller's 180-second heartbeat-loss rule therefore allows a provider-specific grace: 12 minutes for boxes, none for CodeBuild.
+  - The first heartbeat sets the attempt deadline, so boot time does not consume coding time.
+- **Configuration.** `config/coding-backend.json` gains `sandbox`: `codebuild` by default, or `box`. With `box`, the gateway refuses to start unless:
+  - boxes are on;
+  - a `coding` box profile uses the selected Pi worker image;
+  - that profile admits one box at a time;
+  - its task command is the pinned one above.
+
+  There is no schema or Compose change.
+
+- **One box per attempt.** The box is closed when its attempt ends, so concurrency stays at one coding worker (`coding_one_active_worker`).
+- **Residual risk.** The attempt token is in `box_tasks.payload` and `box_messages` while the box runs, and reaches the box over TLS. On CodeBuild it sits in the build's plain environment, readable through `BatchGetBuilds` for as long as the build history is kept. In both cases it works only for its attempt: while the attempt is active and before its deadline, and for the `finish` route afterwards.
+- **To go live:**
+  1. Rebuild the Pi image so it contains the task program.
+  2. Re-pin `config/coding-pi.json`.
+  3. Add the `coding` box profile with that image (concurrency 1) and its `ec2.coding` entry: the `chief-box-prod-coding` launch template, task memory and CPUs within `m7i.xlarge`, and the pinned task command.
+  4. Switch `sandbox` to `box`.
+  5. Run a canary job. In the canary, check that the worker's subreaper cleanup works on the box kernel.
 
 ## Implementation status
 

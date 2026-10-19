@@ -453,3 +453,24 @@ No warn or error lines were logged and no owner notices were raised.
 2. Re-pin `config/coding-pi.json` and add the `coding` box profile with that image.
 3. Switch `sandbox` to `box`.
 4. Run a canary job on EC2.
+
+**Review of `e82c4c2` (Claude Opus 5.5): changes requested.** Two blocking defects, both fixed:
+
+1. **The task program undid the worker's token protection.**
+   - On CodeBuild the worker locks itself down: it becomes non-dumpable and a subreaper, and its parent is CodeBuild's root agent. In a box, the task program is the container's main process, runs as the same user as repository commands, and held the token without either protection.
+   - A command could have sent it SIGUSR1 and attached Node's inspector, or read its memory through `/proc`.
+   - **Fix:** the task program now requires `--disable-sigusr1` and the native lockdown before it reads the task, and refuses the task otherwise. The gateway pins the coding profile's task command at startup. Tests cover both refusals and the lockdown order.
+2. **Switching back to CodeBuild would have wedged coding.**
+   - With the switch on `codebuild`, the provider was CodeBuild alone. An attempt with a `box:` sandbox ID would then have errored on every tick and blocked the coding queue.
+   - **Fix:** whenever a coding box profile exists, box attempts stay routable and the switch only gates new attempts. Without one, startup is refused while an attempt still depends on a box. A test covers this.
+
+Non-blocking findings adopted:
+
+- **Held boxes.** A held box is no longer an error: the attempt pauses normally, and its box is never closed over the hold.
+- **Unstated reasons.**
+  - The idle close and infrastructure faults are now unstated, so they are retried once like a CodeBuild failure.
+  - Limits, a compromise and an operator close remain stated.
+- **Token storage.** The token is removed from stored payloads once the box is gone.
+- **Task program.** It ignores `null` input and a second task, and exits without forcing the process.
+- **Startup.** The coding profile must admit one box at a time.
+- **New test.** A controller-level test runs the real `BoxSandbox` through `CodingController.tick`: grace, a worker exit, closing before cleanup, `sandbox_stopped`, and cleanup completing.

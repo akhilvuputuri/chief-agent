@@ -7,7 +7,12 @@ import { ensureUser, type Database } from "../src/db.js";
 import { BoxController } from "../src/boxes/controller.js";
 import { FakeBoxProvider } from "../src/boxes/provider.js";
 import type { BoxConfig } from "../src/boxes/schema.js";
-import { BoxSandbox, RoutedSandbox } from "../src/coding/box-sandbox.js";
+import {
+  BoxSandbox,
+  CODING_TASK_COMMAND,
+  RoutedSandbox,
+  codingSandbox,
+} from "../src/coding/box-sandbox.js";
 import type {
   SandboxProvider,
   SandboxRequest,
@@ -199,11 +204,50 @@ test("a box ended by its own limits, or a task past its deadline, gives the owne
   );
 });
 
-test("a held coding box is never reported terminal", async (t) => {
+test("a held coding box is left for an operator: never terminal, never closed", async (t) => {
   const f = await fixture(t);
   const id = await f.sandbox.create(await f.request());
   await f.db.query("UPDATE boxes SET state='held' WHERE id=$1", [id.slice(4)]);
-  await assert.rejects(f.sandbox.inspect(id), /held for an operator/);
+  assert.equal(await f.sandbox.inspect(id), "running");
+  await f.sandbox.terminate(id);
+  assert.equal((await f.row(id)).state, "held");
+});
+
+test("only the attempt's own end, idle close and infrastructure faults are unstated", async (t) => {
+  const f = await fixture(t);
+  for (const [reason, stated] of [
+    ["Idle time-to-live reached", false],
+    ["The box stopped polling and is lost", false],
+    ["Compromised: retired credential", true],
+    ["Closed by the owner", true],
+    ["Lifetime limit reached", true],
+  ] as const) {
+    const id = await f.sandbox.create(await f.request());
+    await f.live(id);
+    await f.boxes.close("owner", id.slice(4), reason);
+    await f.settle(id);
+    const said = await f.sandbox.terminalReason(id);
+    if (stated) assert.match(said!, new RegExp(reason.split(":")[0]));
+    else assert.equal(said, undefined);
+  }
+});
+
+test("the attempt token is dropped from stored payloads once the box is gone", async (t) => {
+  const f = await fixture(t);
+  const id = await f.sandbox.create(await f.request());
+  await f.live(id);
+  await f.sandbox.terminate(id);
+  await f.settle(id);
+  assert.equal(await f.sandbox.inspect(id), "terminal");
+  assert.equal((await f.task(id)).payload.token, undefined);
+  const message = (
+    await f.db.query(
+      "SELECT payload FROM box_messages WHERE box_id=$1 AND kind='task.assign'",
+      [id.slice(4)],
+    )
+  ).rows[0].payload;
+  assert.equal(message.payload.token, undefined);
+  assert.ok(message.payload.jobId);
 });
 
 test("routing keeps older images and existing sandboxes on the previous provider", async (t) => {
@@ -260,4 +304,68 @@ test("routing keeps older images and existing sandboxes on the previous provider
     /not configured/,
   );
   assert.equal(await alone.find("unknown"), undefined);
+});
+
+test("startup keeps box attempts routable whenever a coding profile exists, and refuses to strand them", async (t) => {
+  const f = await fixture(t);
+  const codebuild: SandboxProvider = {
+    create: async () => "build-1",
+    find: async () => undefined,
+    inspect: async () => "terminal",
+    terminate: async () => {},
+  };
+  const base = {
+    db: f.db,
+    codebuild,
+    settings: { runtime: "pi", image },
+    taskCommand: CODING_TASK_COMMAND,
+  };
+  // On CodeBuild for new attempts, an existing box attempt is still served by its box.
+  const back = await codingSandbox({
+    ...base,
+    sandbox: "codebuild",
+    boxes: f.boxes,
+  });
+  const r = await f.request();
+  assert.equal(await back.create(r), "build-1");
+  const boxed = await f.sandbox.create(await f.request());
+  assert.equal(await back.inspect(boxed), "running");
+  // Without boxes, startup refuses while that attempt still depends on its box.
+  await f.db.query(
+    "UPDATE coding_jobs SET sandbox_id=$1,state='running' WHERE id=(SELECT id FROM coding_jobs LIMIT 1)",
+    [boxed],
+  );
+  await assert.rejects(
+    codingSandbox({ ...base, sandbox: "codebuild" }),
+    /still depend on boxes/,
+  );
+  await f.db.query("UPDATE coding_jobs SET state='paused',cleanup='complete'");
+  assert.equal(
+    await codingSandbox({ ...base, sandbox: "codebuild" }),
+    codebuild,
+  );
+  // Switching new attempts to boxes is checked against the reviewed profile.
+  const routed = await codingSandbox({
+    ...base,
+    sandbox: "box",
+    boxes: f.boxes,
+  });
+  assert.match(await routed.create(await f.request()), /^box:/);
+  for (const [o, error] of [
+    [{ boxes: undefined }, /BOXES_RUNTIME=on/],
+    [
+      { settings: { runtime: "pi", image: "other" } },
+      /selected Pi worker image/,
+    ],
+    [{ settings: { runtime: "node", image } }, /selected Pi worker image/],
+    [
+      { taskCommand: ["node", "/opt/chief-worker/dist/boxes/coding-task.js"] },
+      /must run node --disable-sigusr1/,
+    ],
+    [{ taskCommand: undefined }, /must run/],
+  ] as const)
+    await assert.rejects(
+      codingSandbox({ ...base, sandbox: "box", boxes: f.boxes, ...o }),
+      error,
+    );
 });

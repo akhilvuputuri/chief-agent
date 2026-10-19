@@ -5,6 +5,28 @@ import type { SandboxProvider, SandboxRequest } from "./provider.js";
 const PREFIX = "box:";
 /** The box sandbox closes its own boxes with this reason, so it can tell them apart. */
 const ENDED = "Coding attempt ended";
+/**
+ * Box endings that say nothing about the attempt itself: its own close, an idle box whose
+ * task had already ended, and infrastructure faults. Like a CodeBuild failure, they leave
+ * the controller free to retry once; every other reason (limits, compromise, an operator
+ * close) is stated to the owner and not retried.
+ */
+const UNSTATED = new Set([
+  ENDED,
+  "Idle time-to-live reached",
+  "The box never connected after boot",
+  "The box stopped polling and is lost",
+  "The provider ended the box before it connected",
+  "The provider ended the box while stopping",
+  "Stop did not complete",
+  "The stopped box could not be started; start a fresh box",
+]);
+/** The only task command a coding box may run; checked at startup. */
+export const CODING_TASK_COMMAND = [
+  "node",
+  "--disable-sigusr1",
+  "/opt/chief-worker/dist/boxes/coding-task.js",
+];
 
 /**
  * Runs each coding attempt as one task in its own EC2 box (docs/boxes.md, phase 4a). The
@@ -22,11 +44,13 @@ export class BoxSandbox implements SandboxProvider {
     private boxes: BoxController,
     readonly profile: string,
     readonly image: string,
+    /** Whether new attempts may start here; existing box attempts are always served. */
+    readonly acceptNew = true,
   ) {}
 
   /** Whether this sandbox runs the attempt; older images stay on the previous provider. */
   accepts(r: SandboxRequest) {
-    return r.runtime === "pi" && r.image === this.image;
+    return this.acceptNew && r.runtime === "pi" && r.image === this.image;
   }
 
   owns(id: string) {
@@ -95,27 +119,34 @@ export class BoxSandbox implements SandboxProvider {
 
   /**
    * `terminal` only once the box is gone, so cleanup never leaves compute behind. A task
-   * that has ended (or was never queued) closes its box; a held box needs an operator.
+   * that has ended (or was never queued) closes its box. A held box is left alone and
+   * reported running: the attempt then pauses through its deadline or heartbeat, and
+   * cleanup waits for an operator.
    */
   async inspect(id: string) {
     const { box, task } = await this.load(id);
-    if (box.state === "terminated") return "terminal" as const;
-    if (box.state === "held")
-      throw new Error("Coding box is held for an operator");
-    if (!task || !["queued", "running"].includes(task.state))
+    if (box.state === "terminated") {
+      await this.scrub(box.id);
+      return "terminal" as const;
+    }
+    if (
+      box.state !== "held" &&
+      (!task || !["queued", "running"].includes(task.state))
+    )
       await this.boxes.close(box.user_id, box.id, ENDED);
     return "running" as const;
   }
 
   async terminate(id: string) {
     const { box } = await this.load(id);
-    if (box.state !== "terminated")
+    if (box.state !== "terminated" && box.state !== "held")
       await this.boxes.close(box.user_id, box.id, ENDED);
   }
 
   /**
-   * A stated reason when the box or its lifetime ended the attempt. `undefined` means the
-   * worker simply exited without a result, which the controller may retry once.
+   * A stated reason when the task's deadline, the box's limits, a compromise or an operator
+   * ended the attempt. `undefined` means nothing about the attempt is known (the worker
+   * exited, or the infrastructure failed), which the controller may retry once.
    */
   async terminalReason(id: string) {
     const { box, task } = await this.load(id);
@@ -123,9 +154,21 @@ export class BoxSandbox implements SandboxProvider {
     const error = task?.result?.error;
     if (typeof error === "string" && /deadline/i.test(error))
       return "Coding box task passed its deadline before a result was recorded; saved work is retained";
-    if (box.reason && box.reason !== ENDED)
+    if (box.reason && !UNSTATED.has(box.reason))
       return `Coding box ended (${String(box.reason).slice(0, 200)}) before a result was recorded; saved work is retained`;
     return undefined;
+  }
+
+  /** The attempt token is only needed while the box runs; drop it from stored payloads. */
+  private async scrub(boxId: string) {
+    await this.db.query(
+      "UPDATE box_tasks SET payload=payload - 'token' WHERE box_id=$1 AND payload ? 'token'",
+      [boxId],
+    );
+    await this.db.query(
+      "UPDATE box_messages SET payload=payload #- '{payload,token}' WHERE box_id=$1 AND kind='task.assign' AND payload->'payload' ? 'token'",
+      [boxId],
+    );
   }
 }
 
@@ -182,4 +225,56 @@ export class RoutedSandbox implements SandboxProvider {
     const provider = this.by(id);
     return provider.terminalReason ? provider.terminalReason(id) : undefined;
   }
+}
+
+/**
+ * Chooses the coding sandbox at startup. Whenever a coding box profile exists, box attempts
+ * stay routable, so switching new attempts back to CodeBuild never strands one; without
+ * it, startup is refused while any attempt still depends on a box.
+ */
+export async function codingSandbox(o: {
+  db: Database;
+  codebuild: SandboxProvider;
+  sandbox: "codebuild" | "box";
+  settings: { runtime?: string; image?: string };
+  boxes?: BoxController;
+  taskCommand?: string[];
+}): Promise<SandboxProvider> {
+  const profile = o.boxes?.config.profiles.coding;
+  if (o.sandbox === "box") {
+    if (!o.boxes || !profile)
+      throw new Error(
+        "Coding on boxes needs BOXES_RUNTIME=on and a coding box profile",
+      );
+    if (o.settings.runtime !== "pi" || profile.image !== o.settings.image)
+      throw new Error(
+        "The coding box profile must use the selected Pi worker image",
+      );
+    if (profile.concurrency !== 1)
+      throw new Error("The coding box profile must admit one box at a time");
+    if (JSON.stringify(o.taskCommand) !== JSON.stringify(CODING_TASK_COMMAND))
+      throw new Error(
+        `The coding box profile must run ${CODING_TASK_COMMAND.join(" ")}`,
+      );
+  }
+  if (o.boxes && profile)
+    return new RoutedSandbox(
+      new BoxSandbox(
+        o.db,
+        o.boxes,
+        "coding",
+        profile.image,
+        o.sandbox === "box",
+      ),
+      o.codebuild,
+    );
+  const stranded = await o.db.query(
+    `SELECT 1 FROM coding_jobs WHERE sandbox_id LIKE 'box:%'
+       AND (state IN ('provisioning','running','publishing') OR cleanup='pending') LIMIT 1`,
+  );
+  if (stranded.rows.length)
+    throw new Error(
+      "Coding attempts still depend on boxes; keep boxes and the coding box profile until they finish",
+    );
+  return o.codebuild;
 }

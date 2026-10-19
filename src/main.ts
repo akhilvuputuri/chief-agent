@@ -341,6 +341,8 @@ const responsibilities =
     ? new Responsibilities(db, { gmail, calendar })
     : undefined;
 let boxes: import("./boxes/controller.js").BoxController | undefined;
+/** Each EC2 box profile's task command, for the coding sandbox's startup check. */
+let boxTaskCommands: Record<string, string[] | undefined> = {};
 let NoticeRetry: typeof import("./boxes/controller.js").NoticeRetry =
   Error as any;
 if (c.BOXES_RUNTIME === "on") {
@@ -372,6 +374,9 @@ if (c.BOXES_RUNTIME === "on") {
     );
   const file = loadBoxesFile(new URL("../config/boxes.json", import.meta.url));
   const settings = boxSettings(file, c.BOX_AWS_ACCOUNT_ID);
+  boxTaskCommands = Object.fromEntries(
+    Object.entries(file.ec2).map(([name, ec2]) => [name, ec2.taskCommand]),
+  );
   boxes = new BoxController(
     db,
     settings.config,
@@ -454,27 +459,19 @@ if (c.CODING_RUNTIME === "on") {
     c.CODING_CODEBUILD_PROJECT,
   );
   await codebuild.validate();
-  let provider: SandboxProvider = codebuild;
-  if (codingBackend.parse(backend).sandbox === "box") {
-    // New attempts run in EC2 boxes; attempts already on CodeBuild, and jobs snapshotted
-    // with an older image, stay there until phase 6 removes it.
-    const profile = boxes?.config.profiles.coding;
-    if (!boxes || !profile)
-      throw startupError(
-        "STARTUP_CODING_BOXES",
-        "Coding on boxes needs BOXES_RUNTIME=on and a coding box profile",
-      );
-    if (settings.runtime !== "pi" || profile.image !== settings.image)
-      throw startupError(
-        "STARTUP_CODING_BOX_IMAGE",
-        "The coding box profile must use the selected Pi worker image",
-      );
-    const { BoxSandbox, RoutedSandbox } =
-      await import("./coding/box-sandbox.js");
-    provider = new RoutedSandbox(
-      new BoxSandbox(db, boxes, "coding", profile.image),
+  let provider: SandboxProvider;
+  try {
+    const { codingSandbox } = await import("./coding/box-sandbox.js");
+    provider = await codingSandbox({
+      db,
       codebuild,
-    );
+      sandbox: codingBackend.parse(backend).sandbox,
+      settings,
+      boxes,
+      taskCommand: boxTaskCommands.coding,
+    });
+  } catch (error) {
+    throw startupError("STARTUP_CODING_SANDBOX", (error as Error).message);
   }
   const owners = new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(","));
   coding = new CodingController(
