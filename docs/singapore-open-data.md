@@ -37,14 +37,14 @@ The data.gov.sg facts below were measured on 19 October 2026 from a Singapore IP
   - real-time: 6 without a key, 12 with a developer key, 30 with a production key;
   - datastore: 4 / 8 / 20;
   - downloads: 2 / 4 / 10.
-- **Measured:** without a key, v2 throttled after 4–6 quick requests. The limit is shared across endpoints. Recovery took up to about a minute, longer than the 10 seconds the 429 body suggests. One request every 2–3 seconds ran 15–22 times in a row without a 429.
-- **Throttle signal:** HTTP 429 `{"code":24,"name":"TOO_MANY_REQUESTS"}`, with no `Retry-After` or rate-limit headers.
+- **Measured:** without a key, v2 throttled after 4–6 quick requests. The limit is shared across endpoints. Recovery took up to about a minute, longer than the body's "Please try again in 10 seconds" suggests. One request every 2–3 seconds ran 15–22 times in a row without a 429.
+- **Throttle signal:** HTTP 429 `{"code":24,"name":"TOO_MANY_REQUESTS","errorMsg":"Rate limit exceeded. Please try again in 10 seconds…"}`, with no `Retry-After` or rate-limit headers.
 - **Legacy v1:** 30 requests in 2.3 seconds were all accepted.
-- **Getting a key:**
+- **Documented: getting a key.**
   - Log in at data.gov.sg (email OTP) and choose Create API Key. Pick Production and describe the use.
   - The key is shown once and expires; reminders are emailed from three months before.
   - It is sent as the `x-api-key` header.
-- **Licence:** [Singapore Open Data Licence v1.0](https://data.gov.sg/open-data-licence). It allows caching and redistribution with a conspicuous attribution notice. The API terms forbid masking the client's identity, so requests send an honest User-Agent.
+- **Documented: licence.** [Singapore Open Data Licence v1.0](https://data.gov.sg/open-data-licence). It allows caching and redistribution with a conspicuous attribution notice. The API terms forbid masking the client's identity, so requests send an honest User-Agent.
 
 ### Data quirks that shape the design
 
@@ -103,6 +103,7 @@ A read-only client in core code, modelled on the library client ([library](libra
   - **outlook:** 24-hour and 4-day forecasts;
   - **alerts:** active flood alerts, recent lightning near a region, high heat stress;
   - **carparks:** search by carpark code, address text or town; joins HDB information and URA places with live lots; capped result count;
+  - **domain registration:** a prefix, summary, picker entry and cue words in `src/tool-domains.ts`, so foreground turns and background routines both find the tools;
   - **dataset query:** a paced datastore search for CSV datasets (holidays, hawker closures), with field selection and capped rows.
   - Exact names and schemas are settled in the implementation review.
 - **Dataset access:** the dataset query tool accepts any `d_` plus 32-hex dataset ID on the fixed hosts. Which datasets Chief uses is decided by the plugin's catalogue skill, so adding a dataset later needs a plugin change, not new host code. The host still enforces pacing, size caps and read-only access.
@@ -123,14 +124,14 @@ The `singapore` plugin package (`plugins/singapore`):
 
 ### Proactive use
 
-- **Routines, no new code:** scheduled routines already run full agent tasks with every enabled tool. For example: "every weekday at 7:30, tell me if rain or haze is expected in the East". Each run costs model calls.
+- **Routines, no new feature code:** scheduled routines run agent tasks, for example "every weekday at 7:30, tell me if rain or haze is expected in the East". Background steps skip the tool picker and get domains only from the deterministic word cues in `src/tool-domains.ts` (see [context management](context-management.md)). The new domain therefore needs cue words (weather, rain, haze, PSI, carpark, parking, public holiday, hawker) in `CUES`; otherwise a routine has to load the tools with an extra step. Each run costs model calls.
 - **Deterministic alerts, later:** alerts without model calls, modelled on the stock monitor. Examples: a flood alert in a saved region, PSI crossing 100 or 200, a favourite hawker centre closing this week. These need tables for dedupe and settings, so a migration and an operator rollout.
 
 ## Release path
 
 - **Automatic release:** host client, tools, plugin and tests with no key: no migration and no Compose change.
 - **Operator rollout:** adding `DATAGOVSG_API_KEY` (and later `LTA_DATAMALL_ACCOUNT_KEY`) changes the gateway environment list in `compose.yaml`. That needs the reviewed operator rollout ([cloud development](cloud-development.md)). The keys live only in the production environment, never in the repository, logs or PRs.
-- **Picker eval:** changing `config/tool-picker.json` for the new domain requires a manual `npm run eval:picker` run. Existing eval fixtures that treat weather questions as web search must be updated.
+- **Picker and cues:** the new domain needs an entry in `config/tool-picker.json` and cue words in `CUES` in `src/tool-domains.ts`. Changing the picker config requires a manual `npm run eval:picker` run. Existing eval fixtures that treat weather questions as web search must be updated.
 
 ## Expanding later
 

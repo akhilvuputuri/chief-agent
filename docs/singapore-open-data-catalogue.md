@@ -2,7 +2,7 @@
 
 Snapshot of everything [data.gov.sg](https://data.gov.sg) offered on 19 October 2026, surveyed for Chief's Singapore plugin. The [design](singapore-open-data.md) explains how Chief uses it; this file is the reference for adding datasets later.
 
-All 4,663 catalogue datasets and the real-time APIs were checked. 251 entries are listed below by theme; related datasets are folded into one entry. Every other dataset is counted under its theme's "set aside" table with a reason. Entries marked **Selected** are in the first release scope; the rest are candidates for later.
+All 4,663 catalogue datasets and the real-time APIs were checked. 250 entries are listed below by theme; related datasets are folded into one entry. Every other dataset is counted under its theme's "set aside" table with a reason. Entries marked **Selected** are in the first release scope; the rest are candidates for later.
 
 How each entry was checked: **rows** means sample rows were fetched; **metadata** means only the dataset metadata (columns, coverage, last update) was read; **listing-only** means only the catalogue listing. Freshness is as of 19 October 2026 and will drift. Recheck a dataset's metadata before enabling it.
 
@@ -15,9 +15,9 @@ Contains information from data.gov.sg datasets accessed on 19 October 2026, made
 - [Live feeds](#live-feeds): 14 entries, 12 selected
 - [Environment & health](#environment--health): 40 entries, 2 selected
 - [Housing & property](#housing--property): 36 entries, 3 selected
-- [Transport & travel](#transport--travel): 21 entries, 1 selected
+- [Transport & travel](#transport--travel): 21 entries
 - [Money, work & energy](#money-work--energy): 36 entries, 1 selected
-- [Education, community & government](#education-community--government): 49 entries, 1 selected
+- [Education, community & government](#education-community--government): 48 entries, 1 selected
 - [Statistics (SingStat) A](#statistics-singstat-a): 34 entries
 - [Statistics (SingStat) B](#statistics-singstat-b): 21 entries
 
@@ -219,10 +219,10 @@ Coverage: 389 datasets, 110 in 40 entries, 279 set aside.
 
 - ID: `d_dbfabf16158d1b0e1c420627c0819168`
 - NEA · tier high · GeoJSON via download · updates daily · latest snapshot 2026-10-19 · last updated 2026-10-19
-- Location: point (lat/lon or SVY21 or address) · checked: metadata
+- Location: point (lat/lon or SVY21 or address) · checked: rows (first catalogue pass)
 - Use: Alert when a dengue cluster appears near the owner's town.
 - Example question: "Are there dengue clusters near Sengkang right now?"
-- Caveats: Already verified elsewhere (reused).
+- Caveats: Rows sampled in the first catalogue pass.
 
 #### Areas with high Aedes mosquito population (Gravitrap) and Wolbachia release sites
 
@@ -272,20 +272,20 @@ Coverage: 389 datasets, 110 in 40 entries, 279 set aside.
 
 - ID: `d_bda4baa634dd1cc7a6c7cad5f19e2d68`
 - NEA · tier high · CSV via datastore · updates ad-hoc · latest current quarter · last updated 2026-10-19
-- Location: point (lat/lon or SVY21 or address) · checked: metadata
+- Location: point (lat/lon or SVY21 or address) · checked: rows (first catalogue pass)
 - Fields: `serial_no`, `name`, `q1_cleaningstartdate`, `q1_cleaningenddate`, `remarks_q1`, `q2_cleaningstartdate`, `q2_cleaningenddate`, `remarks_q2`, `q3_cleaningstartdate`, `q3_cleaningenddate`, `remarks_q3`, `q4_cleaningstartdate`, `q4_cleaningenddate`, `remarks_q4`, `other_works_startdate`, `other_works_enddate`, `remarks_other_works`, `latitude_hc`, `longitude_hc`, `photourl`, `address_myenv`, `no_of_market_stalls`, `no_of_food_stalls`, `description_myenv`, `status`, `google_3d_view`, `google_for_stall`
 - Use: Warn in the daily briefing when the owner's usual hawker centre is closed for cleaning.
 - Example question: "Is Old Airport Road hawker open this Thursday?"
-- Caveats: Already verified elsewhere (reused).
+- Caveats: Rows sampled in the first catalogue pass.
 
 #### Hawker centres (locations, stall counts) — **Selected**
 
 - ID: `d_4a086da0a5553be1d89383cd90d07ecd` (plus 2 related: `d_a57a245b3cf3ec76ad36d55393a16e97`, `d_68a42f09f350881996d83f9cd73ab02f`)
 - NEA · tier high · GeoJSON via download · updates annual · latest snapshot 2026-10 · last updated 2026-10-19
-- Location: point (lat/lon or SVY21 or address) · checked: metadata
+- Location: point (lat/lon or SVY21 or address) · checked: rows (first catalogue pass)
 - Use: Answer "nearest hawker centre" and pair with closure dates for food suggestions.
 - Example question: "Which hawker centres are in Tampines?"
-- Caveats: Already verified elsewhere (reused). NEA Market and Food Centre layer adds stall counts; d_68a42f09 list is a stale 2016 snapshot.
+- Caveats: Rows sampled in the first catalogue pass. NEA Market and Food Centre layer adds stall counts; d_68a42f09 list is a stale 2016 snapshot.
 
 #### Healthier Dining Partners - F&B outlets (with healthier menu items), plus Healthier Eateries/Caterers maps
 
@@ -378,11 +378,11 @@ Coverage: 389 datasets, 110 in 40 entries, 279 set aside.
 
 - ID: `d_bc50d72a9d61457964c6ea8d8ba7dce2` (plus 1 related: `d_bb92615f43de22933e4479558b1f6c36`)
 - HSA · tier medium · CSV via datastore · updates ad-hoc · latest snapshot 2026-08 · last updated 2026-08-07
-- Location: point (lat/lon or SVY21 or address) · checked: metadata
+- Location: point (lat/lon or SVY21 or address) · checked: rows (first catalogue pass)
 - Fields: `PharmacyName`, `Pharmacistincharge`, `PharmacyAddress`
 - Use: Find a pharmacy near the owner's area.
 - Example question: "Where is the nearest Guardian/Watsons pharmacy in Jurong?"
-- Caveats: CSV already verified elsewhere (reused); GeoJSON layer (2025-11) has postal codes and building names.
+- Caveats: CSV sampled in the first catalogue pass (reused); GeoJSON layer (2025-11) has postal codes and building names.
 
 #### Public Health Preparedness Clinics (GP clinics offering COVID vaccines) and Joint Testing & Vaccination Centres
 
@@ -771,11 +771,11 @@ Coverage: 544 datasets, 86 in 36 entries, 458 set aside.
 
 - ID: `d_8b84c4ee58e3cfc0ece0d773c8ca6abc` (plus 4 related: `d_2d5ff9ea31397b66239f245f57751537`, `d_43f493c6c50d54243cc1eab0df142d6a`, `d_ea9ed51da2787afaf8e51f827c304208`, `d_ebc5ab87086db484f88045b47411ebc5`)
 - HDB · tier high · CSV via datastore · updates monthly · latest 2026-10 · last updated 2026-10-19
-- Location: point (lat/lon or SVY21 or address) · checked: listing-only
+- Location: point (lat/lon or SVY21 or address) · checked: rows (first catalogue pass)
 - Fields: `month`, `town`, `flat_type`, `block`, `street_name`, `storey_range`, `floor_area_sqm`, `flat_model`, `lease_commence_date`, `remaining_lease`, `resale_price`
 - Use: Answer "what did flats in my block/street sell for" and track resale prices for a target town/flat type; older archives give long history.
 - Example question: "What did 4-room flats on my street sell for in the last 6 months?"
-- Caveats: Already verified in an earlier pass (not re-sampled here). Related archives (1990-2016) are static and only useful for long-run history.
+- Caveats: Rows sampled in the first catalogue pass. Related archives (1990-2016) are static and only useful for long-run history.
 
 #### Median HDB Resale Prices by Town and Flat Type (quarterly)
 
@@ -812,21 +812,21 @@ Coverage: 544 datasets, 86 in 36 entries, 458 set aside.
 
 - ID: `d_23000a00c52996c55106084ed0339566`
 - HDB · tier medium · CSV via datastore · updates quarterly · latest 2026-Q2 · last updated 2026-07-24
-- Location: town/planning-area · checked: listing-only
+- Location: town/planning-area · checked: rows (first catalogue pass)
 - Fields: `quarter`, `town`, `flat_type`, `median_rent`
 - Use: Quarterly town-level rent benchmark to complement block-level rentals.
 - Example question: "What is the median rent for a 3-room in Bedok?"
-- Caveats: Already verified in an earlier pass (not re-sampled here).
+- Caveats: Rows sampled in the first catalogue pass.
 
 #### HDB Resale Price Index (1Q2009=100)
 
 - ID: `d_14f63e595975691e7c24a27ae4c07c79`
 - HDB · tier medium · CSV via datastore · updates quarterly · latest 2026-Q2 · last updated 2026-07-24
-- Location: none · checked: listing-only
+- Location: none · checked: rows (first catalogue pass)
 - Fields: `quarter`, `index`
 - Use: Quarterly island-wide HDB price trend for a briefing line when URA/HDB release new figures.
 - Example question: "Did HDB resale prices go up last quarter?"
-- Caveats: Already verified in an earlier pass (not re-sampled here).
+- Caveats: Rows sampled in the first catalogue pass.
 
 #### Price Range of HDB Flats Offered (new flats by town and room type, annual)
 
@@ -854,11 +854,11 @@ Coverage: 544 datasets, 86 in 36 entries, 458 set aside.
 
 - ID: `d_23f946fa557947f93a8043bbef41dd09` (plus 2 related: `d_ca933a644e55d34fe21f28b8052fac63`, `d_7e8ecc485c30c0f22eb323f02b9075f1`)
 - HDB · tier high · CSV via datastore · updates monthly · latest snapshot 2026-10 · last updated 2026-10-08
-- Location: point (lat/lon or SVY21 or address) · checked: listing-only
+- Location: point (lat/lon or SVY21 or address) · checked: rows (first catalogue pass)
 - Fields: `car_park_no`, `address`, `x_coord`, `y_coord`, `car_park_type`, `type_of_parking_system`, `short_term_parking`, `free_parking`, `night_parking`, `car_park_decks`, `gantry_height`, `car_park_basement`
 - Use: HDB car park attributes (free parking, night parking, type) near the owner.
 - Example question: "Is there free parking on Sunday at the HDB car park near Blk 123?"
-- Caveats: Already verified in an earlier pass (not re-sampled here). Realtime carpark availability API (ca933a64) is covered by the realtime plugin; car park outline polygons folded in.
+- Caveats: Rows sampled in the first catalogue pass. Realtime carpark availability API (ca933a64) is the live feed rt:carpark-availability; car park outline polygons folded in.
 
 #### URA Parking Places and Capacity (street/backlane/public car parks) — **Selected**
 
@@ -975,11 +975,11 @@ Coverage: 544 datasets, 86 in 36 entries, 458 set aside.
 
 - ID: `d_149ac00a2734bb0a03867bbe2ec0e7b0`
 - URA · tier medium · CSV via datastore · updates quarterly · latest 2026-Q2 · last updated 2026-07-27
-- Location: region · checked: listing-only
+- Location: region · checked: rows (first catalogue pass)
 - Fields: `qtr`, `project_name`, `postal_district`, `25th_percentile`, `median`, `75th_percentile`, `rental_contracts`
 - Use: Quarterly rental benchmarks for private non-landed homes.
 - Example question: "What do condos rent for in my area?"
-- Caveats: Already verified in an earlier pass (not re-sampled here).
+- Caveats: Rows sampled in the first catalogue pass.
 
 #### URA Executive Condominium Units Launched/Sold and Sale Position
 
@@ -1108,7 +1108,7 @@ Coverage: 184 datasets, 37 in 21 entries, 147 set aside.
 - Sample: Westgate (West): $1.30 1st hr, $0.50 per 15 min; 6pm-11.59pm $2.50/entry
 - Caveats: Stale: last updated Nov 2018, rates have changed; useful only as a rough reference with a clear staleness warning.
 
-#### Speed and road cameras — **Selected**
+#### Speed and road cameras
 
 - ID: `d_6e33866de96454529f98b5d99d21a5db` (plus 1 related: `d_147f4906651f5b32925dfe6560296161`)
 - LTA · tier low · GeoJSON via download · updates ad-hoc · latest unknown (published 2024-06 or earlier) · last updated 2024-06-06
@@ -1149,7 +1149,7 @@ Coverage: 184 datasets, 37 in 21 entries, 147 set aside.
 - Use: Quote card/cash fares by distance band and fare type (adult, senior, student, WTCS, PwD) for any bus or train trip.
 - Example question: "How much is an express bus ride of 25 km on card?"
 - Sample: Express >40.2 km: adult card 357c, cash 410c; feeder flat adult card 128c / cash 210c
-- Caveats: Distance-banded, needs trip distance from elsewhere. Trunk (d_828d...) and MRT/LRT (d_2ca2...) tables already verified elsewhere and folded in here.
+- Caveats: Distance-banded, needs trip distance from elsewhere. Trunk (d_828d...) and MRT/LRT (d_2ca2...) tables sampled in the first catalogue pass and folded in here.
 
 #### LTA bus stop locations
 
@@ -1213,7 +1213,7 @@ Coverage: 184 datasets, 37 in 21 entries, 147 set aside.
 - Fields: `month`, `bidding_no`, `vehicle_class`, `quota`, `bids_success`, `bids_received`, `premium`
 - Use: Report each COE bidding result and trend by category; alert when Cat A/B premium crosses a threshold.
 - Example question: "What did Cat A COE close at this round?"
-- Caveats: Already verified elsewhere; reused, not re-sampled.
+- Caveats: Rows sampled in the first catalogue pass. reused, not re-sampled.
 
 #### Car market by make (new registrations monthly; population & annual registrations by make/fuel)
 
@@ -1267,7 +1267,7 @@ Coverage: 184 datasets, 37 in 21 entries, 147 set aside.
 
 Agencies: MOM, CPF, IRAS, MAS, EMA, ACRA, SkillsFuture.
 
-Mostly MOM labour-market statistics (244), plus CPF, IRAS, ACRA, EMA, EDB, IPOS, PSD, MAS, MOF and SkillsFuture. The most valuable for a job-searching owner are fresh quarterly MOM series (vacancies, vacancy/unemployed ratio, retrenchments, turnover, re-employment, all to 2026-Q2), occupational wage percentiles by industry, bonus/leave/flexible-work norms, CPF rates/ceilings/FRS, and the MySkillsFuture course directory; ACRA lookup helps vet employers. Notably absent: SGS/T-bill/SSB yields, retail electricity (OEM) plans, income-tax rate tables and GST rates - none are in this bucket.
+Mostly MOM labour-market statistics (244), plus CPF, IRAS, ACRA, EMA, EDB, IPOS, PSD, MAS, MOF and SkillsFuture. The most valuable for job-search questions are fresh quarterly MOM series (vacancies, vacancy/unemployed ratio, retrenchments, turnover, re-employment, all to 2026-Q2), occupational wage percentiles by industry, bonus/leave/flexible-work norms, CPF rates/ceilings/FRS, and the MySkillsFuture course directory; ACRA lookup helps vet employers. Notably absent: SGS/T-bill/SSB yields, retail electricity (OEM) plans, income-tax rate tables and GST rates - none are in this bucket.
 
 Coverage: 464 datasets, 264 in 36 entries, 200 set aside.
 
@@ -1293,7 +1293,7 @@ Coverage: 464 datasets, 264 in 36 entries, 200 set aside.
 - Use: Compute take-home pay and employer/employee CPF split for a job offer, and how contributions split across OA/SA(RA)/MA by age.
 - Example question: "If I'm offered $9,000 a month, how much goes to CPF and what's my take-home?"
 - Sample: OW ceiling $8,000 from 2026-01 ($7,400 in 2025); allocation >70: Medisave 0.84, OA 0.08, RA 0.08
-- Caveats: Contribution rates d_98ff... already verified elsewhere; allocation file covers 2014+, OW ceiling back to 1955.
+- Caveats: Contribution rates d_98ff... sampled in the first catalogue pass; allocation file covers 2014+, OW ceiling back to 1955.
 
 #### Active CPF members by balance band and age group
 
@@ -1332,11 +1332,11 @@ Coverage: 464 datasets, 264 in 36 entries, 200 set aside.
 
 - ID: `d_8ef23381f9417e4d4254ee8b4dcdb176` (plus 8 related: `d_0b0fe4a7101674be0a359e55d32cd126`, `d_0ba69fc6d56717ff0bf8083c6af3bb84`, `d_149b61ad0a22f61c09dc80f2df5bbec8`, `d_1840fb46caa92cb59e4f168e70a36bf1`, `d_3751791452397f1b1c80c451447e40b7`, `d_4e19214c3a5288eab7a27235f43da4fa`, `d_b773a1ad8dafa6ef27f4f2bf6a7c4a64`, `d_d4d621596397d8f2627cc06c3b6d020a`)
 - MOM · tier high · CSV via datastore · updates annual · latest 2027 · last updated 2026-07-03
-- Location: none · checked: metadata
+- Location: none · checked: rows (first catalogue pass)
 - Fields: `date`, `day`, `holiday`
-- Use: Calendar awareness for briefings, reminders and leave planning (already verified elsewhere).
+- Use: Calendar awareness for briefings, reminders and leave planning.
 - Example question: "When is the next public holiday, and is there a long weekend?"
-- Caveats: Already verified elsewhere; per-year files are redundant with the consolidated one.
+- Caveats: Rows sampled in the first catalogue pass. per-year files are redundant with the consolidated one.
 
 ### Money, work & energy: Employer lookup
 
@@ -1455,11 +1455,11 @@ Coverage: 464 datasets, 264 in 36 entries, 200 set aside.
 
 - ID: `d_ca32584c91ee07d091a4ce75fa868414` (plus 14 related: `d_d1d755e060dd6b01a8024ba60b21b831`, `d_1353f9be1a020ba1469852c49ee62db3`, `d_80effd26c9ca5755a7ff0598fe2e0be6`, `d_b0fb18418204a0a11930ce44edc34775`, `d_dab839a10e83a6a8746e1836f3dd5629`, `d_3fb7b082cd455ec9493ef5e994ef0db7`, `d_50f76f080c7e80c3b6acd4dfc9f29174`, `d_8a02327def3434883960d1dce5567ab5`, `d_ec79cebfc6e2605327bd2a1e80cc17d4`, `d_d809f48f8a66a6e58f238bd82f585154`, `d_06892cb06e24815d193ff66edf4993ab`, `d_8872e15c61a2ee8dde0e5f7e6f48d718`, `d_edc7e225d4e7c8f3532e6c329ba2bf79`, `d_b62ae2e0fb4d8a0a01a2468bd0090f1b`)
 - MOM · tier medium · CSV via datastore · updates quarterly · latest 2026-Q2 · last updated 2026-09-29
-- Location: none · checked: metadata
+- Location: none · checked: rows (first catalogue pass)
 - Fields: `period`, `residential_status`, `seasonally_adj_unemp_rate`, `non_seasonally_adj_unemp_rate`
 - Use: Headline unemployment context for the job-search brief, plus how long unemployment typically lasts.
 - Example question: "What is Singapore's unemployment rate now, and how long do people usually stay unemployed?"
-- Caveats: Overall quarterly rate already verified elsewhere (d_ca32...); median duration and long-term unemployment are annual (latest 2025).
+- Caveats: Overall quarterly rate sampled in the first catalogue pass (d_ca32...); median duration and long-term unemployment are annual (latest 2025).
 
 #### Employees on short work-week or temporary layoff
 
@@ -1569,7 +1569,7 @@ Coverage: 464 datasets, 264 in 36 entries, 200 set aside.
 - Use: Benchmark a job offer: look up percentile pay for a specific occupation within a specific industry during salary negotiation.
 - Example question: "What does a wholesale trade manager earn in financial services vs retail?"
 - Sample: 2024, wholesale trade manager: financial & insurance svcs median gross $16,071 (P25 $10,560, P75 $20,750); wholesale & retail $7,892
-- Caveats: Reference month June 2024 despite 2026 update; overall occupational wages d_9917... already verified elsewhere. Occupation names are lower-case free text; fuzzy matching needed.
+- Caveats: Reference month June 2024 despite 2026 update; overall occupational wages d_9917... sampled in the first catalogue pass. Occupation names are lower-case free text; fuzzy matching needed.
 
 #### Annual leave entitlement distribution and non-statutory leave offered (by industry)
 
@@ -1689,7 +1689,7 @@ Agencies: MOE, ECDA, NLB, PA, SportSG, MUIS, SPF, MFA and more.
 
 770 datasets from education, community, culture, social, legal, security and civic agencies; about 85% are aggregate statistics or archival dumps (NLB digitised collections, poly/ITE yearly files, prison/CNB, IMDA telecom, MCCY/MSF/MinLaw stats). The useful core is location directories (community clubs, ActiveSG/sport facilities, libraries, police centres, FSCs/SSOs, monuments, IPPT centres, constituency offices), daily-refreshed ECDA preschool vacancies and fees, the Graduate Employment Survey salaries, MUIS prayer times, SEAB exam timetable, MFA embassy directories, film classifications, poly cut-off points and adult-learning course lists. Not present in this bucket: mosque locations, crime stats by police division, polling districts, legal-aid office locations, GST import relief, library opening hours/events (NLB API needs a key).
 
-Coverage: 770 datasets, 134 in 49 entries, 636 set aside.
+Coverage: 770 datasets, 134 in 48 entries, 636 set aside.
 
 ### Education, community & government: Childcare & preschool
 
@@ -2002,16 +2002,6 @@ Coverage: 770 datasets, 134 in 49 entries, 636 set aside.
 - Sample: A-Level PHYSICS 9749 Paper 1, Fri 2026-11-27 08:00-09:00, written.
 - Caveats: Partial timetable per SEAB disclaimer; refreshed yearly around April.
 
-#### General information of schools
-
-- ID: `d_688b934f82c1059ed0a6993d2a829089`
-- MOE · tier low · CSV via datastore · updates annual · latest 2026
-- Location: point · checked: rows
-- Fields: `school_name`, `url_address`, `address`, `postal_code`, `telephone_no`, `telephone_no_2`, `fax_no`, `fax_no_2`, `email_address`, `mrt_desc`, `bus_desc`, `principal_name`, `first_vp_name`, `second_vp_name`, `third_vp_name`, `fourth_vp_name`, `fifth_vp_name`, `sixth_vp_name`, `dgp_code`, `zone_code`, `type_code`, `nature_code`, `session_code`, `mainlevel_code`, `sap_ind`, `autonomous_ind`, `gifted_ind`, `ip_ind`, `mothertongue1_code`, `mothertongue2_code` and 1 more
-- Use: School contact and nearest MRT.
-- Example question: "Which MRT is near Raffles Institution?"
-- Sample: 337 schools
-
 #### School bus operators by school (with fare info)
 
 - ID: `d_a9e4d1b0f2897b4480723bf7f074c5e5`
@@ -2131,7 +2121,7 @@ Coverage: 770 datasets, 134 in 49 entries, 636 set aside.
 - Ngee Ann Polytechnic · tier medium · CSV via datastore · updates annual · latest 2025 (NP, RP); 2024 (SP) · last updated 2026-03-04
 - Location: none · checked: metadata
 - Fields: `Year`, `Course_Name`, `Course_Description`, `Reference`
-- Use: Suggest upskilling courses (SkillsFuture-eligible short/WSQ/part-time) at NP, RP and SP relevant to the owner's job search.
+- Use: Suggest upskilling courses (SkillsFuture-eligible short/WSQ/part-time) at NP, RP and SP for job-search questions.
 - Example question: "Are there any part-time data analytics courses at the polytechnics?"
 - Caveats: Per-poly, per-year files with different schemas (RP as XLSX); descriptions and links but no dates, fees or intakes. Temasek/NYP CET lists not present.
 
@@ -2187,36 +2177,36 @@ Coverage: 770 datasets, 134 in 49 entries, 636 set aside.
 
 ### Education, community & government: set aside
 
-| Group                                                                                                                                                                                              | Datasets | Reason                                                                                                     |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------- |
-| Already verified elsewhere (MOE General information of schools d_688b934f)                                                                                                                         | 1        | Reused from the verified list; not re-sampled.                                                             |
-| NLB digitised collections and name authorities (newspapers 1800s-, books, maps, images, music, archived websites, digital-collection-by-subject lists)                                             | 103      | Bibliographic/archival metadata dumps; no daily-life value for an assistant (use NLB search APIs instead). |
-| Superseded yearly snapshots of polytechnic course/fee/scholarship lists (NP 2017-2024, TP 2016-2024, RP 2016-2019, SP older CET lists)                                                             | 97       | Older academic-year versions of files whose latest year is a candidate.                                    |
-| Polytechnic and ITE institutional statistics (enrolment, intake, graduates, CET completion counts, number of courses)                                                                              | 40       | Institutional reporting stats; no personal use.                                                            |
-| MOE education statistics (enrolment by level/age, exam pass rates, cohort progression, teachers/principals, class sizes, school counts, private schools, LASALLE/NAFA, MOE kindergarten enrolment) | 71       | National aggregate education stats; not actionable for one resident.                                       |
-| MOE SICS canteen-stall and school-bus advertisement tenders                                                                                                                                        | 2        | Vendor tender notices for operators, not residents.                                                        |
-| IMDA infocomm industry and telecom statistics (subscriptions, call success, broadband usage, manpower, revenue, media-time surveys, postal volumes, stale 2013-2016 broadband plan prices)         | 62       | Macro/industry statistics, mostly last updated 2024-06 with old coverage.                                  |
-| Singapore Prison Service, Yellow Ribbon and CNB statistics (penal/DRC/remand populations, recidivism, drug arrests and seizures, inmate programmes)                                                | 60       | Criminal-justice aggregates with no personal use.                                                          |
-| SPF one-off event security zones (NDP 2015/2022-2025, ASEAN Summit 2017, SEA Games 2015, GE rally sites) and PCG offshore islands                                                                  | 18       | Past-event polygons; future NDP zones are announced via news. Not reusable.                                |
-| SPF road-accident causes (2012-2018) and driving-licence holder counts                                                                                                                             | 3        | Stale national aggregates.                                                                                 |
-| MCCY arts/culture sector statistics, charity sector receipts/donations, Social Values Survey and MFT raw data                                                                                      | 58       | Sector-level statistics (2024-06 refresh, old coverage); no personal use.                                  |
-| MSF statistics (domestic-violence trend reports, youth rehabilitation, foster care, OPG deputies/LPA counts, maintenance applications, paid-leave take-up)                                         | 36       | Aggregate social statistics; not actionable for one resident.                                              |
-| MinLaw moneylending, pawnbroking, bankruptcy, winding-up, Public Trustee, Legal Aid and CMC caseload statistics; registered precious-metal dealers list                                            | 28       | Aggregate legal-sector stats (mostly ending 2016-2020) and a business registry dump.                       |
-| Judiciary caseload and PPO statistics                                                                                                                                                              | 3        | Court workload aggregates.                                                                                 |
-| People's Association course/interest-group counts, PAssion card membership, CCC+ e-services lists                                                                                                  | 17       | Annual counts of classes/members and internal e-service listings; no schedules or bookable info.           |
-| Singapore Customs licensed premises (zero-GST/duty warehouses, petroleum, liquor/tobacco, motor vehicles), revenue and TradeNet statistics                                                         | 10       | Trader/business licensing and revenue aggregates; no GST import-relief dataset exists here.                |
-| Sport Singapore participation survey statistics (participation levels, motivations, barriers, top sports)                                                                                          | 10       | National survey aggregates.                                                                                |
-| Research & innovation statistics (A*STAR R&D expenditure/manpower/patents, NRF grant calls)                                                                                                        | 8        | Macro R&D stats.                                                                                           |
-| MUIS annual Haj pilgrim counts                                                                                                                                                                     | 1        | Historical aggregate.                                                                                      |
-| Old electoral boundaries (2006, 2011, 2015, 2020)                                                                                                                                                  | 4        | Superseded by the 2025 boundaries.                                                                         |
-| PDPC Do-Not-Call registry figures                                                                                                                                                                  | 2        | Registry volume stats; does not let the owner check numbers.                                               |
-| Misc: GovTech DNS records, Science Centre 2019 enrichment programmes                                                                                                                               | 2        | Infrastructure data / stale 2019 school programme list.                                                    |
+| Group                                                                                                                                                                                              | Datasets | Reason                                                                                                          |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------- |
+| MOE General information of schools (d_688b934f82c1059ed0a6993d2a829089)                                                                                                                            | 1        | Low value for one resident (school contacts and nearest MRT station); rows sampled in the first catalogue pass. |
+| NLB digitised collections and name authorities (newspapers 1800s-, books, maps, images, music, archived websites, digital-collection-by-subject lists)                                             | 103      | Bibliographic/archival metadata dumps; no daily-life value for an assistant (use NLB search APIs instead).      |
+| Superseded yearly snapshots of polytechnic course/fee/scholarship lists (NP 2017-2024, TP 2016-2024, RP 2016-2019, SP older CET lists)                                                             | 97       | Older academic-year versions of files whose latest year is a candidate.                                         |
+| Polytechnic and ITE institutional statistics (enrolment, intake, graduates, CET completion counts, number of courses)                                                                              | 40       | Institutional reporting stats; no personal use.                                                                 |
+| MOE education statistics (enrolment by level/age, exam pass rates, cohort progression, teachers/principals, class sizes, school counts, private schools, LASALLE/NAFA, MOE kindergarten enrolment) | 71       | National aggregate education stats; not actionable for one resident.                                            |
+| MOE SICS canteen-stall and school-bus advertisement tenders                                                                                                                                        | 2        | Vendor tender notices for operators, not residents.                                                             |
+| IMDA infocomm industry and telecom statistics (subscriptions, call success, broadband usage, manpower, revenue, media-time surveys, postal volumes, stale 2013-2016 broadband plan prices)         | 62       | Macro/industry statistics, mostly last updated 2024-06 with old coverage.                                       |
+| Singapore Prison Service, Yellow Ribbon and CNB statistics (penal/DRC/remand populations, recidivism, drug arrests and seizures, inmate programmes)                                                | 60       | Criminal-justice aggregates with no personal use.                                                               |
+| SPF one-off event security zones (NDP 2015/2022-2025, ASEAN Summit 2017, SEA Games 2015, GE rally sites) and PCG offshore islands                                                                  | 18       | Past-event polygons; future NDP zones are announced via news. Not reusable.                                     |
+| SPF road-accident causes (2012-2018) and driving-licence holder counts                                                                                                                             | 3        | Stale national aggregates.                                                                                      |
+| MCCY arts/culture sector statistics, charity sector receipts/donations, Social Values Survey and MFT raw data                                                                                      | 58       | Sector-level statistics (2024-06 refresh, old coverage); no personal use.                                       |
+| MSF statistics (domestic-violence trend reports, youth rehabilitation, foster care, OPG deputies/LPA counts, maintenance applications, paid-leave take-up)                                         | 36       | Aggregate social statistics; not actionable for one resident.                                                   |
+| MinLaw moneylending, pawnbroking, bankruptcy, winding-up, Public Trustee, Legal Aid and CMC caseload statistics; registered precious-metal dealers list                                            | 28       | Aggregate legal-sector stats (mostly ending 2016-2020) and a business registry dump.                            |
+| Judiciary caseload and PPO statistics                                                                                                                                                              | 3        | Court workload aggregates.                                                                                      |
+| People's Association course/interest-group counts, PAssion card membership, CCC+ e-services lists                                                                                                  | 17       | Annual counts of classes/members and internal e-service listings; no schedules or bookable info.                |
+| Singapore Customs licensed premises (zero-GST/duty warehouses, petroleum, liquor/tobacco, motor vehicles), revenue and TradeNet statistics                                                         | 10       | Trader/business licensing and revenue aggregates; no GST import-relief dataset exists here.                     |
+| Sport Singapore participation survey statistics (participation levels, motivations, barriers, top sports)                                                                                          | 10       | National survey aggregates.                                                                                     |
+| Research & innovation statistics (A*STAR R&D expenditure/manpower/patents, NRF grant calls)                                                                                                        | 8        | Macro R&D stats.                                                                                                |
+| MUIS annual Haj pilgrim counts                                                                                                                                                                     | 1        | Historical aggregate.                                                                                           |
+| Old electoral boundaries (2006, 2011, 2015, 2020)                                                                                                                                                  | 4        | Superseded by the 2025 boundaries.                                                                              |
+| PDPC Do-Not-Call registry figures                                                                                                                                                                  | 2        | Registry volume stats; does not let the owner check numbers.                                                    |
+| Misc: GovTech DNS records, Science Centre 2019 enrichment programmes                                                                                                                               | 2        | Infrastructure data / stale 2019 school programme list.                                                         |
 
 ## Statistics (SingStat) A
 
 Agencies: Department of Statistics tables, first half.
 
-First alphabetical half (1,156 tables) of SingStat Table Builder mirrors: mostly census/survey cross-tabs, input-output tables, national accounts, trade and financial-sector aggregates (dismissed). The resident-useful core is small but current: COE quota premiums incl. PQP (2026-09), month-end and average SGD exchange rates (2026-08), private property price and rental indices by CCR/RCR/OCR (2026-Q2), wage benchmarks by occupation and percentile, labour-market tightness, household income (2025) and HES 2023 spending benchmarks, monthly climate recap (2026-08) and hotel room rates. CPI, tariffs, bank rates, FX averages and job vacancies in this bucket were already verified elsewhere.
+First alphabetical half (1,156 tables) of SingStat Table Builder mirrors: mostly census/survey cross-tabs, input-output tables, national accounts, trade and financial-sector aggregates (dismissed). The resident-useful core is small but current: COE quota premiums incl. PQP (2026-09), month-end and average SGD exchange rates (2026-08), private property price and rental indices by CCR/RCR/OCR (2026-Q2), wage benchmarks by occupation and percentile, labour-market tightness, household income (2025) and HES 2023 spending benchmarks, monthly climate recap (2026-08) and hotel room rates. CPI, tariffs, bank rates, FX averages and job vacancies in this bucket were sampled in the first catalogue pass.
 
 Coverage: 1156 datasets, 141 in 34 entries, 1015 set aside.
 
@@ -2309,11 +2299,11 @@ Coverage: 1156 datasets, 141 in 34 entries, 1015 set aside.
 
 - ID: `d_f3bbdfbf92b811fff364aeed23b5e0bb`
 - SingStat · tier high · CSV via datastore · updates quarterly · latest · last updated 2026-10-12
-- Location: none · checked: listing-only
+- Location: none · checked: rows (first catalogue pass)
 - Fields: one row per data series, one column per period (latest `20262Q`)
-- Use: Show where vacancies are concentrated for the owner's job search.
+- Use: Show where vacancies are concentrated for job-search questions.
 - Example question: "How many PMET vacancies are there in ICT?"
-- Caveats: Already verified by the main session (reuse; not re-sampled here).
+- Caveats: Rows sampled in the first catalogue pass. not re-sampled here).
 
 #### Median gross monthly income from employment (incl. employer CPF) of full-time employed residents by occupation and sex
 
@@ -2321,7 +2311,7 @@ Coverage: 1156 datasets, 141 in 34 entries, 1015 set aside.
 - SingStat · tier high · CSV via datastore · updates annual · latest 2024 · last updated 2026-05-19 · 16 rows
 - Location: none · checked: rows
 - Fields: one row per data series, one column per period (latest `2024`)
-- Use: Benchmark the owner's salary or an offer against the national median for their occupation group during job search.
+- Use: Benchmark a salary or job offer against the national median for its occupation group.
 - Example question: "What is the median pay for professionals in Singapore?"
 - Sample: Professionals - Male S$9,156; Professionals - Female S$7,722 (2024)
 - Caveats: Only broad SSOC major groups; latest year 2024 (one year behind). Pair with occupational wages d_9917e751 for finer detail.
@@ -2343,7 +2333,7 @@ Coverage: 1156 datasets, 141 in 34 entries, 1015 set aside.
 - SingStat · tier medium · CSV via datastore · updates quarterly · latest 2026-Q2 · last updated 2026-10-09 · 5 rows
 - Location: none · checked: rows
 - Fields: one row per data series, one column per period (latest `20262Q`)
-- Use: Summarise hiring climate for the owner's job search: vacancy-to-unemployed ratio, resignation and recruitment rates in their industry.
+- Use: Summarise hiring climate for job-search questions: vacancy-to-unemployed ratio, resignation and recruitment rates in their industry.
 - Example question: "Is the job market tightening this quarter?"
 - Sample: Job vacancy to unemployed ratio 1.5; job vacancy rate 2.9%; resident unemployed (SA) 71.1k (2026Q2)
 - Caveats: Complements verified job vacancies d_f3bbdfbf and unemployment d_ca32584c; recruitment/resignation tables are large (one row per industry x occupation).
@@ -2363,21 +2353,21 @@ Coverage: 1156 datasets, 141 in 34 entries, 1015 set aside.
 
 - ID: `d_5fe5a4bb4a1ecc4d8a56a095832e2b24`
 - SingStat · tier high · CSV via datastore · updates monthly · latest · last updated 2026-10-08
-- Location: none · checked: listing-only
+- Location: none · checked: rows (first catalogue pass)
 - Fields: one row per data series, one column per period (latest `2026Aug`)
 - Use: Quote prevailing bank savings/fixed-deposit/prime lending rates when the owner compares deposits or loans.
 - Example question: "What are banks paying on 12-month fixed deposits now?"
-- Caveats: Already verified by the main session (reuse; not re-sampled here).
+- Caveats: Rows sampled in the first catalogue pass. not re-sampled here).
 
 #### Exchange rates (average for period), monthly; annual averages folded in
 
 - ID: `d_b2b7ffe00aaec3936ed379369fdf531b` (plus 3 related: `d_3c62d5eed03c40aeafbb6d0fa324e976`, `d_1ca9cbc55aa0e6added2c719d4bbedac`, `d_b09aeaf8eb591c4bfe347b66148c6b53`)
 - SingStat · tier high · CSV via datastore · updates monthly · latest · last updated 2026-10-10
-- Location: none · checked: listing-only
+- Location: none · checked: rows (first catalogue pass)
 - Fields: one row per data series, one column per period (latest `2026Aug`)
 - Use: Give monthly-average SGD rates against major currencies for travel budgeting and expense conversion.
 - Example question: "What was the average SGD/JPY rate last month?"
-- Caveats: Already verified by the main session (reuse; not re-sampled here). d_3c62d5ee is an older duplicate of the monthly-average table that stops at 2026-05; prefer b2b7ffe0.
+- Caveats: Rows sampled in the first catalogue pass. not re-sampled here). d_3c62d5ee is an older duplicate of the monthly-average table that stops at 2026-05; prefer b2b7ffe0.
 
 #### Exchange rates (as at end of period), monthly
 
@@ -2407,31 +2397,31 @@ Coverage: 1156 datasets, 141 in 34 entries, 1015 set aside.
 
 - ID: `d_bdaff844e3ef89d39fceb962ff8f0791`
 - SingStat · tier high · CSV via datastore · updates monthly · latest 2026-08 (listing updated 2026-09-23) · last updated 2026-09-23
-- Location: none · checked: listing-only
+- Location: none · checked: rows (first catalogue pass)
 - Fields: one row per data series, one column per period (latest `2026Aug`)
 - Use: Report headline and item-level inflation (food, transport, housing, etc.) in briefings and answer cost-of-living questions.
 - Example question: "How much have food prices gone up compared with a year ago?"
-- Caveats: Already verified by the main session (reuse; not re-sampled here).
+- Caveats: Rows sampled in the first catalogue pass. not re-sampled here).
 
 #### Electricity tariff (monthly; annual companion folded in)
 
 - ID: `d_61eac3cdb086814af485dcc682b75ae9` (plus 1 related: `d_d610f8ed1864daa6c7e790318bbc3323`)
 - SingStat · tier high · CSV via datastore · updates monthly · latest · last updated 2026-04-06
-- Location: none · checked: listing-only
+- Location: none · checked: rows (first catalogue pass)
 - Fields: one row per data series, one column per period (latest `2026Jun`)
 - Use: Tell the owner the current household electricity tariff and estimate the monthly bill.
 - Example question: "What is the electricity tariff this quarter?"
-- Caveats: Already verified by the main session (reuse; not re-sampled here). Monthly table last updated 2026-04-06.
+- Caveats: Rows sampled in the first catalogue pass. not re-sampled here). Monthly table last updated 2026-04-06.
 
 #### Gas tariffs (monthly; annual companion folded in)
 
 - ID: `d_c63822ef11e6a79b8281db36b1975bef` (plus 1 related: `d_9835e2085751e6b9c3efae9fdf2b9c5c`)
 - SingStat · tier high · CSV via datastore · updates monthly · latest · last updated 2026-05-11
-- Location: none · checked: listing-only
+- Location: none · checked: rows (first catalogue pass)
 - Fields: one row per data series, one column per period (latest `2026Jun`)
 - Use: Report the current town-gas tariff for household bill checks.
 - Example question: "Has the gas tariff changed this quarter?"
-- Caveats: Already verified by the main session (reuse; not re-sampled here). Monthly table last updated 2026-05-11.
+- Caveats: Rows sampled in the first catalogue pass. not re-sampled here). Monthly table last updated 2026-05-11.
 
 ### Statistics (SingStat) A: Property
 
@@ -2484,7 +2474,7 @@ Coverage: 1156 datasets, 141 in 34 entries, 1015 set aside.
 - SingStat · tier low · CSV via datastore · updates quarterly · latest 2026-Q2 (per metadata coverage) · last updated 2026-07-24
 - Location: none · checked: metadata
 - Fields: one row per data series, one column per period (latest `20262Q`)
-- Use: Fallback mirror of the HDB RPI already verified elsewhere.
+- Use: Fallback mirror of the HDB RPI sampled in the first catalogue pass.
 - Example question: "What is the latest HDB resale price index?"
 - Caveats: Duplicate of verified HDB RPI d_14f63e59; d_913fd3cf is an older copy whose newest column is 2026Q1. Prefer the HDB-published dataset.
 
@@ -2717,11 +2707,11 @@ Coverage: 1156 datasets, 124 in 21 entries, 1032 set aside.
 
 - ID: `d_b816a930bca0eb19fdf20fcbfcdd4c39` (plus 3 related: `d_285a079d823a1cc22dffb9cac325f81a`, `d_750c4fcebb690a88d19884ad3e1417a9`, `d_b0da22a41f952764376a2b7b5b0f2533`)
 - SingStat / MOM · tier medium · CSV via datastore · updates quarterly · latest 2026-Q2 · last updated 2026-10-09
-- Location: none · checked: metadata
+- Location: none · checked: rows (first catalogue pass)
 - Fields: one row per data series, one column per period (latest `20262Q`)
 - Use: Quarterly labour-market headline for briefings and job-search context; complements the already-verified unemployment dataset d_ca32584c.
 - Example question: "What's Singapore's unemployment rate right now?"
-- Caveats: Overlaps d_ca32584c91ee07d091a4ce75fa868414 (already verified) - pick one. Non-SA quarterly and annual variants folded in.
+- Caveats: Overlaps d_ca32584c91ee07d091a4ce75fa868414 (sampled in the first catalogue pass) - pick one. Non-SA quarterly and annual variants folded in.
 
 #### Labour-force annual benchmarks (usual hours worked, LFPR by age/sex, labour force by qualification)
 
