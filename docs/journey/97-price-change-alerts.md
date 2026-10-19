@@ -1,7 +1,7 @@
 # 97 — How does Chief flag a price change without changing the tracker on its own?
 
 Work date(s): 2026-10-19. Written/revised: 2026-10-19.
-Status: in progress. Implementation and tests pass locally; independent review, merge and release pending.
+Status: released as v0.3.84 (merged `18662ba`, first deployed with `c1d556b`). Owner acceptance pending.
 
 ## User-visible problem and preceding iteration
 
@@ -91,6 +91,15 @@ Tested with PGlite:
 - a real `gather_match` reports the check in the foreground and queues exactly one alert across repeated background matches.
 
 Not established: how often the saved price is absent from an invoice that did not change, for example a saved pre-tax price on a total-only invoice; and live Telegram delivery.
+
+### Release closure — 19 October 2026 (SGT)
+
+- **Merge.** [PR 258](https://github.com/akhilvuputuri/chief-agent/pull/258) merged as `18662ba1a1746cd843f65da8c723068bfd07cee4` from approved head `f8e0f57`.
+- **Review.** Exact-head approvals, all by Claude Opus 5.5: `7ee3226` (after the requested changes above), `04a2811` (after the Devin fixes) and the merged head `f8e0f57`. The last was a merge-only check of docs conflicts with main `ef37e12`. Hosted CI and Devin passed on `f8e0f57`.
+- **Blocked releases.** Its own release was refused because main had already moved to `860c45e` (#259). The next releases were refused for #259's database migration.
+- **Release.** Once #262 staged that migration outside `db/`, the [release of `c1d556b`](https://github.com/akhilvuputuri/chief-agent/actions/runs/39161166544) recorded exact deployment and startup health. Logs show `gateway.started` for that release at 20:02 UTC on 18 October. Later releases up to `8456b86` include it.
+- **Migration.** None of its own.
+- **Not yet measured.** Owner acceptance, live alert delivery and how often a saved price is absent from an unchanged invoice.
 
 ## Follow-up and next iteration
 

@@ -24,6 +24,19 @@ Boxes stay off (`BOXES_RUNTIME=off`) until the owner applies `deploy/boxes/boxes
 
 [PR 260](https://github.com/akhilvuputuri/chief-agent/pull/260) merged as `af33a68a326a7474662544c92e07345d8d1a31a7` after exact-head review, CI (including the first Docker-runner test against the real worker image) and the full suite. Its [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39164490351) recorded exact deployment and startup health. The box-layer foundation ([PR 259](https://github.com/akhilvuputuri/chief-agent/pull/259), `860c45e`) deployed in `c1d556b` after [PR 262](https://github.com/akhilvuputuri/chief-agent/pull/262) staged its migration to unblock releases.
 
+## Released v0.3.84 — price-change alerts (in the `c1d556b` deployment)
+
+[PR 258](https://github.com/akhilvuputuri/chief-agent/pull/258) merged as `18662ba1a1746cd843f65da8c723068bfd07cee4`.
+
+- **Review.** Exact-head independent review (Claude Opus 5.5) approved `f8e0f57`. An earlier round blocked on price alerts that could not be turned off while reminders were on; it was fixed with regressions, as were Devin's later findings on pre-change invoices, the effective-day timeline and owner edits. Hosted CI and Devin passed.
+- **Release.** Its own release was refused because main had moved to #259, and the next ones were refused for #259's migration. The [release of `c1d556b`](https://github.com/akhilvuputuri/chief-agent/actions/runs/39161166544) deployed it with exact receipt and startup health, and logs show `gateway.started` for that release at 20:02 UTC on 18 October. No migration of its own.
+- **Behaviour.**
+  - Saved price changes (`pendingAmount`, `pendingCurrency`, `pendingEffectiveDate`) are shown before their date, with a notice 3 days ahead even when reminders are off. From that date they are used in every view, and the next update records them.
+  - Each invoice match is compared with its one tracked item. A background pass sends one Telegram alert per item and invoice when the saved price is absent.
+  - `priceAlerts` per item.
+- **Not yet measured.** Owner acceptance.
+- No tag created yet. [Journal 97](journey/97-price-change-alerts.md), [design](subscriptions.md#price-change-alerts).
+
 ## Deployed in `c1d556b` (package 0.3.84, untagged) — coding transient retry
 
 The host re-queues a paused coding job once, with a notice in the Coding topic, when the pause came from a stopped sandbox, a lost heartbeat or a provider 429/5xx that the worker did not recover from. A retried revision that pauses again waits for the owner. Jobs with a PR, pending cleanup or a revoked owner are never retried. `autoRetryTransientOnce: false` turns it off and is never sent to workers. This is an owner-approved exception to the no-automatic-resumption rule.

@@ -4,7 +4,7 @@
   "enabled": [
     {
       "path": "core",
-      "sha256": "05895e4d066a2944a2d31bc2505b8d75a3b31c2ff839583dd0bedc63867dd884",
+      "sha256": "235b8ea8f1e2b3a28512bdc86d985fe79108e777df7a26310fbb40ea007fd6ff",
       "agents": [
         "email",
         "parcels",
@@ -80,6 +80,8 @@
         "subscription_list",
         "subscription_record",
         "subscription_settings",
+        "subscription_summary",
+        "subscription_summary_set",
         "watchlist_add",
         "watchlist_list",
         "watchlist_remove",
@@ -168,6 +170,8 @@
     "subscription_list",
     "subscription_record",
     "subscription_settings",
+    "subscription_summary",
+    "subscription_summary_set",
     "watchlist_add",
     "watchlist_list",
     "watchlist_remove",

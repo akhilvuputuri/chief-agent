@@ -115,3 +115,20 @@ export const subscriptionInvoices = z
     offset: z.number().int().min(0).max(10000).optional(),
   })
   .strict();
+export const subscriptionSummary = z
+  .object({
+    operation: z.literal("subscription_summary"),
+    month: z
+      .string()
+      .regex(/^20\d{2}-(0[1-9]|1[0-2])$/)
+      .optional(),
+  })
+  .strict();
+export const subscriptionSummarySet = z
+  .object({
+    operation: z.literal("subscription_summary_set"),
+    enabled: z.boolean(),
+    day: z.number().int().min(1).max(28).optional(),
+    time: time.optional(),
+  })
+  .strict();

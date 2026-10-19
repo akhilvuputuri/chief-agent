@@ -1,8 +1,12 @@
+# Monthly subscription summary — in review, 19 October 2026
+
+Issue 132 S7. One opt-in Telegram message a month (`subscription_summary_set`, default the 1st at 09:00 Singapore), built from saved records with no model call. It covers per-currency monthly equivalents, the previous month's recorded changes (new, ended or back, price changes with the price they replaced) and the next 30 days. `subscription_summary` previews it. No migration. It builds on price-change alerts (PR 258). Branch `feat/monthly-summary`; review, merge, release and owner acceptance pending. [Journal 98](journey/98-monthly-subscription-summary.md), [design](subscriptions.md#monthly-summary).
+
 # Coding transient retry — released, 19 October 2026
 
 The host now re-queues a paused coding job once, with a notice to the owner, when the pause came from a stopped sandbox, a lost heartbeat or a provider 429 or 5xx. A job that pauses again waits for the owner. The owner approved this exception on 17 October 2026. PR 257 deployed in `c1d556b`; live acceptance pending. See [journal 96](journey/96-coding-transient-retry.md).
 
-# Price-change alerts — in review, 19 October 2026
+# Price-change alerts — live as v0.3.84, 19 October 2026
 
 Issue 132 price-change milestone.
 
@@ -10,7 +14,7 @@ Issue 132 price-change milestone.
 - **Invoice price checks.** Every invoice match is compared with the one tracked item it belongs to. A background pass sends one Telegram alert when the invoice doesn't show the saved price; the tracker is never changed by it.
 - **Setting.** `priceAlerts` per item, on by default.
 
-No migration. Branch `feat/price-alerts`; review, merge, release and owner acceptance pending. [Journal 97](journey/97-price-change-alerts.md), [design](subscriptions.md#price-change-alerts).
+No migration. [PR 258](https://github.com/akhilvuputuri/chief-agent/pull/258) merged as `18662ba` and first deployed with `c1d556b` on 18 October 20:02 UTC, after the box migration was staged; exact receipt and startup verified. Owner acceptance pending. [Journal 97](journey/97-price-change-alerts.md), [design](subscriptions.md#price-change-alerts).
 
 # Live to-do reminders — released, 18 October 2026
 

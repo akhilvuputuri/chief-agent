@@ -15,6 +15,11 @@ import { Execution, readOperations, recoverRuntime } from "../src/execution.js";
 import { server } from "../src/server.js";
 import { projectObservation } from "../src/observations.js";
 import { plugins } from "../src/plugin-registry.js";
+import {
+  buildSubscriptionSummary,
+  summaryScheduleId,
+} from "../src/subscription-summary.js";
+import { buildBriefing } from "../src/daily-briefing.js";
 
 async function fixture() {
   const pg = new PGlite();
@@ -908,7 +913,7 @@ test("tools and agent are gated independently of Gmail, results retain their not
   const enabled = runtimeContext({ subscriptions: true, gmail: false }, null);
   assert.equal(
     enabled.tools.filter((t) => t.name.startsWith("subscription_")).length,
-    4,
+    6,
   );
   assert.ok(
     JSON.parse(enabled.context).agentCatalogue.some(
@@ -2339,6 +2344,482 @@ test("an owner price edit after a change takes effect reports the price in force
       source: "owner",
     });
     assert.ok(edit.history[0].source_ref.appliedPending);
+  } finally {
+    await f.pg.close();
+  }
+});
+test("the monthly summary is an owner opt-in schedule set only in the foreground", async () => {
+  const f = await fixture();
+  try {
+    assert.ok(readOperations.has("subscription_summary"));
+    assert.ok(!readOperations.has("subscription_summary_set"));
+    assert.throws(() =>
+      action.parse({
+        operation: "subscription_summary_set",
+        enabled: true,
+        day: 29,
+      }),
+    );
+    const on = await f.tools.call("a", f.run, {
+      operation: "subscription_summary_set",
+      enabled: true,
+    } as any);
+    assert.equal(on.enabled, true);
+    // 1 October 08:00 Singapore → today's 09:00 run.
+    assert.equal(
+      new Date(on.nextRun).toISOString(),
+      "2026-10-01T01:00:00.000Z",
+    );
+    const row = (
+      await f.db.query(
+        "SELECT kind,schedule,status FROM daily_schedules WHERE id=$1",
+        [summaryScheduleId("a")],
+      )
+    ).rows[0];
+    assert.deepEqual(row, {
+      kind: "briefing",
+      schedule: "0 9 1 * *",
+      status: "scheduled",
+    });
+    const moved = await f.tools.call("a", f.run, {
+      operation: "subscription_summary_set",
+      enabled: true,
+      day: 5,
+      time: "20:30",
+    } as any);
+    assert.equal(
+      new Date(moved.nextRun).toISOString(),
+      "2026-10-05T12:30:00.000Z",
+    );
+    const off = await f.tools.call("a", f.run, {
+      operation: "subscription_summary_set",
+      enabled: false,
+    } as any);
+    assert.equal(off.enabled, false);
+    assert.equal(off.nextRun, null);
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT count(*)::int n FROM daily_schedules WHERE user_id='a'",
+        )
+      ).rows[0].n,
+      1,
+    );
+    const preview = await f.tools.call("a", f.run, {
+      operation: "subscription_summary",
+    } as any);
+    assert.equal(preview.enabled, false);
+    assert.match(preview.summary.reply, /September 2026 summary/);
+    const background = randomUUID();
+    await f.db.query(
+      "INSERT INTO work_turns(run_id,user_id,request,background) VALUES($1,'a','Background pass',true)",
+      [background],
+    );
+    await assert.rejects(
+      f.tools.call("a", background, {
+        operation: "subscription_summary_set",
+        enabled: true,
+      } as any),
+      /foreground owner request/,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+test("the summary reports totals, the month's recorded changes and the next 30 days from saved records", async () => {
+  const f = await fixture();
+  try {
+    const at = (iso: string) => async (id: string, revision: number) =>
+      f.db.query(
+        "UPDATE subscription_updates SET recorded_at=$3 WHERE subscription_id=$1 AND revision=$2",
+        [id, revision, iso],
+      );
+    const gym = await f.record(annual);
+    await at("2026-08-20T04:00:00Z")(gym.id, 1);
+    const music = await f.record({
+      label: "Music",
+      status: "active",
+      amount: "4.50",
+      currency: "USD",
+      amountType: "fixed",
+      cadence: "monthly",
+    });
+    await at("2026-08-20T04:00:00Z")(music.id, 1);
+    // September (Singapore): a new item, a cancellation and a price change.
+    const tv = await f.record({ ...netflix });
+    await at("2026-09-02T04:00:00Z")(tv.id, 1);
+    const raised = await f.record(
+      { amount: "5.50" },
+      { id: music.id, baseRevision: music.revision },
+    );
+    await at("2026-09-10T04:00:00Z")(music.id, raised.revision);
+    const gone = await f.record(
+      { status: "cancelled" },
+      { id: gym.id, baseRevision: gym.revision },
+    );
+    await at("2026-09-30T15:30:00Z")(gym.id, gone.revision); // 30 Sep 23:30 SGT
+    // Recorded on 1 October Singapore time: not a September change.
+    const water = await f.record({
+      label: "Water",
+      status: "active",
+      amountType: "variable",
+    });
+    await at("2026-09-30T16:30:00Z")(water.id, 1);
+    const s = await buildSubscriptionSummary(
+      f.db,
+      "a",
+      Date.parse("2026-10-01T01:00:00Z"),
+    );
+    assert.match(s.reply, /^Subscriptions — September 2026 summary/);
+    assert.match(s.reply, /September 2026: 1 new, 1 ended, 1 price change\./);
+    const body = (t: string) =>
+      s.sections!.find((x) => x.title.startsWith(t))!.body;
+    assert.match(body("Monthly equivalents"), /22\.98 SGD a month/);
+    assert.match(body("Monthly equivalents"), /5\.50 USD a month/);
+    const changes = body("Changes in September 2026");
+    assert.match(changes, /New · Netflix: added 2026-09-02/);
+    assert.match(changes, /Ended · Gym: cancelled \(recorded 2026-09-30\)/);
+    assert.match(
+      changes,
+      /Price · Music: 4\.50 USD → 5\.50 USD \(owner, recorded 2026-09-10\)/,
+    );
+    assert.doesNotMatch(changes, /Water/);
+    assert.match(body("Not in the totals"), /Water: amount unknown/);
+    assert.match(s.reply, /From saved records only/);
+    // Another owner sees none of it.
+    const other = await buildSubscriptionSummary(
+      f.db,
+      "b",
+      Date.parse("2026-10-01T01:00:00Z"),
+    );
+    assert.match(other.reply, /no recorded changes/);
+    assert.doesNotMatch(JSON.stringify(other), /Netflix|Music|Gym/);
+  } finally {
+    await f.pg.close();
+  }
+});
+test("saved price changes appear in the month they take effect and upcoming ones in the next 30 days", async () => {
+  const f = await fixture();
+  try {
+    // Saved on 1 September, before the change takes effect.
+    const tv = await new SubscriptionTools(f.db, () =>
+      Date.parse("2026-09-01T00:00:00Z"),
+    ).call("a", f.run, {
+      operation: "subscription_record",
+      requestKey: randomUUID(),
+      fields: {
+        ...netflix,
+        nextChargeDate: "2026-10-05",
+        nextChargeEstimated: false,
+        pendingAmount: "24.98",
+        pendingCurrency: "SGD",
+        pendingEffectiveDate: "2026-09-15",
+      },
+    } as any);
+    const gym = await f.record({
+      ...annual,
+      pendingAmount: "150",
+      pendingCurrency: "SGD",
+      pendingEffectiveDate: "2026-10-20",
+    });
+    void gym;
+    const s = await buildSubscriptionSummary(
+      f.db,
+      "a",
+      Date.parse("2026-10-01T01:00:00Z"),
+    );
+    const body = (t: string) =>
+      s.sections!.find((x) => x.title.startsWith(t))!.body;
+    assert.match(
+      body("Changes"),
+      /Price · Netflix: 22\.98 SGD → 24\.98 SGD from 2026-09-15 \(saved price change\)/,
+    );
+    const next = body("Next 30 days");
+    assert.match(next, /2026-10-05 · Netflix: renewal · 24\.98 SGD/);
+    assert.match(next, /2026-10-20 · Gym: price change/);
+    // After the next update records it, it is still reported once, in September.
+    const updated = await new SubscriptionTools(f.db, () =>
+      Date.parse("2026-10-01T01:00:00Z"),
+    ).call("a", f.run, {
+      operation: "subscription_record",
+      requestKey: randomUUID(),
+      id: tv.id,
+      baseRevision: tv.revision,
+      fields: { plan: "Standard" },
+    } as any);
+    assert.ok(updated.history[0].source_ref.appliedPending);
+    const again = await buildSubscriptionSummary(
+      f.db,
+      "a",
+      Date.parse("2026-10-01T01:00:00Z"),
+    );
+    const prices = again
+      .sections!.find((x) => x.title.startsWith("Changes"))!
+      .body.match(/Price · Netflix/g);
+    assert.equal(prices?.length, 1);
+  } finally {
+    await f.pg.close();
+  }
+});
+test("the scheduler delivers the summary with no model, Gmail or Calendar call", async () => {
+  const f = await fixture();
+  try {
+    await f.record({ ...netflix });
+    await f.tools.call("a", f.run, {
+      operation: "subscription_summary_set",
+      enabled: true,
+    } as any);
+    await f.db.query(
+      "UPDATE daily_schedules SET next_run=now()-interval '1 second' WHERE id=$1",
+      [summaryScheduleId("a")],
+    );
+    const forbidden = () => {
+      throw new Error("No model, Gmail or Calendar call");
+    };
+    const sent: any[] = [];
+    await new DailyWorker(
+      f.db,
+      new ScheduleParser(),
+      async (_u, text) => {
+        sent.push(text);
+      },
+      (j) =>
+        buildBriefing(j, {
+          db: f.db,
+          calendar: { list: forbidden } as any,
+          gmail: { call: forbidden } as any,
+        }),
+      async () => {},
+    ).tick();
+    assert.equal(sent.length, 1);
+    assert.match(sent[0].reply, /Subscriptions — .* summary/);
+    assert.match(sent[0].reply, /22\.98 SGD a month/);
+    const row = (
+      await f.db.query(
+        "SELECT status,last_delivered FROM daily_schedules WHERE id=$1",
+        [summaryScheduleId("a")],
+      )
+    ).rows[0];
+    assert.equal(row.status, "scheduled");
+    assert.ok(row.last_delivered);
+  } finally {
+    await f.pg.close();
+  }
+});
+test("summary settings: generic schedule tools refuse it, delivery in progress blocks changes, saved day/time persist and failures are visible", async () => {
+  const f = await fixture();
+  try {
+    const set = (x: object) =>
+      f.tools.call("a", f.run, {
+        operation: "subscription_summary_set",
+        ...x,
+      } as any);
+    await set({ enabled: true, day: 15, time: "20:30" });
+    const kept = await set({ enabled: true });
+    assert.equal(kept.schedule, "monthly on day 15 at 20:30 Singapore time");
+    const daily = new DailyTools(
+      f.db,
+      new ScheduleParser(),
+      { list: async () => [] },
+      { sync: async () => ({}) } as any,
+    );
+    await assert.rejects(
+      () =>
+        daily.call("a", {
+          operation: "schedule_update",
+          id: summaryScheduleId("a"),
+          schedule: "0 9 * * *",
+        } as any),
+      /subscription_summary_set/,
+    );
+    await f.db.query(
+      "UPDATE daily_schedules SET status='processing' WHERE id=$1",
+      [summaryScheduleId("a")],
+    );
+    await assert.rejects(set({ enabled: false }), /being sent right now/);
+    await f.db.query(
+      "UPDATE daily_schedules SET status='failed',last_error='Run or delivery failed; check Telegram before rescheduling' WHERE id=$1",
+      [summaryScheduleId("a")],
+    );
+    const preview = await f.tools.call("a", f.run, {
+      operation: "subscription_summary",
+    } as any);
+    assert.equal(preview.status, "failed");
+    assert.match(preview.lastError, /delivery failed/);
+    assert.match(preview.statusNotice, /stays stopped/);
+    assert.equal((await set({ enabled: true })).enabled, true);
+  } finally {
+    await f.pg.close();
+  }
+});
+test("summary changes: net status per item, decimal-equal prices, ended items' saved changes and every excluded item", async () => {
+  const f = await fixture();
+  try {
+    const at = (iso: string) => async (id: string, revision: number) =>
+      f.db.query(
+        "UPDATE subscription_updates SET recorded_at=$3 WHERE subscription_id=$1 AND revision=$2",
+        [id, revision, iso],
+      );
+    // Cancelled in August, active again in September: one "Back" line.
+    const gym = await f.record(annual);
+    await at("2026-08-01T04:00:00Z")(gym.id, 1);
+    const c = await f.record(
+      { status: "cancelled" },
+      { id: gym.id, baseRevision: 1 },
+    );
+    await at("2026-08-10T04:00:00Z")(gym.id, c.revision);
+    const back = await f.record(
+      { status: "active" },
+      { id: gym.id, baseRevision: c.revision },
+    );
+    await at("2026-09-10T04:00:00Z")(gym.id, back.revision);
+    // Cancelling then cancelled in September: one "Ended" line.
+    const tv = await f.record({ ...netflix });
+    await at("2026-08-01T04:00:00Z")(tv.id, 1);
+    const ing = await f.record(
+      { status: "cancelling" },
+      { id: tv.id, baseRevision: 1 },
+    );
+    await at("2026-09-05T04:00:00Z")(tv.id, ing.revision);
+    const ed = await f.record(
+      { status: "cancelled" },
+      { id: tv.id, baseRevision: ing.revision },
+    );
+    await at("2026-09-20T04:00:00Z")(tv.id, ed.revision);
+    // Restating 10 as 10.00 is not a price change.
+    const music = await f.record({
+      label: "Music",
+      status: "active",
+      amount: "10",
+      currency: "SGD",
+      amountType: "fixed",
+      cadence: "monthly",
+    });
+    await at("2026-08-01T04:00:00Z")(music.id, 1);
+    const same = await f.record(
+      { amount: "10.00" },
+      { id: music.id, baseRevision: 1 },
+    );
+    await at("2026-09-12T04:00:00Z")(music.id, same.revision);
+    // Excluded items of every kind are listed.
+    await f.record({
+      label: "Trial",
+      status: "trial",
+      amount: "5",
+      currency: "SGD",
+      amountType: "fixed",
+      cadence: "monthly",
+    });
+    await f.record({
+      label: "Cadence",
+      status: "active",
+      amount: "7",
+      currency: "SGD",
+      amountType: "fixed",
+    });
+    await f.record({
+      label: "Status",
+      amount: "3",
+      currency: "SGD",
+      amountType: "fixed",
+      cadence: "monthly",
+    });
+    const s = await buildSubscriptionSummary(
+      f.db,
+      "a",
+      Date.parse("2026-10-01T01:00:00Z"),
+    );
+    const body = (t: string) =>
+      s.sections!.find((x) => x.title.startsWith(t))!.body;
+    const changes = body("Changes");
+    assert.equal(changes.match(/Ended · Netflix/g)?.length, 1);
+    assert.match(changes, /Back · Gym: active again/);
+    assert.doesNotMatch(changes, /Price · Music/);
+    const left = body("Not in the totals");
+    assert.match(left, /Trial: 5 SGD, trial/);
+    assert.match(left, /Cadence: 7 SGD, cadence unknown/);
+    assert.match(left, /Status: 3 SGD, status unknown/);
+    assert.match(body("Monthly equivalents"), /3 items excluded/);
+  } finally {
+    await f.pg.close();
+  }
+});
+test("a saved price change on an ended item is not reported", async () => {
+  const f = await fixture();
+  try {
+    const early = new SubscriptionTools(f.db, () =>
+      Date.parse("2026-09-01T00:00:00Z"),
+    );
+    const r = await early.call("a", f.run, {
+      operation: "subscription_record",
+      requestKey: randomUUID(),
+      fields: {
+        ...netflix,
+        pendingAmount: "24.98",
+        pendingCurrency: "SGD",
+        pendingEffectiveDate: "2026-09-20",
+      },
+    } as any);
+    await early.call("a", f.run, {
+      operation: "subscription_record",
+      requestKey: randomUUID(),
+      id: r.id,
+      baseRevision: r.revision,
+      fields: { status: "cancelled" },
+    } as any);
+    const s = await buildSubscriptionSummary(
+      f.db,
+      "a",
+      Date.parse("2026-10-01T01:00:00Z"),
+    );
+    assert.doesNotMatch(JSON.stringify(s), /24\.98/);
+  } finally {
+    await f.pg.close();
+  }
+});
+test("a create recorded as already cancelled is new, not ended, and a back-only month shows in the headline", async () => {
+  const f = await fixture();
+  try {
+    const at = (iso: string) => async (id: string, revision: number) =>
+      f.db.query(
+        "UPDATE subscription_updates SET recorded_at=$3 WHERE subscription_id=$1 AND revision=$2",
+        [id, revision, iso],
+      );
+    const old = await f.record({ ...annual, status: "cancelled" });
+    await at("2026-09-08T04:00:00Z")(old.id, 1);
+    const tv = await f.record({ ...netflix });
+    await at("2026-09-09T04:00:00Z")(tv.id, 1);
+    const ended = await f.record(
+      { status: "cancelled" },
+      { id: tv.id, baseRevision: 1 },
+    );
+    await at("2026-09-20T04:00:00Z")(tv.id, ended.revision);
+    const s = await buildSubscriptionSummary(
+      f.db,
+      "a",
+      Date.parse("2026-10-01T01:00:00Z"),
+    );
+    const changes = s.sections!.find((x) =>
+      x.title.startsWith("Changes"),
+    )!.body;
+    assert.match(changes, /New · Gym/);
+    assert.doesNotMatch(changes, /Ended · Gym/);
+    assert.match(changes, /Ended · Netflix: cancelled/);
+    // October: only a reactivation.
+    const back = await f.record(
+      { status: "active" },
+      { id: tv.id, baseRevision: ended.revision },
+    );
+    await at("2026-10-10T04:00:00Z")(tv.id, back.revision);
+    const oct = await buildSubscriptionSummary(
+      f.db,
+      "a",
+      Date.parse("2026-11-01T01:00:00Z"),
+    );
+    assert.match(
+      oct.reply,
+      /October 2026: 0 new, 0 ended, 1 back, 0 price changes\./,
+    );
   } finally {
     await f.pg.close();
   }
