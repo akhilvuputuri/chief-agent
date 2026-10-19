@@ -490,7 +490,7 @@ Non-blocking findings adopted:
 
 **Re-review of `082a1e7` (Claude Opus 5.5): approved.** It noted that older-image attempts can still launch on CodeBuild after a skipped startup check. A lazy re-check before each launch would put a misconfiguration on the stuck-for-operator path and block box jobs as well, so the docs now state the limit and treat the warning as an operator alert.
 
-### Phase 4a go-live — 19 October 2026
+### Phase 4a go-live — 20 October 2026 (Singapore time)
 
 PR 276 merged as `7e648f9`. The Pi worker image was rebuilt from it ([run 39302600676](https://github.com/akhilvuputuri/chief-agent/actions/runs/39302600676)) as `sha256:ba99d9555bbeb3df5eb4f5ce57488c1ce2aaccf22f68ebf75750df75af34af05`, so it contains the coding task program.
 
