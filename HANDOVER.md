@@ -1,3 +1,13 @@
+# Opus 5.5, a leaner prompt and replies for any model — live as v0.3.91, 20 October 2026
+
+Three P1 changes from the two-week review are deployed with exact release receipts. Live measurement is pending for all three. [Release record](docs/releases.md).
+
+- Claude Opus 5.5 is the main model and `standard` agent tier. The owner-approved $4/$20 ceilings live in `config/model-policy.json`, and provider-specific prompt-cache markers are added. Probes showed why Argon never cached: Chief's request tail changes on every call. PR 273, `f94e699`. [Journal 100](docs/journey/100-opus-main-model-and-caching.md).
+- The fixed coordinator prompt is smaller. Coding tools get their own domain, domain guidance travels with its tools, and older history keeps a capped 6,000-character floor. PR 274, `11c3bad`, first deployed in `7e648f9`. [Journal 101](docs/journey/101-lean-coordinator-prompt.md).
+- Model-written replies follow sharper style rules. A host filter turns Chief's internal names into plain words and shortens long IDs, while code, links, paths and command IDs stay exact. PR 278, `57cfa9a`, first deployed in `becf234`. [Journal 102](docs/journey/102-reply-style-for-any-model.md).
+
+A weekly private review on the operator's Mac measures these against a fixes ledger.
+
 # Bills and subscriptions: price alerts and monthly summary — live, 19 October 2026
 
 - **Price-change alerts** (v0.3.84, first deployed with `c1d556b`):

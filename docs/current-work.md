@@ -1,12 +1,12 @@
-# Reply style for any model — in review, 20 October 2026
+# Reply style for any model — live as v0.3.91, 20 October 2026
 
 On Argon, median replies were 844 characters, and 7 of 10 replies leaked internal names or IDs. Chief's reply instructions now ask for the answer first and short replies for simple requests. A host filter turns Chief's operation and field names into plain words and shortens long IDs in model-written answers, progress and voice replies; code, links and slash-command IDs are left untouched. See [journal 102](journey/102-reply-style-for-any-model.md).
 
-# Lean coordinator prompt — in review, 20 October 2026
+# Lean coordinator prompt — live as v0.3.90, 20 October 2026
 
 The fixed coordinator prompt had outgrown the 48k soft budget, so older conversation was never sent: 142 of 151 foreground calls were over budget. Coding tools now form their own domain. The canvas, jobs and work guidance arrives only with those tools. Older history keeps a 6,000-character floor, and the over-budget event fires once per turn with its reason. Instructions drop from 11.1k to 8.4k characters when those domains are not loaded, and `work` turns that do not need coding lose a further 4.2k of coding schemas. See [journal 101](journey/101-lean-coordinator-prompt.md).
 
-# Opus 5.5 main model and prompt caching — in review, 19 October 2026
+# Opus 5.5 main model and prompt caching — live as v0.3.89, 19 October 2026
 
 The main model and the `standard` agent tier move from Gemini 4 Argon to Claude Opus 5.5. The owner approved raising the price ceilings to $4/$20 in the reviewed model policy. Synthetic probes showed why caching stopped: Argon's implicit cache missed whenever the request tail changed, and Chief adds the current time to every call. Anthropic models cache only when the request is marked, and a Chief-shaped tool-loop probe confirmed that two markers also cache the growing in-turn history. Requests now carry provider-specific markers. See [journal 100](journey/100-opus-main-model-and-caching.md).
 

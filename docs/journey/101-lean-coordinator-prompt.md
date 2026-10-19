@@ -1,7 +1,7 @@
 # 101 — Why did Chief never see older conversation, and how small can its fixed prompt be?
 
 Work date(s): 2026-10-20. Written/revised: 2026-10-20.
-Status: in review. The fixed coordinator prompt is about 2.6k characters smaller on calls without canvas, jobs or work tools, and about 5.9k smaller on `work` turns that do not also need coding. Older history keeps a 6,000-character floor, and the over-budget event is reported once per turn. Production sizes are not yet re-measured.
+Status: released (v0.3.90, `11c3bad`, first deployed in `7e648f9` on 19 October 2026). The fixed coordinator prompt is smaller, older history keeps a capped 6,000-character floor, and the over-budget event is reported once per turn. Production sizes are not yet re-measured.
 
 ## User-visible problem and preceding iteration
 
@@ -95,6 +95,19 @@ Tested locally. Pending:
 - a post-release read of `context.selected` and `context.over_budget`. Expected: fewer turns over budget and older history admitted. That expectation is a hypothesis until measured.
 
 Not measured: whether answers improve. Recall-tool calls (`conversation_read`, `conversation_search`) per turn are the next comparison.
+
+### Release closure — 20 October 2026
+
+[PR 274](https://github.com/akhilvuputuri/chief-agent/pull/274) merged as `11c3bad` (package 0.3.90). Exact-head independent review approved `06daef4` in round 6, and hosted CI and Devin passed there.
+
+`11c3bad`'s own release attempt ([run 39303583311](https://github.com/akhilvuputuri/chief-agent/actions/runs/39303583311)) failed the current-main guard, because PR 276 had merged as `7e648f9`. The change first deployed in `7e648f9`, whose [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39305976845) recorded an exact-commit `success` receipt at 18:55:35Z. It is also in `becf234`.
+
+These receipts show deployment and startup health only. Still pending:
+
+- the share of foreground calls over budget;
+- the median `fixedChars`;
+- whether older history is admitted;
+- recall calls per turn.
 
 ## Follow-up and next iteration
 
