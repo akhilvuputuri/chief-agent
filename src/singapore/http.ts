@@ -100,10 +100,17 @@ export class SgHttp {
   }
   /** Fetches a data.gov.sg dataset file through its poll-download link. */
   async file(dataset: string): Promise<unknown> {
-    const poll = (await this.json("download", {}, { dataset })) as {
-      data?: { url?: unknown };
-    };
-    const url = downloadLink(poll?.data?.url);
+    type Poll = { data?: { url?: unknown } };
+    const link = (body: unknown) => (body as Poll)?.data?.url;
+    // GeoJSON files are documented as ready to poll directly; when a poll has no link,
+    // start the download and poll again a few times.
+    let raw = link(await this.json("download", {}, { dataset }));
+    if (!raw) raw = link(await this.json("initiateDownload", {}, { dataset }));
+    for (let attempt = 0; !raw && attempt < 3; attempt++) {
+      await this.sleep(2_000);
+      raw = link(await this.json("download", {}, { dataset }));
+    }
+    const url = downloadLink(raw);
     const text = await this.paced(
       "dataGovFiles",
       url,

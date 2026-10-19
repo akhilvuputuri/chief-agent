@@ -1,4 +1,4 @@
-# 102 — Singapore plugin: can Chief answer weather, haze, carpark and bus questions from government data?
+# 103 — Singapore plugin: can Chief answer weather, haze, carpark and bus questions from government data?
 
 Work date: 2026-10-20. Written: 2026-10-20.
 Status: tested; not deployed. Phase 1 of [issue 271](https://github.com/akhilvuputuri/chief-agent/issues/271) (data.gov.sg) and [issue 270](https://github.com/akhilvuputuri/chief-agent/issues/270) (LTA DataMall). Design: [Singapore open data](../singapore-open-data.md).
@@ -89,10 +89,15 @@ The owner then asked for LTA DataMall as well, mainly for bus arrivals, and supp
     - One failed reference download (for example URA) failed every carpark search. Reference loads are now settled independently and live-lot outages degrade to null lots.
     - Docs now say downloads retry after a 429, timeout or server error, and that keyed spacing assumes a production key.
     - Tests now check that file downloads carry no API key and that only `http.ts` calls `fetch`.
-  - **Recorded as follow-ups:**
-    - Cancellation signals are not passed into the Singapore tools.
-    - The body cap counts characters after buffering rather than streamed bytes.
-    - The registry's `delegated` list (76 of 80) and the agent catalogue (about 11k of 12k characters) are close to their limits for the next plugin.
+  - **Devin Review findings (head `a0a281f`), all fixed:**
+  - **Downloads:** they polled without `initiate-download`. GeoJSON is documented as ready to poll, and that worked live, but an empty poll now initiates the download and polls up to three more times.
+  - **Bus arrivals:** a service LTA lists with all-empty estimates now gets its first and last bus times, like a service that is absent.
+  - **Flood alerts:** they ignored the region filter. Alerts with a readable location (location fields or a "lat lon radius" circle) are now filtered by region. Alerts without one are kept and counted as `unlocatedAlerts`, because the live alert shape is still unverified.
+  - **DataMall pages:** a page without a `value` array became an empty result. It now raises an error instead of reporting no matches.
+- **Recorded as follow-ups:**
+  - Cancellation signals are not passed into the Singapore tools.
+  - The body cap counts characters after buffering rather than streamed bytes.
+  - The registry's `delegated` list (76 of 80) and the agent catalogue (about 11k of 12k characters) are close to their limits for the next plugin.
 
 ## Verification and outcome
 

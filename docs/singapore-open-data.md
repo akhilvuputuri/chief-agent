@@ -1,6 +1,6 @@
 # Singapore open data
 
-Status: researched 19 October 2026; phase 1 implemented 20 October 2026 ([journal 102](journey/102-singapore-plugin.md)), deployment pending. Tracking: [issue 271](https://github.com/akhilvuputuri/chief-agent/issues/271) (data.gov.sg) and [issue 270](https://github.com/akhilvuputuri/chief-agent/issues/270) (LTA DataMall). Research record: [journal 99](journey/99-singapore-open-data.md). Full dataset reference: [catalogue](singapore-open-data-catalogue.md).
+Status: researched 19 October 2026; phase 1 implemented 20 October 2026 ([journal 103](journey/103-singapore-plugin.md)), deployment pending. Tracking: [issue 271](https://github.com/akhilvuputuri/chief-agent/issues/271) (data.gov.sg) and [issue 270](https://github.com/akhilvuputuri/chief-agent/issues/270) (LTA DataMall). Research record: [journal 99](journey/99-singapore-open-data.md). Full dataset reference: [catalogue](singapore-open-data-catalogue.md).
 
 Chief gets Singapore government data through a `singapore` plugin: weather and air quality now, alerts, parking, public holidays and hawker centre closures. The plugin holds the agent and skills. A small read-only host client does the fetching, because plugins cannot make HTTP calls.
 
@@ -86,7 +86,7 @@ Plugins are text and configuration only. They "cannot execute scripts … add HT
 
 ### Host (`src/singapore/`)
 
-- **Routes (`routes.ts`):** the only module that names the API origins. It holds a fixed inventory of GET routes with validated parameters. Download links are followed only to the data.gov.sg S3 bucket. A boundary test fails if an origin appears anywhere else in `src`.
+- **Routes (`routes.ts`):** the only module that names the API origins. It holds a fixed inventory of GET routes with validated parameters. Dataset files are polled, initiated when a poll has no link, and followed only to the data.gov.sg S3 bucket. A boundary test fails if an origin appears anywhere else in `src`.
 - **Client (`http.ts`):** one serial queue and one 429 breaker (60 seconds) per rate-limit group, because data.gov.sg limits real-time APIs, datastore search and downloads separately. It sends an honest User-Agent, uses 15-second timeouts, refuses redirects and caps bodies at 4 MB (8 MB for files). A data.gov.sg key is sent only to data.gov.sg and the DataMall `AccountKey` only to DataMall. Minimum spacing between requests:
 
   | Group            | Without key                                                                                  | With key |

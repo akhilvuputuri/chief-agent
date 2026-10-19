@@ -40,7 +40,9 @@ export class DataMall {
       const body = (await this.http.json(name, {
         $skip: page ? page * 500 : undefined,
       })) as J;
-      const value = Array.isArray(body?.value) ? body.value : [];
+      if (!Array.isArray(body?.value))
+        throw new Error("LTA DataMall returned an unexpected page");
+      const value = body.value as J[];
       out.push(...value);
       if (value.length < 500) return out;
     }
@@ -93,14 +95,23 @@ export class DataMall {
     }));
     const stopInfo = (await this.stops()).find((s) => s.BusStopCode === stop);
     let notRunning: J[] | undefined;
+    // Services LTA listed without any estimate, as well as a requested service it omitted.
+    const empty = new Set<string>(
+      services.filter((s: J) => !s.next.length).map((s: J) => s.service),
+    );
     if (
       !services.length ||
+      empty.size ||
       (service && !services.some((s: J) => s.service === service))
     ) {
       // LTA returns nothing when no bus is running; Bus Routes tells "not in operation" from "no estimate".
       const routes = (await this.routesByStop()).get(stop) ?? [];
       notRunning = routes
-        .filter((r) => !service || r.ServiceNo === service)
+        .filter((r) =>
+          service
+            ? r.ServiceNo === service
+            : !services.length || empty.has(r.ServiceNo),
+        )
         .slice(0, 15)
         .map((r) => ({
           service: r.ServiceNo,

@@ -73,6 +73,10 @@ export const routes = {
     "sort",
     "q",
   ]),
+  initiateDownload: route(
+    "dataGovOpen",
+    "/v1/public/api/datasets/{dataset}/initiate-download",
+  ),
   download: route(
     "dataGovOpen",
     "/v1/public/api/datasets/{dataset}/poll-download",

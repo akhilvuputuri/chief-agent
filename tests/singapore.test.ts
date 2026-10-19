@@ -959,3 +959,137 @@ test("dataset file downloads never carry an API key and only http.ts calls fetch
       assert.ok(!/\bfetch\s*\(/.test(text), `${file} calls fetch`);
   }
 });
+
+test("flood alerts follow the region filter, keeping alerts whose location cannot be read", async () => {
+  const floods = {
+    code: 0,
+    data: {
+      records: [
+        {
+          datetime: "2026-10-20T07:58:00+08:00",
+          item: {
+            readings: [
+              {
+                location: { latitude: 1.34, longitude: 103.7 },
+                description: "Flash flood at Jurong",
+              },
+              {
+                circle: "1.35 103.94 0.5",
+                description: "Flash flood at Tampines",
+              },
+              { description: "Flash flood, location text only" },
+            ],
+          },
+        },
+      ],
+    },
+  };
+  const { t } = tools((url) =>
+    url.pathname.endsWith("/weather/flood-alerts")
+      ? { body: floods }
+      : dataGovHandler()(url),
+  );
+  const east: any = await t.call({ operation: "sg_alerts", region: "east" });
+  assert.deepEqual(
+    east.floods.active.map((f: any) => f.description),
+    ["Flash flood at Tampines", "Flash flood, location text only"],
+  );
+  assert.equal(east.floods.unlocatedAlerts, 1);
+  const all: any = await t.call({ operation: "sg_alerts" });
+  assert.equal(all.floods.active.length, 3);
+});
+
+test("bus services listed without estimates still get their schedule, and bad pages fail loudly", async () => {
+  let stopsBody: unknown = {
+    value: [{ BusStopCode: "83139", Description: "Blk 1", RoadName: "Rd" }],
+  };
+  const { t } = tools((url) => {
+    const p = url.pathname;
+    if (p.endsWith("/v3/BusArrival"))
+      return {
+        body: {
+          Services: [
+            {
+              ServiceNo: "65",
+              NextBus: {
+                EstimatedArrival: "2026-10-20T08:05:00+08:00",
+                Monitored: 1,
+              },
+            },
+            {
+              ServiceNo: "66",
+              NextBus: { EstimatedArrival: "" },
+              NextBus2: { EstimatedArrival: "" },
+            },
+          ],
+        },
+      };
+    if (p.endsWith("/BusStops")) return { body: stopsBody };
+    if (p.endsWith("/BusRoutes"))
+      return {
+        body: {
+          value: [
+            {
+              ServiceNo: "65",
+              BusStopCode: "83139",
+              WD_FirstBus: "0530",
+              WD_LastBus: "0015",
+            },
+            {
+              ServiceNo: "66",
+              BusStopCode: "83139",
+              WD_FirstBus: "0900",
+              WD_LastBus: "2100",
+            },
+          ],
+        },
+      };
+    throw new Error(url.href);
+  }, "key");
+  const r: any = await t.call({ operation: "lta_bus_arrival", stop: "83139" });
+  assert.equal(r.services[0].next[0].arrives, "5 min");
+  assert.deepEqual(
+    r.scheduleAtStop.map((s: any) => s.service),
+    ["66"],
+  );
+  stopsBody = { error: "unexpected" };
+  const fresh = tools((url) => {
+    if (url.pathname.endsWith("/BusStops")) return { body: stopsBody };
+    throw new Error(url.href);
+  }, "key");
+  await assert.rejects(
+    fresh.t.call({ operation: "lta_bus_stops", query: "blk" }),
+    /unexpected page/,
+  );
+});
+
+test("a dataset file without a ready link is initiated and polled again", async () => {
+  let polls = 0;
+  const f = fakeFetch((url) => {
+    const p = url.pathname;
+    if (p.endsWith("/poll-download"))
+      return {
+        body:
+          ++polls < 2
+            ? { code: 0, data: { status: "PENDING" } }
+            : {
+                code: 0,
+                data: {
+                  url: "https://s3.ap-southeast-1.amazonaws.com/blobs.data.gov.sg/x.geojson",
+                },
+              },
+      };
+    if (p.endsWith("/initiate-download"))
+      return { body: { code: 0, data: { message: "started" } } };
+    return { body: { type: "FeatureCollection", features: [] } };
+  });
+  const http = new SgHttp({ fetch: f.fn, sleep: noSleep });
+  assert.deepEqual(await http.file("d_" + "b".repeat(32)), {
+    type: "FeatureCollection",
+    features: [],
+  });
+  assert.deepEqual(
+    f.calls.map((c) => c.url.pathname.split("/").pop()),
+    ["poll-download", "initiate-download", "poll-download", "x.geojson"],
+  );
+});
