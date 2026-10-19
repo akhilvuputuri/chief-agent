@@ -1,3 +1,23 @@
+## Enabled — boxed sub-agents on in production (configuration only, 19 October)
+
+No new release: production stays on `0e33cfe`.
+
+- The owner applied the `chief-boxes-prod` stack.
+- `BOX_AUTH_KEY` was generated on the host and never displayed. It was added to `.env` with `BOX_AWS_ACCOUNT_ID` and `BOXES_RUNTIME=on`.
+- The gateway was recreated at 14:35 UTC and became healthy with no warn or error lines.
+
+**Measured:**
+
+- **IAM dry-run check:** no failures for either template.
+- **EC2 `echo` proof:**
+  - cold boot to first report in 161 s;
+  - two tasks in one box;
+  - idle stop after about 15.5 minutes;
+  - warm start to first report in about 28 s;
+  - verified termination with no box instance or volume left.
+
+**Not yet measured:** steering, the trust reset, the orphan sweep and retention on EC2. Only the `echo` profile exists, and coding still runs on CodeBuild. [Journal 91](journey/91-boxed-subagents.md#enabled-and-first-ec2-echo-proof--19-october-2026).
+
 ## Released v0.3.88 — monthly subscription summary
 
 [PR 261](https://github.com/akhilvuputuri/chief-agent/pull/261) merged as `293bb0d9e4f7ae77c5d8cdd06751e0535a06d36f`.

@@ -1,7 +1,7 @@
 # 91 — Can Chief delegate heavy work to sub-agents with their own boxes?
 
-Work date(s): 2026-10-17. Written/revised: 2026-10-17.
-Status: in progress. [Design](../boxes.md) recorded with owner decisions; the box-layer foundation (phase 2a) is implemented and dormant. No AWS resources yet.
+Work date(s): 2026-10-17 to 2026-10-19. Written/revised: 2026-10-19.
+Status: in progress. Boxes are on in production since 19 October (`BOXES_RUNTIME=on`, `echo` profile only), with the owner-applied `chief-boxes-prod` AWS stack. The IAM check and the first EC2 echo proof passed; the rest of phase 3 (steering, trust reset, orphan sweep, retention on EC2) is open. Coding still runs on CodeBuild.
 
 ## User-visible problem and preceding iteration
 
@@ -361,3 +361,34 @@ PR 265 merged as `5f46cb4`, and the reviewed rollout ran over the operator SSH c
 The worker image was rebuilt from `5f46cb4` (`sha256:3963041707149df106d0c11238f1792e1145b58bbe1108f0cf0b1bdeaad5734d`, Pi image workflow run 39213526240) and the `echo` profile re-pinned to it, so the box agent understands the profile's task command.
 
 **Still to do:** the owner applies the AWS stack and enables boxes; then the IAM check and the EC2 echo proof.
+
+### Enabled and first EC2 echo proof — 19 October 2026
+
+**AWS stack.** The owner ran the `chief-boxes-prod` deploy in CloudShell (account `149948097061`, `ap-southeast-1`, default VPC subnet `subnet-065a90067df416749`, controller `chief-coding-controller`). All four resources reached `CREATE_COMPLETE` at 14:31 UTC, and the stack policy is attached to the controller user.
+
+**Incident (no effect).** At 14:33 a second, malformed update ran: a deploy command Claude had typed into CloudShell, but not run, was still on the input line, and Claude's next command was appended to it (`ControllerUserName=chief-coding-controllerclear`). IAM refused the unknown user, and CloudFormation rolled back to the created state (`UPDATE_ROLLBACK_COMPLETE`, policy restored and still attached). Lesson: clear the terminal input line before typing anything into a shared shell.
+
+**IAM check (dry runs from the gateway with the controller's own credentials).** No failures:
+
+- `echo` template: 15 passed, 0 failed, 5 inconclusive.
+- `coding` template: 16 passed, 0 failed, 4 inconclusive.
+- The legitimate launch was allowed for both, and every instance-type, image, metadata, volume, spot, tag and no-template override was refused.
+- The inconclusive cases were rejected by AWS before the permission check: a made-up key pair and instance profile, security-group and subnet overrides (`InvalidParameterCombination` against the template's network interface) and, once, a throttled dedicated-tenancy call (it passed for `coding`). They prove nothing either way. They are covered elsewhere: the security group has no ingress, the policy grants no `iam:PassRole`, and the subnet and security group are pinned to the stack's IDs.
+
+**Enablement.** With the owner's request to enable boxes, `.env` was backed up on the host, `BOX_AUTH_KEY` was generated there with `openssl rand -hex 32` (never displayed), `BOX_AWS_ACCOUNT_ID` and `BOXES_RUNTIME=on` were added, and the gateway was recreated at 14:35 UTC on release `0e33cfe`. It became healthy with no warn or error lines. An unauthenticated `POST /boxes/<id>/hello` on the public origin now gets the gateway's 400 instead of the 404 it returned while boxes were off.
+
+**EC2 echo proof (measured with `dist/boxes/probe.js`).**
+
+| Step                      | Result                                                                                                                                                                                                                                                                    |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Spawn                     | Requested at 14:36:19, launch started 14:36:30, instance `i-0833a4914fc64de12`                                                                                                                                                                                            |
+| Cold boot to first report | 161 s from launch (first boot installs Docker and pulls the worker image)                                                                                                                                                                                                 |
+| Two tasks in one box      | Both echoed correctly; each completed within a second of delivery                                                                                                                                                                                                         |
+| Real instance             | `t3.small`, IMDSv2 required, hop limit 1, no instance profile, no key pair, the stack's security group and subnet, `disableApiTermination=false`, shutdown behaviour `terminate`, tagged `chief:box` and `chief:env=prod`; encrypted 20 GiB gp3 volume with the same tags |
+| Idle stop                 | Stopped at 14:55:16, about 15.5 minutes after the last task (15-minute TTL plus the tick)                                                                                                                                                                                 |
+| Warm start                | A task delegated at about 14:55:48 started the box; first report at 14:56:16 (about 28 s) on credential epoch 2; the task finished by 14:56:26                                                                                                                            |
+| Close                     | `terminating` to `terminated` in about 25 s; AWS shows the instance `terminated` and no `chief:env=prod` instance or volume left                                                                                                                                          |
+
+No owner notices were raised and no warn or error lines were logged during the proof.
+
+**Not yet measured on EC2:** steering (the probe cannot send an owner message), the trust reset with the hostile and inspect tasks, inspection, the orphan sweep after a gateway restart, retention termination, and whether `pendingTime` changes on every start. Those need probe support or a gateway restart test and are the rest of phase 3.

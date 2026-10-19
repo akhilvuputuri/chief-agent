@@ -32,22 +32,23 @@ Issue 132 next milestone. A new `core/bills` agent gathers an exact invoice coll
 
 A refused `coding_reply` on 16 October was recorded as uncertain and blocked every owner write until an operator settled it on 18 October; no uncertain calls remain. PR 249 (deployed `9437d86`, part of v0.3.83; live acceptance pending) settles provably empty coding calls automatically, classifies pre-write coding refusals as validation errors and stops a turn from retrying a blocked write. See [journal 92](journey/92-uncertain-coding-write-lock.md).
 
-# Boxed sub-agents — installed and off, 19 October 2026
+# Boxed sub-agents — enabled, first EC2 proof passed, 19 October 2026
 
 Heavy delegated work moves to sub-agents with their own on-demand boxes that Chief can steer and close (issue #245). The owner decided that coding moves first, boxes stop after about 15 idle minutes, and self-managed EC2 replaces CodeBuild. Coding keeps its current CodeBuild path until it moves.
 
-**Live in production, with boxes off (`BOXES_RUNTIME=off`):**
+**Live in production, with boxes on (`BOXES_RUNTIME=on` since 14:35 UTC on 19 October):**
 
 - the box layer, the box agent, the EC2 provider and the gateway wiring (v0.3.85–v0.3.87);
-- migration 032;
-- the `/boxes/*` Caddy route, installed by the reviewed `scripts/deploy-boxes.py` rollout on 19 October.
+- migration 032 and the `/boxes/*` Caddy route;
+- the `chief-boxes-prod` AWS stack, applied by the owner;
+- only the `echo` profile, pinned to worker image `sha256:3963041…`.
 
-The `echo` profile is pinned to worker image `sha256:3963041…`, built from `5f46cb4`.
+**Measured:** the IAM dry-run check had no failures for either template. A real `echo` box booted cold to its first report in 161 s, ran two tasks, stopped after the 15-minute idle TTL, warm-started for a third task in about 28 s, and terminated on close with nothing left in AWS.
 
 **Next:**
 
-1. The owner applies the AWS stack (`deploy/boxes/README.md`) and adds `BOX_AUTH_KEY`, `BOX_AWS_ACCOUNT_ID` and `BOXES_RUNTIME=on`.
-2. Phase 3: the IAM check, then the EC2 echo proof with measured boot and warm-start times.
+1. The rest of phase 3: steering, the trust reset, the orphan sweep and retention on EC2 (the probe needs steering and payload options).
+2. Phase 4: coding on boxes, when the owner starts it.
 
 [Design](boxes.md), [journal 91](journey/91-boxed-subagents.md), [release records](releases.md).
 

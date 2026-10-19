@@ -21,22 +21,23 @@ Four fixes from the review of two weeks of logs and conversations are deployed, 
 
 A new `core/bills` agent gathers an exact invoice collection, then updates the subscription tracker from the matched invoices when the owner asks. Tracker updates can cite one matched invoice, and the host checks its amount and invoice date against the PDF's recorded clues. Gathering, subscriptions and bills share the core `invoice-gathering`, `subscription-ledger` and `invoice-ledger` skills. Released as v0.3.83 (`1733d48`), with no migration. Next: owner acceptance with one real invoice. [Journal 93](docs/journey/93-invoice-backed-tracker.md).
 
-# Boxed sub-agents — installed and off, 19 October 2026
+# Boxed sub-agents — enabled, first EC2 proof passed, 19 October 2026
 
 Heavy delegated work moves to sub-agents with their own on-demand boxes that Chief can steer and close (issue #245). The owner decided that coding moves first, boxes stop after about 15 idle minutes, and self-managed EC2 replaces CodeBuild. Coding keeps its current CodeBuild path until it moves.
 
-**Live in production, with boxes off (`BOXES_RUNTIME=off`):**
+**Live in production, with boxes on (`BOXES_RUNTIME=on` since 14:35 UTC on 19 October):**
 
 - the box layer, the box agent, the EC2 provider and the gateway wiring (v0.3.85–v0.3.87);
-- migration 032;
-- the `/boxes/*` Caddy route, installed by the reviewed `scripts/deploy-boxes.py` rollout on 19 October.
+- migration 032 and the `/boxes/*` Caddy route;
+- the `chief-boxes-prod` AWS stack, applied by the owner;
+- only the `echo` profile, pinned to worker image `sha256:3963041…`.
 
-The `echo` profile is pinned to worker image `sha256:3963041…`, built from `5f46cb4`.
+**Measured:** the IAM dry-run check had no failures for either template. A real `echo` box booted cold to its first report in 161 s, ran two tasks, stopped after the 15-minute idle TTL, warm-started for a third task in about 28 s, and terminated on close with nothing left in AWS.
 
 **Next:**
 
-1. The owner applies the AWS stack (`deploy/boxes/README.md`) and adds `BOX_AUTH_KEY`, `BOX_AWS_ACCOUNT_ID` and `BOXES_RUNTIME=on`.
-2. Phase 3: the IAM check, then the EC2 echo proof with measured boot and warm-start times.
+1. The rest of phase 3: steering, the trust reset, the orphan sweep and retention on EC2 (the probe needs steering and payload options).
+2. Phase 4: coding on boxes, when the owner starts it.
 
 [Design](docs/boxes.md), [journal 91](docs/journey/91-boxed-subagents.md), [release records](docs/releases.md).
 
