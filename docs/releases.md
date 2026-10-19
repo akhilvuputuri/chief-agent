@@ -1,10 +1,10 @@
-## Released v0.3.87 — boxed sub-agents installed, off by default (`5f46cb4`)
+## Released v0.3.87 (untagged) — boxed sub-agents installed, off by default (`5f46cb4`)
 
 [PR 265](https://github.com/akhilvuputuri/chief-agent/pull/265) merged as `5f46cb4f417dda258623626d5347f9ff80ff2ced`. Independent review (Claude Opus 5.5) approved the exact head `4f4bf33` after two rounds of fixes. Hosted CI, Devin, 1,087 application tests, 51 script tests, 107 Pi tests and 27 rollout tests passed.
 
 **Operator rollout.** On 19 October `scripts/deploy-boxes.py` ran over the operator SSH connection, with the owner's approval:
 
-- **Pre-checks:** the live `RELEASE` and main were both the baseline `3feef85`, the gateway was healthy, and the live Caddyfile's catch-all matched the reviewed anchor byte for byte. The archive and script hashes matched on the host.
+- **Pre-checks:** the live `RELEASE` and main at merge time were both the baseline `3feef85`, the gateway was healthy, and the live Caddyfile's catch-all matched the reviewed anchor byte for byte. The archive and script hashes matched on the host.
 - **Result:** deployed and healthy, migration 32 installed, Caddy route added.
 - **Separate checks:**
   - the `RELEASE` and health checks;
@@ -16,11 +16,11 @@
 
 Boxes stay off (`BOXES_RUNTIME=off`) until the owner applies `deploy/boxes/boxes.json` and adds the box settings. [Journal 91](journey/91-boxed-subagents.md).
 
-## Released v0.3.86 — EC2 box provider, dormant (`3feef85`)
+## Released v0.3.86 (untagged) — EC2 box provider, dormant (`3feef85`)
 
 [PR 264](https://github.com/akhilvuputuri/chief-agent/pull/264) merged as `3feef85c63b18bbea9b9c7b56502b224ca0523c9` after exact-head review, CI and the full suite. Its [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39197933021) recorded exact deployment and startup health.
 
-## Released v0.3.85 — box agent and local provider, dormant (`af33a68`)
+## Released v0.3.85 (untagged) — box agent and local provider, dormant (`af33a68`)
 
 [PR 260](https://github.com/akhilvuputuri/chief-agent/pull/260) merged as `af33a68a326a7474662544c92e07345d8d1a31a7` after exact-head review, CI (including the first Docker-runner test against the real worker image) and the full suite. Its [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39164490351) recorded exact deployment and startup health. The box-layer foundation ([PR 259](https://github.com/akhilvuputuri/chief-agent/pull/259), `860c45e`) deployed in `c1d556b` after [PR 262](https://github.com/akhilvuputuri/chief-agent/pull/262) staged its migration to unblock releases.
 
