@@ -431,3 +431,25 @@ No warn or error lines were logged and no owner notices were raised.
 - **Retention.** The box was left to idle-stop again and should be terminated about 24 hours after that stop (`retentionHours` 24). An hourly watcher is checking.
 - **`pendingTime`.** Only `LaunchTime` was observed. The identity document's `pendingTime` was not, so the design still does not check it.
 - **Steering from Chief.** Chief cannot steer yet: no owner-input check is wired, and that arrives with phase 4.
+
+### Phase 4a: coding attempts in boxes — 20 October 2026
+
+**Owner decision confirmed.** "Confirmed, start phase 4": coding moves to EC2 with no CodeBuild fallback, and CodeBuild is removed once coding runs on boxes.
+
+**Exploration.** Two read-only explorations of main `5e53e8f` covered the Pi worker's runtime needs and the coding controller's provider semantics. Findings, from code:
+
+- Coding already runs behind a five-method `SandboxProvider`, so a box-backed provider keeps every host policy and per-call check unchanged.
+- The worker reads its identity only from four environment variables and never uses stdin or stdout. It needs a small adapter that speaks the box task protocol.
+- The worker puts everything under `TMPDIR`: clones (one more per review round), `npm ci`, the npm cache and tests. That is an estimated 450–650 MB, beyond the task container's 512 MB `/tmp` tmpfs, so the adapter points `TMPDIR` at the box disk.
+- The controller's 180-second heartbeat rule starts at claim. A cold EC2 box (113–161 s to first report, plus container start) would be paused as `heartbeat_lost` before the worker spoke.
+- `terminal` from `inspect` must mean the compute is gone, because cleanup completes on it.
+- Box rows store their own image, but a job snapshots its image at start. Older images predate box support, so routing has to be by image.
+
+**Design.** Phase 4a is recorded in the [design](../boxes.md#phase-4a-coding-attempts-in-boxes): `BoxSandbox`, `RoutedSandbox`, the `coding-task` adapter, a provider startup grace and a `sandbox` switch in `config/coding-backend.json`, with the default left on CodeBuild. No schema or Compose change.
+
+**Status.** Implemented and tested locally; not yet reviewed or deployed. To go live after merge:
+
+1. Rebuild the Pi image so it contains the adapter.
+2. Re-pin `config/coding-pi.json` and add the `coding` box profile with that image.
+3. Switch `sandbox` to `box`.
+4. Run a canary job on EC2.

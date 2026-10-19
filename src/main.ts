@@ -1,6 +1,6 @@
 import { InputFile } from "grammy";
 import { sendCodingDelivery } from "./coding/delivery.js";
-import { selectCodingBackend } from "./coding/backend.js";
+import { codingBackend, selectCodingBackend } from "./coding/backend.js";
 import { randomUUID } from "node:crypto";
 import { LinkResolver, postEvidenceSchema } from "./link-resolution.js";
 import { McpTools, loadMcpRegistry, parseMcpCredentials } from "./mcp.js";
@@ -13,7 +13,7 @@ import { recordFeedSent } from "./telegram-feeds.js";
 import { readFileSync } from "node:fs";
 import { CodeBuildClient } from "@aws-sdk/client-codebuild";
 import { CodingController } from "./coding/controller.js";
-import { CodeBuildSandbox } from "./coding/provider.js";
+import { CodeBuildSandbox, type SandboxProvider } from "./coding/provider.js";
 import { GitHubPublisher } from "./coding/github.js";
 import { AgentGitHubTokens } from "./coding/agent-github.js";
 import { codingSettings } from "./coding/schema.js";
@@ -417,13 +417,14 @@ if (c.CODING_RUNTIME === "on") {
       readFileSync(new URL("../config/coding.json", import.meta.url), "utf8"),
     ),
   );
-  const settings = selectCodingBackend(
-    JSON.parse(
-      readFileSync(
-        new URL("../config/coding-backend.json", import.meta.url),
-        "utf8",
-      ),
+  const backend = JSON.parse(
+    readFileSync(
+      new URL("../config/coding-backend.json", import.meta.url),
+      "utf8",
     ),
+  );
+  const settings = selectCodingBackend(
+    backend,
     JSON.parse(
       readFileSync(new URL("../config/coding.json", import.meta.url), "utf8"),
     ),
@@ -448,11 +449,33 @@ if (c.CODING_RUNTIME === "on") {
       "STARTUP_MIGRATION_027",
       "Coding squad migration 027 must be installed before activation",
     );
-  const provider = new CodeBuildSandbox(
+  const codebuild = new CodeBuildSandbox(
     new CodeBuildClient({ region: c.CODING_AWS_REGION, maxAttempts: 1 }),
     c.CODING_CODEBUILD_PROJECT,
   );
-  await provider.validate();
+  await codebuild.validate();
+  let provider: SandboxProvider = codebuild;
+  if (codingBackend.parse(backend).sandbox === "box") {
+    // New attempts run in EC2 boxes; attempts already on CodeBuild, and jobs snapshotted
+    // with an older image, stay there until phase 6 removes it.
+    const profile = boxes?.config.profiles.coding;
+    if (!boxes || !profile)
+      throw startupError(
+        "STARTUP_CODING_BOXES",
+        "Coding on boxes needs BOXES_RUNTIME=on and a coding box profile",
+      );
+    if (settings.runtime !== "pi" || profile.image !== settings.image)
+      throw startupError(
+        "STARTUP_CODING_BOX_IMAGE",
+        "The coding box profile must use the selected Pi worker image",
+      );
+    const { BoxSandbox, RoutedSandbox } =
+      await import("./coding/box-sandbox.js");
+    provider = new RoutedSandbox(
+      new BoxSandbox(db, boxes, "coding", profile.image),
+      codebuild,
+    );
+  }
   const owners = new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(","));
   coding = new CodingController(
     db,

@@ -1670,7 +1670,11 @@ export class CodingController {
           );
         else if (
           this.clock().getTime() - new Date(j.heartbeat_at).getTime() >
-          180000
+          180000 +
+            // Before the first heartbeat, a provider may need longer to boot (a cold box).
+            (j.state === "provisioning"
+              ? (this.provider.startupGraceMs?.(j.sandbox_id) ?? 0)
+              : 0)
         )
           await this.stopped(
             j,

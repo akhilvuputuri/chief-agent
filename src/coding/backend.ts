@@ -1,7 +1,11 @@
 import { z } from "zod";
 import { codingSettings } from "./schema.js";
 export const codingBackend = z
-  .object({ default: z.enum(["legacy", "pi"]) })
+  .object({
+    default: z.enum(["legacy", "pi"]),
+    /** Where new attempts run; `box` needs boxes on and a `coding` box profile. */
+    sandbox: z.enum(["codebuild", "box"]).default("codebuild"),
+  })
   .strict();
 export function selectCodingBackend(
   selector: unknown,

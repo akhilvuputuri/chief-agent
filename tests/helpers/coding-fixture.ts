@@ -121,6 +121,7 @@ export async function fixture(t: TestContext) {
     uncertainPublish = false,
     failModel = false;
   let stallModel = false;
+  let startupGrace = 0;
   const sandboxes = new Map<
     string,
     { id: string; state: "running" | "terminal" }
@@ -146,6 +147,7 @@ export async function fixture(t: TestContext) {
       const s = [...sandboxes.values()].find((v) => v.id === id)!;
       s.state = "terminal";
     },
+    startupGraceMs: () => startupGrace,
   };
   let failModelError = new Error("private model error");
   let published = false;
@@ -239,6 +241,9 @@ export async function fixture(t: TestContext) {
   const row = async (id: string) =>
     (await db.query("SELECT * FROM coding_jobs WHERE id=$1", [id])).rows[0];
   return {
+    startupGrace: (ms: number) => {
+      startupGrace = ms;
+    },
     db,
     c,
     run,

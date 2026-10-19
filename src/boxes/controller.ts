@@ -378,9 +378,9 @@ export class BoxController {
   }
 
   /** Closes a box now; termination is verified by the reconciler. */
-  async close(user: string, boxId: string) {
+  async close(user: string, boxId: string, reason = "Closed by the owner") {
     const box = await this.owned(user, boxId);
-    await this.terminate(box, "Closed by the owner");
+    await this.terminate(box, reason);
     return this.view((await this.load(box.id))!);
   }
 

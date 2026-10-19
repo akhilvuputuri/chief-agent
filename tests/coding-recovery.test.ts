@@ -161,6 +161,34 @@ test("heartbeat expiry pauses instead of starting another worker and revokes the
   await f.c.tick();
   assert.equal(f.creates(), 1);
 });
+test("a provider's startup grace defers heartbeat loss only until the first heartbeat", async (t) => {
+  const f = await fixture(t),
+    job = await f.start();
+  f.startupGrace(12 * 60_000);
+  await f.c.tick();
+  const j = await f.row(job.id);
+  assert.equal(j.state, "provisioning");
+  // A cold box: no heartbeat for minutes is not yet a lost worker.
+  f.advance(10 * 60_000);
+  await f.c.tick();
+  assert.equal((await f.row(j.id)).state, "provisioning");
+  // Once the worker has said it is alive, the normal 180 s rule applies again.
+  await f.c.heartbeat(await f.row(j.id));
+  assert.equal((await f.row(j.id)).state, "running");
+  f.advance(181000);
+  await f.c.tick();
+  assert.equal((await f.row(j.id)).state, "paused");
+});
+test("a provisioning worker past the startup grace is paused as lost", async (t) => {
+  const f = await fixture(t),
+    job = await f.start();
+  f.startupGrace(12 * 60_000);
+  await f.c.tick();
+  f.advance(12 * 60_000 + 181000);
+  await f.c.tick();
+  assert.equal((await f.row(job.id)).state, "paused");
+  assert.equal(f.creates(), 1);
+});
 test("only verified artifact candidates publish; lost PR acknowledgement is reconciled without duplicate publication", async (t) => {
   const f = await fixture(t),
     job = await f.start();
