@@ -37,7 +37,9 @@ export function boundHistory(
   let size = 0;
   for (const group of groups.reverse()) {
     const n = JSON.stringify(group).length;
-    if (size + n > maxChars) continue;
+    // Stop at the first group that does not fit: history stays contiguous, so a short
+    // reply is never kept while its long question is dropped.
+    if (size + n > maxChars) break;
     selected.unshift(group);
     size += n;
   }

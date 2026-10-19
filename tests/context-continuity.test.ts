@@ -975,6 +975,21 @@ test("the history floor never pushes a request into wire compaction or starts at
   assert.equal(roomy.messages.find((m) => m.role !== "system")?.role, "user");
 });
 
+test("bounded history stays contiguous, so a reply never loses its question mid-history", () => {
+  const history = [
+    user("First question"),
+    answer("First answer"),
+    user("A very long question. ".repeat(400)),
+    answer("Its short answer"),
+    user("Latest question"),
+    answer("Latest answer"),
+  ];
+  assert.deepEqual(
+    boundHistory(history, 20, 2000).messages.map((m) => m.content),
+    ["Latest question", "Latest answer"],
+  );
+});
+
 test("bounded history never opens with a reply whose question did not fit", () => {
   const history = [
     user("A very long question. ".repeat(400)),

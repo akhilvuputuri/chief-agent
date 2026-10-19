@@ -70,6 +70,21 @@ Independent review (Opus 5.5, commit `ed74f5c`) requested changes:
 
 Delta review (`94733b2`) found one new medium bug. The `pendingCoding` query treated every `pr_ready` or paused job as waiting, including merged and deployed ones. That would have loaded coding tools on nearly every turn. It now shares the open-loops definition (`CODING_WAITS_ON_OWNER`), with a database test. "Open a PR" also counts as a coding cue again.
 
+Devin Review on `94733b2` raised two more findings:
+
+- **Non-contiguous history.** `boundHistory` could keep a short reply further back while dropping its long question. It now stops at the first group that does not fit.
+- **Missing picker eval.** The `eval:picker` run that AGENTS.md requires after a picker-config change had not been recorded. The eval's own domain list also needed `coding`. Without it, the offline picker test failed in CI on `6b191be`.
+
+**Picker eval** (`npm run eval:picker`, Jev 1.13, 20 October 2026). Six synthetic coding scenarios were added: three tuning, three held out. Over 190 scenarios × 3 runs (570 calls):
+
+- recall of needed domains was 98.3% (98.1% tuning, 98.6% held-out), with 98.4% of calls fully covered;
+- there were 0.43 extra domains per call, and the average offered schema was 20.0% of the full list;
+- no coding scenario was missed, but "merge that PR now" was unstable across runs;
+- the 3 misses were in calendar, library and gmail scenarios;
+- cost was $0.061. The result is a pass against the 97% floor.
+
+The baseline in [journal 37](37-jev-tool-picker.md) was 97.9% on the earlier question set; the scenario sets differ, so this is not a like-for-like comparison.
+
 The shadow continuity eval was not re-run; the floor now admits older exchanges that the earlier assertions kept out.
 
 ## Verification and outcome
