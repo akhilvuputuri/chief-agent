@@ -36,8 +36,8 @@ Heavy delegated work moves to sub-agents with their own on-demand boxes that Chi
 
 **Next:**
 
-1. The rest of phase 3: steering, the trust reset, the orphan sweep and retention on EC2 (the probe needs steering and payload options).
-2. Phase 4: coding on boxes, when the owner starts it.
+1. The rest of phase 3 with the extended probe: steering across a gateway restart, the trust reset, the orphan sweep and retention on EC2.
+2. Phase 4: coding on EC2 boxes. On 19 October the owner said to close out CodeBuild and focus on EC2; read as no CodeBuild fallback, with the CodeBuild path removed once coding runs on boxes (to be confirmed).
 
 [Design](docs/boxes.md), [journal 91](docs/journey/91-boxed-subagents.md), [release records](docs/releases.md).
 
