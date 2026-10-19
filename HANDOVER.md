@@ -1,3 +1,13 @@
+# Bills and subscriptions: price alerts and monthly summary — live, 19 October 2026
+
+- **Price-change alerts** (v0.3.84, first deployed with `c1d556b`):
+  - saved future prices with a notice 3 days ahead;
+  - every invoice match compared with its tracked item;
+  - one alert per item and invoice from background passes;
+  - a `priceAlerts` setting per item.
+- **Monthly summary** (v0.3.88, `293bb0d`): opt-in, model-free, covering totals, the previous month's changes and the next 30 days.
+- **Next.** Owner acceptance of both. [Journal 97](docs/journey/97-price-change-alerts.md), [journal 98](docs/journey/98-monthly-subscription-summary.md).
+
 # Reliability fixes from the two-week review — live, 19 October 2026
 
 Four fixes from the review of two weeks of logs and conversations are deployed, each with an exact release receipt; live acceptance is pending for all four. [Release record](docs/releases.md).

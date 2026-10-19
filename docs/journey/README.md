@@ -106,7 +106,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 18 October | [95 — Live to-do reminders](95-live-todo-reminders.md): why did to-do reminders say "review your list" instead of showing it? | Released `3b93fa7`: briefings lead with their text and list open tasks inline; to-do review reminders become briefings; live acceptance pending |
 | 19 October | [96 — Coding transient retry](96-coding-transient-retry.md): can the host retry a coding job once after a transient fault? | Released `496fd50` (deployed in `c1d556b`): one host retry after a stopped sandbox, lost heartbeat or provider 429/5xx, with an owner notice; live acceptance pending |
 | 19 October | [97 — Price-change alerts](97-price-change-alerts.md): how does Chief flag a price change without changing the tracker on its own? | Released v0.3.84 (merged `18662ba`, first deployed with `c1d556b`); owner acceptance pending |
-| 19 October | [98 — Monthly subscription summary](98-monthly-subscription-summary.md): can the monthly subscription summary be built without a model? | In progress: owner opt-in schedule, history replay and model-free delivery tested locally; review and release pending |
+| 19 October | [98 — Monthly subscription summary](98-monthly-subscription-summary.md): can the monthly subscription summary be built without a model? | Released v0.3.88 (`293bb0d`); exact receipt and startup verified; owner acceptance pending |
 
 ## Coding-agent learning path
 
