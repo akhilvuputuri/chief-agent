@@ -1,7 +1,7 @@
 # 100 — Why did prompt caching stop, and what does Opus 5.5 need?
 
 Work date(s): 2026-10-19. Written/revised: 2026-10-19.
-Status: in review. The main model and `standard` agent tier switch from Gemini 4 Argon to Claude Opus 5.5, with owner-approved price ceilings of $4/M input and $20/M output in the reviewed model policy. Requests carry provider-specific prompt-cache markers. No production call on Opus has been measured yet.
+Status: released (v0.3.89, `f94e699`, 19 October 2026). The main model and `standard` agent tier run Claude Opus 5.5 with owner-approved $4/$20 price ceilings and provider-specific cache markers. No production model call on Opus had been measured at release closure.
 
 ## User-visible problem and preceding iteration
 
@@ -94,6 +94,18 @@ Tested: focused tests pass. Pending:
 - a post-release owner turn whose `model.completed` names `anthropic/claude-opus-5.5`, reports `cachedTokens > 0` on later calls of the turn, and costs less per call than an uncached estimate. The logs record cached tokens but not cache writes.
 
 Cost per turn on Opus is unmeasured. Opus costs twice Argon's per-token price, and caching is expected to offset part of that, but that is a hypothesis.
+
+### Release closure — 20 October 2026
+
+[PR 273](https://github.com/akhilvuputuri/chief-agent/pull/273) merged as `f94e699` (package 0.3.89). Exact-head independent review approved `6af07f8` in round 4, and hosted CI and Devin passed there. The [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39291865454) recorded an exact-commit `success` receipt with startup health at 17:14:44Z on 19 October. Current main, `becf234`, keeps the same policy.
+
+This verifies deployment only. No foreground model call happened in the hours after release, so these remain pending:
+
+- the model name;
+- `cachedTokens` on later calls of a turn;
+- cost per call against the uncached estimate;
+- `finishReason=length`.
+  They are listed in the weekly review's fixes ledger.
 
 ## Follow-up and next iteration
 

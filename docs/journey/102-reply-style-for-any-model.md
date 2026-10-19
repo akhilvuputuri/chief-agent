@@ -1,7 +1,7 @@
 # 102 — How does Chief keep phone replies short and free of internal IDs, whichever model runs?
 
 Work date(s): 2026-10-20. Written/revised: 2026-10-20.
-Status: in review. The reply instructions are sharper, and a host filter removes Chief's internal names and shortens long IDs in model-written answers and progress. Not yet measured in production.
+Status: released (v0.3.91, `57cfa9a`, first deployed in `becf234` on 19 October 2026). Sharper reply instructions and a host filter for internal names and long IDs in model-written answers, progress and voice. Not yet measured in production.
 
 ## User-visible problem and preceding iteration
 
@@ -76,6 +76,14 @@ Tested locally. Pending:
 That read will separate the two effects. The pre-filter text is in history, so it shows the instruction's effect. The delivered text, also recorded as `telegram.delivered.characters`, shows the filter's effect. Opus may leak less than Argon to begin with, so the "any model" claim stays untested until a different model runs.
 
 Expected: fewer leaks. That is a hypothesis; the filter's effect is directly testable, while length still depends on the model.
+
+### Release closure — 20 October 2026
+
+[PR 278](https://github.com/akhilvuputuri/chief-agent/pull/278) merged as `57cfa9a` (package 0.3.91). Exact-head independent review approved `8db82be` in round 5, and hosted CI and Devin passed there.
+
+`57cfa9a`'s own release attempt ([run 39308708359](https://github.com/akhilvuputuri/chief-agent/actions/runs/39308708359)) failed the current-main guard, because PR 279 had merged as `d6549b9`. That later commit's own release also failed. The change first deployed in `becf234`, whose [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39317112618) recorded an exact-commit `success` receipt at 20:14:00Z.
+
+These receipts show deployment and startup health only. Reply length and leaks on Opus 5.5 are pending, read both before and after the filter.
 
 ## Follow-up and next iteration
 

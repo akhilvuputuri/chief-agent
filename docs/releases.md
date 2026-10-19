@@ -1,3 +1,18 @@
+## Released v0.3.89–v0.3.91 (untagged) — Opus 5.5, a leaner prompt, and replies for any model
+
+Three changes from the two-week review, each with exact-head independent review (Claude Opus 5.5), hosted CI and Devin. These receipts show deployment and startup health only. Live measurements are pending and listed in each journal.
+
+- **[PR 273](https://github.com/akhilvuputuri/chief-agent/pull/273), `f94e699`, 0.3.89.** Claude Opus 5.5 is the main model and the `standard` agent tier. The owner approved $4/M input and $20/M output price ceilings, set in the reviewed model policy. Provider-specific prompt-cache markers are added. [Release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39291865454) `success` at 17:14:44Z on 19 October. [Journal 100](journey/100-opus-main-model-and-caching.md).
+- **[PR 274](https://github.com/akhilvuputuri/chief-agent/pull/274), `11c3bad`, 0.3.90.**
+  - Coding tools get their own domain, and domain guidance travels only with its tools.
+  - Older history keeps a capped 6,000-character floor, and selection never keeps a reply without its question.
+  - The over-budget event fires once per turn.
+  - The picker eval passed (98.3% recall).
+
+  Its own release attempt failed the current-main guard. It first deployed in `7e648f9` ([release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39305976845) `success` at 18:55:35Z). [Journal 101](journey/101-lean-coordinator-prompt.md).
+
+- **[PR 278](https://github.com/akhilvuputuri/chief-agent/pull/278), `57cfa9a`, 0.3.91.** Sharper reply instructions, plus a host filter that turns Chief's internal names into plain words and shortens long IDs in model-written replies. Code, links, paths and command IDs stay exact. Its own release attempt failed the current-main guard. It first deployed in `becf234` ([release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39317112618) `success` at 20:14:00Z). [Journal 102](journey/102-reply-style-for-any-model.md).
+
 ## Deployed `a229d91` (untagged) — box probe for phase 3, and the phase 3 results
 
 [PR 269](https://github.com/akhilvuputuri/chief-agent/pull/269) merged as `a229d91398fb4312c0909c22b0865cd850648684`.
