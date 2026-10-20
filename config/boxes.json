@@ -13,12 +13,15 @@
     },
     "coding": {
       "provider": "ec2",
-      "image": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:ba99d9555bbeb3df5eb4f5ce57488c1ce2aaccf22f68ebf75750df75af34af05",
+      "image": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:697f51fc8ff2968098268402c628be28884b0af5dad9e04b696777e1c16728cf",
       "idleTtlMinutes": 15,
       "retentionHours": 0,
       "hardMaxHours": 3,
       "absoluteDays": 1,
-      "concurrency": 1
+      "concurrency": 1,
+      "previousImages": [
+        "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:ba99d9555bbeb3df5eb4f5ce57488c1ce2aaccf22f68ebf75750df75af34af05"
+      ]
     }
   },
   "ec2": {
