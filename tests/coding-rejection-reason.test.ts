@@ -5,6 +5,7 @@ import { codingApi } from "../src/coding/api.js";
 import { server } from "../src/server.js";
 import { rejectionReason } from "../src/coding/rejection-reason.js";
 import { fixture } from "./helpers/coding-fixture.js";
+import { sanitize } from "../src/ops-log.js";
 
 test("a refused model request records which condition refused it", async (t) => {
   const f = await fixture(t);
@@ -84,4 +85,16 @@ test("after a restart, a model call cut off mid-way frees the job's model slot",
     ).rows[0].state,
     "uncertain",
   );
+});
+
+test("the refusal reason survives the operational log allowlist", () => {
+  const line: any = sanitize("coding.request_rejected", "warn", {
+    taskId: randomUUID(),
+    phase: "model",
+    errorCode: "worker_request_rejected",
+    httpStatus: 409,
+    reason: "model_slot_busy",
+  });
+  assert.equal(line.reason, "model_slot_busy");
+  assert.equal(line.dropped, undefined);
 });

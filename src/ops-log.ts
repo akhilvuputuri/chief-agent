@@ -49,6 +49,8 @@ const fields: Record<string, Shape> = {
   effort: "name",
   errorCode: "code",
   errorCategory: "code",
+  /** Fixed reason for a refused coding worker request (src/coding/rejection-reason.ts). */
+  reason: "code",
   model: "model",
   provider: "provider",
   attempt: "count",
