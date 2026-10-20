@@ -116,7 +116,8 @@ def validate_changes(stage):
 
 
 def keys_present():
-    """True when the private .env sets every key to a non-empty value. Values are never returned."""
+    """True when the private .env's effective value of every key is non-empty. Values are never returned."""
+    # Compose takes the last assignment of a repeated name, so a later empty line wins.
     present = set()
     for line in (LIVE / '.env').read_text().splitlines():
         name, sep, value = line.partition('=')
@@ -124,8 +125,12 @@ def keys_present():
         value = value.split(' #')[0].strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in '"\'':
             value = value[1:-1].strip()
-        if sep and name.strip() in KEYS and value and not value.startswith('#'):
+        if not sep or name.strip() not in KEYS:
+            continue
+        if value and not value.startswith('#'):
             present.add(name.strip())
+        else:
+            present.discard(name.strip())
     return present == set(KEYS)
 
 
@@ -204,6 +209,9 @@ def main():
                 raise RuntimeError('Active work; retry when idle without cancelling it')
             if sql("SELECT count(*) FROM conversation_inputs WHERE state IN ('queued','running')") != '0':
                 raise RuntimeError('Pending conversation input; retry after scheduled work and execution finish')
+            # The same coding states the automatic merge guard treats as busy (src/coding/automation.ts).
+            if sql("SELECT count(*) FROM coding_jobs WHERE state IN ('queued','provisioning','running','publishing') OR cleanup='pending'") != '0':
+                raise RuntimeError('Active coding job or pending cleanup; retry when idle without cancelling it')
             previous = compose('images', '-q', 'gateway', text=True).stdout.strip()
             if not previous:
                 raise RuntimeError('Previous image unavailable')

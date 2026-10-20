@@ -157,10 +157,10 @@ There are two agents, because an agent appears in Chief's catalogue only when al
    - `db/` is unchanged;
    - the release handler is unchanged;
    - `compose.yaml` differs only by the two gateway environment names after `TWELVE_DATA_API_KEY`;
-   - the private `.env` already sets both keys to non-empty values. It checks names only; values are never printed, logged or written.
+   - the private `.env` already sets both keys to non-empty values, using the last assignment of each name as Compose does. It checks names only; values are never printed, logged or written.
 2. **Then:**
    - builds the candidate first;
-   - refuses, without cancelling anything, while work is running or input is pending; rerun it when idle;
+   - refuses, without cancelling anything, while a run, pending input, active coding job or coding cleanup exists; rerun it when idle;
    - stops the gateway, switches `compose.yaml` and the image, starts the gateway and checks health.
 3. **On failure:** restores the previous application, source and Compose file. It neither cancels nor replays owner work.
 

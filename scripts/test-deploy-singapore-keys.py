@@ -29,7 +29,7 @@ class SingaporeKeyRolloutTests(unittest.TestCase):
         self.assertEqual(release.BASES, {release.BASE})
         self.assertRegex(release.BASE, '^[0-9a-f]{40}$')
 
-    def scenario(self, *, running=0, pending=0, baseline=None, requested_sha=SHA,
+    def scenario(self, *, running=0, pending=0, coding=0, baseline=None, requested_sha=SHA,
                  archive_sha=SHA, changes=None, unsafe=None, health=None, env=KEYED_ENV,
                  build_failure=False, publish_failure=False, expected_error=None):
         with tempfile.TemporaryDirectory() as directory:
@@ -90,6 +90,8 @@ class SingaporeKeyRolloutTests(unittest.TestCase):
                     return str(running)
                 if statement == "SELECT count(*) FROM conversation_inputs WHERE state IN ('queued','running')":
                     return str(pending)
+                if statement.startswith("SELECT count(*) FROM coding_jobs"):
+                    return str(coding)
                 raise AssertionError('unexpected SQL: ' + statement)
 
             real_publish = release.publish_source
@@ -155,13 +157,15 @@ class SingaporeKeyRolloutTests(unittest.TestCase):
                     '# DATAGOVSG_API_KEY=a\n# LTA_DATAMALL_ACCOUNT_KEY=b\n',
                     'DATAGOVSG_API_KEY=""\nLTA_DATAMALL_ACCOUNT_KEY=secret-sentinel-lta\n',
                     "DATAGOVSG_API_KEY=v2:secret-sentinel-dg\nLTA_DATAMALL_ACCOUNT_KEY=''\n",
-                    'DATAGOVSG_API_KEY=   # later\nLTA_DATAMALL_ACCOUNT_KEY=secret-sentinel-lta\n']:
+                    'DATAGOVSG_API_KEY=   # later\nLTA_DATAMALL_ACCOUNT_KEY=secret-sentinel-lta\n',
+                    KEYED_ENV + 'LTA_DATAMALL_ACCOUNT_KEY=\n']:
             with self.subTest(env=env):
                 commands = self.scenario(env=env, expected_error='Add both Singapore keys')
                 self.assertEqual(commands, [])
 
     def test_running_work_and_pending_input_refuse_before_stop(self):
-        for args, message in [({'running': 1}, 'Active work'), ({'pending': 1}, 'Pending conversation input')]:
+        for args, message in [({'running': 1}, 'Active work'), ({'pending': 1}, 'Pending conversation input'),
+                              ({'coding': 1}, 'Active coding job')]:
             with self.subTest(args=args):
                 self.scenario(**args, expected_error=message)
 
