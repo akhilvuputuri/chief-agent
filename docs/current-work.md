@@ -1,6 +1,6 @@
-# Plain rain replies — tested, not deployed, 21 October 2026
+# Plain rain replies — live in `0c54f89`, 21 October 2026
 
-Merlion's rain answers read like a radar printout. They now answer in one to three plain sentences, with no speeds, percentages or frame times unless asked, and without adding forecasts or alerts. The picture caption is one line. In an offline replay, replies fell from 567–887 to 108–218 characters, with no numbers. [Journal 109](journey/109-plain-rain-replies.md).
+Merlion's rain answers read like a radar printout. They now answer in one to three plain sentences, with no speeds, percentages or frame times unless asked, and without adding forecasts or alerts. The picture caption is one line. In an offline replay, replies fell from 567–887 to about 110–270 characters, with no numbers. Next: owner acceptance. [Journal 109](journey/109-plain-rain-replies.md).
 
 # Keep in-turn reasoning for Opus caching — in review, 20 October 2026
 

@@ -117,7 +117,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 20 October | [106 — Radar pictures](106-radar-pictures.md): can Merlion show the owner the rain, not just describe it? | Released in `8673bd5`: radar map and loop drawn on the host, sent after the reply; owner acceptance pending |
 | 20 October | [107 — Stable tools and effort](107-stable-tools-and-effort.md): can a fixed tool list and a steadier effort keep Opus's cache warm? | In review: every tool domain on every call (no Jev tool pick); effort raised mid-turn only after a failure or follow-up |
 | 20 October | [108 — Keep in-turn reasoning](108-keep-in-turn-reasoning.md): does keeping in-turn reasoning keep the whole Opus turn cached? | In review: Anthropic turns keep earlier steps' reasoning, so cached reads grow with the turn |
-| 21 October | [109 — Plain rain replies](109-plain-rain-replies.md): can Merlion answer about rain without a data dump? | Tested: short, plain-word rain replies and a one-line picture caption; not deployed |
+| 21 October | [109 — Plain rain replies](109-plain-rain-replies.md): can Merlion answer about rain without a data dump? | Released in `0c54f89`: short, plain-word rain replies and a one-line picture caption; owner acceptance pending |
 | 20 October | [110 — IBKR order drafts](110-ibkr-order-drafts.md): can Chief draft IBKR orders without being able to trade? | Measured IBKR scopes and flow type; drafts tested with mocked IBKR; in review |
 
 ## Coding-agent learning path

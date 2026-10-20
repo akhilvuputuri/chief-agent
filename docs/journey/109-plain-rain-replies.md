@@ -1,7 +1,7 @@
 # 109 — Plain rain replies: can Merlion answer about rain without a data dump?
 
 Work date(s): 2026-10-21. Written/revised: 2026-10-21.
-Status: tested; not deployed. Rain replies are short and in everyday words, and the radar picture's caption is one line.
+Status: released in `0c54f89` (21 October 2026); owner acceptance pending. Rain replies are short and in everyday words, and the radar picture's caption is one line.
 
 ## User-visible problem and preceding iteration
 
@@ -73,7 +73,13 @@ On 21 October, "is rain coming?" got three paragraphs. They covered:
 
 ## Verification and outcome
 
-Not deployed. Acceptance after release: the owner asks "is rain coming?" and "show me how the rain moved", and the replies should read as one or two plain sentences, with no statistics.
+Released (closure below). Pending owner acceptance: the owner asks "is rain coming?" and "show me how the rain moved", and the replies should read as one or two plain sentences, with no statistics.
+
+### Release closure — 2026-10-21
+
+- **What merged.** [PR 302](https://github.com/akhilvuputuri/chief-agent/pull/302) was squash-merged at approved head `a059f77` as `0c54f89b2c35001bd31eeccb6b89be73807bad81`. Hosted CI and Devin passed on that head.
+- **Live.** `release:status` reports success: the exact commit deployed and startup health passed. CloudWatch shows `0c54f89` logging from 18:17 UTC on 20 October (2:17 am SGT on 21 October), after `8d26783`. No migration and no Compose change.
+- **Not yet observed:** a rain reply in production under the new wording.
 
 ## Follow-up and next iteration
 

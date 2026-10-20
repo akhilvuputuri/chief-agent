@@ -1,3 +1,15 @@
+## Deployed `0c54f89` (untagged) — plain rain replies
+
+- **What merged.** [PR 302](https://github.com/akhilvuputuri/chief-agent/pull/302) merged as `0c54f89b2c35001bd31eeccb6b89be73807bad81`.
+  - Merlion's rain answers become one to three everyday sentences, with no speeds, percentages or frame times unless asked, and use the radar only.
+  - The picture caption is one line in 12-hour time, with a red dot only for a spot the owner gave.
+  - Merlion's brief keeps asked-for readings (bus minutes, PSI, lots) in every reply.
+- **Review.** Exact-head independent review (Claude Opus 5.5) approved `a059f77` after one blocking finding: the brief first applied plain wording to every domain without protecting asked-for numbers. Devin and hosted CI passed.
+- **Release.** Live at 18:17 UTC on 20 October, with `release:status` success. No migration.
+- **Not yet observed.** A production rain reply under the new wording, and replies in other Merlion domains.
+
+[Journal 109](journey/109-plain-rain-replies.md#release-closure--2026-10-21).
+
 ## Release incident — idle SSH drop during the host image build (20 October)
 
 **Symptom.** Three automatic releases in a row failed after main moved past `8673bd5`: for `11c5269` (refused by the main-branch check) and twice for `da5e7a6`, each in "Deploy and verify health" after about 4.5 minutes with `client_loop: send disconnect: Broken pipe` (exit 255). Production stayed healthy on `8673bd5`, and nothing was half-applied.
