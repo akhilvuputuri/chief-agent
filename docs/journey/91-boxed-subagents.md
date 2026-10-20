@@ -588,3 +588,17 @@ The pause was a model-provider fault, not the box. The main model also saw provi
   - The first sentence of `coding.md` is corrected.
   - The teardown runbook gives exact commands for inline and managed policies.
 - **Tests.** 299 coding and box tests pass, with 1 Docker test skipped.
+
+**Re-review of `862635f` (Claude Opus 5.5): approved.** Two of its notes were adopted:
+
+- The startup check now fails closed on a job with no image.
+- The docs say listed images must still speak the host's current box protocol.
+
+**Devin on PR 287.** Both findings are fixed:
+
+1. **Startup would block recovery of a live box.** An unrecorded launch whose image had been retired from the list would refuse startup, although the box sandbox finds its box by key. Startup now accepts such a launch when its box exists.
+   - The finding also exposed a related gap, present since phase 4a. When a box launch failed before its row was written, "not found" left cleanup pending forever and held the coding queue.
+   - Box lookups are authoritative (`authoritativeFind`), so "not found" now pauses the job with nothing to clean, or settles a pending cleanup, and the queue moves on.
+2. **Learning guide.** The coding-agent learning guide gained its entry.
+
+New tests cover both paths.

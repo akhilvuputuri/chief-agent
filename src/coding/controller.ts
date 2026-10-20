@@ -1619,6 +1619,19 @@ export class CodingController {
             [j.id, j.attempt_id, found],
           );
           j.sandbox_id = found;
+        } else if (this.provider.authoritativeFind) {
+          // The provider's own record says nothing was launched for this attempt, so there
+          // is nothing to clean up; the job pauses for the owner without blocking the queue.
+          await this.stopped(
+            j,
+            "The sandbox launch did not happen; resume to try again",
+            false,
+          );
+          await this.db.query(
+            "UPDATE coding_jobs SET cleanup='complete' WHERE id=$1 AND attempt_id=$2 AND sandbox_id IS NULL AND cleanup='pending' AND state NOT IN ('provisioning','running','publishing')",
+            [j.id, j.attempt_id],
+          );
+          return;
         } else {
           await this.stopped(
             j,

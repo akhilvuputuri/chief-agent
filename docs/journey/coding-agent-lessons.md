@@ -273,3 +273,11 @@ Evidence boundary:
 - **Not yet measured:** a real coding job on EC2, and whether boxes change completion, speed or cost.
 
 The first real attempt on EC2 (20 October) planned in a box, and the box was gone 24 seconds after the result. The same session exposed an older defect that had nothing to do with boxes. Cancelling a paused job reopened its long-finished sandbox cleanup, so the owner could not clear old jobs while anything else ran, or more than one at a time. A state flag that feeds a uniqueness constraint must change only when the thing it tracks changes ([journal 91](91-boxed-subagents.md#first-real-coding-attempt-on-ec2--20-october-2026)).
+
+CodeBuild is removed (phase 6, 20 October): coding runs only in EC2 boxes ([journal 91](91-boxed-subagents.md#phase-6-codebuild-removed--20-october-2026)).
+
+**Review defect: a job's snapshot outlived its image.** A job keeps the worker image it was created with through every round: plan approval, rebases, feedback repairs, resumes and retries. Accepting only the current image would have paused every in-flight job at the next image update. CodeBuild had silently absorbed those jobs. The coding box profile now keeps a reviewed list of earlier box-capable images, and each box starts with the job's own image. The re-pin procedure moves the old digest into that list.
+
+**Recovery defect.** A box provider's own record is authoritative, so "not found" now settles cleanup instead of holding the coding queue forever. Startup also recognises an unrecorded launch whose box exists.
+
+Lesson: when one execution path is removed, list what it quietly absorbed (old snapshots, unrecoverable states) and give each a deliberate home.

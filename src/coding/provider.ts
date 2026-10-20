@@ -28,4 +28,6 @@ export interface SandboxProvider {
   startupGraceMs?(id: string | null | undefined): number;
   /** Whether this sandbox can run the attempt at all; a refusal pauses it before launch. */
   accepts?(request: SandboxRequest): boolean;
+  /** `find` answering nothing proves nothing was launched (the provider's own record). */
+  readonly authoritativeFind?: boolean;
 }

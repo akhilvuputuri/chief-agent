@@ -320,6 +320,26 @@ test("startup needs boxes and the reviewed coding profile, and refuses while a C
     [r.jobId],
   );
   await assert.rejects(codingSandbox(base), /depends on a CodeBuild build/);
+  // Even with an image no longer listed, an unrecorded launch whose box exists is found.
+  const attempt = (
+    await f.db.query(
+      "UPDATE coding_jobs SET attempt_id=gen_random_uuid() WHERE id=$1 RETURNING attempt_id",
+      [r.jobId],
+    )
+  ).rows[0].attempt_id;
+  await f.boxes.spawn("owner", {
+    profile: "coding",
+    requestKey: `coding:${attempt}`,
+    subject: `coding:${r.jobId}`,
+  });
+  assert.ok(await codingSandbox(base));
+  await f.db.query("UPDATE boxes SET state='terminated'");
+  await f.db.query("DELETE FROM box_tasks");
+  await f.db.query("DELETE FROM box_messages");
+  await f.db.query("DELETE FROM box_events");
+  await f.db.query("DELETE FROM boxes WHERE request_key=$1", [
+    `coding:${attempt}`,
+  ]);
   // An unrecorded box launch with a listed image is reconciled by the box sandbox.
   await f.db.query(
     "UPDATE coding_jobs SET settings=jsonb_build_object('image',$2::text) WHERE id=$1",

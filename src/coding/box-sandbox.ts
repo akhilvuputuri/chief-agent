@@ -92,6 +92,8 @@ export class BoxSandbox implements SandboxProvider {
     return `${PREFIX}${box.id}`;
   }
 
+  readonly authoritativeFind = true;
+
   /** The database is the truth for boxes, so a missing row means nothing was created. */
   async find(attemptId: string) {
     const row = (
@@ -203,11 +205,16 @@ export async function codingSandbox(o: {
   const images = [profile.image, ...(profile.previousImages ?? [])];
   // A recorded CodeBuild build, or an unrecorded launch with an image no box runs (an
   // uncertain CodeBuild create), would sit in cleanup forever and block the queue.
+  // An unrecorded launch is fine when its box exists (found by its key) or when its image
+  // is one a box would have been started with (nothing found means nothing launched).
   const stranded = await o.db.query(
-    `SELECT 1 FROM coding_jobs
-     WHERE (state IN ('provisioning','running','publishing') OR cleanup='pending')
-       AND ((sandbox_id IS NOT NULL AND sandbox_id NOT LIKE 'box:%')
-         OR (sandbox_id IS NULL AND NOT (COALESCE(settings->>'image','') = ANY($1::text[]))))
+    `SELECT 1 FROM coding_jobs j
+     WHERE (j.state IN ('provisioning','running','publishing') OR j.cleanup='pending')
+       AND ((j.sandbox_id IS NOT NULL AND j.sandbox_id NOT LIKE 'box:%')
+         OR (j.sandbox_id IS NULL
+           AND NOT (COALESCE(j.settings->>'image','') = ANY($1::text[]))
+           AND NOT EXISTS (SELECT 1 FROM boxes b
+             WHERE b.profile='coding' AND b.request_key='coding:'||j.attempt_id::text)))
      LIMIT 1`,
     [images],
   );
