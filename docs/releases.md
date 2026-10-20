@@ -1,3 +1,18 @@
+## Deployed `bd2ce04` (untagged) — CodeBuild removed; coding runs only in EC2 boxes
+
+- **What merged.** [PR 287](https://github.com/akhilvuputuri/chief-agent/pull/287) merged as `bd2ce046cc71135468346fa824f59e2520e7488d`.
+- **Review.** Exact-head independent review (Claude Opus 5.5) approved it after rounds that found and fixed two problems:
+  - every in-flight job would have been refused after an image re-pin; the fix is per-job images from the profile's `previousImages`;
+  - unrecorded box launches could block startup or the queue; the fix is an authoritative box lookup.
+
+  Devin's findings were fixed, and hosted CI passed.
+
+- **Release.** Live in `bd2ce04` since 10:46 UTC on 20 October. Healthy, no startup error or warnings, and no CodeBuild code in the deployed build. No migration and no Compose change.
+- **AWS teardown, done by the owner.** The CodeBuild project, its worker role and the controller's CodeBuild policy are deleted. Read-only checks confirm they are gone, and the box IAM check still passes.
+- **Not yet measured.** A longer real coding job on EC2: the suggested medium task.
+
+[Journal 91](journey/91-boxed-subagents.md#phase-6-codebuild-removed--20-october-2026), [design](boxes.md#phase-6-codebuild-removed).
+
 ## Deployed `53a2cdb` (untagged) — cancelling paused coding jobs works again, and coding is proven on EC2
 
 - **Fix.** [PR 283](https://github.com/akhilvuputuri/chief-agent/pull/283) merged as `53a2cdb37f33cd35eb5b99c05258afde45509e6b`.
