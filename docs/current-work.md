@@ -1,3 +1,7 @@
+# Stable tools and steadier effort for caching — in review, 20 October 2026
+
+Jev's tool picks changed the tool list between messages and once mid-turn, and an effort raise mid-turn invalidated cached messages. The coordinator is now offered every available tool domain on every call, with no Jev tool pick; that is 54 tools, about 11k tokens, cheap once cached. Reasoning effort is raised mid-turn only after a failed step or an owner follow-up. See [journal 107](journey/107-stable-tools-and-effort.md).
+
 # Merlion radar pictures — tested, not deployed, 20 October 2026
 
 `sg_rain` can now send the owner a radar map or a looping animation of the window, drawn on the host over a bundled outline of Singapore's regions, with the location marked. Chief sends it on Telegram right after the text reply. It is stacked on the rain radar PR. No migration. Next: review, release, then live acceptance. [Journal 106](journey/106-radar-pictures.md), [design](singapore-open-data.md#rain-radar).
@@ -128,7 +132,7 @@ The owner wants the coding agent to commit, push, run its Argon review, mark its
 
 # Shadow decisions measure Jev's accuracy — 15 October 2026
 
-v0.3.77 (PR 234, deployed in `1ec8c4d`) keeps Jev's own routing pick on every shadowed turn and gives shadow mode its own switch, `SHADOW_DECISIONS`. The two-week review found the tool picker adding about 0.6 s per reply with little use, and routing accuracy unmeasurable until now. Next: confirm the first `version: 2` records, backfill the 38 earlier turns privately once the owner allows database access, then trial `TOOL_PICKER=off`. [Journal 88](journey/88-shadow-accuracy.md).
+v0.3.77 (PR 234, deployed in `1ec8c4d`) keeps Jev's own routing pick on every shadowed turn and gives shadow mode its own switch, `SHADOW_DECISIONS`. The two-week review found the tool picker adding about 0.6 s per reply with little use, and routing accuracy unmeasurable until now. Next: confirm the first `version: 2` records, backfill the 38 earlier turns privately once the owner allows database access, then trial `TOOL_PICKER=off`. Superseded on 20 October: `TOOL_PICKER=all` offers a fixed tool list for caching ([journal 107](journey/107-stable-tools-and-effort.md)). [Journal 88](journey/88-shadow-accuracy.md).
 
 # Pi owner-confirmed merge enablement — 15 October 2026
 

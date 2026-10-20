@@ -59,8 +59,9 @@ const schema = z.object({
   DAILY_SPREADSHEET_ID: z.string().default(""),
   OPENROUTER_API_KEY: z.string().default(""),
   AGENT_MODEL: z.string().default("openai/gpt-5.6-sol"),
-  // Jev picks the tool domains per message; "off" uses the deterministic cues.
-  TOOL_PICKER: z.enum(["jev", "off"]).default("jev"),
+  // Jev picks the tool domains per message; "off" uses the deterministic cues; "all" offers
+  // every available domain on every call, so the cached tool list never changes (journal 107).
+  TOOL_PICKER: z.enum(["jev", "off", "all"]).default("all"),
   // Shadow decisions (#127): Jev predicts beside each turn without changing it. Separate
   // from TOOL_PICKER so the picker can be turned off while measurement continues.
   SHADOW_DECISIONS: z.enum(["jev", "off"]).default("jev"),

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PGlite } from "@electric-sql/pglite";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { Assistant } from "../src/agent.js";
 import { CustomAgent } from "../src/custom-agent.js";
@@ -102,7 +102,7 @@ test("domain-limited runtime offers the core plus selected domains and lists the
   assert.ok(TOOL_DOMAINS.includes("gmail"));
 });
 
-async function fixture(model: ModelAdapter) {
+async function fixture(model: ModelAdapter, stableTools = false) {
   const pg = new PGlite();
   for (const f of [
     "001_initial",
@@ -126,6 +126,10 @@ async function fixture(model: ModelAdapter) {
     new JobTools(db, { call: async () => ({ content: "public source" }) }),
     { web: true, delegation: false },
     { ms: 900000, models: 40, tools: 100 },
+    undefined,
+    undefined,
+    undefined,
+    stableTools,
   );
   return { pg, db, assistant };
 }
@@ -343,4 +347,96 @@ test("a waiting coding job keeps coding tools offered; conversational words no l
   ]);
   for (const message of ["update my resume", "I have a promo code"])
     assert.ok(!pick(message).includes("coding"), message);
+});
+
+test("stable tools offer every available domain, identically on every call and every turn", async () => {
+  const seen: string[][] = [];
+  const f = await fixture(
+    {
+      generate: async (input) => {
+        seen.push(names(input.tools));
+        if (seen.length === 1) return call("job_list", {});
+        return text("Done.");
+      },
+    },
+    true,
+  );
+  try {
+    await f.assistant.respond("owner", "hello there");
+    await f.assistant.respond("owner", "any new email from the bank?");
+    // The same list on every call, whatever the message, including job tools nobody asked for.
+    assert.ok(seen.length >= 3);
+    for (const tools of seen) assert.deepEqual(tools, seen[0]);
+    assert.ok(seen[0]!.includes("job_list"));
+    const events = (
+      await f.db.query(
+        "SELECT type FROM events WHERE type IN ('tools.picked','tools.loaded')",
+      )
+    ).rows;
+    assert.deepEqual(events, []);
+  } finally {
+    await f.pg.close();
+  }
+});
+
+test("an owner follow-up absorbed mid-turn leaves the coordinator's stable tool list unchanged", async () => {
+  const pg = new PGlite();
+  for (const f of (await readdir(new URL("../db/", import.meta.url)))
+    .filter((name) => name.endsWith(".sql"))
+    .sort())
+    await pg.exec(
+      await readFile(new URL("../db/" + f, import.meta.url), "utf8"),
+    );
+  const db = pg as unknown as Database;
+  const seen: string[][] = [];
+  let entered!: () => void;
+  const inFirstCall = new Promise<void>((r) => (entered = r));
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  const assistant = new Assistant(
+    db,
+    new CustomAgent({
+      generate: async (input) => {
+        seen.push(names(input.tools));
+        if (seen.length === 1) {
+          entered();
+          await held;
+          return text("Stale.");
+        }
+        return text("Planned.");
+      },
+    }),
+    new JobTools(db, { call: async () => ({}) }),
+    { web: true }, // the coordinator (delegation on), as in production
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    true,
+  );
+  try {
+    const first = assistant.respondDetailed("owner", "thanks");
+    await inFirstCall;
+    // A follow-up whose cues would have loaded the jobs domain mid-turn.
+    const followUp = "and prep me for the interview at the company";
+    const id = await assistant.recordInput("owner", followUp);
+    const second = assistant.respondDetailed(
+      "owner",
+      followUp,
+      undefined,
+      undefined,
+      { id },
+    );
+    release();
+    await Promise.all([first, second]);
+    assert.ok(seen.length >= 2);
+    for (const tools of seen) assert.deepEqual(tools, seen[0]);
+    const loads = (
+      await db.query("SELECT 1 FROM events WHERE type='tools.loaded'")
+    ).rows;
+    assert.equal(loads.length, 0);
+  } finally {
+    assistant.shutdown();
+    await pg.close();
+  }
 });

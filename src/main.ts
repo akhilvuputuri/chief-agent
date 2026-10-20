@@ -772,6 +772,8 @@ const assistant = new Assistant(
         }
       })()
     : undefined,
+  // A fixed tool list keeps the cached prompt prefix stable (journal 107).
+  c.TOOL_PICKER === "all",
 );
 if (responsibilities)
   responsibilities.onInactive = (user, id) =>

@@ -23,6 +23,7 @@
   "escalation": {
     "firstStep": 3,
     "every": 3,
-    "onFailure": true
+    "onFailure": true,
+    "periodic": false
   }
 }
