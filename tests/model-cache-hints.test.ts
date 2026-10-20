@@ -29,11 +29,21 @@ async function sent(model: string) {
   return body;
 }
 
-test("Anthropic requests mark the whole prefix and the last message before the state line", async () => {
+test("Anthropic requests mark the prefix, the opening system message and the last message before the state line", async () => {
   const body = await sent("anthropic/claude-opus-5.5");
   assert.deepEqual(body.cache_control, { type: "ephemeral" });
   assert.deepEqual(body.messages, [
-    messages[0],
+    // The stable opening system message gets its own entry.
+    {
+      role: "system",
+      content: [
+        {
+          type: "text",
+          text: "Stable instructions",
+          cache_control: { type: "ephemeral" },
+        },
+      ],
+    },
     {
       role: "user",
       content: [
@@ -110,4 +120,46 @@ test("other providers' requests are unchanged", async () => {
   assert.deepEqual(cacheHints("google/gemini-3.8-flash", parts), {
     messages: parts,
   });
+});
+
+test("in an Anthropic tool loop the owner's message keeps its own entry as later groups change", () => {
+  const loop: ModelMessage[] = [
+    { role: "system", content: "Stable instructions" },
+    { role: "system", content: "Turn summary" },
+    { role: "user", content: "Check my parcels" },
+    {
+      role: "assistant",
+      content: null,
+      tool_calls: [
+        {
+          id: "c1",
+          type: "function",
+          function: { name: "agent_run", arguments: "{}" },
+        },
+      ],
+    },
+    { role: "tool", tool_call_id: "c1", content: '{"result":"ok"}' },
+    { role: "system", content: "Current state: 10:00:01" },
+  ];
+  const hinted = cacheHints("anthropic/claude-opus-5.5", loop).messages;
+  const marked = hinted.flatMap((m, i) =>
+    Array.isArray(m.content) &&
+    m.content.some((p) => p.type === "text" && p.cache_control)
+      ? [i]
+      : [],
+  );
+  // System, owner and latest result: three explicit entries plus the top-level one.
+  assert.deepEqual(marked, [0, 2, 4]);
+  assert.equal(hinted[1], loop[1]);
+  assert.equal(hinted[5], loop[5]);
+});
+
+test("runtime parts record sizes per key, never values", async () => {
+  const { runtimeParts } = await import("../src/custom-agent.js");
+  assert.deepEqual(runtimeParts(JSON.stringify({ a: "secret", b: [1, 2] })), {
+    a: 8,
+    b: 5,
+  });
+  assert.equal(runtimeParts("not json"), undefined);
+  assert.equal(runtimeParts(JSON.stringify([1])), undefined);
 });

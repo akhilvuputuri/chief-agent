@@ -118,10 +118,27 @@ export function cacheHints(model: string, messages: ModelMessage[]) {
         : messages.length - 1;
     let index = end;
     while (index >= 0 && !marked(messages[index]!)) index--;
-    return {
-      cache_control: { type: "ephemeral" as const },
-      messages: at(index) ?? messages,
-    };
+    // The owner's current message never changes during a turn. Production (20 October)
+    // showed later calls missing entirely once parallel tool results put the previous
+    // entry beyond Anthropic's 20-block lookback; a fixed mark here keeps tools,
+    // instructions, history and the message readable on every later call of the turn.
+    const owner = messages.findLastIndex(
+      (m, i) => m.role === "user" && i <= end && i !== index && !!marked(m),
+    );
+    let hinted = at(index) ?? messages;
+    if (owner >= 0)
+      hinted = hinted.map((m, i) => (i === owner ? marked(m)! : m));
+    // The opening system message (instructions and memories) also gets an entry: it survives
+    // a change of reasoning effort, which invalidates every cached message. That is four
+    // breakpoints with the top-level one, Anthropic's maximum.
+    if (
+      messages[0]?.role === "system" &&
+      index !== 0 &&
+      owner !== 0 &&
+      marked(messages[0])
+    )
+      hinted = hinted.map((m, i) => (i === 0 ? marked(m)! : m));
+    return { cache_control: { type: "ephemeral" as const }, messages: hinted };
   }
   if (model.startsWith("google/") && messages[0]?.role === "system")
     return { messages: at(0) ?? messages };

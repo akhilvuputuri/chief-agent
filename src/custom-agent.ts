@@ -65,6 +65,22 @@ export function omitImages(messages: ModelMessage[]) {
       : m,
   );
 }
+/** Character size of each top-level runtime-context key; never the values themselves. */
+export function runtimeParts(context: string | undefined) {
+  try {
+    const parsed = JSON.parse(context ?? "");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      return undefined;
+    return Object.fromEntries(
+      Object.entries(parsed).map(([key, value]) => [
+        key,
+        JSON.stringify(value)?.length ?? 0,
+      ]),
+    );
+  } catch {
+    return undefined;
+  }
+}
 export class CustomAgent implements Agent {
   constructor(
     private model: ModelAdapter,
@@ -275,6 +291,8 @@ export class CustomAgent implements Agent {
             await execution.trace("context.selected", {
               fixedSize: input.fixedSize,
               fixedParts: input.fixedParts,
+              // Sizes only (characters per top-level key), for measuring the runtime state.
+              runtimeParts: runtimeParts(req.runtime?.context),
               reservedSize: input.reservedSize,
               exchangeSize: input.exchangeSize,
               workingSize: input.workingSize,
