@@ -211,7 +211,8 @@ export function clock(ms: number) {
 }
 
 /** One frame as palette indices: map, rain, coastline, marker, time and progress. */
-function draw(c: Canvas, f: Frame, p: Point, progress?: number) {
+/** `p` is the location to mark; without one, no marker is drawn. */
+function draw(c: Canvas, f: Frame, p: Point | undefined, progress?: number) {
   const base = baseMap(c);
   const pixels = Uint8Array.from(base);
   const d = f.detail;
@@ -247,7 +248,7 @@ function draw(c: Canvas, f: Frame, p: Point, progress?: number) {
       }
     }
   }
-  marker(pixels, c, p);
+  if (p) marker(pixels, c, p);
   label(pixels, c, clock(f.time));
   if (progress !== undefined) {
     const h = Math.max(4, Math.round(c.width / 160));
@@ -420,7 +421,11 @@ export interface RadarPicture {
 }
 
 /** The newest frame as a PNG map with the location marked. */
-export function radarMap(frame: Frame, p: Point, width = 960): RadarPicture {
+export function radarMap(
+  frame: Frame,
+  p: Point | undefined,
+  width = 960,
+): RadarPicture {
   const c = canvas(width);
   return {
     kind: "photo",
@@ -435,7 +440,7 @@ export function radarMap(frame: Frame, p: Point, width = 960): RadarPicture {
 /** Frames (newest first, as RadarFrames returns them) as a looping GIF, oldest first. */
 export function radarAnimation(
   frames: Frame[],
-  p: Point,
+  p: Point | undefined,
   width = 720,
 ): RadarPicture {
   const c = canvas(width);

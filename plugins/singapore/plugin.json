@@ -1,7 +1,7 @@
 {
   "format": "companion.plugin/v1",
   "id": "singapore",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Singapore government open data: NEA weather and air quality, PUB flood alerts, carparks, cameras, public holidays and hawker closures from data.gov.sg, and bus, MRT and traffic from LTA DataMall.",
   "agents": [
     {

@@ -4,7 +4,15 @@ import { DataGov } from "./datagov.js";
 import { DataMall } from "./datamall.js";
 import { Places } from "./places.js";
 import { ISLAND, RadarFrames, analyse, inFrame, type Frame } from "./radar.js";
-import { clock, radarAnimation, radarMap } from "./radar-image.js";
+import { radarAnimation, radarMap } from "./radar-image.js";
+
+/** "11:05 pm" in Singapore time. */
+function twelveHour(ms: number) {
+  const d = new Date(ms + 8 * 3600_000);
+  const h = d.getUTCHours();
+  const m = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${h % 12 || 12}:${m} ${h < 12 ? "am" : "pm"}`;
+}
 import type { MediaOutbox } from "../media-outbox.js";
 import { SgBusyError, SgHttp, type SgHttpOptions } from "./http.js";
 import type { SingaporeAction } from "./schema.js";
@@ -104,7 +112,7 @@ export class SingaporeTools {
   private picture(
     kind: "none" | "map" | "animation" | undefined,
     frames: Frame[],
-    place: { lat: number; lon: number; label: string },
+    place: { lat: number; lon: number; label: string; source: string },
     run: string | undefined,
   ) {
     if (!kind || kind === "none") return {};
@@ -115,34 +123,38 @@ export class SingaporeTools {
           note: "Pictures cannot be sent here.",
         },
       };
-    const picture =
-      kind === "animation" && frames.length > 1
-        ? radarAnimation(frames, place)
-        : radarMap(frames[0]!, place);
-    // Times from the frames' instants, as the picture labels them.
-    const span =
-      picture.kind === "animation"
-        ? `${clock(frames[frames.length - 1]!.time).slice(0, 5)}–${clock(frames[0]!.time)}`
-        : clock(frames[0]!.time);
+    // Mark only a location the owner gave; the all-Singapore default has no dot.
+    const given = place.source !== "default";
     const shown =
+      given &&
       place.lat > ISLAND.south &&
       place.lat < ISLAND.north &&
       place.lon > ISLAND.west &&
       place.lon < ISLAND.east;
+    const mark = shown ? place : undefined;
+    const picture =
+      kind === "animation" && frames.length > 1
+        ? radarAnimation(frames, mark)
+        : radarMap(frames[0]!, mark);
+    // A short caption in the same 12-hour time the reply uses.
+    const span =
+      picture.kind === "animation"
+        ? `${twelveHour(frames[frames.length - 1]!.time)} – ${twelveHour(frames[0]!.time)}`
+        : twelveHour(frames[0]!.time);
+    const where = shown
+      ? ` Red dot: ${place.source === "coordinates" ? "your location" : place.label}.`
+      : "";
     this.media.put(run, {
       kind: picture.kind,
       bytes: picture.bytes,
       filename: picture.filename,
-      caption: `Rain radar ${span}, ${shown ? `${place.label} marked` : `${place.label} is outside the picture`}. Teal light, green moderate, yellow heavy, orange to magenta very heavy. Johor is not drawn. Radar: NEA; map: URA region boundaries; via data.gov.sg, Singapore Open Data Licence.`,
+      caption: `Rain radar, ${span}.${where}\nNEA radar, URA map, via data.gov.sg (Singapore Open Data Licence)`,
     });
     return {
       picture: {
         status: "queued",
         kind: picture.kind,
-        frames: picture.frames,
-        note: shown
-          ? "Sent to the owner right after your reply; refer to it briefly instead of describing every frame."
-          : "Sent to the owner right after your reply; it shows Singapore only, so the location is not marked.",
+        note: 'Sent right after your reply. Say only that it follows, for example "The radar loop follows." Do not describe how it is sent.',
       },
     };
   }

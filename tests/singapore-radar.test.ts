@@ -238,7 +238,7 @@ test("rain sitting over the location is reported with its history, and calm air 
   assert.equal(r.now.atLocation, "very heavy");
   assert.equal(r.now.within5km.rainPct > 50, true);
   assert.equal(r.atLocationHistory.rainedForAboutMinutes, 30);
-  assert.equal(r.movement.recent.summary, "nearly stationary");
+  assert.equal(r.movement.recent.summary, "barely moving");
   assert.equal(r.outlook.estimate, null);
   const dry: any = analyse([frame(0, 500)], POINT, 50, NOW);
   assert.equal(dry.now.nearestRain, null);
