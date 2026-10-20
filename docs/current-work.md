@@ -16,7 +16,7 @@ Jev's tool picks changed the tool list between messages and once mid-turn, and a
 
 # IBKR order drafts — in review, 20 October 2026
 
-Chief can draft IBKR orders that the owner reviews and submits in an IBKR app; it cannot place, change or cancel an order. Drafts are US shares only, at most USD 100 each, and only in IBKR's review-and-approve mode; Chief refuses IBKR's direct-order scope. A separate brokerage agent also answers read-only IBKR lookups. No migration or Compose change. Holdings acceptance from journal 59 is recorded: connected 15 October, matched, scheduled syncs measured; revocation untested. Next: review, release, then the owner reconnects and drafts a test order. [Journal 107](journey/107-ibkr-order-drafts.md), [design](ibkr-portfolio.md#order-drafts).
+Chief can draft IBKR orders that the owner reviews and submits in an IBKR app; it cannot place, change or cancel an order. Drafts are US shares only, at most USD 100 each, and only in IBKR's review-and-approve mode; Chief refuses IBKR's direct-order scope. A separate brokerage agent also answers read-only IBKR lookups. No migration or Compose change. Holdings acceptance from journal 59 is recorded: connected 15 October, matched, scheduled syncs measured; revocation untested. Next: review, release, then the owner reconnects and drafts a test order. [Journal 108](journey/108-ibkr-order-drafts.md), [design](ibkr-portfolio.md#order-drafts).
 
 # Opus cache misses in production — in review, 20 October 2026
 

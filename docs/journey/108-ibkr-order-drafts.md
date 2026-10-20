@@ -1,4 +1,4 @@
-# 107 — Can Chief draft IBKR orders without being able to trade?
+# 108 — Can Chief draft IBKR orders without being able to trade?
 
 Work date: 2026-10-20. Written: 2026-10-20.
 Status: in review. Order drafts are implemented and tested with mocked IBKR; not deployed. Owner acceptance pending.

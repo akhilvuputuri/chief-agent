@@ -89,4 +89,4 @@ The remaining Phase 0 measurements are any absolute refresh-token lifetime beyon
 - **Reported by the owner:** holdings matched the IBKR app, and Chief's holdings answer looked right.
 - **Measured: scheduled refresh and restart recovery.** Every 4-hourly sync on 19–20 October completed, across at least five release SHAs.
 - **Pending:** the revocation test.
-- **Next:** [107 — IBKR order drafts](107-ibkr-order-drafts.md).
+- **Next:** [108 — IBKR order drafts](108-ibkr-order-drafts.md).
