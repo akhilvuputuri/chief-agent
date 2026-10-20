@@ -1,4 +1,6 @@
 import { InputFile } from "grammy";
+import { MediaOutbox } from "./media-outbox.js";
+import { sendRunMedia } from "./telegram-media.js";
 import { sendCodingDelivery } from "./coding/delivery.js";
 import { selectCodingBackend } from "./coding/backend.js";
 import { randomUUID } from "node:crypto";
@@ -283,9 +285,12 @@ if (c.MARKET_DATA_PROVIDER === "twelvedata" && !c.TWELVE_DATA_API_KEY)
     "MARKET_DATA_PROVIDER=twelvedata requires TWELVE_DATA_API_KEY",
   );
 // Read-only Singapore open data; DataMall tools appear only with its account key.
+// Pictures tools make (radar maps) wait here until the reply for their run is sent.
+const media = new MediaOutbox();
 const singapore = new SingaporeTools({
   dataGovKey: c.DATAGOVSG_API_KEY || undefined,
   dataMallKey: c.LTA_DATAMALL_ACCOUNT_KEY || undefined,
+  media,
 });
 const parser = new ScheduleParser();
 // Editions are plain text with link previews off; Save buttons carry item ids.
@@ -783,7 +788,7 @@ const app = server(
       }
     : undefined,
 );
-const bot = telegram(c, assistant, db);
+const bot = telegram(c, assistant, db, media);
 if (coding) await codingApi(app, coding);
 if (boxes) await (await import("./boxes/api.js")).boxApi(app, boxes);
 if (portfolio) {
@@ -906,6 +911,11 @@ async function sendWorkMessage(user: string, text: string | Delivery) {
         },
         typeof text === "string" ? "progress" : "answer",
       );
+      // Pictures a background run queued (radar maps) follow its reply in the same thread.
+      if (delivery.runId && typeof text !== "string")
+        await sendRunMedia(bot.api, db, media, user, delivery.runId, {
+          message_thread_id: extra.message_thread_id,
+        });
       if (delivery.runId && typeof text !== "string") {
         const sent = (
           await db.query(

@@ -40,6 +40,8 @@ import { randomUUID } from "node:crypto";
 import type { Config } from "./config.js";
 import type { Assistant } from "./agent.js";
 import type { Database } from "./db.js";
+import type { MediaOutbox } from "./media-outbox.js";
+import { sendRunMedia } from "./telegram-media.js";
 import { ensureUser, event } from "./db.js";
 import { allowedChat, SerialQueue } from "./security.js";
 import { Voice, boundedBytes } from "./providers.js";
@@ -55,7 +57,12 @@ import {
   validFilePath,
 } from "./attachments.js";
 import type { ImageAttachment } from "./protocol.js";
-export function telegram(c: Config, assistant: Assistant, db: Database) {
+export function telegram(
+  c: Config,
+  assistant: Assistant,
+  db: Database,
+  media?: MediaOutbox,
+) {
   const bot = new Bot(c.TELEGRAM_BOT_TOKEN);
   const views = new TelegramViews(db, bot.api, undefined, c.MINIAPP_ORIGIN);
   // One topics helper for the process: inbound lookups here, sends and creation in main.ts.
@@ -1214,6 +1221,18 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
                   "answer",
                   deliveryGuard,
                 );
+                // Pictures a tool queued for this run (radar maps) follow the
+                // text in the same place, including a fallback to General.
+                if (reply.runId)
+                  await sendRunMedia(
+                    bot.api,
+                    db,
+                    media,
+                    user,
+                    reply.runId,
+                    extra,
+                    deliveryGuard,
+                  );
               },
             );
           if (reply.reply && reply.runId)

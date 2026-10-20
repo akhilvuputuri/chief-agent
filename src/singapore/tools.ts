@@ -3,7 +3,9 @@ import { Carparks } from "./carparks.js";
 import { DataGov } from "./datagov.js";
 import { DataMall } from "./datamall.js";
 import { Places } from "./places.js";
-import { RadarFrames, analyse, inFrame } from "./radar.js";
+import { ISLAND, RadarFrames, analyse, inFrame, type Frame } from "./radar.js";
+import { clock, radarAnimation, radarMap } from "./radar-image.js";
+import type { MediaOutbox } from "../media-outbox.js";
 import { SgBusyError, SgHttp, type SgHttpOptions } from "./http.js";
 import type { SingaporeAction } from "./schema.js";
 
@@ -19,7 +21,9 @@ export class SingaporeTools {
   readonly places: Places;
   private readonly keyedDataGov: boolean;
   private readonly now: () => number;
-  constructor(options: SgHttpOptions = {}) {
+  /** Where radar pictures wait for the reply; without it, pictures are unavailable. */
+  readonly media?: MediaOutbox;
+  constructor(options: SgHttpOptions & { media?: MediaOutbox } = {}) {
     const now = options.now ?? Date.now;
     const http = new SgHttp(options);
     this.dataGov = new DataGov(http, now);
@@ -29,13 +33,15 @@ export class SingaporeTools {
     this.places = new Places(http, this.dataGov);
     this.keyedDataGov = !!options.dataGovKey;
     this.now = now;
+    this.media = options.media;
   }
   get dataMallConfigured() {
     return this.dataMall.configured;
   }
-  async call(a: SingaporeAction) {
+  /** `run` is the calling run, so a picture reaches the reply for that run. */
+  async call(a: SingaporeAction, context: { run?: string } = {}) {
     try {
-      return await this.dispatch(a);
+      return await this.dispatch(a, context);
     } catch (error) {
       // A throttled or failing provider is an answer, not a crash: tell the owner to retry shortly.
       if (error instanceof SgBusyError)
@@ -49,7 +55,10 @@ export class SingaporeTools {
       throw error;
     }
   }
-  private async rain(a: Extract<SingaporeAction, { operation: "sg_rain" }>) {
+  private async rain(
+    a: Extract<SingaporeAction, { operation: "sg_rain" }>,
+    context: { run?: string },
+  ) {
     const place = await this.places.resolve(a);
     const hours = a.hours ?? 1;
     const step = a.stepMinutes ?? (hours <= 1 ? 5 : hours <= 3 ? 10 : 15);
@@ -77,6 +86,7 @@ export class SingaporeTools {
         this.now(),
         stepMinutes,
       ),
+      ...this.picture(a.picture, frames, place, context.run),
       // Frames the provider did not return; history between samples is unknown.
       ...(frames.length < Math.floor((hours * 60) / stepMinutes) + 1
         ? {
@@ -90,7 +100,53 @@ export class SingaporeTools {
         "Contains information from data.gov.sg (NEA rain radar) under the Singapore Open Data Licence v1.0 (https://data.gov.sg/open-data-licence).",
     };
   }
-  private dispatch(a: SingaporeAction) {
+  /** Renders and queues a radar picture; the result tells the agent what will be sent. */
+  private picture(
+    kind: "none" | "map" | "animation" | undefined,
+    frames: Frame[],
+    place: { lat: number; lon: number; label: string },
+    run: string | undefined,
+  ) {
+    if (!kind || kind === "none") return {};
+    if (!this.media || !run)
+      return {
+        picture: {
+          status: "unavailable",
+          note: "Pictures cannot be sent here.",
+        },
+      };
+    const picture =
+      kind === "animation" && frames.length > 1
+        ? radarAnimation(frames, place)
+        : radarMap(frames[0]!, place);
+    // Times from the frames' instants, as the picture labels them.
+    const span =
+      picture.kind === "animation"
+        ? `${clock(frames[frames.length - 1]!.time).slice(0, 5)}–${clock(frames[0]!.time)}`
+        : clock(frames[0]!.time);
+    const shown =
+      place.lat > ISLAND.south &&
+      place.lat < ISLAND.north &&
+      place.lon > ISLAND.west &&
+      place.lon < ISLAND.east;
+    this.media.put(run, {
+      kind: picture.kind,
+      bytes: picture.bytes,
+      filename: picture.filename,
+      caption: `Rain radar ${span}, ${shown ? `${place.label} marked` : `${place.label} is outside the picture`}. Teal light, green moderate, yellow heavy, orange to magenta very heavy. Johor is not drawn. Radar: NEA; map: URA region boundaries; via data.gov.sg, Singapore Open Data Licence.`,
+    });
+    return {
+      picture: {
+        status: "queued",
+        kind: picture.kind,
+        frames: picture.frames,
+        note: shown
+          ? "Sent to the owner right after your reply; refer to it briefly instead of describing every frame."
+          : "Sent to the owner right after your reply; it shows Singapore only, so the location is not marked.",
+      },
+    };
+  }
+  private dispatch(a: SingaporeAction, context: { run?: string }) {
     switch (a.operation) {
       case "sg_weather":
         return this.dataGov.weather(a.region, a.outlook ?? false);
@@ -113,7 +169,7 @@ export class SingaporeTools {
       case "sg_dataset":
         return this.dataGov.dataset(a);
       case "sg_rain":
-        return this.rain(a);
+        return this.rain(a, context);
       case "lta_bus_arrival":
       case "lta_bus_stops":
       case "lta_train_alerts":
