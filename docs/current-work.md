@@ -86,7 +86,7 @@ Retention termination (24 hours after the stop) is being watched.
 - the review passed and Chief published PR 285;
 - every box was terminated after its attempt.
 
-The cancel fix (`53a2cdb`, live in `97776fa`) lets the old paused jobs be cancelled. Next: cancel the old CodeBuild-era jobs, then phase 6 (remove CodeBuild), and phases 4b and 4c.
+The cancel fix (`53a2cdb`, live in `97776fa`) let the ten old paused jobs be cancelled on 20 October. Phase 6, removing CodeBuild from the code, is in review; the owner then deletes the CodeBuild stack and policy (see the design). After that: phases 4b and 4c.
 
 [Design](boxes.md), [journal 91](journey/91-boxed-subagents.md), [release records](releases.md).
 

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { BoxController } from "../src/boxes/controller.js";
 import { FakeBoxProvider } from "../src/boxes/provider.js";
 import { codingSettings } from "../src/coding/schema.js";
-import { BoxSandbox, RoutedSandbox } from "../src/coding/box-sandbox.js";
+import { BoxSandbox } from "../src/coding/box-sandbox.js";
 import { fixture, settings } from "./helpers/coding-fixture.js";
 
 test("a coding attempt in a box: the controller pauses a worker that exited as transient (sandbox_stopped) and cleans up only once the box is gone", async (t) => {
@@ -36,7 +36,7 @@ test("a coding attempt in a box: the controller pauses a worker that exited as t
         () => now,
         { pollMs: 0, hostGraceMs: 0 },
       );
-      return new RoutedSandbox(new BoxSandbox(db, boxes, "coding", pi.image!));
+      return new BoxSandbox(db, boxes, "coding", pi.image!);
     },
   });
   const job = await f.start();
@@ -97,4 +97,57 @@ test("a coding attempt in a box: the controller pauses a worker that exited as t
   assert.equal(paused.cause, "sandbox_stopped");
   await f.c.tick();
   assert.equal((await f.row(job.id)).cleanup, "complete");
+});
+
+test("a job prepared for a worker that no longer runs is paused before launch and frees the queue", async (t) => {
+  const pi = codingSettings.parse({ ...settings, runtime: "pi" });
+  const provider = new FakeBoxProvider({ canStop: true });
+  const current = `ghcr.io/example/coding@sha256:${"e".repeat(64)}`;
+  const f = await fixture(t, {
+    settings: pi,
+    provider: (db) =>
+      new BoxSandbox(
+        db,
+        new BoxController(
+          db,
+          {
+            environment: "test",
+            profiles: {
+              coding: {
+                provider: "fake",
+                image: current,
+                idleTtlMinutes: 15,
+                retentionHours: 0,
+                hardMaxHours: 3,
+                absoluteDays: 1,
+                concurrency: 1,
+              },
+            },
+          },
+          { fake: provider },
+          "b".repeat(64),
+          "https://coding.example.com",
+        ),
+        "coding",
+        current,
+      ),
+  });
+  const job = await f.start();
+  await f.c.tick();
+  const j = await f.row(job.id);
+  assert.equal(j.state, "paused");
+  assert.match(
+    j.summary,
+    /no longer runs \(CodeBuild\); start a new coding job/,
+  );
+  assert.equal(j.cleanup, "none");
+  assert.equal(j.sandbox_id, null);
+  assert.equal(
+    (await f.db.query("SELECT count(*)::int AS n FROM boxes")).rows[0].n,
+    0,
+  );
+  // Nothing holds the single coding slot, so another job can be claimed.
+  const next = await f.start("next");
+  await f.c.tick();
+  assert.equal((await f.row(next.id)).state, "paused");
 });

@@ -41,11 +41,7 @@ import {
   validateFiles,
   canonicalJson,
 } from "../../src/coding/github.js";
-import {
-  CodeBuildSandbox,
-  SandboxTimeoutMismatch,
-  SandboxAcknowledgementPending,
-} from "../../src/coding/provider.js";
+import { SandboxAcknowledgementPending } from "../../src/coding/provider.js";
 import { Workspace } from "../../src/coding/workspace.js";
 import { codingLoop } from "../../src/coding/loop.js";
 import {

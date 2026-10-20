@@ -42,8 +42,8 @@ import {
 } from "./github.js";
 import {
   SandboxAcknowledgementPending,
-  SandboxTimeoutMismatch,
   type SandboxProvider,
+  type SandboxRequest,
 } from "./provider.js";
 import { scrubTrace } from "../trace-scrub.js";
 import { seal, open } from "../secret-box.js";
@@ -1570,7 +1570,7 @@ export class CodingController {
             );
             return;
           }
-          const id = await this.provider.create({
+          const request: SandboxRequest = {
             jobId: j.id,
             attemptId: j.attempt_id,
             token: this.token(j.id, j.attempt_id),
@@ -1581,43 +1581,37 @@ export class CodingController {
               5,
               Math.ceil(this.activeMs(j) / 60000) + 5,
             ),
-          });
+          };
+          // A job snapshotted with a worker image no sandbox runs any more (CodeBuild-era)
+          // is paused before anything is launched, so it never blocks the queue.
+          if (this.provider.accepts && !this.provider.accepts(request)) {
+            await this.stopped(
+              j,
+              "This job was prepared for a coding worker that no longer runs (CodeBuild); start a new coding job to continue",
+              false,
+            );
+            return;
+          }
+          const id = await this.provider.create(request);
           await this.db.query(
             "UPDATE coding_jobs SET sandbox_id=$3 WHERE id=$1 AND attempt_id=$2",
             [j.id, j.attempt_id, id],
           );
-        } catch (error) {
-          if (error instanceof SandboxTimeoutMismatch) {
-            // Preserve the created identity and revoke dispatch atomically.
-            await this.stopped(j, error.message, true, error.sandboxId);
-          } else {
-            await this.stopped(
-              j,
-              "Sandbox provisioning acknowledgement is uncertain; reconciling before any new attempt",
-            );
-          }
+        } catch {
+          await this.stopped(
+            j,
+            "Sandbox provisioning acknowledgement is uncertain; reconciling before any new attempt",
+          );
         }
         return;
       }
       if (!j.sandbox_id) {
-        let found: string | undefined;
-        try {
-          found = await this.provider.find(
-            j.attempt_id,
-            active.includes(j.state)
-              ? Math.max(5, Math.ceil(this.activeMs(j) / 60000) + 5)
-              : undefined,
-          );
-        } catch (error) {
-          if (
-            error instanceof SandboxTimeoutMismatch &&
-            active.includes(j.state)
-          ) {
-            await this.stopped(j, error.message, true, error.sandboxId);
-            return;
-          }
-          throw error;
-        }
+        const found = await this.provider.find(
+          j.attempt_id,
+          active.includes(j.state)
+            ? Math.max(5, Math.ceil(this.activeMs(j) / 60000) + 5)
+            : undefined,
+        );
         if (found) {
           await this.db.query(
             "UPDATE coding_jobs SET sandbox_id=$3 WHERE id=$1 AND attempt_id=$2",

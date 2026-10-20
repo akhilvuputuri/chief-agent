@@ -562,3 +562,18 @@ The pause was a model-provider fault, not the box. The main model also saw provi
 - **Fix.** Cancel now reopens cleanup only for an attempt that is actually running (provisioning, running or publishing).
 - **Regression test.** It cancels two cleaned-up paused jobs and one that never had a sandbox while another attempt runs. It fails without the fix with the production error.
 - **Release.** [PR 283](https://github.com/akhilvuputuri/chief-agent/pull/283) passed exact-head independent review (Claude Opus 5.5), hosted CI and Devin. It merged as `53a2cdb` and went live in `97776fa` (healthy).
+
+**Rebase rounds on EC2 (measured, 20 October).** After PR 285 opened, main moved twice: to `53a2cdb`, then `97776fa`. Each time Chief re-applied the approved change in a fresh box: `f6992faf` at 05:46–06:08 and `09d24cc1` at 06:26–06:45. Each first reported about 93–95 s after launch, passed its checks and exited 0, and the PR was updated. The owner merged PR 285 at 07:12 from the merge card. This is the cost phase 4b's warm reuse would cut: about 1.5 minutes of boot and roughly 18 minutes of checks per round, in a new machine each time.
+
+### Phase 6: CodeBuild removed — 20 October 2026
+
+**Cancelling the old jobs.** At the owner's request, the ten old paused jobs were cancelled from the operator shell. Each update ran the controller's own (fixed) cancel statement, limited to those IDs and to jobs still paused and unpublished. All ten became `cancelled` with cleanup `complete`, and the standard "cancelled" notice was queued for each.
+
+**Code.** Implemented and tested; in review.
+
+- The CodeBuild sandbox, its SDK dependency, timeout-confirmation handling and the `sandbox` switch are removed. Coding requires boxes and the reviewed `coding` profile.
+- Startup is refused while an attempt depends on a CodeBuild build.
+- A job snapshotted with a pre-box image (three old `plan_ready` plans and PR 232's job) is paused before launch with "start a new coding job", so it frees the queue.
+- **Tests.** The CodeBuild-only tests (buildspec, timeouts, build states, Python launcher) are removed. New tests cover the startup checks, the old-image refusal at the controller, and the box sandbox's acceptance rule. 297 coding and box tests pass, with 1 Docker test skipped.
+
+**AWS teardown** is an owner step after release; see the [design](../boxes.md#phase-6-codebuild-removed).

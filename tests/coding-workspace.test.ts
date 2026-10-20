@@ -41,11 +41,7 @@ import {
   validateFiles,
   canonicalJson,
 } from "../src/coding/github.js";
-import {
-  CodeBuildSandbox,
-  SandboxTimeoutMismatch,
-  SandboxAcknowledgementPending,
-} from "../src/coding/provider.js";
+import { SandboxAcknowledgementPending } from "../src/coding/provider.js";
 import { Workspace } from "../src/coding/workspace.js";
 import { codingLoop } from "../src/coding/loop.js";
 import {
@@ -66,52 +62,6 @@ import {
   fixture,
   requirementBrief,
 } from "./helpers/coding-fixture.js";
-test("CodeBuild identifies a timed-out BUILD even when the overall build status is FAILED", async () => {
-  const p = new CodeBuildSandbox(
-    {
-      send: async () => ({
-        builds: [
-          {
-            buildStatus: "FAILED",
-            timeoutInMinutes: 45,
-            phases: [{ phaseType: "BUILD", phaseStatus: "TIMED_OUT" }],
-          },
-        ],
-      }),
-    } as any,
-    "fixture-project",
-  );
-  assert.match(
-    (await p.terminalReason("fixture:timedout"))!,
-    /45-minute build timeout/,
-  );
-});
-test("provider queue or phase-unknown timeouts do not claim the build allocation elapsed", async () => {
-  for (const phases of [
-    [{ phaseType: "QUEUED", phaseStatus: "TIMED_OUT" }],
-    undefined,
-  ]) {
-    const p = new CodeBuildSandbox(
-      {
-        send: async () => ({
-          builds: [
-            {
-              buildStatus: "TIMED_OUT",
-              timeoutInMinutes: 125,
-              queuedTimeoutInMinutes: 5,
-              phases,
-            },
-          ],
-        }),
-      } as any,
-      "fixture-project",
-    );
-    const reason = await p.terminalReason("fixture:queue");
-    assert(reason?.includes("timed out"));
-    assert(!reason.includes("125"));
-    if (phases) assert(reason.includes("queue"));
-  }
-});
 test("workspace rejects traversal and symlinks, captures new/deleted files and kills commands on cancellation", async () => {
   const root = await mkdtemp(join(tmpdir(), "chief-workspace-test-"));
   const stop = new AbortController(),

@@ -44,13 +44,11 @@ export class BoxSandbox implements SandboxProvider {
     private boxes: BoxController,
     readonly profile: string,
     readonly image: string,
-    /** Whether new attempts may start here; existing box attempts are always served. */
-    readonly acceptNew = true,
   ) {}
 
-  /** Whether this sandbox runs the attempt; older images stay on the previous provider. */
+  /** Whether this sandbox runs the attempt: the Pi runtime with the coding profile's image. */
   accepts(r: SandboxRequest) {
-    return this.acceptNew && r.runtime === "pi" && r.image === this.image;
+    return r.runtime === "pi" && r.image === this.image;
   }
 
   owns(id: string) {
@@ -173,113 +171,36 @@ export class BoxSandbox implements SandboxProvider {
 }
 
 /**
- * Sends new attempts to the box sandbox when it accepts them and to the previous provider
- * otherwise; existing sandbox IDs keep the provider that created them.
- */
-export class RoutedSandbox implements SandboxProvider {
-  constructor(
-    private boxes: BoxSandbox,
-    private fallback?: SandboxProvider,
-  ) {}
-
-  private other() {
-    if (!this.fallback)
-      throw new Error(
-        "This attempt needs a sandbox provider that is not configured",
-      );
-    return this.fallback;
-  }
-
-  private by(id: string) {
-    return this.boxes.owns(id) ? this.boxes : this.other();
-  }
-
-  startupGraceMs(id: string | null | undefined) {
-    return id && this.boxes.owns(id) ? this.boxes.startupGraceMs() : 0;
-  }
-
-  async create(r: SandboxRequest) {
-    return this.boxes.accepts(r)
-      ? this.boxes.create(r)
-      : this.other().create(r);
-  }
-
-  async find(attemptId: string, timeoutMinutes?: number) {
-    return (
-      (await this.boxes.find(attemptId)) ??
-      (this.fallback
-        ? this.fallback.find(attemptId, timeoutMinutes)
-        : undefined)
-    );
-  }
-
-  async inspect(id: string) {
-    return this.by(id).inspect(id);
-  }
-
-  async terminate(id: string) {
-    return this.by(id).terminate(id);
-  }
-
-  async terminalReason(id: string) {
-    const provider = this.by(id);
-    return provider.terminalReason ? provider.terminalReason(id) : undefined;
-  }
-}
-
-/**
- * Chooses the coding sandbox at startup. Whenever a coding box profile exists, box attempts
- * stay routable, so switching new attempts back to CodeBuild never strands one; without
- * it, startup is refused while any attempt still depends on a box.
+ * Chooses the coding sandbox at startup. Coding runs only in EC2 boxes (phase 6), so it
+ * needs boxes on and a reviewed `coding` profile, and startup is refused while an attempt
+ * still depends on a CodeBuild build that nothing could inspect or clean up any more.
  */
 export async function codingSandbox(o: {
   db: Database;
-  codebuild: SandboxProvider;
-  sandbox: "codebuild" | "box";
   settings: { runtime?: string; image?: string };
   boxes?: BoxController;
   taskCommand?: string[];
-}): Promise<SandboxProvider> {
+}): Promise<BoxSandbox> {
   const profile = o.boxes?.config.profiles.coding;
-  if (o.sandbox === "box") {
-    if (!o.boxes || !profile)
-      throw new Error(
-        "Coding on boxes needs BOXES_RUNTIME=on and a coding box profile",
-      );
-    if (o.settings.runtime !== "pi" || profile.image !== o.settings.image)
-      throw new Error(
-        "The coding box profile must use the selected Pi worker image",
-      );
-    if (profile.concurrency !== 1)
-      throw new Error("The coding box profile must admit one box at a time");
-    if (JSON.stringify(o.taskCommand) !== JSON.stringify(CODING_TASK_COMMAND))
-      throw new Error(
-        `The coding box profile must run ${CODING_TASK_COMMAND.join(" ")}`,
-      );
-  }
-  if (o.boxes && profile)
-    return new RoutedSandbox(
-      new BoxSandbox(
-        o.db,
-        o.boxes,
-        "coding",
-        profile.image,
-        o.sandbox === "box",
-      ),
-      o.codebuild,
+  if (!o.boxes || !profile)
+    throw new Error("Coding needs BOXES_RUNTIME=on and a coding box profile");
+  if (o.settings.runtime !== "pi" || profile.image !== o.settings.image)
+    throw new Error(
+      "The coding box profile must use the selected Pi worker image",
     );
-  // An attempt depends on a box once it records one, and also when a create spawned a
-  // box but failed before the ID was recorded: then only the live box row shows it.
+  if (profile.concurrency !== 1)
+    throw new Error("The coding box profile must admit one box at a time");
+  if (JSON.stringify(o.taskCommand) !== JSON.stringify(CODING_TASK_COMMAND))
+    throw new Error(
+      `The coding box profile must run ${CODING_TASK_COMMAND.join(" ")}`,
+    );
   const stranded = await o.db.query(
-    `SELECT 1 FROM coding_jobs WHERE sandbox_id LIKE 'box:%'
-       AND (state IN ('provisioning','running','publishing') OR cleanup='pending')
-     UNION ALL
-     SELECT 1 FROM boxes WHERE profile='coding' AND state<>'terminated'
-     LIMIT 1`,
+    `SELECT 1 FROM coding_jobs WHERE sandbox_id IS NOT NULL AND sandbox_id NOT LIKE 'box:%'
+       AND (state IN ('provisioning','running','publishing') OR cleanup='pending') LIMIT 1`,
   );
   if (stranded.rows.length)
     throw new Error(
-      "Coding attempts still depend on boxes; keep boxes and the coding box profile until they finish",
+      "A coding attempt still depends on a CodeBuild build; settle it before starting without CodeBuild",
     );
-  return o.codebuild;
+  return new BoxSandbox(o.db, o.boxes, "coding", profile.image);
 }

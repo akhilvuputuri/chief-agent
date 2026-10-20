@@ -38,7 +38,6 @@
     "check:pi": "npm --prefix coding_runtime_pi run check"
   },
   "dependencies": {
-    "@aws-sdk/client-codebuild": "3.1141.0",
     "@aws-sdk/client-ec2": "3.1141.0",
     "@aws-sdk/client-sts": "3.1141.0",
     "@chief-agent/pi-runtime": "file:./coding_runtime_pi",

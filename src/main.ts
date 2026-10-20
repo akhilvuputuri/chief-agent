@@ -1,6 +1,6 @@
 import { InputFile } from "grammy";
 import { sendCodingDelivery } from "./coding/delivery.js";
-import { codingBackend, selectCodingBackend } from "./coding/backend.js";
+import { selectCodingBackend } from "./coding/backend.js";
 import { randomUUID } from "node:crypto";
 import { LinkResolver, postEvidenceSchema } from "./link-resolution.js";
 import { McpTools, loadMcpRegistry, parseMcpCredentials } from "./mcp.js";
@@ -11,9 +11,8 @@ import { BrowserRpc } from "./gathering/browser-client.js";
 import { formatTelegram } from "./telegram-format.js";
 import { recordFeedSent } from "./telegram-feeds.js";
 import { readFileSync } from "node:fs";
-import { CodeBuildClient } from "@aws-sdk/client-codebuild";
 import { CodingController } from "./coding/controller.js";
-import { CodeBuildSandbox, type SandboxProvider } from "./coding/provider.js";
+import type { SandboxProvider } from "./coding/provider.js";
 import { GitHubPublisher } from "./coding/github.js";
 import { AgentGitHubTokens } from "./coding/agent-github.js";
 import { codingSettings } from "./coding/schema.js";
@@ -413,7 +412,6 @@ if (c.CODING_RUNTIME === "on") {
       "Coding migration 024 must be installed before enabling the runtime",
     );
   if (
-    !c.CODING_CODEBUILD_PROJECT ||
     !c.CODING_GITHUB_APP_ID ||
     !c.CODING_GITHUB_INSTALLATION_ID ||
     !c.CODING_GITHUB_PRIVATE_KEY ||
@@ -421,7 +419,7 @@ if (c.CODING_RUNTIME === "on") {
   )
     throw startupError(
       "STARTUP_CODING_CONFIG",
-      "Coding provider, GitHub App and model configuration are required",
+      "Coding GitHub App and model configuration are required",
     );
   const legacySettings = codingSettings.parse(
     JSON.parse(
@@ -460,25 +458,11 @@ if (c.CODING_RUNTIME === "on") {
       "STARTUP_MIGRATION_027",
       "Coding squad migration 027 must be installed before activation",
     );
-  const codebuild = new CodeBuildSandbox(
-    new CodeBuildClient({ region: c.CODING_AWS_REGION, maxAttempts: 1 }),
-    c.CODING_CODEBUILD_PROJECT,
-  );
-  const sandbox = codingBackend.parse(backend).sandbox;
-  try {
-    await codebuild.validate();
-  } catch (error) {
-    // With coding on boxes, CodeBuild only serves older attempts; it must not block startup.
-    if (sandbox !== "box") throw error;
-    opsLog("coding.codebuild_unavailable", "warn", errorFields(error));
-  }
   let provider: SandboxProvider;
   try {
     const { codingSandbox } = await import("./coding/box-sandbox.js");
     provider = await codingSandbox({
       db,
-      codebuild,
-      sandbox,
       settings,
       boxes,
       taskCommand: boxTaskCommands.coding,
