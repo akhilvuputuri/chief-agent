@@ -1,3 +1,11 @@
+## Release incident — idle SSH drop during the host image build (20 October)
+
+**Symptom.** Three automatic releases in a row failed after main moved past `8673bd5`: for `11c5269` (refused by the main-branch check) and twice for `da5e7a6`, each in "Deploy and verify health" after about 4.5 minutes with `client_loop: send disconnect: Broken pipe` (exit 255). Production stayed healthy on `8673bd5`, and nothing was half-applied.
+
+**Cause, inferred from logs.** The host's release hook (`companion-cloud-release`) runs `docker build` with its output captured, so the SSH session carries no traffic while the image builds. Neither side sends keepalives. The host kernel log shows build containers running from 16:36 to 16:38, and the runner's connection dropped at 16:40:37. GitHub-hosted runners sit behind a NAT that drops idle connections after about 4 minutes, so a build past that length loses its session.
+
+**Fix.** The release workflow's SSH now sends keepalives every 30 seconds (`ServerAliveInterval=30`, `ServerAliveCountMax=20`). Confirmed when the next release succeeds.
+
 ## Deployed `adbba7b` and `8673bd5` (untagged) — Merlion rain radar and radar pictures
 
 - **Rain radar.** [PR 288](https://github.com/akhilvuputuri/chief-agent/pull/288) merged as `d1c66bade2f075badae533e1b86b3d1bc034dc83`.
