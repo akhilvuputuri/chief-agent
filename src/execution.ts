@@ -84,6 +84,7 @@ export const readOperations = new Set([
   "sg_hawker_closures",
   "sg_cameras",
   "sg_dataset",
+  "sg_rain",
   "lta_bus_arrival",
   "lta_bus_stops",
   "lta_train_alerts",

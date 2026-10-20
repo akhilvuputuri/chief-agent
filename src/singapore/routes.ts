@@ -9,6 +9,7 @@ export const hosts = {
   dataGovLegacy: "https://api.data.gov.sg",
   dataGovStore: "https://data.gov.sg",
   dataMall: "https://datamall2.mytransport.sg",
+  oneMap: "https://www.onemap.gov.sg",
 } as const;
 export type Host = keyof typeof hosts;
 /**
@@ -17,20 +18,27 @@ export type Host = keyof typeof hosts;
  */
 export type Provider =
   | "dataGovRealtime"
+  /** The radar API throttles at sub-second spacing even with a key (measured 20 Oct 2026). */
+  | "dataGovRadar"
   | "dataGovStore"
   | "dataGovFiles"
   | "dataGovLegacy"
-  | "dataMall";
+  | "dataMall"
+  | "oneMap"
+  /** Signed NEA radar image links; not API calls. */
+  | "radarImages";
 const groupOf = (r: Route): Provider =>
-  r.host === "dataMall"
-    ? "dataMall"
+  r.host === "dataMall" || r.host === "oneMap"
+    ? r.host
     : r.host === "dataGovStore"
       ? "dataGovStore"
       : r.host === "dataGovLegacy"
         ? "dataGovLegacy"
         : r.path.includes("/datasets/")
           ? "dataGovFiles"
-          : "dataGovRealtime";
+          : r.path.includes("/weather-radar-images/")
+            ? "dataGovRadar"
+            : "dataGovRealtime";
 
 export interface Route {
   host: Host;
@@ -63,6 +71,22 @@ export const routes = {
   lightning: realtime("weather", { api: "lightning" }),
   wbgt: realtime("weather", { api: "wbgt" }),
   flood: realtime("weather/flood-alerts"),
+  // NEA rain radar: one frame per call; date=YYYY-MM-DDTHH:mm:ss selects a past frame.
+  radar70: route("dataGovOpen", "/v2/real-time/api/weather-radar-images/70km", [
+    "date",
+  ]),
+  radar240: route(
+    "dataGovOpen",
+    "/v2/real-time/api/weather-radar-images/240km",
+    ["date"],
+  ),
+  // OneMap address search (keyless): turns a typed place or postal code into coordinates.
+  oneMapSearch: route("oneMap", "/api/common/elastic/search", [
+    "searchVal",
+    "returnGeom",
+    "getAddrDetails",
+    "pageNum",
+  ]),
   hdbCarparkLots: route("dataGovLegacy", "/v1/transport/carpark-availability"),
   datastore: route("dataGovStore", "/api/action/datastore_search", [
     "resource_id",
@@ -125,6 +149,20 @@ export function routeUrl(
  * data.gov.sg answers a download request with a short-lived link to its own S3
  * bucket. Only that bucket is followed; any other link is refused.
  */
+/** Radar frames are short-lived signed links to NEA's image bucket; nothing else is followed. */
+export function radarImageLink(raw: unknown) {
+  if (typeof raw !== "string") throw new Error("Radar image link missing");
+  const url = new URL(raw);
+  if (
+    url.protocol !== "https:" ||
+    url.hostname !==
+      "dgs-backend-app-assets-production.s3.ap-southeast-1.amazonaws.com" ||
+    !url.pathname.startsWith("/nea-rain-radar-images/")
+  )
+    throw new Error("Radar link is not an NEA radar image");
+  return url;
+}
+
 export function downloadLink(raw: unknown) {
   if (typeof raw !== "string") throw new Error("Download link missing");
   const url = new URL(raw);

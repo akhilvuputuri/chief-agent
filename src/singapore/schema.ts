@@ -82,6 +82,20 @@ export const sgDataset = z
   })
   .strict();
 
+/** NEA rain radar over a recent window, analysed for one location. */
+export const sgRain = z
+  .object({
+    operation: z.literal("sg_rain"),
+    lat: z.number().min(1).max(2).optional(),
+    lon: z.number().min(103).max(105).optional(),
+    place: text(100).optional(),
+    region: region.optional(),
+    hours: z.number().min(0.25).max(6).optional(),
+    stepMinutes: z.number().int().min(5).max(60).optional(),
+    range: z.enum(["70km", "240km"]).optional(),
+  })
+  .strict();
+
 /** LTA DataMall reads (need the account key). */
 export const ltaBusArrival = z
   .object({
@@ -112,6 +126,7 @@ export const singaporeSchemas = [
   sgHawkerClosures,
   sgCameras,
   sgDataset,
+  sgRain,
   ltaBusArrival,
   ltaBusStops,
   ltaTrainAlerts,

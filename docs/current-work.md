@@ -2,6 +2,10 @@
 
 The first production turns on Opus 5.5 cost $0.05–0.09 per call when the cache was read, and $0.13–0.23 when it missed. Misses followed a mid-turn tool load and, in one turn, a change of reasoning effort with older history shifting. The hypothesis is that removing the previous step's reasoning left no stable cache entry to fall back on. Anthropic requests now also mark the opening system message and the owner's current message, and older history leaves the prompt at most once per turn. Each turn also records the size of every runtime-state key, to guide trimming the 13–17k of runtime state. See [journal 104](journey/104-opus-cache-misses-in-production.md).
 
+# Merlion rain radar — tested, not deployed, 20 October 2026
+
+`sg_rain` reads NEA rain radar over up to 6 hours for a shared Telegram pin, a typed place or a region. It reports rain now, nearby coverage, history at the location, a timeline, movement (direction and speed) and a rough outlook. Chief now accepts Telegram location messages. No migration. Next: review, release, then live acceptance. [Journal 104](journey/104-rain-radar.md), [design](singapore-open-data.md#rain-radar).
+
 # Reply style for any model — live as v0.3.91, 20 October 2026
 
 On Argon, median replies were 844 characters, and 7 of 10 replies leaked internal names or IDs. Chief's reply instructions now ask for the answer first and short replies for simple requests. A host filter turns Chief's operation and field names into plain words and shortens long IDs in model-written answers, progress and voice replies; code, links and slash-command IDs are left untouched. See [journal 102](journey/102-reply-style-for-any-model.md).

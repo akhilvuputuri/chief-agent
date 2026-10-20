@@ -1,0 +1,71 @@
+# 104 — Rain radar: can Merlion tell where rain is, how it moved and where it is heading?
+
+Work date: 2026-10-20. Written: 2026-10-20.
+Status: tested; not deployed. Builds on [journal 103](103-singapore-plugin.md).
+
+## User-visible problem and preceding iteration
+
+Merlion's rain answers came from the 2-hour area forecast and rain gauges. Those say whether rain is falling or expected, but not where the rain is, which way it is moving, or how it passed over the last few hours. The owner asked for exactly that, as the myENV app shows it. They also wanted to give a location by sharing a Telegram pin or naming a place. Chief rejected Telegram location messages: "Please send text, a voice note, a photo or a PDF document."
+
+## Evidence
+
+- **Measured: NEA radar API** (20 October 2026, Mac, data.gov.sg key).
+  - `weather-radar-images/70km` and `/240km` return one frame per call. Each frame has a georeferenced boundary box and a signed link to a 480 × 480, 8-bit palette PNG in NEA's S3 bucket.
+  - `date=YYYY-MM-DDTHH:mm:ss` returns the frame at that time.
+  - The palette has 33 colours plus a transparent one: teal and cyan (light) through green, yellow and orange to red and magenta (intense). No numeric scale is published with the image.
+- **Measured: rate limit.** At 0.4 s spacing the radar route returned 429 even with the key. At 1 s and 2 s spacing, 14 of 14 requests passed each time. The radar now has its own rate group at 1.1 s.
+- **Measured: OneMap without a token.**
+  - Address search returns results for a postal code or "Bishan MRT", alongside an "Authentication token missing" message.
+  - The static map returns a 512 × 512 RGBA PNG at zoom 11 or more. It is unused so far, kept for the planned radar picture.
+- **Measured: live run of `sg_rain`** on the afternoon's real radar.
+  - **Speed:** cold calls took 13–21 s for 13–25 frames, and cached frames are not fetched again.
+  - **6-hour window for an eastern point:**
+    - a rain mass sat 18 km E at 12:25 and 7 km SE at 13:25;
+    - it was over the point at 13:55, then moved away north;
+    - overall motion was south-east to north-west at about 16 km/h, labelled steady.
+  - **Answer size:** about 3k characters.
+- **Tested:** `tests/singapore-radar.test.ts` (9 tests) covers:
+  - PNG decoding with filtered rows;
+  - colour levels from the live palette;
+  - a synthetic disc moving east at about 27 km/h, giving the right direction, speed and a 20–45 minute arrival;
+  - stationary rain, dry frames and frame caching;
+  - the radar bucket allow-list;
+  - place resolution, including that OneMap never receives the key;
+  - the Telegram location line;
+  - registration.
+
+## Diagnosis and alternatives
+
+- **On the host, not the model:** frames are decoded and analysed on the host, without a model. The model gets a compact summary: now, rings, nearest rain, history at the point, a timeline of up to 13 points, movement and a rough outlook. It never gets pixels.
+  - Rejected: passing radar images to a vision model. That is slower and costlier, and depends on the model reading a picture correctly.
+- **Movement:** estimated by the best whole-cell shift between consecutive frames (about 1.2 km cells on the 70 km view), weighted by rain level and limited to 90 km/h. The outlook moves the newest frame along the recent motion. It is labelled a rough guide, because thunderstorms grow and decay.
+- **Location:**
+  - a Telegram pin is exact (Telegram sends latitude and longitude);
+  - typed places try NEA forecast areas, then OneMap search;
+  - regions and the whole of Singapore are fallbacks.
+- **Intensity:** colours map to five coarse levels. NEA does not publish mm/h with the image, so none is claimed.
+
+## Implementation and review
+
+- **Radar code (`src/singapore/`):**
+  - `png.ts`: palette PNG decoder;
+  - `radar.ts`: frames, cache and analysis;
+  - `places.ts`: location resolution.
+- **Network:** `routes.ts` adds the radar and OneMap routes and the radar-bucket allow-list. `http.ts` adds byte downloads, the radar rate group, and keeps the data.gov.sg key off OneMap.
+- **Tool:** `sg_rain` (read-only) is in `protocol`, `readOperations` and the runtime description.
+- **Telegram:** `src/telegram-location.ts`, plus `telegram.ts`, turn a shared pin or venue into a `[Shared location: …]` line.
+- **Plugin:** the `sg-rain` skill; Merlion's tools, description and instructions; the registry grants, delegation and hash.
+- **Independent review:** pending.
+
+## Verification and outcome
+
+Not deployed. After release:
+
+- live Telegram acceptance: share a pin and ask "is rain coming?", and ask "how did the rain move over the last 3 hours?";
+- check the reply's time and direction against myENV.
+
+## Follow-up and next iteration
+
+- **Radar picture or animation:** the OneMap basemap with the radar layer and a location marker, sent to Telegram as an image or GIF. It needs an image delivery path for agents.
+- **"Rain approaching home" alert:** a deterministic alert, which needs a table and a migration.
+- **Location storage:** shared pins are kept only as conversation text. Saving "home" as coordinates in explicit memory is up to the owner.
