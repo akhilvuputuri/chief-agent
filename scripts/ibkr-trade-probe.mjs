@@ -409,7 +409,10 @@ else if (command === "refresh") {
     ),
   );
 } else if (command === "list") {
-  const { instructions = [] } = await call("get_order_instructions", {});
+  const result = await call("get_order_instructions", {});
+  if (!Array.isArray(result.instructions))
+    console.error(`unexpected shape; top-level keys: ${Object.keys(result)}`);
+  const instructions = result.instructions ?? [];
   console.log(
     JSON.stringify(
       instructions.map((i) => ({
