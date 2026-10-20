@@ -125,6 +125,13 @@ export function runtimeContext(
     (op.startsWith("watchlist_") && !availability.stocks) ||
     (op.startsWith("stock_") && !availability.stocks) ||
     (op.startsWith("portfolio_") && !availability.portfolio) ||
+    ([
+      "portfolio_ibkr_query",
+      "portfolio_order_draft",
+      "portfolio_order_drafts",
+      "portfolio_order_draft_delete",
+    ].includes(op) &&
+      !availability.portfolioDrafts) ||
     (op.startsWith("news_") && !availability.news) ||
     (op.startsWith("sg_") && !availability.singapore) ||
     // Offered with the plugin so the one Merlion agent stays listed; without the
@@ -305,6 +312,14 @@ export function runtimeContext(
                 "Only when the owner explicitly asks to stop Chief reading IBKR: queue a Telegram confirmation card. Nothing is disconnected until the owner taps Disconnect; never say it is done.",
               portfolio_status:
                 "IBKR connection state, last successful sync, position count and last attempt. The owner connects or disconnects with /portfolio connect or /portfolio disconnect in Telegram.",
+              portfolio_ibkr_query:
+                "Call one read-only IBKR tool by name with its own arguments (IBKR's argument names, e.g. search_contracts {query}, get_price_snapshot {contract_id, market_data_names}, get_price_history, get_account_orders, get_account_trades, get_alerts, get_watchlists, list_saved_screeners, run_saved_screener). Returns IBKR's structured result, cut at 30,000 characters. Use portfolio_read for holdings. Facts only, never trading advice.",
+              portfolio_order_draft:
+                "Only when the owner explicitly asked to buy or sell a stock and stated it: create one IBKR order draft. US-listed shares only, whole shares, LIMIT (with limitPrice) or MARKET, optional timeInForce (DAY, GTC, OVT, OND, OPG; IBKR's default otherwise). Refused above the owner's per-draft USD cap (quantity x limit price, or the current ask for MARKET). A draft is not an order: nothing trades until the owner taps Review & Submit in an IBKR app, and Chief cannot submit it. Never retry an 'unknown' result; list drafts instead. needs_exchange: ask the owner which exchange, then repeat with exchange.",
+              portfolio_order_drafts:
+                "List the IBKR order drafts waiting for the owner's review: id, symbol, side, quantity, order type, limit price, time in force, created and expiry (IBKR expires drafts after about 7 days).",
+              portfolio_order_draft_delete:
+                "Only when the owner asked to remove a draft: delete one IBKR order draft by exact id from portfolio_order_drafts. A draft already submitted is a live order and is not affected.",
               stock_rule_add:
                 "Save an owner-defined stock rule after the owner confirmed your restated interpretation. scope item (itemId from watchlist_list), holdings (every IBKR holding that is on the watchlist) or watchlist (every watched stock). direction below/above a reference: prev_close, avg_cost (IBKR average cost; holdings or a held stock), avg_/low_/high_ 12w/26w/52w, all_time_low, all_time_high; optional marginPct (e.g. 15 for 15% below). basis intraday (each poll in session and monitoring hours) or close (final close, alert held for the next monitoring window). notify cross (default; re-arms after a 1% recovery) or daily. label restates the owner's request. Lows/highs/averages exclude today, so 'below its 52-week low' means a new low. Returns coverage for holdings rules: offer to watch notWatched holdings via watchlist_add. Facts, not advice.",
               stock_rule_list:

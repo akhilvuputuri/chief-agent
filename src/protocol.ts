@@ -16,6 +16,7 @@ import {
   browser as gatherBrowser,
 } from "./gathering/schema.js";
 import { TOOL_DOMAINS } from "./tool-domains.js";
+import { IBKR_QUERY_TOOLS } from "./ibkr/catalogue.js";
 import {
   canvasCreate,
   canvasUpdate,
@@ -377,6 +378,42 @@ export const action = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("portfolio_status") }).strict(),
   z.object({ operation: z.literal("portfolio_connect") }).strict(),
   z.object({ operation: z.literal("portfolio_disconnect") }).strict(),
+  z
+    .object({
+      operation: z.literal("portfolio_ibkr_query"),
+      tool: z.enum(IBKR_QUERY_TOOLS),
+      arguments: z
+        .record(z.string(), z.unknown())
+        .refine((v) => JSON.stringify(v).length <= 4000, "arguments too large")
+        .optional(),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("portfolio_order_draft"),
+      symbol: z
+        .string()
+        .trim()
+        .regex(/^[A-Za-z0-9.\- ]{1,12}$/),
+      exchange: z
+        .string()
+        .trim()
+        .regex(/^[A-Za-z0-9.\-]{1,20}$/)
+        .optional(),
+      side: z.enum(["BUY", "SELL"]),
+      quantity: z.number().int().min(1).max(100000),
+      orderType: z.enum(["LIMIT", "MARKET"]),
+      limitPrice: z.number().positive().finite().optional(),
+      timeInForce: z.enum(["DAY", "GTC", "OVT", "OND", "OPG"]).optional(),
+    })
+    .strict(),
+  z.object({ operation: z.literal("portfolio_order_drafts") }).strict(),
+  z
+    .object({
+      operation: z.literal("portfolio_order_draft_delete"),
+      id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+    })
+    .strict(),
   z
     .object({
       operation: z.literal("watchlist_settings"),

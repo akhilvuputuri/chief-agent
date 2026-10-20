@@ -14,6 +14,10 @@ For Anthropic models, earlier steps of a turn now keep their reasoning, so each 
 
 Jev's tool picks changed the tool list between messages and once mid-turn, and an effort raise mid-turn invalidated cached messages. The coordinator is now offered every available tool domain on every call, with no Jev tool pick; that is 54 tools, about 11k tokens, cheap once cached. Reasoning effort is raised mid-turn only after a failed step or an owner follow-up. See [journal 107](journey/107-stable-tools-and-effort.md).
 
+# IBKR order drafts — in review, 20 October 2026
+
+Chief can draft IBKR orders that the owner reviews and submits in an IBKR app; it cannot place, change or cancel an order. Drafts are US shares only, at most USD 100 each, and only in IBKR's review-and-approve mode; Chief refuses IBKR's direct-order scope. A separate brokerage agent also answers read-only IBKR lookups. No migration or Compose change. Holdings acceptance from journal 59 is recorded: connected 15 October, matched, scheduled syncs measured; revocation untested. Next: review, release, then the owner reconnects and drafts a test order. [Journal 110](journey/110-ibkr-order-drafts.md), [design](ibkr-portfolio.md#order-drafts).
+
 # Opus cache misses in production — in review, 20 October 2026
 
 The first production turns on Opus 5.5 cost $0.05–0.09 per call when the cache was read, and $0.13–0.23 when it missed. Misses followed a mid-turn tool load and, in one turn, a change of reasoning effort with older history shifting. The hypothesis is that removing the previous step's reasoning left no stable cache entry to fall back on. Anthropic requests now also mark the opening system message and the owner's current message, and older history leaves the prompt at most once per turn. Each turn also records the size of every runtime-state key, to guide trimming the 13–17k of runtime state. See [journal 104](journey/104-opus-cache-misses-in-production.md).

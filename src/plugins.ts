@@ -89,7 +89,7 @@ const registrySchema = z
     /** Short agent types, such as "email" for "core/email". */
     aliases: z.record(id, z.string().max(100)).optional(),
     /** Operations the coordinator does not get: an agent in the catalogue does that work. */
-    delegated: z.array(operation).max(80).optional(),
+    delegated: z.array(operation).max(120).optional(),
     enabled: z
       .array(
         z
@@ -97,7 +97,7 @@ const registrySchema = z
             path: id,
             sha256: z.string().regex(/^[a-f0-9]{64}$/),
             agents: z.array(id).max(16),
-            allowTools: z.array(operation).max(80),
+            allowTools: z.array(operation).max(120),
             // Host configuration only; never taken from package instructions/model arguments.
             model: z
               .string()

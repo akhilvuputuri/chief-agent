@@ -182,6 +182,27 @@
       "effort": "low"
     },
     {
+      "id": "brokerage",
+      "description": "Look up IBKR market and account data (live prices, price history, orders and trades, alerts, watchlists, saved screeners) and create, list or delete IBKR order drafts the owner explicitly asked for; the owner reviews and submits each draft in an IBKR app.",
+      "instructions": "agents/brokerage.md",
+      "contract": "findings/v1",
+      "tools": [
+        "portfolio_status",
+        "portfolio_ibkr_query",
+        "portfolio_order_draft",
+        "portfolio_order_drafts",
+        "portfolio_order_draft_delete"
+      ],
+      "skills": [],
+      "limits": {
+        "ms": 120000,
+        "models": 8,
+        "tools": 8
+      },
+      "model": "fast",
+      "effort": "medium"
+    },
+    {
       "id": "news",
       "description": "Manage the daily news bulletin: followed sites, delivery time, topics and extra editions.",
       "instructions": "agents/news.md",

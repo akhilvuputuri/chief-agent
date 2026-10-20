@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { Portfolio } from "../portfolio.js";
+import { IBKR } from "./oauth.js";
 import { errorFields, opsLog } from "../ops-log.js";
 
 export const IBKR_CALLBACK_PATH = "/oauth/ibkr/callback";
@@ -63,14 +64,22 @@ export function ibkrRoutes(
         );
     }
     const user = result.user!;
+    // Wording only: a failed lookup must not hide a connection that was saved.
+    const granted = await portfolio.auth.status(user).catch(() => null);
+    const scopes = (granted && "scopes" in granted && granted.scopes) || [];
+    const access = !granted
+      ? "access"
+      : scopes.includes(IBKR.draftScope)
+        ? "read and order-draft access"
+        : "read-only access";
     void portfolio
       .sync(user, "connect")
       .then(async (sync) =>
         notify(
           user,
           sync.status === "failed"
-            ? `IBKR is connected with read-only access, but the first holdings sync failed (${sync.errorCode}). Send /portfolio refresh to retry.`
-            : `IBKR is connected with read-only access.\n\n${(await portfolio.command(user, "show")).text}`,
+            ? `IBKR is connected with ${access}, but the first holdings sync failed (${sync.errorCode}). Send /portfolio refresh to retry.`
+            : `IBKR is connected with ${access}.\n\n${(await portfolio.command(user, "show")).text}`,
         ),
       )
       .catch((error) =>
@@ -78,7 +87,7 @@ export function ibkrRoutes(
       );
     return reply.send(
       page(
-        "IBKR is connected with read-only access. You can close this page and return to Telegram.",
+        `IBKR is connected with ${access}. You can close this page and return to Telegram.`,
       ),
     );
   });

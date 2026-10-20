@@ -76,6 +76,13 @@ const schema = z.object({
   // Read-only IBKR holdings (issue #146). Needs migration 026, IBKR_TOKEN_KEY and
   // MINIAPP_ORIGIN (the OAuth redirect is served on that origin).
   IBKR_PORTFOLIO: z.enum(["on", "off"]).default("off"),
+  // IBKR order drafts and wider read-only IBKR queries (docs/ibkr-portfolio.md#order-drafts).
+  // Drafts are instructions the owner reviews and submits in an IBKR app; Chief cannot
+  // submit them. Needs IBKR_PORTFOLIO=on and an owner reconnect that approves mcp.write.
+  // Owner-enabled on 20 October 2026; it has no effect while IBKR_PORTFOLIO is off.
+  IBKR_ORDER_DRAFTS: z.enum(["on", "off"]).default("on"),
+  // Owner-set ceiling on one draft's value in USD (quantity x limit price or current ask).
+  IBKR_DRAFT_MAX_USD: z.coerce.number().positive().finite().default(100),
   // Encrypts runtime-obtained IBKR tokens at rest.
   IBKR_TOKEN_KEY: z
     .union([z.literal(""), z.string().regex(/^[0-9a-f]{64}$/i)])
@@ -167,6 +174,8 @@ export const RUNTIME_SETTINGS = [
   "ELEVENLABS_STT_MODEL",
   "ELEVENLABS_TTS_MODEL",
   "GROQ_STT_MODEL",
+  "IBKR_ORDER_DRAFTS",
+  "IBKR_DRAFT_MAX_USD",
   // PORT is deployment wiring (Compose ports, health checks), not behaviour; it stays in the environment.
 ] as const satisfies readonly (keyof z.infer<typeof schema>)[];
 type RuntimeSetting = (typeof RUNTIME_SETTINGS)[number];

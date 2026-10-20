@@ -74,6 +74,8 @@ export const readOperations = new Set([
   "gmail_accounts",
   "subscription_list",
   "portfolio_read",
+  "portfolio_ibkr_query",
+  "portfolio_order_drafts",
   "stock_lookup",
   "stock_rule_list",
   "sg_weather",

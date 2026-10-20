@@ -68,6 +68,7 @@ import { IbkrAuth } from "./ibkr/oauth.js";
 import { IbkrMcp } from "./ibkr/mcp.js";
 import { IBKR_CALLBACK_PATH, ibkrRoutes } from "./ibkr/routes.js";
 import { Portfolio } from "./portfolio.js";
+import { OrderDrafts } from "./ibkr/orders.js";
 import { CalendarTools } from "./calendar.js";
 import { DailySheet } from "./daily-sheet.js";
 import { SheetsTools } from "./sheets.js";
@@ -564,17 +565,24 @@ if (c.IBKR_PORTFOLIO === "on") {
       "IBKR_PORTFOLIO=on requires IBKR_TOKEN_KEY and MINIAPP_ORIGIN",
     );
   const owners = new Set(c.TELEGRAM_ALLOWED_USER_IDS.split(","));
+  const drafts = c.IBKR_ORDER_DRAFTS === "on";
   const auth = new IbkrAuth(
     db,
     secretKey(c.IBKR_TOKEN_KEY),
     c.MINIAPP_ORIGIN + IBKR_CALLBACK_PATH,
+    fetch,
+    Date.now,
+    drafts,
   );
+  const mcp = new IbkrMcp((user, force) => auth.accessToken(user, force));
   portfolio = new Portfolio(
     db,
     auth,
-    new IbkrMcp((user, force) => auth.accessToken(user, force)),
+    mcp,
     (user) => owners.has(user),
     (user, text) => notifyUser(user, text),
+    Date.now,
+    drafts ? new OrderDrafts(auth, mcp, c.IBKR_DRAFT_MAX_USD) : undefined,
   );
   await portfolio.recover();
 }
@@ -745,6 +753,7 @@ const assistant = new Assistant(
     ...(responsibilities ? { responsibilities: true } : {}),
     ...(coding ? { coding: true } : {}),
     ...(portfolio ? { portfolio: true } : {}),
+    ...(portfolio?.orders ? { portfolioDrafts: true } : {}),
     ...(gathering ? { gathering: true } : {}),
   },
   {

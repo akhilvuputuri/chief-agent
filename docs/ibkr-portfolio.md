@@ -1,6 +1,6 @@
 # IBKR portfolio access and quote-provider evaluation (issue #146)
 
-Status: **Phase 1 released in v0.3.37 and on (3 October 2026); owner connection and acceptance pending.** Phase 0: registration, read-only consent through the local probe, rotating refresh, a 12-hour idle refresh, the tool catalogue, owner-reconciled holdings and one real-time quote. Phase 1: holdings in Chief, through `/portfolio` and the `core/portfolio` agent, behind `IBKR_PORTFOLIO=off`. Written 2 October 2026 SGT against freshly fetched `origin/main` `ae0237f4337a640937d36ed6e742c5fdef7ae9b7`. The issue's research baseline (`78ad212`) is superseded by PRs #148, #150 and #151, none of which touch the stock subsystem. Refetch main before implementing.
+Status: **Phase 1 released in v0.3.37 and on (3 October 2026); the owner connected on 15 October and holdings acceptance passed except revocation. [Order drafts](#order-drafts) (owner request, 20 October 2026) are in review.** Phase 0: registration, read-only consent through the local probe, rotating refresh, a 12-hour idle refresh, the tool catalogue, owner-reconciled holdings and one real-time quote. Phase 1: holdings in Chief, through `/portfolio` and the `core/portfolio` agent, behind `IBKR_PORTFOLIO=off`. Written 2 October 2026 SGT against freshly fetched `origin/main` `ae0237f4337a640937d36ed6e742c5fdef7ae9b7`. The issue's research baseline (`78ad212`) is superseded by PRs #148, #150 and #151, none of which touch the stock subsystem. Refetch main before implementing.
 
 Product requirement: [issue #146](https://github.com/akhilvuputuri/chief-agent/issues/146). Related design: [stock watchlist](stock-watchlist.md), [plugins](plugins.md), [Library identity](library.md), [Google authorization](google-authorization.md), [coding runtime ingress](coding.md).
 
@@ -176,6 +176,7 @@ The deliverable is a sanitized findings section in the journal, plus fixtures bu
   - `search_contracts` resolves any symbol to a contract ID, so quoting non-held instruments appears possible. This one sample does not show whether AAPL is held.
   - A single sample is not a reliability measurement; Phase 3 still applies.
 - **Measured: the refresh token survived a 12-hour idle gap overnight.** The refresh-lifetime loop started at 23:47 SGT. Its first refresh ran at 11:46 SGT on 3 October, delayed because the Mac slept, which was 723 minutes after the previous refresh. It returned HTTP 200, a rotated refresh token and exactly `mcp.read`. The loop continues, to look for an absolute session cap.
+- **Measured: no absolute cap within about 57 hours.** The loop finished at 08:47 SGT on 5 October: 16 of 16 refreshes returned HTTP 200, each rotated the refresh token and stayed at exactly `mcp.read`, about 57 hours after consent. No refresh-token expiry was reported. A longer cap is not ruled out; Chief's 4-hourly syncs keep the token in use.
 - **Reported by the owner: holdings reconcile.** On 3 October, a one-off display of positions, summary and balances matched the owner's IBKR app. Internal sums were consistent across positions, balances and FX. Values are not recorded.
   - Symbols use IBKR's local form (`BRK B`).
   - ETFs are reported as `STK`.
@@ -295,6 +296,14 @@ To turn it off, set `IBKR_PORTFOLIO=off` and recreate the gateway. `/portfolio d
 
 **Acceptance.** Reconcile holdings privately and record only "matched" or "not matched"; check restart recovery, one overnight scheduled refresh, revocation, and a Chief answer to "how are my holdings doing?".
 
+**Acceptance results (15–20 October 2026).**
+
+- **Measured: the owner connected through Telegram** at 00:29:06 SGT on 15 October (`ibkr.callback` state `connected`, release `aad3056`). IBKR accepted the hosted HTTPS redirect; the client registered lazily on first connect. Sanitized logs from 3–14 October show the only earlier callback was the operator's `invalid_state` activation probe.
+- **Measured: first sync complete** at 00:29:12 SGT, 5.9 s after the callback.
+- **Reported by the owner: holdings matched** the IBKR app, and Chief's answer to "how are my holdings doing?" looked right. No values are recorded.
+- **Measured: scheduled refresh and restart recovery.** On 19–20 October every 4-hourly `portfolio.sync` was `complete` (4.7–8.0 s), across at least five different release SHAs, with no `portfolio.read_failed`.
+- **Not yet tested:** revocation (an owner disconnect, which would need a reconnect afterwards).
+
 ### Phase 2: holdings linkage and owner-defined dip conditions (owner request, 3 October 2026)
 
 The owner asked for alerts when a stock falls below the average price of a holding, or below its 12-week or 52-week average, "to know when to buy the dip". Chief reports only that a condition the owner defined has been met; it gives no buy recommendation (the stocks agent stays "monitoring only: no trades, no advice").
@@ -354,6 +363,33 @@ The owner asked for alerts when a stock falls below the average price of a holdi
   - do not add automatic cross-provider failover.
 - If IBKR is used only for holdings, keep the current alert path and close the evaluation with recorded evidence.
 
+## Order drafts
+
+**Owner request, 20 October 2026; in review.** The owner asked Chief to create IBKR "AI instructions": drafts that IBKR shows in its apps under AI Instructions, where the owner taps Review & Submit to turn one into an order, or Reject. The owner set the rules: review-and-approve only, never autonomous trading; buying or selling whole shares only, no options or futures; each draft worth at most USD 100 while testing. The owner asked for the other restrictions proposed (limit-only, day-only, caps on counts, no short sales) to be left out.
+
+### Measured on 20 October 2026
+
+With `scripts/ibkr-trade-probe.mjs`, on the owner's Mac with a separate owner consent (loopback client from Phase 0):
+
+- **Scopes.** Requesting `mcp.read mcp.write mcp.orders.submit` was granted only `mcp.read mcp.write`. The access token lasted 299 s, and refresh tokens rotate as before.
+- **Catalogue.** `tools/list` returned 45 tools, up from 34 on 2 October. The 11 new ones are IBKR's "Agentic Trading" live-order tools (`submit_order`, `modify_order`, `cancel_order`, `preview_order`, `answer_order_question`, `get_order_rules`, `get_order_status`), `get_flow_type`, and three saved-screener reads.
+- **Flow type.** `get_flow_type` returned `REVIEW_AND_APPROVE`. IBKR's tool descriptions say each session is either that or `AUTONOMOUS`, where the AI places live stock and single-option orders with no review; under review-and-approve the live-order tools are unavailable. How a session becomes autonomous is not documented in what was fetched; the refused `mcp.orders.submit` scope is the likely gate (hypothesis).
+- **Drafts.** Two identical drafts (buy 1 share of a US stock at a limit far below the market, day order) were created because the owner ran the command twice. Each `create_order_instruction` returned an id and an `https` IBKR deep link. Reported by the owner: both appeared in IBKR Mobile under AI Instructions. `get_order_instructions` showed each draft expiring 7 days after creation, although the order itself was a day order. One listing straight after creation returned an empty list; a later one showed both (unexplained).
+- **Listings.** `search_contracts` for a US ticker also returned its Mexican and Canadian listings.
+- **Not tested:** the owner's Review & Submit or Reject from Chief's own drafts; deleting a draft (the two test drafts were left for the owner to delete); whether a second consent for the same account affects Chief's production consent.
+
+### Design
+
+- **Scope.** With `IBKR_ORDER_DRAFTS=on` Chief requests `mcp.read mcp.write` and accepts exactly `mcp.read` or `mcp.read mcp.write` (`permitted` in `src/ibkr/oauth.ts`). Anything else, `mcp.orders.submit` above all, is revoked and refused, at connect and at every refresh. Turning drafts off makes the next refresh refuse a write grant, so access falls back to a read-only reconnect. An existing read-only connection keeps working for holdings; drafting asks the owner to disconnect and reconnect.
+- **Tools** (`src/ibkr/catalogue.ts`). Holdings sync calls three account reads. The model may query 28 read-only tools by name through `portfolio_ibkr_query` (prices, history, orders and trades, alerts, watchlists, saved screeners, research); reads that only serve autonomous trading are excluded. The only writes are `create_order_instruction` and `delete_order_instruction`, called by host code. `submit_order`, `modify_order`, `cancel_order`, `answer_order_question` and every IBKR write other than the two above can never be called.
+- **Draft** (`src/ibkr/orders.ts`, `portfolio_order_draft`). In one MCP session: refuse unless `get_flow_type` is `REVIEW_AND_APPROVE`; resolve the symbol with `search_contracts` to exactly one US stock listing (other listings are refused, several US listings ask for the exchange); value it, then refuse above `IBKR_DRAFT_MAX_USD` (100), and create it once. A buy limit is valued at quantity × limit, since it fills at the limit or lower. A sell limit is a floor that fills at the market when set below it, so it is valued at quantity × the higher of the limit and the bid (else last). A market draft is valued at the ask for a buy and the bid for a sell (else last). With no price, a draft that needs one is refused. The result carries the id, IBKR's link, the terms, the estimated value and the expiry.
+- **Never twice.** An identical draft (same owner, listing, side, quantity, type, limit and time in force) is not sent again within 10 minutes. This is checked from an in-process record and from IBKR's draft list, because the list once lagged a create. If the list cannot be read, nothing is sent, because a duplicate cannot be ruled out. Listings are compared by numeric contract id (the list field is unmeasured), falling back to the symbol. A confirmed delete clears only that draft's record. After a lost reply or an IBKR error result, Chief looks for a matching draft created since the attempt and reports it, or reports `unknown` or the bounded IBKR error. A 401 is assumed to mean IBKR processed nothing (standard, unmeasured for IBKR), so that session is retried once, and its list check would still find a draft IBKR saved anyway. A delete is confirmed by listing afterwards, otherwise reported as unconfirmed.
+- **Authority.** Drafts and deletes run only for a foreground owner request, never from background work, and only on the owner's explicit buy or sell terms. A separate `core/brokerage` agent holds the draft and query tools, listed only when drafts are enabled; the holdings agent stays read-only. The model gets the deep link as data and is told to report the draft as waiting for the owner's Review & Submit.
+- **Configuration.** `IBKR_ORDER_DRAFTS` and `IBKR_DRAFT_MAX_USD` are behaviour settings in `config/runtime.json`, so they ship through a normal release with no migration or Compose change.
+- **Limitations.** A draft interrupted by a restart mid-call is an uncertain write, which blocks further owner writes until an operator reconciles it, as for other writes. FX conversion is not attempted: non-US listings are refused rather than valued. `country_code` is taken as the listing's country; the measured Ford listings on MEXI and TSE carried MX and CA. The value is an estimate at draft time: the owner's Review & Submit later fills at the then-current market.
+
+**Acceptance.** The owner reconnects with order-draft access, asks Chief to draft a small limit order, sees it in IBKR Mobile, rejects or deletes it, and asks Chief to list drafts.
+
 ## 6. Fallback: Flex Web Service
 
 [Flex Web Service](https://www.interactivebrokers.com/docs/web-api/flex-web-service/introduction) uses a token with configurable expiry that can be **IP-restricted** to the Lightsail static IP, with no interactive OAuth. It returns configured report data, such as open positions, with explicit report dates. Data is end-of-day or as of the report run, which suits holdings but not quotes. The `portfolio_*` schema above is source-agnostic: a `source` column distinguishes `ibkr_mcp` from `ibkr_flex`. If G0 fails, Phase 1 swaps the OAuth/MCP modules for a Flex fetcher, and the token goes in `.env` like other provider keys. Quotes then stay on Twelve Data.
@@ -393,7 +429,7 @@ IBKR's guide names the Claude, ChatGPT, Grok and Perplexity connectors. If IBKR 
 
 ## 8. Out of scope
 
-- Order placement or cancellation, non-binding trade instructions, any `mcp.write` or `mcp.orders.submit` scope, and automated trading.
+- Order placement, modification or cancellation, `mcp.orders.submit`, IBKR's autonomous flow, and automated trading. Non-binding instructions under `mcp.write` were brought into scope on 20 October 2026; see [Order drafts](#order-drafts).
 - Paid market-data subscriptions or infrastructure.
 - Unrestricted MCP discovery, or a general MCP plugin client.
 - Historical performance claims.
