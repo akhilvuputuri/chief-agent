@@ -3,9 +3,9 @@
 - **What merged.** [PR 302](https://github.com/akhilvuputuri/chief-agent/pull/302) merged as `0c54f89b2c35001bd31eeccb6b89be73807bad81`.
   - Merlion's rain answers become one to three everyday sentences, with no speeds, percentages or frame times unless asked, and use the radar only.
   - The picture caption is one line in 12-hour time, with a red dot only for a spot the owner gave.
-  - Merlion's brief keeps asked-for readings (bus minutes, PSI, lots) in every reply.
+  - Merlion's brief asks it to keep asked-for readings (bus minutes, PSI, lots) in every reply; this is untested outside rain.
 - **Review.** Exact-head independent review (Claude Opus 5.5) approved `a059f77` after one blocking finding: the brief first applied plain wording to every domain without protecting asked-for numbers. Devin and hosted CI passed.
-- **Release.** Live at 18:17 UTC on 20 October, with `release:status` success. No migration.
+- **Release.** Live at 18:17 UTC on 20 October, with `release:status` success. No migration. This deploy also first shipped #301 (`6ab96c0`), whose own release was refused at 18:02 UTC because `main` had already moved to `0c54f89`.
 - **Not yet observed.** A production rain reply under the new wording, and replies in other Merlion domains.
 
 [Journal 109](journey/109-plain-rain-replies.md#release-closure--2026-10-21).

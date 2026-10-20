@@ -78,7 +78,7 @@ Released (closure below). Pending owner acceptance: the owner asks "is rain comi
 ### Release closure — 2026-10-21
 
 - **What merged.** [PR 302](https://github.com/akhilvuputuri/chief-agent/pull/302) was squash-merged at approved head `a059f77` as `0c54f89b2c35001bd31eeccb6b89be73807bad81`. Hosted CI and Devin passed on that head.
-- **Live.** `release:status` reports success: the exact commit deployed and startup health passed. CloudWatch shows `0c54f89` logging from 18:17 UTC on 20 October (2:17 am SGT on 21 October), after `8d26783`. No migration and no Compose change.
+- **Live.** `release:status` reports success: the exact commit deployed and startup health passed. CloudWatch shows `0c54f89` logging from 18:17 UTC on 20 October (2:17 am SGT on 21 October), after `8d26783`. No migration and no Compose change. The same deploy first shipped #301, whose own release was refused because `main` had moved on.
 - **Not yet observed:** a rain reply in production under the new wording.
 
 ## Follow-up and next iteration
