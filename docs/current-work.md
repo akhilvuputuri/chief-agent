@@ -1,3 +1,7 @@
+# Stable tools and steadier effort for caching — in review, 20 October 2026
+
+Jev's tool picks changed the tool list between messages and once mid-turn, and an effort raise mid-turn invalidated cached messages. The coordinator is now offered every available tool domain on every call, with no Jev tool pick; that is 54 tools, about 11k tokens, cheap once cached. Reasoning effort is raised mid-turn only after a failed step or an owner follow-up. See [journal 107](journey/107-stable-tools-and-effort.md).
+
 # Merlion radar pictures — tested, not deployed, 20 October 2026
 
 `sg_rain` can now send the owner a radar map or a looping animation of the window, drawn on the host over a bundled outline of Singapore's regions, with the location marked. Chief sends it on Telegram right after the text reply. It is stacked on the rain radar PR. No migration. Next: review, release, then live acceptance. [Journal 106](journey/106-radar-pictures.md), [design](singapore-open-data.md#rain-radar).

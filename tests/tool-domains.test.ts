@@ -102,7 +102,7 @@ test("domain-limited runtime offers the core plus selected domains and lists the
   assert.ok(TOOL_DOMAINS.includes("gmail"));
 });
 
-async function fixture(model: ModelAdapter) {
+async function fixture(model: ModelAdapter, stableTools = false) {
   const pg = new PGlite();
   for (const f of [
     "001_initial",
@@ -126,6 +126,10 @@ async function fixture(model: ModelAdapter) {
     new JobTools(db, { call: async () => ({ content: "public source" }) }),
     { web: true, delegation: false },
     { ms: 900000, models: 40, tools: 100 },
+    undefined,
+    undefined,
+    undefined,
+    stableTools,
   );
   return { pg, db, assistant };
 }
@@ -343,4 +347,34 @@ test("a waiting coding job keeps coding tools offered; conversational words no l
   ]);
   for (const message of ["update my resume", "I have a promo code"])
     assert.ok(!pick(message).includes("coding"), message);
+});
+
+test("stable tools offer every available domain, identically on every call and every turn", async () => {
+  const seen: string[][] = [];
+  const f = await fixture(
+    {
+      generate: async (input) => {
+        seen.push(names(input.tools));
+        if (seen.length === 1) return call("job_list", {});
+        return text("Done.");
+      },
+    },
+    true,
+  );
+  try {
+    await f.assistant.respond("owner", "hello there");
+    await f.assistant.respond("owner", "any new email from the bank?");
+    // The same list on every call, whatever the message, including job tools nobody asked for.
+    assert.ok(seen.length >= 3);
+    for (const tools of seen) assert.deepEqual(tools, seen[0]);
+    assert.ok(seen[0]!.includes("job_list"));
+    const events = (
+      await f.db.query(
+        "SELECT type FROM events WHERE type IN ('tools.picked','tools.loaded')",
+      )
+    ).rows;
+    assert.deepEqual(events, []);
+  } finally {
+    await f.pg.close();
+  }
 });

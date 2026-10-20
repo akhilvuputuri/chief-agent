@@ -10,7 +10,7 @@
     "OPENROUTER_MAX_OUTPUT_PRICE": 10,
     "SEARCH_MODEL": "google/gemini-3.8-flash",
     "MEDIA_MODEL": "",
-    "TOOL_PICKER": "jev",
+    "TOOL_PICKER": "all",
     "SHADOW_DECISIONS": "jev",
     "EFFORT_PICKER": "jev",
     "TELEGRAM_TOPICS": "auto",

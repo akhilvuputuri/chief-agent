@@ -165,11 +165,15 @@ test("every failure keeps the current effort and never throws", async () => {
   clearInterval(alive);
 });
 
-test("escalation asks from the configured step, every few steps, and after a new failure", () => {
+test("periodic escalation asks from the configured step, every few steps, and after a new failure", () => {
+  const periodic = {
+    ...config,
+    escalation: { ...config.escalation, periodic: true },
+  };
   const ask = (
     over: Partial<EffortProgress>,
     last = { step: 0, failedCalls: 0 },
-  ) => shouldEscalate(config, progress(over), last);
+  ) => shouldEscalate(periodic, progress(over), last);
   const { firstStep, every } = config.escalation;
   assert.equal(ask({ step: firstStep - 1 }), false);
   assert.equal(ask({ step: firstStep }), true);
@@ -192,6 +196,20 @@ test("escalation asks from the configured step, every few steps, and after a new
   );
 });
 
+test("the committed policy asks again only after a new failure or an owner follow-up", () => {
+  // A raise changes the thinking setting and invalidates the cached messages (journal 105).
+  assert.equal(config.escalation.periodic, false);
+  const ask = (
+    over: Partial<EffortProgress>,
+    last = { step: 0, failedCalls: 0 },
+  ) => shouldEscalate(config, progress(over), last);
+  const { firstStep, every } = config.escalation;
+  assert.equal(ask({ step: firstStep }), false);
+  assert.equal(ask({ step: firstStep + every }), false);
+  assert.equal(ask({ step: 2, failedCalls: 1 }), true);
+  assert.equal(ask({ step: 2, followUp: true }), true);
+});
+
 async function database() {
   const pg = new PGlite();
   for (const file of (await readdir(new URL("../db/", import.meta.url)))
@@ -208,19 +226,21 @@ async function database() {
 test("a foreground turn starts at Jev's effort and raises it mid-turn, logged step by step", async () => {
   const { pg, db } = await database();
   const asked: any[] = [];
-  const picker = new EffortPicker("key", config, (async (
-    _url: string,
-    init: RequestInit,
-  ) => {
-    const body = JSON.parse(String(init.body));
-    asked.push(body.state.turn_progress ?? null);
-    // Start low; the first escalation says high; a later one says low (ignored).
-    return asked.length === 1
-      ? reply("low", { low: 0.9 })
-      : asked.length === 2
-        ? reply("high", { high: 0.9 })
-        : reply("low", { low: 0.99 });
-  }) as typeof fetch);
+  // This test exercises the periodic schedule; the committed policy keeps it off.
+  const picker = new EffortPicker(
+    "key",
+    { ...config, escalation: { ...config.escalation, periodic: true } },
+    (async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      asked.push(body.state.turn_progress ?? null);
+      // Start low; the first escalation says high; a later one says low (ignored).
+      return asked.length === 1
+        ? reply("low", { low: 0.9 })
+        : asked.length === 2
+          ? reply("high", { high: 0.9 })
+          : reply("low", { low: 0.99 });
+    }) as typeof fetch,
+  );
   const efforts: ReasoningEffort[] = [];
   let n = 0;
   const steps = config.escalation.firstStep + config.escalation.every + 1;

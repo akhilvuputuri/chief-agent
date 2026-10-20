@@ -10,7 +10,7 @@ Chief's main model runs every foreground message at one reasoning effort. Before
   - Its `high` applies at 0.6 or above.
   - Anything else, or any failure, is `medium`, the earlier fixed effort.
 - **As the turn grows.**
-  - When the model asks for tools, Jev is asked again, starting at model step 3 and then every 3 steps, and at once after a new failed tool call.
+  - When the model asks for tools, Jev is asked again at once after a new failed tool call. The step schedule (from model step 3, every 3 steps) is behind `escalation.periodic` in `config/reasoning-effort.json`. It has been off since [journal 107](journey/107-stable-tools-and-effort.md), because a raise changes the thinking setting and invalidates Anthropic's cached messages.
   - The escalation adds `turn_progress`: steps, tool calls, failed tool calls, distinct tool names and the current effort. It never sends arguments or results.
   - A scheduled question is asked when the step's tools start; a question after a failure is asked when that step's tools finish, so the call that recovers already uses its answer. The answer applies from the next model call.
   - Effort only rises within a turn, and once it is `high` Jev is not asked again. A step that only calls `finish_turn` asks nothing, since no model call follows.

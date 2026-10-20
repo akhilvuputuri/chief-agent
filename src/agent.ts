@@ -298,6 +298,11 @@ export class Assistant {
     private picker?: ToolPicker,
     private shadow?: ShadowDecisions,
     private effort?: EffortPicker,
+    /**
+     * Offer every available tool domain on every call (TOOL_PICKER "all", journal 105). The
+     * tool list leads the cached prompt, so a list that never changes keeps it reusable.
+     */
+    private stableTools = false,
   ) {
     this.inbox = new InputInbox(db);
   }
@@ -778,18 +783,22 @@ export class Assistant {
               [user],
             )
           ).rows.map((row) => row.domain as string);
-      const picked = await pick(message);
+      const picked = this.stableTools ? null : await pick(message);
       // Jev sees a clipped message, so a longer one also keeps its word cues.
       const clipped =
         [...message].length > (this.picker?.config.state.messageChars ?? 0);
-      const chosen = new Set<string>([
-        ...selectDomains({
-          ...signals,
-          message: picked && !clipped ? "" : message,
-        }),
-        ...heldDomains,
-        ...(picked ?? []),
-      ]);
+      const chosen = new Set<string>(
+        this.stableTools
+          ? availableDomains
+          : [
+              ...selectDomains({
+                ...signals,
+                message: picked && !clipped ? "" : message,
+              }),
+              ...heldDomains,
+              ...(picked ?? []),
+            ],
+      );
       // Canonical order: the same domains always yield the same tool list,
       // whichever source chose them. Mid-turn loads append after these.
       const loadedDomains = new Set(
@@ -987,7 +996,7 @@ export class Assistant {
                 ...previousTurns,
                 { user: message, assistant: "", tools: [] as string[] },
               ];
-              for (const input of adopted) {
+              for (const input of this.stableTools ? [] : adopted) {
                 const picked = await pick(input.message, earlier);
                 const long =
                   [...input.message].length >
