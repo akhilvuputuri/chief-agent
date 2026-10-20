@@ -368,7 +368,14 @@ export class OrderDrafts {
     this.sent.set(terms, { at: this.now() });
     // Without a readable list a duplicate cannot be ruled out (for example after a
     // restart), so nothing is sent: the check fails closed.
-    const rows = await this.lookup(call);
+    let rows: Awaited<ReturnType<OrderDrafts["lookup"]>>;
+    try {
+      rows = await this.lookup(call, true);
+    } catch (error) {
+      // An expired token: nothing was created yet, so the session is retried once.
+      this.sent.delete(terms);
+      throw error;
+    }
     if (!rows) {
       this.sent.delete(terms);
       return refused(
@@ -452,20 +459,35 @@ export class OrderDrafts {
     };
   }
 
-  /** The account's saved instructions, or null when they cannot be read. Never throws. */
-  private async lookup(call: IbkrCall) {
+  /**
+   * The account's saved instructions, or null when they cannot be read. Never throws,
+   * except that `beforeCreate` passes on a missing or rejected token, which `run` retries.
+   */
+  private async lookup(call: IbkrCall, beforeCreate = false) {
     try {
       return instructions(await call("get_order_instructions"));
-    } catch {
+    } catch (error) {
+      if (
+        beforeCreate &&
+        (error instanceof IbkrAuthError ||
+          (error instanceof IbkrMcpError &&
+            ["http_401", "token_unavailable"].includes(error.code)))
+      )
+        throw error;
       return null;
     }
   }
 }
 
+/** The numeric contract id in IBKR's forms ("265598", "265598@NASDAQ"), if any. */
+const contractNumber = (value: string | null) =>
+  /^(\d+)/.exec(value ?? "")?.[1] ?? null;
+
 /**
  * The newest saved instruction with these terms created since `since`. The listing is
- * compared by contract id when IBKR reports one (otherwise by symbol), and the time in
- * force when both sides state it.
+ * compared by numeric contract id when both sides have one, otherwise by symbol (the
+ * list's contract field is unmeasured, so an unknown form errs toward a match), and the
+ * time in force when both sides state it.
  */
 function matching(
   rows: NonNullable<ReturnType<typeof instructions>>,
@@ -483,8 +505,8 @@ function matching(
   return (
     rows.find(
       (i) =>
-        (i.contractId != null
-          ? i.contractId === d.contractId
+        (contractNumber(i.contractId) && contractNumber(d.contractId)
+          ? contractNumber(i.contractId) === contractNumber(d.contractId)
           : i.symbol === d.symbol) &&
         i.side === d.side &&
         i.quantity === d.quantity &&

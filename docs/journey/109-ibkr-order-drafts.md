@@ -65,7 +65,14 @@ Tests were added for the first two. Opus 5.5 approved `aa6c51c` and, after a doc
 - **A delete cleared every record.** Deleting one draft cleared repeat protection for all the owner's drafts. Only the deleted draft's record is cleared now.
 - **Different terms matched as repeats.** A different exchange or time in force counted as identical. The match now compares the listing's contract id and the time in force.
 
-Tests were added for each. Review of the fixed head: pending.
+Tests were added for each.
+
+**Opus 5.5 approved `5439d90`**, with one low finding and one note:
+
+- **Low: the list's contract field is unmeasured.** A form such as `265598@NASDAQ` would make the repeat check miss after a restart. Contract ids are now compared numerically, falling back to the symbol.
+- **Note: an expired token on that list read refused the draft instead of retrying.** It is now retried once, like any session, because nothing had been created yet.
+
+Tests were added for both. Review of the final head: pending.
 
 ## Verification and outcome
 

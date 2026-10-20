@@ -1408,6 +1408,46 @@ test("a lost create is never sent again; it is found or reported unknown", async
   assert.equal(blind.reason, "duplicate_check_unavailable");
   assert.equal(creates(), 2);
   f.ibkr.state.tools.get_order_instructions = list;
+  // Review: a 401 on that list read is retried once, like any session, then drafts.
+  const throwing = f.ibkr.state.tools.create_order_instruction!;
+  f.ibkr.state.tools.create_order_instruction = create;
+  f.ibkr.state.rejectTool = "get_order_instructions";
+  assert.equal(
+    (
+      await draft({
+        symbol: "F",
+        side: "BUY",
+        quantity: 7,
+        orderType: "LIMIT",
+        limitPrice: 5,
+      })
+    ).status,
+    "drafted",
+  );
+  assert.equal(creates(), 3);
+  // Review: the list's contract field is unmeasured; an "id@EXCHANGE" form still matches
+  // after a restart, so the draft is not sent again.
+  b.instructions.at(-1).contract_id_ex = "9599491@NYSE";
+  const fresh = new OrderDrafts(
+    f.auth,
+    new IbkrMcp((user, force) => f.auth.accessToken(user, force), f.ibkr.http),
+    100,
+    f.clock,
+  );
+  assert.equal(
+    (
+      (await fresh.draft("owner", {
+        symbol: "F",
+        side: "BUY",
+        quantity: 7,
+        orderType: "LIMIT",
+        limitPrice: 5,
+      })) as any
+    ).status,
+    "already_drafted",
+  );
+  assert.equal(creates(), 3);
+  f.ibkr.state.tools.create_order_instruction = throwing;
   // Two identical requests at once: only one reaches IBKR.
   const twice = await Promise.all(
     [0, 1].map(() =>
@@ -1424,7 +1464,7 @@ test("a lost create is never sent again; it is found or reported unknown", async
     "already_drafted",
     "unknown",
   ]);
-  assert.equal(creates(), 3);
+  assert.equal(creates(), 4);
   // After a restart (a fresh process), a recent identical draft in IBKR's list is found.
   const restarted = new OrderDrafts(
     f.auth,
@@ -1441,7 +1481,7 @@ test("a lost create is never sent again; it is found or reported unknown", async
   });
   assert.equal(listed.status, "already_drafted");
   assert.equal(listed.id, "100");
-  assert.equal(creates(), 3);
+  assert.equal(creates(), 4);
   // IBKR's own rejection is reported with its text, control characters removed.
   f.ibkr.state.tools.create_order_instruction = () => ({
     toolError: "Contract\u0000 not tradable",
@@ -1469,7 +1509,7 @@ test("a lost create is never sent again; it is found or reported unknown", async
     limitPrice: 5,
   });
   assert.equal(saved.status, "drafted");
-  assert.equal(saved.id, "101");
+  assert.equal(saved.id, "102");
   // A 401 on create is assumed unprocessed: refreshed, then created once.
   f.ibkr.state.tools.create_order_instruction = create;
   f.ibkr.state.rejectTool = "create_order_instruction";
@@ -1481,7 +1521,7 @@ test("a lost create is never sent again; it is found or reported unknown", async
     limitPrice: 4,
   });
   assert.equal(retried.status, "drafted");
-  assert.equal(b.instructions.length, 3);
+  assert.equal(b.instructions.length, 4);
 });
 
 test("drafts need a foreground owner request and a write grant; listing and deleting work", async () => {
