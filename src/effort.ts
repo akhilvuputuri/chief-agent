@@ -34,9 +34,16 @@ const schema = z
       .strict(),
     // The lowest probability at which Jev's low or high pick is applied; otherwise medium.
     apply: z.object({ low: probability, high: probability }).strict(),
-    // Ask again from this model step, then every `every` steps, and after a new tool failure.
+    // Ask again after a new tool failure and, when periodic, from step `firstStep` every
+    // `every` steps. A raise changes the thinking setting, which invalidates the cached
+    // messages, so periodic asks are off since journal 107.
     escalation: z
-      .object({ firstStep: count, every: count, onFailure: z.boolean() })
+      .object({
+        firstStep: count,
+        every: count,
+        onFailure: z.boolean(),
+        periodic: z.boolean(),
+      })
       .strict(),
   })
   .strict();
@@ -84,8 +91,9 @@ export function shouldEscalate(
 ) {
   if (progress.current === "high") return false;
   if (progress.followUp) return true;
-  const { firstStep, every, onFailure } = config.escalation;
+  const { firstStep, every, onFailure, periodic } = config.escalation;
   if (onFailure && progress.failedCalls > lastAsked.failedCalls) return true;
+  if (!periodic) return false;
   return (
     progress.step >= firstStep &&
     (progress.step - firstStep) % every === 0 &&

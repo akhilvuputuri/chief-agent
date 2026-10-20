@@ -38,7 +38,7 @@ To make the switch safe:
 - Before Compose stops passing these names, update `config/runtime.json` to production's current values for exactly those names. Then the switch changes nothing.
 - When `envSettings` is empty after the switch, the file is authoritative.
 
-To change a behaviour setting today, edit `config/runtime.json` in a PR. It takes effect in production on the next release for the five names above. `TOOL_PICKER`, `SHADOW_DECISIONS` and `EFFORT_PICKER` all send messages to Jev; stopping that traffic needs all three set to `off`. For the others, it takes effect once Compose stops passing them; until then the production `.env` value wins.
+To change a behaviour setting today, edit `config/runtime.json` in a PR. It takes effect in production on the next release for the five names above. `TOOL_PICKER` (`jev`, `off` or `all`), `SHADOW_DECISIONS` and `EFFORT_PICKER` all send messages to Jev; stopping that traffic needs `TOOL_PICKER` set to `off` or `all` and the other two set to `off`. Since [journal 107](journey/107-stable-tools-and-effort.md), `TOOL_PICKER` is `all`: every available tool domain on every call, with no Jev pick. For the others, it takes effect once Compose stops passing them; until then the production `.env` value wins.
 
 Locally, a `.env` line that sets a behaviour name, even to an empty value, overrides the file. Delete such lines rather than leaving them empty. `config.loaded` lists them.
 
