@@ -668,3 +668,13 @@ The settings schema capped attempts at 400 model calls and 1,000 tool calls, and
 - **Checked against this case.** The gateway had started at 14:54 and did not restart during the resumed attempt (15:17–15:29), so that is not what refused this call. The cause remains unknown until the new reason codes capture it.
 - **The scenario is still a real gap.** Releases from other sessions land while coding runs, and the first canary survived a 12:56 restart only because no call was in flight. Startup now marks pending model calls `uncertain` (never replayed) and frees `model_busy` before the worker routes open. A test covers it.
 - **Label fix.** A claim refusal without `retryOf` is never labelled "recovery already used".
+
+### Longer attempts: configuration — 20 October 2026
+
+This is step 2 of the longer coding attempts:
+
+- **Image.** The Pi worker image is re-pinned to `sha256:697f51fc…`, built from `11c5269` (Pi image [run 39454970378](https://github.com/akhilvuputuri/chief-agent/actions/runs/39454970378)), which carries the wider schema. An anonymous pull returned 200.
+- **Earlier image.** The coding box profile uses the same image and lists the previous `ba99d955…` in `previousImages`, so jobs created with it keep running with their original limits.
+- **New jobs** get 90 minutes, 800 model calls and 2,000 tool calls. That fits the 100-minute controller ceiling and the box task's 2-hour deadline.
+
+Exact-head review approved: the gateway reads these files from its own image, so the new limits always ship together with the schema that accepts them.
