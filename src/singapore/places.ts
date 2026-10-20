@@ -1,6 +1,6 @@
 import { ToolValidationError } from "../tool-errors.js";
 import type { DataGov } from "./datagov.js";
-import type { SgHttp } from "./http.js";
+import { SgBusyError, type SgHttp } from "./http.js";
 import { clip, matchesQuery, num } from "./format.js";
 import { REGION_LABELS, type Region } from "./geo.js";
 
@@ -70,7 +70,7 @@ export class Places {
           throw new Error("data.gov.sg twoHour returned no data");
         return body.data;
       })
-      .catch(() => null)) as J;
+      .catch(() => undefined)) as J;
     const area = (two?.area_metadata ?? []).find(
       (a: J) => String(a.name).toLowerCase() === query.trim().toLowerCase(),
     );
@@ -109,6 +109,8 @@ export class Places {
         label: String(partial.name),
         source: "NEA forecast area",
       };
+    // With the area list down, an NEA area name OneMap does not know is not the owner's mistake.
+    if (two === undefined) throw new SgBusyError("dataGovRealtime", 60);
     throw new ToolValidationError(
       "Could not find that place; ask the owner for a postal code, a nearby MRT station or to share a location",
     );

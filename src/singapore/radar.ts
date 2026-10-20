@@ -222,18 +222,12 @@ function bearing(east: number, north: number) {
 function cellKm(f: Frame) {
   return ((f.east - f.west) / f.cols) * kmPerLon((f.north + f.south) / 2);
 }
-/**
- * Search radius for "rain at this point": wide enough to always include the
- * cell containing the point (half a cell diagonal), never below 1.5 km.
- */
-function pointRadius(f: Frame) {
-  const tall = ((f.north - f.south) / f.rows) * KM_PER_LAT;
-  return Math.max(1.5, 0.75 * Math.max(cellKm(f), tall));
-}
-function levelNear(f: Frame, p: Point) {
-  return inFrame(f, p)
-    ? around(f, p, pointRadius(f)).reduce((m, c) => Math.max(m, c.level), 0)
-    : 0;
+/** Rain level of the cell containing the point; 0 outside the picture. */
+function levelAt(f: Frame, p: Point) {
+  if (!inFrame(f, p)) return 0;
+  const x = Math.floor(((p.lon - f.west) / (f.east - f.west)) * f.cols);
+  const y = Math.floor(((f.north - p.lat) / (f.north - f.south)) * f.rows);
+  return f.grid[Math.min(f.rows - 1, y) * f.cols + Math.min(f.cols - 1, x)]!;
 }
 export function inFrame(f: Frame, p: Point) {
   return p.lon > f.west && p.lon < f.east && p.lat > f.south && p.lat < f.north;
@@ -293,7 +287,7 @@ function snapshot(f: Frame, p: Point, radiusKm: number) {
   return {
     cells,
     wet,
-    atPoint: levelNear(f, p),
+    atPoint: levelAt(f, p),
     peak: wet.reduce((m, c) => Math.max(m, c.level), 0),
     cover: share(cells, 1),
     centre,
@@ -366,16 +360,21 @@ function averageMotion(
   const east = moves.reduce((s, m) => s + m.east * m.weight, 0) / weight;
   const north = moves.reduce((s, m) => s + m.north * m.weight, 0) / weight;
   const speed = Math.hypot(east, north);
-  // Consistency: how far individual moves stray from the average, relative to
-  // its speed plus half the step a one-cell shift represents. Refined shifts
-  // still carry some quantisation noise, which is not erratic motion.
+  // Consistency: how far individual moves stray from the average, as a share
+  // of its speed. Stop-go rounding (a cell shift, then none) lies along the
+  // track, so half a cell's worth is forgiven there; a change of direction
+  // shows across the track, where only a quarter of a cell is forgiven.
+  const ux = speed ? east / speed : 0;
+  const uy = speed ? north / speed : 0;
   const scatter =
-    moves.reduce(
-      (s, m) => s + m.weight * Math.hypot(m.east - east, m.north - north),
-      0,
-    ) / weight;
-  const quantum = moves.reduce((s, m) => s + m.quantum * m.weight, 0) / weight;
-  const agree = Math.max(0, 1 - scatter / (speed + quantum / 2));
+    moves.reduce((s, m) => {
+      const dx = m.east - east;
+      const dy = m.north - north;
+      const along = Math.max(0, Math.abs(dx * ux + dy * uy) - m.quantum / 2);
+      const across = Math.max(0, Math.abs(dx * uy - dy * ux) - m.quantum / 4);
+      return s + m.weight * Math.hypot(along, across);
+    }, 0) / weight;
+  const agree = speed ? Math.max(0, 1 - scatter / speed) : 1;
   return { east, north, speed, agree };
 }
 
@@ -415,7 +414,7 @@ function nowcast(
       lat: p.lat - (motion.north * h) / KM_PER_LAT,
       lon: p.lon - (motion.east * h) / kmPerLon(p.lat),
     };
-    out.push({ inMinutes: minutes, level: INTENSITY[levelNear(f, source)]! });
+    out.push({ inMinutes: minutes, level: INTENSITY[levelAt(f, source)]! });
   }
   return out;
 }

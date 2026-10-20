@@ -10,7 +10,7 @@ import {
   type Frame,
 } from "../src/singapore/radar.js";
 import { radarImageLink } from "../src/singapore/routes.js";
-import { SgHttp } from "../src/singapore/http.js";
+import { SgBusyError, SgHttp } from "../src/singapore/http.js";
 import { SingaporeTools } from "../src/singapore/tools.js";
 import { locationMessage } from "../src/telegram-location.js";
 import { readOperations } from "../src/execution.js";
@@ -161,6 +161,17 @@ test("slow rain is not called erratic just because shifts alternate between zero
   assert.ok(r.outlook.estimate);
 });
 
+test("stop-go rain, one cell every other frame, is steady and keeps its outlook", () => {
+  // Frames 5 minutes apart; the disc moves a whole cell east every 10 minutes (about 7 km/h).
+  const frames = [0, 5, 10, 15, 20, 25, 30, 35, 40].map((m) =>
+    frame(m, 70 - Math.floor(m / 10)),
+  );
+  const r: any = analyse(frames, POINT, 50, NOW);
+  assert.equal(r.movement.recent.towards, "E");
+  assert.equal(r.movement.recent.consistency, "steady");
+  assert.ok(r.outlook.estimate);
+});
+
 test("zig-zagging rain on the wide view is erratic and gets no outlook", () => {
   // Every 5 minutes half a wide-view cell east (about 1.5 km), alternately
   // also half a cell south: 45 degrees either side of east at about 18 km/h.
@@ -202,6 +213,9 @@ test("a wet wide-view cell counts at a pin near its corner", () => {
   };
   const r: any = analyse([f], pin, 150, NOW);
   assert.equal(r.now.atLocation, "heavy");
+  // A pin in the dry cell next door is dry, even when that wet cell is close.
+  const next = { lat: pin.lat, lon: 102.3 + 59 * cell + 0.98 * cell };
+  assert.equal((analyse([f], next, 150, NOW) as any).now.atLocation, "none");
   // One frame says nothing about how long it rained.
   assert.equal(r.atLocationHistory.rainedForAboutMinutes, null);
 });
@@ -413,6 +427,8 @@ test("places resolve from coordinates, forecast areas or OneMap, and OneMap neve
     (await down.places.resolve({ place: "560123" })).source,
     "OneMap search",
   );
+  // If OneMap cannot place it either, that is an outage, not the owner's mistake.
+  await assert.rejects(down.places.resolve({ place: "Bishan" }), SgBusyError);
 });
 
 test("a shared Telegram pin becomes a coordinates line, venue text is cleaned", () => {

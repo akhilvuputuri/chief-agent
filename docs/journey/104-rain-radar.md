@@ -26,14 +26,15 @@ Merlion's rain answers came from the 2-hour area forecast and rain gauges. Those
     - overall motion was south-east to north-west at about 16 km/h, labelled steady.
   - **Answer size:** about 3k characters.
 - **Measured: speed estimates on synthetic discs** after sub-cell refinement. True speeds of 0, 8, 17, 27 and 53 km/h were estimated at 0, 9, 16, 27 and 53 km/h, all labelled steady. Before refinement, whole-cell shifts reported 8 km/h rain as 13 km/h.
-- **Tested:** `tests/singapore-radar.test.ts` (14 tests) covers:
+- **Tested:** `tests/singapore-radar.test.ts` (15 tests) covers:
   - PNG decoding with filtered rows;
   - colour levels for all 33 legend colours, which never fall along the legend, and opaque white as no rain;
   - slow rain at about 8 km/h, estimated within 5–11 km/h, not called erratic and given an outlook;
   - zig-zagging rain on the 240 km view, called erratic with no outlook;
-  - a wet 240 km cell counted at a pin near its corner, and an unknown duration from a single frame;
+  - a wet 240 km cell counted at a pin near its corner, a pin in the dry cell next door read as dry, and an unknown duration from a single frame;
+  - stop-go rain (one cell every other frame) called steady with an outlook;
   - lead times shifted by the newest frame's age, and no outlook from a frame over 20 minutes old;
-  - a forecast-feed outage still resolving a postal code through OneMap;
+  - a forecast-feed outage still resolving a postal code through OneMap, and reported as an outage when OneMap finds nothing;
   - bare timestamps read as Singapore time, and concurrent calls sharing each frame fetch;
   - a synthetic disc moving east at about 27 km/h, giving the right direction, speed and a 20–45 minute arrival;
   - stationary rain, dry frames and frame caching;
@@ -46,7 +47,10 @@ Merlion's rain answers came from the 2-hour area forecast and rain gauges. Those
 
 - **On the host, not the model:** frames are decoded and analysed on the host, without a model. The model gets a compact summary: now, rings, nearest rain, history at the point, a timeline of up to 13 points, movement and a rough outlook. It never gets pixels.
   - Rejected: passing radar images to a vision model. That is slower and costlier, and depends on the model reading a picture correctly.
-- **Movement:** estimated by the best shift between consecutive frames (about 1.2 km cells on the 70 km view), weighted by rain level and limited to 90 km/h. A parabola through the best score and its neighbours refines the shift to a fraction of a cell. Consistency compares each pair's scatter from the average with the average speed plus half a cell's worth of speed, so quantisation noise alone does not read as erratic. A full cell's worth was too lenient on the 240 km view, where one cell per 5 minutes is about 35 km/h: rain zig-zagging 45° either side of east read as fairly steady. The outlook moves the newest frame along the recent motion. It is labelled a rough guide, because thunderstorms grow and decay.
+- **Movement:** estimated by the best shift between consecutive frames (about 1.2 km cells on the 70 km view), weighted by rain level and limited to 90 km/h. A parabola through the best score and its neighbours refines the shift to a fraction of a cell. Consistency is one minus each pair's scatter from the average, as a share of the average speed. Stop-go rounding (a cell shift, then none) lies along the track, so half a cell's worth is forgiven there; a change of direction shows across the track, where only a quarter of a cell is forgiven.
+  - Measured on synthetic discs: steady motion at 9–53 km/h and stop-go motion of one cell every 10 minutes are steady with an outlook. Zig-zags of half a cell to two cells on both views, and back-and-forth motion, are erratic or stationary with no outlook.
+  - Known limit: stop-go that alternates between the two axes (one frame east, the next north) reads as erratic, so no outlook is given. That fails safe.
+  - Earlier versions: a single allowance of a full cell was too lenient on the 240 km view (a zig-zag read as fairly steady); half a cell everywhere called stop-go rain erratic. The outlook moves the newest frame along the recent motion. It is labelled a rough guide, because thunderstorms grow and decay.
 - **Location:**
   - a Telegram pin is exact (Telegram sends latitude and longitude);
   - typed places try NEA forecast areas, then OneMap search;
@@ -77,6 +81,10 @@ Merlion's rain answers came from the 2-hour area forecast and rain gauges. Those
   - A two-hour forecast outage blocked typed places before OneMap was tried; the forecast-area shortcut is now optional.
   - With a single frame, rain duration read 0 minutes; it is now unknown (null). Missing frames are reported as `framesMissing`.
   - Devin also flagged venue text inside the location note; the note's instructions now come first, and the venue follows as labelled untrusted text.
+- **Devin's second pass** found three more, also fixed and tested:
+  - the wider point radius could borrow a neighbouring cell's rain on the 240 km view, so a dry pin read as wet. Rain at the location now comes from the cell containing the pin, for current rain, history and the outlook;
+  - stop-go rain was called erratic: fixed by splitting along-track and cross-track scatter, as above;
+  - a forecast outage plus no OneMap match was reported as an unknown place; it is now reported as a temporary outage.
 
 ## Verification and outcome
 
