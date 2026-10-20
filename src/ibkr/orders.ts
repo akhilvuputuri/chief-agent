@@ -186,6 +186,10 @@ export class OrderDrafts {
         }
       });
       const confirmed = remaining?.every((i) => i.id !== id) ?? false;
+      // A deleted draft may be requested again; IBKR's list still guards the rest.
+      if (confirmed)
+        for (const key of this.sent.keys())
+          if (key.startsWith(`${user}|`)) this.sent.delete(key);
       opsLog("portfolio.draft_deleted", confirmed ? "info" : "warn", {
         state: confirmed ? "deleted" : "unconfirmed",
       });
@@ -338,19 +342,19 @@ export class OrderDrafts {
     ].join("|");
     for (const [key, at] of this.sent)
       if (this.now() - at > REPEAT_MS) this.sent.delete(key);
-    const recent =
-      this.sent.has(terms) ||
-      (await this.find(call, draft, started - REPEAT_MS));
-    if (recent)
-      return {
-        status: "already_drafted",
-        reason: "recent_duplicate",
-        ...(typeof recent === "object" ? { id: recent.id } : {}),
-        draft,
-        note: "An identical draft was sent to IBKR in the last 10 minutes, so Chief did not send it again. List drafts to see it; to have two, the owner can change the terms or wait.",
-      };
-    // Recorded before the outcome is known: whatever happens next, it is not sent twice.
+    const already = (id?: string) => ({
+      status: "already_drafted",
+      reason: "recent_duplicate",
+      ...(id ? { id } : {}),
+      draft,
+      note: "An identical draft was sent to IBKR in the last 10 minutes, so Chief did not send it again. List drafts to see it; to have two, the owner can change the terms or wait.",
+    });
+    if (this.sent.has(terms)) return already();
+    // Recorded before anything is awaited, so a concurrent identical request stops above,
+    // and kept whatever the outcome: the same terms are never sent twice.
     this.sent.set(terms, this.now());
+    const listed = await this.find(call, draft, started - REPEAT_MS);
+    if (listed) return already(listed.id);
     let created: any;
     try {
       created = await call("create_order_instruction", {

@@ -1376,6 +1376,23 @@ test("a lost create is never sent again; it is found or reported unknown", async
   });
   assert.equal(again.status, "already_drafted");
   assert.equal(creates(), 2);
+  // Two identical requests at once: only one reaches IBKR.
+  const twice = await Promise.all(
+    [0, 1].map(() =>
+      draft({
+        symbol: "F",
+        side: "SELL",
+        quantity: 4,
+        orderType: "LIMIT",
+        limitPrice: 5,
+      }),
+    ),
+  );
+  assert.deepEqual(twice.map((d) => d.status).sort(), [
+    "already_drafted",
+    "unknown",
+  ]);
+  assert.equal(creates(), 3);
   // After a restart (a fresh process), a recent identical draft in IBKR's list is found.
   const restarted = new OrderDrafts(
     f.auth,
@@ -1392,7 +1409,7 @@ test("a lost create is never sent again; it is found or reported unknown", async
   });
   assert.equal(listed.status, "already_drafted");
   assert.equal(listed.id, "100");
-  assert.equal(creates(), 2);
+  assert.equal(creates(), 3);
   // IBKR's own rejection is reported with its text, control characters removed.
   f.ibkr.state.tools.create_order_instruction = () => ({
     toolError: "Contract\u0000 not tradable",
@@ -1471,6 +1488,16 @@ test("drafts need a foreground owner request and a write grant; listing and dele
   );
   assert.equal(removed.status, "deleted");
   assert.equal(b.instructions.length, 0);
+  // After a confirmed delete, the same terms can be drafted again.
+  const redrafted = await draft({
+    symbol: "F",
+    side: "BUY",
+    quantity: 1,
+    orderType: "LIMIT",
+    limitPrice: 6,
+  });
+  assert.equal(redrafted.status, "drafted");
+  assert.equal(redrafted.id, "101");
   // A delete the list does not confirm is reported as unconfirmed.
   await draft({
     symbol: "F",
@@ -1482,7 +1509,7 @@ test("drafts need a foreground owner request and a write grant; listing and dele
   f.ibkr.state.tools.delete_order_instruction = () => ({});
   const kept: any = await f.portfolio.call(
     "owner",
-    { operation: "portfolio_order_draft_delete", id: "101" },
+    { operation: "portfolio_order_draft_delete", id: "102" },
     await turn(f),
   );
   assert.equal(kept.status, "delete_unconfirmed");

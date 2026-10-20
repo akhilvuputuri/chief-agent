@@ -50,7 +50,14 @@ Design and rules: [Order drafts](../ibkr-portfolio.md#order-drafts).
 - **Low: the connect callback could fail on a wording lookup.** That lookup now falls back to generic wording.
 - **Info: deletes were not confirmed.** A delete is now confirmed by listing afterwards.
 
-Re-review of the fixed head: pending.
+**Re-review of `782dccb` (Opus 5.5): APPROVE**, with non-blocking findings:
+
+- **Repeat check race.** Two identical requests at once could both pass the 10-minute check while one awaited IBKR's list. The record is now set before anything is awaited.
+- **Stale repeat record.** The record outlived a confirmed delete, so redrafting the same terms was refused. It is now cleared on a confirmed delete.
+- **Statuses.** `already_drafted` and `delete_unconfirmed` are now named in the brokerage agent's prompt.
+- **Owner decision.** The 10-minute block also stops a deliberate second identical draft; it is left for the owner to accept.
+
+Tests were added for the first two. Review of the final head: pending.
 
 ## Verification and outcome
 
