@@ -678,3 +678,10 @@ This is step 2 of the longer coding attempts:
 - **New jobs** get 90 minutes, 800 model calls and 2,000 tool calls. That fits the 100-minute controller ceiling and the box task's 2-hour deadline.
 
 Exact-head review approved: the gateway reads these files from its own image, so the new limits always ship together with the schema that accepts them.
+
+**Model snapshot (owner request, 20 October).** Coding's DeepSeek coder and planner move from `deepseek/deepseek-v4.1-flash` to the newer snapshot `deepseek/deepseek-v4.1-flash-1017`.
+
+- **Checked on OpenRouter:** it supports tools and tool choice, has a 1M-token context and allows up to 393k output tokens (coding uses 16k).
+- **Price:** $0.15 per million tokens in and $0.60 out, against $0.028 and $0.12. That is about 5× more, and still cheap: the canary's 40-minute attempt would have cost about $1.30 instead of $0.26.
+- **Code:** nothing in the runtime keys off the exact model ID.
+- **Scope:** new jobs only; jobs keep the model they were created with. The reviewer stays `google/gemini-4-argon`.
