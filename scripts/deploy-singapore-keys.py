@@ -17,7 +17,7 @@ import time
 
 LIVE = pathlib.Path('/opt/hermes-companion')
 LOCK = pathlib.Path('/var/lock/companion-release.lock')
-# Live release checked on 20 October 2026 (after the Singapore plugin code release, #277).
+# Live release checked over SSH on 20 October 2026: #280, after the Singapore code release #277.
 # If another release lands first, add its SHA here after review.
 BASE = 'e681b49b8d547046b424639e81f213760f25ded4'
 BASES = {BASE}
@@ -120,7 +120,11 @@ def keys_present():
     present = set()
     for line in (LIVE / '.env').read_text().splitlines():
         name, sep, value = line.partition('=')
-        if sep and name.strip() in KEYS and value.strip():
+        # Compose reads KEY="" , KEY='' and KEY= # note as empty, so they count as missing.
+        value = value.split(' #')[0].strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in '"\'':
+            value = value[1:-1].strip()
+        if sep and name.strip() in KEYS and value and not value.startswith('#'):
             present.add(name.strip())
     return present == set(KEYS)
 

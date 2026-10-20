@@ -152,7 +152,10 @@ class SingaporeKeyRolloutTests(unittest.TestCase):
         for env in ['PRIVATE_SENTINEL=x\n',
                     'DATAGOVSG_API_KEY=v2:secret-sentinel-dg\n',
                     'DATAGOVSG_API_KEY=\nLTA_DATAMALL_ACCOUNT_KEY=secret-sentinel-lta\n',
-                    '# DATAGOVSG_API_KEY=a\n# LTA_DATAMALL_ACCOUNT_KEY=b\n']:
+                    '# DATAGOVSG_API_KEY=a\n# LTA_DATAMALL_ACCOUNT_KEY=b\n',
+                    'DATAGOVSG_API_KEY=""\nLTA_DATAMALL_ACCOUNT_KEY=secret-sentinel-lta\n',
+                    "DATAGOVSG_API_KEY=v2:secret-sentinel-dg\nLTA_DATAMALL_ACCOUNT_KEY=''\n",
+                    'DATAGOVSG_API_KEY=   # later\nLTA_DATAMALL_ACCOUNT_KEY=secret-sentinel-lta\n']:
             with self.subTest(env=env):
                 commands = self.scenario(env=env, expected_error='Add both Singapore keys')
                 self.assertEqual(commands, [])

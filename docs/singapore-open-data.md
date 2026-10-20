@@ -160,7 +160,7 @@ There are two agents, because an agent appears in Chief's catalogue only when al
    - the private `.env` already sets both keys to non-empty values. It checks names only; values are never printed, logged or written.
 2. **Then:**
    - builds the candidate first;
-   - waits until no work is running and no input is pending;
+   - refuses, without cancelling anything, while work is running or input is pending; rerun it when idle;
    - stops the gateway, switches `compose.yaml` and the image, starts the gateway and checks health.
 3. **On failure:** restores the previous application, source and Compose file. It neither cancels nor replays owner work.
 
@@ -175,7 +175,12 @@ There are two agents, because an agent appears in Chief's catalogue only when al
    sudo python3 /tmp/deploy-singapore-keys.py /tmp/singapore-release.tar FULL_REVIEWED_MAIN_SHA
    ```
 
-5. Verify the exact `RELEASE` and health.
+5. Verify the exact `RELEASE` and health. Then check that both keys reached the gateway, printing only the word "present":
+
+   ```sh
+   sudo docker compose --project-directory /opt/hermes-companion -p hermes-companion exec -T gateway sh -c 'test -n "$DATAGOVSG_API_KEY" && test -n "$LTA_DATAMALL_ACCOUNT_KEY" && echo present'
+   ```
+
 6. Dispatch the normal release for the same commit, which should be a no-op redeploy. That confirms later automatic releases accept the installed Compose file.
 7. Live acceptance follows: a bus arrival during service hours, MRT status, and weather.
 
