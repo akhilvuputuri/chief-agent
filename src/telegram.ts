@@ -40,6 +40,7 @@ import { randomUUID } from "node:crypto";
 import type { Config } from "./config.js";
 import type { Assistant } from "./agent.js";
 import type { Database } from "./db.js";
+import type { MediaOutbox } from "./media-outbox.js";
 import { ensureUser, event } from "./db.js";
 import { allowedChat, SerialQueue } from "./security.js";
 import { Voice, boundedBytes } from "./providers.js";
@@ -55,7 +56,12 @@ import {
   validFilePath,
 } from "./attachments.js";
 import type { ImageAttachment } from "./protocol.js";
-export function telegram(c: Config, assistant: Assistant, db: Database) {
+export function telegram(
+  c: Config,
+  assistant: Assistant,
+  db: Database,
+  media?: MediaOutbox,
+) {
   const bot = new Bot(c.TELEGRAM_BOT_TOKEN);
   const views = new TelegramViews(db, bot.api, undefined, c.MINIAPP_ORIGIN);
   // One topics helper for the process: inbound lookups here, sends and creation in main.ts.
@@ -1267,6 +1273,26 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
               }
             }
           }
+          // Pictures a tool queued for this run (radar maps) follow the text reply.
+          // A failed picture never fails the turn: the answer is already sent.
+          if (reply.reply && reply.runId && media)
+            try {
+              for (const item of await media.takeForRun(db, user, reply.runId))
+                if (await deliveryGuard())
+                  await withTelegramSendGuard(deliveryGuard, () => {
+                    const file = new InputFile(item.bytes, item.filename);
+                    const extra = {
+                      ...inThread(actualThread),
+                      caption: item.caption,
+                    };
+                    return item.kind === "animation"
+                      ? bot.api.sendAnimation(user, file, extra).then(() => {})
+                      : bot.api.sendPhoto(user, file, extra).then(() => {});
+                  });
+            } catch (error) {
+              if (!(error instanceof TelegramSendWithheld))
+                opsLog("telegram.media_failed", "warn", errorFields(error));
+            }
         }
       }
       await db.query(

@@ -135,7 +135,7 @@ export class JobTools {
     }
     if (isSingaporeAction(a)) {
       if (!this.singapore) throw new Error("Singapore data is not configured");
-      return this.singapore.call(a);
+      return this.singapore.call(a, { run });
     }
     if (a.operation === "link_resolve") {
       if (!this.links) throw new Error("Link resolution is not configured");

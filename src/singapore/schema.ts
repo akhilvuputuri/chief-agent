@@ -93,6 +93,8 @@ export const sgRain = z
     hours: z.number().min(0.25).max(6).optional(),
     stepMinutes: z.number().int().min(5).max(60).optional(),
     range: z.enum(["70km", "240km"]).optional(),
+    /** A picture sent to the owner after the reply: the newest frame, or the window as an animation. */
+    picture: z.enum(["none", "map", "animation"]).optional(),
   })
   .strict();
 

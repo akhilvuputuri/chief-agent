@@ -69,6 +69,33 @@ const LEGEND_LEVEL = new Map(
   ]),
 );
 
+/** Legend position of a palette colour: exact, else the first colour of its level; -1 for no rain. */
+export function legendIndex(r: number, g: number, b: number, alpha: number) {
+  const level = rainClass(r, g, b, alpha);
+  if (!level) return -1;
+  const exact = LEGEND.findIndex(
+    ([lr, lg, lb]) => lr === r && lg === g && lb === b,
+  );
+  return exact >= 0 ? exact : [0, ...LEVEL_STARTS][level - 1]!;
+}
+
+/** The box the radar picture shows: the whole island with a little sea around it. */
+export const ISLAND = { west: 103.57, east: 104.13, south: 1.13, north: 1.5 };
+
+/**
+ * Full-resolution colours inside ISLAND, kept for pictures: legend index + 1,
+ * or 0 for no rain. The crop starts at (x0, y0) in the radar image.
+ */
+export interface Detail {
+  imageWidth: number;
+  imageHeight: number;
+  x0: number;
+  y0: number;
+  width: number;
+  height: number;
+  colours: Uint8Array;
+}
+
 /**
  * Maps a palette colour to one of five coarse levels: exact legend colours by
  * table, anything else by hue. Opaque white appears in some palettes unused and
@@ -99,11 +126,46 @@ export interface Frame {
   rows: number;
   /** Highest rain level in each cell, 0-5. */
   grid: Uint8Array;
+  detail?: Detail;
 }
 
 /** "YYYY-MM-DDTHH:mm:ss" in Singapore time, the radar API's date format. */
 function sgtStamp(ms: number) {
   return new Date(ms + 8 * 3600_000).toISOString().slice(0, 19);
+}
+
+function islandDetail(
+  png: ReturnType<typeof decodePalettePng>,
+  box: { west: number; east: number; north: number; south: number },
+): Detail | undefined {
+  const colourOf = png.palette.map(
+    ([r, g, b, a]) => legendIndex(r, g, b, a) + 1,
+  );
+  const col = (lon: number) =>
+    ((lon - box.west) / (box.east - box.west)) * png.width;
+  const row = (lat: number) =>
+    ((box.north - lat) / (box.north - box.south)) * png.height;
+  const x0 = Math.max(0, Math.floor(col(ISLAND.west)));
+  const x1 = Math.min(png.width, Math.ceil(col(ISLAND.east)));
+  const y0 = Math.max(0, Math.floor(row(ISLAND.north)));
+  const y1 = Math.min(png.height, Math.ceil(row(ISLAND.south)));
+  if (x1 <= x0 || y1 <= y0) return undefined;
+  const width = x1 - x0;
+  const height = y1 - y0;
+  const colours = new Uint8Array(width * height);
+  for (let y = 0; y < height; y++)
+    for (let x = 0; x < width; x++)
+      colours[y * width + x] =
+        colourOf[png.pixels[(y0 + y) * png.width + x0 + x]!] ?? 0;
+  return {
+    imageWidth: png.width,
+    imageHeight: png.height,
+    x0,
+    y0,
+    width,
+    height,
+    colours,
+  };
 }
 
 /** Fetches and caches radar frames. A published frame never changes. */
@@ -149,17 +211,22 @@ export class RadarFrames {
         const cell = Math.floor(y / CELL) * cols + Math.floor(x / CELL);
         if (level > grid[cell]!) grid[cell] = level;
       }
+    const west = Number(box.upperLeft.longitude);
+    const east = Number(box.lowerRight.longitude);
+    const north = Number(box.upperLeft.latitude);
+    const south = Number(box.lowerRight.latitude);
     return {
       at: stamp,
       time,
       range,
-      west: Number(box.upperLeft.longitude),
-      east: Number(box.lowerRight.longitude),
-      north: Number(box.upperLeft.latitude),
-      south: Number(box.lowerRight.latitude),
+      west,
+      east,
+      north,
+      south,
       cols,
       rows,
       grid,
+      detail: islandDetail(png, { west, east, north, south }),
     };
   }
   /** Frames newest first, spaced stepMinutes apart, covering the last `minutes`. */

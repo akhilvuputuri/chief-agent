@@ -1,3 +1,7 @@
+# Merlion radar pictures — tested, not deployed, 20 October 2026
+
+`sg_rain` can now send the owner a radar map or a looping animation of the window, drawn on the host over a bundled outline of Singapore's regions, with the location marked. Chief sends it on Telegram right after the text reply. It is stacked on the rain radar PR. No migration. Next: review, release, then live acceptance. [Journal 106](journey/106-radar-pictures.md), [design](singapore-open-data.md#rain-radar).
+
 # Opus cache misses in production — in review, 20 October 2026
 
 The first production turns on Opus 5.5 cost $0.05–0.09 per call when the cache was read, and $0.13–0.23 when it missed. Misses followed a mid-turn tool load and, in one turn, a change of reasoning effort with older history shifting. The hypothesis is that removing the previous step's reasoning left no stable cache entry to fall back on. Anthropic requests now also mark the opening system message and the owner's current message, and older history leaves the prompt at most once per turn. Each turn also records the size of every runtime-state key, to guide trimming the 13–17k of runtime state. See [journal 104](journey/104-opus-cache-misses-in-production.md).

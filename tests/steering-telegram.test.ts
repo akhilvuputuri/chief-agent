@@ -7,6 +7,7 @@ import type { Delivery } from "../src/answer.js";
 import type { Database } from "../src/db.js";
 import type { ImageAttachment } from "../src/protocol.js";
 import { readConfig } from "../src/config.js";
+import { MediaOutbox } from "../src/media-outbox.js";
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -67,7 +68,9 @@ const jpeg = new Uint8Array(
 
 type Input = { id: string; message: string; metadata: Incoming };
 type Prepared = { id: string; message: string; images?: ImageAttachment[] };
-async function fixture(options: { voice?: boolean } = {}) {
+async function fixture(
+  options: { voice?: boolean; media?: MediaOutbox; failMethod?: string } = {},
+) {
   const claims = new Set<number>();
   const inputs: Input[] = [];
   const ready: Prepared[] = [];
@@ -165,8 +168,11 @@ async function fixture(options: { voice?: boolean } = {}) {
     }),
     assistant,
     db,
+    options.media,
   );
   bot.api.config.use(async (_previous, method, payload) => {
+    if (method === options.failMethod)
+      return { ok: false, error_code: 400, description: "Bad Request" } as any;
     if (method === "getMe")
       return {
         ok: true,
@@ -869,5 +875,61 @@ test("reset waits for earlier foreground commits and removes their conversation 
     f.assistant.shutdown();
     await Promise.allSettled([first, reset].filter(Boolean));
     await f.pg.close();
+  }
+});
+
+test("pictures a delegated agent queued follow the text reply, and a failed picture does not fail the turn", async () => {
+  const child = "00000000-0000-4000-8000-000000000002";
+  for (const failMethod of [undefined, "sendAnimation"]) {
+    const media = new MediaOutbox();
+    const f = await fixture({ media, failMethod });
+    f.state.query = async (sql) =>
+      sql.includes("AS family(id)")
+        ? [{ id: runId }, { id: child }]
+        : undefined;
+    media.put(child, {
+      kind: "photo",
+      bytes: Buffer.from("png"),
+      filename: "rain-radar.png",
+      caption: "Rain radar 15:00 SGT",
+    });
+    media.put(child, {
+      kind: "animation",
+      bytes: Buffer.from("gif"),
+      filename: "rain-radar.gif",
+      caption: "Rain radar 13:00–15:00 SGT",
+    });
+    // Another run's picture stays queued.
+    media.put("00000000-0000-4000-8000-000000000009", {
+      kind: "photo",
+      bytes: Buffer.from("other"),
+      filename: "other.png",
+      caption: "Other",
+    });
+    f.state.respond = async () => ({
+      reply: "Rain is coming from the east.",
+      runId,
+      inputRevision: f.state.revision,
+    });
+    await bounded(f.bot.handleUpdate(update(1, { text: "Is rain coming?" })));
+    const methods = f.sent.map((item) => item.method);
+    const text = methods.indexOf("sendMessage");
+    assert.ok(text >= 0);
+    assert.ok(methods.indexOf("sendPhoto") > text);
+    if (!failMethod) {
+      assert.ok(
+        methods.indexOf("sendAnimation") > methods.indexOf("sendPhoto"),
+      );
+      assert.equal(
+        f.sent.find((item) => item.method === "sendPhoto")!.payload.caption,
+        "Rain radar 15:00 SGT",
+      );
+    }
+    assert.deepEqual(f.failed, []);
+    assert.equal(media.take([child]).length, 0);
+    assert.equal(
+      media.take(["00000000-0000-4000-8000-000000000009"]).length,
+      1,
+    );
   }
 });

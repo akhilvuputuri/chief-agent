@@ -157,7 +157,11 @@ One agent, **Merlion** (`singapore/merlion`, alias `merlion`), holds all twelve 
   - frames become a grid of about 1.2 km cells with five levels (light to intense) from the radar colours;
   - per call it reports: rain at the location; coverage within 5, 10 and 25 km (25, 50 and 100 km on the 240 km view); the nearest rain and nearest heavy rain; rain history at the location; a timeline of up to 13 points; movement from the best shift between frames (recent and over the window); and a 10–60 minute advection outlook, labelled a rough guide.
 - **Window:** up to 6 hours. Frames are spaced 5–15 minutes apart and cached by timestamp; without a key, at most 9 frames are used.
-- **Not yet built:** a radar picture or animation sent to Telegram, and alerts.
+- **Pictures** ([journal 106](journey/106-radar-pictures.md)): `picture` set to `map` (the newest frame, PNG) or `animation` (the window as a looping GIF) renders the radar over a bundled outline of the five regions, with the location marked and the time shown.
+  - No map service is called. The outline is URA's region boundary, simplified to 1,722 points.
+  - The tool queues the picture in memory under its run. After the text reply for that run, including runs it delegated, Telegram sends it with `sendPhoto` or `sendAnimation`.
+  - Unsent pictures expire after 15 minutes.
+- **Not yet built:** rain alerts.
 
 ## Release path
 

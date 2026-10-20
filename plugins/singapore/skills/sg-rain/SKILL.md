@@ -32,7 +32,17 @@ Use `sg_rain` for questions about rain moving, approaching or passing. Examples:
   - `recent` covers the last 45 minutes and `overWindow` the whole window.
   - Each gives the direction (from, towards), the speed in km/h and how steady the motion was.
   - "nearly stationary" means the rain grew or faded in place rather than travelling.
-- `outlook.estimate`: the level expected over the location in 10 to 60 minutes if the recent motion continues. It is null when the motion is too weak or erratic.
+- `outlook.estimate`: the level expected over the location in 10 to 60 minutes if the recent motion continues. It is null when the motion is too weak or erratic, or the newest frame is over 20 minutes old.
+- `atLocationHistory.rainedForAboutMinutes` is null when only one frame came back; `framesMissing` counts frames the provider did not return.
+
+## Pictures
+
+- Pass `picture` to send the owner a radar picture after your reply:
+  - `animation` for how rain moved or developed over the window (a looping GIF, oldest to newest, holding on the newest frame);
+  - `map` for where rain is right now (the newest frame).
+- Send one when the owner asks to see the radar, or with a movement story over 1 hour or more. Skip it for quick yes/no questions unless asked.
+- `picture.status` "queued" means it will arrive right after your answer: mention it in a few words ("the radar loop follows"), and do not describe every frame. "unavailable" means it cannot be sent here; just answer in text.
+- The picture marks the location with a red dot and shows Singapore's five regions; Johor is not drawn.
 
 ## Telling it
 
