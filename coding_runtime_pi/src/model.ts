@@ -14,6 +14,21 @@ export type ModelFactory = (admit: () => Promise<void>) => Promise<{
   requestByteLimit?: number;
   setRequestPurpose?: (purpose: "agent" | "compaction") => void;
 }>;
+/**
+ * Pi's bundled metadata (reasoning flag, compatibility rules) for a model. A dated snapshot
+ * such as `deepseek/deepseek-v4.1-flash-1017` is often newer than the bundled list; it then
+ * shares its base model's protocol rules, which must not silently fall back to defaults.
+ */
+export function knownModel(
+  runtime: Pick<ModelRuntime, "getModel">,
+  provider: string,
+  model: string,
+) {
+  const exact = runtime.getModel(provider, model);
+  if (exact) return exact;
+  const base = /^(.+)-\d{4}$/.exec(model)?.[1];
+  return base ? runtime.getModel(provider, base) : undefined;
+}
 /** Native Pi OpenAI-compatible implementation; no custom transcript conversion. */
 export function compatibleModel(config: ModelConfig): ModelFactory {
   return async (admit) => {
@@ -25,7 +40,7 @@ export function compatibleModel(config: ModelConfig): ModelFactory {
       refreshOnCreate: false,
       allowModelNetwork: false,
     });
-    const known = runtime.getModel(config.provider, config.model);
+    const known = knownModel(runtime, config.provider, config.model);
     const provider = "runtime";
     runtime.registerProvider(provider, {
       api: "openai-completions",
