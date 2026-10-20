@@ -205,6 +205,7 @@ test("when the provider's own record proves nothing launched, cleanup settles an
   const j = await f.row(job.id);
   assert.equal(j.state, "paused");
   assert.equal(j.cleanup, "complete");
+  assert.match(j.summary, /launch did not happen; resume/);
   // While an attempt is still active with no recorded sandbox, it pauses with nothing to clean.
   const g = await fixture(t),
     other = await g.start();

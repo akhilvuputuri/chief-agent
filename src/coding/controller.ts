@@ -1628,7 +1628,7 @@ export class CodingController {
             false,
           );
           await this.db.query(
-            "UPDATE coding_jobs SET cleanup='complete' WHERE id=$1 AND attempt_id=$2 AND sandbox_id IS NULL AND cleanup='pending' AND state NOT IN ('provisioning','running','publishing')",
+            "UPDATE coding_jobs SET cleanup='complete',summary=CASE WHEN state='paused' THEN 'The sandbox launch did not happen; resume to try again' ELSE summary END,updated_at=now() WHERE id=$1 AND attempt_id=$2 AND sandbox_id IS NULL AND cleanup='pending' AND state NOT IN ('provisioning','running','publishing')",
             [j.id, j.attempt_id],
           );
           return;

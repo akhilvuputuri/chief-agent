@@ -92,6 +92,11 @@ export class BoxSandbox implements SandboxProvider {
     return `${PREFIX}${box.id}`;
   }
 
+  /**
+   * A box row is written before anything is launched or queued, and box rows are never
+   * deleted, so a missing row proves nothing ran. Keep that invariant if box rows are ever
+   * pruned: prune only terminated boxes whose attempts are settled.
+   */
   readonly authoritativeFind = true;
 
   /** The database is the truth for boxes, so a missing row means nothing was created. */
