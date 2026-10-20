@@ -673,10 +673,17 @@ The settings schema capped attempts at 400 model calls and 1,000 tool calls, and
 
 This is step 2 of the longer coding attempts:
 
-- **Image.** The Pi worker image is re-pinned to `sha256:697f51fc…`, built from `11c5269` (Pi image [run 39454970378](https://github.com/akhilvuputuri/chief-agent/actions/runs/39454970378)), which carries the wider schema. An anonymous pull returned 200.
+- **Image.** The Pi worker image is re-pinned to `sha256:e8f1c2cd…`, built from `6ab96c0` (Pi image [run 39468980138](https://github.com/akhilvuputuri/chief-agent/actions/runs/39468980138)). It carries the wider schema (#293) and the dated-snapshot fallback (#301); an anonymous pull returned 200. An intermediate build from `11c5269` (`697f51fc…`) was never configured.
 - **Earlier image.** The coding box profile uses the same image and lists the previous `ba99d955…` in `previousImages`, so jobs created with it keep running with their original limits.
 - **New jobs** get 90 minutes, 800 model calls and 2,000 tool calls. That fits the 100-minute controller ceiling and the box task's 2-hour deadline.
 
 Exact-head review approved: the gateway reads these files from its own image, so the new limits always ship together with the schema that accepts them.
 
-**Model snapshot (owner request, 20 October).** The owner asked to move coding's DeepSeek coder and planner to `deepseek/deepseek-v4.1-flash-1017`. It supports tools and tool choice, with a 1M-token context, and costs about 5× the current snapshot ($0.15/$0.60 against $0.028/$0.12 per million tokens). Review found that the worker takes DeepSeek's compatibility settings from Pi's bundled model list by exact ID, and that list has no `-1017` entry. The settings include reasoning content on assistant messages, no developer role, and OpenRouter's reasoning format. The switch therefore follows separately: the runtime first reuses a dated snapshot's base-model settings, then a new image, then the configuration.
+**Model snapshot (owner request, 20 October).** Coding's DeepSeek coder and planner move to `deepseek/deepseek-v4.1-flash-1017`.
+
+- **Capabilities:** it supports tools and tool choice, with a 1M-token context.
+- **Cost:** about 5× the earlier snapshot ($0.15/$0.60 against $0.028/$0.12 per million tokens).
+- **Protocol rules:** Pi's bundled model list has no `-1017` entry, so #301 first made the worker reuse a dated snapshot's base-model rules; without that, the native-protocol test fails DeepSeek's reasoning replay.
+- **Rollout:** the model ID ships in the same change as the image built with that fix. Jobs snapshot model and image together, so no job pairs `-1017` with an older worker. Existing jobs keep their model.
+
+**Phase 3 retention, measured.** Box `d423dcdf` (instance `i-0adb8580eff24ac19`) stopped at 17:18:18 UTC on 19 October and was terminated by the reconciler at 17:18:54 on 20 October with "Stopped retention reached": 24 hours plus 36 seconds. Every phase 3 check is now measured on EC2.
