@@ -1,7 +1,7 @@
 # 91 — Can Chief delegate heavy work to sub-agents with their own boxes?
 
 Work date(s): 2026-10-17 to 2026-10-20. Written/revised: 2026-10-20.
-Status: in progress. Boxes are on in production since 19 October, with the owner-applied `chief-boxes-prod` AWS stack. Phase 3 is measured on EC2. Since 20:13 UTC on 19 October, new coding attempts run in EC2 `coding` boxes (phase 4a). On 20 October a real job ran entirely on EC2 (plan, implementation and an automatic retry, each in its own box), passed review and published PR 285. Jobs snapshotted with an older image still run on CodeBuild until phase 6. Not yet observed: subreaper cleanup on the AL2023 kernel.
+Status: in progress. Boxes are on in production since 19 October, with the owner-applied `chief-boxes-prod` AWS stack, and phase 3 is measured on EC2. Coding runs only in EC2 boxes: phase 4a since 19 October, with a real job run end to end on 20 October. CodeBuild was removed from the code (`bd2ce04`) and from AWS on 20 October (phase 6). Next: a medium-sized canary job, then phases 4b and 4c. Not yet observed: subreaper cleanup on the AL2023 kernel.
 
 ## User-visible problem and preceding iteration
 
