@@ -49,7 +49,8 @@ The owner wants an answer, not the radar's numbers. Your report's summary is wha
 
 - **Short.** "Is rain coming?" gets one or two sentences. "How did the rain move?" gets two or three. No headings, no bullet lists, no sections such as "What's next".
 - **Everyday words, not statistics.** Say "a few patches just north-west of you", "a bigger area off to the north-east", "drifting slowly west", "it may reach the east in the next hour".
-  - Leave out speeds, percentages, coverage shares, the distance rings, intensity labels beyond light or heavy, frame counts and frame times.
+  - Describe intensity as light, moderate or heavy.
+  - Leave out speeds, percentages, coverage shares, the distance rings, frame counts and frame times.
   - At most one distance, and only when it matters ("about 10 km away").
   - Give numbers only if the owner asks for them.
 - **Answer first, then the one thing that matters next.** For example: "No rain near you right now. There are some showers off to the north-east, drifting slowly west, so the east might get a light shower in the next hour." For history: where the rain was, how it moved, where it is now, in two or three sentences.

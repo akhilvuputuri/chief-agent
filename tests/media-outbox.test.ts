@@ -123,7 +123,7 @@ test("sg_rain queues a picture only when asked and when it has a run", async () 
   // One short line in the reply's 12-hour time, then the credit.
   assert.equal(
     queued!.caption,
-    "Rain radar, 2:45 pm – 3:00 pm. Red dot: your location.\nNEA radar, URA map, via data.gov.sg (Singapore Open Data Licence)",
+    "Rain radar, 2:45 pm – 3:00 pm. Red dot: the shared location.\nNEA radar, URA map, via data.gov.sg (Singapore Open Data Licence)",
   );
   assert.match(animated.picture.note, /Say only that it follows/);
   assert.equal(animated.picture.frames, undefined);
@@ -140,6 +140,19 @@ test("sg_rain queues a picture only when asked and when it has a run", async () 
     "Rain radar, 3:00 pm.\nNEA radar, URA map, via data.gov.sg (Singapore Open Data Licence)",
   );
   assert.ok(!marked(general.bytes));
+  // A whole region is not one spot, so it gets no dot either.
+  await tools.call(
+    action.parse({
+      operation: "sg_rain",
+      region: "east",
+      hours: 0.25,
+      picture: "map",
+    }) as Parameters<SingaporeTools["call"]>[0],
+    { run: "r" },
+  );
+  const region = outbox.take(["r"])[0]!;
+  assert.doesNotMatch(region.caption, /Red dot/);
+  assert.ok(!marked(region.bytes));
   const nowhere: any = await tools.call(ask("map"));
   assert.equal(nowhere.picture.status, "unavailable");
 });

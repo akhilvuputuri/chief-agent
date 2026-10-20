@@ -4,15 +4,8 @@ import { DataGov } from "./datagov.js";
 import { DataMall } from "./datamall.js";
 import { Places } from "./places.js";
 import { ISLAND, RadarFrames, analyse, inFrame, type Frame } from "./radar.js";
-import { radarAnimation, radarMap } from "./radar-image.js";
+import { radarAnimation, radarMap, twelveHour } from "./radar-image.js";
 
-/** "11:05 pm" in Singapore time. */
-function twelveHour(ms: number) {
-  const d = new Date(ms + 8 * 3600_000);
-  const h = d.getUTCHours();
-  const m = String(d.getUTCMinutes()).padStart(2, "0");
-  return `${h % 12 || 12}:${m} ${h < 12 ? "am" : "pm"}`;
-}
 import type { MediaOutbox } from "../media-outbox.js";
 import { SgBusyError, SgHttp, type SgHttpOptions } from "./http.js";
 import type { SingaporeAction } from "./schema.js";
@@ -123,8 +116,9 @@ export class SingaporeTools {
           note: "Pictures cannot be sent here.",
         },
       };
-    // Mark only a location the owner gave; the all-Singapore default has no dot.
-    const given = place.source !== "default";
+    // Mark only a spot the owner gave: not the all-Singapore default, and not a
+    // whole region, which a dot would wrongly pin to one point.
+    const given = place.source !== "default" && place.source !== "region";
     const shown =
       given &&
       place.lat > ISLAND.south &&
@@ -142,7 +136,7 @@ export class SingaporeTools {
         ? `${twelveHour(frames[frames.length - 1]!.time)} – ${twelveHour(frames[0]!.time)}`
         : twelveHour(frames[0]!.time);
     const where = shown
-      ? ` Red dot: ${place.source === "coordinates" ? "your location" : place.label}.`
+      ? ` Red dot: ${place.source === "coordinates" ? "the shared location" : place.label}.`
       : "";
     this.media.put(run, {
       kind: picture.kind,

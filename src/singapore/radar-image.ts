@@ -166,6 +166,9 @@ const GLYPHS: Record<string, string[]> = {
   S: ["01111", "10000", "10000", "01110", "00001", "00001", "11110"],
   G: ["01110", "10001", "10000", "10111", "10001", "10001", "01111"],
   T: ["11111", "00100", "00100", "00100", "00100", "00100", "00100"],
+  A: ["01110", "10001", "10001", "11111", "10001", "10001", "10001"],
+  P: ["11110", "10001", "10001", "11110", "10000", "10000", "10000"],
+  M: ["10001", "11011", "10101", "10101", "10001", "10001", "10001"],
 };
 
 function label(pixels: Uint8Array, c: Canvas, text: string) {
@@ -205,9 +208,12 @@ function marker(pixels: Uint8Array, c: Canvas, p: Point) {
     }
 }
 
-/** "HH:MM SGT" for a frame time. */
-export function clock(ms: number) {
-  return new Date(ms + 8 * 3600_000).toISOString().slice(11, 16) + " SGT";
+/** "11:05 pm" in Singapore time, as Chief writes times to the owner. */
+export function twelveHour(ms: number) {
+  const d = new Date(ms + 8 * 3600_000);
+  const h = d.getUTCHours();
+  const m = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${h % 12 || 12}:${m} ${h < 12 ? "am" : "pm"}`;
 }
 
 /** One frame as palette indices: map, rain, coastline, marker, time and progress. */
@@ -249,7 +255,7 @@ function draw(c: Canvas, f: Frame, p: Point | undefined, progress?: number) {
     }
   }
   if (p) marker(pixels, c, p);
-  label(pixels, c, clock(f.time));
+  label(pixels, c, twelveHour(f.time).toUpperCase());
   if (progress !== undefined) {
     const h = Math.max(4, Math.round(c.width / 160));
     const filled = Math.round(progress * c.width);
