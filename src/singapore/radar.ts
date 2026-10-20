@@ -445,19 +445,44 @@ function averageMotion(
   return { east, north, speed, agree };
 }
 
+const WORDS: Record<string, string> = {
+  N: "north",
+  NE: "north-east",
+  E: "east",
+  SE: "south-east",
+  S: "south",
+  SW: "south-west",
+  W: "west",
+  NW: "north-west",
+};
+
+/**
+ * Movement in everyday words ("drifting slowly west"), with the numbers kept
+ * alongside for when the owner asks for them.
+ */
 function describeMotion(m: ReturnType<typeof averageMotion>, pairs: number) {
   if (!m) return null;
   if (m.speed < 4)
-    return { summary: "nearly stationary", speedKmh: round(m.speed), pairs };
+    return { summary: "barely moving", speedKmh: round(m.speed), pairs };
   const toward = compass(bearing(m.east, m.north));
   const from = compass(bearing(m.east, m.north) + 180);
+  const consistency =
+    m.agree > 0.85 ? "steady" : m.agree > 0.6 ? "fairly steady" : "erratic";
+  const way = WORDS[toward] ?? toward;
+  const summary =
+    consistency === "erratic"
+      ? "shifting around without a clear direction"
+      : m.speed < 12
+        ? `drifting slowly ${way}`
+        : m.speed < 30
+          ? `moving ${way}`
+          : `moving quickly ${way}`;
   return {
-    summary: `moving from the ${from} toward the ${toward} at about ${round(m.speed)} km/h`,
+    summary,
     towards: toward,
     from,
     speedKmh: round(m.speed),
-    consistency:
-      m.agree > 0.85 ? "steady" : m.agree > 0.6 ? "fairly steady" : "erratic",
+    consistency,
     pairs,
   };
 }

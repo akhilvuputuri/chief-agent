@@ -161,6 +161,10 @@ One agent, **Merlion** (`singapore/merlion`, alias `merlion`), holds all twelve 
   - No map service is called. The outline is URA's region boundary, simplified to 1,722 points.
   - The tool queues the picture in memory under its run. After the text reply for that run, Telegram sends it with `sendPhoto` or `sendAnimation`. This includes pictures from runs it delegated, and replies to direct messages or background work, in the same thread.
   - Unsent pictures expire after 15 minutes.
+- **Replies** ([journal 109](journey/109-plain-rain-replies.md)):
+  - Merlion answers rain questions in one to three plain sentences, without speeds, percentages or frame times, unless the owner asks.
+  - Rain questions use the radar only.
+  - The picture's caption is one line in 12-hour time, with a red dot only for a location the owner gave.
 - **Not yet built:** rain alerts.
 
 ## Release path

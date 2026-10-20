@@ -5,6 +5,7 @@ import { MediaOutbox, type OutgoingMedia } from "../src/media-outbox.js";
 import type { Database } from "../src/db.js";
 import { SingaporeTools } from "../src/singapore/tools.js";
 import { action } from "../src/protocol.js";
+import { decodePalettePng } from "../src/singapore/png.js";
 
 const picture = (name: string): OutgoingMedia => ({
   kind: "photo",
@@ -102,14 +103,15 @@ test("sg_rain queues a picture only when asked and when it has a run", async () 
     dataGovKey: "k",
     media: outbox,
   });
-  const ask = (picture?: string) =>
+  const ask = (picture?: string, pin = true) =>
     action.parse({
       operation: "sg_rain",
-      lat: 1.35,
-      lon: 103.85,
+      ...(pin ? { lat: 1.35, lon: 103.85 } : {}),
       hours: 0.25,
       ...(picture ? { picture } : {}),
     }) as Parameters<SingaporeTools["call"]>[0];
+  // Palette entry 4 is the red location marker.
+  const marked = (png: Buffer) => decodePalettePng(png).pixels.includes(4);
   const plain: any = await tools.call(ask(), { run: "r" });
   assert.equal(plain.picture, undefined);
   const animated: any = await tools.call(ask("animation"), { run: "r" });
@@ -118,15 +120,39 @@ test("sg_rain queues a picture only when asked and when it has a run", async () 
   const [queued] = outbox.take(["r"]);
   assert.equal(queued!.kind, "animation");
   assert.equal(queued!.bytes.subarray(0, 6).toString("latin1"), "GIF89a");
-  assert.match(
+  // One short line in the reply's 12-hour time, then the credit.
+  assert.equal(
     queued!.caption,
-    /^Rain radar 14:45–15:00 SGT, 1.3500, 103.8500 marked\./,
+    "Rain radar, 2:45 pm – 3:00 pm. Red dot: the shared location.\nNEA radar, URA map, via data.gov.sg (Singapore Open Data Licence)",
   );
-  assert.match(queued!.caption, /map: URA region boundaries/);
-  assert.match(queued!.caption, /Singapore Open Data Licence/);
+  assert.match(animated.picture.note, /Say only that it follows/);
+  assert.equal(animated.picture.frames, undefined);
   const map: any = await tools.call(ask("map"), { run: "r" });
   assert.equal(map.picture.kind, "photo");
-  assert.equal(outbox.take(["r"])[0]!.bytes.subarray(1, 4).toString(), "PNG");
+  const photo = outbox.take(["r"])[0]!;
+  assert.equal(photo.bytes.subarray(1, 4).toString(), "PNG");
+  assert.ok(marked(photo.bytes));
+  // Without a location from the owner, there is no dot and no claim of one.
+  await tools.call(ask("map", false), { run: "r" });
+  const general = outbox.take(["r"])[0]!;
+  assert.equal(
+    general.caption,
+    "Rain radar, 3:00 pm.\nNEA radar, URA map, via data.gov.sg (Singapore Open Data Licence)",
+  );
+  assert.ok(!marked(general.bytes));
+  // A whole region is not one spot, so it gets no dot either.
+  await tools.call(
+    action.parse({
+      operation: "sg_rain",
+      region: "east",
+      hours: 0.25,
+      picture: "map",
+    }) as Parameters<SingaporeTools["call"]>[0],
+    { run: "r" },
+  );
+  const region = outbox.take(["r"])[0]!;
+  assert.doesNotMatch(region.caption, /Red dot/);
+  assert.ok(!marked(region.bytes));
   const nowhere: any = await tools.call(ask("map"));
   assert.equal(nowhere.picture.status, "unavailable");
 });

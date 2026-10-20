@@ -1,3 +1,7 @@
+# Plain rain replies — tested, not deployed, 21 October 2026
+
+Merlion's rain answers read like a radar printout. They now answer in one to three plain sentences, with no speeds, percentages or frame times unless asked, and without adding forecasts or alerts. The picture caption is one line. In an offline replay, replies fell from 567–887 to 108–218 characters, with no numbers. [Journal 109](journey/109-plain-rain-replies.md).
+
 # Keep in-turn reasoning for Opus caching — in review, 20 October 2026
 
 For Anthropic models, earlier steps of a turn now keep their reasoning, so each call extends the previous one exactly. In a synthetic Opus loop, cached reads grew with the turn (12.8k → 13.2k) instead of stopping at the owner's message. Writes per call stayed small instead of growing. See [journal 108](journey/108-keep-in-turn-reasoning.md).

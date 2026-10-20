@@ -15,6 +15,7 @@ import {
   lzw,
   radarAnimation,
   radarMap,
+  twelveHour,
 } from "../src/singapore/radar-image.js";
 
 /** An independent GIF LZW decoder, written from the specification. */
@@ -311,4 +312,16 @@ test("each radar pixel lands exactly on the map pixels whose centres it covers",
     }
   // A radar pixel is about 4.5 map pixels across.
   assert.ok(inside >= 16 && inside <= 25, String(inside));
+});
+
+test("times read as 12-hour Singapore time, including midnight and noon", () => {
+  const at = (sgt: string) =>
+    twelveHour(Date.parse(`2026-10-21T${sgt}:00+08:00`));
+  assert.equal(at("00:00"), "12:00 am");
+  assert.equal(at("00:05"), "12:05 am");
+  assert.equal(at("11:59"), "11:59 am");
+  assert.equal(at("12:00"), "12:00 pm");
+  assert.equal(at("23:05"), "11:05 pm");
+  // A UTC instant is shown in Singapore time.
+  assert.equal(twelveHour(Date.parse("2026-10-20T16:05:00Z")), "12:05 am");
 });
