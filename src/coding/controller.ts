@@ -540,6 +540,8 @@ export class CodingController {
       return this.status(user, id);
     }
     if (a.operation === "coding_cancel") {
+      // Only a running attempt needs its sandbox cleaned up. A paused job's cleanup is
+      // already settled, and reopening it would occupy the one-active-worker slot.
       const publishing = (
         await this.db.query(
           "SELECT 1 FROM coding_jobs WHERE id=$1 AND user_id=$2 AND state='publishing' AND publication_started",
@@ -551,7 +553,7 @@ export class CodingController {
           "PR publication is in flight or uncertain; inspect its result before cancelling",
         );
       await this.db.query(
-        `WITH changed AS (UPDATE coding_jobs SET state='cancelled',summary='Cancelled by the owner',cleanup=CASE WHEN attempt_id IS NULL THEN cleanup ELSE 'pending' END,updated_at=now() WHERE id=$1 AND user_id=$2 AND state!='cancelled' AND (state!='pr_ready' OR (settings->>'autoMerge'='true' AND stage NOT IN ('merging','release_pending','deployed'))) AND NOT (state='publishing' AND publication_started) RETURNING id)
+        `WITH changed AS (UPDATE coding_jobs SET state='cancelled',summary='Cancelled by the owner',cleanup=CASE WHEN attempt_id IS NOT NULL AND state IN ('provisioning','running','publishing') THEN 'pending' ELSE cleanup END,updated_at=now() WHERE id=$1 AND user_id=$2 AND state!='cancelled' AND (state!='pr_ready' OR (settings->>'autoMerge'='true' AND stage NOT IN ('merging','release_pending','deployed'))) AND NOT (state='publishing' AND publication_started) RETURNING id)
         INSERT INTO coding_events(job_id,event_key,payload) SELECT id,'cancelled',jsonb_build_object('summary','Coding job cancelled; sandbox cleanup is tracked separately.') FROM changed ON CONFLICT DO NOTHING`,
         [a.id, user],
       );
