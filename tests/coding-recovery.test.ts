@@ -130,12 +130,12 @@ test("deadline expiry keeps an explicit reason even when the worker exits before
       const stopped = await f.row(job.id);
       assert.equal(stopped.state, "paused");
       if (terminal) {
-        assert.match(stopped.summary, /deadline has expired/);
-        assert.match(stopped.summary, /stopping cause is unconfirmed/);
+        assert.match(stopped.summary, /after its time ran out/);
+        assert.match(stopped.summary, /the cause is unconfirmed/);
       } else
         assert.match(
           stopped.summary,
-          /Allocated coding time expired while the sandbox was still active/,
+          /Coding time ran out while the coding box was still working/,
         );
       assert.equal(f.creates(), 1);
       await assert.rejects(
@@ -186,7 +186,7 @@ test("an active attempt whose sandbox cannot be found is paused with cleanup sti
   await f.c.tick();
   const j = await f.row(job.id);
   assert.equal(j.state, "paused");
-  assert.match(j.summary, /could not be reconciled/);
+  assert.match(j.summary, /could not be identified/);
   assert.equal(j.cleanup, "pending");
   assert.equal(f.creates(), 1);
 });
@@ -205,7 +205,7 @@ test("when the provider's own record proves nothing launched, cleanup settles an
   const j = await f.row(job.id);
   assert.equal(j.state, "paused");
   assert.equal(j.cleanup, "complete");
-  assert.match(j.summary, /launch did not happen; resume/);
+  assert.match(j.summary, /never started; resume/);
   // While an attempt is still active with no recorded sandbox, it pauses with nothing to clean.
   const g = await fixture(t),
     other = await g.start();
@@ -220,7 +220,7 @@ test("when the provider's own record proves nothing launched, cleanup settles an
   await g.c.tick();
   const o = await g.row(other.id);
   assert.equal(o.state, "paused");
-  assert.match(o.summary, /launch did not happen/);
+  assert.match(o.summary, /never started/);
   assert.equal(o.cleanup, "none");
   const next = await g.start("next");
   await g.c.tick();

@@ -613,3 +613,13 @@ New tests cover both paths.
   - the dry-run IAM check passes for both box templates.
 
 CodeBuild is gone from the code and from AWS.
+
+### Owner-facing wording — 20 October 2026
+
+The owner noticed stale wording during the medium canary: "Python implementation is queued in a new sandbox", progress lines such as "Pi build: Running build" and "Pi plan: waiting_approval", and pause messages about the "sandbox". The host now rewrites them:
+
+- the approval notice says the implementation is queued in a fresh coding box;
+- worker progress is stored and shown in plain words, for example "Implementation started", "Plan ready for your approval" and "Check passed: npm run check". The translation is deterministic, so a retried report still matches its stored record;
+- owner-visible pause and cancel messages say "coding box" instead of "sandbox".
+
+The worker image is unchanged.

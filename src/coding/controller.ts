@@ -46,6 +46,7 @@ import {
   type SandboxRequest,
 } from "./provider.js";
 import { scrubTrace } from "../trace-scrub.js";
+import { ownerProgress } from "./progress-text.js";
 import { seal, open } from "../secret-box.js";
 import { errorFields, opsLog } from "../ops-log.js";
 import { ModelError } from "../model.js";
@@ -554,7 +555,7 @@ export class CodingController {
         );
       await this.db.query(
         `WITH changed AS (UPDATE coding_jobs SET state='cancelled',summary='Cancelled by the owner',cleanup=CASE WHEN attempt_id IS NOT NULL AND state IN ('provisioning','running','publishing') THEN 'pending' ELSE cleanup END,updated_at=now() WHERE id=$1 AND user_id=$2 AND state!='cancelled' AND (state!='pr_ready' OR (settings->>'autoMerge'='true' AND stage NOT IN ('merging','release_pending','deployed'))) AND NOT (state='publishing' AND publication_started) RETURNING id)
-        INSERT INTO coding_events(job_id,event_key,payload) SELECT id,'cancelled',jsonb_build_object('summary','Coding job cancelled; sandbox cleanup is tracked separately.') FROM changed ON CONFLICT DO NOTHING`,
+        INSERT INTO coding_events(job_id,event_key,payload) SELECT id,'cancelled',jsonb_build_object('summary','Coding job cancelled; its coding box is cleaned up separately.') FROM changed ON CONFLICT DO NOTHING`,
         [a.id, user],
       );
       const current = (
@@ -862,7 +863,9 @@ export class CodingController {
     return { accepted: true };
   }
   async progress(job: CodingJob, raw: unknown) {
-    const e = workerEvent.parse(raw);
+    const reported = workerEvent.parse(raw);
+    // Stored and shown in owner-facing words; deterministic, so a retry still matches.
+    const e = { ...reported, summary: ownerProgress(reported.summary) };
     const prior = (
       await this.db.query(
         "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key=$2",
@@ -1553,7 +1556,7 @@ export class CodingController {
         if (!this.allowed(j.user_id)) {
           await this.stopped(
             j,
-            "Owner access was revoked before sandbox creation",
+            "Owner access was revoked before the coding box was started",
             false,
           );
           return;
@@ -1601,7 +1604,7 @@ export class CodingController {
         } catch {
           await this.stopped(
             j,
-            "Sandbox provisioning acknowledgement is uncertain; reconciling before any new attempt",
+            "Starting the coding box gave an uncertain answer; checking before any new attempt",
           );
         }
         return;
@@ -1624,18 +1627,18 @@ export class CodingController {
           // is nothing to clean up; the job pauses for the owner without blocking the queue.
           await this.stopped(
             j,
-            "The sandbox launch did not happen; resume to try again",
+            "The coding box never started; resume to try again",
             false,
           );
           await this.db.query(
-            "UPDATE coding_jobs SET cleanup='complete',summary=CASE WHEN state='paused' THEN 'The sandbox launch did not happen; resume to try again' ELSE summary END,updated_at=now() WHERE id=$1 AND attempt_id=$2 AND sandbox_id IS NULL AND cleanup='pending' AND state NOT IN ('provisioning','running','publishing')",
+            "UPDATE coding_jobs SET cleanup='complete',summary=CASE WHEN state='paused' THEN 'The coding box never started; resume to try again' ELSE summary END,updated_at=now() WHERE id=$1 AND attempt_id=$2 AND sandbox_id IS NULL AND cleanup='pending' AND state NOT IN ('provisioning','running','publishing')",
             [j.id, j.attempt_id],
           );
           return;
         } else {
           await this.stopped(
             j,
-            "Sandbox identity could not be reconciled; inspect the provider before resuming",
+            "The coding box could not be identified; an operator must inspect it before resuming",
           );
           return;
         }
@@ -1654,8 +1657,8 @@ export class CodingController {
             j,
             reason ??
               (expired
-                ? "Sandbox exited without a result and its allocated deadline has expired; stopping cause is unconfirmed, saved work is retained"
-                : "Sandbox stopped before a result was recorded; saved work is retained"),
+                ? "The coding box stopped without a result after its time ran out; the cause is unconfirmed, and saved work is retained"
+                : "The coding box stopped before a result was recorded; saved work is retained"),
             true,
             undefined,
             // Only a confirmed absence of a provider reason is transient.
@@ -1667,13 +1670,13 @@ export class CodingController {
           await this.stopped(
             j,
             state === "terminal"
-              ? "Sandbox exited without a result and its allocated deadline has expired; stopping cause is unconfirmed, saved work is retained"
-              : "Allocated coding time expired while the sandbox was still active; saved work is retained",
+              ? "The coding box stopped without a result after its time ran out; the cause is unconfirmed, and saved work is retained"
+              : "Coding time ran out while the coding box was still working; saved work is retained",
           );
         else if (state === "terminal")
           await this.stopped(
             j,
-            "Sandbox stopped before a result was recorded; saved work is retained",
+            "The coding box stopped before a result was recorded; saved work is retained",
             true,
             undefined,
             "sandbox_stopped",
