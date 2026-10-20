@@ -72,7 +72,7 @@ export const checkpoint = z
     piState: z
       .object({
         version: z.literal(1),
-        toolsUsed: z.number().int().min(0).max(1000),
+        toolsUsed: z.number().int().min(0).max(2500),
         phase: z.enum(["plan", "build", "review"]).optional(),
         reviewRound: z.number().int().min(1).max(1000).optional(),
         rejectedCandidate: z
@@ -241,8 +241,9 @@ export const codingSettings = z
     limits: z
       .object({
         ms: z.number().int().positive().max(7200000),
-        models: z.number().int().positive().max(400),
-        tools: z.number().int().positive().max(1000),
+        // Raised from 400 and 1000 when coding moved to EC2 boxes (no 45-minute CodeBuild cap).
+        models: z.number().int().positive().max(1000),
+        tools: z.number().int().positive().max(2500),
       })
       .strict(),
   })

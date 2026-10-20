@@ -36,7 +36,7 @@ export const squadState = z
       .string()
       .regex(/^[a-f0-9]{64}$/)
       .or(z.literal("")),
-    toolsUsed: z.number().int().nonnegative().max(1000),
+    toolsUsed: z.number().int().nonnegative().max(2500),
     handoff: z
       .object({
         id: z.string().uuid(),
