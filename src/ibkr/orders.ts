@@ -30,6 +30,8 @@ export interface DraftRequest {
 const MAX_RESULT_CHARS = 30000;
 /** How far back a lost create's instruction may have been stamped (clock skew). */
 const MATCH_SKEW_MS = 2 * 60 * 1000;
+/** An identical draft is not sent again within this window (review, 20 October 2026). */
+const REPEAT_MS = 10 * 60 * 1000;
 const LIVE = ["connected", "refresh_uncertain"];
 
 const round2 = (value: number) => Math.round(value * 100) / 100;
@@ -96,6 +98,12 @@ function ibkrLink(value: unknown) {
 }
 
 export class OrderDrafts {
+  /**
+   * Identical drafts sent recently, by owner and terms. IBKR's list can lag a create
+   * (measured once), so this in-process record covers the gap; the list check covers
+   * a restart.
+   */
+  private sent = new Map<string, number>();
   constructor(
     private auth: IbkrAuth,
     private mcp: IbkrMcp,
@@ -168,14 +176,25 @@ export class OrderDrafts {
     const blocked = await this.writable(user);
     if (blocked) return blocked;
     return this.guard(async () => {
-      await this.mcp.run(user, (call) =>
-        call("delete_order_instruction", { id }),
-      );
-      opsLog("portfolio.draft_deleted", "info", {});
+      // The delete is confirmed by listing afterwards; a failed list leaves it unconfirmed.
+      const remaining = await this.mcp.run(user, async (call) => {
+        await call("delete_order_instruction", { id });
+        try {
+          return instructions(await call("get_order_instructions"));
+        } catch {
+          return null;
+        }
+      });
+      const confirmed = remaining?.every((i) => i.id !== id) ?? false;
+      opsLog("portfolio.draft_deleted", confirmed ? "info" : "warn", {
+        state: confirmed ? "deleted" : "unconfirmed",
+      });
       return {
-        status: "deleted",
+        status: confirmed ? "deleted" : "delete_unconfirmed",
         id,
-        note: "The draft was deleted in IBKR. A draft the owner already submitted is an order and is not affected.",
+        note: confirmed
+          ? "The draft was deleted in IBKR. A draft the owner already submitted is an order and is not affected."
+          : "IBKR accepted the delete, but the draft list could not confirm it. List drafts to check.",
       };
     });
   }
@@ -211,7 +230,7 @@ export class OrderDrafts {
     const started = this.now();
     const result = await this.guard(() =>
       this.mcp.run(user, (call) =>
-        this.create(call, r, symbol, exchange, started),
+        this.create(call, user, r, symbol, exchange, started),
       ),
     );
     opsLog("portfolio.draft", result.status === "drafted" ? "info" : "warn", {
@@ -226,6 +245,7 @@ export class OrderDrafts {
 
   private async create(
     call: IbkrCall,
+    user: string,
     r: DraftRequest,
     symbol: string,
     exchange: string | undefined,
@@ -267,20 +287,29 @@ export class OrderDrafts {
         note: "Several US listings match. Ask the owner which exchange, then draft again with exchange. Nothing was sent to IBKR.",
       };
     const listing = us[0]!;
-    let unit = r.limitPrice;
-    if (r.orderType === "MARKET") {
+    // A buy limit fills at the limit or lower, so the limit bounds its value. A sell limit
+    // is a floor that fills at the market when below it, and a market order fills at the
+    // market: those are valued at the current price (a sell at the higher of the limit and
+    // the market).
+    let unit = r.side === "BUY" ? r.limitPrice : undefined;
+    if (!unit) {
       const quote = (await call("get_price_snapshot", {
         contract_id: listing.contractId,
         market_data_names: ["last", "bid_ask"],
       })) as any;
-      const ask = Number(quote?.["bid-ask"]?.ask);
-      const last = Number(quote?.last?.price);
-      unit = ask > 0 ? ask : last > 0 ? last : undefined;
+      const price = (value: unknown) =>
+        Number(value) > 0 ? Number(value) : undefined;
+      const last = price(quote?.last?.price);
+      const market =
+        r.side === "BUY"
+          ? (price(quote?.["bid-ask"]?.ask) ?? last)
+          : (price(quote?.["bid-ask"]?.bid) ?? last);
+      unit = market && Math.max(market, r.limitPrice ?? 0);
     }
     if (!(Number(unit) > 0))
       return refused(
         "no_price",
-        "IBKR returned no current price to check the cap; a LIMIT draft avoids this.",
+        "IBKR returned no current price to check the cap.",
       );
     const estimatedValueUsd = round2(r.quantity * unit!);
     if (estimatedValueUsd > this.maxUsd)
@@ -299,6 +328,29 @@ export class OrderDrafts {
       limitPrice: r.orderType === "LIMIT" ? r.limitPrice : null,
       timeInForce: r.timeInForce ?? "IBKR default",
     };
+    const terms = [
+      user,
+      symbol,
+      r.side,
+      r.quantity,
+      r.orderType,
+      r.limitPrice ?? "",
+    ].join("|");
+    for (const [key, at] of this.sent)
+      if (this.now() - at > REPEAT_MS) this.sent.delete(key);
+    const recent =
+      this.sent.has(terms) ||
+      (await this.find(call, draft, started - REPEAT_MS));
+    if (recent)
+      return {
+        status: "already_drafted",
+        reason: "recent_duplicate",
+        ...(typeof recent === "object" ? { id: recent.id } : {}),
+        draft,
+        note: "An identical draft was sent to IBKR in the last 10 minutes, so Chief did not send it again. List drafts to see it; to have two, the owner can change the terms or wait.",
+      };
+    // Recorded before the outcome is known: whatever happens next, it is not sent twice.
+    this.sent.set(terms, this.now());
     let created: any;
     try {
       created = await call("create_order_instruction", {
@@ -310,23 +362,31 @@ export class OrderDrafts {
         ...(r.timeInForce ? { time_in_force: r.timeInForce } : {}),
       });
     } catch (error) {
-      // No token or a 401 means IBKR processed nothing: a 401 retries the session from the
-      // start, and a missing token is reported as not connected.
+      // No token means nothing was sent. A 401 is assumed to mean IBKR processed nothing
+      // (standard for a resource server; unmeasured for IBKR), so the session is retried
+      // once: the record above is released, and the retry's list check still finds a
+      // draft IBKR saved anyway.
       if (
         error instanceof IbkrAuthError ||
         (error instanceof IbkrMcpError &&
           ["http_401", "token_unavailable"].includes(error.code))
-      )
+      ) {
+        this.sent.delete(terms);
         throw error;
-      if (error instanceof IbkrMcpError && error.code === "tool_error")
+      }
+      // An error result or a lost reply: IBKR may still have saved it. Look, never resend.
+      const found = await this.find(call, draft, started);
+      if (
+        !found &&
+        error instanceof IbkrMcpError &&
+        error.code === "tool_error"
+      )
         return {
           status: "refused_by_ibkr",
-          reason: "ibkr_rejected",
+          reason: "ibkr_error",
           ...(error.detail ? { detail: error.detail } : {}),
-          note: "IBKR rejected the draft; nothing was created.",
+          note: "IBKR reported an error and no matching draft is listed. Chief will not send the same draft again for 10 minutes; list drafts before trying again.",
         };
-      // Lost response: IBKR may have saved it. Never send it again; look for it instead.
-      const found = await this.find(call, draft, started);
       return found
         ? {
             status: "drafted",
@@ -391,8 +451,8 @@ export class OrderDrafts {
             i.quantity === d.quantity &&
             i.orderType === d.orderType &&
             (d.limitPrice == null || i.limitPrice === d.limitPrice) &&
-            (i.createdAt == null ||
-              Date.parse(i.createdAt) >= started - MATCH_SKEW_MS),
+            i.createdAt != null &&
+            Date.parse(i.createdAt) >= started - MATCH_SKEW_MS,
         ) ?? null
       );
     } catch {

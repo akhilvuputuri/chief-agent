@@ -70,8 +70,9 @@ export class IbkrMcp {
 
   /**
    * Runs `work` in one MCP session. An access token rejected before its expiry is refreshed
-   * once and the whole work is retried: a 401 means IBKR processed nothing, so this also
-   * holds for a work that creates an instruction.
+   * once and the whole work is retried. A 401 is assumed to mean IBKR processed nothing
+   * (standard, unmeasured for IBKR); a work that creates an instruction checks for an
+   * identical recent one before creating, so a wrong assumption cannot send it twice.
    */
   async run<T>(user: string, work: (call: IbkrCall) => Promise<T>): Promise<T> {
     let retried = false;

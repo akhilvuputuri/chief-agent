@@ -64,12 +64,14 @@ export function ibkrRoutes(
         );
     }
     const user = result.user!;
-    const granted = await portfolio.auth.status(user);
-    const access = (("scopes" in granted && granted.scopes) || []).includes(
-      IBKR.draftScope,
-    )
-      ? "read and order-draft access"
-      : "read-only access";
+    // Wording only: a failed lookup must not hide a connection that was saved.
+    const granted = await portfolio.auth.status(user).catch(() => null);
+    const scopes = (granted && "scopes" in granted && granted.scopes) || [];
+    const access = !granted
+      ? "access"
+      : scopes.includes(IBKR.draftScope)
+        ? "read and order-draft access"
+        : "read-only access";
     void portfolio
       .sync(user, "connect")
       .then(async (sync) =>

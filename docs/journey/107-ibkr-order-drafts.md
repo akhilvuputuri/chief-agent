@@ -38,11 +38,30 @@ The earlier statement to the owner that no IBKR tool places a live order was tru
 - A separate `core/brokerage` agent owns the four new tools and appears only when drafts are on; the holdings agent is unchanged apart from wording.
 - `IBKR_ORDER_DRAFTS=on` and `IBKR_DRAFT_MAX_USD=100` are in `config/runtime.json`. No migration, no Compose change.
 
-Design and rules: [Order drafts](../ibkr-portfolio.md#order-drafts). Independent review: pending.
+Design and rules: [Order drafts](../ibkr-portfolio.md#order-drafts).
+
+**Independent review of `a183872` (Opus 5.5): REQUEST CHANGES.**
+
+- **Medium: the cap did not bound sells.** A sell limit was valued at its limit price, but a sell limit below the market fills at the market. "Sell 40 at 2.50" (meaning 250) passed as USD 100 and would have sold far more. Sells are now valued at the higher of the limit and the bid (else last). Regression test added.
+- **Low: "nothing was created" after an IBKR error result.** The error could wrap a saved draft. Chief now looks for it first and no longer says nothing was created.
+- **Low: never-twice held only within one call.** A re-delegation after an `unknown` could resend. Identical drafts are now blocked for 10 minutes, from an in-process record and IBKR's list.
+- **Low: the 401 assumption was stated as fact.** It is now labelled a hypothesis, and the duplicate check covers it if it is wrong.
+- **Low: a lost-reply match accepted drafts without a creation time.** It now requires one.
+- **Low: the connect callback could fail on a wording lookup.** That lookup now falls back to generic wording.
+- **Info: deletes were not confirmed.** A delete is now confirmed by listing afterwards.
+
+Re-review of the fixed head: pending.
 
 ## Verification and outcome
 
-- **Tested:** `tests/portfolio.test.ts` (PGlite and a fake IBKR server with the measured tool shapes) covers the scope rules, refusing a write grant once drafts are off, the US-shares and cap checks for limit and market drafts, ambiguous and non-US listings, the autonomous-flow refusal, a lost reply found or reported unknown with exactly one create, IBKR's rejection text, a 401 retried once, foreground-only drafting, list and delete, the blocked live-order tools, bounded query results and agent gating.
+- **Tested:** `tests/portfolio.test.ts` (PGlite and a fake IBKR server with the measured tool shapes) covers:
+  - the scope rules, and refusing a write grant once drafts are off;
+  - the US-shares and cap checks for buy and sell limits and for market drafts;
+  - ambiguous and non-US listings, and the autonomous-flow refusal;
+  - a lost reply found or reported unknown with exactly one create, and no resend of identical terms, including after a restart;
+  - an IBKR error result that saved a draft, IBKR's error text, and a 401 retried once;
+  - foreground-only drafting, list, confirmed and unconfirmed deletes;
+  - the blocked live-order tools, bounded query results and agent gating.
 - **Not yet verified:** a draft from Chief in production; the owner's reconnect with order-draft access; deleting a draft through IBKR; whether the probe's second consent affected Chief's production consent.
 
 ## Follow-up and next iteration

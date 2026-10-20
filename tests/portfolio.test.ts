@@ -1046,6 +1046,7 @@ function broker(f: Awaited<ReturnType<typeof fixture>>) {
     instructions: [] as any[],
     next: 100,
     ask: 12.22 as number | null,
+    bid: 12.2 as number | null,
     last: 12.21 as number | null,
   };
   const listing = (
@@ -1079,7 +1080,7 @@ function broker(f: Awaited<ReturnType<typeof fixture>>) {
     search_contracts: (a: any) => ({ results: listings[a.query] ?? [] }),
     get_price_snapshot: () => ({
       last: { price: s.last },
-      "bid-ask": { ask: s.ask },
+      "bid-ask": { ask: s.ask, bid: s.bid },
     }),
     create_order_instruction: (a: any) => {
       const id = String(s.next++);
@@ -1200,13 +1201,33 @@ test("a draft is US shares only, within the cap, and only in review-and-approve 
   // Over the cap: 20 x 6 = 120 > 100. Nothing is sent.
   const over = await draft({
     symbol: "F",
-    side: "SELL",
+    side: "BUY",
     quantity: 20,
     orderType: "LIMIT",
     limitPrice: 6,
   });
   assert.equal(over.reason, "over_cap");
   assert.equal(over.estimatedValueUsd, 120);
+  // A sell limit is a floor that fills at the market when below it: valued at the
+  // higher of the limit and the bid (review finding, 20 October 2026).
+  const lowSell = await draft({
+    symbol: "F",
+    side: "SELL",
+    quantity: 40,
+    orderType: "LIMIT",
+    limitPrice: 2.5,
+  });
+  assert.equal(lowSell.reason, "over_cap");
+  assert.equal(lowSell.estimatedValueUsd, 488);
+  const highSell = await draft({
+    symbol: "F",
+    side: "SELL",
+    quantity: 1,
+    orderType: "LIMIT",
+    limitPrice: 20,
+  });
+  assert.equal(highSell.status, "drafted");
+  assert.equal(highSell.estimatedValueUsd, 20);
   // A market draft is valued at the current ask (falling back to last).
   const market = await draft({
     symbol: "F",
@@ -1228,9 +1249,9 @@ test("a draft is US shares only, within the cap, and only in review-and-approve 
   assert(
     !(
       "limit_price" in
-      f.ibkr.state.toolArgs.filter(
-        (c) => c.name === "create_order_instruction",
-      )[1]!.args
+      f.ibkr.state.toolArgs
+        .filter((c) => c.name === "create_order_instruction")
+        .at(-1)!.args
     ),
   );
   b.last = null;
@@ -1295,7 +1316,7 @@ test("a draft is US shares only, within the cap, and only in review-and-approve 
     limitPrice: 6,
   });
   assert.equal(autonomous.reason, "flow_not_review");
-  assert.equal(creates(), 3);
+  assert.equal(creates(), 4);
   // Limit price and order type must agree.
   await assert.rejects(
     draft({ symbol: "F", side: "BUY", quantity: 1, orderType: "LIMIT" }),
@@ -1345,6 +1366,33 @@ test("a lost create is never sent again; it is found or reported unknown", async
   assert.equal(unknown.status, "unknown");
   assert.match(unknown.note, /Do not draft it again/);
   assert.equal(creates(), 2);
+  // Asking again with the same terms does not resend, although the list shows nothing.
+  const again = await draft({
+    symbol: "F",
+    side: "SELL",
+    quantity: 3,
+    orderType: "LIMIT",
+    limitPrice: 5,
+  });
+  assert.equal(again.status, "already_drafted");
+  assert.equal(creates(), 2);
+  // After a restart (a fresh process), a recent identical draft in IBKR's list is found.
+  const restarted = new OrderDrafts(
+    f.auth,
+    new IbkrMcp((user, force) => f.auth.accessToken(user, force), f.ibkr.http),
+    100,
+    f.clock,
+  );
+  const listed: any = await restarted.draft("owner", {
+    symbol: "F",
+    side: "BUY",
+    quantity: 2,
+    orderType: "LIMIT",
+    limitPrice: 5,
+  });
+  assert.equal(listed.status, "already_drafted");
+  assert.equal(listed.id, "100");
+  assert.equal(creates(), 2);
   // IBKR's own rejection is reported with its text, control characters removed.
   f.ibkr.state.tools.create_order_instruction = () => ({
     toolError: "Contract\u0000 not tradable",
@@ -1358,7 +1406,22 @@ test("a lost create is never sent again; it is found or reported unknown", async
   });
   assert.equal(rejected.status, "refused_by_ibkr");
   assert.equal(rejected.detail, "Contract not tradable");
-  // A 401 on create means nothing was processed: refreshed, then created once.
+  assert.doesNotMatch(rejected.note, /nothing was created/);
+  // An error result after IBKR saved the draft is reported as the draft it is.
+  f.ibkr.state.tools.create_order_instruction = (a) => {
+    create(a);
+    return { toolError: "backend timeout" };
+  };
+  const saved = await draft({
+    symbol: "F",
+    side: "BUY",
+    quantity: 3,
+    orderType: "LIMIT",
+    limitPrice: 5,
+  });
+  assert.equal(saved.status, "drafted");
+  assert.equal(saved.id, "101");
+  // A 401 on create is assumed unprocessed: refreshed, then created once.
   f.ibkr.state.tools.create_order_instruction = create;
   f.ibkr.state.rejectTool = "create_order_instruction";
   const retried = await draft({
@@ -1366,10 +1429,10 @@ test("a lost create is never sent again; it is found or reported unknown", async
     side: "BUY",
     quantity: 1,
     orderType: "LIMIT",
-    limitPrice: 5,
+    limitPrice: 4,
   });
   assert.equal(retried.status, "drafted");
-  assert.equal(b.instructions.length, 2);
+  assert.equal(b.instructions.length, 3);
 });
 
 test("drafts need a foreground owner request and a write grant; listing and deleting work", async () => {
@@ -1408,6 +1471,21 @@ test("drafts need a foreground owner request and a write grant; listing and dele
   );
   assert.equal(removed.status, "deleted");
   assert.equal(b.instructions.length, 0);
+  // A delete the list does not confirm is reported as unconfirmed.
+  await draft({
+    symbol: "F",
+    side: "BUY",
+    quantity: 2,
+    orderType: "LIMIT",
+    limitPrice: 6,
+  });
+  f.ibkr.state.tools.delete_order_instruction = () => ({});
+  const kept: any = await f.portfolio.call(
+    "owner",
+    { operation: "portfolio_order_draft_delete", id: "101" },
+    await turn(f),
+  );
+  assert.equal(kept.status, "delete_unconfirmed");
   // A read-only grant (an earlier connection) cannot draft: reconnect first.
   const ro = await draftFixture("mcp.read");
   const calls = ro.f.ibkr.state.toolCalls.length;
