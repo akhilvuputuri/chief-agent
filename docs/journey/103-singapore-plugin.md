@@ -1,7 +1,7 @@
 # 103 — Singapore plugin: can Chief answer weather, haze, carpark and bus questions from government data?
 
 Work date: 2026-10-20. Written: 2026-10-20.
-Status: tested; not deployed. Phase 1 of [issue 271](https://github.com/akhilvuputuri/chief-agent/issues/271) (data.gov.sg) and [issue 270](https://github.com/akhilvuputuri/chief-agent/issues/270) (LTA DataMall). Design: [Singapore open data](../singapore-open-data.md).
+Status: released 20 October 2026 (#277, `becf234`) without keys; the key rollout is in review. Phase 1 of [issue 271](https://github.com/akhilvuputuri/chief-agent/issues/271) (data.gov.sg) and [issue 270](https://github.com/akhilvuputuri/chief-agent/issues/270) (LTA DataMall). Design: [Singapore open data](../singapore-open-data.md).
 
 ## User-visible problem and preceding iteration
 
@@ -113,6 +113,15 @@ Tested, not deployed. Remaining after the code release:
    - a bus arrival during service hours;
    - MRT status.
 3. **Bus arrival in service hours:** check live minutes and load. The smoke run was at night, so only the no-service path was observed live.
+
+### Release closure — 20 October 2026
+
+- **Merge:** [#277](https://github.com/akhilvuputuri/chief-agent/pull/277) was merged at approved head `101b283` as `becf234038e128a34fe54974ffdd2d475c84239a`.
+- **CI:** checks passed. The [release run](https://github.com/akhilvuputuri/chief-agent/actions/runs/39317112618) succeeded, and `npm run release:status` reports the exact commit deployed with startup health passing at release time.
+- **What is live:** production runs the `sg_` tools at the anonymous data.gov.sg pace. The transport agent is hidden because no DataMall key is configured.
+- **Pending:**
+  - the key rollout (`scripts/deploy-singapore-keys.py`), which adds both keys;
+  - live Telegram acceptance.
 
 ## Follow-up and next iteration
 
