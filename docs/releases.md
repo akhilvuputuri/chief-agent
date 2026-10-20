@@ -1,3 +1,24 @@
+## Deployed `adbba7b` and `8673bd5` (untagged) — Merlion rain radar and radar pictures
+
+- **Rain radar.** [PR 288](https://github.com/akhilvuputuri/chief-agent/pull/288) merged as `d1c66bade2f075badae533e1b86b3d1bc034dc83`.
+  - `sg_rain` reads up to 6 hours of NEA radar for a shared Telegram pin, a typed place or a region. It reports rain now, history, movement and a rough outlook. Telegram location messages now reach Chief.
+  - Exact-head independent review (Claude Opus 5.5) approved `97d6b53` after several rounds. Fixes included:
+    - sub-cell motion, after 8 km/h rain was read as 13 km/h;
+    - an exact table of NEA's 33 legend colours;
+    - sampling the pin's own radar cell;
+    - stale-frame outlooks;
+    - forecast-outage lookups.
+  - Devin and hosted CI passed.
+  - Live in `adbba7b` at 12:56 UTC on 20 October. The first release attempt stopped because `main` had moved.
+- **Radar pictures.** [PR 291](https://github.com/akhilvuputuri/chief-agent/pull/291) merged as `9c184b59aec0155095d9b549471f6166ff779fb9`.
+  - The radar is drawn on the host as a PNG map or looping GIF over a bundled outline of Singapore's regions, and sent after the reply, including background replies.
+  - Review approved `6a454f5`; Devin and hosted CI passed.
+  - Its own release attempt hit the job's 15-minute timeout during the deploy step, leaving production unchanged on `adbba7b`.
+  - Live in `8673bd5` (#292 on top) at 14:54 UTC, with `release:status` success, then heartbeats and no errors.
+- **Not yet observed.** An owner `sg_rain` call or picture in production. Acceptance: compare with myENV.
+
+[Journal 105](journey/105-rain-radar.md#release-closure--2026-10-20), [journal 106](journey/106-radar-pictures.md#release-closure--2026-10-20), [design](singapore-open-data.md#rain-radar).
+
 ## Deployed `bd2ce04` (untagged) — CodeBuild removed; coding runs only in EC2 boxes
 
 - **What merged.** [PR 287](https://github.com/akhilvuputuri/chief-agent/pull/287) merged as `bd2ce046cc71135468346fa824f59e2520e7488d`.
