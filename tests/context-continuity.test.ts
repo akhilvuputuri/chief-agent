@@ -1051,12 +1051,15 @@ test("older history stays the same across a turn's calls as its results grow", (
     input.messages.filter((m) =>
       /Earlier (question|answer)/.test(String(m.content)),
     ).length;
+  // Counts depend on the runtime state's size (the skill catalogue grows), so
+  // compare calls with each other rather than with fixed numbers.
   const first = call(0);
-  assert.equal(earlier(first), 16);
+  const admitted = earlier(first);
+  assert.ok(admitted >= 10, String(admitted));
   // Without the frozen allowance, history would shrink as this turn's results grow.
-  assert.equal(earlier(call(4)), 8);
+  assert.ok(earlier(call(4)) <= admitted - 4, String(earlier(call(4))));
   // With it, every later call sends the same older history.
-  assert.equal(earlier(call(4, first.historyAllowance)), 16);
+  assert.equal(earlier(call(4, first.historyAllowance)), admitted);
 });
 
 test("with a full fixed envelope, older history leaves at most once per turn and stays out", () => {

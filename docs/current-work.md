@@ -4,7 +4,7 @@ The first production turns on Opus 5.5 cost $0.05–0.09 per call when the cache
 
 # Merlion rain radar — tested, not deployed, 20 October 2026
 
-`sg_rain` reads NEA rain radar over up to 6 hours for a shared Telegram pin, a typed place or a region. It reports rain now, nearby coverage, history at the location, a timeline, movement (direction and speed) and a rough outlook. Chief now accepts Telegram location messages. No migration. Next: review, release, then live acceptance. [Journal 104](journey/104-rain-radar.md), [design](singapore-open-data.md#rain-radar).
+`sg_rain` reads NEA rain radar over up to 6 hours for a shared Telegram pin, a typed place or a region. It reports rain now, nearby coverage, history at the location, a timeline, movement (direction and speed) and a rough outlook. Chief now accepts Telegram location messages. No migration. Next: review, release, then live acceptance. [Journal 105](journey/105-rain-radar.md), [design](singapore-open-data.md#rain-radar).
 
 # Reply style for any model — live as v0.3.91, 20 October 2026
 

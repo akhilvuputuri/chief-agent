@@ -146,7 +146,7 @@ One agent, **Merlion** (`singapore/merlion`, alias `merlion`), holds all twelve 
 
 ## Rain radar
 
-`sg_rain` reads NEA's rain radar ([journal 104](journey/104-rain-radar.md)).
+`sg_rain` reads NEA's rain radar ([journal 105](journey/105-rain-radar.md)).
 
 - **Source:**
   - `weather-radar-images/70km` (and `/240km`) gives one frame every 5 minutes, with past frames available by `date`.
