@@ -12,6 +12,9 @@ test("the worker's internal progress labels are shown to the owner in plain word
     ["Pi build: completed", "Implementation completed"],
     ["Pi review: Running review", "Review started"],
     ["Pi review: failed", "Review failed"],
+    ["Pi plan: waiting_input", "Planning needs your answer"],
+    ["Pi build: cancelled", "Implementation cancelled"],
+    ["Pi build: ready", "Implementation ready"],
     ["Pi check: npm ci: 0", "Check passed: npm ci"],
     ["Pi check: npm run check: 1", "Check failed: npm run check (exit 1)"],
     ["Pi check: npm run build", "Check: npm run build"],
@@ -45,4 +48,26 @@ test("progress is stored in owner wording, and a retried report still matches", 
     )
   ).rows[0].payload;
   assert.equal(event.summary, "Check passed: npm run check");
+});
+
+test("a retry of a progress report stored before the owner wording still matches", async (t) => {
+  const f = await fixture(t),
+    job = await f.start();
+  await f.c.tick();
+  const j = await f.row(job.id);
+  const report = {
+    key: "pi:task:7",
+    stage: "implementing",
+    summary: "Pi build: Running build",
+  };
+  // Stored by the previous host version, in the worker's own words.
+  await f.db.query(
+    "INSERT INTO coding_events(job_id,event_key,payload) VALUES($1,$2,$3::jsonb)",
+    [job.id, `${j.attempt_id}:pi:task:7`, JSON.stringify(report)],
+  );
+  assert.deepEqual(await f.c.progress(j, report), { accepted: true });
+  await assert.rejects(
+    f.c.progress(j, { ...report, summary: "Pi build: completed" }),
+    /Progress key conflict/,
+  );
 });

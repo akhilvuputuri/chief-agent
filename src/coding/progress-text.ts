@@ -26,7 +26,10 @@ export function ownerProgress(summary: string): string {
     return intent === "plan"
       ? "Plan ready for your approval"
       : `${phase} waiting for your approval`;
-  if (["completed", "paused", "failed"].includes(text))
+  if (text === "waiting_input") return `${phase} needs your answer`;
+  if (text === "running") return `${phase} running`;
+  if (text === "ready") return `${phase} ready`;
+  if (["completed", "paused", "failed", "cancelled"].includes(text))
     return `${phase} ${text}`;
   return `${phase}: ${text}`;
 }

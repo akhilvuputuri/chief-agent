@@ -873,7 +873,11 @@ export class CodingController {
       )
     ).rows[0];
     if (prior) {
-      if (hash(prior.payload) !== hash(e))
+      // A record stored before the owner wording existed holds the raw report.
+      if (
+        hash(prior.payload) !== hash(e) &&
+        hash(prior.payload) !== hash(reported)
+      )
         throw new Error("Progress key conflict");
       return { accepted: true };
     }
