@@ -1262,7 +1262,7 @@ export class CodingController {
               ? "Coding attempt deadline has passed"
               : now.used_models >= job.settings.limits.models
                 ? "Model allocation exhausted"
-                : now.model_busy
+                : now.model_busy || !input.retryOf
                   ? "Another model request is already in flight"
                   : "Generation recovery already used",
         );
@@ -1807,6 +1807,20 @@ export class CodingController {
   async recoverDelivery() {
     await this.db.query(
       "UPDATE coding_events SET delivery='uncertain' WHERE delivery='sending'",
+    );
+  }
+  /**
+   * After a gateway restart no model call is in flight: a call cut off mid-way never ran
+   * its cleanup. Its result is unknown, so it becomes uncertain (never replayed), and the
+   * job's model slot is freed so the worker, which survives in its box, can continue.
+   * Runs before the worker routes open.
+   */
+  async recoverModels() {
+    await this.db.query(
+      "UPDATE coding_model_calls SET state='uncertain' WHERE state='pending'",
+    );
+    await this.db.query(
+      "UPDATE coding_jobs SET model_busy=false WHERE model_busy",
     );
   }
   async deliver(

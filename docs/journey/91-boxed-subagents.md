@@ -662,3 +662,9 @@ The settings schema capped attempts at 400 model calls and 1,000 tool calls, and
 - a mismatch between the resumed session and the previous attempt's uncertain call.
 
 **Change (in review).** Generic rejections now record a fixed reason code, and the model-slot claim names its refusing condition: `model_slot_busy`, `model_allocation_exhausted`, `attempt_deadline_passed`, `attempt_inactive` or `recovery_already_used`. The reason appears in `coding_status` as `lastFailure.reason`.
+
+**Review of the diagnostics change (Claude Opus 5.5): approved.** The reviewer's best hypothesis for the refusal was a gateway restart during a model call. That would leave `model_busy` set, so every later call fails the slot claim and is never recorded.
+
+- **Checked against this case.** The gateway had started at 14:54 and did not restart during the resumed attempt (15:17–15:29), so that is not what refused this call. The cause remains unknown until the new reason codes capture it.
+- **The scenario is still a real gap.** Releases from other sessions land while coding runs, and the first canary survived a 12:56 restart only because no call was in flight. Startup now marks pending model calls `uncertain` (never replayed) and frees `model_busy` before the worker routes open. A test covers it.
+- **Label fix.** A claim refusal without `retryOf` is never labelled "recovery already used".

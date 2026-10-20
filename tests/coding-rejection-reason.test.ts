@@ -59,3 +59,29 @@ test("only the host's own fixed messages map to reasons; anything else is unclas
   );
   assert.equal(rejectionReason("not an error"), "unclassified");
 });
+
+test("after a restart, a model call cut off mid-way frees the job's model slot", async (t) => {
+  const f = await fixture(t);
+  const job: any = await f.start("restart-mid-call", "plan");
+  await f.c.tick();
+  const active = await f.row(job.id);
+  // The gateway stopped during a call: slot held, ledger row still pending.
+  await f.db.query("UPDATE coding_jobs SET model_busy=true WHERE id=$1", [
+    job.id,
+  ]);
+  const cut = randomUUID();
+  await f.db.query(
+    "INSERT INTO coding_model_calls(id,job_id,attempt_id,role,request_hash,input) VALUES($1,$2,$3,'coder','h','{}'::jsonb)",
+    [cut, job.id, active.attempt_id],
+  );
+  await f.c.recoverModels();
+  assert.equal((await f.row(job.id)).model_busy, false);
+  assert.equal(
+    (
+      await f.db.query("SELECT state FROM coding_model_calls WHERE id=$1", [
+        cut,
+      ])
+    ).rows[0].state,
+    "uncertain",
+  );
+});
