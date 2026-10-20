@@ -10,7 +10,7 @@ The fixed coordinator prompt had outgrown the 48k soft budget, so older conversa
 
 The main model and the `standard` agent tier move from Gemini 4 Argon to Claude Opus 5.5. The owner approved raising the price ceilings to $4/$20 in the reviewed model policy. Synthetic probes showed why caching stopped: Argon's implicit cache missed whenever the request tail changed, and Chief adds the current time to every call. Anthropic models cache only when the request is marked, and a Chief-shaped tool-loop probe confirmed that two markers also cache the growing in-turn history. Requests now carry provider-specific markers. See [journal 100](journey/100-opus-main-model-and-caching.md).
 
-# Singapore plugin — released without keys, 20 October 2026
+# Singapore plugin — keys live as of `7f83158`, Merlion in v0.3.92, 20 October 2026
 
 Phase 1 of issues [271](https://github.com/akhilvuputuri/chief-agent/issues/271) (data.gov.sg) and [270](https://github.com/akhilvuputuri/chief-agent/issues/270) (LTA DataMall). It adds read-only `sg_` and `lta_` tools in `src/singapore/` and the `singapore` plugin.
 
@@ -18,7 +18,7 @@ Phase 1 of issues [271](https://github.com/akhilvuputuri/chief-agent/issues/271)
 - `transport` agent: bus arrivals, MRT status and traffic.
 - No migration. The picker eval passed.
 
-Released as `becf234` (#277) with startup health verified. Next: the reviewed key rollout (`scripts/deploy-singapore-keys.py`) adding `DATAGOVSG_API_KEY` and `LTA_DATAMALL_ACCOUNT_KEY`, then live acceptance. [Design](singapore-open-data.md), [catalogue](singapore-open-data-catalogue.md), [DataMall catalogue](lta-datamall-catalogue.md), journals [99](journey/99-singapore-open-data.md) and [103](journey/103-singapore-plugin.md).
+Code released as `becf234` (#277). Both keys went live through the reviewed operator rollout of `7f83158` (#282): RELEASE, health and key presence were verified, and live bus arrival, MRT, weather and PSI calls passed inside production. The two agents are being merged into one, **Merlion** (`merlion`), in the v0.3.92 records PR. Next: owner Telegram acceptance (a weather or haze question, a carpark, a bus arrival at a saved stop, MRT status). [Design](singapore-open-data.md), [catalogue](singapore-open-data-catalogue.md), [DataMall catalogue](lta-datamall-catalogue.md), journals [99](journey/99-singapore-open-data.md) and [103](journey/103-singapore-plugin.md).
 
 # Monthly subscription summary — live as v0.3.88, 19 October 2026
 

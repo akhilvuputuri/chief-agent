@@ -111,7 +111,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 19 October | [100 — Opus main model and caching](100-opus-main-model-and-caching.md): why did prompt caching stop, and what does Opus 5.5 need? | Released v0.3.89 (`f94e699`): Opus 5.5 main and standard tier, $4/$20 policy ceilings, provider-specific cache markers; live measurement pending |
 | 20 October | [101 — Lean coordinator prompt](101-lean-coordinator-prompt.md): why did Chief never see older conversation, and how small can its fixed prompt be? | Released v0.3.90 (`11c3bad`, deployed in `7e648f9`): coding domain split, domain guidance with its tools, capped 6k history floor, once-per-turn over-budget event; live measurement pending |
 | 20 October | [102 — Reply style for any model](102-reply-style-for-any-model.md): how does Chief keep phone replies short and free of internal IDs, whichever model runs? | Released v0.3.91 (`57cfa9a`, deployed in `becf234`): sharper reply instructions and a host filter for internal names and long IDs; live measurement pending |
-| 20 October | [103 — Singapore plugin](103-singapore-plugin.md): can Chief answer weather, haze, carpark and bus questions from government data? | Tested: data.gov.sg and LTA DataMall tools, `singapore` plugin, picker eval pass; not deployed, key rollout pending |
+| 20 October | [103 — Singapore plugin](103-singapore-plugin.md): can Chief answer weather, haze, carpark and bus questions from government data? | Released `becf234` (#277, keyless), then keys live via the operator rollout of `7f83158` (#282) with live production checks; Merlion merge and v0.3.92 in #284; owner Telegram acceptance pending |
 
 ## Coding-agent learning path
 

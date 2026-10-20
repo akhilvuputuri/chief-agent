@@ -27,10 +27,8 @@ AGENT = {
     "library": "library",
     "watchlist": "stocks",
     "news": "news",
-    "singapore": "singapore",
+    "singapore": "merlion",
 }
-# Singapore bus, MRT and traffic questions go to the transport agent.
-TRANSPORT = {"sg-2", "sg-3"}
 # Domains the coordinator keeps; a message needing one is Chief's to handle.
 CHIEF = {"canvas", "work", "skills"}
 # Unlabelled public-web questions now go to the web agent.
@@ -42,8 +40,6 @@ JOB_ALIGNMENT = {"jobs-1", "jobs-5", "jobs-6", "jobs-7", "t-jobs-3", "fu-5"}
 def gold(scenario: dict) -> str:
     if scenario["id"] in WEB:
         return "web"
-    if scenario["id"] in TRANSPORT:
-        return "transport"
     if scenario["id"] in JOB_ALIGNMENT:
         return "chief"
     domains = set(scenario["gold"])
