@@ -1106,6 +1106,7 @@ const ruleDelivery = new RuleDelivery(db, async (user, payload) => {
 await ruleDelivery.recover();
 await newsBulletin.recover();
 await coding?.recoverDelivery();
+await coding?.recoverModels();
 const boxTimer = boxes
   ? setInterval(() => {
       void boxes

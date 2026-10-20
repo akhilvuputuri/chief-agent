@@ -396,6 +396,8 @@ export class CodingController {
         | "model_context_limit"
         | CodingFailureCode;
       httpStatus: 409 | 413;
+      /** A fixed reason code for a generic rejection (src/coding/rejection-reason.ts). */
+      reason?: string;
       elapsedMs?: number;
       callId?: string;
       timeoutKind?: "first_output" | "idle" | "total";
@@ -410,6 +412,7 @@ export class CodingController {
       phase: failure.phase,
       errorCode: failure.code,
       httpStatus: failure.httpStatus,
+      ...(failure.reason ? { reason: failure.reason } : {}),
     });
     const recorded = await this.db.query(
       `INSERT INTO coding_events(job_id,event_key,payload,delivery)
@@ -1242,10 +1245,28 @@ export class CodingController {
           input.retryOf ?? null,
         ],
       );
-      if (!claimed.rows.length)
+      if (!claimed.rows.length) {
+        // Say which condition refused the slot, so a pause can be diagnosed.
+        const now = (
+          await this.db.query(
+            "SELECT state,attempt_id,model_busy,used_models,attempt_deadline FROM coding_jobs WHERE id=$1",
+            [job.id],
+          )
+        ).rows[0];
         throw new Error(
-          "Model allocation unavailable or a request is already in flight",
+          !now ||
+            !active.includes(now.state) ||
+            now.attempt_id !== job.attempt_id
+            ? "Coding attempt is no longer active"
+            : new Date(now.attempt_deadline).getTime() <= this.clock().getTime()
+              ? "Coding attempt deadline has passed"
+              : now.used_models >= job.settings.limits.models
+                ? "Model allocation exhausted"
+                : now.model_busy || !input.retryOf
+                  ? "Another model request is already in flight"
+                  : "Generation recovery already used",
         );
+      }
       admitted = true;
       const live = (
         await this.db.query(
@@ -1786,6 +1807,20 @@ export class CodingController {
   async recoverDelivery() {
     await this.db.query(
       "UPDATE coding_events SET delivery='uncertain' WHERE delivery='sending'",
+    );
+  }
+  /**
+   * After a gateway restart no model call is in flight: a call cut off mid-way never ran
+   * its cleanup. Its result is unknown, so it becomes uncertain (never replayed), and the
+   * job's model slot is freed so the worker, which survives in its box, can continue.
+   * Runs before the worker routes open.
+   */
+  async recoverModels() {
+    await this.db.query(
+      "UPDATE coding_model_calls SET state='uncertain' WHERE state='pending'",
+    );
+    await this.db.query(
+      "UPDATE coding_jobs SET model_busy=false WHERE model_busy",
     );
   }
   async deliver(
