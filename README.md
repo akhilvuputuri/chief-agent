@@ -1,5 +1,7 @@
 # Chief
 
+This is a personal project.
+
 Current release and open work: [current-work.md](docs/current-work.md). For an incident, start with [troubleshooting.md](docs/troubleshooting.md). [Published releases](https://github.com/akhilvuputuri/chief-agent/releases) record verified deployment milestones; a branch push alone is not a deployment.
 
 **A personal assistant with a TypeScript agent runtime we own.** Talk to it through Telegram text or voice, ask it to research, maintain notes, plan preparation, and manage reminders. Postgres is the durable source of truth; Google Sheets gives you a familiar viewing surface.
