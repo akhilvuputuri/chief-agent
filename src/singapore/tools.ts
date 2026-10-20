@@ -2,6 +2,8 @@ import { ToolValidationError } from "../tool-errors.js";
 import { Carparks } from "./carparks.js";
 import { DataGov } from "./datagov.js";
 import { DataMall } from "./datamall.js";
+import { Places } from "./places.js";
+import { RadarFrames, analyse, inFrame } from "./radar.js";
 import { SgBusyError, SgHttp, type SgHttpOptions } from "./http.js";
 import type { SingaporeAction } from "./schema.js";
 
@@ -13,12 +15,20 @@ export class SingaporeTools {
   readonly dataGov: DataGov;
   readonly dataMall: DataMall;
   readonly carparks: Carparks;
+  readonly radar: RadarFrames;
+  readonly places: Places;
+  private readonly keyedDataGov: boolean;
+  private readonly now: () => number;
   constructor(options: SgHttpOptions = {}) {
     const now = options.now ?? Date.now;
     const http = new SgHttp(options);
     this.dataGov = new DataGov(http, now);
     this.dataMall = new DataMall(http, now);
     this.carparks = new Carparks(this.dataGov, this.dataMall, now);
+    this.radar = new RadarFrames(http, now);
+    this.places = new Places(http, this.dataGov);
+    this.keyedDataGov = !!options.dataGovKey;
+    this.now = now;
   }
   get dataMallConfigured() {
     return this.dataMall.configured;
@@ -38,6 +48,47 @@ export class SingaporeTools {
         };
       throw error;
     }
+  }
+  private async rain(a: Extract<SingaporeAction, { operation: "sg_rain" }>) {
+    const place = await this.places.resolve(a);
+    const hours = a.hours ?? 1;
+    const step = a.stepMinutes ?? (hours <= 1 ? 5 : hours <= 3 ? 10 : 15);
+    // Each frame is one API call; without a key the anonymous limit allows few.
+    const maxFrames = this.keyedDataGov ? 37 : 9;
+    const stepMinutes = Math.max(
+      5,
+      Math.ceil(Math.max(step, (hours * 60) / (maxFrames - 1)) / 5) * 5,
+    );
+    const range = a.range ?? "70km";
+    const frames = await this.radar.window(range, hours * 60, stepMinutes);
+    if (!frames.length)
+      return { status: "unavailable", note: "No radar frame was returned." };
+    if (!inFrame(frames[0]!, place))
+      throw new ToolValidationError(
+        "That location is outside the radar picture; try range 240km",
+      );
+    return {
+      location: place,
+      stepMinutes,
+      ...analyse(
+        frames,
+        place,
+        range === "70km" ? 50 : 150,
+        this.now(),
+        stepMinutes,
+      ),
+      // Frames the provider did not return; history between samples is unknown.
+      ...(frames.length < Math.floor((hours * 60) / stepMinutes) + 1
+        ? {
+            framesMissing:
+              Math.floor((hours * 60) / stepMinutes) + 1 - frames.length,
+          }
+        : {}),
+      intensityScale:
+        "NEA radar colours mapped to light, moderate, heavy, very heavy and intense; not exact mm/h",
+      source:
+        "Contains information from data.gov.sg (NEA rain radar) under the Singapore Open Data Licence v1.0 (https://data.gov.sg/open-data-licence).",
+    };
   }
   private dispatch(a: SingaporeAction) {
     switch (a.operation) {
@@ -61,6 +112,8 @@ export class SingaporeTools {
         return this.dataGov.cameras(a.query, a.region, a.kind);
       case "sg_dataset":
         return this.dataGov.dataset(a);
+      case "sg_rain":
+        return this.rain(a);
       case "lta_bus_arrival":
       case "lta_bus_stops":
       case "lta_train_alerts":

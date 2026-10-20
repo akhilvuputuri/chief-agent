@@ -34,6 +34,7 @@ import {
   libraryPreview,
 } from "./library-actions.js";
 import { Bot, InputFile } from "grammy";
+import { locationMessage } from "./telegram-location.js";
 import type { InlineKeyboardButton } from "grammy/types";
 import { randomUUID } from "node:crypto";
 import type { Config } from "./config.js";
@@ -1072,9 +1073,11 @@ export function telegram(c: Config, assistant: Assistant, db: Database) {
             bytes: audio.length,
           });
         }
+        if (!message.trim() && ctx.message.location)
+          message = locationMessage(ctx.message.location, ctx.message.venue);
         if (!message.trim()) {
           await reject(
-            "Please send text, a voice note, a photo or a PDF document.",
+            "Please send text, a voice note, a photo, a PDF document or a location.",
           );
           return;
         }

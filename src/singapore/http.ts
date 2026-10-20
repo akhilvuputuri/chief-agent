@@ -1,5 +1,6 @@
 import {
   downloadLink,
+  radarImageLink,
   routeUrl,
   type Provider,
   type RouteName,
@@ -30,6 +31,7 @@ const USER_AGENT =
 const TIMEOUT_MS = 15_000;
 const JSON_LIMIT = 4 * 1024 * 1024;
 const FILE_LIMIT = 8 * 1024 * 1024;
+const IMAGE_LIMIT = 2 * 1024 * 1024;
 /** After a 429 the anonymous data.gov.sg limit took up to a minute to recover (journal 99). */
 const BREAKER_MS = 60_000;
 
@@ -65,6 +67,12 @@ export class SgHttp {
     switch (provider) {
       case "dataMall":
         return 200;
+      case "oneMap":
+        return 500;
+      case "radarImages":
+        return 0;
+      case "dataGovRadar":
+        return 1_100;
       case "dataGovLegacy":
         return 500;
       case "dataGovRealtime":
@@ -88,10 +96,13 @@ export class SgHttp {
       "user-agent": USER_AGENT,
       accept: "application/json",
     };
+    // Each key goes only to its own provider; OneMap search is keyless.
     if (provider === "dataMall") headers.AccountKey = this.options.dataMallKey!;
-    else if (this.options.dataGovKey)
+    else if (provider.startsWith("dataGov") && this.options.dataGovKey)
       headers["x-api-key"] = this.options.dataGovKey;
-    const text = await this.paced(provider, url, headers, JSON_LIMIT);
+    const text = (
+      await this.paced(provider, url, headers, JSON_LIMIT)
+    ).toString("utf8");
     try {
       return JSON.parse(text);
     } catch {
@@ -111,18 +122,31 @@ export class SgHttp {
       raw = link(await this.json("download", {}, { dataset }));
     }
     const url = downloadLink(raw);
-    const text = await this.paced(
-      "dataGovFiles",
-      url,
-      { "user-agent": USER_AGENT },
-      FILE_LIMIT,
-      false,
-    );
+    const text = (
+      await this.paced(
+        "dataGovFiles",
+        url,
+        { "user-agent": USER_AGENT },
+        FILE_LIMIT,
+        false,
+      )
+    ).toString("utf8");
     try {
       return JSON.parse(text);
     } catch {
       throw new Error("Dataset file is not JSON");
     }
+  }
+  /** Downloads one NEA radar PNG from its signed link (no API key is sent). */
+  radarImage(link: unknown): Promise<Buffer> {
+    const url = radarImageLink(link);
+    return this.paced(
+      "radarImages",
+      url,
+      { "user-agent": USER_AGENT },
+      IMAGE_LIMIT,
+      false,
+    );
   }
   private paced(
     provider: Provider,
@@ -130,7 +154,7 @@ export class SgHttp {
     headers: Record<string, string>,
     limit: number,
     counted = true,
-  ): Promise<string> {
+  ): Promise<Buffer> {
     const run = (this.tail.get(provider) ?? Promise.resolve()).then(
       async () => {
         const blocked = (this.blockedUntil.get(provider) ?? 0) - this.now();
@@ -191,7 +215,7 @@ export class SgHttp {
       throw new Error(`${provider} request failed (${response.status})`);
     const declared = Number(response.headers.get("content-length") ?? 0);
     if (declared > limit) throw new Error(`${provider} response is too large`);
-    const body = await response.text();
+    const body = Buffer.from(await response.arrayBuffer());
     if (body.length > limit)
       throw new Error(`${provider} response is too large`);
     return body;

@@ -1,12 +1,12 @@
 {
   "format": "companion.plugin/v1",
   "id": "singapore",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Singapore government open data: NEA weather and air quality, PUB flood alerts, carparks, cameras, public holidays and hawker closures from data.gov.sg, and bus, MRT and traffic from LTA DataMall.",
   "agents": [
     {
       "id": "merlion",
-      "description": "Singapore now: weather, rain, haze/PSI, UV and heat; flood and lightning alerts; live bus arrivals and bus stops; MRT/LRT service status; traffic incidents; carpark lots and free or night parking; speed and red-light cameras; public holidays; hawker centre closures. Brief it with the owner's region (north, south, east, west or central) and any saved bus stop codes, carparks or favourite hawker centres.",
+      "description": "Singapore now: weather, rain and the rain radar (where rain is, how it moved over the last hours and where it is heading for a location or shared pin), haze/PSI, UV and heat; flood and lightning alerts; live bus arrivals and bus stops; MRT/LRT service status; traffic incidents; carpark lots and free or night parking; speed and red-light cameras; public holidays; hawker centre closures. Brief it with the owner's region (north, south, east, west or central) and any saved bus stop codes, carparks or favourite hawker centres.",
       "instructions": "agents/merlion.md",
       "contract": "findings/v1",
       "tools": [
@@ -18,12 +18,19 @@
         "sg_hawker_closures",
         "sg_cameras",
         "sg_dataset",
+        "sg_rain",
         "lta_bus_arrival",
         "lta_bus_stops",
         "lta_train_alerts",
         "lta_traffic"
       ],
-      "skills": ["sg-weather", "sg-places", "sg-transport", "sg-catalogue"],
+      "skills": [
+        "sg-weather",
+        "sg-rain",
+        "sg-places",
+        "sg-transport",
+        "sg-catalogue"
+      ],
       "limits": {
         "ms": 90000,
         "models": 8,
@@ -37,6 +44,10 @@
     {
       "id": "sg-weather",
       "path": "skills/sg-weather/SKILL.md"
+    },
+    {
+      "id": "sg-rain",
+      "path": "skills/sg-rain/SKILL.md"
     },
     {
       "id": "sg-places",

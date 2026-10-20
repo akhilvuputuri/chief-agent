@@ -144,6 +144,21 @@ One agent, **Merlion** (`singapore/merlion`, alias `merlion`), holds all twelve 
 - **Routines, no new feature code:** scheduled routines run agent tasks, for example "every weekday at 7:30, tell me if rain or haze is expected in the East". `agent_run` is a core tool and the catalogue is always in context, so a routine can delegate. The domain also has cue words (weather, rain, haze, PSI, carpark, bus, MRT, traffic, public holiday, hawker) in `CUES` for background steps, which skip the picker.
 - **Deterministic alerts, later:** examples include a flood alert in a saved region, PSI crossing 100 or 200, an MRT disruption, or a favourite hawker centre closing. They need tables for dedupe and settings, so a migration and an operator rollout.
 
+## Rain radar
+
+`sg_rain` reads NEA's rain radar ([journal 105](journey/105-rain-radar.md)).
+
+- **Source:**
+  - `weather-radar-images/70km` (and `/240km`) gives one frame every 5 minutes, with past frames available by `date`.
+  - Each frame is a 480 × 480 palette PNG with a lat/lon boundary box, served from a signed link to NEA's S3 bucket. Only that bucket is followed.
+  - Requests are spaced 1.1 s apart: sub-second spacing was throttled even with the key.
+- **Location:** a shared Telegram pin (exact coordinates), a typed place (NEA forecast areas, then OneMap search, which is keyless and never gets the data.gov.sg key), a region, or all of Singapore.
+- **Analysis on the host, no model:**
+  - frames become a grid of about 1.2 km cells with five levels (light to intense) from the radar colours;
+  - per call it reports: rain at the location; coverage within 5, 10 and 25 km (25, 50 and 100 km on the 240 km view); the nearest rain and nearest heavy rain; rain history at the location; a timeline of up to 13 points; movement from the best shift between frames (recent and over the window); and a 10–60 minute advection outlook, labelled a rough guide.
+- **Window:** up to 6 hours. Frames are spaced 5–15 minutes apart and cached by timestamp; without a key, at most 9 frames are used.
+- **Not yet built:** a radar picture or animation sent to Telegram, and alerts.
+
 ## Release path
 
 1. **Code release (automatic):** host client, tools, plugin, picker entry, eval fixtures and tests. No migration and no Compose change. In production, data.gov.sg tools then run at the anonymous pace, and DataMall tools stay hidden.

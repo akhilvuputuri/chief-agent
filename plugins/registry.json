@@ -99,7 +99,7 @@
     },
     {
       "path": "singapore",
-      "sha256": "33f6093bc111bca92e7967d9258483041062af09e0247fb106f2a3aba0b687fa",
+      "sha256": "d2f3a9aa85089c49b9f0180214c64fa51065ffc8580d1e03e5b90cd17c0c73e5",
       "agents": ["merlion"],
       "allowTools": [
         "lta_bus_arrival",
@@ -113,6 +113,7 @@
         "sg_dataset",
         "sg_hawker_closures",
         "sg_holidays",
+        "sg_rain",
         "sg_weather"
       ]
     }
@@ -192,6 +193,7 @@
     "sg_dataset",
     "sg_hawker_closures",
     "sg_holidays",
+    "sg_rain",
     "sg_weather",
     "stock_lookup",
     "stock_rule_add",
