@@ -170,9 +170,14 @@ export function context(
   // replace long result bodies with exact excerpts and their observation/source read references.
   // Call/result groups stay complete; authoritative journal messages are never modified.
   const workingGroups = completeMessageGroups(olderTail);
+  // Earlier steps of this turn normally lose their reasoning. Anthropic models keep it
+  // (journal 108): each call then extends the previous one exactly, so the cache entry the
+  // last call wrote stays readable. Compaction still rewrites groups when it must.
   let working = compactForWire
     ? workingGroups.flatMap((group) => compactToolGroup(group))
-    : workingGroups.flat().map(withoutReasoning);
+    : workingGroups
+        .flat()
+        .map(request.keepTurnReasoning ? (m: Message) => m : withoutReasoning);
   const available = contextHardLimit - fixedSize - reservedSize - exchangeSize;
   let workingSize = working.length ? JSON.stringify(working).length : 0;
   if (

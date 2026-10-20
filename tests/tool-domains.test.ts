@@ -344,3 +344,43 @@ test("a waiting coding job keeps coding tools offered; conversational words no l
   for (const message of ["update my resume", "I have a promo code"])
     assert.ok(!pick(message).includes("coding"), message);
 });
+
+test("Anthropic models get earlier in-turn reasoning back; other models do not", async () => {
+  for (const [modelId, kept] of [
+    ["anthropic/claude-opus-5.5", true],
+    ["openai/gpt-6.1-sol", false],
+  ] as const) {
+    const inputs: any[] = [];
+    const step = (n: number) => ({
+      message: {
+        role: "assistant" as const,
+        content: null,
+        reasoning_details: [{ type: "reasoning.text", text: `thinking ${n}` }],
+        tool_calls: [
+          {
+            id: randomUUID(),
+            type: "function" as const,
+            function: { name: "job_list", arguments: "{}" },
+          },
+        ],
+      },
+    });
+    const f = await fixture({
+      model: modelId,
+      generate: async (input) => {
+        inputs.push(input);
+        if (inputs.length <= 2) return step(inputs.length);
+        return text("Done.");
+      },
+    } as ModelAdapter);
+    try {
+      await f.assistant.respond("owner", "list my roles twice");
+      const third = inputs[2].messages.filter(
+        (m: any) => m.role === "assistant" && m.reasoning_details,
+      );
+      assert.equal(third.length, kept ? 2 : 1, modelId);
+    } finally {
+      await f.pg.close();
+    }
+  }
+});

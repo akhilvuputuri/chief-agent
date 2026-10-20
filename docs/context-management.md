@@ -10,6 +10,8 @@ Status: stage 1 (measurement) is released. Stage 2 (relevant tool loading) is im
 - The per-turn summary has its own system message after the stable instructions and memories.
 - `context.over_budget` is logged once per turn, at info level, with `kind` (`fixed` or `protected`), `fixedChars` and `protectedHistoryChars`.
 
+**In-turn reasoning (journal 108).** For `anthropic/` models, earlier steps of the current turn keep `reasoning_details`, so each call extends the previous one exactly and stays cacheable. Other models still lose reasoning on all but the latest step.
+
 ## Why the current projection fails
 
 `context.ts` retains the entire preceding exchange and all complete tool-call/result groups from the current turn. It can shorten recoverable result bodies but has no bound on the number of retained groups, assistant arguments, or unreferenced results. `history.ts` also protects the preceding exchange during reload. The 48,000-character soft allowance only removes optional older history. It does not constrain the fixed instructions/state/tool schemas or those protected groups.

@@ -1,3 +1,7 @@
+# Keep in-turn reasoning for Opus caching — in review, 20 October 2026
+
+For Anthropic models, earlier steps of a turn now keep their reasoning, so each call extends the previous one exactly. In a synthetic Opus loop, cached reads grew with the turn (12.8k → 13.2k) instead of stopping at the owner's message. Writes per call stayed small instead of growing. See [journal 108](journey/108-keep-in-turn-reasoning.md).
+
 # Merlion radar pictures — tested, not deployed, 20 October 2026
 
 `sg_rain` can now send the owner a radar map or a looping animation of the window, drawn on the host over a bundled outline of Singapore's regions, with the location marked. Chief sends it on Telegram right after the text reply. It is stacked on the rain radar PR. No migration. Next: review, release, then live acceptance. [Journal 106](journey/106-radar-pictures.md), [design](singapore-open-data.md#rain-radar).

@@ -1130,3 +1130,31 @@ test("with a full fixed envelope, older history leaves at most once per turn and
   assert.ok(latched.slice(0, drop).every((n) => n === 12));
   assert.ok(latched.slice(drop).every((n) => n === 0));
 });
+
+test("Anthropic turns keep reasoning on earlier steps so each call extends the last", () => {
+  const history = [user("Earlier"), answer("Earlier answer")];
+  const turn = [
+    user("Find it"),
+    ...toolGroup("step_one", { result: "one" }, "a"),
+    ...toolGroup("step_two", { result: "two" }, "b"),
+  ];
+  const reasoned = (keepTurnReasoning: boolean) =>
+    context({ ...request("Find it", history), keepTurnReasoning }, [
+      ...history,
+      ...turn,
+    ]).messages.filter((m) => m.role === "assistant" && m.reasoning_details)
+      .length;
+  // Default: only the latest step keeps its reasoning.
+  assert.equal(reasoned(false), 1);
+  // Anthropic: both steps keep it, so the earlier prefix is byte-identical across calls.
+  assert.equal(reasoned(true), 2);
+  // Earlier conversation history never carries reasoning either way.
+  const earlier = context(
+    {
+      ...request("Next", [...history, ...turn.slice(0, 3)]),
+      keepTurnReasoning: true,
+    },
+    [...history, ...turn.slice(0, 3), answer("Done"), user("Next")],
+  ).messages.filter((m) => m.role === "assistant" && m.reasoning_details);
+  assert.equal(earlier.length, 0);
+});
