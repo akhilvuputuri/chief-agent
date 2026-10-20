@@ -23,6 +23,13 @@ test("the outbox keeps the latest pictures per run, for a while, and hands each 
     ["b", "c", "d"],
   );
   assert.deepEqual(outbox.take(["run"]), []);
+  // Pictures from several runs come out in the order they were queued, whatever the run order.
+  outbox.put("second", picture("first map"));
+  outbox.put("first", picture("then loop"));
+  assert.deepEqual(
+    outbox.take(["first", "second"]).map((m) => m.caption),
+    ["first map", "then loop"],
+  );
   assert.equal(outbox.take(["other"])[0]!.caption.length, 1024);
   outbox.put("old", picture("old"));
   now = 16 * 60_000;

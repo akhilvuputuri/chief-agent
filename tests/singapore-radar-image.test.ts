@@ -18,7 +18,11 @@ import {
 } from "../src/singapore/radar-image.js";
 
 /** An independent GIF LZW decoder, written from the specification. */
-function unlzw(data: Buffer, minCodeSize: number) {
+function unlzw(
+  data: Buffer,
+  minCodeSize: number,
+  seen: { endWidth?: number } = {},
+) {
   const clear = 1 << minCodeSize;
   const end = clear + 1;
   const out: number[] = [];
@@ -48,7 +52,10 @@ function unlzw(data: Buffer, minCodeSize: number) {
       prev = null;
       continue;
     }
-    if (code === end) break;
+    if (code === end) {
+      seen.endWidth = size;
+      break;
+    }
     let entry: number[];
     if (code < dict.length) entry = dict[code]!;
     else if (code === dict.length && prev) entry = [...prev, prev[0]!];
@@ -107,8 +114,26 @@ test("LZW round-trips runs, noise and table resets at every code size", () => {
       (_, i) => Math.floor(i / 97) % n,
     );
     const noise = Uint8Array.from({ length: 50_000 }, () => random() % n);
-    for (const data of [runs, noise, Uint8Array.of(1), new Uint8Array(0)])
-      assert.deepEqual(unlzw(lzw(data, min), min), data);
+    for (const data of [runs, noise, Uint8Array.of(1), new Uint8Array(0)]) {
+      const trace: { endWidth?: number } = {};
+      const seen: { endWidth?: number } = {};
+      assert.deepEqual(unlzw(lzw(data, min, trace), min, seen), data);
+      // The end code must be as wide as the decoder expects, even where the
+      // extra bit would fall in zero padding.
+      assert.equal(trace.endWidth, seen.endWidth);
+    }
+    // Lengths that end right as the table grows, at every small size.
+    for (let length = 1; length < 600; length++) {
+      const data = Uint8Array.from({ length }, () => random() % n);
+      const trace: { endWidth?: number } = {};
+      const seen: { endWidth?: number } = {};
+      assert.deepEqual(unlzw(lzw(data, min, trace), min, seen), data);
+      assert.equal(
+        trace.endWidth,
+        seen.endWidth,
+        `min ${min}, length ${length}`,
+      );
+    }
   }
 });
 

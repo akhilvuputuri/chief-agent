@@ -294,7 +294,12 @@ export function encodePalettePng(
 }
 
 /** GIF variable-width LZW, as in the GIF89a specification. */
-export function lzw(indices: Uint8Array, minCodeSize: number) {
+export function lzw(
+  indices: Uint8Array,
+  minCodeSize: number,
+  /** Tests read the end code's width here; it must match the decoder's. */
+  trace?: { endWidth?: number },
+) {
   const clear = 1 << minCodeSize;
   const end = clear + 1;
   const out: number[] = [];
@@ -314,6 +319,7 @@ export function lzw(indices: Uint8Array, minCodeSize: number) {
   };
   emit(clear);
   if (!indices.length) {
+    if (trace) trace.endWidth = codeSize;
     emit(end);
     if (bits) out.push(acc & 0xff);
     return Buffer.from(out);
@@ -345,6 +351,7 @@ export function lzw(indices: Uint8Array, minCodeSize: number) {
   // The decoder adds one more entry after that last code, so it may expect
   // the end code one bit wider.
   if (next < 4096 && next >= 1 << codeSize) codeSize++;
+  if (trace) trace.endWidth = codeSize;
   emit(end);
   if (bits) out.push(acc & 0xff);
   return Buffer.from(out);

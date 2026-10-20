@@ -23,10 +23,11 @@ export async function sendRunMedia(
   extra: { message_thread_id?: number },
   guard?: () => Promise<boolean>,
 ) {
-  // A withheld reply leaves its pictures queued, to expire unsent.
-  if (!media || (guard && !(await guard()))) return 0;
+  if (!media) return 0;
   let items;
   try {
+    // A withheld reply leaves its pictures queued, to expire unsent.
+    if (guard && !(await guard())) return 0;
     items = await media.takeForRun(db, user, run);
   } catch (error) {
     opsLog("telegram.media_failed", "warn", errorFields(error));

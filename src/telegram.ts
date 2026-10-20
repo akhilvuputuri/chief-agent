@@ -1221,6 +1221,18 @@ export function telegram(
                   "answer",
                   deliveryGuard,
                 );
+                // Pictures a tool queued for this run (radar maps) follow the
+                // text in the same place, including a fallback to General.
+                if (reply.runId)
+                  await sendRunMedia(
+                    bot.api,
+                    db,
+                    media,
+                    user,
+                    reply.runId,
+                    extra,
+                    deliveryGuard,
+                  );
               },
             );
           if (reply.reply && reply.runId)
@@ -1274,17 +1286,6 @@ export function telegram(
               }
             }
           }
-          // Pictures a tool queued for this run (radar maps) follow the text reply.
-          if (reply.reply && reply.runId)
-            await sendRunMedia(
-              bot.api,
-              db,
-              media,
-              user,
-              reply.runId,
-              inThread(actualThread),
-              deliveryGuard,
-            );
         }
       }
       await db.query(

@@ -13,6 +13,7 @@ export interface OutgoingMedia {
 const TTL_MS = 15 * 60_000;
 const PER_RUN = 3;
 const RUNS = 10;
+type Queued = OutgoingMedia & { seq: number };
 
 /**
  * Pictures a tool made during a run, held in memory until the reply for that
@@ -21,29 +22,34 @@ const RUNS = 10;
  * or a background run that never replies simply drops them.
  */
 export class MediaOutbox {
-  private readonly runs = new Map<
-    string,
-    { at: number; media: OutgoingMedia[] }
-  >();
+  private readonly runs = new Map<string, { at: number; media: Queued[] }>();
+  private seq = 0;
   constructor(private readonly now: () => number = Date.now) {}
   put(run: string, media: OutgoingMedia) {
     this.prune();
     const entry = this.runs.get(run) ?? { at: this.now(), media: [] };
-    entry.media.push({ ...media, caption: media.caption.slice(0, 1024) });
+    entry.media.push({
+      ...media,
+      caption: media.caption.slice(0, 1024),
+      seq: this.seq++,
+    });
     if (entry.media.length > PER_RUN) entry.media.shift();
     this.runs.delete(run);
     this.runs.set(run, entry);
     while (this.runs.size > RUNS)
       this.runs.delete(this.runs.keys().next().value!);
   }
-  /** Removes and returns the pictures queued under these runs. */
-  take(runs: string[]) {
+  /** Removes and returns the pictures queued under these runs, in the order they were queued. */
+  take(runs: string[]): OutgoingMedia[] {
     this.prune();
-    return runs.flatMap((run) => {
-      const entry = this.runs.get(run);
-      this.runs.delete(run);
-      return entry?.media ?? [];
-    });
+    return runs
+      .flatMap((run) => {
+        const entry = this.runs.get(run);
+        this.runs.delete(run);
+        return entry?.media ?? [];
+      })
+      .sort((a, b) => a.seq - b.seq)
+      .map(({ seq: _seq, ...media }) => media);
   }
   /** Pictures from this run and the agent runs it started, such as Merlion's. */
   async takeForRun(db: Database, user: string, run: string) {

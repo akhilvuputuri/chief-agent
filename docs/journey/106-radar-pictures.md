@@ -20,7 +20,7 @@ Status: tested; not deployed. Merlion can queue a radar map (PNG) or a loop of t
   - Viewed by eye: regions, coastline, outlying islands, rain speckles in legend colours, the location marker and the time label are all legible. Heavier rain will compress less; sizes for a wet afternoon are not yet measured.
 - **Tested:**
   - `tests/singapore-radar-image.test.ts` (6 tests):
-    - GIF LZW round-trips through an independent decoder, written from the specification and refusing to read past the data, for runs, noise and table resets at code sizes 2, 4, 7 and 8;
+    - GIF LZW round-trips through an independent decoder, written from the specification and refusing to read past the data. It covers runs, noise, table resets and every length up to 599 at code sizes 2, 4, 7 and 8. The end code is as wide as the decoder expects, which fails without the end-code fix below;
     - polylines decode as in Google's reference example;
     - palette PNGs decode back exactly, and GIFs loop with the set delays;
     - the map shows sea, land, rain blended over land, the marker and the time label;
@@ -29,6 +29,7 @@ Status: tested; not deployed. Merlion can queue a radar map (PNG) or a loop of t
   - `tests/telegram-media.test.ts` (2 tests): pictures go to the owner in the reply's thread, in order, each sent on its own so one failure does not stop the next. A withheld reply sends nothing and leaves the pictures queued.
   - `tests/media-outbox.test.ts` (3 tests):
     - the outbox keeps at most 3 pictures per run and 10 runs for 15 minutes, hands each out once, and caps captions at 1,024 characters;
+    - pictures from several runs come out in the order they were queued;
     - the run-family query, on PGlite, includes the delegated agent's pictures and excludes another owner's;
     - `sg_rain` queues a GIF or PNG only when asked and when it knows its run.
   - `tests/steering-telegram.test.ts`: the pictures a delegated agent queued follow the text reply, with their caption. Another run's picture stays queued, and a failed send neither fails the turn nor triggers the failure notice.
@@ -75,6 +76,13 @@ Status: tested; not deployed. Merlion can queue a radar map (PNG) or a loop of t
   - one failed picture skipped the rest; each is now sent on its own.
   - the caption's time came from the timestamp text rather than the frame's instant. A place outside the picture, which the 240 km view allows, was still said to be marked, and the caption did not credit URA for the map. All three are fixed.
   - there were no tests for a withheld reply, the topic thread, or a one-pixel georeferencing offset. All three now have tests.
+
+- **Second review** (Opus 5.5) approved d4392c0 with no blocking findings.
+  - It found that the old end code was narrower than the decoder expected in 33 of 9,600 random streams, and in none after the fix.
+  - Its two remaining points were fixed: the stricter decoder alone could not catch that bug, so the end-code width is now compared directly; and a guard error before the first picture could fail the turn, so it is now caught.
+- **Devin** found two issues, both fixed:
+  - when a reply fell back to General because its topic had become unusable, the pictures were sent afterwards, outside that fallback, and could be redirected to Main. They are now sent inside the same delivery callback, right after the text, with its thread.
+  - pictures from two delegated runs could arrive in run-ID order rather than the order they were made. The outbox now numbers them as they are queued.
 
 ## Verification and outcome
 
