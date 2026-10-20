@@ -28,7 +28,7 @@ aws ec2 describe-subnets --region ap-southeast-1 --filters Name=default-for-az,V
 
 ## 2. Confirm the controller user
 
-This is the IAM user whose access keys the gateway uses: the one that already holds the CodeBuild controller policy (`deploy/coding/controller-policy.json`).
+This is the IAM user whose access keys the gateway uses: `chief-coding-controller`. (It used to hold the CodeBuild controller policy too, removed on 20 October with CodeBuild.)
 
 ```bash
 aws iam list-users --query 'Users[].UserName' --output table

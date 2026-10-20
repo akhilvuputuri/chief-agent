@@ -602,3 +602,14 @@ The pause was a model-provider fault, not the box. The main model also saw provi
 2. **Learning guide.** The coding-agent learning guide gained its entry.
 
 New tests cover both paths.
+
+**Released and torn down.**
+
+- **Release.** PR 287 passed exact-head review (Claude Opus 5.5), Devin and CI. It merged as `bd2ce04`, which has been live since 10:46 UTC on 20 October: healthy, no startup error, and no CodeBuild code in the deployed build.
+- **Teardown.** The owner removed the inline `ChiefCodingProjectOnly` policy and deleted the `chief-coding` stack in CloudShell, after Claude had read the policy and confirmed it held only CodeBuild permissions.
+- **Measured afterwards:**
+  - no CodeBuild project, stack or worker role;
+  - only the boxes policy on the controller;
+  - the dry-run IAM check passes for both box templates.
+
+CodeBuild is gone from the code and from AWS.

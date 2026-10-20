@@ -63,7 +63,7 @@ Retention termination (24 hours after the stop) is being watched.
 - the review passed and Chief published PR 285;
 - every box was terminated after its attempt.
 
-The cancel fix (`53a2cdb`, live in `97776fa`) let the ten old paused jobs be cancelled on 20 October. Phase 6, removing CodeBuild from the code, is in review; the owner then deletes the CodeBuild stack and policy (see the design). After that: phases 4b and 4c.
+The cancel fix (`53a2cdb`, live in `97776fa`) let the ten old paused jobs be cancelled on 20 October. Phase 6 is done: CodeBuild is removed from the code (`bd2ce04`, live) and from AWS (stack, worker role and controller policy deleted on 20 October). Coding runs only in EC2 boxes. Next: a medium-sized canary coding job, then phases 4b (warm reuse) and 4c (box view and steering).
 
 [Design](docs/boxes.md), [journal 91](docs/journey/91-boxed-subagents.md), [release records](docs/releases.md).
 
