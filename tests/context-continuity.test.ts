@@ -1192,6 +1192,7 @@ test("kept reasoning is dropped before it can push real results into excerpts", 
   // Reasoning alone would cross the compaction threshold; it is dropped instead...
   assert.ok(earlierSteps.every((m) => !m.reasoning_details));
   assert.equal(input.reasoningSize, 0);
+  assert.equal(input.reasoningDropped, true);
   // ...and the results themselves stay whole, not excerpts.
   assert.ok(
     input.messages
@@ -1205,4 +1206,58 @@ test("kept reasoning is dropped before it can push real results into excerpts", 
     [...history, ...turn.slice(0, 5)],
   );
   assert.ok(small.reasoningSize > 0);
+});
+
+test("kept reasoning does not push older history out", () => {
+  const older: Message[] = [];
+  for (let i = 0; i < 6; i++)
+    older.push(
+      user(`Earlier question ${i} ` + "q".repeat(400)),
+      answer(`Earlier answer ${i} ` + "a".repeat(400)),
+    );
+  older.push(user("Thanks"), answer("You are welcome."));
+  const runtime = runtimeContext({ web: true }, null);
+  runtime.context += " ".repeat(25000);
+  const turn: Message[] = [user("Do it")];
+  for (let i = 0; i < 6; i++)
+    turn.push(
+      {
+        role: "assistant",
+        content: null,
+        reasoning_details: [{ type: "reasoning.text", text: "t".repeat(6000) }],
+        tool_calls: [
+          {
+            id: `s${i}`,
+            type: "function",
+            function: { name: "x", arguments: "{}" },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        tool_call_id: `s${i}`,
+        content: JSON.stringify({ r: "r".repeat(1500) }),
+      },
+    );
+  const at = (keepTurnReasoning: boolean) =>
+    context(
+      {
+        runId: "fixture",
+        capability: "fixture",
+        message: "Do it",
+        history: older,
+        memories: [],
+        runtime,
+        historyAllowance: 6000,
+        keepTurnReasoning,
+      },
+      [...older, ...turn],
+    );
+  const stripped = at(false);
+  const kept = at(true);
+  assert.ok(kept.reasoningSize > 25000);
+  assert.equal(kept.reasoningDropped, false);
+  assert.equal(stripped.historyAllowance, 6000);
+  assert.equal(kept.historyAllowance, stripped.historyAllowance);
+  assert.equal(kept.omitted, stripped.omitted);
 });

@@ -42,7 +42,8 @@ Alternatives:
 
 - `src/context.ts`: when `request.keepTurnReasoning` is set, earlier in-turn groups keep `reasoning_details`. Wire compaction still rewrites groups when it must. Earlier conversation history still never carries reasoning.
 - `src/context.ts`: when the turn would cross the compaction threshold, or its serialized size would, it is rebuilt without kept reasoning before any group is compacted. That costs one cache shift, and the old behaviour applies from then on.
-- `src/custom-agent.ts`: sets `keepTurnReasoning` for `anthropic/` models, using the resolved model of each run (a Flash child under Opus gets false). `context.selected` records `reasoningSize`, the characters of kept reasoning.
+- `src/custom-agent.ts`: sets `keepTurnReasoning` for `anthropic/` models, using the resolved model of each run (a Flash child under Opus gets false). `context.selected` records `reasoningSize`, the characters of kept reasoning, and `reasoningDropped`, set when it was dropped to stay under the threshold.
+- Kept reasoning does not count against the room for older history, so it never makes the turn drop older history that would otherwise fit.
 - Tests:
   - `tests/context-continuity.test.ts` checks the projection;
   - `tests/tool-domains.test.ts` checks that Opus gets both earlier steps' reasoning back and GPT gets only the latest.
@@ -57,6 +58,8 @@ Independent review (Opus 5.5, commit `4248e96`) requested changes:
   - There was no production measure of reasoning size.
 
 All fixed.
+
+A delta review (`6344472`) found that kept reasoning still counted against the room for older history. A turn between about 101k and 120k could drop older history that fitted without reasoning. Because of the journal 104 latch, that also shifted the owner-message cache entry for the rest of the turn. Kept reasoning is now excluded from that headroom. A test fails without the fix. `reasoningDropped` makes the fallback visible in production.
 
 The review also confirmed:
 
@@ -74,4 +77,4 @@ Pending (the comparison is confounded when effort escalates mid-turn, which chan
 ## Follow-up and next iteration
 
 - Reuse across messages (step 4 of the caching plan) after a week of data.
-- If `reasoningSize` shows reasoning often triggering the drop, revisit the compaction threshold.
+- If `reasoningDropped` is common, revisit the compaction threshold.
