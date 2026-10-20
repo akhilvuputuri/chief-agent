@@ -34,8 +34,11 @@ function unlzw(data: Buffer, minCodeSize: number) {
   let pos = 0;
   const read = () => {
     let code = 0;
-    for (let i = 0; i < size; i++, pos++)
+    for (let i = 0; i < size; i++, pos++) {
+      // Strict: a code that runs past the data means the widths disagree.
+      if (pos >> 3 >= data.length) throw new Error("read past the data");
       code |= ((data[pos >> 3]! >> (pos & 7)) & 1) << i;
+    }
     return code;
   };
   for (;;) {
@@ -246,4 +249,41 @@ test("the radar animation plays oldest to newest and holds the newest frame", ()
     assert.equal(f.pixels.length, gif.width * gif.height);
     assert.ok(f.pixels.every((v) => v < PALETTE.length));
   }
+});
+
+test("each radar pixel lands exactly on the map pixels whose centres it covers", () => {
+  const box = {
+    west: 103.342685,
+    east: 104.602315,
+    north: 1.97854,
+    south: 0.719515,
+  };
+  const size = 480;
+  const base = frame(0);
+  const d = base.detail!;
+  // Light up one radar pixel inland (near Bishan); clear the test block.
+  d.colours.fill(0);
+  const col = Math.floor(((103.85 - box.west) / (box.east - box.west)) * size);
+  const row = Math.floor(
+    ((box.north - 1.355) / (box.north - box.south)) * size,
+  );
+  d.colours[(row - d.y0) * d.width + (col - d.x0)] = 1;
+  const west = box.west + (col / size) * (box.east - box.west);
+  const east = box.west + ((col + 1) / size) * (box.east - box.west);
+  const north = box.north - (row / size) * (box.north - box.south);
+  const south = box.north - ((row + 1) / size) * (box.north - box.south);
+  const map = decodePalettePng(radarMap(base, { lat: 1.2, lon: 104.05 }).bytes);
+  const deg = (ISLAND.east - ISLAND.west) / map.width;
+  let inside = 0;
+  for (let y = 0; y < map.height; y++)
+    for (let x = 0; x < map.width; x++) {
+      const lon = ISLAND.west + (x + 0.5) * deg;
+      const lat = ISLAND.north - (y + 0.5) * deg;
+      const covered = lon >= west && lon < east && lat <= north && lat > south;
+      const rain = map.pixels[y * map.width + x]! >= 8;
+      if (covered) inside++;
+      assert.equal(rain, covered, `pixel ${x},${y}`);
+    }
+  // A radar pixel is about 4.5 map pixels across.
+  assert.ok(inside >= 16 && inside <= 25, String(inside));
 });

@@ -19,12 +19,14 @@ Status: tested; not deployed. Merlion can queue a radar map (PNG) or a loop of t
   - Loop: 720 × 476, 19 frames, 186 KB, rendered in 116 ms.
   - Viewed by eye: regions, coastline, outlying islands, rain speckles in legend colours, the location marker and the time label are all legible. Heavier rain will compress less; sizes for a wet afternoon are not yet measured.
 - **Tested:**
-  - `tests/singapore-radar-image.test.ts` (5 tests):
-    - GIF LZW round-trips through an independent decoder, written from the specification, for runs, noise and table resets at code sizes 2, 4, 7 and 8;
+  - `tests/singapore-radar-image.test.ts` (6 tests):
+    - GIF LZW round-trips through an independent decoder, written from the specification and refusing to read past the data, for runs, noise and table resets at code sizes 2, 4, 7 and 8;
     - polylines decode as in Google's reference example;
     - palette PNGs decode back exactly, and GIFs loop with the set delays;
     - the map shows sea, land, rain blended over land, the marker and the time label;
-    - the loop plays oldest to newest and holds the newest frame.
+    - the loop plays oldest to newest and holds the newest frame;
+    - one radar pixel lands on exactly the map pixels whose centres it covers. This fails if the mapping rounds instead of flooring.
+  - `tests/telegram-media.test.ts` (2 tests): pictures go to the owner in the reply's thread, in order, each sent on its own so one failure does not stop the next. A withheld reply sends nothing and leaves the pictures queued.
   - `tests/media-outbox.test.ts` (3 tests):
     - the outbox keeps at most 3 pictures per run and 10 runs for 15 minutes, hands each out once, and caps captions at 1,024 characters;
     - the run-family query, on PGlite, includes the delegated agent's pictures and excludes another owner's;
@@ -45,9 +47,10 @@ Status: tested; not deployed. Merlion can queue a radar map (PNG) or a loop of t
   - The GIF encoder is about 60 lines in the repository, rather than a new dependency.
 - **Delivery:**
   - `sg_rain` gains `picture: "map" | "animation"`. The tool renders the picture and puts it in an in-memory outbox keyed by its run.
-  - After sending the text reply for a run, the Telegram client takes the pictures queued under that run and the agent runs it started. These are found by the same run-family query approvals use.
-  - The pictures go out with `sendPhoto` or `sendAnimation`, under the same delivery guard as voice replies.
-  - Nothing is persisted. A background run that never replies, or a restart, drops its pictures; the owner can ask again.
+  - After sending the text reply for a run, Chief takes the pictures queued under that run and the agent runs it started, and sends them. The runs are found by the same run-family query approvals use.
+    - This covers direct replies, under the same delivery guard as voice replies, and background work replies such as routines, in the same topic thread.
+    - The pictures go out with `sendPhoto` or `sendAnimation`.
+  - Nothing is persisted. A withheld reply or a restart drops the pictures, which expire after 15 minutes; the owner can ask again.
   - Rejected: putting image bytes on the reply object. Views persist replies, and binary payloads do not belong there.
   - Rejected: a separate "send picture" write tool. The picture is part of answering the owner's question, sent to the owner only, in the same turn.
 
@@ -61,7 +64,17 @@ Status: tested; not deployed. Merlion can queue a radar map (PNG) or a loop of t
   - the `picture` option in `schema.ts` and `tools.ts`; `tools.ts` passes the run;
   - `main.ts` and `telegram.ts`: send after the reply.
 - **Plugin:** Singapore v1.3.0. The `sg-rain` skill says when to send a picture and how to refer to it, and the hash is re-pinned. No new tool, so registry grants and delegation are unchanged.
-- **Independent review:** pending.
+- **Independent review** (Opus 5.5) approved 28742b4 with no blocking findings. It checked:
+  - every PNG chunk CRC with Python's zlib;
+  - a GIF that forces several table resets, pixel for pixel, with macOS ImageIO;
+  - the worst case of 37 frames of noise: 414 ms to render, a 5.2 MB GIF, about 175 MB peak in the test process.
+
+  Non-blocking findings fixed before merge:
+  - background and scheduled runs were told a picture would follow, but only direct replies sent pictures. Background work replies now send them too.
+  - the end code could be one bit narrower than a decoder expects after the final entry. The encoder now grows the code size there, as the decoder does.
+  - one failed picture skipped the rest; each is now sent on its own.
+  - the caption's time came from the timestamp text rather than the frame's instant. A place outside the picture, which the 240 km view allows, was still said to be marked, and the caption did not credit URA for the map. All three are fixed.
+  - there were no tests for a withheld reply, the topic thread, or a one-pixel georeferencing offset. All three now have tests.
 
 ## Verification and outcome
 

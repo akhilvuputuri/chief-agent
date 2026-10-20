@@ -41,6 +41,7 @@ import type { Config } from "./config.js";
 import type { Assistant } from "./agent.js";
 import type { Database } from "./db.js";
 import type { MediaOutbox } from "./media-outbox.js";
+import { sendRunMedia } from "./telegram-media.js";
 import { ensureUser, event } from "./db.js";
 import { allowedChat, SerialQueue } from "./security.js";
 import { Voice, boundedBytes } from "./providers.js";
@@ -1274,25 +1275,16 @@ export function telegram(
             }
           }
           // Pictures a tool queued for this run (radar maps) follow the text reply.
-          // A failed picture never fails the turn: the answer is already sent.
-          if (reply.reply && reply.runId && media)
-            try {
-              for (const item of await media.takeForRun(db, user, reply.runId))
-                if (await deliveryGuard())
-                  await withTelegramSendGuard(deliveryGuard, () => {
-                    const file = new InputFile(item.bytes, item.filename);
-                    const extra = {
-                      ...inThread(actualThread),
-                      caption: item.caption,
-                    };
-                    return item.kind === "animation"
-                      ? bot.api.sendAnimation(user, file, extra).then(() => {})
-                      : bot.api.sendPhoto(user, file, extra).then(() => {});
-                  });
-            } catch (error) {
-              if (!(error instanceof TelegramSendWithheld))
-                opsLog("telegram.media_failed", "warn", errorFields(error));
-            }
+          if (reply.reply && reply.runId)
+            await sendRunMedia(
+              bot.api,
+              db,
+              media,
+              user,
+              reply.runId,
+              inThread(actualThread),
+              deliveryGuard,
+            );
         }
       }
       await db.query(

@@ -206,7 +206,7 @@ function marker(pixels: Uint8Array, c: Canvas, p: Point) {
 }
 
 /** "HH:MM SGT" for a frame time. */
-function clock(ms: number) {
+export function clock(ms: number) {
   return new Date(ms + 8 * 3600_000).toISOString().slice(11, 16) + " SGT";
 }
 
@@ -342,6 +342,9 @@ export function lzw(indices: Uint8Array, minCodeSize: number) {
     prefix = k;
   }
   emit(prefix);
+  // The decoder adds one more entry after that last code, so it may expect
+  // the end code one bit wider.
+  if (next < 4096 && next >= 1 << codeSize) codeSize++;
   emit(end);
   if (bits) out.push(acc & 0xff);
   return Buffer.from(out);

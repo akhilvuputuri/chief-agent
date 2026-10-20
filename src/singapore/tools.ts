@@ -3,8 +3,8 @@ import { Carparks } from "./carparks.js";
 import { DataGov } from "./datagov.js";
 import { DataMall } from "./datamall.js";
 import { Places } from "./places.js";
-import { RadarFrames, analyse, inFrame, type Frame } from "./radar.js";
-import { radarAnimation, radarMap } from "./radar-image.js";
+import { ISLAND, RadarFrames, analyse, inFrame, type Frame } from "./radar.js";
+import { clock, radarAnimation, radarMap } from "./radar-image.js";
 import type { MediaOutbox } from "../media-outbox.js";
 import { SgBusyError, SgHttp, type SgHttpOptions } from "./http.js";
 import type { SingaporeAction } from "./schema.js";
@@ -119,23 +119,30 @@ export class SingaporeTools {
       kind === "animation" && frames.length > 1
         ? radarAnimation(frames, place)
         : radarMap(frames[0]!, place);
-    const clock = (f: Frame) => f.at.slice(11, 16);
+    // Times from the frames' instants, as the picture labels them.
     const span =
       picture.kind === "animation"
-        ? `${clock(frames[frames.length - 1]!)}–${clock(frames[0]!)}`
-        : clock(frames[0]!);
+        ? `${clock(frames[frames.length - 1]!.time).slice(0, 5)}–${clock(frames[0]!.time)}`
+        : clock(frames[0]!.time);
+    const shown =
+      place.lat > ISLAND.south &&
+      place.lat < ISLAND.north &&
+      place.lon > ISLAND.west &&
+      place.lon < ISLAND.east;
     this.media.put(run, {
       kind: picture.kind,
       bytes: picture.bytes,
       filename: picture.filename,
-      caption: `Rain radar ${span} SGT, ${place.label} marked. Teal light, green moderate, yellow heavy, orange to magenta very heavy. Johor is not drawn. NEA via data.gov.sg, Singapore Open Data Licence.`,
+      caption: `Rain radar ${span}, ${shown ? `${place.label} marked` : `${place.label} is outside the picture`}. Teal light, green moderate, yellow heavy, orange to magenta very heavy. Johor is not drawn. Radar: NEA; map: URA region boundaries; via data.gov.sg, Singapore Open Data Licence.`,
     });
     return {
       picture: {
         status: "queued",
         kind: picture.kind,
         frames: picture.frames,
-        note: "Sent to the owner right after your reply; refer to it briefly instead of describing every frame.",
+        note: shown
+          ? "Sent to the owner right after your reply; refer to it briefly instead of describing every frame."
+          : "Sent to the owner right after your reply; it shows Singapore only, so the location is not marked.",
       },
     };
   }

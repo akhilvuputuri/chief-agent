@@ -159,7 +159,7 @@ One agent, **Merlion** (`singapore/merlion`, alias `merlion`), holds all twelve 
 - **Window:** up to 6 hours. Frames are spaced 5–15 minutes apart and cached by timestamp; without a key, at most 9 frames are used.
 - **Pictures** ([journal 106](journey/106-radar-pictures.md)): `picture` set to `map` (the newest frame, PNG) or `animation` (the window as a looping GIF) renders the radar over a bundled outline of the five regions, with the location marked and the time shown.
   - No map service is called. The outline is URA's region boundary, simplified to 1,722 points.
-  - The tool queues the picture in memory under its run. After the text reply for that run, including runs it delegated, Telegram sends it with `sendPhoto` or `sendAnimation`.
+  - The tool queues the picture in memory under its run. After the text reply for that run, Telegram sends it with `sendPhoto` or `sendAnimation`. This includes pictures from runs it delegated, and replies to direct messages or background work, in the same thread.
   - Unsent pictures expire after 15 minutes.
 - **Not yet built:** rain alerts.
 

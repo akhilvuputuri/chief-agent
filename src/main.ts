@@ -1,5 +1,6 @@
 import { InputFile } from "grammy";
 import { MediaOutbox } from "./media-outbox.js";
+import { sendRunMedia } from "./telegram-media.js";
 import { sendCodingDelivery } from "./coding/delivery.js";
 import { selectCodingBackend } from "./coding/backend.js";
 import { randomUUID } from "node:crypto";
@@ -910,6 +911,11 @@ async function sendWorkMessage(user: string, text: string | Delivery) {
         },
         typeof text === "string" ? "progress" : "answer",
       );
+      // Pictures a background run queued (radar maps) follow its reply in the same thread.
+      if (delivery.runId && typeof text !== "string")
+        await sendRunMedia(bot.api, db, media, user, delivery.runId, {
+          message_thread_id: extra.message_thread_id,
+        });
       if (delivery.runId && typeof text !== "string") {
         const sent = (
           await db.query(

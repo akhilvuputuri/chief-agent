@@ -115,6 +115,7 @@ test("sg_rain queues a picture only when asked and when it has a run", async () 
     queued!.caption,
     /^Rain radar 14:45–15:00 SGT, 1.3500, 103.8500 marked\./,
   );
+  assert.match(queued!.caption, /map: URA region boundaries/);
   assert.match(queued!.caption, /Singapore Open Data Licence/);
   const map: any = await tools.call(ask("map"), { run: "r" });
   assert.equal(map.picture.kind, "photo");
