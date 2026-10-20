@@ -510,3 +510,17 @@ A new test runs the gateway's coding sandbox startup checks against the reviewed
 - the worker's checks and review inside the box;
 - that the attempt's box is terminated;
 - that the worker's subreaper cleanup works on the AL2023 kernel.
+
+**Released and switched.**
+
+- Phase 4a deployed in `7e648f9` (18:55 UTC on 19 October).
+- The switch (PR 279, `d6549b9`) went live in `becf234` at 20:13 UTC: healthy, no startup error.
+- No coding job was requested in the following hours, so the canary is still pending.
+
+**Measured smoke test (20 October, 02:52 UTC).**
+
+- `probe spawn coding` launched a real `coding` box (`m7i.xlarge`) with the new image. Its first report came 84 s after launch, faster than the `t3.small` echo boxes.
+- The probe's echo-style task is not a valid coding task. The task program answered "Invalid coding task", which it returns only after both `--disable-sigusr1` and the native lockdown succeed, so the token boundary works under the box's Docker flags on AL2023.
+- Closing the box terminated it 12 s later. No warnings.
+
+This proves the image, the boot and the boundary. It does not prove the worker itself: that needs the canary.

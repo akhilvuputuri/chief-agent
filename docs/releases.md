@@ -1,3 +1,20 @@
+## Deployed `7e648f9` and `d6549b9` (untagged) — coding attempts run in EC2 boxes
+
+- **Phase 4a code.** [PR 276](https://github.com/akhilvuputuri/chief-agent/pull/276) merged as `7e648f99d6fa0c6eb2107bb4e98f0678d4f82891`.
+  - Exact-head independent review (Claude Opus 5.5) approved `082a1e7` after two rounds of changes: the coding task program's token boundary, and a rollback that could have wedged coding. Devin's three findings were fixed, and hosted CI passed on the final docs-only head `71527b3`.
+  - Its [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39305976845) succeeded, and `gateway.started` was logged for `7e648f9` at 18:55 UTC on 19 October with no warn or error lines. Two earlier attempts were refused correctly, because main had moved.
+- **Switch.** [PR 279](https://github.com/akhilvuputuri/chief-agent/pull/279) merged as `d6549b94dc56fd434d01e3f986c30a0e7e1fd0a2`.
+  - It re-pins the Pi image to `sha256:ba99d955…` (rebuilt from `7e648f9`), adds the `coding` box profile and sets `sandbox: box`. Exact-head review approved it, and hosted CI and Devin passed.
+  - It went live inside the [release of `becf234`](https://github.com/akhilvuputuri/chief-agent/actions/runs/39317112618) at 20:13 UTC: healthy, no startup error, and the live `config/coding-backend.json` reads `sandbox: box`.
+- **Measured smoke test (20 October, 02:52 UTC, no coding job).**
+  - The probe spawned a real `coding` box (`m7i.xlarge`) with the new image. It booted cold to its first report in 84 s.
+  - Handed a deliberately invalid task, the task program answered "Invalid coding task". It only gives that answer after `--disable-sigusr1` and the native lockdown have succeeded, so its token boundary works on the box.
+  - The box was terminated 12 s after it was closed. No warnings.
+- **Not yet measured.** A real coding job on EC2 (the owner-requested canary): the worker's checks and review inside the box, termination after the attempt, and subreaper cleanup on the AL2023 kernel.
+- **Still on CodeBuild.** Existing paused and plan-ready jobs keep their older image, so they would run on CodeBuild if resumed.
+
+[Journal 91](journey/91-boxed-subagents.md), [design](boxes.md#phase-4a-coding-attempts-in-boxes).
+
 ## Released v0.3.89–v0.3.91 (untagged) — Opus 5.5, a leaner prompt, and replies for any model
 
 Three changes from the two-week review, each with exact-head independent review (Claude Opus 5.5), hosted CI and Devin. These receipts show deployment and startup health only. Live measurements are pending and listed in each journal.
