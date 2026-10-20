@@ -668,3 +668,22 @@ The settings schema capped attempts at 400 model calls and 1,000 tool calls, and
 - **Checked against this case.** The gateway had started at 14:54 and did not restart during the resumed attempt (15:17–15:29), so that is not what refused this call. The cause remains unknown until the new reason codes capture it.
 - **The scenario is still a real gap.** Releases from other sessions land while coding runs, and the first canary survived a 12:56 restart only because no call was in flight. Startup now marks pending model calls `uncertain` (never replayed) and frees `model_busy` before the worker routes open. A test covers it.
 - **Label fix.** A claim refusal without `retryOf` is never labelled "recovery already used".
+
+### Longer attempts: configuration — 20 October 2026
+
+This is step 2 of the longer coding attempts:
+
+- **Image.** The Pi worker image is re-pinned to `sha256:e8f1c2cd…`, built from `6ab96c0` (Pi image [run 39468980138](https://github.com/akhilvuputuri/chief-agent/actions/runs/39468980138)). It carries the wider schema (#293) and the dated-snapshot fallback (#301); an anonymous pull returned 200. An intermediate build from `11c5269` (`697f51fc…`) was never configured.
+- **Earlier image.** The coding box profile uses the same image and lists the previous `ba99d955…` in `previousImages`, so jobs created with it keep running with their original limits.
+- **New jobs** get 90 minutes, 800 model calls and 2,000 tool calls. That fits the 100-minute controller ceiling and the box task's 2-hour deadline.
+
+Exact-head review approved: the gateway reads these files from its own image, so the new limits always ship together with the schema that accepts them.
+
+**Model snapshot (owner request, 20 October).** Coding's DeepSeek coder and planner move to `deepseek/deepseek-v4.1-flash-1017`.
+
+- **Capabilities:** it supports tools and tool choice, with a 1M-token context.
+- **Cost:** about 5× the earlier snapshot ($0.15/$0.60 against $0.028/$0.12 per million tokens).
+- **Protocol rules:** Pi's bundled model list has no `-1017` entry, so #301 first made the worker reuse a dated snapshot's base-model rules; without that, the native-protocol test fails DeepSeek's reasoning replay.
+- **Rollout:** the model ID ships in the same change as the image built with that fix. Jobs snapshot model and image together, so no job pairs `-1017` with an older worker. Existing jobs keep their model.
+
+**Phase 3 retention, measured.** Box `d423dcdf` (instance `i-0adb8580eff24ac19`) stopped at 17:18:18 UTC on 19 October and was terminated by the reconciler at 17:18:54 on 20 October with "Stopped retention reached": 24 hours plus 36 seconds. Every phase 3 check is now measured on EC2.

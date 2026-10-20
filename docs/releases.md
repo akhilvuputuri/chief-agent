@@ -4,7 +4,7 @@
 
 **Cause, inferred from logs.** The host's release hook (`companion-cloud-release`) runs `docker build` with its output captured, so the SSH session carries no traffic while the image builds. Neither side sends keepalives. The host kernel log shows build containers running from 16:36 to 16:38, and the runner's connection dropped at 16:40:37. GitHub-hosted runners sit behind a NAT that drops idle connections after about 4 minutes, so a build past that length loses its session.
 
-**Fix.** The release workflow's SSH now sends keepalives every 30 seconds (`ServerAliveInterval=30`, `ServerAliveCountMax=20`). Confirmed when the next release succeeds.
+**Fix.** The release workflow's SSH now sends keepalives every 30 seconds (`ServerAliveInterval=30`, `ServerAliveCountMax=20`); [PR 300](https://github.com/akhilvuputuri/chief-agent/pull/300), merged as `8d26783`. **Confirmed:** that commit's release deployed with a 5 minute 21 second deploy step (17:36:38–17:41:59 UTC), longer than the idle limit, and went live healthy at 17:41.
 
 ## Deployed `adbba7b` and `8673bd5` (untagged) — Merlion rain radar and radar pictures
 

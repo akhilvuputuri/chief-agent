@@ -709,7 +709,7 @@ test("bundled Pi cutover snapshots new jobs while duplicate legacy requests and 
   assert.equal(record.settings.runtime, "pi");
   assert.equal(record.settings.image, pi.image);
   assert.equal(record.settings.autoMerge, false);
-  assert.deepEqual(record.settings.limits, { ...saved.limits, ms: 2400000 });
+  assert.deepEqual(record.settings.limits, pi.limits);
   assert.equal(record.mode, "plan");
   assert.equal(f.creates(), 0);
   const rolledBack = await start(prior, "after-rollback");
