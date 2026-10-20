@@ -18,6 +18,7 @@ const REDIRECT = `http://127.0.0.1:${PORT}/callback`;
 const MAX_VALUE = 100;
 // The only tools this probe calls. Anything else IBKR lists is reported, never called.
 const CALLABLE = new Set([
+  "get_flow_type",
   "search_contracts",
   "get_price_snapshot",
   "create_order_instruction",
@@ -30,6 +31,7 @@ const usage = `Usage: node scripts/ibkr-trade-probe.mjs COMMAND DIR [ARGS]
   connect DIR                         consent in the browser; prints granted scopes
   refresh DIR                         rotate tokens; prints granted scopes
   tools DIR                           list tools; saves tools.json
+  flow DIR                            AUTONOMOUS or REVIEW_AND_APPROVE for this consent
   search DIR SYMBOL                   stock listings for SYMBOL
   quote DIR CONTRACT_ID               last price and data status
   draft DIR SYMBOL CONTRACT_ID BUY|SELL QTY LIMIT|MARKET [PRICE] [TIF] --confirm
@@ -343,6 +345,8 @@ else if (command === "refresh") {
       `${t.name}\treadOnlyHint=${t.annotations?.readOnlyHint ?? "?"}\tdestructiveHint=${t.annotations?.destructiveHint ?? "?"}`,
     );
   console.log(`${tools.length} tools; schemas saved to tools.json`);
+} else if (command === "flow") {
+  console.log(JSON.stringify(await call("get_flow_type", {})));
 } else if (command === "search") {
   const [symbol] = rest;
   if (!/^[A-Z0-9.]{1,12}$/.test(symbol ?? ""))
