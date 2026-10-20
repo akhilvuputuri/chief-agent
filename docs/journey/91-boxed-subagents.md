@@ -648,3 +648,17 @@ The settings schema capped attempts at 400 model calls and 1,000 tool calls, and
    - Jobs keep the limits they were created with.
 
 **Review of PR 293 (Claude Opus 5.5): approved.** It confirmed that nothing else caps model or tool counts, and that older images never receive the higher limits, because a job snapshots its image and limits together. It also found the 40-minute controller ceiling, fixed above.
+
+### Resumed canary paused by a host refusal — 20 October 2026
+
+**Measured.** The owner resumed job `791b6d8b`, and the new attempt ran in box `09cac962`: launched at 15:17:09, first report 107 s later. Ten minutes in, after 111 completed model calls, the host refused the next model call with HTTP 409 `worker_request_rejected`. The worker treats that as fatal and paused ("Model run did not finish cleanly"), and the box ended cleanly.
+
+- The refused call never reached the model-call ledger, so it failed a precondition on the host.
+- The previous attempt had been cut off at its deadline with one coder call still `uncertain`. The resumed session continued from that state, and its patch grew from 20.6k to 49.2k characters (4 files to 11).
+
+**Not known.** Which precondition refused the call; the rejection record carried no reason. Hypotheses, unconfirmed:
+
+- the model slot was still busy for an overlapping call;
+- a mismatch between the resumed session and the previous attempt's uncertain call.
+
+**Change (in review).** Generic rejections now record a fixed reason code, and the model-slot claim names its refusing condition: `model_slot_busy`, `model_allocation_exhausted`, `attempt_deadline_passed`, `attempt_inactive` or `recovery_already_used`. The reason appears in `coding_status` as `lastFailure.reason`.

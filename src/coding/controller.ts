@@ -396,6 +396,8 @@ export class CodingController {
         | "model_context_limit"
         | CodingFailureCode;
       httpStatus: 409 | 413;
+      /** A fixed reason code for a generic rejection (src/coding/rejection-reason.ts). */
+      reason?: string;
       elapsedMs?: number;
       callId?: string;
       timeoutKind?: "first_output" | "idle" | "total";
@@ -410,6 +412,7 @@ export class CodingController {
       phase: failure.phase,
       errorCode: failure.code,
       httpStatus: failure.httpStatus,
+      ...(failure.reason ? { reason: failure.reason } : {}),
     });
     const recorded = await this.db.query(
       `INSERT INTO coding_events(job_id,event_key,payload,delivery)
@@ -1242,10 +1245,28 @@ export class CodingController {
           input.retryOf ?? null,
         ],
       );
-      if (!claimed.rows.length)
+      if (!claimed.rows.length) {
+        // Say which condition refused the slot, so a pause can be diagnosed.
+        const now = (
+          await this.db.query(
+            "SELECT state,attempt_id,model_busy,used_models,attempt_deadline FROM coding_jobs WHERE id=$1",
+            [job.id],
+          )
+        ).rows[0];
         throw new Error(
-          "Model allocation unavailable or a request is already in flight",
+          !now ||
+            !active.includes(now.state) ||
+            now.attempt_id !== job.attempt_id
+            ? "Coding attempt is no longer active"
+            : new Date(now.attempt_deadline).getTime() <= this.clock().getTime()
+              ? "Coding attempt deadline has passed"
+              : now.used_models >= job.settings.limits.models
+                ? "Model allocation exhausted"
+                : now.model_busy
+                  ? "Another model request is already in flight"
+                  : "Generation recovery already used",
         );
+      }
       admitted = true;
       const live = (
         await this.db.query(

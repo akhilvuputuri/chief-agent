@@ -1,4 +1,5 @@
 import { SandboxAcknowledgementPending } from "./provider.js";
+import { rejectionReason } from "./rejection-reason.js";
 import { piCompletion } from "./pi-proxy.js";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -227,6 +228,9 @@ export async function codingApi(
                   phase: diagnosticPhase,
                   code,
                   httpStatus: 409,
+                  ...(code === "worker_request_rejected"
+                    ? { reason: rejectionReason(error) }
+                    : {}),
                   ...(error instanceof CodingModelFailure ? error.details : {}),
                 })
                 .catch(() => false);
