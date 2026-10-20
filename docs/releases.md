@@ -11,6 +11,7 @@
 - **Not yet observed.** A draft created by Chief in production.
 
 [Journal 110](journey/110-ibkr-order-drafts.md#release-closure--2026-10-21), [design](ibkr-portfolio.md#order-drafts).
+
 ## Deployed `0c54f89` (untagged) — plain rain replies
 
 - **What merged.** [PR 302](https://github.com/akhilvuputuri/chief-agent/pull/302) merged as `0c54f89b2c35001bd31eeccb6b89be73807bad81`.
