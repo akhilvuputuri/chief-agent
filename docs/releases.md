@@ -2,7 +2,7 @@
 
 - **Code.** [PR 277](https://github.com/akhilvuputuri/chief-agent/pull/277) merged as `becf234038e128a34fe54974ffdd2d475c84239a`.
   - It adds read-only `sg_` (data.gov.sg) and `lta_` (LTA DataMall) tools and the `singapore` plugin.
-  - Exact-head independent review (Claude Opus 5.5) approved `101b283` after five rounds of changes. The blocking finding was open-ended hawker closures reported as open. Devin found five issues, which were fixed.
+  - Exact-head independent review (Claude Opus 5.5) approved `101b283` after four rounds of changes. The blocking finding was open-ended hawker closures reported as open. Devin found five issues, which were fixed.
   - Hosted CI passed. The picker eval passed (98.2% recall, 15 of 15 Singapore picks).
   - The [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39317112618) succeeded with startup health at 20:14 UTC on 19 October, without keys.
 - **Keys.** [PR 282](https://github.com/akhilvuputuri/chief-agent/pull/282) merged as `7f831582efa4930b6756ad1f7e4c20fe2f1d4676`.
@@ -13,7 +13,7 @@
   - A bus arrival returned live minutes, load and wheelchair access.
   - MRT status was normal.
   - Weather and PSI readings were fresh; West PSI was 128.
-- **Merlion.** This records PR merges the two agents into one, `singapore/merlion`, and bumps the version to 0.3.92.
+- **Merlion.** [PR 284](https://github.com/akhilvuputuri/chief-agent/pull/284) merges the two agents into one, `singapore/merlion`, and bumps the version to 0.3.92. Merlion is live once that PR's release succeeds.
 - **Pending.** Owner Telegram acceptance.
 
 [Journal 103](journey/103-singapore-plugin.md), [design](singapore-open-data.md), [catalogue](singapore-open-data-catalogue.md), [DataMall catalogue](lta-datamall-catalogue.md).

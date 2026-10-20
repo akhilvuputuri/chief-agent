@@ -1,6 +1,6 @@
 # Singapore open data
 
-Status: researched 19 October 2026. Phase 1 released 20 October 2026 as `becf234` (#277, [journal 103](journey/103-singapore-plugin.md)), and both keys went live through the rollout of `7f83158` (#282, v0.3.92). Tracking: [issue 271](https://github.com/akhilvuputuri/chief-agent/issues/271) (data.gov.sg) and [issue 270](https://github.com/akhilvuputuri/chief-agent/issues/270) (LTA DataMall). Research record: [journal 99](journey/99-singapore-open-data.md). Full dataset reference: [catalogue](singapore-open-data-catalogue.md).
+Status: researched 19 October 2026. Phase 1 released 20 October 2026 as `becf234` (#277, [journal 103](journey/103-singapore-plugin.md)), and both keys went live through the rollout of `7f83158` (#282). The single Merlion agent and v0.3.92 ship in #284. Tracking: [issue 271](https://github.com/akhilvuputuri/chief-agent/issues/271) (data.gov.sg) and [issue 270](https://github.com/akhilvuputuri/chief-agent/issues/270) (LTA DataMall). Research record: [journal 99](journey/99-singapore-open-data.md). Full dataset reference: [catalogue](singapore-open-data-catalogue.md).
 
 Chief gets Singapore government data through a `singapore` plugin: weather and air quality now, alerts, parking, public holidays and hawker centre closures. The plugin holds the agent and skills. A small read-only host client does the fetching, because plugins cannot make HTTP calls.
 

@@ -10,7 +10,7 @@ The fixed coordinator prompt had outgrown the 48k soft budget, so older conversa
 
 The main model and the `standard` agent tier move from Gemini 4 Argon to Claude Opus 5.5. The owner approved raising the price ceilings to $4/$20 in the reviewed model policy. Synthetic probes showed why caching stopped: Argon's implicit cache missed whenever the request tail changed, and Chief adds the current time to every call. Anthropic models cache only when the request is marked, and a Chief-shaped tool-loop probe confirmed that two markers also cache the growing in-turn history. Requests now carry provider-specific markers. See [journal 100](journey/100-opus-main-model-and-caching.md).
 
-# Singapore plugin (Merlion) — live with keys as v0.3.92, 20 October 2026
+# Singapore plugin — keys live as of `7f83158`, Merlion in v0.3.92, 20 October 2026
 
 Phase 1 of issues [271](https://github.com/akhilvuputuri/chief-agent/issues/271) (data.gov.sg) and [270](https://github.com/akhilvuputuri/chief-agent/issues/270) (LTA DataMall). It adds read-only `sg_` and `lta_` tools in `src/singapore/` and the `singapore` plugin.
 

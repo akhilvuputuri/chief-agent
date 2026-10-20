@@ -1,7 +1,7 @@
 # 103 — Singapore plugin: can Chief answer weather, haze, carpark and bus questions from government data?
 
 Work date: 2026-10-20. Written: 2026-10-20.
-Status: released 20 October 2026. The code shipped as `becf234` (#277); both keys went live through the operator rollout of `7f83158` (#282, v0.3.92). Owner Telegram acceptance is pending. Phase 1 of [issue 271](https://github.com/akhilvuputuri/chief-agent/issues/271) (data.gov.sg) and [issue 270](https://github.com/akhilvuputuri/chief-agent/issues/270) (LTA DataMall). Design: [Singapore open data](../singapore-open-data.md).
+Status: released 20 October 2026. The code shipped as `becf234` (#277); both keys went live through the operator rollout of `7f83158` (#282). The Merlion merge and the v0.3.92 version ship in #284. Owner Telegram acceptance is pending. Phase 1 of [issue 271](https://github.com/akhilvuputuri/chief-agent/issues/271) (data.gov.sg) and [issue 270](https://github.com/akhilvuputuri/chief-agent/issues/270) (LTA DataMall). Design: [Singapore open data](../singapore-open-data.md).
 
 ## User-visible problem and preceding iteration
 
