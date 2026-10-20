@@ -120,6 +120,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 21 October | [109 — Plain rain replies](109-plain-rain-replies.md): can Merlion answer about rain without a data dump? | Tested: short, plain-word rain replies and a one-line picture caption; not deployed |
 | 20 October | [107 — IBKR order drafts](107-ibkr-order-drafts.md): can Chief draft IBKR orders without being able to trade? | Measured IBKR scopes and flow type; drafts tested with mocked IBKR; in review |
 | 20 October | [108 — IBKR order drafts](108-ibkr-order-drafts.md): can Chief draft IBKR orders without being able to trade? | Measured IBKR scopes and flow type; drafts tested with mocked IBKR; in review |
+| 20 October | [109 — IBKR order drafts](109-ibkr-order-drafts.md): can Chief draft IBKR orders without being able to trade? | Measured IBKR scopes and flow type; drafts tested with mocked IBKR; in review |
 
 ## Coding-agent learning path
 
@@ -146,7 +147,7 @@ Start with [coding-agent engineering: changes, failures and evidence](coding-age
 | UI           | [19 — Voice/text delivery](19-foundation-and-voice.md) → [11 — Telegram views](11-telegram-views.md) → [13 — HTTPS](13-miniapp-https.md) → [14 — Canvases](14-persistent-canvases.md) → [18 — Reply delivery fences](18-checkpoint-steering.md) → [102 — Reply style](102-reply-style-for-any-model.md)                                                                                                                                                                                                                                                                                                                                                                      |
 | DevOps       | [01 — Runtime cutover](01-owned-runtime.md) → [04 — Provider failure diagnostics](04-empty-responses.md) → [05 — Cloud development](05-cloud-development.md) → [10 — Independent review](10-foundation-review.md) → [13 — Ingress](13-miniapp-https.md) → [16 — Storage migration](16-authoritative-storage.md) → [18 — Release guard and rollout](18-checkpoint-steering.md) → [32 — Model releases](32-repo-controlled-model.md) → [33 — Hosted checks](33-actions-usage.md) → [84 — Shared workflow](84-shared-agent-workflow.md) → [91 — Boxed sub-agents](91-boxed-subagents.md)                                                                                        |
 
-Brokerage: [25 — Stock watchlist](25-stock-watchlist.md) → [59 — IBKR holdings](59-ibkr-portfolio.md) → [60 — Stock rules](60-stock-rules.md) → [108 — IBKR order drafts](108-ibkr-order-drafts.md).
+Brokerage: [25 — Stock watchlist](25-stock-watchlist.md) → [59 — IBKR holdings](59-ibkr-portfolio.md) → [60 — Stock rules](60-stock-rules.md) → [109 — IBKR order drafts](109-ibkr-order-drafts.md).
 
 Recurring payments: [33 — Delivery provenance](33-delivery-tracker.md) → [24 — Scheduled work](24-scheduled-routines.md) → [49 — Domain agents](49-coordinator-agents.md) → [54 — Subscriptions](54-subscriptions.md) → [62 — Durable gathering](62-gathering-harness.md) → [93 — Invoice-backed tracker](93-invoice-backed-tracker.md) → [97 — Price-change alerts](97-price-change-alerts.md) → [98 — Monthly subscription summary](98-monthly-subscription-summary.md).
 
