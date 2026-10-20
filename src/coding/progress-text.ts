@@ -7,6 +7,7 @@ const phases: Record<string, string> = {
   plan: "Planning",
   build: "Implementation",
   review: "Review",
+  learn: "Learning",
 };
 
 export function ownerProgress(summary: string): string {
@@ -17,7 +18,7 @@ export function ownerProgress(summary: string): string {
       : `Check failed: ${check[1]} (exit ${check[2]})`;
   const command = /^Pi check: (.+)$/s.exec(summary);
   if (command) return `Check: ${command[1]}`;
-  const state = /^Pi (plan|build|review): (.+)$/s.exec(summary);
+  const state = /^Pi (plan|build|review|learn): (.+)$/s.exec(summary);
   if (!state) return summary;
   const [, intent, text] = state as unknown as [string, string, string];
   const phase = phases[intent]!;

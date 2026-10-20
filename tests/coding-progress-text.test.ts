@@ -15,6 +15,7 @@ test("the worker's internal progress labels are shown to the owner in plain word
     ["Pi plan: waiting_input", "Planning needs your answer"],
     ["Pi build: cancelled", "Implementation cancelled"],
     ["Pi build: ready", "Implementation ready"],
+    ["Pi learn: Running learn", "Learning started"],
     ["Pi check: npm ci: 0", "Check passed: npm ci"],
     ["Pi check: npm run check: 1", "Check failed: npm run check (exit 1)"],
     ["Pi check: npm run build", "Check: npm run build"],
