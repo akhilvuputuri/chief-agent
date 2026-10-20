@@ -5,8 +5,14 @@ import { randomBytes } from "node:crypto";
 import { PGlite } from "@electric-sql/pglite";
 import Fastify from "fastify";
 import { ensureUser, type Database } from "../src/db.js";
-import { IBKR, IbkrAuth, readOnly } from "../src/ibkr/oauth.js";
-import { IBKR_READ_TOOLS, IbkrMcp } from "../src/ibkr/mcp.js";
+import { IBKR, IbkrAuth, permitted, readOnly } from "../src/ibkr/oauth.js";
+import {
+  IBKR_DRAFT_TOOLS,
+  IBKR_QUERY_TOOLS,
+  IBKR_READ_TOOLS,
+  IbkrMcp,
+} from "../src/ibkr/mcp.js";
+import { OrderDrafts } from "../src/ibkr/orders.js";
 import { IBKR_CALLBACK_PATH, ibkrRoutes } from "../src/ibkr/routes.js";
 import { Portfolio, reconcile, telegramChunks } from "../src/portfolio.js";
 import { readOperations } from "../src/execution.js";
@@ -80,6 +86,11 @@ function fakeIbkr() {
     failToken: false,
     rejectAccess: false,
     counter: 0,
+    /** Per-tool fakes for order-draft and query tests; others use the holdings data. */
+    tools: {} as Record<string, (args: any) => unknown>,
+    toolArgs: [] as { name: string; args: any }[],
+    /** Answer this tool's next call with 401, before processing it. */
+    rejectTool: null as string | null,
   };
   const issue = () => {
     const n = ++state.counter;
@@ -157,13 +168,35 @@ function fakeIbkr() {
       if (body.method === "notifications/initialized")
         return new Response(null, { status: 202 });
       if (body.method === "tools/call") {
+        if (state.rejectTool === body.params.name) {
+          state.rejectTool = null;
+          return new Response(null, { status: 401 });
+        }
         state.toolCalls.push(body.params.name);
-        const data =
-          body.params.name === "get_account_positions"
+        state.toolArgs.push({
+          name: body.params.name,
+          args: body.params.arguments,
+        });
+        const fake = state.tools[body.params.name];
+        const data = fake
+          ? fake(body.params.arguments)
+          : body.params.name === "get_account_positions"
             ? state.positions
             : body.params.name === "get_account_balances"
               ? state.balances
               : { currency: "SGD", leverage: "0.78" };
+        if (data && typeof data === "object" && "toolError" in data)
+          return new Response(
+            `event: message\ndata: ${JSON.stringify({
+              jsonrpc: "2.0",
+              id: body.id,
+              result: {
+                isError: true,
+                content: [{ type: "text", text: (data as any).toolError }],
+              },
+            })}\n\n`,
+            { status: 200, headers: { "content-type": "text/event-stream" } },
+          );
         // IBKR answers as SSE with JSON text content and structuredContent.
         return new Response(
           `event: message\ndata: ${JSON.stringify({
@@ -183,7 +216,7 @@ function fakeIbkr() {
   return { state, http };
 }
 
-async function fixture() {
+async function fixture({ drafts = false, maxUsd = 100 } = {}) {
   const pg = new PGlite();
   for (const name of (await readdir(new URL("../db/", import.meta.url)))
     .filter((n) => /^\d.*sql$/.test(n))
@@ -205,17 +238,22 @@ async function fixture() {
   let now = Date.parse("2026-10-03T04:00:00Z");
   const clock = () => now;
   const key = randomBytes(32);
-  const auth = new IbkrAuth(db, key, REDIRECT, ibkr.http, clock);
+  const auth = new IbkrAuth(db, key, REDIRECT, ibkr.http, clock, drafts);
   const notices: string[] = [];
+  const mcp = new IbkrMcp(
+    (user, force) => auth.accessToken(user, force),
+    ibkr.http,
+  );
   const portfolio = new Portfolio(
     db,
     auth,
-    new IbkrMcp((user, force) => auth.accessToken(user, force), ibkr.http),
+    mcp,
     (user) => user === "owner",
     async (_user, text) => {
       notices.push(text);
     },
     clock,
+    drafts ? new OrderDrafts(auth, mcp, maxUsd, clock) : undefined,
   );
   const connect = async () => {
     const { url } = await auth.begin("owner");
@@ -234,6 +272,7 @@ async function fixture() {
     notices,
     faults,
     connect,
+    clock,
     advance: (ms: number) => {
       now += ms;
     },
@@ -998,4 +1037,470 @@ test("a connect card whose link cannot be built is released for retry, not stran
     run,
   );
   assert.equal(sent.length, 1);
+});
+
+/** IBKR's order-instruction tools as measured on 20 October 2026, with synthetic data. */
+function broker(f: Awaited<ReturnType<typeof fixture>>) {
+  const s = {
+    flow: "REVIEW_AND_APPROVE",
+    instructions: [] as any[],
+    next: 100,
+    ask: 12.22 as number | null,
+    last: 12.21 as number | null,
+  };
+  const listing = (
+    symbol: string,
+    id: number,
+    exchange: string,
+    country: string,
+    type = "STK",
+  ) => ({
+    symbol,
+    underlying_contract_id: id,
+    exchange,
+    country_code: country,
+    description: `${symbol} TEST CO`,
+    sections: [{ security_type: type }],
+  });
+  const listings: Record<string, unknown[]> = {
+    F: [
+      listing("F", 9599491, "NYSE", "US"),
+      listing("F", 38708330, "MEXI", "MX"),
+    ],
+    FX: [listing("FX", 5, "TSE", "CA")],
+    DUAL: [
+      listing("DUAL", 7, "NYSE", "US"),
+      listing("DUAL", 8, "NASDAQ", "US"),
+    ],
+    OPTONLY: [listing("OPTONLY", 9, "NYSE", "US", "OPT")],
+  };
+  Object.assign(f.ibkr.state.tools, {
+    get_flow_type: () => ({ flow_type: s.flow }),
+    search_contracts: (a: any) => ({ results: listings[a.query] ?? [] }),
+    get_price_snapshot: () => ({
+      last: { price: s.last },
+      "bid-ask": { ask: s.ask },
+    }),
+    create_order_instruction: (a: any) => {
+      const id = String(s.next++);
+      s.instructions.push({
+        id,
+        symbol: "F",
+        side: a.side,
+        quantity: a.quantity,
+        order_type: a.order_type,
+        limit_price: a.limit_price,
+        tif: a.time_in_force,
+        creation_time: new Date(f.clock()).toISOString(),
+        expiration: new Date(f.clock() + 7 * 86400000).toISOString(),
+        is_new: true,
+      });
+      return {
+        id,
+        url: `https://ndcdyn.interactivebrokers.com/sso/resolver?action=AI#${id}`,
+      };
+    },
+    get_order_instructions: () => ({ instructions: s.instructions }),
+    delete_order_instruction: (a: any) => {
+      s.instructions = s.instructions.filter((i) => i.id !== a.id);
+      return {};
+    },
+  });
+  return s;
+}
+
+async function draftFixture(scope = "mcp.read mcp.write") {
+  const f = await fixture({ drafts: true });
+  f.ibkr.state.scope = scope;
+  await f.connect();
+  const b = broker(f);
+  const run = await turn(f);
+  const draft = (args: Record<string, unknown>) =>
+    f.portfolio.call(
+      "owner",
+      { operation: "portfolio_order_draft", ...args },
+      run,
+    ) as Promise<any>;
+  const creates = () =>
+    f.ibkr.state.toolCalls.filter((t) => t === "create_order_instruction")
+      .length;
+  return { f, b, run, draft, creates };
+}
+
+test("drafts request read and write, and never accept direct order submission", async () => {
+  assert.equal(permitted(["mcp.read", "mcp.write"], true), true);
+  assert.equal(permitted(["mcp.read"], true), true);
+  assert.equal(permitted(["mcp.read", "mcp.write"], false), false);
+  assert.equal(
+    permitted(["mcp.read", "mcp.write", "mcp.orders.submit"], true),
+    false,
+  );
+  assert.equal(permitted(["mcp.write"], true), false);
+  assert.equal(permitted(["mcp.read", "openid"], true), false);
+  const f = await fixture({ drafts: true });
+  const { url } = await f.auth.begin("owner");
+  assert.equal(new URL(url).searchParams.get("scope"), "mcp.read mcp.write");
+  // IBKR granting submission as well is revoked and refused, as on 2 October.
+  f.ibkr.state.scope = "mcp.read mcp.write mcp.orders.submit";
+  assert.equal((await f.connect()).result.reason, "scope_rejected");
+  assert.equal(f.ibkr.state.revoked.length, 1);
+  f.ibkr.state.scope = "mcp.read mcp.write";
+  assert.equal((await f.connect()).result.ok, true);
+  const row = (await f.db.query("SELECT scopes FROM brokerage_connections"))
+    .rows[0];
+  assert.deepEqual(row.scopes, ["mcp.read", "mcp.write"]);
+});
+
+test("switching drafts off refuses a write grant at its next refresh", async () => {
+  const on = await fixture({ drafts: true });
+  on.ibkr.state.scope = "mcp.read mcp.write";
+  await on.connect();
+  // The same stored grant, read by a server with drafts off.
+  const off = new IbkrAuth(
+    on.db,
+    (on.auth as any).key,
+    REDIRECT,
+    on.ibkr.http,
+    on.clock,
+    false,
+  );
+  on.advance(10 * 60 * 1000);
+  await assert.rejects(off.accessToken("owner"), { code: "scope_rejected" });
+  assert.equal((await off.status("owner")).state, "disconnected");
+});
+
+test("a draft is US shares only, within the cap, and only in review-and-approve sessions", async () => {
+  const { f, b, draft, creates } = await draftFixture();
+  const made = await draft({
+    symbol: "f",
+    side: "BUY",
+    quantity: 1,
+    orderType: "LIMIT",
+    limitPrice: 6,
+    timeInForce: "DAY",
+  });
+  assert.equal(made.status, "drafted");
+  assert.equal(made.id, "100");
+  assert.match(made.link, /^https:\/\/ndcdyn\.interactivebrokers\.com\//);
+  assert.equal(made.draft.exchange, "NYSE");
+  assert.equal(made.estimatedValueUsd, 6);
+  assert.equal(made.expiresAt, "2026-10-10T04:00:00.000Z");
+  assert.match(made.note, /Review & Submit/);
+  const sent = f.ibkr.state.toolArgs.find(
+    (c) => c.name === "create_order_instruction",
+  )!.args;
+  assert.deepEqual(sent, {
+    contract_id_ex: "9599491",
+    side: "BUY",
+    quantity: 1,
+    order_type: "LIMIT",
+    limit_price: 6,
+    time_in_force: "DAY",
+  });
+  // Over the cap: 20 x 6 = 120 > 100. Nothing is sent.
+  const over = await draft({
+    symbol: "F",
+    side: "SELL",
+    quantity: 20,
+    orderType: "LIMIT",
+    limitPrice: 6,
+  });
+  assert.equal(over.reason, "over_cap");
+  assert.equal(over.estimatedValueUsd, 120);
+  // A market draft is valued at the current ask (falling back to last).
+  const market = await draft({
+    symbol: "F",
+    side: "BUY",
+    quantity: 9,
+    orderType: "MARKET",
+  });
+  assert.equal(market.reason, "over_cap");
+  assert.equal(market.estimatedValueUsd, 109.98);
+  b.ask = null;
+  const cheap = await draft({
+    symbol: "F",
+    side: "BUY",
+    quantity: 8,
+    orderType: "MARKET",
+  });
+  assert.equal(cheap.status, "drafted");
+  assert.equal(cheap.estimatedValueUsd, 97.68);
+  assert(
+    !(
+      "limit_price" in
+      f.ibkr.state.toolArgs.filter(
+        (c) => c.name === "create_order_instruction",
+      )[1]!.args
+    ),
+  );
+  b.last = null;
+  assert.equal(
+    (
+      await draft({
+        symbol: "F",
+        side: "BUY",
+        quantity: 1,
+        orderType: "MARKET",
+      })
+    ).reason,
+    "no_price",
+  );
+  // Listings: not US, not a stock, unknown, or ambiguous until an exchange is given.
+  for (const [symbol, reason] of [
+    ["FX", "not_us_listed"],
+    ["OPTONLY", "not_found"],
+    ["NOPE", "not_found"],
+  ])
+    assert.equal(
+      (
+        await draft({
+          symbol,
+          side: "BUY",
+          quantity: 1,
+          orderType: "LIMIT",
+          limitPrice: 1,
+        })
+      ).reason,
+      reason,
+    );
+  const ambiguous = await draft({
+    symbol: "DUAL",
+    side: "BUY",
+    quantity: 1,
+    orderType: "LIMIT",
+    limitPrice: 1,
+  });
+  assert.equal(ambiguous.status, "needs_exchange");
+  assert.equal(ambiguous.listings.length, 2);
+  assert.equal(
+    (
+      await draft({
+        symbol: "DUAL",
+        exchange: "nasdaq",
+        side: "BUY",
+        quantity: 1,
+        orderType: "LIMIT",
+        limitPrice: 1,
+      })
+    ).status,
+    "drafted",
+  );
+  // A session IBKR reports as autonomous is never used.
+  b.flow = "AUTONOMOUS";
+  const autonomous = await draft({
+    symbol: "F",
+    side: "BUY",
+    quantity: 1,
+    orderType: "LIMIT",
+    limitPrice: 6,
+  });
+  assert.equal(autonomous.reason, "flow_not_review");
+  assert.equal(creates(), 3);
+  // Limit price and order type must agree.
+  await assert.rejects(
+    draft({ symbol: "F", side: "BUY", quantity: 1, orderType: "LIMIT" }),
+    /LIMIT draft needs limitPrice/,
+  );
+  await assert.rejects(
+    draft({
+      symbol: "F",
+      side: "BUY",
+      quantity: 1,
+      orderType: "MARKET",
+      limitPrice: 5,
+    }),
+    /MARKET draft takes none/,
+  );
+});
+
+test("a lost create is never sent again; it is found or reported unknown", async () => {
+  const { f, b, draft, creates } = await draftFixture();
+  const create = f.ibkr.state.tools.create_order_instruction!;
+  // IBKR saved the draft but the reply never arrived.
+  f.ibkr.state.tools.create_order_instruction = (a) => {
+    create(a);
+    throw new TypeError("connection reset");
+  };
+  const lost = await draft({
+    symbol: "F",
+    side: "BUY",
+    quantity: 2,
+    orderType: "LIMIT",
+    limitPrice: 5,
+  });
+  assert.equal(lost.status, "drafted");
+  assert.equal(lost.id, "100");
+  assert.equal(creates(), 1);
+  // Nothing saved and no reply: unknown, still sent only once.
+  f.ibkr.state.tools.create_order_instruction = () => {
+    throw new TypeError("connection reset");
+  };
+  const unknown = await draft({
+    symbol: "F",
+    side: "SELL",
+    quantity: 3,
+    orderType: "LIMIT",
+    limitPrice: 5,
+  });
+  assert.equal(unknown.status, "unknown");
+  assert.match(unknown.note, /Do not draft it again/);
+  assert.equal(creates(), 2);
+  // IBKR's own rejection is reported with its text, control characters removed.
+  f.ibkr.state.tools.create_order_instruction = () => ({
+    toolError: "Contract\u0000 not tradable",
+  });
+  const rejected = await draft({
+    symbol: "F",
+    side: "BUY",
+    quantity: 1,
+    orderType: "LIMIT",
+    limitPrice: 5,
+  });
+  assert.equal(rejected.status, "refused_by_ibkr");
+  assert.equal(rejected.detail, "Contract not tradable");
+  // A 401 on create means nothing was processed: refreshed, then created once.
+  f.ibkr.state.tools.create_order_instruction = create;
+  f.ibkr.state.rejectTool = "create_order_instruction";
+  const retried = await draft({
+    symbol: "F",
+    side: "BUY",
+    quantity: 1,
+    orderType: "LIMIT",
+    limitPrice: 5,
+  });
+  assert.equal(retried.status, "drafted");
+  assert.equal(b.instructions.length, 2);
+});
+
+test("drafts need a foreground owner request and a write grant; listing and deleting work", async () => {
+  const { f, b, draft } = await draftFixture();
+  await assert.rejects(
+    f.portfolio.call(
+      "owner",
+      {
+        operation: "portfolio_order_draft",
+        symbol: "F",
+        side: "BUY",
+        quantity: 1,
+        orderType: "LIMIT",
+        limitPrice: 6,
+      },
+      await turn(f, true),
+    ),
+    /foreground/,
+  );
+  await draft({
+    symbol: "F",
+    side: "BUY",
+    quantity: 1,
+    orderType: "LIMIT",
+    limitPrice: 6,
+  });
+  const listed: any = await f.portfolio.call("owner", {
+    operation: "portfolio_order_drafts",
+  });
+  assert.equal(listed.drafts.length, 1);
+  assert.equal(listed.drafts[0].awaitingReview, true);
+  const removed: any = await f.portfolio.call(
+    "owner",
+    { operation: "portfolio_order_draft_delete", id: "100" },
+    await turn(f),
+  );
+  assert.equal(removed.status, "deleted");
+  assert.equal(b.instructions.length, 0);
+  // A read-only grant (an earlier connection) cannot draft: reconnect first.
+  const ro = await draftFixture("mcp.read");
+  const calls = ro.f.ibkr.state.toolCalls.length;
+  assert.equal(
+    (
+      await ro.draft({
+        symbol: "F",
+        side: "BUY",
+        quantity: 1,
+        orderType: "LIMIT",
+        limitPrice: 6,
+      })
+    ).status,
+    "reconnect_needed",
+  );
+  assert.equal(ro.f.ibkr.state.toolCalls.length, calls);
+});
+
+test("only allowlisted IBKR tools are callable; live-order tools never are", async () => {
+  const { f } = await draftFixture();
+  const mcp = new IbkrMcp(
+    (user, force) => f.auth.accessToken(user, force),
+    f.ibkr.http,
+  );
+  for (const name of [
+    "submit_order",
+    "modify_order",
+    "cancel_order",
+    "answer_order_question",
+    "preview_order",
+    "create_alert",
+    "edit_watchlist",
+  ])
+    await assert.rejects(
+      mcp.run("owner", (call) => call(name)),
+      { code: "not_allowlisted" },
+    );
+  const live =
+    /submit|modify|cancel|answer_order|preview|order_rules|order_status|create_|edit_|update_|delete_|set_|feedback/;
+  for (const name of IBKR_QUERY_TOOLS) assert.doesNotMatch(name, live);
+  assert.deepEqual([...IBKR_DRAFT_TOOLS].sort(), [
+    "create_order_instruction",
+    "delete_order_instruction",
+  ]);
+  // The model can only name query tools, never a write or live-order tool.
+  assert.throws(() =>
+    action.parse({ operation: "portfolio_ibkr_query", tool: "submit_order" }),
+  );
+  assert.throws(() =>
+    action.parse({
+      operation: "portfolio_ibkr_query",
+      tool: "create_order_instruction",
+    }),
+  );
+  // Queries return IBKR's result, bounded, and report IBKR errors as data.
+  f.ibkr.state.tools.get_price_history = () => ({ bars: "x".repeat(40000) });
+  const big: any = await f.portfolio.call("owner", {
+    operation: "portfolio_ibkr_query",
+    tool: "get_price_history",
+    arguments: { contract_id: 1 },
+  });
+  assert.equal(big.truncated, true);
+  assert.equal(big.text.length, 30000);
+  f.ibkr.state.tools.get_alerts = () => ({ toolError: "no alerts service" });
+  const failed: any = await f.portfolio.call("owner", {
+    operation: "portfolio_ibkr_query",
+    tool: "get_alerts",
+  });
+  assert.equal(failed.status, "ibkr_error");
+  assert.equal(failed.detail, "no alerts service");
+});
+
+test("drafts belong to a separate brokerage agent, offered only when enabled", () => {
+  assert(readOperations.has("portfolio_ibkr_query"));
+  assert(readOperations.has("portfolio_order_drafts"));
+  assert(!readOperations.has("portfolio_order_draft"));
+  assert(!readOperations.has("portfolio_order_draft_delete"));
+  const base = { web: true, stocks: true, portfolio: true };
+  const types = (availability: Record<string, boolean>) => {
+    const ctx = runtimeContext(availability, null, undefined, undefined, true);
+    return {
+      agents: JSON.parse(ctx.context).agentCatalogue.map((a: any) => a.type),
+      tools: ctx.allTools!.map((t) => t.name),
+      coordinator: ctx.tools.map((t) => t.name),
+    };
+  };
+  const holdings = types(base);
+  assert(holdings.agents.includes("portfolio"));
+  assert(!holdings.agents.includes("brokerage"));
+  assert(!holdings.tools.includes("portfolio_order_draft"));
+  const drafting = types({ ...base, portfolioDrafts: true });
+  assert(drafting.agents.includes("portfolio"));
+  assert(drafting.agents.includes("brokerage"));
+  assert(drafting.tools.includes("portfolio_order_draft"));
+  assert(!drafting.coordinator.some((t: string) => t.startsWith("portfolio_")));
 });

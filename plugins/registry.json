@@ -4,7 +4,7 @@
   "enabled": [
     {
       "path": "core",
-      "sha256": "235b8ea8f1e2b3a28512bdc86d985fe79108e777df7a26310fbb40ea007fd6ff",
+      "sha256": "ba983036ede47dd254b114229ec8d1f987860d735bc790fab9179d365cb5f0d8",
       "agents": [
         "email",
         "parcels",
@@ -14,6 +14,7 @@
         "jobs",
         "stocks",
         "portfolio",
+        "brokerage",
         "news",
         "library",
         "web",
@@ -61,6 +62,10 @@
         "parcel_record",
         "portfolio_connect",
         "portfolio_disconnect",
+        "portfolio_ibkr_query",
+        "portfolio_order_draft",
+        "portfolio_order_draft_delete",
+        "portfolio_order_drafts",
         "portfolio_read",
         "portfolio_status",
         "routine_create",
@@ -131,6 +136,7 @@
     "media": "core/media",
     "subscriptions": "core/subscriptions",
     "portfolio": "core/portfolio",
+    "brokerage": "core/brokerage",
     "gathering": "core/gathering",
     "bills": "core/bills",
     "merlion": "singapore/merlion"
@@ -177,6 +183,10 @@
     "parcel_record",
     "portfolio_connect",
     "portfolio_disconnect",
+    "portfolio_ibkr_query",
+    "portfolio_order_draft",
+    "portfolio_order_draft_delete",
+    "portfolio_order_drafts",
     "portfolio_read",
     "portfolio_status",
     "routine_create",

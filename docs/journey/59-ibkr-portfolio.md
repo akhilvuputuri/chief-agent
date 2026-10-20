@@ -81,3 +81,12 @@ The remaining Phase 0 measurements are any absolute refresh-token lifetime beyon
 - **Automatic release.** The [release for `c3cea89`](https://github.com/akhilvuputuri/chief-agent/actions/runs/37135022555) then succeeded as a no-op redeploy, and the gateway stayed healthy with IBKR on.
 - **Version.** Released in v0.3.37 together with the stock lookup.
 - **Pending:** the owner's Telegram connect and holdings acceptance; IBKR's acceptance of the hosted HTTPS redirect; the absolute refresh-token lifetime; the revocation test.
+
+### Owner acceptance — 15–20 October 2026
+
+- **Measured: refresh lifetime.** The Phase 0 loop finished on 5 October: 16 of 16 refreshes succeeded and rotated, about 57 hours after consent, with no absolute cap seen.
+- **Measured: owner connection.** The owner connected through Telegram at 00:29:06 SGT on 15 October. IBKR accepted the hosted HTTPS redirect. The first sync completed 5.9 s later.
+- **Reported by the owner:** holdings matched the IBKR app, and Chief's holdings answer looked right.
+- **Measured: scheduled refresh and restart recovery.** Every 4-hourly sync on 19–20 October completed, across at least five release SHAs.
+- **Pending:** the revocation test.
+- **Next:** [107 — IBKR order drafts](107-ibkr-order-drafts.md).

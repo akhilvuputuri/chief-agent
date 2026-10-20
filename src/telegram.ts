@@ -711,7 +711,12 @@ export function telegram(
                 ? {
                     reply_markup: {
                       inline_keyboard: [
-                        [{ text: "Connect IBKR (read-only)", url: result.url }],
+                        [
+                          {
+                            text: `Connect IBKR (${portfolio.access})`,
+                            url: result.url,
+                          },
+                        ],
                       ],
                     },
                   }
@@ -1462,10 +1467,10 @@ async function sendPortfolioApprovalsOnce(
         continue;
       }
       text = link.url
-        ? "Connect IBKR to Chief (read-only)?\n\n" + link.text
+        ? `Connect IBKR to Chief (${portfolio.access})?\n\n` + link.text
         : link.text;
       keyboard = link.url
-        ? [[{ text: "Open IBKR (read-only)", url: link.url }]]
+        ? [[{ text: `Open IBKR (${portfolio.access})`, url: link.url }]]
         : [];
     } else {
       text =

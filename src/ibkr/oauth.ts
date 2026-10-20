@@ -4,11 +4,13 @@ import { open, seal } from "../secret-box.js";
 
 /**
  * Host-side OAuth for IBKR's hosted MCP server (issue #146). Chief is a public client
- * (PKCE S256, no secret). It requests only `mcp.read`; IBKR registers every client with
+ * (PKCE S256, no secret). It requests `mcp.read`, plus `mcp.write` when order drafts are
+ * enabled (docs/ibkr-portfolio.md, "Order drafts"). IBKR registers every client with
  * `mcp.read mcp.write mcp.orders.submit`, so the granted scope is checked on every token
- * response and anything broader is revoked and refused. Access tokens last ~10 minutes
- * and refresh tokens rotate on every use, so a refresh is single-flight in process and
- * leased in Postgres, and the rotated token is stored before the access token is used.
+ * response and anything broader, including `mcp.orders.submit`, is revoked and refused.
+ * Access tokens last ~5-10 minutes and refresh tokens rotate on every use, so a refresh is
+ * single-flight in process and leased in Postgres, and the rotated token is stored before
+ * the access token is used.
  */
 export const IBKR = {
   issuer: "https://api.ibkr.com",
@@ -18,6 +20,8 @@ export const IBKR = {
   token: "https://api.ibkr.com/oauth2/api/v1/token",
   revoke: "https://api.ibkr.com/oauth2/api/v1/token/revoke",
   scope: "mcp.read",
+  /** Order instructions (drafts the owner submits in IBKR); never `mcp.orders.submit`. */
+  draftScope: "mcp.write",
 } as const;
 const PROVIDER = "ibkr";
 const ATTEMPT_MS = 10 * 60 * 1000;
@@ -48,10 +52,22 @@ interface TokenResponse extends Tokens {
 const sha256 = (value: string) =>
   createHash("sha256").update(value).digest("hex");
 
-/** Exactly mcp.read and nothing else: any other or unknown scope is refused (fail closed). */
-export function readOnly(scopes: string[]) {
+/**
+ * mcp.read, plus mcp.write only when drafts are allowed, and nothing else: any other or
+ * unknown scope (mcp.orders.submit above all) is refused (fail closed).
+ */
+export function permitted(scopes: string[], drafts: boolean) {
   const granted = new Set(scopes);
-  return granted.size === 1 && granted.has(IBKR.scope);
+  if (!granted.has(IBKR.scope)) return false;
+  for (const scope of granted)
+    if (scope !== IBKR.scope && !(drafts && scope === IBKR.draftScope))
+      return false;
+  return true;
+}
+
+/** Exactly mcp.read and nothing else. */
+export function readOnly(scopes: string[]) {
+  return permitted(scopes, false);
 }
 
 function scopesOf(body: any): string[] {
@@ -81,7 +97,13 @@ export class IbkrAuth {
     readonly redirectUri: string,
     private http: Fetch = fetch,
     private now: () => number = Date.now,
+    /** Order drafts enabled: request and accept mcp.write as well. */
+    readonly drafts = false,
   ) {}
+
+  private get requested() {
+    return this.drafts ? `${IBKR.scope} ${IBKR.draftScope}` : IBKR.scope;
+  }
 
   private request(url: string, init: RequestInit) {
     return this.http(url, {
@@ -179,7 +201,7 @@ export class IbkrAuth {
       response_type: "code",
       client_id: client,
       redirect_uri: this.redirectUri,
-      scope: IBKR.scope,
+      scope: this.requested,
       state,
       code_challenge: createHash("sha256").update(verifier).digest("base64url"),
       code_challenge_method: "S256",
@@ -235,7 +257,7 @@ export class IbkrAuth {
     } catch (e) {
       return fail(e instanceof IbkrAuthError ? e.code : "exchange_failed");
     }
-    if (!readOnly(tokens.scopes)) {
+    if (!permitted(tokens.scopes, this.drafts)) {
       await this.revokeRemote(tokens.refresh);
       return fail("scope_rejected");
     }
@@ -443,11 +465,13 @@ export class IbkrAuth {
       );
       throw error;
     }
-    if (!readOnly(next.scopes)) {
+    // Also refuses a write grant once drafts are switched off: access falls back to a
+    // read-only reconnect rather than keeping a scope Chief no longer uses.
+    if (!permitted(next.scopes, this.drafts)) {
       await this.revokeRemote(next.refresh);
       await this.disconnect(user, "scope_rejected", version);
       throw new IbkrAuthError(
-        "IBKR granted more than read access",
+        "IBKR granted more access than Chief allows",
         "scope_rejected",
       );
     }

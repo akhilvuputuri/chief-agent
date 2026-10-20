@@ -1,18 +1,29 @@
 import { IBKR, IbkrAuthError } from "./oauth.js";
+import {
+  IBKR_DRAFT_TOOLS,
+  IBKR_QUERY_TOOLS,
+  IBKR_READ_TOOLS,
+  type IbkrReadTool,
+} from "./catalogue.js";
 
-/**
- * The complete set of IBKR MCP tools Chief may call. The server lists order-instruction,
- * alert and watchlist write tools even under an mcp.read token (measured 2 October 2026),
- * so this allowlist is a required boundary, not a second layer. The model never names an
- * MCP tool; host code calls these by constant.
- */
-export const IBKR_READ_TOOLS = [
-  "get_account_positions",
-  "get_account_balances",
-  // Read only for the account's base currency; its margin/leverage fields are not shown.
-  "get_account_summary",
-] as const;
-export type IbkrReadTool = (typeof IBKR_READ_TOOLS)[number];
+export {
+  IBKR_DRAFT_TOOLS,
+  IBKR_QUERY_TOOLS,
+  IBKR_READ_TOOLS,
+  type IbkrReadTool,
+};
+
+const CALLABLE: ReadonlySet<string> = new Set([
+  ...IBKR_READ_TOOLS,
+  ...IBKR_QUERY_TOOLS,
+  ...IBKR_DRAFT_TOOLS,
+]);
+
+/** One allowlisted tool call inside an open MCP session. */
+export type IbkrCall = (
+  name: string,
+  args?: Record<string, unknown>,
+) => Promise<unknown>;
 
 const MAX_BODY = 2_000_000;
 const PROTOCOL = "2025-06-18";
@@ -22,6 +33,8 @@ export class IbkrMcpError extends Error {
     message: string,
     readonly code: string,
     readonly transient: boolean,
+    /** IBKR's own error text for a tool error, bounded and stripped of control characters. */
+    readonly detail?: string,
   ) {
     super(message);
   }
@@ -48,12 +61,24 @@ export class IbkrMcp {
           "not_allowlisted",
           false,
         );
+    return this.run(user, async (call) => {
+      const out = {} as Record<T, unknown>;
+      for (const name of tools) out[name] = await call(name);
+      return out;
+    });
+  }
+
+  /**
+   * Runs `work` in one MCP session. An access token rejected before its expiry is refreshed
+   * once and the whole work is retried: a 401 means IBKR processed nothing, so this also
+   * holds for a work that creates an instruction.
+   */
+  async run<T>(user: string, work: (call: IbkrCall) => Promise<T>): Promise<T> {
     let retried = false;
     for (;;) {
       try {
-        return await this.session(user, tools);
+        return await this.session(user, work);
       } catch (error) {
-        // An access token rejected before its expiry: refresh once and retry the reads.
         if (
           error instanceof IbkrMcpError &&
           error.code === "http_401" &&
@@ -68,10 +93,7 @@ export class IbkrMcp {
     }
   }
 
-  private async session<T extends IbkrReadTool>(
-    user: string,
-    tools: readonly T[],
-  ) {
+  private async session<T>(user: string, work: (call: IbkrCall) => Promise<T>) {
     const state = {
       user,
       session: null as string | null,
@@ -86,17 +108,33 @@ export class IbkrMcp {
     if (typeof init?.protocolVersion === "string")
       state.protocol = init.protocolVersion.slice(0, 20);
     await this.rpc(state, "notifications/initialized", {}, true);
-    const out = {} as Record<T, unknown>;
-    for (const name of tools) {
+    return work(async (name, args = {}) => {
+      if (!CALLABLE.has(name))
+        throw new IbkrMcpError(
+          "Tool not allowlisted",
+          "not_allowlisted",
+          false,
+        );
       const result = (await this.rpc(state, "tools/call", {
         name,
-        arguments: {},
+        arguments: args,
       })) as any;
-      if (result?.isError)
-        throw new IbkrMcpError(`${name} returned an error`, "tool_error", true);
       const text = Array.isArray(result?.content)
         ? result.content.find((c: any) => c?.type === "text")?.text
         : undefined;
+      if (result?.isError)
+        throw new IbkrMcpError(
+          `${name} returned an error`,
+          "tool_error",
+          true,
+          typeof text === "string"
+            ? text
+                .replace(/[\u0000-\u001f\u007f]+/g, " ")
+                .replace(/ {2,}/g, " ")
+                .trim()
+                .slice(0, 300)
+            : undefined,
+        );
       let structured = result?.structuredContent;
       if (structured == null && typeof text === "string") {
         try {
@@ -109,9 +147,8 @@ export class IbkrMcp {
           );
         }
       }
-      out[name] = structured;
-    }
-    return out;
+      return structured;
+    });
   }
 
   private async rpc(

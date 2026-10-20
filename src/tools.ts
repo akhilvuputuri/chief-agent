@@ -310,7 +310,11 @@ export class JobTools {
       a.operation === "portfolio_read" ||
       a.operation === "portfolio_status" ||
       a.operation === "portfolio_connect" ||
-      a.operation === "portfolio_disconnect"
+      a.operation === "portfolio_disconnect" ||
+      a.operation === "portfolio_ibkr_query" ||
+      a.operation === "portfolio_order_draft" ||
+      a.operation === "portfolio_order_drafts" ||
+      a.operation === "portfolio_order_draft_delete"
     ) {
       if (!this.portfolio) throw new Error("IBKR portfolio is not configured");
       return this.portfolio.call(user, a, run);

@@ -3,14 +3,16 @@ import { z } from "zod";
 import type { Database } from "./db.js";
 import { IbkrAuth, IbkrAuthError } from "./ibkr/oauth.js";
 import { IbkrMcp, IbkrMcpError } from "./ibkr/mcp.js";
+import type { DraftRequest, OrderDrafts } from "./ibkr/orders.js";
 import { errorFields, opsLog } from "./ops-log.js";
 import { ToolValidationError } from "./tool-errors.js";
 
 /**
- * Read-only IBKR holdings (issue #146, docs/ibkr-portfolio.md). Each sync is an immutable
- * snapshot; only a validated complete (or genuinely empty) sync supersedes the holdings
- * shown, so a failed or malformed read never erases them or looks like a sale. Syncs are
- * deterministic and make no model calls. Nothing here can place, change or instruct trades.
+ * IBKR holdings (issue #146, docs/ibkr-portfolio.md). Each sync is an immutable snapshot;
+ * only a validated complete (or genuinely empty) sync supersedes the holdings shown, so a
+ * failed or malformed read never erases them or looks like a sale. Syncs are deterministic
+ * and make no model calls. Nothing here can place, change or cancel an order; with order
+ * drafts enabled, `orders` creates instructions the owner submits in an IBKR app.
  */
 
 const money = z.number().finite();
@@ -153,7 +155,28 @@ export class Portfolio {
     private allowed: (user: string) => boolean,
     private notify: Notify = async () => {},
     private now: () => number = Date.now,
+    /** Order drafts (IBKR_ORDER_DRAFTS=on); absent means read-only. */
+    readonly orders?: OrderDrafts,
   ) {}
+
+  /** How Chief's IBKR access is described to the owner. */
+  get access() {
+    return this.orders ? "read and order-draft" : "read-only";
+  }
+
+  /** IBKR changes and proposals only follow a foreground owner request. */
+  private async requireForeground(user: string, run: string, what: string) {
+    const turn = (
+      await this.db.query(
+        "SELECT background FROM work_turns WHERE run_id=$1 AND user_id=$2",
+        [run, user],
+      )
+    ).rows[0];
+    if (!turn || turn.background)
+      throw new ToolValidationError(
+        `Only a foreground owner request may ${what}`,
+      );
+  }
 
   /** A sync interrupted by a restart is recorded as failed; earlier holdings remain current. */
   async recover() {
@@ -335,7 +358,7 @@ export class Portfolio {
     if (marked.rows.length)
       await this.notify(
         user,
-        "IBKR access has ended (expired or revoked), so holdings are no longer updating. The last synced holdings are kept. Send /portfolio connect to reconnect read-only access.",
+        `IBKR access has ended (expired or revoked), so holdings are no longer updating. The last synced holdings are kept. Send /portfolio connect to reconnect ${this.access} access.`,
       ).catch(() => {});
   }
 
@@ -453,7 +476,7 @@ export class Portfolio {
         lastAttempt,
         note: connected
           ? "No successful IBKR sync yet."
-          : "IBKR is not connected. The owner can send /portfolio connect in Telegram to grant read-only access.",
+          : `IBKR is not connected. The owner can send /portfolio connect in Telegram to grant ${this.access} access.`,
       };
     const finished = new Date(snap.current.finished_at);
     const ageMinutes = Math.round((this.now() - finished.getTime()) / 60000);
@@ -559,16 +582,11 @@ export class Portfolio {
    * open the card's IBKR link and approve there; disconnecting needs the owner's tap.
    */
   async propose(user: string, run: string, kind: "connect" | "disconnect") {
-    const turn = (
-      await this.db.query(
-        "SELECT background FROM work_turns WHERE run_id=$1 AND user_id=$2",
-        [run, user],
-      )
-    ).rows[0];
-    if (!turn || turn.background)
-      throw new ToolValidationError(
-        "Only a foreground owner request may propose connecting or disconnecting IBKR",
-      );
+    await this.requireForeground(
+      user,
+      run,
+      "propose connecting or disconnecting IBKR",
+    );
     const live = ["connected", "refresh_uncertain"].includes(
       (await this.auth.status(user)).state,
     );
@@ -601,7 +619,7 @@ export class Portfolio {
       expiresAt: new Date(expiresAt).toISOString(),
       note:
         kind === "connect"
-          ? "A Telegram card with an 'Open IBKR (read-only)' button is sent after this reply. Nothing is connected until the owner opens it and approves on IBKR's site."
+          ? `A Telegram card with an 'Open IBKR (${this.access})' button is sent after this reply. Nothing is connected until the owner opens it and approves on IBKR's site.`
           : "A Telegram card asks the owner to confirm. Nothing is disconnected until they tap Disconnect.",
     };
   }
@@ -637,8 +655,36 @@ export class Portfolio {
     };
   }
 
-  async call(user: string, a: { operation: string }, run?: string) {
+  async call(
+    user: string,
+    a: { operation: string } & Record<string, any>,
+    run?: string,
+  ) {
     if (!this.allowed(user)) throw new Error("Unauthorized portfolio access");
+    if (a.operation === "portfolio_ibkr_query") {
+      if (!this.orders) throw new Error("IBKR queries are not enabled");
+      return this.orders.query(user, a.tool, a.arguments ?? {});
+    }
+    if (
+      a.operation === "portfolio_order_draft" ||
+      a.operation === "portfolio_order_drafts" ||
+      a.operation === "portfolio_order_draft_delete"
+    ) {
+      if (!this.orders) throw new Error("IBKR order drafts are not enabled");
+      if (a.operation === "portfolio_order_drafts")
+        return this.orders.list(user);
+      if (!run)
+        throw new ToolValidationError("A conversation turn is required");
+      await this.requireForeground(
+        user,
+        run,
+        "create or delete IBKR order drafts",
+      );
+      if (a.operation === "portfolio_order_draft_delete")
+        return this.orders.remove(user, a.id);
+      const { operation: _, ...draft } = a;
+      return this.orders.draft(user, draft as DraftRequest);
+    }
     if (
       a.operation === "portfolio_connect" ||
       a.operation === "portfolio_disconnect"
@@ -692,7 +738,9 @@ export class Portfolio {
       try {
         const { url } = await this.auth.begin(user);
         return {
-          text: "Open the button within 10 minutes, log in on IBKR's own site and approve read-only access. Chief requests read-only access and refuses anything broader; it cannot place or change trades.",
+          text: this.orders
+            ? "Open the button within 10 minutes, log in on IBKR's own site and approve access. Chief requests read access and order drafts, and refuses anything broader: it can only draft orders that you review and submit in an IBKR app, and it cannot place, change or cancel orders."
+            : "Open the button within 10 minutes, log in on IBKR's own site and approve read-only access. Chief requests read-only access and refuses anything broader; it cannot place or change trades.",
           url,
         };
       } catch (error) {
@@ -729,7 +777,7 @@ export class Portfolio {
     if (!("positions" in view))
       return view.connection === "never_connected" ||
         !["connected", "refresh_uncertain"].includes(view.connection)
-        ? "IBKR is not connected. Send /portfolio connect to grant Chief read-only access to your holdings."
+        ? `IBKR is not connected. Send /portfolio connect to grant Chief ${this.access} access.`
         : `No IBKR holdings synced yet${view.lastAttempt?.errorCode ? ` (last attempt: ${view.lastAttempt.errorCode})` : ""}. Try /portfolio refresh.`;
     const lines = [
       `IBKR holdings · as of ${sgt(new Date(view.asOf))} SGT${view.freshness === "fresh" ? "" : ` (${view.freshness})`}`,
@@ -761,7 +809,9 @@ export class Portfolio {
       );
     lines.push(
       "",
-      "Prices are IBKR's marks at sync time, not live quotes. Read-only: Chief cannot trade.",
+      this.orders
+        ? "Prices are IBKR's marks at sync time, not live quotes. Chief can only draft orders for you to submit in IBKR; it cannot trade."
+        : "Prices are IBKR's marks at sync time, not live quotes. Read-only: Chief cannot trade.",
     );
     return lines.join("\n");
   }
