@@ -562,3 +562,43 @@ The pause was a model-provider fault, not the box. The main model also saw provi
 - **Fix.** Cancel now reopens cleanup only for an attempt that is actually running (provisioning, running or publishing).
 - **Regression test.** It cancels two cleaned-up paused jobs and one that never had a sandbox while another attempt runs. It fails without the fix with the production error.
 - **Release.** [PR 283](https://github.com/akhilvuputuri/chief-agent/pull/283) passed exact-head independent review (Claude Opus 5.5), hosted CI and Devin. It merged as `53a2cdb` and went live in `97776fa` (healthy).
+
+**Rebase rounds on EC2 (measured, 20 October).** After PR 285 opened, main moved twice: to `53a2cdb`, then `97776fa`. Each time Chief re-applied the approved change in a fresh box: `f6992faf` at 05:46–06:08 and `09d24cc1` at 06:26–06:45. Each first reported about 93–95 s after launch, passed its checks and exited 0, and the PR was updated. The owner merged PR 285 at 07:12 from the merge card. This is the cost phase 4b's warm reuse would cut: about 1.5 minutes of boot and roughly 18 minutes of checks per round, in a new machine each time.
+
+### Phase 6: CodeBuild removed — 20 October 2026
+
+**Cancelling the old jobs.** At the owner's request, the ten old paused jobs were cancelled from the operator shell. Each update ran the controller's own (fixed) cancel statement, limited to those IDs and to jobs still paused and unpublished. All ten became `cancelled` with cleanup `complete`, and the standard "cancelled" notice was queued for each.
+
+**Code.** Implemented and tested; in review.
+
+- The CodeBuild sandbox, its SDK dependency, timeout-confirmation handling and the `sandbox` switch are removed. Coding requires boxes and the reviewed `coding` profile.
+- Startup is refused while an attempt depends on a CodeBuild build.
+- A job's box is started with the job's own snapshotted image when the coding profile lists it (`image` or `previousImages`). A job whose image is not listed is paused before launch with "start a new coding job", so it frees the queue. That covers three old `plan_ready` plans and PR 232's job, which predate boxes.
+- **Tests.** The CodeBuild-only tests (buildspec, timeouts, build states, Python launcher) are removed. New tests cover the startup checks, the old-image refusal at the controller, and the box sandbox's acceptance rule. 297 coding and box tests pass, with 1 Docker test skipped.
+
+**AWS teardown** is an owner step after release; see the [design](../boxes.md#phase-6-codebuild-removed).
+
+**Review of `251f0d5` (Claude Opus 5.5): changes requested.**
+
+- **Blocking.** The box sandbox accepted only the coding profile's current image, but jobs keep their snapshotted image through plan approval, rebases, feedback rounds, resumes and retries. The first routine Pi image re-pin would therefore have paused every in-flight job, wrongly blaming CodeBuild. Under phase 4a, CodeBuild had absorbed those jobs.
+- **Fix.** The profile now lists `previousImages`, and `spawn` accepts an image from that list. Each box is started with the job's own image. The re-pin procedure moves the old digest into the list, and the refusal message no longer blames CodeBuild.
+- **Non-blocking, also adopted:**
+  - The startup check now also refuses an unrecorded launch whose image no box runs.
+  - Two generic reconciliation tests are restored with the fixture provider: one where the sandbox is found and recorded, one where it isn't found and the job is paused.
+  - The first sentence of `coding.md` is corrected.
+  - The teardown runbook gives exact commands for inline and managed policies.
+- **Tests.** 299 coding and box tests pass, with 1 Docker test skipped.
+
+**Re-review of `862635f` (Claude Opus 5.5): approved.** Two of its notes were adopted:
+
+- The startup check now fails closed on a job with no image.
+- The docs say listed images must still speak the host's current box protocol.
+
+**Devin on PR 287.** Both findings are fixed:
+
+1. **Startup would block recovery of a live box.** An unrecorded launch whose image had been retired from the list would refuse startup, although the box sandbox finds its box by key. Startup now accepts such a launch when its box exists.
+   - The finding also exposed a related gap, present since phase 4a. When a box launch failed before its row was written, "not found" left cleanup pending forever and held the coding queue.
+   - Box lookups are authoritative (`authoritativeFind`), so "not found" now pauses the job with nothing to clean, or settles a pending cleanup, and the queue moves on.
+2. **Learning guide.** The coding-agent learning guide gained its entry.
+
+New tests cover both paths.

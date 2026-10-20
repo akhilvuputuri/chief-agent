@@ -10,15 +10,12 @@ import type { BoxConfig } from "../src/boxes/schema.js";
 import {
   BoxSandbox,
   CODING_TASK_COMMAND,
-  RoutedSandbox,
   codingSandbox,
 } from "../src/coding/box-sandbox.js";
-import type {
-  SandboxProvider,
-  SandboxRequest,
-} from "../src/coding/provider.js";
+import type { SandboxRequest } from "../src/coding/provider.js";
 
 const image = `ghcr.io/example/coding@sha256:${"a".repeat(64)}`;
+const previous = `ghcr.io/example/coding@sha256:${"9".repeat(64)}`;
 
 async function fixture(t: TestContext) {
   const pg = new PGlite();
@@ -39,6 +36,7 @@ async function fixture(t: TestContext) {
       coding: {
         provider: "fake",
         image,
+        previousImages: [previous],
         idleTtlMinutes: 15,
         retentionHours: 0,
         hardMaxHours: 3,
@@ -56,7 +54,7 @@ async function fixture(t: TestContext) {
     () => now,
     { pollMs: 0, hostGraceMs: 0 },
   );
-  const sandbox = new BoxSandbox(db, boxes, "coding", image);
+  const sandbox = new BoxSandbox(db, boxes, "coding", [image, previous]);
   const job = async () => {
     const id = randomUUID();
     await db.query(
@@ -250,113 +248,46 @@ test("the attempt token is dropped from stored payloads once the box is gone", a
   assert.ok(message.payload.jobId);
 });
 
-test("routing keeps older images and existing sandboxes on the previous provider", async (t) => {
+test("the box sandbox runs the job's own snapshotted image when the profile still lists it", async (t) => {
   const f = await fixture(t);
-  const calls: string[] = [];
-  const fallback: SandboxProvider = {
-    create: async (r) => {
-      calls.push(`create:${r.image}`);
-      return "build-1";
-    },
-    find: async (attemptId) => {
-      calls.push(`find:${attemptId}`);
-      return undefined;
-    },
-    inspect: async (id) => {
-      calls.push(`inspect:${id}`);
-      return "terminal";
-    },
-    terminate: async (id) => {
-      calls.push(`terminate:${id}`);
-    },
-    terminalReason: async () => "from fallback",
-  };
-  const routed = new RoutedSandbox(f.sandbox, fallback);
-  const old = `ghcr.io/example/coding@sha256:${"d".repeat(64)}`;
-  assert.equal(await routed.create(await f.request({ image: old })), "build-1");
+  assert.equal(f.sandbox.accepts(await f.request()), true);
+  // After a re-pin, a job snapshotted with the previous image still runs, on that image.
+  const r = await f.request({ image: previous });
+  assert.equal(f.sandbox.accepts(r), true);
+  const id = await f.sandbox.create(r);
+  assert.equal((await f.row(id)).image, previous);
+  const retired = `ghcr.io/example/coding@sha256:${"d".repeat(64)}`;
+  assert.equal(f.sandbox.accepts(await f.request({ image: retired })), false);
   assert.equal(
-    await routed.create(await f.request({ runtime: "python" })),
-    "build-1",
+    f.sandbox.accepts(await f.request({ runtime: "python" })),
+    false,
   );
-  assert.equal(await routed.inspect("build-1"), "terminal");
-  await routed.terminate("build-1");
-  assert.equal(await routed.terminalReason("build-1"), "from fallback");
-  assert.equal(routed.startupGraceMs("build-1"), 0);
-
-  const r = await f.request();
-  const id = await routed.create(r);
-  assert.match(id, /^box:/);
-  assert.equal(await routed.find(r.attemptId), id);
-  assert.equal(await routed.inspect(id), "running");
-  assert.equal(routed.startupGraceMs(id), 12 * 60_000);
-  assert.equal(await routed.find("unknown"), undefined);
-  assert.deepEqual(calls, [
-    `create:${old}`,
-    `create:${image}`,
-    "inspect:build-1",
-    "terminate:build-1",
-    "find:unknown",
-  ]);
-
-  const alone = new RoutedSandbox(f.sandbox);
   await assert.rejects(
-    alone.create(await f.request({ image: old })),
-    /not configured/,
+    f.sandbox.create(await f.request({ image: retired })),
+    /cannot run in a coding box/,
   );
-  assert.equal(await alone.find("unknown"), undefined);
+  // The box layer itself refuses an image its profile does not list.
+  await assert.rejects(
+    f.boxes.spawn("owner", {
+      profile: "coding",
+      requestKey: "direct",
+      subject: "direct",
+      image: retired,
+    }),
+    /does not run that image/,
+  );
 });
-
-test("startup keeps box attempts routable whenever a coding profile exists, and refuses to strand them", async (t) => {
+test("startup needs boxes and the reviewed coding profile, and refuses while a CodeBuild attempt is live", async (t) => {
   const f = await fixture(t);
-  const codebuild: SandboxProvider = {
-    create: async () => "build-1",
-    find: async () => undefined,
-    inspect: async () => "terminal",
-    terminate: async () => {},
-  };
   const base = {
     db: f.db,
-    codebuild,
     settings: { runtime: "pi", image },
+    boxes: f.boxes,
     taskCommand: CODING_TASK_COMMAND,
   };
-  // On CodeBuild for new attempts, an existing box attempt is still served by its box.
-  const back = await codingSandbox({
-    ...base,
-    sandbox: "codebuild",
-    boxes: f.boxes,
-  });
-  const r = await f.request();
-  assert.equal(await back.create(r), "build-1");
-  const boxed = await f.sandbox.create(await f.request());
-  assert.equal(await back.inspect(boxed), "running");
-  // Without boxes, startup refuses while that attempt still depends on its box.
-  await f.db.query(
-    "UPDATE coding_jobs SET sandbox_id=$1,state='running' WHERE id=(SELECT id FROM coding_jobs LIMIT 1)",
-    [boxed],
-  );
-  await assert.rejects(
-    codingSandbox({ ...base, sandbox: "codebuild" }),
-    /still depend on boxes/,
-  );
-  await f.db.query("UPDATE coding_jobs SET state='paused',cleanup='complete'");
-  // A box spawned by a create that never recorded its ID still depends on boxes.
-  await assert.rejects(
-    codingSandbox({ ...base, sandbox: "codebuild" }),
-    /still depend on boxes/,
-  );
-  await f.db.query("UPDATE boxes SET state='terminated'");
-  assert.equal(
-    await codingSandbox({ ...base, sandbox: "codebuild" }),
-    codebuild,
-  );
-  // Switching new attempts to boxes is checked against the reviewed profile.
-  const routed = await codingSandbox({
-    ...base,
-    sandbox: "box",
-    boxes: f.boxes,
-  });
-  assert.match(await routed.create(await f.request()), /^box:/);
+  const chosen = await codingSandbox(base);
+  assert.ok(chosen instanceof BoxSandbox);
+  assert.deepEqual(chosen.images, [image, previous]);
   for (const [o, error] of [
     [{ boxes: undefined }, /BOXES_RUNTIME=on/],
     [
@@ -370,8 +301,55 @@ test("startup keeps box attempts routable whenever a coding profile exists, and 
     ],
     [{ taskCommand: undefined }, /must run/],
   ] as const)
-    await assert.rejects(
-      codingSandbox({ ...base, sandbox: "box", boxes: f.boxes, ...o }),
-      error,
-    );
+    await assert.rejects(codingSandbox({ ...base, ...o }), error);
+  // An attempt still on a CodeBuild build would be stranded without CodeBuild.
+  const r = await f.request();
+  await f.db.query(
+    "UPDATE coding_jobs SET sandbox_id='chief-coding:build-1',state='running' WHERE id=$1",
+    [r.jobId],
+  );
+  await assert.rejects(codingSandbox(base), /depends on a CodeBuild build/);
+  await f.db.query(
+    "UPDATE coding_jobs SET state='paused',cleanup='complete' WHERE id=$1",
+    [r.jobId],
+  );
+  assert.ok(await codingSandbox(base));
+  // An unrecorded launch whose image no box runs (an uncertain CodeBuild create) also would.
+  await f.db.query(
+    "UPDATE coding_jobs SET sandbox_id=NULL,state='paused',cleanup='pending',settings=jsonb_build_object('image','ghcr.io/example/old@sha256:'||repeat('c',64)) WHERE id=$1",
+    [r.jobId],
+  );
+  await assert.rejects(codingSandbox(base), /depends on a CodeBuild build/);
+  // Even with an image no longer listed, an unrecorded launch whose box exists is found.
+  const attempt = (
+    await f.db.query(
+      "UPDATE coding_jobs SET attempt_id=gen_random_uuid() WHERE id=$1 RETURNING attempt_id",
+      [r.jobId],
+    )
+  ).rows[0].attempt_id;
+  await f.boxes.spawn("owner", {
+    profile: "coding",
+    requestKey: `coding:${attempt}`,
+    subject: `coding:${r.jobId}`,
+  });
+  assert.ok(await codingSandbox(base));
+  await f.db.query("UPDATE boxes SET state='terminated'");
+  await f.db.query("DELETE FROM box_tasks");
+  await f.db.query("DELETE FROM box_messages");
+  await f.db.query("DELETE FROM box_events");
+  await f.db.query("DELETE FROM boxes WHERE request_key=$1", [
+    `coding:${attempt}`,
+  ]);
+  // An unrecorded box launch with a listed image is reconciled by the box sandbox.
+  await f.db.query(
+    "UPDATE coding_jobs SET settings=jsonb_build_object('image',$2::text) WHERE id=$1",
+    [r.jobId, previous],
+  );
+  assert.ok(await codingSandbox(base));
+  // Box attempts never block startup.
+  await f.db.query(
+    "UPDATE coding_jobs SET sandbox_id='box:x',state='running' WHERE id=$1",
+    [r.jobId],
+  );
+  assert.ok(await codingSandbox(base));
 });

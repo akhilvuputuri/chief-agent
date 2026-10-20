@@ -41,11 +41,7 @@ import {
   validateFiles,
   canonicalJson,
 } from "../src/coding/github.js";
-import {
-  CodeBuildSandbox,
-  SandboxTimeoutMismatch,
-  SandboxAcknowledgementPending,
-} from "../src/coding/provider.js";
+import { SandboxAcknowledgementPending } from "../src/coding/provider.js";
 import { Workspace } from "../src/coding/workspace.js";
 import { codingLoop } from "../src/coding/loop.js";
 import {
@@ -262,18 +258,4 @@ test("a pre-send database failure returns the coding notice to pending without a
     sends++;
   });
   assert.equal(sends, 1);
-});
-test("sandbox inspection accepts only explicit terminal states", async () => {
-  let status = "QUEUED";
-  const p = new CodeBuildSandbox(
-    { send: async () => ({ builds: [{ buildStatus: status }] }) } as any,
-    "fixture",
-  );
-  assert.equal(await p.inspect("fixture"), "running");
-  status = "IN_PROGRESS";
-  assert.equal(await p.inspect("fixture"), "running");
-  status = "STOPPED";
-  assert.equal(await p.inspect("fixture"), "terminal");
-  status = "UNKNOWN";
-  await assert.rejects(p.inspect("fixture"), /Unknown/);
 });

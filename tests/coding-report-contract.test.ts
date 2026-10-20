@@ -42,11 +42,7 @@ import {
   validateFiles,
   canonicalJson,
 } from "../src/coding/github.js";
-import {
-  CodeBuildSandbox,
-  SandboxTimeoutMismatch,
-  SandboxAcknowledgementPending,
-} from "../src/coding/provider.js";
+import { SandboxAcknowledgementPending } from "../src/coding/provider.js";
 import { Workspace } from "../src/coding/workspace.js";
 import { codingLoop } from "../src/coding/loop.js";
 import {
@@ -67,7 +63,7 @@ import {
   fixture,
   requirementBrief,
 } from "./helpers/coding-fixture.js";
-test("Pi profile rejects Python selectors and automatic merge; runtime launcher stays pinned per job", async () => {
+test("Pi profile rejects Python selectors and automatic merge", async () => {
   assert(
     codingSettings.safeParse({
       ...settings,
@@ -112,33 +108,6 @@ test("Pi profile rejects Python selectors and automatic merge; runtime launcher 
       !codingSettings.safeParse({ ...settings, runtime: "pi", ...changes })
         .success,
     );
-  const calls: any[] = [];
-  const provider = new CodeBuildSandbox(
-    {
-      send: async (c) => {
-        calls.push(c.input);
-        return { build: { id: "synthetic", timeoutInMinutes: 15 } };
-      },
-    } as any,
-    "fixed-project",
-  );
-  const input = {
-    jobId: randomUUID(),
-    attemptId: randomUUID(),
-    token: "c".repeat(64),
-    origin: "https://example.invalid",
-    image: settings.image,
-    timeoutMinutes: 15,
-  };
-  await provider.create({ ...input, runtime: "pi" });
-  await provider.create({ ...input, runtime: "python" });
-  assert(calls[0].buildspecOverride.includes("dist/coding/pi-worker.js"));
-  assert(!calls[0].buildspecOverride.includes("chief_coding_runtime.worker"));
-  assert(
-    calls[1].buildspecOverride.includes(
-      "python -I -m chief_coding_runtime.worker",
-    ),
-  );
 });
 test("a Pi default retains legacy automation support without granting it to Pi jobs", async (t) => {
   const f = await fixture(t);

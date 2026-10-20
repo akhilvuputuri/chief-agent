@@ -23,8 +23,6 @@ const schema = z.object({
     .default(""),
   CODING_RUNTIME: z.enum(["on", "off"]).default("off"),
   CODING_PUBLIC_ORIGIN: z.string().default(""),
-  CODING_CODEBUILD_PROJECT: z.string().default(""),
-  CODING_AWS_REGION: z.string().default("ap-southeast-1"),
   CODING_AUTH_KEY: z.string().default(""),
   CODING_GITHUB_APP_ID: z.string().default(""),
   CODING_GITHUB_INSTALLATION_ID: z.string().default(""),

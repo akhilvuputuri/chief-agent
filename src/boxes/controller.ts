@@ -237,9 +237,23 @@ export class BoxController {
   /** Requests a box for one subject; idempotent by request key. Launch happens on a tick. */
   async spawn(
     user: string,
-    a: { requestKey: string; profile: string; subject: string },
+    a: {
+      requestKey: string;
+      profile: string;
+      subject: string;
+      /** One of the profile's previous images, for work snapshotted before a re-pin. */
+      image?: string;
+    },
   ) {
     const profile = this.profile(a.profile);
+    if (
+      a.image !== undefined &&
+      a.image !== profile.image &&
+      !profile.previousImages?.includes(a.image)
+    )
+      throw new ToolValidationError(
+        `Box profile ${a.profile} does not run that image`,
+      );
     const now = this.clock();
     const id = randomUUID();
     const inserted = await this.db.query(
@@ -253,7 +267,7 @@ export class BoxController {
         profile.provider,
         this.config.environment,
         a.subject,
-        profile.image,
+        a.image ?? profile.image,
         // Replaced by the bootstrap secret's hash at launch.
         hashCredential(bootstrapSecret()),
         new Date(now.getTime() + profile.absoluteDays * 86_400_000),

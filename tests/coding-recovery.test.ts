@@ -41,11 +41,7 @@ import {
   validateFiles,
   canonicalJson,
 } from "../src/coding/github.js";
-import {
-  CodeBuildSandbox,
-  SandboxTimeoutMismatch,
-  SandboxAcknowledgementPending,
-} from "../src/coding/provider.js";
+import { SandboxAcknowledgementPending } from "../src/coding/provider.js";
 import { Workspace } from "../src/coding/workspace.js";
 import { codingLoop } from "../src/coding/loop.js";
 import {
@@ -160,6 +156,75 @@ test("heartbeat expiry pauses instead of starting another worker and revokes the
   await f.c.tick();
   await f.c.tick();
   assert.equal(f.creates(), 1);
+});
+test("an active attempt whose sandbox ID was not recorded is reconciled by attempt before workers authenticate", async (t) => {
+  const f = await fixture(t),
+    job = await f.start();
+  await f.c.tick();
+  const launched = await f.row(job.id);
+  // A restart lost the recorded identity of a launched sandbox.
+  await f.db.query("UPDATE coding_jobs SET sandbox_id=NULL WHERE id=$1", [
+    job.id,
+  ]);
+  const token = f.c.token(job.id, launched.attempt_id);
+  await assert.rejects(f.c.authenticate(job.id, token));
+  await f.c.tick();
+  const found = await f.row(job.id);
+  assert.equal(found.sandbox_id, launched.sandbox_id);
+  assert.equal(found.state, "provisioning");
+  assert.equal((await f.c.authenticate(job.id, token)).id, job.id);
+  assert.equal(f.creates(), 1);
+});
+test("an active attempt whose sandbox cannot be found is paused with cleanup still pending", async (t) => {
+  const f = await fixture(t),
+    job = await f.start();
+  await f.c.tick();
+  await f.db.query("UPDATE coding_jobs SET sandbox_id=NULL WHERE id=$1", [
+    job.id,
+  ]);
+  f.provider.find = async () => undefined;
+  await f.c.tick();
+  const j = await f.row(job.id);
+  assert.equal(j.state, "paused");
+  assert.match(j.summary, /could not be reconciled/);
+  assert.equal(j.cleanup, "pending");
+  assert.equal(f.creates(), 1);
+});
+test("when the provider's own record proves nothing launched, cleanup settles and the queue moves on", async (t) => {
+  // After an uncertain create: paused with cleanup pending, then the authoritative lookup.
+  const f = await fixture(t),
+    job = await f.start();
+  Object.assign(f.provider, {
+    authoritativeFind: true,
+    find: async () => undefined,
+  });
+  f.uncertainCreate();
+  await f.c.tick();
+  assert.equal((await f.row(job.id)).cleanup, "pending");
+  await f.c.tick();
+  const j = await f.row(job.id);
+  assert.equal(j.state, "paused");
+  assert.equal(j.cleanup, "complete");
+  assert.match(j.summary, /launch did not happen; resume/);
+  // While an attempt is still active with no recorded sandbox, it pauses with nothing to clean.
+  const g = await fixture(t),
+    other = await g.start();
+  await g.c.tick();
+  await g.db.query("UPDATE coding_jobs SET sandbox_id=NULL WHERE id=$1", [
+    other.id,
+  ]);
+  Object.assign(g.provider, {
+    authoritativeFind: true,
+    find: async () => undefined,
+  });
+  await g.c.tick();
+  const o = await g.row(other.id);
+  assert.equal(o.state, "paused");
+  assert.match(o.summary, /launch did not happen/);
+  assert.equal(o.cleanup, "none");
+  const next = await g.start("next");
+  await g.c.tick();
+  assert.equal((await g.row(next.id)).state, "provisioning");
 });
 test("cancelling paused jobs keeps their settled cleanup, even while another attempt runs", async (t) => {
   const f = await fixture(t);

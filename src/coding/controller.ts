@@ -42,8 +42,8 @@ import {
 } from "./github.js";
 import {
   SandboxAcknowledgementPending,
-  SandboxTimeoutMismatch,
   type SandboxProvider,
+  type SandboxRequest,
 } from "./provider.js";
 import { scrubTrace } from "../trace-scrub.js";
 import { seal, open } from "../secret-box.js";
@@ -1570,7 +1570,7 @@ export class CodingController {
             );
             return;
           }
-          const id = await this.provider.create({
+          const request: SandboxRequest = {
             jobId: j.id,
             attemptId: j.attempt_id,
             token: this.token(j.id, j.attempt_id),
@@ -1581,49 +1581,57 @@ export class CodingController {
               5,
               Math.ceil(this.activeMs(j) / 60000) + 5,
             ),
-          });
+          };
+          // A job snapshotted with a worker image no sandbox runs any more (one from before
+          // EC2 boxes, or one retired from the coding profile) is paused before anything is
+          // launched, so it never blocks the queue.
+          if (this.provider.accepts && !this.provider.accepts(request)) {
+            await this.stopped(
+              j,
+              "This job's worker image is no longer run by the coding sandbox (it predates EC2 boxes or has been retired); start a new coding job to continue",
+              false,
+            );
+            return;
+          }
+          const id = await this.provider.create(request);
           await this.db.query(
             "UPDATE coding_jobs SET sandbox_id=$3 WHERE id=$1 AND attempt_id=$2",
             [j.id, j.attempt_id, id],
           );
-        } catch (error) {
-          if (error instanceof SandboxTimeoutMismatch) {
-            // Preserve the created identity and revoke dispatch atomically.
-            await this.stopped(j, error.message, true, error.sandboxId);
-          } else {
-            await this.stopped(
-              j,
-              "Sandbox provisioning acknowledgement is uncertain; reconciling before any new attempt",
-            );
-          }
+        } catch {
+          await this.stopped(
+            j,
+            "Sandbox provisioning acknowledgement is uncertain; reconciling before any new attempt",
+          );
         }
         return;
       }
       if (!j.sandbox_id) {
-        let found: string | undefined;
-        try {
-          found = await this.provider.find(
-            j.attempt_id,
-            active.includes(j.state)
-              ? Math.max(5, Math.ceil(this.activeMs(j) / 60000) + 5)
-              : undefined,
-          );
-        } catch (error) {
-          if (
-            error instanceof SandboxTimeoutMismatch &&
-            active.includes(j.state)
-          ) {
-            await this.stopped(j, error.message, true, error.sandboxId);
-            return;
-          }
-          throw error;
-        }
+        const found = await this.provider.find(
+          j.attempt_id,
+          active.includes(j.state)
+            ? Math.max(5, Math.ceil(this.activeMs(j) / 60000) + 5)
+            : undefined,
+        );
         if (found) {
           await this.db.query(
             "UPDATE coding_jobs SET sandbox_id=$3 WHERE id=$1 AND attempt_id=$2",
             [j.id, j.attempt_id, found],
           );
           j.sandbox_id = found;
+        } else if (this.provider.authoritativeFind) {
+          // The provider's own record says nothing was launched for this attempt, so there
+          // is nothing to clean up; the job pauses for the owner without blocking the queue.
+          await this.stopped(
+            j,
+            "The sandbox launch did not happen; resume to try again",
+            false,
+          );
+          await this.db.query(
+            "UPDATE coding_jobs SET cleanup='complete',summary=CASE WHEN state='paused' THEN 'The sandbox launch did not happen; resume to try again' ELSE summary END,updated_at=now() WHERE id=$1 AND attempt_id=$2 AND sandbox_id IS NULL AND cleanup='pending' AND state NOT IN ('provisioning','running','publishing')",
+            [j.id, j.attempt_id],
+          );
+          return;
         } else {
           await this.stopped(
             j,

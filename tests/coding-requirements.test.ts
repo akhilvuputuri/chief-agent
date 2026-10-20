@@ -41,11 +41,7 @@ import {
   validateFiles,
   canonicalJson,
 } from "../src/coding/github.js";
-import {
-  CodeBuildSandbox,
-  SandboxTimeoutMismatch,
-  SandboxAcknowledgementPending,
-} from "../src/coding/provider.js";
+import { SandboxAcknowledgementPending } from "../src/coding/provider.js";
 import { Workspace } from "../src/coding/workspace.js";
 import { codingLoop } from "../src/coding/loop.js";
 import {
@@ -288,31 +284,4 @@ test("review cannot approve a plan read in the same generated tool batch", async
   });
   assert.equal(r.kind, "APPROVE");
   assert.equal(calls, 2);
-});
-test("Python launcher is host-selected and drops capabilities before executing the package", async () => {
-  const commands: any[] = [];
-  const provider = new CodeBuildSandbox(
-    {
-      send: async (command: any) => {
-        commands.push(command);
-        return { build: { id: "fixture:python", timeoutInMinutes: 20 } };
-      },
-    } as any,
-    "fixture-project",
-  );
-  await provider.create({
-    jobId: randomUUID(),
-    attemptId: randomUUID(),
-    token: "a".repeat(64),
-    origin: "https://fixture.example",
-    image: settings.image,
-    runtime: "python",
-    timeoutMinutes: 20,
-  });
-  assert(
-    commands[0].input.buildspecOverride.includes(
-      "--no-new-privs --bounding-set=-all python -I -m chief_coding_runtime.worker",
-    ),
-  );
-  assert(!commands[0].input.buildspecOverride.includes("worker.js"));
 });
