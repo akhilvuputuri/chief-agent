@@ -540,13 +540,25 @@ This proves the image, the boot and the boundary. It does not prove the worker i
 
 No box-related warn or error lines were logged. The host-side flow ran unchanged through the box: assignment, heartbeat, Pi session, checkpoints, model proxy and finish.
 
-**Still to observe in a later attempt:**
+**Implementation attempt, measured (same job, after plan approval).**
 
-- an implementation attempt with checks and review inside the box;
-- the subreaper cleanup on the AL2023 kernel.
+| Step                  | Result                                                                                                                                                                                                                                                                                       |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Box `914da6bd`        | Requested 05:22:18, launch 05:22:33, first report 05:24:02 (89 s)                                                                                                                                                                                                                            |
+| Checks inside the box | `npm ci` 0 (05:25), `npm run check` 0 (05:39, about 14 minutes including the full test suite), `npm run build` 0, `npm run format:check` 0                                                                                                                                                   |
+| Review                | Started 05:39:52; the first reviewer call succeeded. Two later reviewer calls (`google/gemini-4-argon` through OpenRouter) failed with provider 504 at 05:40:24 and 05:40:49. The worker paused ("Model run did not finish cleanly; session retained") and exited 0. Box terminated 05:41:47 |
+| Automatic retry       | 05:43:03, in a fresh box `f86ceb8a`. The worker resumed its saved session straight into review at 05:44:48 without repeating the checks                                                                                                                                                      |
+| Result                | Review passed; the box was terminated at 05:46:11; Chief published [PR 285](https://github.com/akhilvuputuri/chief-agent/pull/285) (a two-line README change) and is waiting on its CI and Devin                                                                                             |
+
+The pause was a model-provider fault, not the box. The main model also saw provider 504s that morning.
+
+**Measured:** the whole job ran on EC2, across three boxes (plan, implementation, automatic retry), with checks, review, publication and termination. No attempt used CodeBuild.
+
+**Not yet observed:** the worker's subreaper cleanup on the AL2023 kernel. No attempt left stray processes to clean up.
 
 **Defect found around the canary: cancelling paused jobs.** Just before the canary, the owner continued an old job (`1a6cf84e`). Its snapshot carried the old image, so it ran on CodeBuild and held the single coding slot. Chief then tried to cancel the ten old paused jobs, twice. Every cancel failed with `ACTIVE_WORK_EXISTS` (a `duplicate key` on `coding_one_active_worker`).
 
 - **Cause.** Cancel set `cleanup='pending'` for any job with an attempt ID, even a paused job whose sandbox was already cleaned up (`complete`) or never created (`none`). The single-worker index counts pending cleanup as active, so the cancel collided with the running job, or with the previous cancel in the same batch.
 - **Fix.** Cancel now reopens cleanup only for an attempt that is actually running (provisioning, running or publishing).
 - **Regression test.** It cancels two cleaned-up paused jobs and one that never had a sandbox while another attempt runs. It fails without the fix with the production error.
+- **Release.** [PR 283](https://github.com/akhilvuputuri/chief-agent/pull/283) passed exact-head independent review (Claude Opus 5.5), hosted CI and Devin. It merged as `53a2cdb` and went live in `97776fa` (healthy).

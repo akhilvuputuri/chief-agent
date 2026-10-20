@@ -57,7 +57,13 @@ Retention termination (24 hours after the stop) is being watched.
 **Next:**
 
 1. Record retention on the phase 3 box.
-2. Phase 4: coding on EC2 boxes, with no CodeBuild fallback and CodeBuild removed once coding runs on boxes (owner confirmed 20 October). Phase 4a, one box per attempt behind the sandbox interface, merged as `7e648f9`. The go-live change re-pins the Pi image (`sha256:ba99d955…`), adds the `coding` box profile and switches `sandbox` to `box`. Live since 20:13 UTC on 19 October (`becf234`). A smoke test on 20 October confirmed a real coding box boots in 84 s and its task program's token boundary holds. The first real attempt (a plan, 20 October) ran in a box and the box was terminated 24 s after the result. Next: an implementation attempt on EC2, and the cancel fix, so the old paused jobs can be cleared and CodeBuild retired.
+2. Phase 4: coding on EC2 boxes, with no CodeBuild fallback and CodeBuild removed once coding runs on boxes (owner confirmed 20 October). Phase 4a, one box per attempt behind the sandbox interface, merged as `7e648f9`. The go-live change re-pins the Pi image (`sha256:ba99d955…`), adds the `coding` box profile and switches `sandbox` to `box`. Live since 20:13 UTC on 19 October (`becf234`). A smoke test on 20 October confirmed a real coding box boots in 84 s and its task program's token boundary holds. On 20 October a real job ran entirely on EC2:
+
+- plan, implementation (all checks passed in the box) and an automatic retry after provider 504s, each in its own box;
+- the review passed and Chief published PR 285;
+- every box was terminated after its attempt.
+
+The cancel fix (`53a2cdb`, live in `97776fa`) lets the old paused jobs be cancelled. Next: cancel the old CodeBuild-era jobs, then phase 6 (remove CodeBuild), and phases 4b and 4c.
 
 [Design](docs/boxes.md), [journal 91](docs/journey/91-boxed-subagents.md), [release records](docs/releases.md).
 
