@@ -26,10 +26,11 @@ Merlion's rain answers came from the 2-hour area forecast and rain gauges. Those
     - overall motion was south-east to north-west at about 16 km/h, labelled steady.
   - **Answer size:** about 3k characters.
 - **Measured: speed estimates on synthetic discs** after sub-cell refinement. True speeds of 0, 8, 17, 27 and 53 km/h were estimated at 0, 9, 16, 27 and 53 km/h, all labelled steady. Before refinement, whole-cell shifts reported 8 km/h rain as 13 km/h.
-- **Tested:** `tests/singapore-radar.test.ts` (11 tests) covers:
+- **Tested:** `tests/singapore-radar.test.ts` (12 tests) covers:
   - PNG decoding with filtered rows;
   - colour levels for all 33 legend colours, which never fall along the legend, and opaque white as no rain;
-  - slow rain at about 8 km/h, estimated within 5–11 km/h and not called erratic;
+  - slow rain at about 8 km/h, estimated within 5–11 km/h, not called erratic and given an outlook;
+  - zig-zagging rain on the 240 km view, called erratic with no outlook;
   - bare timestamps read as Singapore time, and concurrent calls sharing each frame fetch;
   - a synthetic disc moving east at about 27 km/h, giving the right direction, speed and a 20–45 minute arrival;
   - stationary rain, dry frames and frame caching;
@@ -42,7 +43,7 @@ Merlion's rain answers came from the 2-hour area forecast and rain gauges. Those
 
 - **On the host, not the model:** frames are decoded and analysed on the host, without a model. The model gets a compact summary: now, rings, nearest rain, history at the point, a timeline of up to 13 points, movement and a rough outlook. It never gets pixels.
   - Rejected: passing radar images to a vision model. That is slower and costlier, and depends on the model reading a picture correctly.
-- **Movement:** estimated by the best shift between consecutive frames (about 1.2 km cells on the 70 km view), weighted by rain level and limited to 90 km/h. A parabola through the best score and its neighbours refines the shift to a fraction of a cell. Consistency compares each pair's scatter from the average with the average speed plus one cell's worth of speed, so quantisation alone does not read as erratic. The outlook moves the newest frame along the recent motion. It is labelled a rough guide, because thunderstorms grow and decay.
+- **Movement:** estimated by the best shift between consecutive frames (about 1.2 km cells on the 70 km view), weighted by rain level and limited to 90 km/h. A parabola through the best score and its neighbours refines the shift to a fraction of a cell. Consistency compares each pair's scatter from the average with the average speed plus half a cell's worth of speed, so quantisation noise alone does not read as erratic. A full cell's worth was too lenient on the 240 km view, where one cell per 5 minutes is about 35 km/h: rain zig-zagging 45° either side of east read as fairly steady. The outlook moves the newest frame along the recent motion. It is labelled a rough guide, because thunderstorms grow and decay.
 - **Location:**
   - a Telegram pin is exact (Telegram sends latitude and longitude);
   - typed places try NEA forecast areas, then OneMap search;
@@ -59,13 +60,14 @@ Merlion's rain answers came from the 2-hour area forecast and rain gauges. Those
 - **Tool:** `sg_rain` (read-only) is in `protocol`, `readOperations` and the runtime description.
 - **Telegram:** `src/telegram-location.ts`, plus `telegram.ts`, turn a shared pin or venue into a `[Shared location: …]` line.
 - **Plugin:** the `sg-rain` skill; Merlion's tools, description and instructions; the registry grants, delegation and hash.
-- **Independent review** (Opus 5.5) approved 753f7f4 with no blocking findings. Non-blocking findings were fixed before merge:
+- **Independent review** (Opus 5.5) approved 753f7f4, then the follow-up 193200e, with no blocking findings. Non-blocking findings were fixed before merge:
   - slow rain was labelled erratic, and whole-cell shifts overstated its speed: sub-cell refinement and the new consistency measure;
   - only seven palette colours were tested: the full legend is now an exact table, with a hue fallback;
   - a timestamp without a zone would have been read as UTC: bare times are Singapore time, and unreadable times are dropped;
   - concurrent calls fetched the same frames twice: in-flight fetches are shared;
   - venue text could blend into the location note: it is now labelled as given, without quotes or brackets;
-  - a doc comment sat above the wrong function.
+  - a doc comment sat above the wrong function;
+  - on the follow-up: the consistency measure was lenient on the 240 km view (now half a cell's worth), and the slow-rain test's outlook check was vacuous.
 
 ## Verification and outcome
 

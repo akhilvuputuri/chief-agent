@@ -158,7 +158,27 @@ test("slow rain is not called erratic just because shifts alternate between zero
     String(r.movement.recent.speedKmh),
   );
   assert.notEqual(r.movement.recent.consistency, "erratic");
-  assert.ok(r.outlook);
+  assert.ok(r.outlook.estimate);
+});
+
+test("zig-zagging rain on the wide view is erratic and gets no outlook", () => {
+  // Every 5 minutes half a wide-view cell east (about 1.5 km), alternately
+  // also half a cell south: 45 degrees either side of east at about 18 km/h.
+  // A full one-cell quantum in the consistency measure called this fairly steady.
+  const frames = [0, 1, 2, 3, 4, 5, 6, 7, 8]
+    .map((i) => ({
+      ...frame((8 - i) * 5, 50 + i * 0.5, 60 + (i % 2 ? 0.5 : 0)),
+      range: "240km" as const,
+      west: 102.3,
+      east: 105.5,
+      north: 2.95,
+      south: -0.25,
+    }))
+    .reverse();
+  const r: any = analyse(frames, { lat: 1.35, lon: 103.9 }, 150, NOW);
+  assert.equal(r.movement.overWindow.towards, "E");
+  assert.equal(r.movement.overWindow.consistency, "erratic");
+  assert.equal(r.outlook.estimate, null);
 });
 
 test("rain sitting over the location is reported with its history, and calm air has no outlook", () => {

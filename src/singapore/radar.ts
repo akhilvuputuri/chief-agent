@@ -353,15 +353,15 @@ function averageMotion(
   const north = moves.reduce((s, m) => s + m.north * m.weight, 0) / weight;
   const speed = Math.hypot(east, north);
   // Consistency: how far individual moves stray from the average, relative to
-  // its speed plus the step one cell shift represents. Slow rain alternates
-  // between zero and one-cell shifts, which is quantisation, not erratic motion.
+  // its speed plus half the step a one-cell shift represents. Refined shifts
+  // still carry some quantisation noise, which is not erratic motion.
   const scatter =
     moves.reduce(
       (s, m) => s + m.weight * Math.hypot(m.east - east, m.north - north),
       0,
     ) / weight;
   const quantum = moves.reduce((s, m) => s + m.quantum * m.weight, 0) / weight;
-  const agree = Math.max(0, 1 - scatter / (speed + quantum));
+  const agree = Math.max(0, 1 - scatter / (speed + quantum / 2));
   return { east, north, speed, agree };
 }
 
