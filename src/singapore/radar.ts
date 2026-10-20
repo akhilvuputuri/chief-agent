@@ -19,12 +19,64 @@ const MIN = 60_000;
 const CELL = 4;
 
 /**
- * NEA colours its rain-rate layer from teal and cyan (light) through green,
- * yellow and orange to red and magenta (intense). Each palette colour maps to
- * one of five coarse levels; exact mm/h values are not published with the image.
+ * NEA's rain-rate legend, lightest to most intense, as observed in live frames
+ * (2026-10-13 to 2026-10-20): six teals, ten greens, five yellows, four oranges,
+ * then reds and magentas. Exact mm/h values are not published with the image.
+ */
+export const LEGEND: [number, number, number][] = [
+  [0, 255, 255],
+  [0, 239, 239],
+  [0, 209, 213],
+  [0, 186, 191],
+  [0, 151, 154],
+  [0, 131, 125],
+  [0, 128, 69],
+  [0, 137, 56],
+  [0, 162, 53],
+  [0, 183, 41],
+  [0, 202, 17],
+  [0, 218, 13],
+  [0, 245, 7],
+  [0, 255, 0],
+  [67, 255, 65],
+  [72, 255, 70],
+  [255, 255, 59],
+  [255, 255, 0],
+  [255, 240, 0],
+  [255, 220, 0],
+  [255, 198, 0],
+  [255, 178, 0],
+  [255, 165, 0],
+  [255, 138, 0],
+  [255, 114, 0],
+  [255, 73, 0],
+  [255, 31, 0],
+  [229, 0, 0],
+  [193, 0, 0],
+  [182, 0, 106],
+  [210, 0, 165],
+  [212, 0, 170],
+  [255, 0, 255],
+];
+/** Legend positions where each level after "light" begins. */
+const LEVEL_STARTS = [6, 16, 21, 25];
+const LEGEND_LEVEL = new Map(
+  LEGEND.map(([r, g, b], i) => [
+    `${r},${g},${b}`,
+    1 + LEVEL_STARTS.filter((start) => i >= start).length,
+  ]),
+);
+
+/**
+ * Maps a palette colour to one of five coarse levels: exact legend colours by
+ * table, anything else by hue. Opaque white appears in some palettes unused and
+ * is not on the legend, so it counts as no rain.
  */
 export function rainClass(r: number, g: number, b: number, alpha: number) {
   if (alpha < 32) return 0;
+  const known = LEGEND_LEVEL.get(`${r},${g},${b}`);
+  if (known) return known;
+  if (r > 230 && g > 230 && b > 230) return 0;
   if (r < 100 && g > 100 && b > 100 && Math.abs(g - b) < 40) return 1;
   if (r < 120 && g > b + 30) return 2;
   if (r > 200 && g >= 190 && b < 100) return 3;
@@ -55,6 +107,7 @@ function sgtStamp(ms: number) {
 /** Fetches and caches radar frames. A published frame never changes. */
 export class RadarFrames {
   private readonly frames = new Map<string, Frame | null>();
+  private readonly pending = new Map<string, Promise<Frame | null>>();
   private readonly latest: TtlCache;
   constructor(
     private readonly http: SgHttp,
@@ -77,6 +130,12 @@ export class RadarFrames {
     const record = (data?.records ?? [])[0];
     const box = data?.boundaryBox;
     if (body?.code !== 0 || !record?.image?.url || !box) return null;
+    const stamp = String(record.timestamp ?? "");
+    // The feed gives +08:00 offsets; a bare local time is read as Singapore time, not UTC.
+    const time = Date.parse(
+      /(?:Z|[+-]\d\d:?\d\d)$/.test(stamp) ? stamp : `${stamp}+08:00`,
+    );
+    if (!Number.isFinite(time)) return null;
     const png = decodePalettePng(await this.http.radarImage(record.image.url));
     const classes = png.palette.map(([r, g, b, a]) => rainClass(r, g, b, a));
     const cols = Math.floor(png.width / CELL);
@@ -89,8 +148,8 @@ export class RadarFrames {
         if (level > grid[cell]!) grid[cell] = level;
       }
     return {
-      at: String(record.timestamp),
-      time: Date.parse(record.timestamp),
+      at: stamp,
+      time,
       range,
       west: Number(box.upperLeft.longitude),
       east: Number(box.lowerRight.longitude),
@@ -112,8 +171,17 @@ export class RadarFrames {
     for (let back = stepMinutes; back <= minutes; back += stepMinutes) {
       const time = newest.time - back * MIN;
       const key = `${range}:${time}`;
-      if (!this.frames.has(key))
-        this.remember(key, await this.load(range, sgtStamp(time)));
+      if (!this.frames.has(key)) {
+        // Concurrent calls share one fetch per frame.
+        let loading = this.pending.get(key);
+        if (!loading) {
+          loading = this.load(range, sgtStamp(time)).finally(() =>
+            this.pending.delete(key),
+          );
+          this.pending.set(key, loading);
+        }
+        this.remember(key, await loading);
+      }
       const frame = this.frames.get(key);
       if (frame) out.push(frame);
     }
@@ -235,6 +303,8 @@ function motionBetween(older: Frame, newer: Frame, p: Point, radiusKm: number) {
   if (wetA.length < 12 || b.size < 12) return null;
   // Rain cells rarely move faster than 90 km/h.
   const reach = Math.min(25, Math.ceil((90 * hours) / size));
+  const width = 2 * reach + 1;
+  const scores = new Float64Array(width * width);
   let best = { score: 0, dx: 0, dy: 0 };
   for (let dy = -reach; dy <= reach; dy++)
     for (let dx = -reach; dx <= reach; dx++) {
@@ -244,40 +314,54 @@ function motionBetween(older: Frame, newer: Frame, p: Point, radiusKm: number) {
         const level = b.get(key);
         if (level) score += Math.min(level, c.level);
       }
+      scores[(dy + reach) * width + dx + reach] = score;
       if (score > best.score) best = { score, dx, dy };
     }
   const total = wetA.reduce((s, c) => s + c.level, 0);
   if (best.score / total < 0.25) return null;
+  // Refine to a fraction of a cell with a parabola through the best score and
+  // its neighbours on each axis, so slow rain is not rounded to 0 or 1 cell.
+  const at = (dx: number, dy: number) =>
+    Math.abs(dx) > reach || Math.abs(dy) > reach
+      ? 0
+      : scores[(dy + reach) * width + dx + reach]!;
+  const refine = (minus: number, plus: number) => {
+    const curve = minus - 2 * best.score + plus;
+    return curve < 0
+      ? Math.max(-0.5, Math.min(0.5, (minus - plus) / (2 * curve)))
+      : 0;
+  };
+  const dx =
+    best.dx + refine(at(best.dx - 1, best.dy), at(best.dx + 1, best.dy));
+  const dy =
+    best.dy + refine(at(best.dx, best.dy - 1), at(best.dx, best.dy + 1));
   return {
-    east: (best.dx * size) / hours,
-    north: (best.dy * size) / hours,
+    east: (dx * size) / hours,
+    north: (dy * size) / hours,
     weight: best.score,
+    /** Speed that one whole-cell shift represents for this pair. */
+    quantum: size / hours,
   };
 }
 
 function averageMotion(
-  moves: { east: number; north: number; weight: number }[],
+  moves: { east: number; north: number; weight: number; quantum: number }[],
 ) {
   const weight = moves.reduce((s, m) => s + m.weight, 0);
   if (!weight) return null;
   const east = moves.reduce((s, m) => s + m.east * m.weight, 0) / weight;
   const north = moves.reduce((s, m) => s + m.north * m.weight, 0) / weight;
   const speed = Math.hypot(east, north);
-  // Consistency: how much the individual moves agree with the average.
-  const agree =
+  // Consistency: how far individual moves stray from the average, relative to
+  // its speed plus the step one cell shift represents. Slow rain alternates
+  // between zero and one-cell shifts, which is quantisation, not erratic motion.
+  const scatter =
     moves.reduce(
-      (s, m) =>
-        s +
-        m.weight *
-          Math.max(
-            0,
-            speed && Math.hypot(m.east, m.north)
-              ? (m.east * east + m.north * north) /
-                  (speed * Math.hypot(m.east, m.north))
-              : 0,
-          ),
+      (s, m) => s + m.weight * Math.hypot(m.east - east, m.north - north),
       0,
     ) / weight;
+  const quantum = moves.reduce((s, m) => s + m.quantum * m.weight, 0) / weight;
+  const agree = Math.max(0, 1 - scatter / (speed + quantum));
   return { east, north, speed, agree };
 }
 

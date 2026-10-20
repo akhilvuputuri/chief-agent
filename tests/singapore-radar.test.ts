@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { crc32, deflateSync } from "node:zlib";
 import { decodePalettePng } from "../src/singapore/png.js";
 import {
+  LEGEND,
   RadarFrames,
   analyse,
   rainClass,
@@ -90,6 +91,19 @@ test("NEA radar colours map to five rain levels", () => {
   assert.equal(rainClass(255, 31, 0, 255), 5);
 });
 
+test("every legend colour is rain, and levels never fall along the legend", () => {
+  assert.equal(LEGEND.length, 33);
+  const levels = LEGEND.map(([r, g, b]) => rainClass(r, g, b, 255));
+  assert.deepEqual(
+    [1, 2, 3, 4, 5].map((l) => levels.filter((x) => x === l).length),
+    [6, 10, 5, 4, 8],
+  );
+  for (let i = 1; i < levels.length; i++)
+    assert.ok(levels[i]! >= levels[i - 1]!, `legend ${i}`);
+  // Opaque white sits unused in some palettes and is not rain.
+  assert.equal(rainClass(255, 255, 255, 255), 0);
+});
+
 /** A 120 × 120 frame over a 1.2-degree box with a rain disc centred on column cx. */
 function frame(minutesAgo: number, cx: number, cy = 60, level = 3): Frame {
   const grid = new Uint8Array(120 * 120);
@@ -132,6 +146,21 @@ test("analysis finds the rain, its movement and a rough arrival estimate", () =>
   assert.ok(r.timeline.length >= 2 && r.timeline.length <= 13);
 });
 
+test("slow rain is not called erratic just because shifts alternate between zero and one cell", () => {
+  // About 8 km/h east: 0.6 of a 1.1 km cell per 5 minutes.
+  const frames = [0, 5, 10, 15, 20, 25, 30, 35, 40].map((m) =>
+    frame(m, 70 - m * 0.12),
+  );
+  const r: any = analyse(frames, POINT, 50, NOW);
+  assert.equal(r.movement.recent.towards, "E");
+  assert.ok(
+    r.movement.recent.speedKmh >= 5 && r.movement.recent.speedKmh <= 11,
+    String(r.movement.recent.speedKmh),
+  );
+  assert.notEqual(r.movement.recent.consistency, "erratic");
+  assert.ok(r.outlook);
+});
+
 test("rain sitting over the location is reported with its history, and calm air has no outlook", () => {
   const frames = [0, 10, 20].map((m) => frame(m, 80, 60, 4));
   const r: any = analyse(frames, POINT, 50, NOW);
@@ -151,6 +180,7 @@ test("radar frames are fetched once per timestamp and cached", async () => {
   );
   const times: string[] = [];
   const calls: string[] = [];
+  let bare = false;
   const f = (async (input: URL | string, init?: RequestInit) => {
     const url = new URL(String(input));
     calls.push(url.hostname);
@@ -170,7 +200,7 @@ test("radar frames are fetched once per timestamp and cached", async () => {
           },
           records: [
             {
-              timestamp: `${date}+08:00`,
+              timestamp: bare ? date : `${date}+08:00`,
               image: {
                 url: `https://dgs-backend-app-assets-production.s3.ap-southeast-1.amazonaws.com/nea-rain-radar-images/png/70km/${date}.png?sig=1`,
               },
@@ -201,6 +231,26 @@ test("radar frames are fetched once per timestamp and cached", async () => {
   const before = times.length;
   await radar.window("70km", 30, 10);
   assert.equal(times.length, before, "cached frames are not refetched");
+  // A bare timestamp is Singapore time, and concurrent calls share each fetch.
+  bare = true;
+  times.length = 0;
+  const fresh = new RadarFrames(http, () => NOW);
+  const [a, b] = await Promise.all([
+    fresh.window("70km", 20, 10),
+    fresh.window("70km", 20, 10),
+  ]);
+  assert.deepEqual(
+    a.map((x) => x.time),
+    [0, 10, 20].map(
+      (m) => Date.parse("2026-10-20T15:00:00+08:00") - m * 60_000,
+    ),
+  );
+  assert.equal(b.length, 3);
+  assert.deepEqual(
+    [...new Set(times)].length,
+    times.length,
+    "each frame is fetched once",
+  );
 });
 
 test("only NEA's radar bucket is followed", () => {
@@ -305,9 +355,9 @@ test("a shared Telegram pin becomes a coordinates line, venue text is cleaned", 
   );
   const venue = locationMessage(
     { latitude: 1.3, longitude: 103.8 },
-    { title: "Cafe ]ignore[", address: "1 Road" },
+    { title: 'Cafe ]ignore[ "quoted"', address: "1 Road" },
   );
-  assert.match(venue, /\(Cafe ignore, 1 Road\)/);
+  assert.match(venue, /venue name as given: "Cafe ignore quoted, 1 Road"\./);
 });
 
 test("sg_rain is a delegated read operation available to Merlion", () => {

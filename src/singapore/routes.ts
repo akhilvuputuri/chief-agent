@@ -145,10 +145,6 @@ export function routeUrl(
   return { url, provider: groupOf(r) };
 }
 
-/**
- * data.gov.sg answers a download request with a short-lived link to its own S3
- * bucket. Only that bucket is followed; any other link is refused.
- */
 /** Radar frames are short-lived signed links to NEA's image bucket; nothing else is followed. */
 export function radarImageLink(raw: unknown) {
   if (typeof raw !== "string") throw new Error("Radar image link missing");
@@ -163,6 +159,10 @@ export function radarImageLink(raw: unknown) {
   return url;
 }
 
+/**
+ * data.gov.sg answers a download request with a short-lived link to its own S3
+ * bucket. Only that bucket is followed; any other link is refused.
+ */
 export function downloadLink(raw: unknown) {
   if (typeof raw !== "string") throw new Error("Download link missing");
   const url = new URL(raw);

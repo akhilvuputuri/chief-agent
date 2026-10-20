@@ -12,11 +12,12 @@ export function locationMessage(
   const accuracy = location.horizontal_accuracy
     ? `, accuracy about ${Math.round(location.horizontal_accuracy)} m`
     : "";
-  // Venue names come from Telegram's place search: keep them short and bracket-free.
+  // Venue names come from Telegram's place search: label them as data and keep
+  // them short, without brackets or quotes that could blend into the note.
   const name = [venue?.title, venue?.address]
     .filter(Boolean)
     .join(", ")
-    .replace(/[[\]]/g, "")
+    .replace(/[[\]"“”]/g, "")
     .slice(0, 120);
-  return `[Shared location: lat ${lat}, lon ${lon}${accuracy}${name ? ` (${name})` : ""}. The owner shared this pin from Telegram; use it as their location for location questions such as rain, weather or nearby carparks, and ask what they want if the request is unclear.]`;
+  return `[Shared location: lat ${lat}, lon ${lon}${accuracy}${name ? `, venue name as given: "${name}"` : ""}. The owner shared this pin from Telegram; use it as their location for location questions such as rain, weather or nearby carparks, and ask what they want if the request is unclear.]`;
 }
