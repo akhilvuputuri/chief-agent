@@ -1,6 +1,6 @@
 # Singapore open data
 
-Status: researched 19 October 2026; phase 1 implemented 20 October 2026 ([journal 103](journey/103-singapore-plugin.md)), deployment pending. Tracking: [issue 271](https://github.com/akhilvuputuri/chief-agent/issues/271) (data.gov.sg) and [issue 270](https://github.com/akhilvuputuri/chief-agent/issues/270) (LTA DataMall). Research record: [journal 99](journey/99-singapore-open-data.md). Full dataset reference: [catalogue](singapore-open-data-catalogue.md).
+Status: researched 19 October 2026. Phase 1 released 20 October 2026 as `becf234` (#277, [journal 103](journey/103-singapore-plugin.md)); the key rollout below is pending. Tracking: [issue 271](https://github.com/akhilvuputuri/chief-agent/issues/271) (data.gov.sg) and [issue 270](https://github.com/akhilvuputuri/chief-agent/issues/270) (LTA DataMall). Research record: [journal 99](journey/99-singapore-open-data.md). Full dataset reference: [catalogue](singapore-open-data-catalogue.md).
 
 Chief gets Singapore government data through a `singapore` plugin: weather and air quality now, alerts, parking, public holidays and hawker centre closures. The plugin holds the agent and skills. A small read-only host client does the fetching, because plugins cannot make HTTP calls.
 
@@ -145,6 +145,41 @@ There are two agents, because an agent appears in Chief's catalogue only when al
 1. **Code release (automatic):** host client, tools, plugin, picker entry, eval fixtures and tests. No migration and no Compose change. In production, data.gov.sg tools then run at the anonymous pace, and DataMall tools stay hidden.
 2. **Key rollout (operator):** `DATAGOVSG_API_KEY` and `LTA_DATAMALL_ACCOUNT_KEY` are added to the gateway environment list in `compose.yaml` and to the production `.env`, through the reviewed operator procedure ([cloud development](cloud-development.md)). The keys live only in the production environment, never in the repository, logs or PRs.
 3. **Picker eval:** `config/tool-picker.json` gains the `singapore` domain, so `npm run eval:picker` is run by hand and recorded in the journal.
+
+### Key rollout procedure
+
+`scripts/deploy-singapore-keys.py` is the one-time reviewed operator rollout. Its baseline is the live release recorded in the script. Recheck the server's `RELEASE` before running it; a different baseline needs reconciliation and review.
+
+**What the script checks and does:**
+
+1. **Before anything changes:**
+   - the archive matches the exact requested commit;
+   - `db/` is unchanged;
+   - the release handler is unchanged;
+   - `compose.yaml` differs only by the two gateway environment names after `TWELVE_DATA_API_KEY`;
+   - the private `.env` already sets both keys to non-empty values. It checks names only; values are never printed, logged or written.
+2. **Then:**
+   - builds the candidate first;
+   - waits until no work is running and no input is pending;
+   - stops the gateway, switches `compose.yaml` and the image, starts the gateway and checks health.
+3. **On failure:** restores the previous application, source and Compose file. It neither cancels nor replays owner work.
+
+**Steps:**
+
+1. Run the offline tests: `python3 scripts/test-deploy-singapore-keys.py`.
+2. Once the PR is approved and merged, add the two keys to `/opt/hermes-companion/.env` (root, mode 600) through the pinned Lightsail operator connection ([lightsail.md](lightsail.md)). Pipe the values from local private files over SSH, so they never appear in a command line, a log or the chat.
+3. Create the `git archive` of the exact merge commit, and transfer it and the reviewed script.
+4. Run:
+
+   ```sh
+   sudo python3 /tmp/deploy-singapore-keys.py /tmp/singapore-release.tar FULL_REVIEWED_MAIN_SHA
+   ```
+
+5. Verify the exact `RELEASE` and health.
+6. Dispatch the normal release for the same commit, which should be a no-op redeploy. That confirms later automatic releases accept the installed Compose file.
+7. Live acceptance follows: a bus arrival during service hours, MRT status, and weather.
+
+**Until the script runs:** a merged `compose.yaml` change makes the automatic release refuse every later merge. Run it immediately after the merge.
 
 ## Expanding later
 
