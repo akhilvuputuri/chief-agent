@@ -2,7 +2,7 @@
   "repository": "akhilvuputuri/chief-agent",
   "branch": "main",
   "image": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:e7554fb19f010706e16f748f6fc4b433567a503069d603761d1bf76a965e7687",
-  "model": "deepseek/deepseek-v4.1-flash-1017",
+  "model": "deepseek/deepseek-v4.1-flash",
   "reviewerModel": "google/gemini-4-argon",
   "effort": "high",
   "limits": {
@@ -12,7 +12,7 @@
   },
   "runtime": "python",
   "squad": true,
-  "leaderModel": "deepseek/deepseek-v4.1-flash-1017",
+  "leaderModel": "deepseek/deepseek-v4.1-flash",
   "autoMerge": true,
   "harnessVersion": 2
 }

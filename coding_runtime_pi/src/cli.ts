@@ -31,7 +31,7 @@ const runtime = new CodingRuntime({
   store: new TaskStore(join(state, "tasks"), stateKey),
   model: compatibleModel({
     provider: value("--provider", "openrouter")!,
-    model: value("--model", "deepseek/deepseek-v4.1-flash-1017")!,
+    model: value("--model", "deepseek/deepseek-v4.1-flash")!,
     apiKey: key,
     baseUrl: value("--base-url"),
     reasoning: "high",
