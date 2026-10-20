@@ -21,7 +21,7 @@ The release SHA plus the policy file at that SHA identifies the intended model. 
 
 **Prompt caching.** `cacheHints` in `src/model.ts` adds provider-specific cache markers.
 
-- **Anthropic models:** a top-level marker, plus a marker on the last message before the per-call state line.
+- **Anthropic models:** a top-level marker, plus markers on the opening system message, the owner's current message and the last message before the per-call state line (four breakpoints, the maximum; [journal 104](journey/104-opus-cache-misses-in-production.md)).
 - **Google models:** a marker on the opening system message.
 
 In synthetic probes, Anthropic cached nothing unmarked, and Gemini's implicit cache missed whenever the request tail changed, which happens on every Chief call. After a model change, compare `cachedTokens` and `cost` across the calls of one turn in `model.completed`. Cached tokens alone do not show cache-write premiums. See [journal 100](journey/100-opus-main-model-and-caching.md).

@@ -65,6 +65,22 @@ export function omitImages(messages: ModelMessage[]) {
       : m,
   );
 }
+/** Character size of each top-level runtime-context key; never the values themselves. */
+export function runtimeParts(context: string | undefined) {
+  try {
+    const parsed = JSON.parse(context ?? "");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      return undefined;
+    return Object.fromEntries(
+      Object.entries(parsed).map(([key, value]) => [
+        key,
+        JSON.stringify(value)?.length ?? 0,
+      ]),
+    );
+  } catch {
+    return undefined;
+  }
+}
 export class CustomAgent implements Agent {
   constructor(
     private model: ModelAdapter,
@@ -205,6 +221,8 @@ export class CustomAgent implements Agent {
     await execution.checkpoint(messages);
     // context.over_budget is reported once per turn, not on every model call.
     let overBudgetReported = false;
+    // Older history stays the same for the whole turn, so the cached prefix does not shift.
+    let historyAllowance: number | undefined;
     try {
       turn: while (true) {
         if (await steer()) {
@@ -264,6 +282,7 @@ export class CustomAgent implements Agent {
             const input = context(
               {
                 ...req,
+                ...(historyAllowance === undefined ? {} : { historyAllowance }),
                 runtime: { context: req.runtime?.context ?? "", tools },
               },
               // Undelivered finals remain in the immutable journal, but must not
@@ -272,9 +291,13 @@ export class CustomAgent implements Agent {
                 (_, index) => !undeliveredMessageIndices.includes(index),
               ),
             );
+            // Reused for the rest of the turn; 0 once the turn had to drop older history.
+            historyAllowance = input.historyAllowance;
             await execution.trace("context.selected", {
               fixedSize: input.fixedSize,
               fixedParts: input.fixedParts,
+              // Sizes only (characters per top-level key), for measuring the runtime state.
+              runtimeParts: runtimeParts(req.runtime?.context),
               reservedSize: input.reservedSize,
               exchangeSize: input.exchangeSize,
               workingSize: input.workingSize,

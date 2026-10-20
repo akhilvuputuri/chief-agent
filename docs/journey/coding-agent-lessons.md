@@ -281,3 +281,5 @@ CodeBuild is removed (phase 6, 20 October): coding runs only in EC2 boxes ([jour
 **Recovery defect.** A box provider's own record is authoritative, so "not found" now settles cleanup instead of holding the coding queue forever. Startup also recognises an unrecorded launch whose box exists.
 
 Lesson: when one execution path is removed, list what it quietly absorbed (old snapshots, unrecoverable states) and give each a deliberate home.
+
+A synthetic cache probe is only as good as its resemblance to production. The first Opus turns missed their cache on most later calls ([journal 104](104-opus-cache-misses-in-production.md)), which the earlier append-only probes never showed. The hypothesis is that a mid-turn tool load, followed by Chief removing the previous step's reasoning, left no cache entry to reuse; older history shifting within a turn also changed the prefix. The shared adapter now also marks the opening system message and the owner's message, for coding models on Anthropic too. Read cached tokens per call from real turns before trusting a probe.

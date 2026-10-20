@@ -1003,3 +1003,127 @@ test("bounded history never opens with a reply whose question did not fit", () =
     ["Short question", "Short reply"],
   );
 });
+
+test("older history stays the same across a turn's calls as its results grow", () => {
+  const older: Message[] = [];
+  for (let i = 0; i < 12; i++)
+    older.push(
+      user(`Earlier question ${i} ` + "q".repeat(600)),
+      answer(`Earlier answer ${i} ` + "a".repeat(600)),
+    );
+  older.push(user("Thanks"), answer("You are welcome."));
+  const runtime = runtimeContext({ web: true }, null);
+  const call = (results: number, historyAllowance?: number) => {
+    const turn: Message[] = [user("Do the task")];
+    for (let i = 0; i < results; i++)
+      turn.push(
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            {
+              id: `s${i}`,
+              type: "function",
+              function: { name: "x", arguments: "{}" },
+            },
+          ],
+        },
+        {
+          role: "tool",
+          tool_call_id: `s${i}`,
+          content: JSON.stringify({ r: "r".repeat(4000) }),
+        },
+      );
+    return context(
+      {
+        runId: "fixture",
+        capability: "fixture",
+        message: "Do the task",
+        history: older,
+        memories: [],
+        runtime,
+        ...(historyAllowance === undefined ? {} : { historyAllowance }),
+      },
+      [...older, ...turn],
+    );
+  };
+  const earlier = (input: ReturnType<typeof context>) =>
+    input.messages.filter((m) =>
+      /Earlier (question|answer)/.test(String(m.content)),
+    ).length;
+  const first = call(0);
+  assert.equal(earlier(first), 16);
+  // Without the frozen allowance, history would shrink as this turn's results grow.
+  assert.equal(earlier(call(4)), 8);
+  // With it, every later call sends the same older history.
+  assert.equal(earlier(call(4, first.historyAllowance)), 16);
+});
+
+test("with a full fixed envelope, older history leaves at most once per turn and stays out", () => {
+  const older: Message[] = [];
+  for (let i = 0; i < 6; i++)
+    older.push(
+      user(`Earlier question ${i} ` + "q".repeat(400)),
+      answer(`Earlier answer ${i} ` + "a".repeat(400)),
+    );
+  older.push(user("Thanks"), answer("You are welcome."));
+  const runtime = runtimeContext({ web: true }, null);
+  runtime.context += " ".repeat(45000); // fixed envelope about 82k, over the 48k budget
+  const call = (results: number, historyAllowance?: number) => {
+    const turn: Message[] = [user("Do it")];
+    for (let i = 0; i < results; i++)
+      turn.push(
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            {
+              id: `s${i}`,
+              type: "function",
+              function: { name: "x", arguments: "{}" },
+            },
+          ],
+        },
+        {
+          role: "tool",
+          tool_call_id: `s${i}`,
+          content: JSON.stringify({ r: "r".repeat(4000) }),
+        },
+      );
+    return context(
+      {
+        runId: "fixture",
+        capability: "fixture",
+        message: "Do it",
+        history: older,
+        memories: [],
+        runtime,
+        ...(historyAllowance === undefined ? {} : { historyAllowance }),
+      },
+      [...older, ...turn],
+    );
+  };
+  const earlier = (input: ReturnType<typeof context>) =>
+    input.messages.filter(
+      (m) =>
+        m.role !== "system" &&
+        /Earlier (question|answer)/.test(String(m.content)),
+    ).length;
+  const free: number[] = [];
+  const latched: number[] = [];
+  let allowance: number | undefined;
+  for (let results = 0; results <= 14; results++) {
+    free.push(earlier(call(results)));
+    const input = call(results, allowance);
+    allowance = input.historyAllowance;
+    latched.push(earlier(input));
+  }
+  // Recomputed per call, older history shrinks and returns as trimming frees room.
+  assert.ok(free.some((n, i) => i > 0 && n > free[i - 1]!));
+  // Latched, it is kept until it no longer fits, then dropped once for the rest of the turn.
+  assert.equal(latched[0], 12);
+  const drop = latched.indexOf(0);
+  assert.ok(drop > 0);
+  assert.ok(latched.slice(0, drop).every((n) => n === 12));
+  assert.ok(latched.slice(drop).every((n) => n === 0));
+});
