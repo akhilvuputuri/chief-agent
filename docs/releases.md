@@ -1,3 +1,18 @@
+## Deployed `53a2cdb` (untagged) — cancelling paused coding jobs works again, and coding is proven on EC2
+
+- **Fix.** [PR 283](https://github.com/akhilvuputuri/chief-agent/pull/283) merged as `53a2cdb37f33cd35eb5b99c05258afde45509e6b`.
+  - Cancelling a paused job no longer reopens its settled sandbox cleanup. That reopening had made every cancel fail with `ACTIVE_WORK_EXISTS` while another attempt ran, or after the first cancel in a batch.
+  - Exact-head independent review (Claude Opus 5.5) approved it, and hosted CI and Devin passed. A regression test reproduces the production error.
+  - It went live in `97776fa` (healthy). No migration.
+- **Coding on EC2, measured on 20 October.** One owner job ran entirely in EC2 boxes:
+  - **Plan:** in its own box.
+  - **Implementation:** checks inside the box, every one exiting 0. Review then hit provider 504s.
+  - **Automatic retry:** a fresh box; the worker resumed straight into review.
+  - **Result:** review passed and Chief published [PR 285](https://github.com/akhilvuputuri/chief-agent/pull/285). Every box was terminated after its attempt.
+- **Not yet observed.** Subreaper cleanup on the AL2023 kernel.
+
+[Journal 91](journey/91-boxed-subagents.md#first-real-coding-attempt-on-ec2--20-october-2026).
+
 ## Released v0.3.92 (untagged) — Singapore open data: Merlion, data.gov.sg and LTA DataMall
 
 - **Code.** [PR 277](https://github.com/akhilvuputuri/chief-agent/pull/277) merged as `becf234038e128a34fe54974ffdd2d475c84239a`.
