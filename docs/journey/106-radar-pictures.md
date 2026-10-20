@@ -96,8 +96,15 @@ Released (closure below). Pending owner acceptance:
 
 - **What merged.** [PR 291](https://github.com/akhilvuputuri/chief-agent/pull/291) was squash-merged at approved head `6a454f5` as `9c184b59aec0155095d9b549471f6166ff779fb9`. Hosted CI and Devin passed on that head.
 - **First release attempt** ([run](https://github.com/akhilvuputuri/chief-agent/actions/runs/39429738495)): cancelled by the job's 15-minute timeout while the deploy step was still running. The handler builds the image before its idle check, and it printed nothing.
-  - Production logs show the gateway stayed on `adbba7b`, healthy, throughout. Nothing was deployed or rolled back.
-  - Earlier deploy steps that day took 3–6 minutes. The cause of the slow attempt is not established.
+  - **Production logs (CloudWatch, 12:50–15:20 UTC)** show the gateway stayed on `adbba7b`, healthy, until `8673bd5` replaced it:
+    - heartbeats every 5 minutes from 13:31 to 14:51 UTC, with uptime rising steadily from 2,100 s to 6,900 s, so there was no restart;
+    - `gateway.stopping` for `adbba7b` at 14:54:21 UTC;
+    - no `9c184b5` line at all.
+
+    So the cancelled attempt deployed and rolled back nothing, including after the job was cancelled.
+
+  - Successful deploy steps earlier that day took about 4–6.5 minutes, apart from one 17-second outlier. The cause of the slow attempt is not established.
+  - **Follow-up:** the host handler pipes its build output and does not handle the SSH session closing, so a cancelled release could in principle keep running and deploy unannounced. It did not here (above), but the handler should stop with its session or log its outcome.
 - **Live.** The release of `8673bd5` (#292 on top of this PR) succeeded at 14:54 UTC ([run](https://github.com/akhilvuputuri/chief-agent/actions/runs/39443054854)), with `release:status` success.
 - **Production logs.** The gateway started on `8673bd5` at 14:54 UTC, with heartbeats at 15:14 and no errors in the following 20 minutes.
 - **No migration** and no Compose change.

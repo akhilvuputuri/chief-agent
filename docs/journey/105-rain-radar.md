@@ -98,7 +98,7 @@ Released (closure below). Pending owner acceptance:
 - **What merged.** [PR 288](https://github.com/akhilvuputuri/chief-agent/pull/288) was squash-merged at approved head `97d6b53` as `d1c66bade2f075badae533e1b86b3d1bc034dc83`. Hosted CI and Devin passed on that head.
 - **First release attempt.** It stopped at its own guard, which releases only the current `main`, because #290 had merged on top.
 - **Live.** The release of `adbba7b` (#290 on top of this PR) succeeded at 12:56 UTC ([run](https://github.com/akhilvuputuri/chief-agent/actions/runs/39425373111)). `release:status` reports the exact commit deployed and startup health passed.
-- **Production logs.** The gateway started on `adbba7b` and logged heartbeats until it was replaced by `8673bd5` at 14:54 UTC, which also contains this change.
+- **Production logs (CloudWatch).** The gateway started on `adbba7b` at 12:56:07 UTC and logged a heartbeat every 5 minutes without a restart, through a cancelled release attempt for #291 (see [106](106-radar-pictures.md#release-closure--2026-10-20)). `8673bd5`, which also contains this change, replaced it at 14:54 UTC.
 - **No migration** and no Compose change.
 - **Not yet observed:** an owner `sg_rain` call in production.
 

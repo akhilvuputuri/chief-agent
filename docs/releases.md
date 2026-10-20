@@ -13,7 +13,7 @@
 - **Radar pictures.** [PR 291](https://github.com/akhilvuputuri/chief-agent/pull/291) merged as `9c184b59aec0155095d9b549471f6166ff779fb9`.
   - The radar is drawn on the host as a PNG map or looping GIF over a bundled outline of Singapore's regions, and sent after the reply, including background replies.
   - Review approved `6a454f5`; Devin and hosted CI passed.
-  - Its own release attempt hit the job's 15-minute timeout during the deploy step, leaving production unchanged on `adbba7b`.
+  - Its own release attempt hit the job's 15-minute timeout during the deploy step. CloudWatch shows `adbba7b` stayed live, healthy and without a restart until 14:54 UTC, with no `9c184b5` line.
   - Live in `8673bd5` (#292 on top) at 14:54 UTC, with `release:status` success, then heartbeats and no errors.
 - **Not yet observed.** An owner `sg_rain` call or picture in production. Acceptance: compare with myENV.
 
