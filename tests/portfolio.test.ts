@@ -1510,6 +1510,30 @@ test("a lost create is never sent again; it is found or reported unknown", async
   });
   assert.equal(saved.status, "drafted");
   assert.equal(saved.id, "102");
+  // Review (Devin): a reply without an id is confirmed from the list, or reported unknown.
+  f.ibkr.state.tools.create_order_instruction = (a) => {
+    create(a);
+    return {};
+  };
+  const confirmed = await draft({
+    symbol: "F",
+    side: "BUY",
+    quantity: 5,
+    orderType: "LIMIT",
+    limitPrice: 5,
+  });
+  assert.equal(confirmed.status, "drafted");
+  assert.equal(confirmed.id, "103");
+  f.ibkr.state.tools.create_order_instruction = () => ({});
+  const missing = await draft({
+    symbol: "F",
+    side: "BUY",
+    quantity: 6,
+    orderType: "LIMIT",
+    limitPrice: 5,
+  });
+  assert.equal(missing.status, "unknown");
+  assert.equal(missing.reason, "no_draft_id");
   // A 401 on create is assumed unprocessed: refreshed, then created once.
   f.ibkr.state.tools.create_order_instruction = create;
   f.ibkr.state.rejectTool = "create_order_instruction";
@@ -1521,7 +1545,7 @@ test("a lost create is never sent again; it is found or reported unknown", async
     limitPrice: 4,
   });
   assert.equal(retried.status, "drafted");
-  assert.equal(b.instructions.length, 4);
+  assert.equal(b.instructions.length, 5);
 });
 
 test("drafts need a foreground owner request and a write grant; listing and deleting work", async () => {

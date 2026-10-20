@@ -72,7 +72,9 @@ Tests were added for each.
 - **Low: the list's contract field is unmeasured.** A form such as `265598@NASDAQ` would make the repeat check miss after a restart. Contract ids are now compared numerically, falling back to the symbol.
 - **Note: an expired token on that list read refused the draft instead of retrying.** It is now retried once, like any session, because nothing had been created yet.
 
-Tests were added for both. Review of the final head: pending.
+Tests were added for both.
+
+**Devin Review of `615a028`:** a create reply without a draft id was still reported as drafted, with a null id. Such a reply is now confirmed from IBKR's list, or reported as `unknown` and never resent. Devin dismissed its own other new comment, about background lookups. Holdings reads were already allowed in background work; drafts and deletes stay foreground-only. Review of the final head: pending.
 
 ## Verification and outcome
 

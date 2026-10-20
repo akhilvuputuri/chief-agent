@@ -438,15 +438,27 @@ export class OrderDrafts {
             note: "IBKR's reply was lost and the draft could not be confirmed. Do not draft it again: ask the owner to check AI Instructions in an IBKR app, or list drafts shortly.",
           };
     }
-    const id =
-      typeof created?.id === "string" || typeof created?.id === "number"
+    const returned =
+      (typeof created?.id === "string" &&
+        /^[A-Za-z0-9_-]{1,64}$/.test(created.id)) ||
+      Number.isSafeInteger(created?.id)
         ? String(created.id)
         : null;
-    if (id) this.sent.set(terms, { at: this.now(), id });
-    // Expiry comes from the list; failing to read it never repeats the create.
-    const saved = id
-      ? ((await this.lookup(call))?.find((i) => i.id === id)?.expiresAt ?? null)
-      : null;
+    // Expiry comes from the list; failing to read it never repeats the create. A reply
+    // without a usable id is confirmed from the list, or reported unknown (review, Devin).
+    const after = await this.lookup(call);
+    const saved = returned
+      ? after?.find((i) => i.id === returned)
+      : matching(after ?? [], match, started);
+    const id = returned ?? saved?.id ?? null;
+    if (!id)
+      return {
+        status: "unknown",
+        reason: "no_draft_id",
+        draft,
+        note: "IBKR answered without a draft id and no matching draft is listed. Do not draft it again: ask the owner to check AI Instructions in an IBKR app, or list drafts shortly.",
+      };
+    this.sent.set(terms, { at: this.now(), id });
     return {
       status: "drafted",
       id,
@@ -454,7 +466,7 @@ export class OrderDrafts {
       draft,
       estimatedValueUsd,
       capUsd: this.maxUsd,
-      expiresAt: saved,
+      expiresAt: saved?.expiresAt ?? null,
       note: "This is a draft, not an order. Nothing trades until the owner opens it in an IBKR app (AI Instructions) and taps Review & Submit; Reject discards it. Chief cannot submit it.",
     };
   }
