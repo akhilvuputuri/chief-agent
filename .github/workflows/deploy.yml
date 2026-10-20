@@ -86,7 +86,9 @@ jobs:
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/companion ~/.ssh/known_hosts
           trap 'rm -f ~/.ssh/companion' EXIT
-          git archive HEAD | ssh -i ~/.ssh/companion -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes "root@${DEPLOY_HOST}" "deploy $(git rev-parse HEAD)"
+          # The host builds the image with its output captured, so the session is silent for
+          # minutes; keepalives stop the runner's network dropping it as idle.
+          git archive HEAD | ssh -i ~/.ssh/companion -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=20 "root@${DEPLOY_HOST}" "deploy $(git rev-parse HEAD)"
 
   report:
     needs: [announce, deploy]
