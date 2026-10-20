@@ -62,7 +62,7 @@ import {
   fixture,
   requirementBrief,
 } from "./helpers/coding-fixture.js";
-test("historical two-hour Pi settings use a 40-minute active attempt and a verified 45-minute sandbox", async (t) => {
+test("two-hour Pi settings use a 100-minute active attempt, inside the box task's two-hour deadline", async (t) => {
   const f = await fixture(t),
     job = await f.start("pi-bounded-attempt", "plan");
   const historical = {
@@ -78,14 +78,14 @@ test("historical two-hour Pi settings use a 40-minute active attempt and a verif
   ]);
   await f.c.tick();
   let current = await f.row(job.id);
-  assert.equal(f.sandboxRequests()[0].timeoutMinutes, 45);
+  assert.equal(f.sandboxRequests()[0].timeoutMinutes, 105);
   assert.deepEqual((await f.c.assignment(current)).settings, historical);
   await f.c.heartbeat(current);
   current = await f.row(job.id);
   assert.equal(
     new Date(current.attempt_deadline).getTime() -
       new Date(current.heartbeat_at).getTime(),
-    2400000,
+    6000000,
   );
   const deadline = new Date(current.attempt_deadline).getTime();
   await f.c.heartbeat(current);

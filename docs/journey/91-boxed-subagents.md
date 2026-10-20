@@ -639,8 +639,12 @@ The 40-minute limit (`limits.ms` 2,400,000) was set under CodeBuild's unexplaine
 
 The settings schema capped attempts at 400 model calls and 1,000 tool calls, and the worker in the box validates its settings against its own copy of that schema. Raising them therefore needs a new worker image:
 
-1. **Code (this change).** The caps become 1,000 model calls and 2,500 tool calls (time stays at most 2 hours). The run-memory, Pi-state and squad-state counters follow.
+1. **Code (this change).**
+   - The caps become 1,000 model calls and 2,500 tool calls; time stays at most 2 hours. The run-memory, Pi-state and squad-state counters follow.
+   - Review found that the controller also capped every Pi attempt at 40 minutes, whatever `limits.ms` said: the same CodeBuild leftover. That ceiling is now 100 minutes, inside the box task's 2-hour deadline. Jobs already created keep their own 40-minute `limits.ms`.
 2. **Configuration, after the image is rebuilt.**
    - Re-pin the image, moving the previous one into the coding profile's `previousImages`.
    - New jobs get 90 minutes, 800 model calls and 2,000 tool calls.
    - Jobs keep the limits they were created with.
+
+**Review of PR 293 (Claude Opus 5.5): approved.** It confirmed that nothing else caps model or tool counts, and that older images never receive the higher limits, because a job snapshots its image and limits together. It also found the 40-minute controller ceiling, fixed above.
