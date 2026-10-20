@@ -14,9 +14,9 @@ For Anthropic models, earlier steps of a turn now keep their reasoning, so each 
 
 Jev's tool picks changed the tool list between messages and once mid-turn, and an effort raise mid-turn invalidated cached messages. The coordinator is now offered every available tool domain on every call, with no Jev tool pick; that is 54 tools, about 11k tokens, cheap once cached. Reasoning effort is raised mid-turn only after a failed step or an owner follow-up. See [journal 107](journey/107-stable-tools-and-effort.md).
 
-# IBKR order drafts — in review, 20 October 2026
+# IBKR order drafts — live in `ac94d23`, 21 October 2026
 
-Chief can draft IBKR orders that the owner reviews and submits in an IBKR app; it cannot place, change or cancel an order. Drafts are US shares only, at most USD 100 each, and only in IBKR's review-and-approve mode; Chief refuses IBKR's direct-order scope. A separate brokerage agent also answers read-only IBKR lookups. No migration or Compose change. Holdings acceptance from journal 59 is recorded: connected 15 October, matched, scheduled syncs measured; revocation untested. Next: review, release, then the owner reconnects and drafts a test order. [Journal 110](journey/110-ibkr-order-drafts.md), [design](ibkr-portfolio.md#order-drafts).
+Chief can draft IBKR orders that the owner reviews and submits in an IBKR app; it cannot place, change or cancel an order. Drafts are US shares only, at most USD 100 each, and only in IBKR's review-and-approve mode; Chief refuses IBKR's direct-order scope. A separate brokerage agent also answers read-only IBKR lookups. No migration or Compose change. Chief's IBKR grant ended (sync failed `not_connected` at 02:27 SGT on 21 October), likely because of the probe's second consent; an absolute grant lifetime is the alternative. Next: the owner reconnects with order-draft access, then drafts and removes a test order. [Journal 110](journey/110-ibkr-order-drafts.md#release-closure--2026-10-21), [design](ibkr-portfolio.md#order-drafts).
 
 # Opus cache misses in production — in review, 20 October 2026
 

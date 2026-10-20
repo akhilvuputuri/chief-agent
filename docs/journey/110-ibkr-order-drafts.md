@@ -1,7 +1,7 @@
 # 110 — Can Chief draft IBKR orders without being able to trade?
 
 Work date: 2026-10-20. Written: 2026-10-20.
-Status: in review. Order drafts are implemented and tested with mocked IBKR; not deployed. Owner acceptance pending.
+Status: released in `ac94d23` on 21 October 2026 (SGT). Owner reconnect and live acceptance pending.
 
 ## User-visible problem and preceding iteration
 
@@ -74,7 +74,7 @@ Tests were added for each.
 
 Tests were added for both.
 
-**Devin Review of `615a028`:** a create reply without a draft id was still reported as drafted, with a null id. Such a reply is now confirmed from IBKR's list, or reported as `unknown` and never resent. Devin dismissed its own other new comment, about background lookups. Holdings reads were already allowed in background work; drafts and deletes stay foreground-only. Review of the final head: pending.
+**Devin Review of `615a028`:** a create reply without a draft id was still reported as drafted, with a null id. Such a reply is now confirmed from IBKR's list, or reported as `unknown` and never resent. Devin dismissed its own other new comment, about background lookups. Holdings reads were already allowed in background work; drafts and deletes stay foreground-only. Opus 5.5 approved `5536c8b`, and then the docs-only rebases `bf1255a` (code byte-identical, checked by range-diff and patch-id). Hosted CI and Devin passed on `bf1255a`.
 
 ## Verification and outcome
 
@@ -86,7 +86,18 @@ Tests were added for both.
   - an IBKR error result that saved a draft, IBKR's error text, and a 401 retried once;
   - foreground-only drafting, list, confirmed and unconfirmed deletes;
   - the blocked live-order tools, bounded query results and agent gating.
-- **Not yet verified:** a draft from Chief in production; the owner's reconnect with order-draft access; deleting a draft through IBKR; whether the probe's second consent affected Chief's production consent.
+- **Measured: Chief's grant ended after the probe's consent.** Chief's holdings synced at 22:27 SGT on 20 October. The probe's consent for the same account followed at about 23:15. The next scheduled sync, at 02:27 SGT on 21 October, failed with `not_connected`. No IBKR code changed in between; unrelated releases restarted Chief, and earlier syncs had survived restarts.
+- **Hypothesis: the second consent replaced the first** (one AI consent per account, even across clients). An alternative fits the same evidence: an absolute grant lifetime of about 6 days, since Chief's grant dated from 15 October and Phase 0 only ruled out a cap within about 57 hours. The owner reconnects after this release anyway, to grant order drafts.
+- **Not yet verified:** a draft from Chief in production; the owner's reconnect with order-draft access; deleting a draft through IBKR.
+
+### Release closure — 2026-10-21
+
+- **Merged.** [PR #298](https://github.com/akhilvuputuri/chief-agent/pull/298) merged as `ac94d2355992b52839a6d1541fd048617be5658d`, from the approved head `bf1255a`.
+- **Checks.** Hosted CI and Devin passed on that head. The [main checks](https://github.com/akhilvuputuri/chief-agent/actions/runs/39474326599) and the [automatic release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39476720645) succeeded.
+- **Release receipt.** `release:status` reports the exact commit deployed with startup health passing (18:45 UTC).
+- **Sanitized logs.** `ac94d23` started at 18:44 UTC with no startup error, and no environment override of the drafts settings.
+- **Changes.** No migration or Compose change; no version tag.
+- **Pending.** The owner reconnects with order-draft access, drafts a small limit order, sees it in IBKR Mobile, and rejects or deletes it. The probe's two test drafts expire on 27 October.
 
 ## Follow-up and next iteration
 

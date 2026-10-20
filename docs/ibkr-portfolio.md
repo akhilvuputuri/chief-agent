@@ -1,6 +1,6 @@
 # IBKR portfolio access and quote-provider evaluation (issue #146)
 
-Status: **Phase 1 released in v0.3.37 and on (3 October 2026); the owner connected on 15 October and holdings acceptance passed except revocation. [Order drafts](#order-drafts) (owner request, 20 October 2026) are in review.** Phase 0: registration, read-only consent through the local probe, rotating refresh, a 12-hour idle refresh, the tool catalogue, owner-reconciled holdings and one real-time quote. Phase 1: holdings in Chief, through `/portfolio` and the `core/portfolio` agent, behind `IBKR_PORTFOLIO=off`. Written 2 October 2026 SGT against freshly fetched `origin/main` `ae0237f4337a640937d36ed6e742c5fdef7ae9b7`. The issue's research baseline (`78ad212`) is superseded by PRs #148, #150 and #151, none of which touch the stock subsystem. Refetch main before implementing.
+Status: **Phase 1 released in v0.3.37 and on (3 October 2026); the owner connected on 15 October and holdings acceptance passed except revocation. [Order drafts](#order-drafts) (owner request, 20 October 2026) are live in `ac94d23`; the owner must reconnect, because Chief's IBKR grant ended (likely the probe's second consent).** Phase 0: registration, read-only consent through the local probe, rotating refresh, a 12-hour idle refresh, the tool catalogue, owner-reconciled holdings and one real-time quote. Phase 1: holdings in Chief, through `/portfolio` and the `core/portfolio` agent, behind `IBKR_PORTFOLIO=off`. Written 2 October 2026 SGT against freshly fetched `origin/main` `ae0237f4337a640937d36ed6e742c5fdef7ae9b7`. The issue's research baseline (`78ad212`) is superseded by PRs #148, #150 and #151, none of which touch the stock subsystem. Refetch main before implementing.
 
 Product requirement: [issue #146](https://github.com/akhilvuputuri/chief-agent/issues/146). Related design: [stock watchlist](stock-watchlist.md), [plugins](plugins.md), [Library identity](library.md), [Google authorization](google-authorization.md), [coding runtime ingress](coding.md).
 
@@ -365,7 +365,7 @@ The owner asked for alerts when a stock falls below the average price of a holdi
 
 ## Order drafts
 
-**Owner request, 20 October 2026; in review.** The owner asked Chief to create IBKR "AI instructions": drafts that IBKR shows in its apps under AI Instructions, where the owner taps Review & Submit to turn one into an order, or Reject. The owner set the rules: review-and-approve only, never autonomous trading; buying or selling whole shares only, no options or futures; each draft worth at most USD 100 while testing. The owner asked for the other restrictions proposed (limit-only, day-only, caps on counts, no short sales) to be left out.
+**Owner request, 20 October 2026; live in `ac94d23` since 21 October 2026.** The owner asked Chief to create IBKR "AI instructions": drafts that IBKR shows in its apps under AI Instructions, where the owner taps Review & Submit to turn one into an order, or Reject. The owner set the rules: review-and-approve only, never autonomous trading; buying or selling whole shares only, no options or futures; each draft worth at most USD 100 while testing. The owner asked for the other restrictions proposed (limit-only, day-only, caps on counts, no short sales) to be left out.
 
 ### Measured on 20 October 2026
 
@@ -376,7 +376,8 @@ With `scripts/ibkr-trade-probe.mjs`, on the owner's Mac with a separate owner co
 - **Flow type.** `get_flow_type` returned `REVIEW_AND_APPROVE`. IBKR's tool descriptions say each session is either that or `AUTONOMOUS`, where the AI places live stock and single-option orders with no review; under review-and-approve the live-order tools are unavailable. How a session becomes autonomous is not documented in what was fetched; the refused `mcp.orders.submit` scope is the likely gate (hypothesis).
 - **Drafts.** Two identical drafts (buy 1 share of a US stock at a limit far below the market, day order) were created because the owner ran the command twice. Each `create_order_instruction` returned an id and an `https` IBKR deep link. Reported by the owner: both appeared in IBKR Mobile under AI Instructions. `get_order_instructions` showed each draft expiring 7 days after creation, although the order itself was a day order. One listing straight after creation returned an empty list; a later one showed both (unexplained).
 - **Listings.** `search_contracts` for a US ticker also returned its Mexican and Canadian listings.
-- **Not tested:** the owner's Review & Submit or Reject from Chief's own drafts; deleting a draft (the two test drafts were left for the owner to delete); whether a second consent for the same account affects Chief's production consent.
+- **Measured afterwards:** Chief's next scheduled sync, about 3 hours after the probe's consent for the same account, failed with `not_connected`. **Hypothesis:** the second consent replaced Chief's (one AI consent per account). The alternative is an absolute grant lifetime of about 6 days, beyond the 57 hours measured in Phase 0. Test with a separate consent only when a reconnect is acceptable.
+- **Not tested:** the owner's Review & Submit or Reject from Chief's own drafts; deleting a draft (the two test drafts were left for the owner to delete, and expire on 27 October).
 
 ### Design
 
