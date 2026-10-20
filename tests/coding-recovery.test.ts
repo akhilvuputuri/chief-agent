@@ -157,6 +157,39 @@ test("heartbeat expiry pauses instead of starting another worker and revokes the
   await f.c.tick();
   assert.equal(f.creates(), 1);
 });
+test("an active attempt whose sandbox ID was not recorded is reconciled by attempt before workers authenticate", async (t) => {
+  const f = await fixture(t),
+    job = await f.start();
+  await f.c.tick();
+  const launched = await f.row(job.id);
+  // A restart lost the recorded identity of a launched sandbox.
+  await f.db.query("UPDATE coding_jobs SET sandbox_id=NULL WHERE id=$1", [
+    job.id,
+  ]);
+  const token = f.c.token(job.id, launched.attempt_id);
+  await assert.rejects(f.c.authenticate(job.id, token));
+  await f.c.tick();
+  const found = await f.row(job.id);
+  assert.equal(found.sandbox_id, launched.sandbox_id);
+  assert.equal(found.state, "provisioning");
+  assert.equal((await f.c.authenticate(job.id, token)).id, job.id);
+  assert.equal(f.creates(), 1);
+});
+test("an active attempt whose sandbox cannot be found is paused with cleanup still pending", async (t) => {
+  const f = await fixture(t),
+    job = await f.start();
+  await f.c.tick();
+  await f.db.query("UPDATE coding_jobs SET sandbox_id=NULL WHERE id=$1", [
+    job.id,
+  ]);
+  f.provider.find = async () => undefined;
+  await f.c.tick();
+  const j = await f.row(job.id);
+  assert.equal(j.state, "paused");
+  assert.match(j.summary, /could not be reconciled/);
+  assert.equal(j.cleanup, "pending");
+  assert.equal(f.creates(), 1);
+});
 test("cancelling paused jobs keeps their settled cleanup, even while another attempt runs", async (t) => {
   const f = await fixture(t);
   const paused: string[] = [];

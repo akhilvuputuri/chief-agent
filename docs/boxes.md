@@ -374,8 +374,10 @@ Started on 20 October 2026, after a real job ran entirely on EC2 and the ten old
 - **Code.** The CodeBuild sandbox, its SDK dependency, its timeout-confirmation handling and the `sandbox` switch are removed.
   - Coding needs boxes on and the reviewed `coding` profile; the gateway refuses to start otherwise.
   - `CODING_CODEBUILD_PROJECT` is no longer required. The Compose variables stay, unused, so this needs no operator rollout.
-  - Startup is refused while an attempt still depends on a CodeBuild build: active, or with cleanup pending. Nothing could inspect or stop that build any more.
-- **Older jobs.** A job snapshotted with a worker image that predates boxes (three old `plan_ready` plans, and PR 232's job) is not lost. If it needs another attempt, the controller pauses it before anything is launched, with "start a new coding job". So it never blocks the coding queue, and never fails a launch that would leave cleanup pending.
+  - Startup is refused while an attempt still depends on a CodeBuild build: a recorded build, or an unrecorded launch whose image no box runs, either active or with cleanup pending. Nothing could inspect or stop that build any more.
+- **Jobs keep their image.** A job runs every attempt with the worker image it was snapshotted with: plan, implementation, rebases, feedback repairs, resumes and retries. Its box is started with that image when the `coding` profile still lists it, as `image` or in `previousImages`.
+  - **Re-pinning the Pi worker image:** set the new digest as `image` (and in `config/coding-pi.json`), and move the old one into `previousImages`. Remove it only once no open job uses it. Every listed image must contain the box agent and the coding task program, which means a build from `7e648f9` or later.
+  - **Refusals.** A job whose image is not listed is paused before anything is launched: "no longer run by the coding sandbox (it predates EC2 boxes or has been retired); start a new coding job". That covers the three old `plan_ready` plans and PR 232's job, whose images predate boxes. It never blocks the coding queue, and never fails a launch that would leave cleanup pending.
 - **AWS teardown (owner, in CloudShell, after the code is live).** Look the names up, then delete:
 
   ```bash
@@ -385,7 +387,12 @@ Started on 20 October 2026, after a real job ran entirely on EC2 and the ten old
   ```
 
   1. Delete the CodeBuild stack (`deploy/coding/codebuild.json`: the `chief-coding` project and its worker role): `aws cloudformation delete-stack --region ap-southeast-1 --stack-name <name>`.
-  2. Detach and delete the CodeBuild controller policy from `chief-coding-controller` (`deploy/coding/controller-policy.json`). Keep the `chief-boxes-prod` stack's policy.
+  2. Remove the CodeBuild controller policy (`deploy/coding/controller-policy.json`) from `chief-coding-controller`. Keep the `chief-boxes-prod` stack's policy. Which commands depends on how the policy is attached:
+     - **Inline policy:** `aws iam delete-user-policy --user-name chief-coding-controller --policy-name <name>`.
+     - **Managed policy:**
+       1. Detach it: `aws iam detach-user-policy --user-name chief-coding-controller --policy-arn <arn>`.
+       2. Delete every non-default version: `aws iam list-policy-versions --policy-arn <arn>`, then `aws iam delete-policy-version --policy-arn <arn> --version-id <v>`.
+       3. Delete the policy: `aws iam delete-policy --policy-arn <arn>`.
   3. Optionally remove `CODING_CODEBUILD_PROJECT` from the production `.env`; nothing reads it.
 
 - **After teardown.** Remove `deploy/coding/codebuild.json` and `controller-policy.json`, and drop the Compose variables at the next reviewed operator rollout.

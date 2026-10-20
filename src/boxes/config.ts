@@ -27,9 +27,15 @@ export const boxesFile = z
     region: z.string().regex(/^[a-z]{2}-[a-z]+-\d$/),
     profiles: z.record(
       name,
-      boxProfile.refine((p) => launchPatterns.image.test(p.image), {
-        message: "Box images must be digest-pinned",
-      }),
+      boxProfile.refine(
+        (p) =>
+          [p.image, ...(p.previousImages ?? [])].every((i) =>
+            launchPatterns.image.test(i),
+          ),
+        {
+          message: "Box images must be digest-pinned",
+        },
+      ),
     ),
     ec2: z.record(name, ec2Profile),
   })

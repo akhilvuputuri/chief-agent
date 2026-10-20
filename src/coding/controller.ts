@@ -1582,12 +1582,13 @@ export class CodingController {
               Math.ceil(this.activeMs(j) / 60000) + 5,
             ),
           };
-          // A job snapshotted with a worker image no sandbox runs any more (CodeBuild-era)
-          // is paused before anything is launched, so it never blocks the queue.
+          // A job snapshotted with a worker image no sandbox runs any more (one from before
+          // EC2 boxes, or one retired from the coding profile) is paused before anything is
+          // launched, so it never blocks the queue.
           if (this.provider.accepts && !this.provider.accepts(request)) {
             await this.stopped(
               j,
-              "This job was prepared for a coding worker that no longer runs (CodeBuild); start a new coding job to continue",
+              "This job's worker image is no longer run by the coding sandbox (it predates EC2 boxes or has been retired); start a new coding job to continue",
               false,
             );
             return;

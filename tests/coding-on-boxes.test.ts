@@ -36,7 +36,7 @@ test("a coding attempt in a box: the controller pauses a worker that exited as t
         () => now,
         { pollMs: 0, hostGraceMs: 0 },
       );
-      return new BoxSandbox(db, boxes, "coding", pi.image!);
+      return new BoxSandbox(db, boxes, "coding", [pi.image!]);
     },
   });
   const job = await f.start();
@@ -129,7 +129,7 @@ test("a job prepared for a worker that no longer runs is paused before launch an
           "https://coding.example.com",
         ),
         "coding",
-        current,
+        [current],
       ),
   });
   const job = await f.start();
@@ -138,7 +138,7 @@ test("a job prepared for a worker that no longer runs is paused before launch an
   assert.equal(j.state, "paused");
   assert.match(
     j.summary,
-    /no longer runs \(CodeBuild\); start a new coding job/,
+    /no longer run by the coding sandbox .* start a new coding job/,
   );
   assert.equal(j.cleanup, "none");
   assert.equal(j.sandbox_id, null);

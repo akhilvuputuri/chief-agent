@@ -573,7 +573,18 @@ The pause was a model-provider fault, not the box. The main model also saw provi
 
 - The CodeBuild sandbox, its SDK dependency, timeout-confirmation handling and the `sandbox` switch are removed. Coding requires boxes and the reviewed `coding` profile.
 - Startup is refused while an attempt depends on a CodeBuild build.
-- A job snapshotted with a pre-box image (three old `plan_ready` plans and PR 232's job) is paused before launch with "start a new coding job", so it frees the queue.
+- A job's box is started with the job's own snapshotted image when the coding profile lists it (`image` or `previousImages`). A job whose image is not listed is paused before launch with "start a new coding job", so it frees the queue. That covers three old `plan_ready` plans and PR 232's job, which predate boxes.
 - **Tests.** The CodeBuild-only tests (buildspec, timeouts, build states, Python launcher) are removed. New tests cover the startup checks, the old-image refusal at the controller, and the box sandbox's acceptance rule. 297 coding and box tests pass, with 1 Docker test skipped.
 
 **AWS teardown** is an owner step after release; see the [design](../boxes.md#phase-6-codebuild-removed).
+
+**Review of `251f0d5` (Claude Opus 5.5): changes requested.**
+
+- **Blocking.** The box sandbox accepted only the coding profile's current image, but jobs keep their snapshotted image through plan approval, rebases, feedback rounds, resumes and retries. The first routine Pi image re-pin would therefore have paused every in-flight job, wrongly blaming CodeBuild. Under phase 4a, CodeBuild had absorbed those jobs.
+- **Fix.** The profile now lists `previousImages`, and `spawn` accepts an image from that list. Each box is started with the job's own image. The re-pin procedure moves the old digest into the list, and the refusal message no longer blames CodeBuild.
+- **Non-blocking, also adopted:**
+  - The startup check now also refuses an unrecorded launch whose image no box runs.
+  - Two generic reconciliation tests are restored with the fixture provider: one where the sandbox is found and recorded, one where it isn't found and the job is paused.
+  - The first sentence of `coding.md` is corrected.
+  - The teardown runbook gives exact commands for inline and managed policies.
+- **Tests.** 299 coding and box tests pass, with 1 Docker test skipped.

@@ -5,6 +5,14 @@ export const boxProfile = z
   .object({
     provider: z.string().min(1).max(40),
     image: z.string().regex(/^[^\s@]+@sha256:[a-f0-9]{64}$/),
+    /**
+     * Earlier images a box of this profile may still be started with, for work snapshotted
+     * before the latest re-pin (each must be box-capable). New work uses `image`.
+     */
+    previousImages: z
+      .array(z.string().regex(/^[^\s@]+@sha256:[a-f0-9]{64}$/))
+      .max(10)
+      .optional(),
     idleTtlMinutes: z.number().int().min(0).max(240),
     retentionHours: z.number().int().min(0).max(168),
     hardMaxHours: z.number().int().min(1).max(72),

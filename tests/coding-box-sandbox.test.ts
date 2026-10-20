@@ -15,6 +15,7 @@ import {
 import type { SandboxRequest } from "../src/coding/provider.js";
 
 const image = `ghcr.io/example/coding@sha256:${"a".repeat(64)}`;
+const previous = `ghcr.io/example/coding@sha256:${"9".repeat(64)}`;
 
 async function fixture(t: TestContext) {
   const pg = new PGlite();
@@ -35,6 +36,7 @@ async function fixture(t: TestContext) {
       coding: {
         provider: "fake",
         image,
+        previousImages: [previous],
         idleTtlMinutes: 15,
         retentionHours: 0,
         hardMaxHours: 3,
@@ -52,7 +54,7 @@ async function fixture(t: TestContext) {
     () => now,
     { pollMs: 0, hostGraceMs: 0 },
   );
-  const sandbox = new BoxSandbox(db, boxes, "coding", image);
+  const sandbox = new BoxSandbox(db, boxes, "coding", [image, previous]);
   const job = async () => {
     const id = randomUUID();
     await db.query(
@@ -246,21 +248,35 @@ test("the attempt token is dropped from stored payloads once the box is gone", a
   assert.ok(message.payload.jobId);
 });
 
-test("the box sandbox accepts only the Pi runtime with its own image", async (t) => {
+test("the box sandbox runs the job's own snapshotted image when the profile still lists it", async (t) => {
   const f = await fixture(t);
   assert.equal(f.sandbox.accepts(await f.request()), true);
-  const old = `ghcr.io/example/coding@sha256:${"d".repeat(64)}`;
-  assert.equal(f.sandbox.accepts(await f.request({ image: old })), false);
+  // After a re-pin, a job snapshotted with the previous image still runs, on that image.
+  const r = await f.request({ image: previous });
+  assert.equal(f.sandbox.accepts(r), true);
+  const id = await f.sandbox.create(r);
+  assert.equal((await f.row(id)).image, previous);
+  const retired = `ghcr.io/example/coding@sha256:${"d".repeat(64)}`;
+  assert.equal(f.sandbox.accepts(await f.request({ image: retired })), false);
   assert.equal(
     f.sandbox.accepts(await f.request({ runtime: "python" })),
     false,
   );
   await assert.rejects(
-    f.sandbox.create(await f.request({ image: old })),
+    f.sandbox.create(await f.request({ image: retired })),
     /cannot run in a coding box/,
   );
+  // The box layer itself refuses an image its profile does not list.
+  await assert.rejects(
+    f.boxes.spawn("owner", {
+      profile: "coding",
+      requestKey: "direct",
+      subject: "direct",
+      image: retired,
+    }),
+    /does not run that image/,
+  );
 });
-
 test("startup needs boxes and the reviewed coding profile, and refuses while a CodeBuild attempt is live", async (t) => {
   const f = await fixture(t);
   const base = {
@@ -269,7 +285,9 @@ test("startup needs boxes and the reviewed coding profile, and refuses while a C
     boxes: f.boxes,
     taskCommand: CODING_TASK_COMMAND,
   };
-  assert.ok((await codingSandbox(base)) instanceof BoxSandbox);
+  const chosen = await codingSandbox(base);
+  assert.ok(chosen instanceof BoxSandbox);
+  assert.deepEqual(chosen.images, [image, previous]);
   for (const [o, error] of [
     [{ boxes: undefined }, /BOXES_RUNTIME=on/],
     [
@@ -294,6 +312,18 @@ test("startup needs boxes and the reviewed coding profile, and refuses while a C
   await f.db.query(
     "UPDATE coding_jobs SET state='paused',cleanup='complete' WHERE id=$1",
     [r.jobId],
+  );
+  assert.ok(await codingSandbox(base));
+  // An unrecorded launch whose image no box runs (an uncertain CodeBuild create) also would.
+  await f.db.query(
+    "UPDATE coding_jobs SET sandbox_id=NULL,state='paused',cleanup='pending',settings=jsonb_build_object('image','ghcr.io/example/old@sha256:'||repeat('c',64)) WHERE id=$1",
+    [r.jobId],
+  );
+  await assert.rejects(codingSandbox(base), /depends on a CodeBuild build/);
+  // An unrecorded box launch with a listed image is reconciled by the box sandbox.
+  await f.db.query(
+    "UPDATE coding_jobs SET settings=jsonb_build_object('image',$2::text) WHERE id=$1",
+    [r.jobId, previous],
   );
   assert.ok(await codingSandbox(base));
   // Box attempts never block startup.

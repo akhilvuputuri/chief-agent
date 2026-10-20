@@ -43,12 +43,17 @@ export class BoxSandbox implements SandboxProvider {
     private db: Database,
     private boxes: BoxController,
     readonly profile: string,
-    readonly image: string,
+    /** The profile's current image first, then earlier box-capable images it still runs. */
+    readonly images: string[],
   ) {}
 
-  /** Whether this sandbox runs the attempt: the Pi runtime with the coding profile's image. */
+  /**
+   * Whether this sandbox runs the attempt: the Pi runtime with one of the profile's images.
+   * A job keeps the image it was snapshotted with, so after a re-pin its box is started
+   * with that earlier image, as long as the profile still lists it.
+   */
   accepts(r: SandboxRequest) {
-    return r.runtime === "pi" && r.image === this.image;
+    return r.runtime === "pi" && this.images.includes(r.image);
   }
 
   owns(id: string) {
@@ -72,6 +77,7 @@ export class BoxSandbox implements SandboxProvider {
       profile: this.profile,
       requestKey: key,
       subject: `coding:${r.jobId}`,
+      image: r.image,
     });
     await this.boxes.delegate(job.user_id, box.id, {
       requestKey: key,
@@ -194,13 +200,20 @@ export async function codingSandbox(o: {
     throw new Error(
       `The coding box profile must run ${CODING_TASK_COMMAND.join(" ")}`,
     );
+  const images = [profile.image, ...(profile.previousImages ?? [])];
+  // A recorded CodeBuild build, or an unrecorded launch with an image no box runs (an
+  // uncertain CodeBuild create), would sit in cleanup forever and block the queue.
   const stranded = await o.db.query(
-    `SELECT 1 FROM coding_jobs WHERE sandbox_id IS NOT NULL AND sandbox_id NOT LIKE 'box:%'
-       AND (state IN ('provisioning','running','publishing') OR cleanup='pending') LIMIT 1`,
+    `SELECT 1 FROM coding_jobs
+     WHERE (state IN ('provisioning','running','publishing') OR cleanup='pending')
+       AND ((sandbox_id IS NOT NULL AND sandbox_id NOT LIKE 'box:%')
+         OR (sandbox_id IS NULL AND NOT (settings->>'image' = ANY($1::text[]))))
+     LIMIT 1`,
+    [images],
   );
   if (stranded.rows.length)
     throw new Error(
       "A coding attempt still depends on a CodeBuild build; settle it before starting without CodeBuild",
     );
-  return new BoxSandbox(o.db, o.boxes, "coding", profile.image);
+  return new BoxSandbox(o.db, o.boxes, "coding", images);
 }
