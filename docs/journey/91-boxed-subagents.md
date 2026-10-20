@@ -623,3 +623,28 @@ The owner noticed stale wording during the medium canary: "Python implementation
 - owner-visible pause and cancel messages say "coding box" instead of "sandbox".
 
 The worker image is unchanged.
+
+### Longer coding attempts on boxes — 20 October 2026
+
+**Measured: the medium canary.** Job `791b6d8b` (`coding_status` box view):
+
+- **Planning:** 20 model calls in one box.
+- **Implementation:** ran the full 40-minute allocation in box `566f0543` (12:29 to 13:10 UTC), with 272 model calls costing about $0.26 (mostly `deepseek-v4.1-flash`). Context stayed near 26k tokens a call, with occasional compaction.
+  - It carried on through a gateway restart (another session's release at about 12:56).
+  - At the deadline it had saved a 20.6k-character patch across 4 files ("Ready"), but had not reached checks or review. The controller paused it ("time expired"), and the box ended cleanly.
+
+The 40-minute limit (`limits.ms` 2,400,000) was set under CodeBuild's unexplained 45-minute cap ([journal 80](80-codebuild-timeout-mismatch.md)). Boxes have no such cap: a box task has a 2-hour deadline and a box a 3-hour maximum.
+
+**Owner decision (20 October).** Raise the limits; most calls are cheap DeepSeek calls.
+
+The settings schema capped attempts at 400 model calls and 1,000 tool calls, and the worker in the box validates its settings against its own copy of that schema. Raising them therefore needs a new worker image:
+
+1. **Code (this change).**
+   - The caps become 1,000 model calls and 2,500 tool calls; time stays at most 2 hours. The run-memory, Pi-state and squad-state counters follow.
+   - Review found that the controller also capped every Pi attempt at 40 minutes, whatever `limits.ms` said: the same CodeBuild leftover. That ceiling is now 100 minutes, inside the box task's 2-hour deadline. Jobs already created keep their own 40-minute `limits.ms`.
+2. **Configuration, after the image is rebuilt.**
+   - Re-pin the image, moving the previous one into the coding profile's `previousImages`.
+   - New jobs get 90 minutes, 800 model calls and 2,000 tool calls.
+   - Jobs keep the limits they were created with.
+
+**Review of PR 293 (Claude Opus 5.5): approved.** It confirmed that nothing else caps model or tool counts, and that older images never receive the higher limits, because a job snapshots its image and limits together. It also found the 40-minute controller ceiling, fixed above.

@@ -2,21 +2,17 @@
 
 For Anthropic models, earlier steps of a turn now keep their reasoning, so each call extends the previous one exactly. In a synthetic Opus loop, cached reads grew with the turn (12.8k → 13.2k) instead of stopping at the owner's message. Writes per call stayed small instead of growing. See [journal 108](journey/108-keep-in-turn-reasoning.md).
 
+# Merlion rain radar and pictures — live (radar in `adbba7b`, pictures in `8673bd5`), 20 October 2026
+
+`sg_rain` reads NEA rain radar over up to 6 hours for a shared Telegram pin, a typed place or a region. It reports rain now, history at the location, movement and a rough outlook, and can send a radar map or a looping animation after the reply. Chief accepts Telegram location messages. Released without a migration. Next: owner acceptance in Telegram, checked against myENV. [Journal 105](journey/105-rain-radar.md), [journal 106](journey/106-radar-pictures.md), [design](singapore-open-data.md#rain-radar).
+
 # Stable tools and steadier effort for caching — in review, 20 October 2026
 
 Jev's tool picks changed the tool list between messages and once mid-turn, and an effort raise mid-turn invalidated cached messages. The coordinator is now offered every available tool domain on every call, with no Jev tool pick; that is 54 tools, about 11k tokens, cheap once cached. Reasoning effort is raised mid-turn only after a failed step or an owner follow-up. See [journal 107](journey/107-stable-tools-and-effort.md).
 
-# Merlion radar pictures — tested, not deployed, 20 October 2026
-
-`sg_rain` can now send the owner a radar map or a looping animation of the window, drawn on the host over a bundled outline of Singapore's regions, with the location marked. Chief sends it on Telegram right after the text reply. It is stacked on the rain radar PR. No migration. Next: review, release, then live acceptance. [Journal 106](journey/106-radar-pictures.md), [design](singapore-open-data.md#rain-radar).
-
 # Opus cache misses in production — in review, 20 October 2026
 
 The first production turns on Opus 5.5 cost $0.05–0.09 per call when the cache was read, and $0.13–0.23 when it missed. Misses followed a mid-turn tool load and, in one turn, a change of reasoning effort with older history shifting. The hypothesis is that removing the previous step's reasoning left no stable cache entry to fall back on. Anthropic requests now also mark the opening system message and the owner's current message, and older history leaves the prompt at most once per turn. Each turn also records the size of every runtime-state key, to guide trimming the 13–17k of runtime state. See [journal 104](journey/104-opus-cache-misses-in-production.md).
-
-# Merlion rain radar — tested, not deployed, 20 October 2026
-
-`sg_rain` reads NEA rain radar over up to 6 hours for a shared Telegram pin, a typed place or a region. It reports rain now, nearby coverage, history at the location, a timeline, movement (direction and speed) and a rough outlook. Chief now accepts Telegram location messages. No migration. Next: review, release, then live acceptance. [Journal 105](journey/105-rain-radar.md), [design](singapore-open-data.md#rain-radar).
 
 # Reply style for any model — live as v0.3.91, 20 October 2026
 
