@@ -1148,7 +1148,7 @@ test("Anthropic turns keep reasoning on earlier steps so each call extends the l
   assert.equal(reasoned(false), 1);
   // Anthropic: both steps keep it, so the earlier prefix is byte-identical across calls.
   assert.equal(reasoned(true), 2);
-  // Earlier conversation history never carries reasoning either way.
+  // The previous exchange (compacted) never carries reasoning either way.
   const earlier = context(
     {
       ...request("Next", [...history, ...turn.slice(0, 3)]),
@@ -1157,4 +1157,52 @@ test("Anthropic turns keep reasoning on earlier steps so each call extends the l
     [...history, ...turn.slice(0, 3), answer("Done"), user("Next")],
   ).messages.filter((m) => m.role === "assistant" && m.reasoning_details);
   assert.equal(earlier.length, 0);
+});
+
+test("kept reasoning is dropped before it can push real results into excerpts", () => {
+  const history = [user("Earlier"), answer("Earlier answer")];
+  // Each step carries about 19k characters of reasoning but a small result.
+  const turn = [user("Work through it")];
+  for (let i = 0; i < 5; i++)
+    turn.push(
+      ...toolGroup(
+        `step_${i}`,
+        { result: `value ${i} ` + "v".repeat(3000), sourceId: `s${i}` },
+        `id${i}`,
+      ),
+    );
+  const input = context(
+    { ...request("Work through it", history), keepTurnReasoning: true },
+    [...history, ...turn],
+  );
+  const earlierSteps = input.messages.filter(
+    (m) =>
+      m.role === "assistant" &&
+      m.tool_calls?.length &&
+      m.tool_calls[0]!.id !== "id4",
+  );
+  // Precondition: with reasoning these steps cross the 120k threshold; without it they fit.
+  assert.ok(input.fixedSize + JSON.stringify(turn).length > 120000);
+  assert.ok(
+    input.fixedSize +
+      JSON.stringify(turn.map((m) => ({ ...m, reasoning_details: undefined })))
+        .length <
+      100000,
+  );
+  // Reasoning alone would cross the compaction threshold; it is dropped instead...
+  assert.ok(earlierSteps.every((m) => !m.reasoning_details));
+  assert.equal(input.reasoningSize, 0);
+  // ...and the results themselves stay whole, not excerpts.
+  assert.ok(
+    input.messages
+      .filter((m) => m.role === "tool")
+      .every((m) => !String(m.content).includes("contextProjection")),
+  );
+  assert.equal(input.wireCompacted, false);
+  // With room to spare, the same steps keep their reasoning and report its size.
+  const small = context(
+    { ...request("Work through it", history), keepTurnReasoning: true },
+    [...history, ...turn.slice(0, 5)],
+  );
+  assert.ok(small.reasoningSize > 0);
 });

@@ -303,6 +303,7 @@ export class CustomAgent implements Agent {
               reservedSize: input.reservedSize,
               exchangeSize: input.exchangeSize,
               workingSize: input.workingSize,
+              reasoningSize: input.reasoningSize,
               trimmed: input.trimmed,
               compacted: input.compacted,
               wireCompacted: input.wireCompacted,

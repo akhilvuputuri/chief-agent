@@ -89,6 +89,8 @@ export type FixedParts = {
 };
 type ContextSelection = {
   omitted: number;
+  /** Characters of earlier in-turn reasoning kept for caching (journal 108); 0 when stripped. */
+  reasoningSize: number;
   /** Older-history allowance this call used; the agent reuses it for the rest of the turn. */
   historyAllowance: number;
   overBudget: boolean;
@@ -184,6 +186,10 @@ export function context(
     fixedSize + reservedSize + exchangeSize + workingSize >=
     contextCompactionThreshold
   ) {
+    // Kept reasoning must never be what pushes real results into excerpts: drop it first
+    // (one cache shift), and compact only if the turn is still over (journal 108).
+    if (request.keepTurnReasoning && !compactForWire)
+      return context({ ...request, keepTurnReasoning: false }, messages);
     working = workingGroups.flatMap((group) => compactToolGroup(group));
     workingSize = working.length ? JSON.stringify(working).length : 0;
   }
@@ -320,6 +326,8 @@ export function context(
     ).length +
     2000;
   if (!compactForWire && serializedSize >= contextCompactionThreshold) {
+    if (request.keepTurnReasoning)
+      return context({ ...request, keepTurnReasoning: false }, messages);
     return context(request, messages, true);
   }
   if (serializedSize >= contextHardLimit) {
@@ -355,6 +363,16 @@ export function context(
   }
   return {
     omitted,
+    reasoningSize: request.keepTurnReasoning
+      ? working.reduce(
+          (sum, m) =>
+            sum +
+            (m.reasoning_details
+              ? JSON.stringify(m.reasoning_details).length
+              : 0),
+          0,
+        )
+      : 0,
     historyAllowance,
     overBudget,
     fixedSize,
