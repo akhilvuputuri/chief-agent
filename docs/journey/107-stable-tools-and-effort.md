@@ -39,7 +39,7 @@ Status: in review. The coordinator is offered every available tool domain on eve
   - `src/agent.ts` (`stableTools`) loads every available domain in canonical order.
   - Jev is not asked about tools, for the first message or for follow-ups. Picker latency was p50 0.5–0.7 s in the two-week review.
   - Background job steps get the same list.
-  - With no pick to check, shadow picker checks and the hold, waiting-job and recent-use queries are skipped.
+  - With no pick to check, shadow picker checks and the hold and waiting-job queries are skipped; the recent-use and pending-approval reads still run but are unused.
   - The `toolDomains` note now says every domain is loaded.
   - Domain guidance for every loaded domain is always in the runtime context.
 - **`escalation.periodic: false`** in `config/reasoning-effort.json`. `src/effort.ts` asks again only after a new failed tool call or an absorbed owner follow-up.
