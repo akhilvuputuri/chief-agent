@@ -140,7 +140,7 @@ test("Pi output allowance is captured per job and cannot be changed by caller hi
   assert.equal((await f.row(job.id)).settings.maxOutputTokens, 16000);
 });
 test("expanded coding allocations survive assignment, provisioning, status and checkpoint validation", async (t) => {
-  const limits = { ms: 7200000, models: 400, tools: 1000 };
+  const limits = { ms: 7200000, models: 1000, tools: 2500 };
   const expanded = codingSettings.parse({
     ...settings,
     runtime: "python",
@@ -194,7 +194,7 @@ test("expanded coding allocations survive assignment, provisioning, status and c
   await assert.rejects(
     f.c.save(await f.row(job.id), {
       ...cp,
-      squadState: { ...cp.squadState, sequence: 2, toolsUsed: 1001 },
+      squadState: { ...cp.squadState, sequence: 2, toolsUsed: 2501 },
     }),
   );
 });
