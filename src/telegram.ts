@@ -1813,6 +1813,6 @@ function codingDecisionNotice(result: { status: string; duplicate: boolean }) {
   if (result.duplicate)
     return "That requirement message was already decided. Ask Chief for the current coding status.";
   return result.status === "approved"
-    ? "Requirements approved. Python implementation is queued in a new sandbox; I will collect updates and return a draft PR."
+    ? "Requirements approved. Implementation is queued in a fresh coding box; I'll send progress here and return a draft PR."
     : "Requirement proposal declined. Tell Chief what to change.";
 }
