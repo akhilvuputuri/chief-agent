@@ -207,7 +207,7 @@ export async function codingSandbox(o: {
     `SELECT 1 FROM coding_jobs
      WHERE (state IN ('provisioning','running','publishing') OR cleanup='pending')
        AND ((sandbox_id IS NOT NULL AND sandbox_id NOT LIKE 'box:%')
-         OR (sandbox_id IS NULL AND NOT (settings->>'image' = ANY($1::text[]))))
+         OR (sandbox_id IS NULL AND NOT (COALESCE(settings->>'image','') = ANY($1::text[]))))
      LIMIT 1`,
     [images],
   );
