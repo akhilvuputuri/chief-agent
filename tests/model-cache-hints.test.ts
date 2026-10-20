@@ -163,3 +163,52 @@ test("runtime parts record sizes per key, never values", async () => {
   assert.equal(runtimeParts("not json"), undefined);
   assert.equal(runtimeParts(JSON.stringify([1])), undefined);
 });
+
+test("requests without a state line, or with an image-ending owner message, stay within four breakpoints", () => {
+  const count = (messages: ModelMessage[]) =>
+    1 +
+    cacheHints("anthropic/claude-opus-5.5", messages).messages.filter(
+      (m) =>
+        Array.isArray(m.content) &&
+        m.content.some((p) => p.type === "text" && p.cache_control),
+    ).length;
+  // Pi coding requests end with a tool result, not a state line.
+  assert.equal(
+    count([
+      { role: "system", content: "Coder" },
+      { role: "user", content: "Task" },
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: "t",
+            type: "function",
+            function: { name: "read", arguments: "{}" },
+          },
+        ],
+      },
+      { role: "tool", tool_call_id: "t", content: "file" },
+    ]),
+    4,
+  );
+  // An owner message ending in an image cannot be marked; an earlier one is used instead.
+  const withImage: ModelMessage[] = [
+    { role: "system", content: "Stable" },
+    { role: "user", content: "Earlier question" },
+    { role: "assistant", content: "Earlier answer" },
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "What is this?" },
+        { type: "image_url", image_url: { url: "data:image/png;base64,AA==" } },
+      ],
+    },
+    { role: "system", content: "Current state" },
+  ];
+  assert.ok(count(withImage) <= 4);
+  assert.deepEqual(
+    cacheHints("anthropic/claude-opus-5.5", withImage).messages[3],
+    withImage[3],
+  );
+});

@@ -1003,3 +1003,58 @@ test("bounded history never opens with a reply whose question did not fit", () =
     ["Short question", "Short reply"],
   );
 });
+
+test("older history stays the same across a turn's calls as its results grow", () => {
+  const older: Message[] = [];
+  for (let i = 0; i < 12; i++)
+    older.push(
+      user(`Earlier question ${i} ` + "q".repeat(600)),
+      answer(`Earlier answer ${i} ` + "a".repeat(600)),
+    );
+  older.push(user("Thanks"), answer("You are welcome."));
+  const runtime = runtimeContext({ web: true }, null);
+  const call = (results: number, historyAllowance?: number) => {
+    const turn: Message[] = [user("Do the task")];
+    for (let i = 0; i < results; i++)
+      turn.push(
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            {
+              id: `s${i}`,
+              type: "function",
+              function: { name: "x", arguments: "{}" },
+            },
+          ],
+        },
+        {
+          role: "tool",
+          tool_call_id: `s${i}`,
+          content: JSON.stringify({ r: "r".repeat(4000) }),
+        },
+      );
+    return context(
+      {
+        runId: "fixture",
+        capability: "fixture",
+        message: "Do the task",
+        history: older,
+        memories: [],
+        runtime,
+        ...(historyAllowance === undefined ? {} : { historyAllowance }),
+      },
+      [...older, ...turn],
+    );
+  };
+  const earlier = (input: ReturnType<typeof context>) =>
+    input.messages.filter((m) =>
+      /Earlier (question|answer)/.test(String(m.content)),
+    ).length;
+  const first = call(0);
+  assert.equal(earlier(first), 16);
+  // Without the frozen allowance, history would shrink as this turn's results grow.
+  assert.equal(earlier(call(4)), 8);
+  // With it, every later call sends the same older history.
+  assert.equal(earlier(call(4, first.historyAllowance)), 16);
+});

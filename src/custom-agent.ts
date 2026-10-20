@@ -221,6 +221,8 @@ export class CustomAgent implements Agent {
     await execution.checkpoint(messages);
     // context.over_budget is reported once per turn, not on every model call.
     let overBudgetReported = false;
+    // Older history stays the same for the whole turn, so the cached prefix does not shift.
+    let historyAllowance: number | undefined;
     try {
       turn: while (true) {
         if (await steer()) {
@@ -280,6 +282,7 @@ export class CustomAgent implements Agent {
             const input = context(
               {
                 ...req,
+                ...(historyAllowance === undefined ? {} : { historyAllowance }),
                 runtime: { context: req.runtime?.context ?? "", tools },
               },
               // Undelivered finals remain in the immutable journal, but must not
@@ -288,6 +291,7 @@ export class CustomAgent implements Agent {
                 (_, index) => !undeliveredMessageIndices.includes(index),
               ),
             );
+            historyAllowance ??= input.historyAllowance;
             await execution.trace("context.selected", {
               fixedSize: input.fixedSize,
               fixedParts: input.fixedParts,

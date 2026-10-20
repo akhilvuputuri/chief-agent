@@ -89,6 +89,8 @@ export type FixedParts = {
 };
 type ContextSelection = {
   omitted: number;
+  /** Older-history allowance this call used; the agent reuses it for the rest of the turn. */
+  historyAllowance: number;
   overBudget: boolean;
   fixedSize: number;
   fixedParts: FixedParts;
@@ -236,23 +238,30 @@ export function context(
   ).length;
   const protectedSize = reservedSize + exchangeSize + workingSize;
   const overBudget = fixedSize + protectedSize >= contextBudget;
+  // The floor never pushes a request into wire compaction, which would shrink this
+  // turn's own results to make room for lower-priority older history.
+  const headroom = Math.max(
+    0,
+    contextCompactionThreshold -
+      turnDigestChars -
+      trimMargin -
+      fixedSize -
+      protectedSize,
+  );
+  // The turn's first call sets the allowance and later calls reuse it (journal 104), so
+  // older history, which precedes the cached owner message, does not shift as runtime
+  // state and this turn's results grow. It shrinks only to stay out of wire compaction.
+  const historyAllowance =
+    request.historyAllowance ??
+    Math.max(
+      Math.min(historyFloor, headroom),
+      contextBudget - fixedSize - protectedSize,
+      0,
+    );
   const bounded = boundHistory(
     earlier.map(withoutReasoning),
     20,
-    Math.max(
-      // The floor never pushes a request into wire compaction, which would shrink this
-      // turn's own results to make room for lower-priority older history.
-      Math.min(
-        historyFloor,
-        contextCompactionThreshold -
-          turnDigestChars -
-          trimMargin -
-          fixedSize -
-          protectedSize,
-      ),
-      contextBudget - fixedSize - protectedSize,
-      0,
-    ),
+    Math.min(historyAllowance, headroom),
   );
   const current: ModelMessage[] = [
     ...bounded.messages,
@@ -338,6 +347,7 @@ export function context(
   }
   return {
     omitted,
+    historyAllowance,
     overBudget,
     fixedSize,
     fixedParts,

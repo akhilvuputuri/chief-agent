@@ -118,18 +118,18 @@ export function cacheHints(model: string, messages: ModelMessage[]) {
         : messages.length - 1;
     let index = end;
     while (index >= 0 && !marked(messages[index]!)) index--;
-    // The owner's current message never changes during a turn. Production (20 October)
-    // showed later calls missing entirely once parallel tool results put the previous
-    // entry beyond Anthropic's 20-block lookback; a fixed mark here keeps tools,
-    // instructions, history and the message readable on every later call of the turn.
+    // The owner's current message never changes during a turn. In production (20 October)
+    // later calls missed entirely after a mid-turn tool load; the hypothesis (journal 104)
+    // is that removing the previous step's reasoning broke the only entry each call wrote.
+    // A fixed mark here keeps tools, instructions, history and the message readable.
     const owner = messages.findLastIndex(
       (m, i) => m.role === "user" && i <= end && i !== index && !!marked(m),
     );
     let hinted = at(index) ?? messages;
     if (owner >= 0)
       hinted = hinted.map((m, i) => (i === owner ? marked(m)! : m));
-    // The opening system message (instructions and memories) also gets an entry: it survives
-    // a change of reasoning effort, which invalidates every cached message. That is four
+    // The opening system message (instructions and memories) also gets an entry, reusable
+    // across turns with the same tools and whenever later messages change. That is four
     // breakpoints with the top-level one, Anthropic's maximum.
     if (
       messages[0]?.role === "system" &&

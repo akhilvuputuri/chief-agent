@@ -1,6 +1,6 @@
 # Opus cache misses in production — in review, 20 October 2026
 
-The first production turns on Opus 5.5 cost $0.05–0.09 per call when the cache was read, and $0.13–0.23 when it missed. Misses followed a mid-turn tool load, because Chief removes the previous step's reasoning and no stable cache entry existed to fall back on. Anthropic requests now also mark the opening system message and the owner's current message. Each turn also records the size of every runtime-state key, to guide trimming the 13–17k of runtime state. See [journal 104](journey/104-opus-cache-misses-in-production.md).
+The first production turns on Opus 5.5 cost $0.05–0.09 per call when the cache was read, and $0.13–0.23 when it missed. Misses followed a mid-turn tool load and, in one turn, a change of reasoning effort with older history shifting. The hypothesis is that removing the previous step's reasoning left no stable cache entry to fall back on. Anthropic requests now also mark the opening system message and the owner's current message, and older history is frozen for the turn. Each turn also records the size of every runtime-state key, to guide trimming the 13–17k of runtime state. See [journal 104](journey/104-opus-cache-misses-in-production.md).
 
 # Reply style for any model — live as v0.3.91, 20 October 2026
 
