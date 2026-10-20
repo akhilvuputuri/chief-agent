@@ -603,6 +603,10 @@ export interface AgentRequest {
   images?: ImageAttachment[];
   history: unknown[];
   historyOmitted?: number;
+  /** Keep reasoning on this turn's earlier steps, for prompt caching (journal 108). */
+  keepTurnReasoning?: boolean;
+  /** Set internally when kept reasoning was dropped to avoid compaction. */
+  reasoningDropped?: boolean;
   /** Older-history allowance set by the turn's first call; 0 once dropped (journal 104). */
   historyAllowance?: number;
   /** Stable start of this foreground exchange, including all absorbed follow-ups. */

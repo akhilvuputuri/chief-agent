@@ -283,6 +283,8 @@ export class CustomAgent implements Agent {
               {
                 ...req,
                 ...(historyAllowance === undefined ? {} : { historyAllowance }),
+                // Anthropic caches by exact prefix; earlier steps keep their reasoning (journal 108).
+                keepTurnReasoning: (model.model ?? "").startsWith("anthropic/"),
                 runtime: { context: req.runtime?.context ?? "", tools },
               },
               // Undelivered finals remain in the immutable journal, but must not
@@ -301,6 +303,8 @@ export class CustomAgent implements Agent {
               reservedSize: input.reservedSize,
               exchangeSize: input.exchangeSize,
               workingSize: input.workingSize,
+              reasoningSize: input.reasoningSize,
+              reasoningDropped: input.reasoningDropped,
               trimmed: input.trimmed,
               compacted: input.compacted,
               wireCompacted: input.wireCompacted,

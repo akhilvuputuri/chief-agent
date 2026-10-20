@@ -89,6 +89,10 @@ export type FixedParts = {
 };
 type ContextSelection = {
   omitted: number;
+  /** Characters of earlier in-turn reasoning kept for caching (journal 108); 0 when stripped. */
+  reasoningSize: number;
+  /** Kept reasoning was dropped this call to stay under the compaction threshold. */
+  reasoningDropped: boolean;
   /** Older-history allowance this call used; the agent reuses it for the rest of the turn. */
   historyAllowance: number;
   overBudget: boolean;
@@ -170,15 +174,27 @@ export function context(
   // replace long result bodies with exact excerpts and their observation/source read references.
   // Call/result groups stay complete; authoritative journal messages are never modified.
   const workingGroups = completeMessageGroups(olderTail);
+  // Earlier steps of this turn normally lose their reasoning. Anthropic models keep it
+  // (journal 108): each call then extends the previous one exactly, so the cache entry the
+  // last call wrote stays readable. Compaction still rewrites groups when it must.
   let working = compactForWire
     ? workingGroups.flatMap((group) => compactToolGroup(group))
-    : workingGroups.flat().map(withoutReasoning);
+    : workingGroups
+        .flat()
+        .map(request.keepTurnReasoning ? (m: Message) => m : withoutReasoning);
   const available = contextHardLimit - fixedSize - reservedSize - exchangeSize;
   let workingSize = working.length ? JSON.stringify(working).length : 0;
   if (
     fixedSize + reservedSize + exchangeSize + workingSize >=
     contextCompactionThreshold
   ) {
+    // Kept reasoning must never be what pushes real results into excerpts: drop it first
+    // (one cache shift), and compact only if the turn is still over (journal 108).
+    if (request.keepTurnReasoning && !compactForWire)
+      return context(
+        { ...request, keepTurnReasoning: false, reasoningDropped: true },
+        messages,
+      );
     working = workingGroups.flatMap((group) => compactToolGroup(group));
     workingSize = working.length ? JSON.stringify(working).length : 0;
   }
@@ -240,13 +256,25 @@ export function context(
   const overBudget = fixedSize + protectedSize >= contextBudget;
   // The floor never pushes a request into wire compaction, which would shrink this
   // turn's own results to make room for lower-priority older history.
+  // Kept reasoning never counts against older history: it is dropped before it could
+  // force compaction anyway (journal 108).
+  const keptReasoning = request.keepTurnReasoning
+    ? working.reduce(
+        (sum, m) =>
+          sum +
+          (m.reasoning_details
+            ? JSON.stringify(m.reasoning_details).length
+            : 0),
+        0,
+      )
+    : 0;
   const headroom = Math.max(
     0,
     contextCompactionThreshold -
       turnDigestChars -
       trimMargin -
       fixedSize -
-      protectedSize,
+      (protectedSize - keptReasoning),
   );
   // The turn's first call sets the allowance and later calls reuse it (journal 104), so
   // older history, which precedes the cached owner message, does not shift as runtime
@@ -315,6 +343,11 @@ export function context(
     ).length +
     2000;
   if (!compactForWire && serializedSize >= contextCompactionThreshold) {
+    if (request.keepTurnReasoning)
+      return context(
+        { ...request, keepTurnReasoning: false, reasoningDropped: true },
+        messages,
+      );
     return context(request, messages, true);
   }
   if (serializedSize >= contextHardLimit) {
@@ -350,6 +383,8 @@ export function context(
   }
   return {
     omitted,
+    reasoningSize: keptReasoning,
+    reasoningDropped: !!request.reasoningDropped,
     historyAllowance,
     overBudget,
     fixedSize,

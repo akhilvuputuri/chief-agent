@@ -1,3 +1,7 @@
+# Keep in-turn reasoning for Opus caching — in review, 20 October 2026
+
+For Anthropic models, earlier steps of a turn now keep their reasoning, so each call extends the previous one exactly. In a synthetic Opus loop, cached reads grew with the turn (12.8k → 13.2k) instead of stopping at the owner's message. Writes per call stayed small instead of growing. See [journal 108](journey/108-keep-in-turn-reasoning.md).
+
 # Merlion rain radar and pictures — live (radar in `adbba7b`, pictures in `8673bd5`), 20 October 2026
 
 `sg_rain` reads NEA rain radar over up to 6 hours for a shared Telegram pin, a typed place or a region. It reports rain now, history at the location, movement and a rough outlook, and can send a radar map or a looping animation after the reply. Chief accepts Telegram location messages. Released without a migration. Next: owner acceptance in Telegram, checked against myENV. [Journal 105](journey/105-rain-radar.md), [journal 106](journey/106-radar-pictures.md), [design](singapore-open-data.md#rain-radar).

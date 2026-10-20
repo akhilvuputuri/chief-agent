@@ -1130,3 +1130,134 @@ test("with a full fixed envelope, older history leaves at most once per turn and
   assert.ok(latched.slice(0, drop).every((n) => n === 12));
   assert.ok(latched.slice(drop).every((n) => n === 0));
 });
+
+test("Anthropic turns keep reasoning on earlier steps so each call extends the last", () => {
+  const history = [user("Earlier"), answer("Earlier answer")];
+  const turn = [
+    user("Find it"),
+    ...toolGroup("step_one", { result: "one" }, "a"),
+    ...toolGroup("step_two", { result: "two" }, "b"),
+  ];
+  const reasoned = (keepTurnReasoning: boolean) =>
+    context({ ...request("Find it", history), keepTurnReasoning }, [
+      ...history,
+      ...turn,
+    ]).messages.filter((m) => m.role === "assistant" && m.reasoning_details)
+      .length;
+  // Default: only the latest step keeps its reasoning.
+  assert.equal(reasoned(false), 1);
+  // Anthropic: both steps keep it, so the earlier prefix is byte-identical across calls.
+  assert.equal(reasoned(true), 2);
+  // The previous exchange (compacted) never carries reasoning either way.
+  const earlier = context(
+    {
+      ...request("Next", [...history, ...turn.slice(0, 3)]),
+      keepTurnReasoning: true,
+    },
+    [...history, ...turn.slice(0, 3), answer("Done"), user("Next")],
+  ).messages.filter((m) => m.role === "assistant" && m.reasoning_details);
+  assert.equal(earlier.length, 0);
+});
+
+test("kept reasoning is dropped before it can push real results into excerpts", () => {
+  const history = [user("Earlier"), answer("Earlier answer")];
+  // Each step carries about 19k characters of reasoning but a small result.
+  const turn = [user("Work through it")];
+  for (let i = 0; i < 5; i++)
+    turn.push(
+      ...toolGroup(
+        `step_${i}`,
+        { result: `value ${i} ` + "v".repeat(3000), sourceId: `s${i}` },
+        `id${i}`,
+      ),
+    );
+  const input = context(
+    { ...request("Work through it", history), keepTurnReasoning: true },
+    [...history, ...turn],
+  );
+  const earlierSteps = input.messages.filter(
+    (m) =>
+      m.role === "assistant" &&
+      m.tool_calls?.length &&
+      m.tool_calls[0]!.id !== "id4",
+  );
+  // Precondition: with reasoning these steps cross the 120k threshold; without it they fit.
+  assert.ok(input.fixedSize + JSON.stringify(turn).length > 120000);
+  assert.ok(
+    input.fixedSize +
+      JSON.stringify(turn.map((m) => ({ ...m, reasoning_details: undefined })))
+        .length <
+      100000,
+  );
+  // Reasoning alone would cross the compaction threshold; it is dropped instead...
+  assert.ok(earlierSteps.every((m) => !m.reasoning_details));
+  assert.equal(input.reasoningSize, 0);
+  assert.equal(input.reasoningDropped, true);
+  // ...and the results themselves stay whole, not excerpts.
+  assert.ok(
+    input.messages
+      .filter((m) => m.role === "tool")
+      .every((m) => !String(m.content).includes("contextProjection")),
+  );
+  assert.equal(input.wireCompacted, false);
+  // With room to spare, the same steps keep their reasoning and report its size.
+  const small = context(
+    { ...request("Work through it", history), keepTurnReasoning: true },
+    [...history, ...turn.slice(0, 5)],
+  );
+  assert.ok(small.reasoningSize > 0);
+});
+
+test("kept reasoning does not push older history out", () => {
+  const older: Message[] = [];
+  for (let i = 0; i < 6; i++)
+    older.push(
+      user(`Earlier question ${i} ` + "q".repeat(400)),
+      answer(`Earlier answer ${i} ` + "a".repeat(400)),
+    );
+  older.push(user("Thanks"), answer("You are welcome."));
+  const runtime = runtimeContext({ web: true }, null);
+  runtime.context += " ".repeat(25000);
+  const turn: Message[] = [user("Do it")];
+  for (let i = 0; i < 6; i++)
+    turn.push(
+      {
+        role: "assistant",
+        content: null,
+        reasoning_details: [{ type: "reasoning.text", text: "t".repeat(6000) }],
+        tool_calls: [
+          {
+            id: `s${i}`,
+            type: "function",
+            function: { name: "x", arguments: "{}" },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        tool_call_id: `s${i}`,
+        content: JSON.stringify({ r: "r".repeat(1500) }),
+      },
+    );
+  const at = (keepTurnReasoning: boolean) =>
+    context(
+      {
+        runId: "fixture",
+        capability: "fixture",
+        message: "Do it",
+        history: older,
+        memories: [],
+        runtime,
+        historyAllowance: 6000,
+        keepTurnReasoning,
+      },
+      [...older, ...turn],
+    );
+  const stripped = at(false);
+  const kept = at(true);
+  assert.ok(kept.reasoningSize > 25000);
+  assert.equal(kept.reasoningDropped, false);
+  assert.equal(stripped.historyAllowance, 6000);
+  assert.equal(kept.historyAllowance, stripped.historyAllowance);
+  assert.equal(kept.omitted, stripped.omitted);
+});
