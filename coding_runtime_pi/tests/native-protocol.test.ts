@@ -15,6 +15,12 @@ for (const choice of [
     model: "deepseek/deepseek-v4.1-flash",
     deepseek: true,
   },
+  // A dated snapshot newer than Pi's bundled list keeps its base model's protocol rules.
+  {
+    provider: "openrouter",
+    model: "deepseek/deepseek-v4.1-flash-1017",
+    deepseek: true,
+  },
   ...[
     "openai/gpt-6.1-sol",
     "anthropic/claude-sonnet-5.5",
