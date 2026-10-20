@@ -99,8 +99,8 @@
     },
     {
       "path": "singapore",
-      "sha256": "78517ce23b65f363e6966936727f2205d440d58438a99715a2b308ce91b4f1e7",
-      "agents": ["local", "transport"],
+      "sha256": "33f6093bc111bca92e7967d9258483041062af09e0247fb106f2a3aba0b687fa",
+      "agents": ["merlion"],
       "allowTools": [
         "lta_bus_arrival",
         "lta_bus_stops",
@@ -132,8 +132,7 @@
     "portfolio": "core/portfolio",
     "gathering": "core/gathering",
     "bills": "core/bills",
-    "singapore": "singapore/local",
-    "transport": "singapore/transport"
+    "merlion": "singapore/merlion"
   },
   "delegated": [
     "calendar_draft",

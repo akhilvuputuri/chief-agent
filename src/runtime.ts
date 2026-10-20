@@ -127,7 +127,9 @@ export function runtimeContext(
     (op.startsWith("portfolio_") && !availability.portfolio) ||
     (op.startsWith("news_") && !availability.news) ||
     (op.startsWith("sg_") && !availability.singapore) ||
-    (op.startsWith("lta_") && !availability.ltaDataMall) ||
+    // Offered with the plugin so the one Merlion agent stays listed; without the
+    // DataMall key these tools answer "not configured".
+    (op.startsWith("lta_") && !availability.singapore) ||
     (op.startsWith("web_") && !availability.web);
   const enabled = action.options.filter(
     (o) =>

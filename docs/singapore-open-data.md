@@ -1,6 +1,6 @@
 # Singapore open data
 
-Status: researched 19 October 2026. Phase 1 released 20 October 2026 as `becf234` (#277, [journal 103](journey/103-singapore-plugin.md)); the key rollout below is pending. Tracking: [issue 271](https://github.com/akhilvuputuri/chief-agent/issues/271) (data.gov.sg) and [issue 270](https://github.com/akhilvuputuri/chief-agent/issues/270) (LTA DataMall). Research record: [journal 99](journey/99-singapore-open-data.md). Full dataset reference: [catalogue](singapore-open-data-catalogue.md).
+Status: researched 19 October 2026. Phase 1 released 20 October 2026 as `becf234` (#277, [journal 103](journey/103-singapore-plugin.md)), and both keys went live through the rollout of `7f83158` (#282, v0.3.92). Tracking: [issue 271](https://github.com/akhilvuputuri/chief-agent/issues/271) (data.gov.sg) and [issue 270](https://github.com/akhilvuputuri/chief-agent/issues/270) (LTA DataMall). Research record: [journal 99](journey/99-singapore-open-data.md). Full dataset reference: [catalogue](singapore-open-data-catalogue.md).
 
 Chief gets Singapore government data through a `singapore` plugin: weather and air quality now, alerts, parking, public holidays and hawker centre closures. The plugin holds the agent and skills. A small read-only host client does the fetching, because plugins cannot make HTTP calls.
 
@@ -123,17 +123,21 @@ Plugins are text and configuration only. They "cannot execute scripts … add HT
   | `lta_train_alerts()`                                                 | MRT/LRT status, affected segments, free bus and shuttle arrangements, LTA messages                                   |
   | `lta_traffic(query?)`                                                | Current traffic incidents, optionally by road or expressway                                                          |
 
-- **Availability:** `sg_` tools are always offered, because data.gov.sg works without a key. `lta_` tools are offered only when `LTA_DATAMALL_ACCOUNT_KEY` is set. A throttled provider returns `{status: "busy", retryAfterSeconds}` instead of failing the turn.
+- **Availability:**
+  - All twelve tools are offered with the plugin.
+  - data.gov.sg works without a key.
+  - Without `LTA_DATAMALL_ACCOUNT_KEY`, the `lta_` tools return "LTA DataMall is not configured"; the availability context reports `ltaDataMall`.
+  - A throttled provider returns `{status: "busy", retryAfterSeconds}` instead of failing the turn.
 - **Dataset access:** `sg_dataset` accepts any `d_` dataset ID on the fixed host. Which datasets Chief uses is decided by the plugin's catalogue skill, so enabling a CSV dataset later is a plugin change, not host code.
 
 ### Plugin (`plugins/singapore`)
 
-There are two agents, because an agent appears in Chief's catalogue only when all of its tools are available. The DataMall agent therefore stays hidden until its key exists.
+One agent, **Merlion** (`singapore/merlion`, alias `merlion`), holds all twelve tools and the four skills `sg-weather`, `sg-places`, `sg-transport` and `sg-catalogue`. It uses `findings/v1`, the fast tier and low effort. Its description tells Chief what it covers; the name is branding.
 
-- **`singapore/local` (alias `singapore`):** the eight `sg_` tools, with the skills `sg-weather`, `sg-places` and `sg-catalogue`.
-- **`singapore/transport` (alias `transport`):** the four `lta_` tools, with the skill `sg-transport`.
-- Both use `findings/v1`, the fast tier and low effort.
-- **Delegation:** the registry lists every `sg_` and `lta_` tool as `delegated`, so Chief does not see them. Chief briefs an agent with `agent_run`, including the owner's region and saved stop or carpark codes from its explicit memories. This matches every other Chief domain. Each question costs one extra cheap model call.
+- **Phase 1 had two agents:** `singapore` and `transport`. An agent appears in Chief's catalogue only when all of its tools are available, so splitting kept DataMall's tools hidden until the key existed. Once both keys were live, the owner chose a single agent.
+  - The `lta_` tools are now offered with the plugin.
+  - Without the DataMall key they return "not configured", so Merlion stays listed and weather keeps working.
+- **Delegation:** the registry lists every `sg_` and `lta_` tool as `delegated`, so Chief does not see them. Chief briefs Merlion with `agent_run`, including the owner's region and saved stop or carpark codes from its explicit memories. This matches every other Chief domain. Each question costs one extra cheap model call.
 
 ### Proactive use
 

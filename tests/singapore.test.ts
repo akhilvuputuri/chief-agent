@@ -858,10 +858,10 @@ test("Singapore tools are read-only, in their own domain and offered only when c
   assert.ok(
     !names({}).some((n) => n.startsWith("sg_") || n.startsWith("lta_")),
   );
+  // Without the DataMall key the bus tools are still offered (they answer "not configured").
   const keyless = names({ singapore: true });
   assert.ok(
-    keyless.includes("sg_weather") &&
-      !keyless.some((n) => n.startsWith("lta_")),
+    keyless.includes("sg_weather") && keyless.includes("lta_bus_arrival"),
   );
   assert.ok(
     names({ singapore: true, ltaDataMall: true }).includes("lta_bus_arrival"),
@@ -881,8 +881,11 @@ test("Singapore tools are read-only, in their own domain and offered only when c
   );
   const types = (ctx: { context: string }) =>
     JSON.parse(ctx.context).agentCatalogue.map((a: { type: string }) => a.type);
-  assert.ok(
-    types(chief).includes("singapore") && types(chief).includes("transport"),
+  assert.deepEqual(
+    types(chief).filter((t: string) =>
+      ["merlion", "singapore", "transport"].includes(t),
+    ),
+    ["merlion"],
   );
   const noKey = runtimeContext(
     { singapore: true },
@@ -891,9 +894,7 @@ test("Singapore tools are read-only, in their own domain and offered only when c
     undefined,
     true,
   );
-  assert.ok(
-    types(noKey).includes("singapore") && !types(noKey).includes("transport"),
-  );
+  assert.ok(types(noKey).includes("merlion"));
   assert.ok(
     selectDomains({ message: "will it rain in the east later?" }).has(
       "singapore",

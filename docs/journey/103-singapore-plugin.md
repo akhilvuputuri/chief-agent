@@ -1,7 +1,7 @@
 # 103 — Singapore plugin: can Chief answer weather, haze, carpark and bus questions from government data?
 
 Work date: 2026-10-20. Written: 2026-10-20.
-Status: released 20 October 2026 (#277, `becf234`) without keys; the key rollout is in review. Phase 1 of [issue 271](https://github.com/akhilvuputuri/chief-agent/issues/271) (data.gov.sg) and [issue 270](https://github.com/akhilvuputuri/chief-agent/issues/270) (LTA DataMall). Design: [Singapore open data](../singapore-open-data.md).
+Status: released 20 October 2026. The code shipped as `becf234` (#277); both keys went live through the operator rollout of `7f83158` (#282, v0.3.92). Owner Telegram acceptance is pending. Phase 1 of [issue 271](https://github.com/akhilvuputuri/chief-agent/issues/271) (data.gov.sg) and [issue 270](https://github.com/akhilvuputuri/chief-agent/issues/270) (LTA DataMall). Design: [Singapore open data](../singapore-open-data.md).
 
 ## User-visible problem and preceding iteration
 
@@ -56,7 +56,7 @@ The owner then asked for LTA DataMall as well, mainly for bus arrivals, and supp
 
 - **Separate breakers per rate-limit group.** The smoke-run 429 showed that one shared data.gov.sg breaker turns a datastore throttle into a weather outage. data.gov.sg documents separate limits for real-time APIs, datastore search and downloads, so each now has its own queue and breaker.
 - **Patient downloads.** Downloads are spaced 12 seconds apart and retried once after a 429, timeout or server error. They are rare, because results are cached for a day.
-- **Two agents instead of one.** An agent appears in Chief's catalogue only when all of its tools are available ([plugins](../plugins.md)). DataMall tools must stay hidden without the key, so they form a separate `transport` agent. A single agent would either vanish without the key or carry tools that always fail.
+- **Two agents at first, one now.** An agent appears in Chief's catalogue only when all of its tools are available ([plugins](../plugins.md)). DataMall tools had to stay hidden before the key existed, so phase 1 shipped a separate `transport` agent. After the keys went live, the owner chose a single agent, branded **Merlion**. The `lta_` tools are now offered with the plugin and return "not configured" without the key, so a missing key no longer hides weather.
 - **Delegated tools.** Chief does not hold the `sg_`/`lta_` tools; it delegates with `agent_run`, as for every other domain. Each question costs one extra fast-model call.
   - Rejected: keeping quick weather tools on the coordinator. That would break the pattern and lengthen Chief's tool list.
 - **Whole-word matching.** The first carpark search for "Bishan Street 22" also matched carpark code BE22 and a block range containing "227", because words were matched as substrings. Numbers now match whole words, and other words match as a prefix.
@@ -122,6 +122,34 @@ Tested, not deployed. Remaining after the code release:
 - **Pending:**
   - the key rollout (`scripts/deploy-singapore-keys.py`), which adds both keys;
   - live Telegram acceptance.
+
+### Key rollout closure — 20 October 2026
+
+- **PR:** [#282](https://github.com/akhilvuputuri/chief-agent/pull/282) added the Compose names and `scripts/deploy-singapore-keys.py`.
+- **Review:**
+  - Exact-head independent review (Claude Opus 5.5) approved `8b90adb` after two rounds of changes: quoted-empty keys and refusal wording, then Devin's coding-job idle check and last-assignment key parsing.
+  - Devin's third finding, partial publication, did not apply: `source_changed` is set before publication, and a test covers the restore.
+  - Hosted CI passed.
+- **Merge timing:** merged as `7f831582efa4930b6756ad1f7e4c20fe2f1d4676` while #281 (`c71df79`, docs) was still in CI. The live release was then still `e681b49`, the script's baseline.
+- **Operator steps (measured, 20 October, about 11:50 SGT):**
+  1. Both keys were appended to the server's private `.env` (root, mode 600) over the pinned operator connection. Values were piped from local private files and never printed.
+  2. The uploaded script's SHA-256 matched the merged file, and the archive's pax comment matched the merge commit.
+  3. The rollout printed `{"deployed": "7f83158…", "healthy": true, "singaporeKeys": "configured"}`. That release includes #281.
+  4. `RELEASE` read `7f83158`, `/healthz` passed, and the gateway was healthy. The in-container `test -n` check printed `present`.
+- **Measured live check from inside the production gateway (about 11:54 SGT), with read-only calls to the built tools:**
+  - `lta_bus_arrival` at stop 83139 returned live arrivals with load and wheelchair access, for example service 150 in 3 minutes. It took 2.2 s on the first call.
+  - `lta_train_alerts` returned normal, with one LTA advisory about a bus diversion.
+  - `sg_weather` east and `sg_air` west returned fresh readings. West PSI was 128 (unhealthy).
+- **Automatic releases afterwards:**
+  - #281's own release attempt (`c71df79`) was refused by the current-main guard, because main had moved. Its docs went live inside this rollout.
+  - The automatic [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39368300270) of `7f83158` then succeeded at 04:12 UTC as a no-op redeploy. This confirms later automatic releases accept the installed Compose file.
+
+### Merlion merge — 20 October 2026
+
+- **Agents:** `singapore` and `transport` became one agent, `singapore/merlion` (alias `merlion`). It has all twelve tools and four skills, with limits of 90 s, 8 model calls and 16 tool calls. The plugin is version 1.1.0, and its hash is re-pinned.
+- **Availability:** `lta_` tools are offered with `availability.singapore`. The dispatcher already refuses them without the key.
+- **Evals:** routing fixtures map Singapore questions to `merlion`. The picker domain is unchanged, so no picker eval rerun is needed.
+- **Release:** shipped in the same PR as the v0.3.92 release records.
 
 ## Follow-up and next iteration
 

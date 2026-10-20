@@ -1,3 +1,23 @@
+## Released v0.3.92 (untagged) — Singapore open data: Merlion, data.gov.sg and LTA DataMall
+
+- **Code.** [PR 277](https://github.com/akhilvuputuri/chief-agent/pull/277) merged as `becf234038e128a34fe54974ffdd2d475c84239a`.
+  - It adds read-only `sg_` (data.gov.sg) and `lta_` (LTA DataMall) tools and the `singapore` plugin.
+  - Exact-head independent review (Claude Opus 5.5) approved `101b283` after five rounds of changes. The blocking finding was open-ended hawker closures reported as open. Devin found five issues, which were fixed.
+  - Hosted CI passed. The picker eval passed (98.2% recall, 15 of 15 Singapore picks).
+  - The [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39317112618) succeeded with startup health at 20:14 UTC on 19 October, without keys.
+- **Keys.** [PR 282](https://github.com/akhilvuputuri/chief-agent/pull/282) merged as `7f831582efa4930b6756ad1f7e4c20fe2f1d4676`.
+  - It adds the two Compose names and `scripts/deploy-singapore-keys.py`. Review approved `8b90adb`.
+  - The keys were added to the private `.env`, and the operator rollout installed the commit (it includes #281). RELEASE, health and the in-container key presence check were verified.
+  - The automatic [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39368300270) then succeeded as a no-op.
+- **Measured live inside production.**
+  - A bus arrival returned live minutes, load and wheelchair access.
+  - MRT status was normal.
+  - Weather and PSI readings were fresh; West PSI was 128.
+- **Merlion.** This records PR merges the two agents into one, `singapore/merlion`, and bumps the version to 0.3.92.
+- **Pending.** Owner Telegram acceptance.
+
+[Journal 103](journey/103-singapore-plugin.md), [design](singapore-open-data.md), [catalogue](singapore-open-data-catalogue.md), [DataMall catalogue](lta-datamall-catalogue.md).
+
 ## Deployed `7e648f9` and `d6549b9` (untagged) — coding attempts run in EC2 boxes
 
 - **Phase 4a code.** [PR 276](https://github.com/akhilvuputuri/chief-agent/pull/276) merged as `7e648f99d6fa0c6eb2107bb4e98f0678d4f82891`.
