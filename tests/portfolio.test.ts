@@ -1087,6 +1087,7 @@ function broker(f: Awaited<ReturnType<typeof fixture>>) {
       s.instructions.push({
         id,
         symbol: "F",
+        contract_id_ex: a.contract_id_ex,
         side: a.side,
         quantity: a.quantity,
         order_type: a.order_type,
@@ -1306,6 +1307,22 @@ test("a draft is US shares only, within the cap, and only in review-and-approve 
     ).status,
     "drafted",
   );
+  // Review (Devin): another listing or time in force is a different draft, not a repeat.
+  for (const extra of [
+    { symbol: "DUAL", exchange: "NYSE", limitPrice: 1 },
+    { symbol: "F", limitPrice: 6, timeInForce: "GTC" },
+  ])
+    assert.equal(
+      (
+        await draft({
+          side: "BUY",
+          quantity: 1,
+          orderType: "LIMIT",
+          ...extra,
+        })
+      ).status,
+      "drafted",
+    );
   // A session IBKR reports as autonomous is never used.
   b.flow = "AUTONOMOUS";
   const autonomous = await draft({
@@ -1316,7 +1333,7 @@ test("a draft is US shares only, within the cap, and only in review-and-approve 
     limitPrice: 6,
   });
   assert.equal(autonomous.reason, "flow_not_review");
-  assert.equal(creates(), 4);
+  assert.equal(creates(), 6);
   // Limit price and order type must agree.
   await assert.rejects(
     draft({ symbol: "F", side: "BUY", quantity: 1, orderType: "LIMIT" }),
@@ -1376,6 +1393,21 @@ test("a lost create is never sent again; it is found or reported unknown", async
   });
   assert.equal(again.status, "already_drafted");
   assert.equal(creates(), 2);
+  // Review (Devin): an unreadable draft list cannot rule out a duplicate, so nothing is sent.
+  const list = f.ibkr.state.tools.get_order_instructions!;
+  f.ibkr.state.tools.get_order_instructions = () => {
+    throw new TypeError("timeout");
+  };
+  const blind = await draft({
+    symbol: "F",
+    side: "BUY",
+    quantity: 7,
+    orderType: "LIMIT",
+    limitPrice: 5,
+  });
+  assert.equal(blind.reason, "duplicate_check_unavailable");
+  assert.equal(creates(), 2);
+  f.ibkr.state.tools.get_order_instructions = list;
   // Two identical requests at once: only one reaches IBKR.
   const twice = await Promise.all(
     [0, 1].map(() =>
@@ -1488,6 +1520,44 @@ test("drafts need a foreground owner request and a write grant; listing and dele
   );
   assert.equal(removed.status, "deleted");
   assert.equal(b.instructions.length, 0);
+  // Review (Devin): a confirmed delete clears only that draft's record. Draft A stays
+  // protected while IBKR's list omits it, although another draft was deleted.
+  await draft({
+    symbol: "F",
+    side: "BUY",
+    quantity: 3,
+    orderType: "LIMIT",
+    limitPrice: 6,
+  });
+  const a = await draft({
+    symbol: "F",
+    side: "BUY",
+    quantity: 4,
+    orderType: "LIMIT",
+    limitPrice: 6,
+  });
+  const list = f.ibkr.state.tools.get_order_instructions!;
+  f.ibkr.state.tools.get_order_instructions = () => ({
+    instructions: b.instructions.filter((i) => i.id !== a.id),
+  });
+  await f.portfolio.call(
+    "owner",
+    { operation: "portfolio_order_draft_delete", id: "101" },
+    await turn(f),
+  );
+  assert.equal(
+    (
+      await draft({
+        symbol: "F",
+        side: "BUY",
+        quantity: 4,
+        orderType: "LIMIT",
+        limitPrice: 6,
+      })
+    ).status,
+    "already_drafted",
+  );
+  f.ibkr.state.tools.get_order_instructions = list;
   // After a confirmed delete, the same terms can be drafted again.
   const redrafted = await draft({
     symbol: "F",
@@ -1497,7 +1567,7 @@ test("drafts need a foreground owner request and a write grant; listing and dele
     limitPrice: 6,
   });
   assert.equal(redrafted.status, "drafted");
-  assert.equal(redrafted.id, "101");
+  assert.equal(redrafted.id, "103");
   // A delete the list does not confirm is reported as unconfirmed.
   await draft({
     symbol: "F",
@@ -1509,7 +1579,7 @@ test("drafts need a foreground owner request and a write grant; listing and dele
   f.ibkr.state.tools.delete_order_instruction = () => ({});
   const kept: any = await f.portfolio.call(
     "owner",
-    { operation: "portfolio_order_draft_delete", id: "102" },
+    { operation: "portfolio_order_draft_delete", id: "104" },
     await turn(f),
   );
   assert.equal(kept.status, "delete_unconfirmed");

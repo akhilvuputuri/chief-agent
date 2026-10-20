@@ -57,7 +57,15 @@ Design and rules: [Order drafts](../ibkr-portfolio.md#order-drafts).
 - **Statuses.** `already_drafted` and `delete_unconfirmed` are now named in the brokerage agent's prompt.
 - **Owner decision.** The 10-minute block also stops a deliberate second identical draft; it is left for the owner to accept.
 
-Tests were added for the first two. Review of the final head: pending.
+Tests were added for the first two. Opus 5.5 approved `aa6c51c` and, after a docs-only rebase, `d6738d1`. Its remaining note was that a delete cleared all of the owner's repeat records; Devin found the same issue below.
+
+**Devin Review of `d6738d1`:**
+
+- **Red: the repeat check failed open.** An unreadable draft list counted as no duplicate, so a create after a restart could resend. The list check now fails closed: nothing is sent.
+- **A delete cleared every record.** Deleting one draft cleared repeat protection for all the owner's drafts. Only the deleted draft's record is cleared now.
+- **Different terms matched as repeats.** A different exchange or time in force counted as identical. The match now compares the listing's contract id and the time in force.
+
+Tests were added for each. Review of the fixed head: pending.
 
 ## Verification and outcome
 

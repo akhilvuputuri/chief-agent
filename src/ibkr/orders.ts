@@ -72,6 +72,12 @@ function instructions(raw: unknown) {
   return rows.map((i: any) => ({
     id: String(i?.id ?? ""),
     symbol: typeof i?.symbol === "string" ? i.symbol : null,
+    contractId:
+      typeof i?.contract_id_ex === "string"
+        ? i.contract_id_ex
+        : Number.isSafeInteger(i?.contract_id)
+          ? String(i.contract_id)
+          : null,
     side: typeof i?.side === "string" ? i.side : null,
     quantity: Number.isFinite(i?.quantity) ? i.quantity : null,
     orderType: typeof i?.order_type === "string" ? i.order_type : null,
@@ -99,11 +105,11 @@ function ibkrLink(value: unknown) {
 
 export class OrderDrafts {
   /**
-   * Identical drafts sent recently, by owner and terms. IBKR's list can lag a create
-   * (measured once), so this in-process record covers the gap; the list check covers
-   * a restart.
+   * Identical drafts sent recently, by owner and terms, with IBKR's id once known. IBKR's
+   * list can lag a create (measured once), so this in-process record covers the gap; the
+   * list check covers a restart.
    */
-  private sent = new Map<string, number>();
+  private sent = new Map<string, { at: number; id?: string }>();
   constructor(
     private auth: IbkrAuth,
     private mcp: IbkrMcp,
@@ -186,10 +192,11 @@ export class OrderDrafts {
         }
       });
       const confirmed = remaining?.every((i) => i.id !== id) ?? false;
-      // A deleted draft may be requested again; IBKR's list still guards the rest.
+      // The deleted draft's terms may be requested again; every other record stays.
       if (confirmed)
-        for (const key of this.sent.keys())
-          if (key.startsWith(`${user}|`)) this.sent.delete(key);
+        for (const [key, entry] of this.sent)
+          if (key.startsWith(`${user}|`) && entry.id === id)
+            this.sent.delete(key);
       opsLog("portfolio.draft_deleted", confirmed ? "info" : "warn", {
         state: confirmed ? "deleted" : "unconfirmed",
       });
@@ -332,16 +339,22 @@ export class OrderDrafts {
       limitPrice: r.orderType === "LIMIT" ? r.limitPrice : null,
       timeInForce: r.timeInForce ?? "IBKR default",
     };
+    const match = {
+      ...draft,
+      contractId: String(listing.contractId),
+      timeInForce: r.timeInForce ?? null,
+    };
     const terms = [
       user,
-      symbol,
+      listing.contractId,
       r.side,
       r.quantity,
       r.orderType,
       r.limitPrice ?? "",
+      r.timeInForce ?? "",
     ].join("|");
-    for (const [key, at] of this.sent)
-      if (this.now() - at > REPEAT_MS) this.sent.delete(key);
+    for (const [key, entry] of this.sent)
+      if (this.now() - entry.at > REPEAT_MS) this.sent.delete(key);
     const already = (id?: string) => ({
       status: "already_drafted",
       reason: "recent_duplicate",
@@ -352,8 +365,18 @@ export class OrderDrafts {
     if (this.sent.has(terms)) return already();
     // Recorded before anything is awaited, so a concurrent identical request stops above,
     // and kept whatever the outcome: the same terms are never sent twice.
-    this.sent.set(terms, this.now());
-    const listed = await this.find(call, draft, started - REPEAT_MS);
+    this.sent.set(terms, { at: this.now() });
+    // Without a readable list a duplicate cannot be ruled out (for example after a
+    // restart), so nothing is sent: the check fails closed.
+    const rows = await this.lookup(call);
+    if (!rows) {
+      this.sent.delete(terms);
+      return refused(
+        "duplicate_check_unavailable",
+        "IBKR's draft list could not be read to rule out a duplicate; try again shortly.",
+      );
+    }
+    const listed = matching(rows, match, started - REPEAT_MS);
     if (listed) return already(listed.id);
     let created: any;
     try {
@@ -379,7 +402,7 @@ export class OrderDrafts {
         throw error;
       }
       // An error result or a lost reply: IBKR may still have saved it. Look, never resend.
-      const found = await this.find(call, draft, started);
+      const found = matching((await this.lookup(call)) ?? [], match, started);
       if (
         !found &&
         error instanceof IbkrMcpError &&
@@ -412,9 +435,10 @@ export class OrderDrafts {
       typeof created?.id === "string" || typeof created?.id === "number"
         ? String(created.id)
         : null;
+    if (id) this.sent.set(terms, { at: this.now(), id });
     // Expiry comes from the list; failing to read it never repeats the create.
     const saved = id
-      ? ((await this.find(call, draft, started, id))?.expiresAt ?? null)
+      ? ((await this.lookup(call))?.find((i) => i.id === id)?.expiresAt ?? null)
       : null;
     return {
       status: "drafted",
@@ -428,39 +452,49 @@ export class OrderDrafts {
     };
   }
 
-  /**
-   * The saved instruction with this id, or else the newest one matching the draft that was
-   * created since `started`. Never throws.
-   */
-  private async find(
-    call: IbkrCall,
-    d: {
-      symbol: string;
-      side: string;
-      quantity: number;
-      orderType: string;
-      limitPrice: number | null | undefined;
-    },
-    started: number,
-    id?: string,
-  ) {
+  /** The account's saved instructions, or null when they cannot be read. Never throws. */
+  private async lookup(call: IbkrCall) {
     try {
-      const rows = instructions(await call("get_order_instructions")) ?? [];
-      if (id) return rows.find((i) => i.id === id) ?? null;
-      return (
-        rows.find(
-          (i) =>
-            i.symbol === d.symbol &&
-            i.side === d.side &&
-            i.quantity === d.quantity &&
-            i.orderType === d.orderType &&
-            (d.limitPrice == null || i.limitPrice === d.limitPrice) &&
-            i.createdAt != null &&
-            Date.parse(i.createdAt) >= started - MATCH_SKEW_MS,
-        ) ?? null
-      );
+      return instructions(await call("get_order_instructions"));
     } catch {
       return null;
     }
   }
+}
+
+/**
+ * The newest saved instruction with these terms created since `since`. The listing is
+ * compared by contract id when IBKR reports one (otherwise by symbol), and the time in
+ * force when both sides state it.
+ */
+function matching(
+  rows: NonNullable<ReturnType<typeof instructions>>,
+  d: {
+    symbol: string;
+    contractId: string;
+    side: string;
+    quantity: number;
+    orderType: string;
+    limitPrice: number | null | undefined;
+    timeInForce: string | null;
+  },
+  since: number,
+) {
+  return (
+    rows.find(
+      (i) =>
+        (i.contractId != null
+          ? i.contractId === d.contractId
+          : i.symbol === d.symbol) &&
+        i.side === d.side &&
+        i.quantity === d.quantity &&
+        i.orderType === d.orderType &&
+        (d.limitPrice == null || i.limitPrice === d.limitPrice) &&
+        (d.timeInForce == null ||
+          i.timeInForce == null ||
+          i.timeInForce === d.timeInForce) &&
+        i.createdAt != null &&
+        Date.parse(i.createdAt) >= since - MATCH_SKEW_MS,
+    ) ?? null
+  );
 }
