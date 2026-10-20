@@ -16,7 +16,7 @@ Jev's tool picks changed the tool list between messages and once mid-turn, and a
 
 # IBKR order drafts — live in `ac94d23`, 21 October 2026
 
-Chief can draft IBKR orders that the owner reviews and submits in an IBKR app; it cannot place, change or cancel an order. Drafts are US shares only, at most USD 100 each, and only in IBKR's review-and-approve mode; Chief refuses IBKR's direct-order scope. A separate brokerage agent also answers read-only IBKR lookups. No migration or Compose change. The probe's second IBKR consent ended Chief's holdings grant (sync failed `not_connected` at 02:27 SGT on 21 October). Next: the owner reconnects with order-draft access, then drafts and removes a test order. [Journal 110](journey/110-ibkr-order-drafts.md#release-closure--2026-10-21), [design](ibkr-portfolio.md#order-drafts).
+Chief can draft IBKR orders that the owner reviews and submits in an IBKR app; it cannot place, change or cancel an order. Drafts are US shares only, at most USD 100 each, and only in IBKR's review-and-approve mode; Chief refuses IBKR's direct-order scope. A separate brokerage agent also answers read-only IBKR lookups. No migration or Compose change. Chief's IBKR grant ended (sync failed `not_connected` at 02:27 SGT on 21 October), likely because of the probe's second consent; an absolute grant lifetime is the alternative. Next: the owner reconnects with order-draft access, then drafts and removes a test order. [Journal 110](journey/110-ibkr-order-drafts.md#release-closure--2026-10-21), [design](ibkr-portfolio.md#order-drafts).
 
 # Opus cache misses in production — in review, 20 October 2026
 

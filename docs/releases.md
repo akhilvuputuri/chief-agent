@@ -7,7 +7,7 @@
   - A separate brokerage agent holds the draft tools and read-only IBKR lookups.
 - **Review.** Exact-head independent review (Claude Opus 5.5) requested changes once: the cap did not bound sell limits, plus six lower findings. After the fixes it approved, and it re-approved each docs-only rebase up to `bf1255a`. Devin's findings were also fixed: a duplicate check that failed open, records cleared too broadly, repeat matching that ignored exchange and time in force, and replies without a draft id. Hosted CI passed.
 - **Release.** Live in `ac94d23` since 18:44 UTC on 20 October (02:44 SGT, 21 October). The [release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39476720645) and `release:status` succeeded, and startup logged no errors. No migration or Compose change.
-- **Owner action.** A second IBKR consent from the probe ended Chief's holdings grant, so the owner must reconnect. That reconnect also grants order drafts.
+- **Owner action.** Chief's IBKR grant ended. The 02:27 SGT sync on 21 October failed with `not_connected`, likely because of the probe's second consent; an absolute grant lifetime is the alternative. The owner must reconnect, which also grants order drafts.
 - **Not yet observed.** A draft created by Chief in production.
 
 [Journal 110](journey/110-ibkr-order-drafts.md#release-closure--2026-10-21), [design](ibkr-portfolio.md#order-drafts).

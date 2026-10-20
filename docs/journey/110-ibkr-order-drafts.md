@@ -86,7 +86,8 @@ Tests were added for both.
   - an IBKR error result that saved a draft, IBKR's error text, and a 401 retried once;
   - foreground-only drafting, list, confirmed and unconfirmed deletes;
   - the blocked live-order tools, bounded query results and agent gating.
-- **Measured: a second consent ended Chief's grant.** Chief's holdings synced at 22:27 SGT on 20 October. The probe's consent for the same account followed at about 23:15. The next scheduled sync, at 02:27 SGT on 21 October, failed with `not_connected`, with no other change in between. Hypothesis: IBKR keeps one AI consent per account, even across clients. The owner reconnects after this release anyway, to grant order drafts.
+- **Measured: Chief's grant ended after the probe's consent.** Chief's holdings synced at 22:27 SGT on 20 October. The probe's consent for the same account followed at about 23:15. The next scheduled sync, at 02:27 SGT on 21 October, failed with `not_connected`. No IBKR code changed in between; unrelated releases restarted Chief, and earlier syncs had survived restarts.
+- **Hypothesis: the second consent replaced the first** (one AI consent per account, even across clients). An alternative fits the same evidence: an absolute grant lifetime of about 6 days, since Chief's grant dated from 15 October and Phase 0 only ruled out a cap within about 57 hours. The owner reconnects after this release anyway, to grant order drafts.
 - **Not yet verified:** a draft from Chief in production; the owner's reconnect with order-draft access; deleting a draft through IBKR.
 
 ### Release closure — 2026-10-21
