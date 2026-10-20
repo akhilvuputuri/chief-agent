@@ -15,6 +15,8 @@ export const INTENSITY = [
   "intense",
 ] as const;
 const MIN = 60_000;
+/** Beyond this frame age an outlook would mostly describe the past. */
+const STALE_MINUTES = 20;
 /** Pixels per analysis cell: 480-pixel frames become a 120 × 120 grid. */
 const CELL = 4;
 
@@ -220,6 +222,19 @@ function bearing(east: number, north: number) {
 function cellKm(f: Frame) {
   return ((f.east - f.west) / f.cols) * kmPerLon((f.north + f.south) / 2);
 }
+/**
+ * Search radius for "rain at this point": wide enough to always include the
+ * cell containing the point (half a cell diagonal), never below 1.5 km.
+ */
+function pointRadius(f: Frame) {
+  const tall = ((f.north - f.south) / f.rows) * KM_PER_LAT;
+  return Math.max(1.5, 0.75 * Math.max(cellKm(f), tall));
+}
+function levelNear(f: Frame, p: Point) {
+  return inFrame(f, p)
+    ? around(f, p, pointRadius(f)).reduce((m, c) => Math.max(m, c.level), 0)
+    : 0;
+}
 export function inFrame(f: Frame, p: Point) {
   return p.lon > f.west && p.lon < f.east && p.lat > f.south && p.lat < f.north;
 }
@@ -268,7 +283,6 @@ function relative(east: number, north: number) {
 function snapshot(f: Frame, p: Point, radiusKm: number) {
   const cells = around(f, p, radiusKm);
   const wet = cells.filter((c) => c.level > 0);
-  const here = cells.filter((c) => c.km <= 1.5);
   const weight = wet.reduce((s, c) => s + c.level, 0);
   const centre = weight
     ? {
@@ -279,7 +293,7 @@ function snapshot(f: Frame, p: Point, radiusKm: number) {
   return {
     cells,
     wet,
-    atPoint: here.reduce((m, c) => Math.max(m, c.level), 0),
+    atPoint: levelNear(f, p),
     peak: wet.reduce((m, c) => Math.max(m, c.level), 0),
     cover: share(cells, 1),
     centre,
@@ -390,19 +404,18 @@ function nowcast(
   f: Frame,
   p: Point,
   motion: NonNullable<ReturnType<typeof averageMotion>>,
+  ageMinutes: number,
 ) {
   const out: { inMinutes: number; level: string }[] = [];
   for (const minutes of [10, 20, 30, 45, 60]) {
-    const h = minutes / 60;
+    // Lead times count from now, and the newest frame is already ageMinutes old.
+    const h = (minutes + ageMinutes) / 60;
     // Rain that will be over the point came from upwind of it.
     const source = {
       lat: p.lat - (motion.north * h) / KM_PER_LAT,
       lon: p.lon - (motion.east * h) / kmPerLon(p.lat),
     };
-    const level = inFrame(f, source)
-      ? around(f, source, 1.5).reduce((m, c) => Math.max(m, c.level), 0)
-      : 0;
-    out.push({ inMinutes: minutes, level: INTENSITY[level]! });
+    out.push({ inMinutes: minutes, level: INTENSITY[levelNear(f, source)]! });
   }
   return out;
 }
@@ -417,9 +430,12 @@ export function analyse(
   p: Point,
   radiusKm = 50,
   nowMs = Date.now(),
+  /** The requested spacing; frames the provider did not return leave gaps. */
+  stepMinutes?: number,
 ) {
   const [latest] = frames;
   if (!latest) return null;
+  const age = Math.max(0, (nowMs - latest.time) / MIN);
   const now = snapshot(latest, p, radiusKm);
   const rings = Object.fromEntries(
     // The wide view's cells are about 4 km across, so its rings are wider too.
@@ -470,12 +486,15 @@ export function analyse(
       peak: INTENSITY[s.peak],
     }));
   const wetFrames = snaps.filter(({ s }) => s.atPoint > 0);
-  const stepMinutes =
-    chronological.length > 1
+  // Each wet sample stands for one requested step; with a single frame the
+  // duration is unknown rather than zero.
+  const step =
+    stepMinutes ??
+    (chronological.length > 1
       ? (latest.time - chronological[0]!.time) /
         MIN /
         (chronological.length - 1)
-      : 0;
+      : 0);
   const peakAt = snaps.reduce(
     (best, x) => (x.s.atPoint > best.s.atPoint ? x : best),
     snaps[0]!,
@@ -483,7 +502,7 @@ export function analyse(
   return {
     radarRange: latest.range,
     latestFrame: latest.at,
-    ageMinutes: Math.max(0, round((nowMs - latest.time) / MIN)),
+    ageMinutes: round(age),
     framesUsed: frames.length,
     windowMinutes: round((latest.time - chronological[0]!.time) / MIN),
     radiusKm,
@@ -497,7 +516,8 @@ export function analyse(
         : "none",
     },
     atLocationHistory: {
-      rainedForAboutMinutes: round(wetFrames.length * stepMinutes),
+      rainedForAboutMinutes:
+        chronological.length > 1 ? round(wetFrames.length * step) : null,
       lastRainAt: wetFrames.length
         ? wetFrames[wetFrames.length - 1]!.f.at
         : null,
@@ -512,15 +532,20 @@ export function analyse(
       overWindow: describeMotion(overall, moves.length),
     },
     outlook:
-      recent && recent.speed >= 4 && recent.agree > 0.6
+      age > STALE_MINUTES
         ? {
-            estimate: nowcast(latest, p, recent),
-            note: "Extrapolated from recent movement; storms grow and decay, so treat as a rough guide.",
-          }
-        : {
             estimate: null,
-            note: "Movement too weak or inconsistent to project.",
-          },
+            note: `The newest radar frame is ${round(age)} minutes old, too old to project.`,
+          }
+        : recent && recent.speed >= 4 && recent.agree > 0.6
+          ? {
+              estimate: nowcast(latest, p, recent, age),
+              note: "Extrapolated from recent movement; storms grow and decay, so treat as a rough guide.",
+            }
+          : {
+              estimate: null,
+              note: "Movement too weak or inconsistent to project.",
+            },
     timeline,
   };
 }

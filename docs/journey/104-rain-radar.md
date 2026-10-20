@@ -26,11 +26,14 @@ Merlion's rain answers came from the 2-hour area forecast and rain gauges. Those
     - overall motion was south-east to north-west at about 16 km/h, labelled steady.
   - **Answer size:** about 3k characters.
 - **Measured: speed estimates on synthetic discs** after sub-cell refinement. True speeds of 0, 8, 17, 27 and 53 km/h were estimated at 0, 9, 16, 27 and 53 km/h, all labelled steady. Before refinement, whole-cell shifts reported 8 km/h rain as 13 km/h.
-- **Tested:** `tests/singapore-radar.test.ts` (12 tests) covers:
+- **Tested:** `tests/singapore-radar.test.ts` (14 tests) covers:
   - PNG decoding with filtered rows;
   - colour levels for all 33 legend colours, which never fall along the legend, and opaque white as no rain;
   - slow rain at about 8 km/h, estimated within 5–11 km/h, not called erratic and given an outlook;
   - zig-zagging rain on the 240 km view, called erratic with no outlook;
+  - a wet 240 km cell counted at a pin near its corner, and an unknown duration from a single frame;
+  - lead times shifted by the newest frame's age, and no outlook from a frame over 20 minutes old;
+  - a forecast-feed outage still resolving a postal code through OneMap;
   - bare timestamps read as Singapore time, and concurrent calls sharing each frame fetch;
   - a synthetic disc moving east at about 27 km/h, giving the right direction, speed and a 20–45 minute arrival;
   - stationary rain, dry frames and frame caching;
@@ -68,6 +71,12 @@ Merlion's rain answers came from the 2-hour area forecast and rain gauges. Those
   - venue text could blend into the location note: it is now labelled as given, without quotes or brackets;
   - a doc comment sat above the wrong function;
   - on the follow-up: the consistency measure was lenient on the 240 km view (now half a cell's worth), and the slow-rain test's outlook check was vacuous.
+- **Devin review** found four defects, now fixed and tested:
+  - on the 240 km view (cells about 3 km across), a pin near a cell corner was more than 1.5 km from every cell centre, so rain over it read as none. The point radius now always covers the cell containing the pin, and the outlook uses the same rule.
+  - Outlook lead times counted from the newest frame, not from now. They now add the frame's age, and a frame over 20 minutes old gets no outlook.
+  - A two-hour forecast outage blocked typed places before OneMap was tried; the forecast-area shortcut is now optional.
+  - With a single frame, rain duration read 0 minutes; it is now unknown (null). Missing frames are reported as `framesMissing`.
+  - Devin also flagged venue text inside the location note; the note's instructions now come first, and the venue follows as labelled untrusted text.
 
 ## Verification and outcome
 

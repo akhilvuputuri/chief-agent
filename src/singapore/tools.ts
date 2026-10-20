@@ -70,7 +70,20 @@ export class SingaporeTools {
     return {
       location: place,
       stepMinutes,
-      ...analyse(frames, place, range === "70km" ? 50 : 150, this.now()),
+      ...analyse(
+        frames,
+        place,
+        range === "70km" ? 50 : 150,
+        this.now(),
+        stepMinutes,
+      ),
+      // Frames the provider did not return; history between samples is unknown.
+      ...(frames.length < Math.floor((hours * 60) / stepMinutes) + 1
+        ? {
+            framesMissing:
+              Math.floor((hours * 60) / stepMinutes) + 1 - frames.length,
+          }
+        : {}),
       intensityScale:
         "NEA radar colours mapped to light, moderate, heavy, very heavy and intense; not exact mm/h",
       source:

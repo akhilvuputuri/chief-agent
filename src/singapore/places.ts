@@ -62,16 +62,15 @@ export class Places {
     };
   }
   private async lookup(query: string): Promise<Place> {
-    const two = (await this.dataGov.cache.get(
-      "feed:twoHour",
-      10 * 60_000,
-      async () => {
+    // Forecast areas are a shortcut; when that feed is down, OneMap still answers.
+    const two = (await this.dataGov.cache
+      .get("feed:twoHour", 10 * 60_000, async () => {
         const body = (await this.http.json("twoHour")) as J;
         if (body?.code !== 0)
           throw new Error("data.gov.sg twoHour returned no data");
         return body.data;
-      },
-    )) as J;
+      })
+      .catch(() => null)) as J;
     const area = (two?.area_metadata ?? []).find(
       (a: J) => String(a.name).toLowerCase() === query.trim().toLowerCase(),
     );
