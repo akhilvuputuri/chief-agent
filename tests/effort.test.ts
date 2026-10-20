@@ -197,7 +197,7 @@ test("periodic escalation asks from the configured step, every few steps, and af
 });
 
 test("the committed policy asks again only after a new failure or an owner follow-up", () => {
-  // A raise changes the thinking setting and invalidates the cached messages (journal 105).
+  // A raise changes the thinking setting and invalidates the cached messages (journal 107).
   assert.equal(config.escalation.periodic, false);
   const ask = (
     over: Partial<EffortProgress>,
@@ -425,10 +425,15 @@ test("a failed tool call raises effort for the very next model call", async () =
 test("a step that only finishes the turn does not ask again", async () => {
   const { pg, db } = await database();
   let questions = 0;
-  const picker = new EffortPicker("key", config, (async () => {
-    questions++;
-    return reply("medium", { medium: 0.9 });
-  }) as typeof fetch);
+  // With the periodic schedule on, so the assertion is not met by the committed policy alone.
+  const picker = new EffortPicker(
+    "key",
+    { ...config, escalation: { ...config.escalation, periodic: true } },
+    (async () => {
+      questions++;
+      return reply("medium", { medium: 0.9 });
+    }) as typeof fetch,
+  );
   const efforts: ReasoningEffort[] = [];
   const { firstStep } = config.escalation;
   // The step that reaches the escalation schedule only calls finish_turn.

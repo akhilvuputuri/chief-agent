@@ -85,7 +85,7 @@ The word cues in stage 2 missed many phrasings (stock tickers, book titles, "has
 - A bound task, pending Calendar or library approvals and tools used in the last hour still load their domains.
 - Domains Jev picked for the owner in the last hour (`tools.picked` events, by event time) stay offered, so a conversation keeps its tools. A hold is renewed only when Jev picks the domain again; domains actually used are held through recent tool use.
 - The initial domains are offered in canonical order, so the same set always produces the same tool list. Domains loaded mid-turn are appended.
-- Background job steps use the stage 2 selection without Jev.
+- Background job steps use the stage 2 selection without Jev. Under `TOOL_PICKER=all` (journal 107), foreground and background calls alike get every available domain.
 - `tools_load` and auto-loading on a direct tool call remain the escape hatch.
 
 **Failure behaviour.** The call times out after 1.5 seconds and is never retried. On a timeout, HTTP error, partial answer or missing key, the stage 2 word cues are used instead. After a 429 the picker is skipped for 5 minutes. A 401/402/403 is logged at error level. The behaviour setting `TOOL_PICKER=off` in `config/runtime.json` disables it on the next release, and `TOOL_PICKER=all`, the default since [journal 107](journey/107-stable-tools-and-effort.md), offers every available domain on every call so the cached tool list never changes; production Compose does not pass the name, so the file is authoritative ([configuration](configuration.md)). Shadow decisions have their own switch, `SHADOW_DECISIONS`.

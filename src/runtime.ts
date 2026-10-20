@@ -412,7 +412,10 @@ export function runtimeContext(
             toolDomains: {
               loaded: [...domains].sort(),
               loadable,
-              note: "Tools for loadable domains are not offered yet. Call tools_load with the domains a task needs; they stay loaded for this turn.",
+              note:
+                loadable && Object.keys(loadable).length
+                  ? "Tools for loadable domains are not offered yet. Call tools_load with the domains a task needs; they stay loaded for this turn."
+                  : "Every available tool domain is loaded; tools_load is not needed.",
             },
           }
         : { operations: options.map((o) => o.shape.operation.value) }),

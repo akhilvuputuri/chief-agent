@@ -299,7 +299,7 @@ export class Assistant {
     private shadow?: ShadowDecisions,
     private effort?: EffortPicker,
     /**
-     * Offer every available tool domain on every call (TOOL_PICKER "all", journal 105). The
+     * Offer every available tool domain on every call (TOOL_PICKER "all", journal 107). The
      * tool list leads the cached prompt, so a list that never changes keeps it reusable.
      */
     private stableTools = false,
@@ -707,6 +707,7 @@ export class Assistant {
         // A coding job waiting on the owner keeps coding tools offered for short replies.
         pendingCoding:
           !background &&
+          !this.stableTools &&
           !!this.availability.coding &&
           (await codingWaitsOnOwner(this.db, user)),
         recentOperations,
@@ -769,20 +770,21 @@ export class Assistant {
       // Domains Jev picked for this owner in the last hour stay loaded, so a
       // conversation keeps its tools. Only picks renew the hold; domains
       // actually used are held through recentOperations.
-      const heldDomains = background
-        ? []
-        : (
-            await this.db.query(
-              `SELECT DISTINCT d.domain FROM runtime_runs r
+      const heldDomains =
+        background || this.stableTools
+          ? []
+          : (
+              await this.db.query(
+                `SELECT DISTINCT d.domain FROM runtime_runs r
                JOIN events e ON e.run_id=r.id AND e.user_id=r.user_id
                CROSS JOIN LATERAL jsonb_array_elements_text(e.data->'domains') d(domain)
                WHERE r.user_id=$1 AND r.started_at > now() - interval '2 hours'
                  AND e.created_at > now() - interval '60 minutes'
                  AND e.type='tools.picked'
                  AND jsonb_typeof(e.data->'domains')='array'`,
-              [user],
-            )
-          ).rows.map((row) => row.domain as string);
+                [user],
+              )
+            ).rows.map((row) => row.domain as string);
       const picked = this.stableTools ? null : await pick(message);
       // Jev sees a clipped message, so a longer one also keeps its word cues.
       const clipped =
@@ -1353,7 +1355,9 @@ export class Assistant {
             messages: Math.max(1, consumedIds.length),
           }),
         );
-      if (!background && this.shadow?.config.shadow.picker)
+      // With a fixed tool list there is no pick to check; recording one would count every
+      // turn as a "cues" pick with nearly every domain unused.
+      if (!background && !this.stableTools && this.shadow?.config.shadow.picker)
         void recordPickerCheck(this.db, user, run, domainOf);
       const approvals = (
         await this.db.query(

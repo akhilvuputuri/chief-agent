@@ -132,7 +132,7 @@ The owner wants the coding agent to commit, push, run its Argon review, mark its
 
 # Shadow decisions measure Jev's accuracy — 15 October 2026
 
-v0.3.77 (PR 234, deployed in `1ec8c4d`) keeps Jev's own routing pick on every shadowed turn and gives shadow mode its own switch, `SHADOW_DECISIONS`. The two-week review found the tool picker adding about 0.6 s per reply with little use, and routing accuracy unmeasurable until now. Next: confirm the first `version: 2` records, backfill the 38 earlier turns privately once the owner allows database access, then trial `TOOL_PICKER=off`. [Journal 88](journey/88-shadow-accuracy.md).
+v0.3.77 (PR 234, deployed in `1ec8c4d`) keeps Jev's own routing pick on every shadowed turn and gives shadow mode its own switch, `SHADOW_DECISIONS`. The two-week review found the tool picker adding about 0.6 s per reply with little use, and routing accuracy unmeasurable until now. Next: confirm the first `version: 2` records, backfill the 38 earlier turns privately once the owner allows database access, then trial `TOOL_PICKER=off`. Superseded on 20 October: `TOOL_PICKER=all` offers a fixed tool list for caching ([journal 107](journey/107-stable-tools-and-effort.md)). [Journal 88](journey/88-shadow-accuracy.md).
 
 # Pi owner-confirmed merge enablement — 15 October 2026
 

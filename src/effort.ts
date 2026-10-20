@@ -36,7 +36,7 @@ const schema = z
     apply: z.object({ low: probability, high: probability }).strict(),
     // Ask again after a new tool failure and, when periodic, from step `firstStep` every
     // `every` steps. A raise changes the thinking setting, which invalidates the cached
-    // messages, so periodic asks are off since journal 105.
+    // messages, so periodic asks are off since journal 107.
     escalation: z
       .object({
         firstStep: count,
