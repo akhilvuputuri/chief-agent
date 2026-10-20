@@ -44,6 +44,7 @@ Alternatives:
 
 - **Keep reasoning on older in-turn messages.** The whole turn would then stay cacheable, but this changes context size and behaviour for every model. Deferred until production shows how much it would save.
 - **Stop mid-turn tool loads.** Not possible; the model needs them.
+- **Let older history shrink and return per call**, as before. This keeps more history on long turns but shifts the cached prefix on every change. The chosen latch trades that away: once dropped, older history stays out for the rest of the run, including follow-ups absorbed into it. `conversation_search` and the omitted count in the state line still let the model reach it. The latch compares the allowance, not the selected size, so it can drop history slightly earlier than needed; this is a possible refinement.
 - **Pin the reasoning effort for a turn.** That would trade away the escalation from [journal 90](90-jev-reasoning-effort.md). Deferred until production shows effort changes cause misses.
 
 The chosen change has three parts:
