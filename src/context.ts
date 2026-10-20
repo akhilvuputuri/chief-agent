@@ -250,18 +250,21 @@ export function context(
   );
   // The turn's first call sets the allowance and later calls reuse it (journal 104), so
   // older history, which precedes the cached owner message, does not shift as runtime
-  // state and this turn's results grow. It shrinks only to stay out of wire compaction.
-  const historyAllowance =
+  // state and this turn's results grow. When compaction headroom no longer covers it,
+  // older history is dropped once and stays out for the rest of the turn (latched at 0):
+  // one prefix shift instead of a shrink on every call.
+  const wanted =
     request.historyAllowance ??
     Math.max(
       Math.min(historyFloor, headroom),
       contextBudget - fixedSize - protectedSize,
       0,
     );
+  const historyAllowance = wanted <= headroom ? wanted : 0;
   const bounded = boundHistory(
     earlier.map(withoutReasoning),
     20,
-    Math.min(historyAllowance, headroom),
+    historyAllowance,
   );
   const current: ModelMessage[] = [
     ...bounded.messages,

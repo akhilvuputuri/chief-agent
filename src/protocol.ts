@@ -603,7 +603,7 @@ export interface AgentRequest {
   images?: ImageAttachment[];
   history: unknown[];
   historyOmitted?: number;
-  /** Older-history allowance fixed at the turn's first model call (journal 104). */
+  /** Older-history allowance set by the turn's first call; 0 once dropped (journal 104). */
   historyAllowance?: number;
   /** Stable start of this foreground exchange, including all absorbed follow-ups. */
   turnStart?: number;

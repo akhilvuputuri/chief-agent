@@ -291,7 +291,8 @@ export class CustomAgent implements Agent {
                 (_, index) => !undeliveredMessageIndices.includes(index),
               ),
             );
-            historyAllowance ??= input.historyAllowance;
+            // Reused for the rest of the turn; 0 once the turn had to drop older history.
+            historyAllowance = input.historyAllowance;
             await execution.trace("context.selected", {
               fixedSize: input.fixedSize,
               fixedParts: input.fixedParts,

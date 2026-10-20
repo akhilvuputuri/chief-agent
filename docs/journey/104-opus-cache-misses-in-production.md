@@ -49,7 +49,7 @@ Alternatives:
 The chosen change has three parts:
 
 - every call gets a cache entry that does not change during the turn, at the owner's message;
-- older history is frozen for the turn, so that entry stays valid;
+- older history is set by the turn's first call and kept until it no longer fits the compaction headroom. Then it is dropped once and stays out for the rest of the turn. That makes at most one shift of the prefix before the owner's entry, instead of a shrink on every call;
 - the opening system message gets an entry that can be reused across turns.
 
 The markers make four Anthropic breakpoints, the maximum.
@@ -59,13 +59,13 @@ The markers make four Anthropic breakpoints, the maximum.
 - `src/model.ts` `cacheHints`: for `anthropic/` models it now also marks:
   - the owner's latest user message;
   - the opening system message.
-- `src/context.ts` and `src/custom-agent.ts`: the turn's first call sets the older-history allowance (`historyAllowance`), and later calls reuse it. It shrinks only to stay out of wire compaction.
+- `src/context.ts` and `src/custom-agent.ts`: the turn's first call sets the older-history allowance (`historyAllowance`), and later calls reuse it. When the headroom no longer covers it, the allowance latches at 0 for the rest of the turn.
 - `src/custom-agent.ts`: `context.selected` records `runtimeParts`, the character size of each runtime-state key, in the private events table. Values are never recorded. This shows which part of the 13–17k state to trim next.
 - `tests/model-cache-hints.test.ts` covers the markers in a tool loop and the size-only record.
 
 Independent review (Opus 5.5, commit `26312b3`) requested changes:
 
-- **Medium.** Older history could still shift within a turn. Confirmed in turn 3 and fixed by freezing the allowance, with a test.
+- **Medium.** Older history could still shift within a turn, as turn 3's omitted count showed. A first fix froze the allowance. Delta review (`94a498b`) found it was a no-op whenever the fixed envelope was over 48k, which held in every measured turn: history still shrank and returned as headroom changed. The allowance now latches at 0 once it no longer fits. A test with an 82k fixed envelope shows older history kept, then dropped once, where recomputing per call shrank it and brought it back.
 - **Medium.** The effort claim conflicted with Anthropic's documentation and with turn 3. Reworded as above.
 - **Medium.** Docs stated the hypothesis as fact. Corrected.
 - **Low.**
