@@ -161,6 +161,40 @@ test("heartbeat expiry pauses instead of starting another worker and revokes the
   await f.c.tick();
   assert.equal(f.creates(), 1);
 });
+test("cancelling paused jobs keeps their settled cleanup, even while another attempt runs", async (t) => {
+  const f = await fixture(t);
+  const paused: string[] = [];
+  for (const [key, cleanup] of [
+    ["old-1", "complete"],
+    ["old-2", "complete"],
+    ["old-3", "none"],
+  ]) {
+    const job = await f.start(key);
+    await f.db.query(
+      "UPDATE coding_jobs SET state='paused',attempt_id=gen_random_uuid(),sandbox_id=$2,cleanup=$3 WHERE id=$1",
+      [job.id, `fixture:${key}`, cleanup],
+    );
+    paused.push(job.id);
+  }
+  const running = await f.start("current");
+  await f.c.tick();
+  assert.equal((await f.row(running.id)).state, "provisioning");
+  // Before the fix, the first cancel reopened cleanup and the rest hit the single-worker slot.
+  for (const id of paused)
+    await f.c.call("a", f.run, { operation: "coding_cancel", id });
+  const rows = await Promise.all(paused.map((id) => f.row(id)));
+  assert.deepEqual(
+    rows.map((r) => [r.state, r.cleanup]),
+    [
+      ["cancelled", "complete"],
+      ["cancelled", "complete"],
+      ["cancelled", "none"],
+    ],
+  );
+  // A running attempt still gets its sandbox cleaned up when cancelled.
+  await f.c.call("a", f.run, { operation: "coding_cancel", id: running.id });
+  assert.equal((await f.row(running.id)).cleanup, "pending");
+});
 test("a provider's startup grace defers heartbeat loss only until the first heartbeat", async (t) => {
   const f = await fixture(t),
     job = await f.start();

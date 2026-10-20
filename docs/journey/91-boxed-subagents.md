@@ -524,3 +524,29 @@ A new test runs the gateway's coding sandbox startup checks against the reviewed
 - Closing the box terminated it 12 s later. No warnings.
 
 This proves the image, the boot and the boundary. It does not prove the worker itself: that needs the canary.
+
+### First real coding attempt on EC2 — 20 October 2026
+
+**Measured canary.** The owner started a coding job in plan mode (`fa7e618b`, created 05:08:55 UTC). It was claimed at 05:11:48, once the slot freed (see below). Its attempt ran in `coding` box `6fba7a28` (instance `i-0ae2dd66c57ad9e36`):
+
+| Step                      | Result                                                                                                |
+| ------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Box requested, launch     | 05:11:48, launch 05:12:03                                                                             |
+| First report from the box | 05:13:35 (92 s after launch)                                                                          |
+| Worker planning           | Running by 05:13:57; 8 model calls                                                                    |
+| Worker finished           | 05:15:09: plan recorded (about 8,800 characters), `plan_ready`; the task program reported exit code 0 |
+| Box closed and terminated | Terminated 05:15:33 ("Coding attempt ended"), 24 s after the result; cleanup `complete`               |
+| Token at rest             | Removed from the stored task payload after termination                                                |
+
+No box-related warn or error lines were logged. The host-side flow ran unchanged through the box: assignment, heartbeat, Pi session, checkpoints, model proxy and finish.
+
+**Still to observe in a later attempt:**
+
+- an implementation attempt with checks and review inside the box;
+- the subreaper cleanup on the AL2023 kernel.
+
+**Defect found around the canary: cancelling paused jobs.** Just before the canary, the owner continued an old job (`1a6cf84e`). Its snapshot carried the old image, so it ran on CodeBuild and held the single coding slot. Chief then tried to cancel the ten old paused jobs, twice. Every cancel failed with `ACTIVE_WORK_EXISTS` (a `duplicate key` on `coding_one_active_worker`).
+
+- **Cause.** Cancel set `cleanup='pending'` for any job with an attempt ID, even a paused job whose sandbox was already cleaned up (`complete`) or never created (`none`). The single-worker index counts pending cleanup as active, so the cancel collided with the running job, or with the previous cancel in the same batch.
+- **Fix.** Cancel now reopens cleanup only for an attempt that is actually running (provisioning, running or publishing).
+- **Regression test.** It cancels two cleaned-up paused jobs and one that never had a sandbox while another attempt runs. It fails without the fix with the production error.

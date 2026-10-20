@@ -271,3 +271,5 @@ Evidence boundary:
 
 - **Reproduced:** synthetic tests for the box sandbox, routing, rollback, the task program's refusals and a controller-level attempt.
 - **Not yet measured:** a real coding job on EC2, and whether boxes change completion, speed or cost.
+
+The first real attempt on EC2 (20 October) planned in a box, and the box was gone 24 seconds after the result. The same session exposed an older defect that had nothing to do with boxes. Cancelling a paused job reopened its long-finished sandbox cleanup, so the owner could not clear old jobs while anything else ran, or more than one at a time. A state flag that feeds a uniqueness constraint must change only when the thing it tracks changes ([journal 91](91-boxed-subagents.md#first-real-coding-attempt-on-ec2--20-october-2026)).
