@@ -1,7 +1,7 @@
 # 106 — Radar pictures: can Merlion show the owner the rain, not just describe it?
 
 Work date(s): 2026-10-20. Written/revised: 2026-10-20.
-Status: tested; not deployed. Merlion can queue a radar map (PNG) or a loop of the window (GIF), and Chief sends it on Telegram right after the text reply.
+Status: released in `8673bd5` (20 October 2026); owner acceptance pending. Merlion can queue a radar map (PNG) or a loop of the window (GIF), and Chief sends it on Telegram right after the text reply.
 
 ## User-visible problem and preceding iteration
 
@@ -86,13 +86,30 @@ Status: tested; not deployed. Merlion can queue a radar map (PNG) or a loop of t
 
 ## Verification and outcome
 
-Not deployed. Stacked on the rain radar PR ([105](105-rain-radar.md)).
-
-After release, live acceptance:
+Released (closure below). Pending owner acceptance:
 
 - ask "show me how the rain moved over the last 3 hours", and check the loop arrives after the reply and plays in Telegram;
 - ask "show me the radar now" with a shared pin, and check the marker sits on the pin;
 - check the rain's position against myENV for the same time.
+
+### Release closure — 2026-10-20
+
+- **What merged.** [PR 291](https://github.com/akhilvuputuri/chief-agent/pull/291) was squash-merged at approved head `6a454f5` as `9c184b59aec0155095d9b549471f6166ff779fb9`. Hosted CI and Devin passed on that head.
+- **First release attempt** ([run](https://github.com/akhilvuputuri/chief-agent/actions/runs/39429738495)): cancelled by the job's 15-minute timeout while the deploy step was still running. The handler builds the image before its idle check, and it printed nothing.
+  - **Production logs (CloudWatch, 12:50–15:20 UTC)** show the gateway stayed on `adbba7b`, healthy, until `8673bd5` replaced it:
+    - heartbeats every 5 minutes from 13:31 to 14:51 UTC, with uptime rising steadily from 2,100 s to 6,900 s, so there was no restart;
+    - `gateway.stopping` for `adbba7b` at 14:54:21 UTC;
+    - no `9c184b5` line at all.
+
+    So the cancelled attempt deployed and rolled back nothing, including after the job was cancelled.
+
+  - Successful deploy steps earlier that day took about 4–6.5 minutes, apart from one 17-second outlier. The cause of the slow attempt is not established.
+  - **Follow-up:** the host handler pipes its build output and does not handle the SSH session closing, so a cancelled release could in principle keep running and deploy unannounced. It did not here (above), but the handler should stop with its session or log its outcome.
+- **Live.** The release of `8673bd5` (#292 on top of this PR) succeeded at 14:54 UTC ([run](https://github.com/akhilvuputuri/chief-agent/actions/runs/39443054854)), with `release:status` success.
+- **Production logs.** The gateway started on `8673bd5` at 14:54 UTC, with heartbeats at 15:14 and no errors in the following 20 minutes.
+- **No migration** and no Compose change.
+- **Not yet observed:** a picture sent to the owner in production.
+- **Remaining follow-up from review:** if the delivery-guard check inside the picture loop throws a database error, the turn can still fail after the text was sent. Voice replies have the same exposure.
 
 ## Follow-up and next iteration
 
