@@ -956,9 +956,9 @@ test("the history floor never pushes a request into wire compaction or starts at
       [...older, ...turn],
     );
   };
-  // About 118.6k without older history: an uncapped 6k floor would cross the 120k
+  // About 118.6k without older history (recalibrate as catalogues grow): an uncapped 6k floor would cross the 120k
   // compaction threshold and shrink the result this turn just read.
-  const crowded = at(60000);
+  const crowded = at(58500);
   assert.equal(crowded.wireCompacted, false);
   assert.equal(
     crowded.messages.find((m) => m.role === "tool")?.content,
