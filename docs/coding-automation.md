@@ -20,11 +20,11 @@ Only the exact owned repository/branch/head/tree with passing trusted CI/Devin, 
 
 Protected paths include database/Compose, workflows/infrastructure/scripts/configuration, dependency manifests and the source modules that own coding publication, authentication, credentials, permissions and execution controls (`protectedMergePath` in `src/coding/merge-policy.ts`).
 
-- **Owner-merge workflow (owner decision, 21 October 2026).** A PR touching protected paths now goes through the normal flow (ready, CI, Devin, review) to the owner's Merge card. The card lists the protected files, so the owner approves Chief's own controls knowingly. Before this, such PRs stopped at manual review and had to be merged on GitHub.
+- **Owner-merge workflow (owner decision, 21 October 2026).** A PR touching protected paths now goes through the normal flow (ready, CI, Devin, review) to the owner's Merge card. The card lists the protected files, so the owner approves Chief's own controls knowingly. Before this, such PRs stopped at manual review and had to be merged on GitHub. Changes to `package.json`, `package-lock.json` or a `Dockerfile` are listed separately on the card: they are built into the production gateway, which runs with its secrets, so the owner should read their diff on GitHub.
 - **Hard stops** (`hardStopMergePath`) never merge through Chief, even with the card:
   - database migrations (`db/`) and Compose files, which need a reviewed operator rollout; the release guard refuses them otherwise;
   - environment files;
-  - GitHub workflows (`.github/`), which the coding GitHub App cannot merge.
+  - GitHub workflows (`.github/`); environment and workflow files are already refused when the PR is published, so the hard stop is a second guard.
 - **Automatic merge without an owner card** keeps the full protected boundary. User cancellation remains possible before a merge is claimed; an in-flight/unknown merge must be reconciled first. Key decisions/results go to General and coding milestones to Coding.
 
 ## Model selection in Telegram

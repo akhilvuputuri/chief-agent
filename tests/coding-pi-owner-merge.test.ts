@@ -220,6 +220,27 @@ test("protected files reach the owner's Merge card, which names them; hard stops
     assert.equal(g.counts().merges, 0);
   }
 });
+test("dependency and image changes are called out separately on the Merge card", async (t) => {
+  const f = await fixture(t, undefined, [
+    "package-lock.json",
+    "Dockerfile.coding-pi",
+  ]);
+  await f.auto.tick();
+  f.setInspection({ checks: "passed" });
+  await f.auto.tick();
+  assert.equal((await f.job()).stage, "awaiting_merge_approval");
+  const card = (
+    await f.db.query(
+      "SELECT payload FROM coding_events WHERE job_id=$1 AND payload ? 'merge'",
+      [f.id],
+    )
+  ).rows[0].payload;
+  assert.match(
+    card.summary,
+    /Dependencies or images changed.*`package-lock.json`, `Dockerfile.coding-pi`/s,
+  );
+  assert.doesNotMatch(card.summary, /Protected files changed/);
+});
 test("an ordinary owner-merge card carries no protected-files warning", async (t) => {
   const f = await fixture(t);
   await f.auto.tick();

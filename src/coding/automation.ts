@@ -207,17 +207,28 @@ export class CodingAutomation {
     const summary = Array.from(String(j.result?.summary ?? ""))
       .slice(0, 800)
       .join("");
-    const guarded = (j.result?.checkpoint.files ?? [])
-      .map((f) => f.path)
-      .filter(protectedMergePath);
-    const warning = guarded.length
-      ? `\n\n**Protected files changed** (Chief's own controls; review them before approving): ${guarded
-          .slice(0, 8)
-          .map((p) => `\`${p}\``)
-          .join(
-            ", ",
-          )}${guarded.length > 8 ? ` and ${guarded.length - 8} more` : ""}.`
-      : "";
+    const paths = (j.result?.checkpoint.files ?? []).map((f) => f.path);
+    const list = (found: string[]) =>
+      `${found
+        .slice(0, 8)
+        .map((p) => `\`${p}\``)
+        .join(", ")}${found.length > 8 ? ` and ${found.length - 8} more` : ""}`;
+    // Dependencies and images are built into the production gateway at release.
+    const shipped = paths.filter((p) =>
+      /^(?:package(?:-lock)?\.json|Dockerfile(?:\..+)?)$/.test(p),
+    );
+    const guarded = paths.filter(
+      (p) => protectedMergePath(p) && !shipped.includes(p),
+    );
+    const warning = `${
+      guarded.length
+        ? `\n\n**Protected files changed** (Chief's own controls; review them before approving): ${list(guarded)}.`
+        : ""
+    }${
+      shipped.length
+        ? `\n\n**Dependencies or images changed** (they run in production at release; review the diff on GitHub before approving): ${list(shipped)}.`
+        : ""
+    }`;
     await this.db.query(
       "INSERT INTO coding_events(job_id,event_key,payload) VALUES($1,$2,$3::jsonb)",
       [
