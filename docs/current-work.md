@@ -1,4 +1,4 @@
-# US AQI next to PSI — tested, not deployed, 21 October 2026
+# US AQI next to PSI — live in `eb03a02`, 21 October 2026
 
 aqicn.org's Singapore readings are NEA's hourly PM2.5 on the US EPA scale. Merlion's `sg_air` now computes the same figure (on 21 October: four regions exact, the West within 1), so haze answers can give PSI and the aqicn-style number side by side with no new data source or key. [Journal 111](journey/111-us-aqi-from-nea.md).
 

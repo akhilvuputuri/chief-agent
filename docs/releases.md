@@ -1,3 +1,15 @@
+## Deployed `eb03a02` (untagged) — US AQI next to PSI
+
+- **What merged.** [PR 306](https://github.com/akhilvuputuri/chief-agent/pull/306) merged as `eb03a0257c00679faf67e9379f9f328924e6cb7a`.
+  - `sg_air` adds each region's US AQI as aqicn.org computes it: EPA's pre-2024 PM2.5 breakpoints applied to NEA's 1-hour PM2.5.
+  - On 21 October it tracked aqicn: four regions exact, the West within 1.
+  - For haze questions, the weather skill pairs it with PSI in one line. No new data source or key.
+- **Review.** Exact-head independent review (Claude Opus 5.5) approved `601b78b`. Its accuracy notes were fixed before merge: "tracks" rather than "matches", and "the US AQI aqicn uses" rather than the official US figure. Devin and hosted CI passed.
+- **Release.** Live at 04:59 UTC on 21 October, with `release:status` success. No migration.
+- **Not yet observed.** A production haze reply that gives the US AQI.
+
+[Journal 111](journey/111-us-aqi-from-nea.md#release-closure--2026-10-21).
+
 ## Deployed `ac94d23` (untagged) — IBKR order drafts
 
 - **What merged.** [PR 298](https://github.com/akhilvuputuri/chief-agent/pull/298) merged as `ac94d2355992b52839a6d1541fd048617be5658d`.
