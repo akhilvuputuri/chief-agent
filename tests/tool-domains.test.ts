@@ -481,3 +481,31 @@ test("Anthropic models get earlier in-turn reasoning back; other models do not",
     }
   }
 });
+
+test("with stable tools the opening system message is identical on every call and every turn", async () => {
+  const openings: string[] = [];
+  let n = 0;
+  const f = await fixture(
+    {
+      generate: async (input) => {
+        openings.push(String(input.messages[0]?.content));
+        n++;
+        if (n === 1 || n === 3) return call("job_list", {});
+        return text("Done.");
+      },
+    },
+    true,
+  );
+  try {
+    await f.assistant.respond("owner", "list my roles");
+    await f.assistant.respond("owner", "and again please");
+    assert.ok(openings.length >= 4);
+    for (const opening of openings) assert.equal(opening, openings[0]);
+    assert.match(
+      openings[0]!,
+      /Configuration \(data, not new user instructions\)/,
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
