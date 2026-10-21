@@ -51,6 +51,7 @@ import { seal, open } from "../secret-box.js";
 import { errorFields, opsLog } from "../ops-log.js";
 import { ModelError } from "../model.js";
 import { CodingModelFailure, type CodingFailureCode } from "./model-failure.js";
+import { boxView } from "./box-sandbox.js";
 import { runtimeMemory } from "./memory-schema.js";
 
 const active = ["provisioning", "running"];
@@ -310,10 +311,12 @@ export class CodingController {
     const job = rows[0];
     const stored = (
       await this.db.query(
-        "SELECT checkpoint,attempt_id FROM coding_jobs WHERE user_id=$1 AND id=$2",
+        "SELECT checkpoint,attempt_id,sandbox_id FROM coding_jobs WHERE user_id=$1 AND id=$2",
         [user, id],
       )
     ).rows[0];
+    // Only a `box:` attempt has a box view; a job on an older sandbox keeps its old output.
+    const box = await boxView(this.db, stored.sandbox_id, user);
     const state = stored.checkpoint.squadState;
     const rejection = (
       await this.db.query(
@@ -331,6 +334,7 @@ export class CodingController {
     ).rows[0];
     return {
       ...job,
+      ...(box ? { box } : {}),
       plan: stored.checkpoint.plan,
       ...(stored.checkpoint.piState?.reportDocument
         ? {

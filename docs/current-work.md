@@ -1,3 +1,7 @@
+# A box view in coding_status — tested, 21 October 2026
+
+When a coding attempt runs in an EC2 box, `coding_status` for that job now includes a short `box` view: its lifecycle phase (requested, booting, ready, busy, terminating, terminated, held), when it launched, when it last reported and, once it is terminated, why it ended. It reads the existing `boxes` and `box_events` tables with one owner-scoped SELECT and no schema change; all eleven stored states map into the seven. Jobs on older `chief-coding:` sandboxes, malformed ids and missing rows show no box view, and the list call is unchanged. The view is built in `src/coding/box-sandbox.ts` and attached in the coding controller's detail query. Next: independent review and release, then one real boxed job read back in production. [Journal 112](journey/112-coding-status-box-view.md), [design](boxes.md#phase-4c-owner-view-and-steering).
+
 # US AQI next to PSI — live in `eb03a02`, 21 October 2026
 
 aqicn.org's Singapore readings are NEA's hourly PM2.5 on the US EPA scale. Merlion's `sg_air` now computes the same figure (on 21 October: four regions exact, the West within 1), so haze answers can give PSI and the aqicn-style number side by side with no new data source or key. [Journal 111](journey/111-us-aqi-from-nea.md).

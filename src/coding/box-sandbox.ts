@@ -28,6 +28,81 @@ export const CODING_TASK_COMMAND = [
   "/opt/chief-worker/dist/boxes/coding-task.js",
 ];
 
+/** The box states `coding_status` reports to the owner (docs/boxes.md, phase 4c). */
+export const BOX_VIEW_STATES = [
+  "requested",
+  "booting",
+  "ready",
+  "busy",
+  "terminating",
+  "terminated",
+  "held",
+] as const;
+export type BoxViewState = (typeof BOX_VIEW_STATES)[number];
+/**
+ * Every state `boxes.state` allows, mapped to one of the seven reported. Keep it complete:
+ * a stored state added to the CHECK without an entry here is reported as `held`, which
+ * claims neither that the box runs nor that it is gone.
+ */
+const VIEW: Record<string, BoxViewState> = {
+  requested: "requested",
+  launching: "requested", // launch in progress
+  booting: "booting",
+  starting: "booting", // a stopped box started again
+  ready: "ready",
+  busy: "busy",
+  stopping: "terminating", // still there, no longer serving the attempt
+  stopped: "terminating", // retained warm and not running
+  terminating: "terminating",
+  terminated: "terminated",
+  held: "held",
+};
+export type BoxView = {
+  state: BoxViewState;
+  launchedAt: Date | null;
+  lastReportAt: Date | null;
+  /** Only once the box is gone, so a live box never claims why it ended. */
+  endReason?: string;
+};
+
+/**
+ * The owner's short view of the box behind a `box:` sandbox id, read from `boxes` (state,
+ * reason, launch time, last report) and `box_events` (fallback report time). Read-only: no
+ * writes, no provider call. Any other sandbox id, and a `box:` id with no row, has no view.
+ */
+export async function boxView(
+  db: Database,
+  sandboxId: string | undefined | null,
+  userId: string,
+): Promise<BoxView | undefined> {
+  if (!sandboxId?.startsWith(PREFIX)) return undefined;
+  const boxId = sandboxId.slice(PREFIX.length);
+  // Box ids are UUIDs; anything else has no row, and comparing as uuid keeps the primary key.
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      boxId,
+    )
+  )
+    return undefined;
+  const row = (
+    await db.query(
+      `SELECT b.state,b.reason,b.launch_started_at,b.seen_at,
+         (SELECT max(e.created_at) FROM box_events e WHERE e.box_id=b.id) AS last_event_at
+       FROM boxes b WHERE b.id=$1::uuid AND b.user_id=$2`,
+      [boxId, userId],
+    )
+  ).rows[0];
+  if (!row) return undefined;
+  const state = VIEW[row.state] ?? "held";
+  const reason = String(row.reason ?? "").slice(0, 200);
+  return {
+    state,
+    launchedAt: row.launch_started_at ?? null,
+    lastReportAt: row.seen_at ?? row.last_event_at ?? null,
+    ...(state === "terminated" && reason ? { endReason: reason } : {}),
+  };
+}
+
 /**
  * Runs each coding attempt as one task in its own EC2 box (docs/boxes.md, phase 4a). The
  * coding controller keeps all policy: the worker inside the box calls the same
