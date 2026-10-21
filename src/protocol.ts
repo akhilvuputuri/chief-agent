@@ -640,6 +640,8 @@ export interface AgentRequest {
   images?: ImageAttachment[];
   history: unknown[];
   historyOmitted?: number;
+  /** Character limits for compaction and refusal; defaults are context.ts's constants. */
+  contextLimits?: { compaction: number; hard: number };
   /** Keep reasoning on this turn's earlier steps, for prompt caching (journal 108). */
   keepTurnReasoning?: boolean;
   /** Set internally when kept reasoning was dropped to avoid compaction. */

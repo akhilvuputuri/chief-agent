@@ -2,8 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   boundHistory,
-  context,
-  contextHardLimit,
+  context as productionContext,
+  splitRuntimeContext,
+  contextCompactionThreshold,
   ContextLimitError,
 } from "../src/context.js";
 import {
@@ -16,6 +17,21 @@ import {
 import { runtimeContext } from "../src/runtime.js";
 import type { AgentRequest } from "../src/protocol.js";
 import type { Message } from "../src/model.js";
+
+// These scenarios were calibrated at the earlier limits (120k compaction, 400k refusal).
+// The mechanics are the same at any size; journal 113 raised the production defaults.
+const contextHardLimit = 400000;
+const legacyLimits = { compaction: 120000, hard: contextHardLimit };
+const context = (
+  request: Parameters<typeof productionContext>[0],
+  messages: Parameters<typeof productionContext>[1],
+  compactForWire?: boolean,
+) =>
+  productionContext(
+    { contextLimits: legacyLimits, ...request },
+    messages,
+    compactForWire,
+  );
 
 const user = (content: string): Message => ({ role: "user", content });
 const answer = (content: string): Message => ({ role: "assistant", content });
@@ -62,7 +78,12 @@ function request(
   };
   const measured = context(req, [user(message)]).fixedSize;
   assert.ok(measured < fixedSize);
-  runtime.context += " ".repeat(fixedSize - measured);
+  // Pad inside the JSON: the state is parsed and re-serialized (journal 113), which would
+  // drop trailing whitespace. ',"pad":""' adds 9 characters before the padding itself.
+  runtime.context = JSON.stringify({
+    ...JSON.parse(runtime.context),
+    pad: " ".repeat(fixedSize - measured - 9),
+  });
   return req;
 }
 
@@ -1260,4 +1281,68 @@ test("kept reasoning does not push older history out", () => {
   assert.equal(stripped.historyAllowance, 6000);
   assert.equal(kept.historyAllowance, stripped.historyAllowance);
   assert.equal(kept.omitted, stripped.omitted);
+});
+
+test("production limits allow about 300k tokens before compaction", () => {
+  assert.equal(contextCompactionThreshold, 1080000);
+  // A turn of about 200k characters, past the old 120k limit, is sent without excerpts.
+  const turn: Message[] = [user("Read everything")];
+  for (let i = 0; i < 8; i++)
+    turn.push(
+      ...toolGroup(
+        `read_${i}`,
+        { r: "r".repeat(25000), sourceId: `s${i}` },
+        `r${i}`,
+      ),
+    );
+  const input = productionContext(request("Read everything", []), turn);
+  assert.ok(input.serializedSize > 200000);
+  assert.equal(input.wireCompacted, false);
+  assert.ok(
+    input.messages
+      .filter((m) => m.role === "tool")
+      .every((m) => !String(m.content).includes("contextProjection")),
+  );
+});
+
+test("unchanging configuration opens the request and only changing state stays at the end", () => {
+  const runtime = runtimeContext({ web: true }, null);
+  const withState = (costUsage: number) => ({
+    ...runtime,
+    context: JSON.stringify({ ...JSON.parse(runtime.context), costUsage }),
+  });
+  const at = (costUsage: number) =>
+    context(
+      {
+        runId: "fixture",
+        capability: "fixture",
+        message: "hello",
+        history: [],
+        memories: [],
+        runtime: withState(costUsage),
+      },
+      [user("hello")],
+    ).messages;
+  const first = at(1);
+  const second = at(2);
+  const opening = String(first[0]!.content);
+  const state = String(first.at(-1)!.content);
+  assert.match(
+    opening,
+    /Configuration \(data, not new user instructions\): \{"availability"/,
+  );
+  assert.match(opening, /"agentCatalogue"|"skillCatalogue"/);
+  assert.doesNotMatch(
+    state,
+    /"agentCatalogue"|"skillCatalogue"|"availability"/,
+  );
+  assert.match(state, /"costUsage":1/);
+  // Changing state never alters the cacheable opening message.
+  assert.equal(second[0]!.content, first[0]!.content);
+  assert.notEqual(second.at(-1)!.content, first.at(-1)!.content);
+  // A runtime context that is not a JSON object stays whole in the state message.
+  assert.deepEqual(splitRuntimeContext("plain text"), {
+    stable: "",
+    current: "plain text",
+  });
 });

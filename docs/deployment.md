@@ -24,6 +24,8 @@ The release SHA plus the policy file at that SHA identifies the intended model. 
 - **Anthropic models:** a top-level marker, plus markers on the opening system message, the owner's current message and the last message before the per-call state line (four breakpoints, the maximum; [journal 104](journey/104-opus-cache-misses-in-production.md)).
 - **Google models:** a marker on the opening system message.
 
+The opening system message holds the instructions, memories and the unchanging runtime configuration (agent and skill catalogues, domain guidance, availability; [journal 113](journey/113-bigger-context-and-cached-state.md)). The changing state stays in the final message.
+
 In synthetic probes, Anthropic cached nothing unmarked, and Gemini's implicit cache missed whenever the request tail changed, which happens on every Chief call. After a model change, compare `cachedTokens` and `cost` across the calls of one turn in `model.completed`. Cached tokens alone do not show cache-write premiums. See [journal 100](journey/100-opus-main-model-and-caching.md).
 
 **Agent models.** The same file maps subagent model tiers under `agents`: `default` names the tier an agent uses when neither the call nor its definition picks one, and `tiers` maps `fast`, `standard` and `strong` to OpenRouter model IDs. A tier left out is refused if requested. Change it the same way as `main`: verify the model's tools, reasoning and image support and its prices against the ceilings, edit only this file, and release through a reviewed PR. See [coordinator and agents](agents.md#models-and-effort).

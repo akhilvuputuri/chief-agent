@@ -842,7 +842,10 @@ test("oversized stored tool results use bounded exact excerpts and owner-verifie
     );
     const body =
       "HEAD: exact current target. " +
-      "large unparsed tool body ".repeat(20000) +
+      // Above the hard limit (journal 113 raised it to 1.3M characters).
+      "large unparsed tool body ".repeat(
+        Math.ceil(contextHardLimit / 25) + 1000,
+      ) +
       " TAIL: source ends here.";
     for (const [runId, observationId] of [
       [run, observation],
