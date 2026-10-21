@@ -1,3 +1,7 @@
+# Bigger context and cached fixed state — in review, 21 October 2026
+
+After the fixed tool list, ordinary Opus turns hit the 120k-character compaction threshold: older history was dropped mid-turn and results were excerpted. Compaction now starts at about 1.08M characters (about 300k tokens, the owner's choice). The 11k of runtime state that never changes (agent and skill catalogues, domain guidance, availability) moves into the cached opening system message. See [journal 113](journey/113-bigger-context-and-cached-state.md).
+
 # A box view in coding_status — tested, 21 October 2026
 
 When a coding attempt runs in an EC2 box, `coding_status` for that job now includes a short `box` view: its lifecycle phase (requested, booting, ready, busy, terminating, terminated, held), when it launched, when it last reported and, once it is terminated, why it ended. It reads the existing `boxes` and `box_events` tables with one owner-scoped SELECT and no schema change; all eleven stored states map into the seven. Jobs on older `chief-coding:` sandboxes, malformed ids and missing rows show no box view, and the list call is unchanged. The view is built in `src/coding/box-sandbox.ts` and attached in the coding controller's detail query. Next: independent review and release, then one real boxed job read back in production. [Journal 112](journey/112-coding-status-box-view.md), [design](boxes.md#phase-4c-owner-view-and-steering).

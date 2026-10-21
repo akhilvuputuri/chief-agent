@@ -157,7 +157,8 @@ test("tools_load offers a domain's tools on the next model call and is recorded"
   const f = await fixture({
     generate: async (input) => {
       seen.push(names(input.tools));
-      states.push(String(input.messages.at(-1)?.content));
+      // Guidance is configuration: it sits in the opening system message (journal 113).
+      states.push(String(input.messages[0]?.content));
       if (seen.length === 1) return call("tools_load", { domains: ["jobs"] });
       if (seen.length === 2) return call("job_list", {});
       return text("You have no saved roles.");
@@ -171,7 +172,7 @@ test("tools_load offers a domain's tools on the next model call and is recorded"
     assert.ok(!seen[0]!.includes("job_list"));
     assert.ok(seen[0]!.includes("tools_load"));
     assert.ok(seen[1]!.includes("job_list"));
-    // The loaded domain's guidance arrives with its tools, at the end of the request.
+    // The loaded domain's guidance arrives with its tools.
     assert.doesNotMatch(states[0]!, /job-alignment skill/);
     assert.match(states[1]!, /job-alignment skill/);
     const events = (

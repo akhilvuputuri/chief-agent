@@ -1,6 +1,6 @@
 # Bounded context management — issue #77
 
-Status: stage 1 (measurement) is released. Stage 2 (relevant tool loading) is implemented on a review branch. Stages 3–4 are proposed. The v0.3.22 increase to a 400,000-character internal ceiling is temporary headroom, not a provider-token budget or a bounded-context design. [Issue #77](https://github.com/akhilvuputuri/chief-agent/issues/77) tracks implementation; [journal 28](journey/28-context-wire-compaction.md) contains the measured incidents.
+Status (21 October 2026): compaction starts at about 1.08M characters and the hard ceiling is 1.3M ([journal 113](journey/113-bigger-context-and-cached-state.md)); the 120k and 400k figures below describe earlier stages. Status: stage 1 (measurement) is released. Stage 2 (relevant tool loading) is implemented on a review branch. Stages 3–4 are proposed. The v0.3.22 increase to a 400,000-character internal ceiling is temporary headroom, not a provider-token budget or a bounded-context design. [Issue #77](https://github.com/akhilvuputuri/chief-agent/issues/77) tracks implementation; [journal 28](journey/28-context-wire-compaction.md) contains the measured incidents.
 
 **Lean coordinator prompt (20 October 2026, [journal 101](journey/101-lean-coordinator-prompt.md)).**
 
