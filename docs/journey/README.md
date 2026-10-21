@@ -119,7 +119,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 20 October | [108 — Keep in-turn reasoning](108-keep-in-turn-reasoning.md): does keeping in-turn reasoning keep the whole Opus turn cached? | In review: Anthropic turns keep earlier steps' reasoning, so cached reads grow with the turn |
 | 21 October | [109 — Plain rain replies](109-plain-rain-replies.md): can Merlion answer about rain without a data dump? | Released in `0c54f89`: short, plain-word rain replies and a one-line picture caption; owner acceptance pending |
 | 20 October | [110 — IBKR order drafts](110-ibkr-order-drafts.md): can Chief draft IBKR orders without being able to trade? | Released in `ac94d23`; Chief's IBKR grant ended, likely after a second consent (owner reconnect pending); live draft acceptance pending |
-| 21 October | [111 — US AQI from NEA](111-us-aqi-from-nea.md): can Merlion give the aqicn.org comparison without a new data source? | Tested: US AQI computed from NEA PM2.5 matches aqicn for the five regions; not deployed |
+| 21 October | [111 — US AQI from NEA](111-us-aqi-from-nea.md): can Merlion give the aqicn.org comparison without a new data source? | Released in `eb03a02`: US AQI computed from NEA PM2.5 tracks aqicn for the five regions; owner acceptance pending |
 
 ## Coding-agent learning path
 

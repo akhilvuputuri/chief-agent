@@ -1,7 +1,7 @@
 # 111 — US AQI from NEA: can Merlion give the aqicn.org comparison without a new data source?
 
 Work date(s): 2026-10-21. Written/revised: 2026-10-21.
-Status: tested; not deployed. `sg_air` now adds each region's US EPA AQI, computed from NEA's 1-hour PM2.5. This is the number aqicn.org shows for Singapore.
+Status: released in `eb03a02` (21 October 2026); owner acceptance pending. `sg_air` now adds each region's US EPA AQI, computed from NEA's 1-hour PM2.5. This is the number aqicn.org shows for Singapore.
 
 ## User-visible problem and preceding iteration
 
@@ -32,7 +32,7 @@ For haze, the owner compares NEA with aqicn.org and asked whether Chief could in
 
 ## Diagnosis and alternatives
 
-- **Chosen:** compute the US AQI on the host from NEA's PM2.5. It needs no key, no new terms, no new request and no Compose change, and it matches aqicn for NEA's stations.
+- **Chosen:** compute the US AQI on the host from NEA's PM2.5. It needs no key, no new terms, no new request and no Compose change, and it tracks aqicn for NEA's stations.
 - **Breakpoints:** the older US EPA PM2.5 breakpoints, because those match aqicn's values. The 2024 US breakpoints would read slightly higher above 55 µg/m³ (west: 170), so replies call it "the US AQI aqicn uses", not the current official US figure. EPA defines its PM2.5 AQI on 24-hour averages; aqicn applies it to the hourly reading.
 - **Deferred:** the aqicn API itself. It would add the unidentified extra points and a PM2.5 forecast. It needs a token, and adding a new environment key means a Compose change and the operator rollout. Revisit if the owner wants neighbourhood readings or the forecast.
 - **The skill:** for haze questions, give PSI and the US AQI side by side in one line. Explain the difference only if asked.
@@ -50,7 +50,13 @@ For haze, the owner compares NEA with aqicn.org and asked whether Chief could in
 
 ## Verification and outcome
 
-Not deployed. Acceptance after release: ask "how's the haze?" and check that the reply gives PSI and a US AQI matching aqicn's regional stations.
+Released (closure below). Pending owner acceptance: ask "how's the haze?" and check that the reply gives PSI and a US AQI matching aqicn's regional stations.
+
+### Release closure — 2026-10-21
+
+- **What merged.** [PR 306](https://github.com/akhilvuputuri/chief-agent/pull/306) was squash-merged at approved head `601b78b` as `eb03a0257c00679faf67e9379f9f328924e6cb7a`. Hosted CI and Devin passed on that head.
+- **Live.** `release:status` reports success: the exact commit deployed and startup health passed. CloudWatch shows `eb03a02` logging from 04:59 UTC (12:59 pm SGT) on 21 October, after `3b67e44`. No migration and no Compose change.
+- **Not yet observed:** a haze reply in production that gives the US AQI.
 
 ## Follow-up and next iteration
 
