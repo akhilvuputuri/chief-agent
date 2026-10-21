@@ -104,7 +104,7 @@
     },
     {
       "path": "singapore",
-      "sha256": "35e123f8c30aab41b2ebe052b82fe51a757138a0a06ef9bf51c05bd1b64efa75",
+      "sha256": "3909f5c6bbce1fe0ce0ff0a7b1044199b0b904d4fc384580272089f2add99a42",
       "agents": ["merlion"],
       "allowTools": [
         "lta_bus_arrival",

@@ -115,7 +115,7 @@ const US_PM25: [number, number, number, number][] = [
   [350.5, 500.4, 401, 500],
 ];
 export function usAqi(pm25: number | null) {
-  if (pm25 === null || pm25 < 0) return null;
+  if (pm25 === null || !Number.isFinite(pm25) || pm25 < 0) return null;
   // EPA truncates PM2.5 to one decimal before looking up its band.
   const c = Math.floor(pm25 * 10) / 10;
   const band = US_PM25.find(([, hi]) => c <= hi);

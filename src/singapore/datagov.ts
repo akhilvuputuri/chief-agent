@@ -234,7 +234,7 @@ export class DataGov {
           }),
         ),
         usAqiNote:
-          "usAqi is this hour's PM2.5 on the US EPA scale aqicn.org shows. It reads higher than PSI because the US scale is stricter between about 12 and 150 µg/m³ and is not averaged over 24 hours.",
+          "usAqi is the US AQI as aqicn.org computes it: EPA's pre-2024 PM2.5 breakpoints applied to this hour's reading. It reads higher than PSI because that scale is stricter between about 12 and 150 µg/m³ and is not averaged over 24 hours. Call it the US AQI aqicn uses, not the current official US figure.",
       },
       uv:
         nowHour < 7 || nowHour >= 20

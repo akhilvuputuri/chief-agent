@@ -1109,8 +1109,9 @@ test("a dataset file without a ready link is initiated and polled again", async 
   );
 });
 
-test("US AQI from NEA's hourly PM2.5 matches aqicn.org's Singapore readings", () => {
-  // NEA 1-hour PM2.5 and aqicn's map at 11:00 SGT on 21 October 2026.
+test("US AQI from NEA's hourly PM2.5 tracks aqicn.org's Singapore readings", () => {
+  // NEA 1-hour PM2.5 at 11:00 SGT on 21 October 2026. aqicn showed 95, 127,
+  // 144, 157 and 164: four exact, and West within 1.
   assert.deepEqual(
     [33, 46, 53, 67, 82].map((v) => usAqi(v)),
     [95, 127, 144, 157, 165],
@@ -1123,6 +1124,8 @@ test("US AQI from NEA's hourly PM2.5 matches aqicn.org's Singapore readings", ()
     [0, 50, 51, 100, 101, 150, 151, 200, 500, 500],
   );
   assert.equal(usAqi(null), null);
+  assert.equal(usAqi(Number.NaN), null);
+  assert.equal(usAqi(-1), null);
   assert.deepEqual(
     [50, 51, 101, 151, 201, 301].map((v) => usAqiBand(v)),
     [

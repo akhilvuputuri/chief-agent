@@ -146,7 +146,7 @@ One agent, **Merlion** (`singapore/merlion`, alias `merlion`), holds all twelve 
 
 ## US AQI next to PSI
 
-`sg_air` adds each region's US EPA AQI, computed from NEA's 1-hour PM2.5 with the older (pre-May 2024) breakpoints, as aqicn.org uses ([journal 111](journey/111-us-aqi-from-nea.md)). This matches aqicn's figures for NEA's five regional stations, with no extra data source. It reads higher than PSI because the US scale is stricter between about 12 and 150 µg/m³ and is hourly, not a 24-hour average. aqicn's own API (extra sensors and a PM2.5 forecast) is deferred.
+`sg_air` adds each region's US EPA AQI, computed from NEA's 1-hour PM2.5 with the older (pre-May 2024) breakpoints, as aqicn.org uses ([journal 111](journey/111-us-aqi-from-nea.md)). This tracks aqicn's figures for NEA's five regional stations (on 21 October: four exact, the West within 1), with no extra data source. Replies call it the US AQI aqicn uses, not the current official US figure, which since 2024 reads slightly higher above 55 µg/m³. It reads higher than PSI because the US scale is stricter between about 12 and 150 µg/m³ and is hourly, not a 24-hour average. aqicn's own API (extra sensors and a PM2.5 forecast) is deferred.
 
 ## Rain radar
 
