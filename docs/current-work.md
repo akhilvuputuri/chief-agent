@@ -1,3 +1,7 @@
+# US AQI next to PSI — tested, not deployed, 21 October 2026
+
+aqicn.org's Singapore readings are NEA's hourly PM2.5 on the US EPA scale. Merlion's `sg_air` now computes the same figure, so haze answers can give PSI and the aqicn-style number side by side with no new data source or key. [Journal 111](journey/111-us-aqi-from-nea.md).
+
 # Plain rain replies — live in `0c54f89`, 21 October 2026
 
 Merlion's rain answers read like a radar printout. They now answer in one to three plain sentences, with no speeds, percentages or frame times unless asked, and without adding forecasts or alerts. The picture caption is one line. In an offline replay, replies fell from 567–887 to about 110–270 characters, with no numbers. Next: owner acceptance. [Journal 109](journey/109-plain-rain-replies.md).

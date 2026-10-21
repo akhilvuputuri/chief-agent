@@ -21,6 +21,7 @@ Results use NEA's five regions: north, south, east, west and central. A place is
 - **24-hour PSI bands:** 0–50 good, 51–100 moderate, 101–200 unhealthy, 201–300 very unhealthy, above 300 hazardous.
 - **When PSI is unhealthy or worse:** say that NEA advises reducing prolonged or strenuous outdoor activity. Vulnerable people (elderly, children, people with heart or lung conditions) should avoid it.
 - **1-hour PM2.5 bands:** normal (0–55), elevated (56–150), high (151–250), very high (above 250). Use it for "right now" questions; PSI is the 24-hour picture.
+- **US AQI (`usAqi`, `usBand`):** this hour's PM2.5 on the US EPA scale, the number aqicn.org shows for Singapore. For haze or air quality questions, give it next to PSI in one line, for example "West: PSI 131; about 165 on the US hourly scale aqicn uses." It reads higher than PSI because the US scale is stricter between about 12 and 150 µg/m³ and is not a 24-hour average. Explain that only if the owner asks or seems surprised. Do not call aqicn itself: this is computed from NEA's readings.
 - **UV:** low 0–2, moderate 3–5, high 6–7, very high 8–10, extreme 11 and above. There are no readings at night.
 - **Heat stress (WBGT):** Low, Moderate or High. At Moderate or High, suggest shade, water and rest for outdoor exercise.
 
