@@ -34,7 +34,11 @@ const settings = codingSettings.parse({
   limits: { ms: 900000, models: 40, tools: 100 },
 });
 
-async function fixture(t: TestContext, piState: any = undefined) {
+async function fixture(
+  t: TestContext,
+  piState: any = undefined,
+  paths: string[] = ["docs/fixture.md"],
+) {
   const pg = new PGlite();
   t.after(() => pg.close());
   for (const f of (await readdir(new URL("../db/", import.meta.url)))
@@ -48,7 +52,7 @@ async function fixture(t: TestContext, piState: any = undefined) {
   const id = randomUUID(),
     attempt = randomUUID();
   let now = new Date();
-  const files = [{ path: "docs/fixture.md", content: "Fixture\n" }];
+  const files = paths.map((path) => ({ path, content: "Fixture\n" }));
   const cp = {
     plan: "Owner-approved docs change",
     summary: "Added the fixture entry",
@@ -180,6 +184,55 @@ async function fixture(t: TestContext, piState: any = undefined) {
   };
 }
 
+test("protected files reach the owner's Merge card, which names them; hard stops never do", async (t) => {
+  const f = await fixture(t, undefined, [
+    "src/coding/automation.ts",
+    "src/runtime.ts",
+    "docs/fixture.md",
+  ]);
+  await f.auto.tick();
+  f.setInspection({ checks: "passed" });
+  await f.auto.tick();
+  assert.equal((await f.job()).stage, "awaiting_merge_approval");
+  assert.equal(f.counts().merges, 0);
+  const card = (
+    await f.db.query(
+      "SELECT payload FROM coding_events WHERE job_id=$1 AND payload ? 'merge'",
+      [f.id],
+    )
+  ).rows[0].payload;
+  assert.match(card.summary, /Protected files changed/);
+  assert.match(card.summary, /`src\/coding\/automation.ts`, `src\/runtime.ts`/);
+  assert.doesNotMatch(card.summary, /docs\/fixture.md/);
+  for (const path of [
+    "db/033_example.sql",
+    "compose.yaml",
+    ".github/workflows/ci.yml",
+    "deploy/.env",
+  ]) {
+    const g = await fixture(t, undefined, ["docs/fixture.md", path]);
+    await g.auto.tick();
+    g.setInspection({ checks: "passed" });
+    await g.auto.tick();
+    const stopped = await g.job();
+    assert.equal(stopped.stage, "manual_review", path);
+    assert.match(stopped.summary, /operator rollout or review on GitHub/);
+    assert.equal(g.counts().merges, 0);
+  }
+});
+test("an ordinary owner-merge card carries no protected-files warning", async (t) => {
+  const f = await fixture(t);
+  await f.auto.tick();
+  f.setInspection({ checks: "passed" });
+  await f.auto.tick();
+  const card = (
+    await f.db.query(
+      "SELECT payload FROM coding_events WHERE job_id=$1 AND payload ? 'merge'",
+      [f.id],
+    )
+  ).rows[0].payload;
+  assert.doesNotMatch(card.summary, /Protected files changed/);
+});
 test("Pi owner-merge PRs become ready for Devin, then wait for an exact-head owner card before merging", async (t) => {
   const f = await fixture(t);
   await f.auto.tick();
