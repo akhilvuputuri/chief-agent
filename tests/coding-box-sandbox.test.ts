@@ -7,12 +7,19 @@ import { ensureUser, type Database } from "../src/db.js";
 import { BoxController } from "../src/boxes/controller.js";
 import { FakeBoxProvider } from "../src/boxes/provider.js";
 import type { BoxConfig } from "../src/boxes/schema.js";
+import { CodingController } from "../src/coding/controller.js";
+import { codingSettings } from "../src/coding/schema.js";
 import {
+  BOX_VIEW_STATES,
   BoxSandbox,
   CODING_TASK_COMMAND,
+  boxView,
   codingSandbox,
 } from "../src/coding/box-sandbox.js";
-import type { SandboxRequest } from "../src/coding/provider.js";
+import type {
+  SandboxProvider,
+  SandboxRequest,
+} from "../src/coding/provider.js";
 
 const image = `ghcr.io/example/coding@sha256:${"a".repeat(64)}`;
 const previous = `ghcr.io/example/coding@sha256:${"9".repeat(64)}`;
@@ -96,6 +103,59 @@ async function fixture(t: TestContext) {
     for (let i = 0; i < 6 && (await row(id)).state !== "terminated"; i++)
       await boxes.tick();
   };
+  /**
+   * `coding_status` over this database. Its provider, publisher and model all throw, so a
+   * status call that touched any of them would fail the test rather than go unnoticed.
+   */
+  const controller = new CodingController(
+    db,
+    codingSettings.parse({
+      repository: "akhilvuputuri/chief-agent",
+      branch: "main",
+      image,
+      model: "fixture/coder",
+      reviewerModel: "fixture/reviewer",
+      effort: "high",
+      limits: { ms: 900000, models: 40, tools: 100 },
+    }),
+    {
+      create: async () => {
+        throw new Error("status must not create a sandbox");
+      },
+      find: async () => {
+        throw new Error("status must not find a sandbox");
+      },
+      inspect: async () => {
+        throw new Error("status must not inspect a sandbox");
+      },
+      terminate: async () => {
+        throw new Error("status must not terminate a sandbox");
+      },
+    } as unknown as SandboxProvider,
+    {
+      resolve: async () => {
+        throw new Error("status must not resolve a repository");
+      },
+      publish: async () => {
+        throw new Error("status must not publish");
+      },
+    } as any,
+    "c".repeat(64),
+    "https://companion.example.com",
+    (user) => user === "owner",
+    (() => {
+      throw new Error("status must not call a model");
+    }) as any,
+    () => now,
+  );
+  const status = async (id?: string) =>
+    (await controller.status("owner", id)) as any;
+  /** Records the sandbox of a job's current attempt, as the controller does after launch. */
+  const attach = async (jobId: string, sandboxId: string) =>
+    db.query("UPDATE coding_jobs SET sandbox_id=$2 WHERE id=$1", [
+      jobId,
+      sandboxId,
+    ]);
   return {
     db,
     boxes,
@@ -105,6 +165,8 @@ async function fixture(t: TestContext) {
     task,
     live,
     settle,
+    status,
+    attach,
     advance: (ms: number) => {
       now = new Date(now.getTime() + ms);
     },
@@ -352,4 +414,161 @@ test("startup needs boxes and the reviewed coding profile, and refuses while a C
     [r.jobId],
   );
   assert.ok(await codingSandbox(base));
+});
+
+test("coding_status shows the box view of a live box, and keeps the list call unchanged", async (t) => {
+  const f = await fixture(t);
+  const r = await f.request();
+  const id = await f.sandbox.create(r);
+  await f.attach(r.jobId, id);
+  const credential = await f.live(id);
+  let box = (await f.status(r.jobId)).box;
+  assert.equal(box.state, "ready");
+  assert.ok(box.launchedAt instanceof Date);
+  assert.ok(box.lastReportAt instanceof Date);
+  assert.ok(box.lastReportAt >= box.launchedAt);
+  assert.equal("endReason" in box, false);
+  // The list call stays as it was: a box view only ever appears on one job's details.
+  for (const item of await f.status()) assert.equal("box" in item, false);
+  // A busy box says so, and a closing box is terminating, not yet ended.
+  await f.boxes.events(id.slice(4), credential, {
+    epoch: 1,
+    events: [{ seq: 1, kind: "box.state", state: "busy" }],
+  });
+  assert.equal((await f.status(r.jobId)).box.state, "busy");
+  await f.boxes.events(id.slice(4), credential, {
+    epoch: 1,
+    events: [
+      {
+        seq: 2,
+        kind: "task.result",
+        taskId: (await f.task(id)).id,
+        payload: { exitCode: 1 },
+      },
+    ],
+  });
+  await f.sandbox.inspect(id);
+  box = (await f.status(r.jobId)).box;
+  assert.equal((await f.row(id)).state, "terminating");
+  assert.equal(box.state, "terminating");
+  assert.equal("endReason" in box, false);
+});
+
+test("coding_status states why a box ended, only once it is terminated and has a reason", async (t) => {
+  const f = await fixture(t);
+  const r = await f.request();
+  const id = await f.sandbox.create(r);
+  await f.attach(r.jobId, id);
+  await f.live(id);
+  assert.equal("endReason" in (await f.status(r.jobId)).box, false);
+  await f.boxes.close("owner", id.slice(4), "Hard maximum reached");
+  await f.settle(id);
+  const box = (await f.status(r.jobId)).box;
+  assert.equal(box.state, "terminated");
+  assert.equal(box.endReason, "Hard maximum reached");
+  assert.ok(box.lastReportAt instanceof Date);
+
+  // A verified ending with nothing stated about it gives the owner no reason.
+  const other = await f.request();
+  const otherId = await f.sandbox.create(other);
+  await f.attach(other.jobId, otherId);
+  await f.live(otherId);
+  await f.db.query(
+    "UPDATE boxes SET state='terminated',reason='' WHERE id=$1",
+    [otherId.slice(4)],
+  );
+  const ended = (await f.status(other.jobId)).box;
+  assert.equal(ended.state, "terminated");
+  assert.equal("endReason" in ended, false);
+});
+
+test("a job on an older sandbox shows no box view", async (t) => {
+  const f = await fixture(t);
+  const r = await f.request();
+  await f.attach(r.jobId, "chief-coding:build-1");
+  const detail = await f.status(r.jobId);
+  assert.equal("box" in detail, false);
+  assert.equal(detail.id, r.jobId);
+  assert.equal(await boxView(f.db, "chief-coding:build-1", "owner"), undefined);
+  // A box: id that is not a box UUID is refused before any query, so it has no view.
+  await f.db.query("UPDATE coding_jobs SET sandbox_id='box:x' WHERE id=$1", [
+    r.jobId,
+  ]);
+  assert.equal("box" in (await f.status(r.jobId)), false);
+});
+
+test("every stored box state maps to one of the seven view states", async (t) => {
+  const f = await fixture(t);
+  const documented: Record<string, string> = {
+    requested: "requested",
+    launching: "requested",
+    booting: "booting",
+    starting: "booting",
+    ready: "ready",
+    busy: "busy",
+    stopping: "terminating",
+    stopped: "terminating",
+    terminating: "terminating",
+    terminated: "terminated",
+    held: "held",
+  };
+  // The mapping is only total if it covers the states the column actually allows.
+  const check = (
+    await f.db.query(
+      "SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid='boxes'::regclass AND contype='c'",
+    )
+  ).rows.map((c: any) => String(c.def))[0];
+  const stored = [...check.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+  assert.deepEqual([...stored].sort(), Object.keys(documented).sort());
+  const r = await f.request();
+  const id = await f.sandbox.create(r);
+  await f.attach(r.jobId, id);
+  await f.live(id);
+  for (const [state, view] of Object.entries(documented)) {
+    await f.db.query("UPDATE boxes SET state=$2,reason='' WHERE id=$1", [
+      id.slice(4),
+      state,
+    ]);
+    const box = (await f.status(r.jobId)).box;
+    assert.ok(BOX_VIEW_STATES.includes(box.state), `${state} -> ${box.state}`);
+    assert.equal(box.state, view, state);
+    assert.equal("endReason" in box, false, state);
+  }
+  // A state a later migration might allow is reported as held: neither live nor gone.
+  await f.db.query("ALTER TABLE boxes DROP CONSTRAINT boxes_state_check");
+  await f.db.query("UPDATE boxes SET state='draining' WHERE id=$1", [
+    id.slice(4),
+  ]);
+  assert.equal((await f.status(r.jobId)).box.state, "held");
+});
+
+test("a box id with no row, another owner's box, or a malformed id has no view", async (t) => {
+  const f = await fixture(t);
+  assert.equal(await boxView(f.db, `box:${randomUUID()}`, "owner"), undefined);
+  assert.equal(await boxView(f.db, "box:not-a-uuid", "owner"), undefined);
+  // A job whose attempt names no box row still gets its normal status details.
+  const r = await f.request();
+  await f.attach(r.jobId, `box:${randomUUID()}`);
+  const detail = await f.status(r.jobId);
+  assert.equal("box" in detail, false);
+  assert.equal(detail.id, r.jobId);
+  // The view is owner-scoped like every other coding read.
+  const id = await f.sandbox.create(await f.request());
+  assert.ok(await boxView(f.db, id, "owner"));
+  assert.equal(await boxView(f.db, id, "someone-else"), undefined);
+});
+
+test("a held box shows held without stating a reason for ending", async (t) => {
+  const f = await fixture(t);
+  const r = await f.request();
+  const id = await f.sandbox.create(r);
+  await f.attach(r.jobId, id);
+  await f.live(id);
+  await f.db.query(
+    "UPDATE boxes SET state='held',reason='Launch outcome unknown; inspect the provider' WHERE id=$1",
+    [id.slice(4)],
+  );
+  const box = (await f.status(r.jobId)).box;
+  assert.equal(box.state, "held");
+  assert.equal("endReason" in box, false);
 });

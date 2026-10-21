@@ -252,7 +252,9 @@ Starting a box creates infrastructure and spends money. `agent_run` is classed a
 
 - **Concurrency.** Coding defaults to 2 running EC2 boxes; stopped boxes count against a separate retention cap. On the existing CodeBuild path, coding stays at 1.
 - **Owner view and steering.** `coding_status` gains:
-  - box state: running, idle or stopped;
+  - box state, as one of seven view states: requested, booting, ready, busy, terminating, terminated or held ([phase 4c](#phase-4c-owner-view-and-steering));
+  - when the box launched and when it last reported;
+  - why it ended, once it is terminated;
   - the current step;
   - recent activity from the channel.
 
@@ -284,7 +286,7 @@ Each phase is a separate PR with exact-head independent review, CI, a release re
 4. **Coding on boxes.** No CodeBuild fallback (owner decision, confirmed 20 October). In-flight jobs keep their snapshotted path.
    - **4a. Attempts run in boxes.** Each coding attempt runs as one task in its own EC2 box, behind the existing sandbox interface, so every host policy and per-call check stays exactly as it is. See [Phase 4a](#phase-4a-coding-attempts-in-boxes). Then: canary jobs on EC2, and switch new attempts to boxes by configuration.
    - **4b. Warm reuse.** Reuse across the rounds that follow implementation approval, with the trust reset, and coding concurrency of 2 boxes. The coding hooks are extracted here, where reuse needs them.
-   - **4c. Owner view and steering.** `coding_status` box view, and Chief relays owner answers into a running task.
+   - **4c. Owner view and steering.** `coding_status` box view ([journal 112](journey/112-coding-status-box-view.md)), and Chief relays owner answers into a running task. See [Phase 4c](#phase-4c-owner-view-and-steering).
 5. **Generic boxed agent.** `agent_run` with `placement: box` and `requestKey`, plus `agent_send`, `agent_status` and `agent_close`; first non-coding profile (analysis or crawl).
 6. **Retire CodeBuild** (the coding-specific sandbox path, its project and its controller policy) as soon as coding runs on boxes and no snapshotted job uses it. See [Phase 6](#phase-6-codebuild-removed).
 
@@ -366,6 +368,38 @@ The smallest move that puts coding on EC2 without weakening anything. Coding alr
   3. Add the `coding` box profile with that image (concurrency 1) and its `ec2.coding` entry: the `chief-box-prod-coding` launch template, task memory and CPUs within `m7i.xlarge`, and the pinned task command.
   4. Switch `sandbox` to `box`.
   5. Run a canary job. In the canary, check that the worker's subreaper cleanup works on the box kernel.
+
+## Phase 4c: owner view and steering
+
+The owner's side of a boxed coding attempt: what `coding_status` says about the box, without leaving the box layer's truth or claiming more than the database holds. The steering half of this phase is not built yet.
+
+- **One `box` field, only for box attempts.** `coding_status` with an exact job id adds `box` when the job's current or latest attempt has a `box:` sandbox id:
+  - `state`: one of seven view states, `requested`, `booting`, `ready`, `busy`, `terminating`, `terminated` or `held`;
+  - `launchedAt`: when the launch began, `null` before it does;
+  - `lastReportAt`: the box's last hello, poll or event; `null` before first contact;
+  - `endReason`: why it ended, present only once the box is `terminated` and the stored reason is non-empty. A live, held or terminating box never states one.
+
+  A job on an older sandbox (a `chief-coding:` build id) has no `box` key at all, so its output is exactly as before. The list call (`coding_status` without an id) is unchanged for every job.
+
+- **Read-only, from the existing tables.** `boxView()` (`src/coding/box-sandbox.ts`) runs one owner-scoped `SELECT`: `state`, `reason`, `launch_started_at` and `seen_at` from `boxes`, plus `max(created_at)` from `box_events` as a fallback report time for a row that has not been seen yet. It takes no lock, makes no provider call and writes nothing, so there is no schema change and no migration. The id is matched as `b.id::text`, so a malformed sandbox id cannot fail the call.
+- **A missing row is no view, not an error.** A `box:` id with no `boxes` row (deleted, or never created) shows no `box` field. `coding_status` never fails because a box is gone.
+- **The mapping is total.** `boxes.state` allows eleven values; the owner is told seven. Every stored state maps to one of them, and an unrecognised stored state (a future CHECK value) is reported as `held`, because that claims neither that the box runs nor that it is gone:
+
+  | stored state  | view state    | why                                                                         |
+  | ------------- | ------------- | --------------------------------------------------------------------------- |
+  | `requested`   | `requested`   | admitted, nothing launched yet                                              |
+  | `launching`   | `requested`   | launch in progress; after an uncertain launch an instance may already exist |
+  | `booting`     | `booting`     | launched, waiting for the box's first hello                                 |
+  | `starting`    | `booting`     | a stopped box started again, same wait for a hello                          |
+  | `ready`       | `ready`       | connected and idle                                                          |
+  | `busy`        | `busy`        | running a task                                                              |
+  | `stopping`    | `terminating` | asked to stop; still exists, no longer serving the attempt                  |
+  | `stopped`     | `terminating` | retained warm and not running; it serves nothing until it is started again  |
+  | `terminating` | `terminating` | termination started, not yet verified                                       |
+  | `terminated`  | `terminated`  | verified gone                                                               |
+  | `held`        | `held`        | held for an operator                                                        |
+
+- **A lifecycle phase, not a resource claim.** The view never says a box still exists once it is gone: only a verified closure reports `terminated`, and that is the only state that says why. `held` means the host is not acting on the box, not that it is running.
 
 ## Phase 6: CodeBuild removed
 
