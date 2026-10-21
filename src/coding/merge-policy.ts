@@ -1,7 +1,23 @@
 import type { Outcome } from "./schema.js";
 import { artifactHash } from "./github.js";
 
-/** Operator-reviewed boundary. A model cannot widen it through task instructions. */
+/**
+ * Never merged through Chief, even with the owner's Merge card: database migrations and
+ * Compose need a reviewed operator rollout (the release guard refuses them otherwise),
+ * environment files hold secrets, and the GitHub App cannot merge workflow changes.
+ */
+export function hardStopMergePath(path: string) {
+  return (
+    /^(?:\.github|db)(?:\/|$)/.test(path) ||
+    /^compose(?:\..+)?\.ya?ml$/.test(path) ||
+    path.split("/").some((p) => p.startsWith(".env") && p !== ".env.example")
+  );
+}
+/**
+ * Operator-reviewed boundary. A model cannot widen it through task instructions. Without
+ * the owner's Merge card these paths are never merged automatically; with it, the card
+ * names them so the owner approves them knowingly (owner decision, 21 October 2026).
+ */
 export function protectedMergePath(path: string) {
   return (
     /^(?:\.github|db|deploy|scripts|config|evals|coding_runtime|plugins)(?:\/|$)/.test(

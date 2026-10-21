@@ -7,6 +7,7 @@ import { requirementScope } from "./requirements.js";
 import {
   MergeRefused,
   approvedArtifact,
+  hardStopMergePath,
   protectedMergePath,
   type MergeTarget,
   type PrAutomationRepository,
@@ -206,13 +207,35 @@ export class CodingAutomation {
     const summary = Array.from(String(j.result?.summary ?? ""))
       .slice(0, 800)
       .join("");
+    const paths = (j.result?.checkpoint.files ?? []).map((f) => f.path);
+    const list = (found: string[]) =>
+      `${found
+        .slice(0, 8)
+        .map((p) => `\`${p}\``)
+        .join(", ")}${found.length > 8 ? ` and ${found.length - 8} more` : ""}`;
+    // Dependencies and images are built into the production gateway at release.
+    const shipped = paths.filter((p) =>
+      /^(?:package(?:-lock)?\.json|Dockerfile(?:\..+)?)$/.test(p),
+    );
+    const guarded = paths.filter(
+      (p) => protectedMergePath(p) && !shipped.includes(p),
+    );
+    const warning = `${
+      guarded.length
+        ? `\n\n**Protected files changed** (Chief's own controls; review them before approving): ${list(guarded)}.`
+        : ""
+    }${
+      shipped.length
+        ? `\n\n**Dependencies or images changed** (they run in production at release; review the diff on GitHub before approving): ${list(shipped)}.`
+        : ""
+    }`;
     await this.db.query(
       "INSERT INTO coding_events(job_id,event_key,payload) VALUES($1,$2,$3::jsonb)",
       [
         j.id,
         `merge-approval:${j.revision}:${d.head}:${randomUUID()}`,
         JSON.stringify({
-          summary: `**Ready to merge**\nCoder's own summary (not verified by Chief): ${summary}`,
+          summary: `**Ready to merge**\nCoder's own summary (not verified by Chief): ${summary}${warning}`,
           question: `${cards.length ? "The PR state changed or the earlier card lapsed, so please confirm again. " : ""}Exact-head CI and Devin passed, ${d.handled.length} review comment(s) were handled, and the independent ${j.settings.reviewerModel} review approved the final candidate. Merge this PR? Chief will merge only head ${d.head.slice(0, 12)} and then watch the release.`,
           url: (j as any).pr_url,
           merge: { revision: j.revision, head: d.head, tree: d.tree },
@@ -355,7 +378,17 @@ export class CodingAutomation {
         );
         return;
       }
-      if (j.result.checkpoint.files.some((f) => protectedMergePath(f.path))) {
+      const paths = j.result.checkpoint.files.map((f) => f.path);
+      if (paths.some(hardStopMergePath)) {
+        await this.manual(
+          j,
+          d,
+          "This PR changes database migrations, Compose, environment files or CI workflows; those need an operator rollout or review on GitHub.",
+        );
+        return;
+      }
+      // Protected paths merge only through the owner's Merge card, which names them.
+      if (!ownerMerge && paths.some(protectedMergePath)) {
         await this.manual(
           j,
           d,
