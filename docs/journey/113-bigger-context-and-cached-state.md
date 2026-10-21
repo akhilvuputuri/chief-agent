@@ -24,26 +24,27 @@ Status: in review. The compaction threshold rises from 120k to about 1.08M chara
 
 - **Measured, production, same calls.** `runtimeParts` averages per call:
 
-  | Key                                                                     | Characters | Changes between calls?              |
-  | ----------------------------------------------------------------------- | ---------- | ----------------------------------- |
-  | `agentCatalogue`                                                        | 4,206      | no                                  |
-  | `skillCatalogue`                                                        | 3,203      | no                                  |
-  | `domainGuidance`                                                        | 2,671      | no, with every domain always loaded |
-  | `gatheringWorkflow`, `availability`                                     | 827        | no                                  |
-  | `conversation`, `openLoops`, `library`, `topic`, `costUsage` and others | about 4.5k | yes                                 |
+  | Key                                                                     | Characters | Changes between calls? (from the code, not measured) |
+  | ----------------------------------------------------------------------- | ---------- | ---------------------------------------------------- |
+  | `agentCatalogue`                                                        | 4,206      | no                                                   |
+  | `skillCatalogue`                                                        | 3,203      | no                                                   |
+  | `domainGuidance`                                                        | 2,671      | no, with every domain always loaded                  |
+  | `gatheringWorkflow`, `availability`                                     | 827        | no                                                   |
+  | `conversation`, `openLoops`, `library`, `topic`, `costUsage` and others | about 4.5k | yes                                                  |
 
   The state message comes after every cache marker, so all of it was billed at the full input price on every call.
 
 ## Diagnosis and alternatives
 
 - **The threshold.** At 120k characters (about 33k tokens), a fixed envelope of 80k left about 27k for the previous exchange, this turn's results and older history. Ordinary turns ran out of room, so history was dropped and results were excerpted.
-  - The new 1.08M-character threshold is about 300k tokens, the owner's choice. That is well within Opus's 1M window.
-  - **Cost trade-off (estimated):** a turn can now grow much larger before compaction. A 400k-character call costs about $0.05 when cached, but about $0.55 to write fresh.
+  - The new 1.08M-character threshold is about 300k tokens, the owner's choice. That is well within Opus's 1M window (OpenRouter catalogue `context_length` 1,000,000 for `anthropic/claude-opus-5.5`).
+  - **Cost trade-off (estimated):** a turn can now grow much larger before compaction. A 400k-character call costs about $0.02–0.03 when cached (cache read is $0.20/M, 0.05× the $4/M input price), but about $0.55 to write fresh.
   - The soft 48k budget and the 6k older-history floor are unchanged, so older history does not grow, but it is no longer dropped mid-turn at these sizes.
-- **Fixed state.** About 11k characters of the state never change between calls. They now sit in the opening system message, after instructions and memories. That message carries a cache marker, so they are read at about 0.1× instead of billed in full every call. The estimated saving is about $0.01 per call.
+- **Fixed state.** About 11k characters of the state never change between calls. They now sit in the opening system message, after instructions and memories. That message carries a cache marker, so they are read at about 0.05× instead of billed in full every call. The estimated saving is about $0.01 per call.
   - Changing keys stay in the state message at the end.
   - The skill catalogue changes only when a skill is activated, which costs one cache rewrite.
-  - Under `TOOL_PICKER=jev`, a mid-turn load would now change the opening message and cost a full miss. `all` is the production setting.
+  - `toolDomains` and the fixed `note` move too, along with child agents' `skillCatalogue` and role `note`.
+- Under `TOOL_PICKER=jev`, a mid-turn load already changed the tool list, which precedes the system message in the cached prefix. So moving these keys adds no new miss there. `all` is the production setting.
 
 ## Implementation and review
 
@@ -57,7 +58,20 @@ Status: in review. The compaction threshold rises from 120k to about 1.08M chara
   - new tests pin the production defaults (a 200k-character turn is not compacted) and the stable/current split, including a byte-identical opening message when only the changing state differs;
   - the history and tool-domains tests are updated for the new limit and the guidance's new place.
 
-Independent review: pending.
+Independent review (Opus 5.5, `a3e1d49`): APPROVE, with no blocking findings. It confirmed:
+
+- every stable key is constant per deployment and owner, and `refreshContext` and `loadTools` never rewrite one;
+- no consumer reads the moved keys from the state message;
+- the limits are coherent with `history.ts`, and trimming still behaves;
+- the cache markers are unchanged.
+
+Its low findings:
+
+- specialist traces can grow about 9× per row;
+- there is no per-turn cost ceiling;
+- text in scripts near one character per token (for example Chinese) could exceed the token window before the character limits act;
+- the cache property lacked an integration test, which has since been added;
+- doc corrections, since applied.
 
 ## Verification and outcome
 
@@ -68,10 +82,12 @@ Pending:
   - no `context.over_budget`-driven history drop mid-turn at about 80k fixed;
   - `wireCompacted` false on ordinary turns;
   - later calls reading at least through the owner's message;
-  - the state message shrinking to about 4.5k;
+  - the state message shrinking to about 4.5k (derived: `runtimeParts` measures the whole state before the split, so subtract the stable keys);
   - cost per call against 21 October.
 
 ## Follow-up and next iteration
 
 - Reuse across messages (step 4 of the caching plan) after a week of data.
-- Watch for unusually large turns now that compaction starts much later.
+- Watch for unusually large turns now that compaction starts much later. Estimated: an extreme turn costs about $1–3, and a fresh 300k-token write about $1.50.
+- Watch `research.model_input` trace storage, since specialist rows can grow about 9×.
+- Text near one character per token, for example Chinese, could exceed the 1M-token window before 1.3M characters. This is a known limit.
