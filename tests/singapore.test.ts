@@ -9,7 +9,13 @@ import {
 } from "../src/singapore/routes.js";
 import { SgBusyError, SgHttp } from "../src/singapore/http.js";
 import { regionOf, svy21ToWgs84, inSingapore } from "../src/singapore/geo.js";
-import { dmy, matchesQuery, psiBand } from "../src/singapore/format.js";
+import {
+  dmy,
+  matchesQuery,
+  psiBand,
+  usAqi,
+  usAqiBand,
+} from "../src/singapore/format.js";
 import { SingaporeTools } from "../src/singapore/tools.js";
 import { readOperations } from "../src/execution.js";
 import { runtimeContext } from "../src/runtime.js";
@@ -542,6 +548,10 @@ test("air quality reports PSI bands, PM2.5, UV and the worst heat stress per reg
   assert.deepEqual(a.psi24h.byRegion.west, { psi: 114, band: "unhealthy" });
   assert.deepEqual(a.psi24h.byRegion.east, { psi: 52, band: "moderate" });
   assert.equal(a.pm25OneHour.byRegion.north.band, "elevated");
+  // 60 µg/m³ on the US EPA scale aqicn shows.
+  assert.equal(a.pm25OneHour.byRegion.north.usAqi, 153);
+  assert.equal(a.pm25OneHour.byRegion.north.usBand, "unhealthy");
+  assert.match(a.pm25OneHour.usAqiNote, /aqicn/);
   assert.equal(a.uv.index, 1);
   assert.equal(a.heatStress.worstByRegion.east.level, "Moderate");
   const alerts: any = await t.call({ operation: "sg_alerts" });
@@ -1096,5 +1106,35 @@ test("a dataset file without a ready link is initiated and polled again", async 
   assert.deepEqual(
     f.calls.map((c) => c.url.pathname.split("/").pop()),
     ["poll-download", "initiate-download", "poll-download", "x.geojson"],
+  );
+});
+
+test("US AQI from NEA's hourly PM2.5 tracks aqicn.org's Singapore readings", () => {
+  // NEA 1-hour PM2.5 at 11:00 SGT on 21 October 2026. aqicn showed 95, 127,
+  // 144, 157 and 164: four exact, and West within 1.
+  assert.deepEqual(
+    [33, 46, 53, 67, 82].map((v) => usAqi(v)),
+    [95, 127, 144, 157, 165],
+  );
+  // Band edges, the top of the scale, and missing readings.
+  assert.deepEqual(
+    [0, 12, 12.1, 35.4, 35.5, 55.4, 55.5, 150.4, 500.4, 900].map((v) =>
+      usAqi(v),
+    ),
+    [0, 50, 51, 100, 101, 150, 151, 200, 500, 500],
+  );
+  assert.equal(usAqi(null), null);
+  assert.equal(usAqi(Number.NaN), null);
+  assert.equal(usAqi(-1), null);
+  assert.deepEqual(
+    [50, 51, 101, 151, 201, 301].map((v) => usAqiBand(v)),
+    [
+      "good",
+      "moderate",
+      "unhealthy for sensitive groups",
+      "unhealthy",
+      "very unhealthy",
+      "hazardous",
+    ],
   );
 });

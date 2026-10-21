@@ -100,6 +100,39 @@ export function pm25Band(value: number | null) {
   return "very high";
 }
 
+/**
+ * US EPA AQI for PM2.5, using the breakpoints in force before May 2024. These
+ * are the ones aqicn.org uses: its Singapore readings are NEA's 1-hour PM2.5
+ * converted this way, with no averaging, so this matches what the owner sees there.
+ */
+const US_PM25: [number, number, number, number][] = [
+  [0, 12, 0, 50],
+  [12.1, 35.4, 51, 100],
+  [35.5, 55.4, 101, 150],
+  [55.5, 150.4, 151, 200],
+  [150.5, 250.4, 201, 300],
+  [250.5, 350.4, 301, 400],
+  [350.5, 500.4, 401, 500],
+];
+export function usAqi(pm25: number | null) {
+  if (pm25 === null || !Number.isFinite(pm25) || pm25 < 0) return null;
+  // EPA truncates PM2.5 to one decimal before looking up its band.
+  const c = Math.floor(pm25 * 10) / 10;
+  const band = US_PM25.find(([, hi]) => c <= hi);
+  if (!band) return 500;
+  const [lo, hi, il, ih] = band;
+  return Math.round(il + ((ih - il) * (c - lo)) / (hi - lo));
+}
+export function usAqiBand(aqi: number | null) {
+  if (aqi === null) return null;
+  if (aqi <= 50) return "good";
+  if (aqi <= 100) return "moderate";
+  if (aqi <= 150) return "unhealthy for sensitive groups";
+  if (aqi <= 200) return "unhealthy";
+  if (aqi <= 300) return "very unhealthy";
+  return "hazardous";
+}
+
 export function uvBand(value: number | null) {
   if (value === null) return null;
   if (value <= 2) return "low";
