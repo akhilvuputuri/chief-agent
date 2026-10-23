@@ -14,6 +14,7 @@ import { CodingController, type CodingJob } from "../src/coding/controller.js";
 import { ToolValidationError } from "../src/tool-errors.js";
 import { codingSettings, outcome } from "../src/coding/schema.js";
 import { artifactHash, canonicalJson } from "../src/coding/github.js";
+import { setOpsSink } from "../src/ops-log.js";
 import type { PrInspection } from "../src/coding/merge-policy.js";
 
 const base = "a".repeat(40),
@@ -694,7 +695,15 @@ async function rebasedAttempt(f: Awaited<ReturnType<typeof fixture>>) {
 test("a rebase that reproduces the reviewed artifact byte for byte is recorded, and review still runs", async (t) => {
   const f = await fixture(t);
   const { before, review, recorded } = await rebasedAttempt(f);
+  const logs: any[] = [];
+  const previous = setOpsSink((line) => logs.push(JSON.parse(line)));
+  t.after(() => setOpsSink(previous));
   await review(before.checkpoint.files, before.checkpoint.patch);
+  const rebased = logs.filter((l) => l.event === "coding.rebase_candidate");
+  assert.equal(rebased.length, 1);
+  assert.equal(rebased[0].taskId, f.id);
+  assert.equal(rebased[0].revision, 2);
+  assert.equal(rebased[0].matched, true);
   const [row] = await recorded();
   assert.equal(row.delivery, "suppressed");
   assert.equal(row.payload.identical, true);
@@ -709,6 +718,9 @@ test("a rebase that reproduces the reviewed artifact byte for byte is recorded, 
 test("a rebase whose candidate differs at all is recorded as not identical", async (t) => {
   const f = await fixture(t);
   const { before, review, recorded } = await rebasedAttempt(f);
+  const logs: any[] = [];
+  const previous = setOpsSink((line) => logs.push(JSON.parse(line)));
+  t.after(() => setOpsSink(previous));
   await review(
     before.checkpoint.files.map((file: any) => ({
       ...file,
@@ -719,6 +731,10 @@ test("a rebase whose candidate differs at all is recorded as not identical", asy
   const rows = await recorded();
   assert.equal(rows.length, 1);
   assert.equal(rows[0].payload.identical, false);
+  const rebased = logs.filter((l) => l.event === "coding.rebase_candidate");
+  assert.equal(rebased.length, 1);
+  assert.equal(rebased[0].revision, 2);
+  assert.equal(rebased[0].matched, false);
 });
 
 test("automatic rebases stop after two rounds and hand back to the owner", async (t) => {

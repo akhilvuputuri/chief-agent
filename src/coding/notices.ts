@@ -1,3 +1,5 @@
+import { formatTelegram } from "../telegram-format.js";
+
 /**
  * Owner-facing shape of coding notices (journal 115). Progress-only notices are folded into
  * one status message per stretch of work and edited in place; questions, approval cards,
@@ -96,4 +98,22 @@ export function renderStatus(
     "",
     "This message updates in place. Questions, approvals and results arrive as separate messages.",
   ].join("\n");
+}
+
+/**
+ * Bounds a status message to one Telegram message: Telegram splits by UTF-16 length, so
+ * emoji-heavy lines can outgrow the line count bound. The oldest lines are dropped first.
+ */
+export function fitStatus(
+  jobId: string,
+  candidates: StatusLine[],
+  total: number,
+) {
+  let lines = candidates.slice(-STATUS_LINES);
+  let text = renderStatus(jobId, lines, total);
+  while (lines.length > 1 && formatTelegram(text).length !== 1) {
+    lines = lines.slice(1);
+    text = renderStatus(jobId, lines, total);
+  }
+  return { lines, text };
 }

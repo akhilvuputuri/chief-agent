@@ -1,7 +1,7 @@
 # 115 — Can a coding job keep the owner informed without a message per milestone?
 
 Work date: 2026-10-23. Written: 2026-10-23.
-Status: in review. The notice changes and the rebase measurement are implemented and pass their offline tests. Independent review: pending. CI, release and a live job after the release are pending.
+Status: in review. The notice changes and the rebase measurement are implemented and pass their offline tests. Independent review approved `11cc462` with nits; the fixes are in place, and re-review is pending. CI, release and a live job after the release are pending.
 
 ## User-visible problem and preceding iteration
 
@@ -36,7 +36,8 @@ The volume comes from delivery, not from the worker: each milestone is a separat
 - **Quiet hours.** Edits do not notify, so editing the current status message continues at night. Progress that would need a new message waits until the window ends (`CODING_QUIET_HOURS`, default `23:00-08:00`, Asia/Singapore). If a separate notice was sent after held progress, that progress is superseded and suppressed rather than shown out of order in the morning.
   - Rejected: sending silently (`disable_notification`). It still adds a message, and the request was to defer or fold.
   - Questions and approval cards are never held. Failures and outcomes are not held either, because they are not progress.
-- **Cancellations.** Pending cancellations for one owner become one summary. A cancellation waits 15 seconds before delivery, so a bulk cancel made in one turn lands in one message.
+- **Cancellations.** Pending cancellations for one owner become one summary, naming each job by its objective (first line, 80 characters) and its id. A cancellation waits 15 seconds before delivery, so a bulk cancel made in one turn lands in one message.
+- **The coder's summary.** Folding the approved candidate into the status message would cut the coder's summary, previously up to 1,500 characters, to one status line. In quiet hours that line can even be superseded before it is sent. Owner-merge jobs see the summary again on the Merge card (800 characters); autoMerge and draft-only jobs would not. So the first PR notice of a job outside the owner-merge workflow now carries the summary, bounded to 800 characters like the Merge card. The PR notice is a separate message, never held, so the summary always arrives. Rejected: keeping `:finished` separate for those jobs. That puts back one message per attempt and still sends the "publishing" notice and the PR notice back to back.
 
 **Rebase review reuse: detection only.** The goal was to skip the repeat review when a rebase reproduces the reviewed candidate byte for byte. Two findings make that larger than this change:
 
@@ -72,6 +73,10 @@ Outbox guarantees kept:
 - Progress payloads are never modified, so the worker's retry-equality check (`progress()` hashing) still holds.
 - Owner scoping, revoked-owner suppression, the requirements-card gate and `codingDestination` routing are unchanged. Edits address the owner's chat and message id, so they need no topic.
 
+- **One deliverer per status message.** Two gateway processes can overlap during a release. A status delivery therefore takes a two-minute lease on the job's `status-message` row (an atomic conditional upsert, like the Telegram views lease) for the anchor read, the edit or send, and the save. A delivery that finds the lease held returns its notices to `pending` without trying. A lease left by a process that died expires.
+- **One Telegram message.** Before the anchor is saved, the oldest lines are dropped until the text formats to exactly one message. The line bound counts code points, but Telegram splits by UTF-16 length, so emoji-heavy lines could otherwise split the message and make every later edit fail.
+- **Publication mismatch.** A PR that does not match the reviewed artifact pauses the job, as before, and now also sends a pause notice (`publication-paused:<revision>:<attempt>`). Without it, the status message would end at "publishing" with nothing after it.
+
 Known edge: if the gateway stops after Telegram accepted a new status message but before its id was saved, those notices are `uncertain` and the next progress starts another status message. Nothing is resent, but an orphaned status message can remain.
 
 Tests:
@@ -81,12 +86,27 @@ Tests:
   - quiet-hours hold, edits that continue at night, the morning send and superseded progress;
   - outbox idempotency: an uncertain edit, a restart mid-edit, a deleted status message and a retried worker report;
   - Telegram edit-error mapping;
-  - the approved candidate folded in, with its PR separate and a rebuilt PR folded;
-  - the bulk cancel summary.
-- [`tests/coding-pi-owner-merge.test.ts`](../../tests/coding-pi-owner-merge.test.ts): the carried artifact, plus identical and different rebased candidates.
+  - the approved candidate folded in, with its PR separate (carrying the coder's summary) and a rebuilt PR folded;
+  - a failed outcome with no question sent as its own message while a status message is current;
+  - pending progress for a cancelled job suppressed;
+  - emoji-heavy progress fitting one editable message;
+  - the status lease: a held lease defers delivery, and an expired lease does not;
+  - the publication-mismatch pause notice;
+  - the bulk cancel summary, with each job's objective.
+- [`tests/coding-pi-owner-merge.test.ts`](../../tests/coding-pi-owner-merge.test.ts): the carried artifact, plus identical and different rebased candidates, each with its `coding.rebase_candidate` ops-log line (`revision`, `matched`).
 - [`tests/coding-model-journal.test.ts`](../../tests/coding-model-journal.test.ts): two progress notices folded into one uncertain send are now both `uncertain`.
 
-Independent review: pending.
+Independent review (Claude Opus 5.5, 23 October 2026) approved `11cc462` with nits:
+
+1. Two mutations survived the tests: folding every `:finished`, and removing the suppression of progress for cancelled jobs.
+2. Folding the approved candidate lost the coder's summary for autoMerge and draft-only jobs.
+3. Emoji-heavy status text could exceed one Telegram message, after which every edit fails.
+4. Nothing serialised a job's status message across overlapping gateway processes.
+5. The publication-mismatch pause sent no notice, so the status message stopped at "publishing".
+6. The bulk-cancel summary listed only bare job ids.
+7. The rebase tests did not assert the ops-log line.
+
+Each nit is fixed as described above, with a test. Both surviving mutations now fail their new tests (checked by hand), and so does disabling the one-message fit. Re-review: pending.
 
 ## Verification and outcome
 

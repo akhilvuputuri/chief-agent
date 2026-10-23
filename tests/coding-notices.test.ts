@@ -2,8 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { candidate, fixture } from "./helpers/coding-fixture.js";
 import { editCodingStatus } from "../src/coding/delivery.js";
+import { formatTelegram } from "../src/telegram-format.js";
+import { AgentPublicationMismatch } from "../src/coding/github.js";
 import {
   StatusMessageGone,
+  fitStatus,
   inQuietHours,
   parseQuietHours,
   renderStatus,
@@ -305,6 +308,8 @@ test("several cancellations become one summary for the owner", async (t) => {
   assert.equal(tg.sends.length, 1);
   assert.match(tg.sends[0]!.text, /3 coding jobs cancelled/);
   for (const job of jobs) assert.match(tg.sends[0]!.text, new RegExp(job.id));
+  // Each job is named by its objective, not only its id.
+  assert.equal(tg.sends[0]!.text.match(/Fix a synthetic bug/g)?.length, 3);
   const states = (
     await f.db.query(
       "SELECT delivery FROM coding_events WHERE event_key='cancelled'",
@@ -328,6 +333,11 @@ test("an approved candidate folds into the status message and its PR is a separa
   assert.equal(tg.sends.length, 2, JSON.stringify(tg.sends));
   assert.match(tg.sends[0]!.text, /Independent review approved; publishing/);
   assert.match(tg.sends[1]!.text, /pull\/1/);
+  // Without the owner-merge workflow no Merge card repeats it, so the PR notice carries the summary.
+  assert.match(
+    tg.sends[1]!.text,
+    /Coder's own summary \(not verified by Chief\): Fixture complete/,
+  );
   // The same PR rebuilt later (a rebase or feedback round) is progress, not a new announcement.
   await f.db.query(
     "INSERT INTO coding_events(job_id,event_key,payload) VALUES($1,'later-attempt:pr',$2::jsonb)",
@@ -346,4 +356,168 @@ test("an approved candidate folds into the status message and its PR is a separa
     /PR updated: https:\/\/github.com\/example\/repo\/pull\/1/,
   );
   assert.match(tg.sends[2]!.text, /: progress/);
+});
+
+test("a failure is its own message while a status message is current", async (t) => {
+  const f = await fixture(t),
+    job = await f.start();
+  await f.c.tick();
+  const j = await f.row(job.id);
+  const tg = telegram();
+  await f.c.progress(j, {
+    key: "build",
+    stage: "implementing",
+    summary: "Implementation started",
+  });
+  await f.c.deliver(tg.send, { edit: tg.edit });
+  assert.equal(tg.sends.length, 1);
+  const running = await f.row(job.id);
+  await f.c.finish(running, {
+    kind: "failed",
+    summary: "The coder could not finish the change",
+    question: "",
+    checkpoint: running.checkpoint,
+    checks: [],
+  });
+  await f.c.deliver(tg.send, { edit: tg.edit });
+  assert.equal(tg.edits.length, 0);
+  assert.equal(tg.sends.length, 2);
+  assert.match(tg.sends[1]!.text, /The coder could not finish the change/);
+});
+
+test("progress still pending when the owner cancels the job is suppressed", async (t) => {
+  const f = await fixture(t),
+    job = await f.start();
+  await f.c.tick();
+  const j = await f.row(job.id);
+  await f.c.progress(j, {
+    key: "build",
+    stage: "implementing",
+    summary: "Implementation started",
+  });
+  await f.c.call("a", f.run, { operation: "coding_cancel", id: job.id });
+  const tg = telegram();
+  await f.c.deliver(tg.send, { edit: tg.edit });
+  assert.equal(tg.sends.length, 0);
+  assert.equal(
+    (await deliveries(f, job.id)).find((e) => e.event_key.endsWith(":build"))
+      ?.delivery,
+    "suppressed",
+  );
+});
+
+test("emoji-heavy progress still fits one editable Telegram message", async (t) => {
+  const wide = (n: number) => `${n} ${"\u{1F680}".repeat(400)}`;
+  const fitted = fitStatus(
+    "job",
+    Array.from({ length: 10 }, (_, n) => ({
+      at: new Date().toISOString(),
+      text: Array.from(wide(n)).slice(0, 200).join(""),
+    })),
+    10,
+  );
+  assert.equal(formatTelegram(fitted.text).length, 1);
+  assert(fitted.lines.length < 10 && fitted.lines.length > 0);
+  // The newest lines are the ones kept.
+  assert.match(fitted.lines.at(-1)!.text, /^9 /);
+  const f = await fixture(t),
+    job = await f.start();
+  await f.c.tick();
+  const j = await f.row(job.id);
+  const tg = telegram();
+  const edit = async (user: string, messageId: number, text: string) => {
+    // The real edit path refuses a status that would split into two messages.
+    await editCodingStatus(text, async () => {});
+    return tg.edit(user, messageId, text);
+  };
+  await f.c.progress(j, {
+    key: "first",
+    stage: "implementing",
+    summary: "Started",
+  });
+  await f.c.deliver(tg.send, { edit });
+  for (let n = 0; n < 12; n++)
+    await f.c.progress(j, {
+      key: `wide-${n}`,
+      stage: "implementing",
+      summary: wide(n),
+    });
+  await f.c.deliver(tg.send, { edit });
+  assert.equal(tg.edits.length, 1);
+  assert.equal(formatTelegram(tg.edits[0]!.text).length, 1);
+  assert(
+    (await deliveries(f, job.id)).every((e) => e.delivery === "sent"),
+    JSON.stringify(await deliveries(f, job.id)),
+  );
+});
+
+test("one deliverer at a time holds a job's status message", async (t) => {
+  const f = await fixture(t),
+    job = await f.start();
+  await f.c.tick();
+  const j = await f.row(job.id);
+  const tg = telegram();
+  await f.c.progress(j, {
+    key: "one",
+    stage: "implementing",
+    summary: "Started",
+  });
+  await f.c.deliver(tg.send, { edit: tg.edit });
+  const anchor = async () =>
+    (
+      await f.db.query(
+        "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='status-message'",
+        [job.id],
+      )
+    ).rows[0].payload;
+  // The lease is released after each delivery.
+  assert.equal((await anchor()).lease, undefined);
+  // Another gateway process (during a release overlap) holds the lease.
+  await f.db.query(
+    "UPDATE coding_events SET payload=payload || jsonb_build_object('lease','other','leaseUntil',(now()+interval '1 minute')::text) WHERE job_id=$1 AND event_key='status-message'",
+    [job.id],
+  );
+  await f.c.progress(j, {
+    key: "two",
+    stage: "implementing",
+    summary: "Checks",
+  });
+  await f.c.deliver(tg.send, { edit: tg.edit });
+  assert.equal(tg.sends.length + tg.edits.length, 1);
+  assert.equal(
+    (await deliveries(f, job.id)).find((e) => e.event_key.endsWith(":two"))
+      ?.delivery,
+    "pending",
+  );
+  assert.equal((await anchor()).lease, "other");
+  // An expired lease (a process that died mid-delivery) does not block for long.
+  await f.db.query(
+    "UPDATE coding_events SET payload=payload || jsonb_build_object('leaseUntil',(now()-interval '1 second')::text) WHERE job_id=$1 AND event_key='status-message'",
+    [job.id],
+  );
+  await f.c.deliver(tg.send, { edit: tg.edit });
+  assert.equal(tg.edits.length, 1);
+  assert.match(tg.edits[0]!.text, /Checks/);
+});
+
+test("a published PR that does not match the reviewed artifact pauses with an owner notice", async (t) => {
+  const f = await fixture(t),
+    job = await f.start();
+  await f.c.tick();
+  const j = await f.row(job.id);
+  (f.publisher as any).publish = async () => {
+    throw new AgentPublicationMismatch("synthetic mismatch");
+  };
+  await f.c.finish(j, candidate());
+  for (let i = 0; i < 4 && (await f.row(job.id)).state !== "paused"; i++)
+    await f.c.tick();
+  assert.equal((await f.row(job.id)).state, "paused");
+  const tg = telegram();
+  for (let i = 0; i < 4; i++) await f.c.deliver(tg.send, { edit: tg.edit });
+  assert.equal(tg.sends.length, 2, JSON.stringify(tg.sends));
+  assert.match(tg.sends[0]!.text, /Independent review approved; publishing/);
+  assert.match(
+    tg.sends[1]!.text,
+    /does not match the independently reviewed artifact/,
+  );
 });

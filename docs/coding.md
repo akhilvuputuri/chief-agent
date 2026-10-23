@@ -59,8 +59,9 @@ Milestone updates and questions use an outbox. A send with unknown outcome becom
 - **Status message.** Progress-only notices fold into one status message per job, edited in place. These are worker progress, the automatic retry, rebase and feedback re-queues, the approved candidate, and a PR rebuilt at an already announced URL. A burst of progress is one edit.
 - **Separate messages.** Questions, requirement and merge cards, pauses and failures, a new PR, manual-review stops, merge and deploy each stay their own message, so they notify. Each closes the job's status message, and later progress starts a new one below it.
 - **Quiet hours.** Progress that would start a new message waits until `CODING_QUIET_HOURS` ends (default `23:00-08:00`, Asia/Singapore). Edits continue at night, because they do not notify. Held progress that a later separate notice superseded is suppressed.
-- **Cancellations.** Pending cancellations for one owner become one summary after a 15-second settle.
-- **Outbox rules.** Notices claimed together share one outcome, so an uncertain send or edit is never replayed. The intended status text is saved before each edit. A deleted status message is replaced by a new one.
+- **Cancellations.** Pending cancellations for one owner become one summary after a 15-second settle, naming each job by its objective and id.
+- **Coder's summary.** Outside the owner-merge workflow, the first PR notice carries the coder's own summary (up to 800 characters), because the approved candidate's notice is folded. Owner-merge jobs get it on the Merge card.
+- **Outbox rules.** Notices claimed together share one outcome, so an uncertain send or edit is never replayed. The intended status text is saved before each edit. A deleted status message is replaced by a new one. A short lease on the job's status row lets only one gateway process edit or send its status message at a time, and the text is trimmed to fit one Telegram message.
 
 Owner status reads preserve the underlying result. Messages are bounded for Telegram. Host routing sends every coding message, status edits included, to the Coding topic (`src/coding/delivery-routing.ts`, since [journal 87](journey/87-pi-owner-merge-feedback.md)). The original job thread remains stored; model text cannot choose a delivery target. Revoked owners cannot use worker APIs or receive updates.
 

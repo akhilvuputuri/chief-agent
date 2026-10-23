@@ -12,10 +12,9 @@ import {
 import { assertSquadCheckpoint } from "./squad-state.js";
 import { codingDestination } from "./delivery-routing.js";
 import {
-  STATUS_LINES,
   StatusMessageGone,
+  fitStatus,
   inQuietHours,
-  renderStatus,
   statusLine,
   type QuietHours,
   type StatusAnchor,
@@ -1827,19 +1826,22 @@ export class CodingController {
               : await this.publisher.publish(fresh);
         } catch (error) {
           if (!(error instanceof AgentPublicationMismatch)) throw error;
-          // A PR that is not the reviewed artifact is never retried or recorded.
+          // A PR that is not the reviewed artifact is never retried or recorded. The owner is
+          // told, since the status message last said the change was being published.
           await this.db.query(
-            "UPDATE coding_jobs SET state='paused',stage='paused',publication_started=false,summary=$2,updated_at=now() WHERE id=$1 AND state='publishing'",
+            `WITH changed AS (UPDATE coding_jobs SET state='paused',stage='paused',publication_started=false,summary=$2,updated_at=now() WHERE id=$1 AND state='publishing' RETURNING id)
+            INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$3,jsonb_build_object('summary',$2::text) FROM changed ON CONFLICT DO NOTHING`,
             [
               j.id,
               "Agent PR does not match the independently reviewed artifact; inspect it, then resume to republish the reviewed candidate or cancel",
+              `publication-paused:${j.revision}:${j.attempt_id}`,
             ],
           );
           return;
         }
         await this.db.query(
           `WITH changed AS (UPDATE coding_jobs SET state='pr_ready',stage='pr_ready',pr_url=$2,head_sha=$3,summary=$6,updated_at=now() WHERE id=$1 AND state='publishing' RETURNING id)
-          INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$4,jsonb_build_object('summary',$6::text,'url',$2::text,'tree',$5::text) FROM changed ON CONFLICT DO NOTHING`,
+          INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$4,jsonb_build_object('summary',$6::text,'url',$2::text,'tree',$5::text,'coderSummary',$7::text) FROM changed ON CONFLICT DO NOTHING`,
           [
             j.id,
             published.url,
@@ -1851,6 +1853,11 @@ export class CodingController {
               : j.settings.prWorkflow
                 ? "Draft PR prepared; collecting CI, Devin and MR feedback before asking the owner to merge."
                 : "Draft PR prepared; CI and independent review of its head remain required.",
+            // The approved candidate's notice is folded into the status message, so the coder's
+            // summary travels with the PR notice (journal 115).
+            typeof fresh.result?.summary === "string"
+              ? fresh.result.summary
+              : null,
           ],
         );
         if ((j.settings.autoMerge || j.settings.prWorkflow) && published.tree) {
@@ -2003,6 +2010,19 @@ export class CodingController {
         const caption = attachment
           ? `**Coding plan — revision ${req.revision}**\n\n${summaryPreview}\n\nThe complete plan and original request are attached. Review the document, then approve the requirements or request changes. You can also reply yes directly to this message. Confirmation stays valid for 24 hours.\n\nJob: ${e.job_id}`
           : undefined;
+        // Without the owner-merge workflow no Merge card repeats the coder's summary, so the
+        // first PR notice carries it (bounded like the Merge card).
+        const coderSummary =
+          !req &&
+          !merge &&
+          e.event_key.endsWith(":pr") &&
+          j.settings.prWorkflow !== "owner_merge"
+            ? typeof e.payload.coderSummary === "string"
+              ? e.payload.coderSummary
+              : e.event_key === `${j.attempt_id}:pr`
+                ? j.result?.summary
+                : undefined
+            : undefined;
         ctx.attempted = true;
         const sent = await send(
           j.user_id,
@@ -2019,6 +2039,9 @@ export class CodingController {
                 ? e.payload.question.slice(0, 2000)
                 : undefined,
               e.payload.url,
+              typeof coderSummary === "string" && coderSummary
+                ? `Coder's own summary (not verified by Chief): ${Array.from(coderSummary).slice(0, 800).join("")}`
+                : undefined,
               req ? req.plan : undefined,
               req
                 ? `**Execution**\nLeader: ${j.settings.leaderModel ?? j.settings.model}\nCoder: ${j.settings.model}\nReviewer: ${j.settings.reviewerModel}\n${j.settings.autoMerge ? "Ordinary changes may merge after exact-artifact review and GitHub checks; protected changes stop for explicit review." : "Draft PR for owner review."}\n\nApprove this scope, or reply directly to this message with yes. To revise it, tell Chief what to change. Confirmation stays valid for 24 hours.\nJob: ${e.job_id}`
@@ -2096,6 +2119,52 @@ export class CodingController {
     quiet: boolean,
     ctx: { claimed: string[]; attempted: boolean },
   ) {
+    // One deliverer per job's status message, even across overlapping gateway processes:
+    // the anchor's read, edit or send, and save happen under a short lease on its row.
+    const lease = randomUUID();
+    const leased = (
+      await this.db.query(
+        `INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'status-message',jsonb_build_object('current',false,'lines','[]'::jsonb,'total',0,'lease',$2::text,'leaseUntil',(now()+interval '2 minutes')::text),'suppressed')
+         ON CONFLICT(job_id,event_key) DO UPDATE SET payload=coding_events.payload || jsonb_build_object('lease',$2::text,'leaseUntil',(now()+interval '2 minutes')::text)
+         WHERE NOT (coding_events.payload ? 'leaseUntil') OR (coding_events.payload->>'leaseUntil')::timestamptz<now() RETURNING id`,
+        [e.job_id, lease],
+      )
+    ).rows.length;
+    if (!leased) {
+      // Another deliverer holds it; nothing was attempted, so these wait for the next tick.
+      await this.db.query(
+        "UPDATE coding_events SET delivery='pending' WHERE id=ANY($1::uuid[]) AND delivery='sending'",
+        [ctx.claimed],
+      );
+      return;
+    }
+    try {
+      await this.foldStatus(e, j, send, options, quiet, ctx);
+    } finally {
+      await this.db.query(
+        "UPDATE coding_events SET payload=payload - 'lease' - 'leaseUntil' WHERE job_id=$1 AND event_key='status-message' AND payload->>'lease'=$2",
+        [e.job_id, lease],
+      );
+    }
+  }
+  private async foldStatus(
+    e: any,
+    j: CodingJob,
+    send: (
+      user: string,
+      target: import("../delivery-routing.js").Destination,
+      text: string,
+    ) => Promise<unknown>,
+    options: {
+      edit?: (
+        user: string,
+        messageId: number,
+        text: string,
+      ) => Promise<unknown>;
+    },
+    quiet: boolean,
+    ctx: { claimed: string[]; attempted: boolean },
+  ) {
     const following = (
       await this.db.query(
         `SELECT e.id,${STATUS_NOTICE} AS status FROM coding_events e JOIN coding_jobs j ON j.id=e.job_id
@@ -2155,9 +2224,13 @@ export class CodingController {
       anchor.messageId! > 0
         ? anchor
         : undefined;
-    const lines = [...(current?.lines ?? []), ...fresh].slice(-STATUS_LINES);
     const total = (current?.total ?? 0) + fresh.length;
-    const text = renderStatus(e.job_id, lines, total);
+    // Oldest lines go first until the text is one Telegram message, so it stays editable.
+    const { lines, text } = fitStatus(
+      e.job_id,
+      [...(current?.lines ?? []), ...fresh],
+      total,
+    );
     if (current) {
       // The intended text is saved first: if this edit fails or its outcome is lost, the next edit shows it.
       await this.saveStatus(e.job_id, {
@@ -2222,13 +2295,26 @@ export class CodingController {
     ).rows as { id: string; job_id: string }[];
     ctx.claimed.push(...others.map((r) => r.id));
     const jobs = [e.job_id as string, ...others.map((r) => r.job_id)];
+    const objectives = new Map<string, string>(
+      (
+        await this.db.query(
+          "SELECT id,objective FROM coding_jobs WHERE id=ANY($1::uuid[]) AND user_id=$2",
+          [jobs, j.user_id],
+        )
+      ).rows.map((r: { id: string; objective: string }) => [
+        r.id,
+        Array.from(String(r.objective).split("\n")[0]!.trim())
+          .slice(0, 80)
+          .join(""),
+      ]),
+    );
     ctx.attempted = true;
     await send(
       j.user_id,
       codingDestination(e.payload),
       jobs.length === 1
         ? `Coding job ${e.job_id}\n\n${String(e.payload.summary ?? "").slice(0, 1500)}`
-        : `**${jobs.length} coding jobs cancelled**\n${jobs.map((id) => `• ${id}`).join("\n")}\n\nTheir coding boxes are cleaned up separately.`,
+        : `**${jobs.length} coding jobs cancelled**\n${jobs.map((id) => `• ${objectives.get(id) || "Coding job"} (job ${id})`).join("\n")}\n\nTheir coding boxes are cleaned up separately.`,
     );
     await this.markSent(ctx.claimed);
   }
