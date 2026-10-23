@@ -126,7 +126,7 @@ export class Execution {
     readonly user: string,
     readonly run: string,
     readonly signal: AbortSignal,
-    private limits: Budget = defaultBudget,
+    readonly limits: Budget = defaultBudget,
     private parent?: Execution,
   ) {}
   async start() {
