@@ -25,6 +25,8 @@ export const codingReply = z
     requestKey: z.string().min(1).max(100),
     message: z.string().min(1).max(8000),
     mode: z.enum(["plan", "implement"]).optional(),
+    /** Only when the owner explicitly asked, in this conversation, to resume or answer this job. */
+    confirmStale: z.boolean().optional(),
   })
   .strict();
 export const codingCancel = z
@@ -36,6 +38,8 @@ export const codingResume = z
     id,
     baseRevision: z.number().int().positive(),
     requestKey: z.string().min(1).max(100),
+    /** Only when the owner explicitly asked, in this conversation, to resume this job. */
+    confirmStale: z.boolean().optional(),
   })
   .strict();
 export const codingModels = z

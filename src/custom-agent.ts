@@ -23,22 +23,91 @@ import {
   toolError,
   NotDispatchedError,
   RepeatedFailureError,
+  ToolValidationError,
   WriteBlockedError,
 } from "./tool-errors.js";
 /** Model steps, with no successful call between them, in which one call form failed the same way before it is refused. */
 const REPEAT_LIMIT = 3;
-/** An operation plus its argument names: listing without an id is a different form than reading one. */
+/**
+ * An operation plus its argument names: listing without an id is a different form than
+ * reading one. A write's target id is part of its form: refusals of distinct targets (a
+ * bulk cancel where some jobs have a PR) are separate decisions, not one guess repeated.
+ */
 function callForm(op: string, raw: string) {
   try {
     const args = JSON.parse(raw);
-    return `${op}(${args && typeof args === "object" ? Object.keys(args).sort().join(",") : ""})`;
+    const target =
+      !readOperations.has(op) &&
+      args &&
+      typeof args === "object" &&
+      typeof args.id === "string"
+        ? `@${args.id}`
+        : "";
+    return `${op}(${args && typeof args === "object" ? Object.keys(args).sort().join(",") : ""})${target}`;
   } catch {
     return `${op}(?)`;
+  }
+}
+/** Times one exact call (operation and argument values) may be refused in a turn before it is no longer made. */
+const IDENTICAL_LIMIT = 2;
+/** An operation plus its exact argument values, independent of key order. */
+function exactCall(op: string, raw: string) {
+  const order = (v: unknown): unknown =>
+    Array.isArray(v)
+      ? v.map(order)
+      : v && typeof v === "object"
+        ? Object.fromEntries(
+            Object.entries(v)
+              .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+              .map(([k, x]) => [k, order(x)]),
+          )
+        : v;
+  try {
+    return `${op}:${JSON.stringify(order(JSON.parse(raw)))}`;
+  } catch {
+    return `${op}:${raw}`;
   }
 }
 import { domainOf } from "./tool-domains.js";
 import { runFamily } from "./run-family.js";
 import { higher as higherEffort } from "./effort.js";
+/** The tools a child run reports with; a child's last model call is offered only this. */
+const REPORT_TOOLS = new Set([
+  "agent_report",
+  "research_report",
+  "media_report",
+  "job_alignment_report",
+]);
+/** A child with this little time left reports now rather than start another lookup. */
+const FINAL_CALL_MS = 20000;
+/**
+ * A host notice for a child running low on its allocation, or undefined. On the last model
+ * call (or when the time or tool allocation could not cover another round) the child is
+ * offered only its report tool; one call earlier it is told to report while a rejected report
+ * can still be fixed. Without this, a child spent its last calls on lookups or a rejected
+ * report and returned nothing (journal 116).
+ */
+export function budgetNotice(
+  left: { ms: number; models: number; tools: number },
+  allocationMs: number,
+  report: string,
+) {
+  const final =
+    left.models <= 0 ||
+    left.tools <= 1 ||
+    left.ms <= Math.min(FINAL_CALL_MS, allocationMs / 4);
+  if (final)
+    return {
+      final: true,
+      text: `[Host notice] This is your last model call: your allocation is nearly used up. Call ${report} now with what you have found so far. Mark anything unfinished partial and say what is missing. Only ${report} is available on this call.`,
+    };
+  if (left.models === 1)
+    return {
+      final: false,
+      text: `[Host notice] You have one model call left after this one. Call ${report} now if you can, so that if the host rejects an item you can still fix it on your last call.`,
+    };
+  return undefined;
+}
 const finishTool: ToolDefinition = {
   name: "finish_turn",
   description:
@@ -151,6 +220,15 @@ export class CustomAgent implements Agent {
       string,
       { code: string; count: number; step: number }
     >();
+    // Per exact call (operation and argument values): the last failure code, how many
+    // steps it was refused in, and the step that last counted. Unlike the form guard,
+    // successful reads do not reset it (20 October: a refused coding_cancel was retried
+    // between status reads); only a successful write or new owner input can change the
+    // state that refused it.
+    const refusals = new Map<
+      string,
+      { code: string; count: number; step: number }
+    >();
     let step = 0;
     // Set when the host refuses a write because an earlier write's outcome is uncertain.
     // That refusal holds for the rest of this turn: later writes are refused without
@@ -198,6 +276,7 @@ export class CustomAgent implements Agent {
         req.message = inputs.at(-1)!.message;
         // New owner input (for example the id the model asked for) can make a refused form valid.
         failures.clear();
+        refusals.clear();
         // An absorbed follow-up can be harder than the message the effort was picked for.
         askEffort(true);
       }
@@ -241,6 +320,10 @@ export class CustomAgent implements Agent {
     let overBudgetReported = false;
     // Older history stays the same for the whole turn, so the cached prefix does not shift.
     let historyAllowance: number | undefined;
+    // The low-allocation notices a child has already been given (see budgetNotice).
+    const noticed = new Set<boolean>();
+    // Set for a child's last model call: the only tool its calls may dispatch.
+    let onlyTool: string | undefined;
     try {
       turn: while (true) {
         if (await steer()) {
@@ -297,13 +380,44 @@ export class CustomAgent implements Agent {
             await req.refreshContext?.();
             tools = [...(req.runtime?.tools ?? []), finishTool];
             enabled = new Set(tools.map((t) => t.name));
+            // What this call offers. A child low on allocation is told so, and its last call
+            // offers and dispatches only its report tool.
+            let offered = tools;
+            onlyTool = undefined;
+            const reportTool = req.specialist
+              ? tools.find((t) => REPORT_TOOLS.has(t.name))
+              : undefined;
+            if (reportTool) {
+              const notice = budgetNotice(
+                await execution.remaining(),
+                execution.limits.ms,
+                reportTool.name,
+              );
+              if (notice && !noticed.has(notice.final)) {
+                noticed.add(notice.final);
+                messages.push({ role: "user", content: notice.text });
+                await execution.checkpoint(messages);
+                await execution.trace("agent.budget_notice", {
+                  version: 1,
+                  invocationId,
+                  final: notice.final,
+                });
+              }
+              if (notice?.final) {
+                offered = [reportTool];
+                onlyTool = reportTool.name;
+              }
+            }
             const input = context(
               {
                 ...req,
                 ...(historyAllowance === undefined ? {} : { historyAllowance }),
                 // Anthropic caches by exact prefix; earlier steps keep their reasoning (journal 108).
                 keepTurnReasoning: (model.model ?? "").startsWith("anthropic/"),
-                runtime: { context: req.runtime?.context ?? "", tools },
+                runtime: {
+                  context: req.runtime?.context ?? "",
+                  tools: offered,
+                },
               },
               // Undelivered finals remain in the immutable journal, but must not
               // look like something the user already heard in subsequent context.
@@ -335,7 +449,7 @@ export class CustomAgent implements Agent {
               messageCount: input.messages.length,
               inputCharacters:
                 JSON.stringify(omitImages(input.messages)).length +
-                JSON.stringify(tools).length,
+                JSON.stringify(offered).length,
             });
             if (input.omitted)
               await execution.trace("context.omitted", {
@@ -358,7 +472,7 @@ export class CustomAgent implements Agent {
                 version: 1,
                 invocationId,
                 messages: omitImages(input.messages),
-                tools,
+                tools: offered,
                 reasoning: effort,
                 model: model.model ?? null,
                 omitted: input.omitted,
@@ -368,7 +482,7 @@ export class CustomAgent implements Agent {
             if (req.shouldYield?.()) continue turn;
             generation = await model.generate({
               messages: input.messages,
-              tools,
+              tools: offered,
               reasoning: effort,
               sessionId: req.runId,
               ...(req.cacheKey ? { cacheKey: req.cacheKey } : {}),
@@ -489,13 +603,17 @@ export class CustomAgent implements Agent {
           }
           const op = call.function.name;
           const form = callForm(op, call.function.arguments);
+          const exact = exactCall(op, call.function.arguments);
           let result: unknown;
           let candidate: typeof finish;
           const start = Date.now();
           if (req.signal.aborted) throw new Stop("cancelled");
           if (op.startsWith("work_") && op !== "work_status")
             await execution.attach(true);
-          await execution.consume("tools");
+          // On a child's last call only its report runs. A refused call costs no tool unit,
+          // so it cannot take the unit the report in the same step needs.
+          const lastCallRefusal = !!onlyTool && op !== onlyTool;
+          if (!lastCallRefusal) await execution.consume("tools");
           if (op !== "finish_turn") {
             toolCalls++;
             toolsUsed.add(op);
@@ -524,6 +642,19 @@ export class CustomAgent implements Agent {
               repeated.step !== step
             )
               throw new RepeatedFailureError(op, repeated.code, repeated.count);
+            const refused = refusals.get(exact);
+            if (
+              op !== "finish_turn" &&
+              refused &&
+              refused.count >= IDENTICAL_LIMIT &&
+              refused.step !== step
+            )
+              throw new RepeatedFailureError(
+                op,
+                refused.code,
+                refused.count,
+                true,
+              );
             // A new delegation could only retry the refused writes in another context.
             if (
               writesBlocked &&
@@ -531,6 +662,11 @@ export class CustomAgent implements Agent {
               (!readOperations.has(op) || op === "agent_run")
             )
               throw new WriteBlockedError(writesBlocked);
+            // A child's last call may only report: another lookup could not be used.
+            if (lastCallRefusal)
+              throw new ToolValidationError(
+                `Not dispatched: this was your last model call, so only ${onlyTool} runs; ${op} was not run. Report what you have now.`,
+              );
             if (!enabled.has(op)) {
               // A known tool whose domain is not loaded yet: load the domain and
               // dispatch. Arguments are still validated and the owner-scoped
@@ -625,6 +761,8 @@ export class CustomAgent implements Agent {
             // Any success is progress and may supply what a failing form lacked
             // (such as an id from parcel_match), so every count starts again.
             failures.clear();
+            // Reads change nothing, so an identical refused call would be refused again.
+            if (!readOperations.has(op) || op === "agent_run") refusals.clear();
             if (candidate) {
               finish = candidate;
               finishObservation = op === "finish_turn" ? journal : undefined;
@@ -655,6 +793,17 @@ export class CustomAgent implements Agent {
                     : last.step === step
                       ? last.count
                       : last.count + 1,
+              });
+              const prior = refusals.get(exact);
+              refusals.set(exact, {
+                code,
+                step,
+                count:
+                  prior?.code !== code
+                    ? 1
+                    : prior.step === step
+                      ? prior.count
+                      : prior.count + 1,
               });
             }
             const uncertain =

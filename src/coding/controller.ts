@@ -59,6 +59,39 @@ const active = ["provisioning", "running"];
 export type PauseCause = "sandbox_stopped" | "heartbeat_lost";
 const hash = (v: unknown) =>
   createHash("sha256").update(canonicalJson(v)).digest("hex");
+/** Hours a job may wait before the model must state the owner's explicit request to restart it. */
+const STALE_HOURS = 24;
+/** Jobs a coding_resume or coding_reply can requeue (with a matching revision). */
+const RESTARTABLE =
+  "state IN ('plan_ready','awaiting_input','paused','failed') AND NOT publication_started AND cleanup IN ('none','complete') AND (lease IS NULL OR lease_until<now())";
+/** Owner-merge PRs stopped for the owner, which coding_resume returns to automation. */
+const CONTINUABLE =
+  "state='pr_ready' AND settings->>'prWorkflow'='owner_merge' AND stage IN ('manual_review','merge_declined') AND (lease IS NULL OR lease_until<now())";
+/** Why coding_cancel left a job as it was, and what the owner can do instead. */
+export function cancelRefusal(job: {
+  state: string;
+  stage?: string | null;
+  pr_url?: string | null;
+  merge_flow?: string | null;
+}) {
+  if (job.state === "pr_ready") {
+    if (
+      job.stage === "merging" ||
+      job.stage === "release_pending" ||
+      job.stage === "deployed"
+    )
+      return `Not cancelled: this job's PR is already ${job.stage === "merging" ? "merging" : "merged"} (stage ${job.stage}), so the job cannot be cancelled. Report its stage from coding_status; undoing a merged change needs a new job.`;
+    const pr = job.pr_url ? ` (${job.pr_url})` : "";
+    return `Not cancelled: this job already published a PR${pr}, so it stays pr_ready with that PR. Chief has no tool to close pull requests. Tell the owner it was not cancelled. ${
+      job.stage === "merge_approved"
+        ? "The owner already approved its merge, so Chief will merge it; to stop that, the owner closes the PR on GitHub now."
+        : job.merge_flow === "owner_merge"
+          ? "To abandon it, the owner closes the PR on GitHub; it never merges without the owner's tap on its Merge card."
+          : "To abandon it, the owner closes the PR on GitHub; it is a draft PR that only the owner can merge there."
+    } If the PR is already closed, nothing further happens: the job stays as a record of it.`;
+  }
+  return `Not cancelled: the job is ${job.state}${job.stage ? ` (stage ${job.stage})` : ""}. Read coding_status and retry only if its state changed.`;
+}
 export type CodingJob = {
   id: string;
   user_id: string;
@@ -568,7 +601,7 @@ export class CodingController {
       );
       const current = (
         await this.db.query(
-          "SELECT state,publication_started FROM coding_jobs WHERE id=$1 AND user_id=$2",
+          "SELECT state,stage,pr_url,publication_started,settings->>'prWorkflow' AS merge_flow FROM coding_jobs WHERE id=$1 AND user_id=$2",
           [a.id, user],
         )
       ).rows[0];
@@ -577,6 +610,8 @@ export class CodingController {
           "PR publication is in flight or uncertain; inspect its result before cancelling",
         );
       if (current?.state === "cancelled") this.abortModels(a.id);
+      // Nothing changed: say why, so the job is never reported as cancelled while it is not.
+      else if (current) throw new ToolValidationError(cancelRefusal(current));
       return this.status(user, a.id);
     }
     const job = (
@@ -634,6 +669,7 @@ export class CodingController {
         throw new ToolValidationError(
           `This job's PR already merged as ${automation.mergeSha} (${job.summary}); it cannot continue. Explain the reason; the release must be inspected separately.`,
         );
+      await this.assertFreshOrConfirmed(job, a, CONTINUABLE);
       const released = await this.db.query(
         `WITH changed AS (UPDATE coding_jobs SET stage='awaiting_ci',summary='Owner asked to continue; re-checking the PR and rebasing onto main if needed',updated_at=now() WHERE id=$1 AND user_id=$2 AND state='pr_ready' AND stage=$3 AND revision=$4 AND (lease IS NULL OR lease_until<now()) RETURNING id),
         -- The waits restart now, so an old stop time does not re-park the job on its first check.
@@ -671,6 +707,7 @@ export class CodingController {
         throw new ToolValidationError("Coding revision request key conflict");
       return this.status(user, a.id);
     }
+    await this.assertFreshOrConfirmed(job, a, RESTARTABLE);
     if (
       a.operation === "coding_reply" &&
       job.context.length + message.length + 18 > 24000
@@ -687,7 +724,7 @@ export class CodingController {
     const changed = await this.db.query(
       `WITH changed AS (
       UPDATE coding_jobs SET revision=revision+1,mode=COALESCE($5,mode),context=CASE WHEN $7 THEN context || E'\nOwner follow-up: ' || $4 ELSE context END,state='queued',stage='queued',question='',result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,used_models=0,model_busy=false,publication_started=false,lease=NULL,lease_until=NULL,updated_at=now()
-      WHERE id=$1 AND user_id=$2 AND revision=$3 AND state IN ('plan_ready','awaiting_input','paused','failed') AND NOT publication_started AND cleanup IN ('none','complete') AND (lease IS NULL OR lease_until<now()) RETURNING id,revision,mode
+      WHERE id=$1 AND user_id=$2 AND revision=$3 AND ${RESTARTABLE} RETURNING id,revision,mode
     ) INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$6,$4,mode FROM changed RETURNING job_id`,
       [
         a.id,
@@ -716,6 +753,33 @@ export class CodingController {
                   : "This job already has a draft PR; it predates the owner-merge workflow, so it can only be merged on GitHub or replaced by a new job.",
       );
     return this.status(user, a.id);
+  }
+  /**
+   * Work that has waited more than a day restarts only on the owner's explicit request in
+   * the current conversation (20 October: a three-day-old parked job was resumed while
+   * answering an unrelated question, and held the worker slot until the owner cancelled
+   * it). The model states that request with confirmStale. The host's own transient retry
+   * (autoRetryOnce) does not come through here. Only a job the following update could
+   * restart (`restartable`, at the caller's revision) is gated, so any other job gets the
+   * update's own precondition reason instead of a misleading request for confirmation.
+   */
+  private async assertFreshOrConfirmed(
+    job: CodingJob,
+    a: { operation: string; baseRevision: number; confirmStale?: boolean },
+    restartable: string,
+  ) {
+    if (a.confirmStale === true) return;
+    const waiting = (
+      await this.db.query(
+        `SELECT updated_at FROM coding_jobs WHERE id=$1 AND revision=$2 AND ${restartable} AND updated_at < now() - interval '${STALE_HOURS} hours'`,
+        [job.id, a.baseRevision],
+      )
+    ).rows[0];
+    if (!waiting) return;
+    const since = new Date(waiting.updated_at).toISOString().slice(0, 10);
+    throw new ToolValidationError(
+      `Nothing changed: this coding job has been waiting since ${since}, more than ${STALE_HOURS} hours, so ${a.operation} needs the owner's explicit request to restart it. Ask the owner whether to resume this specific job. Repeat the call with confirmStale: true only if the owner explicitly asked, in this conversation, to resume or answer this job.`,
+    );
   }
   async authenticate(
     id: string,
