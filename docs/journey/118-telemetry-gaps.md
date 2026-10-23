@@ -1,7 +1,7 @@
 # 118 — Why did the CloudWatch logs not show token sums, finish reasons or older-history size?
 
 Work date(s): 2026-10-23. Written/revised: 2026-10-23.
-Status: in review. Independent review: approve with nits on the earlier head; fixes awaiting re-review. `model.completed` now records why the model stopped (`finishReason`) and cache-write tokens; model providers are logged as fixed slugs, so Opus calls carry a provider again; `model.failed` carries the model; `context.selected` records the older history admitted and its remaining size parts; the `models` CloudWatch query reports token sums again, and new `finishes` and `context` queries exist. Not released; nothing here is measured from the new fields yet.
+Status: in review. Independent review: approve with nits on the first head; approve on the fixed head (2f018c6). `model.completed` now records why the model stopped (`finishReason`) and cache-write tokens; model providers are logged as fixed slugs, so Opus calls carry a provider again; `model.failed` carries the model; `context.selected` records the older history admitted and its remaining size parts; the `models` CloudWatch query reports token sums again, and new `finishes` and `context` queries exist. Not released; nothing here is measured from the new fields yet.
 
 ## User-visible problem and preceding iteration
 
@@ -38,7 +38,7 @@ Other `context.selected` fields that were already in the private trace are now p
 
 The provider shape was deliberately not widened. Allowing four words let one of the existing private fixtures (a token followed by three words) pass the shape, which the shape tests exist to prevent. Instead the projection maps known display names to fixed slugs. Seen in production: "Claude Platform on AWS" → `claude-aws`, "Google" → `google`, "Google AI Studio" → `google-ai-studio`, "OpenAI" → `openai`, "Azure" → `azure`. Not yet seen, listed as anticipated routes for Anthropic and Gemini models: "Anthropic" → `anthropic`, "Amazon Bedrock" → `bedrock`, "Google Vertex" → `vertex`. Every unlisted label is logged as `other`, so the provider field carries only host-defined names, as the [operational-log contract](../operational-logs.md#safety-contract) requires of fields fed from third-party text. The raw label stays in the private trace. An earlier revision of this change kept unlisted labels that fit the three-word shape; review asked for the strict form. Logged provider values therefore change from display names to slugs for these providers after release: queries that compare provider values across the release boundary need both forms.
 
-`model.failed` now traces the requested model (`model.model`) and projects it with the same `model` shape as `model.completed`, so the `models` and `finishes` queries group failures by model. The two differ in meaning: `model` on `model.completed` is the model OpenRouter reports as serving the call, while on `model.failed` it is the requested model. So both events also carry `requestedModel` (the same shape; on `model.completed` from the trace's new `requestedModel`), and `stats count(*) by event, requestedModel` gives a failure rate per requested model. `state` on `model.failed` now goes through the same fixed finish-reason names; no saved query or code groups by its raw value (checked: `scripts/cloudwatch-logs.mjs`, `src/coding/diagnostics.ts`).
+`model.failed` now traces the requested model (`model.model`) and projects it with the same `model` shape as `model.completed`, so failures carry a model. The two differ in meaning: `model` on `model.completed` is the model OpenRouter reports as serving the call, while on `model.failed` it is the requested model. So both events also carry `requestedModel` (the same shape; on `model.completed` from the trace's new `requestedModel`), and `stats count(*) by event, requestedModel` gives a failure rate per requested model; the saved `models` and `finishes` queries group by the served `model`, so a failure and a completion of the same request can land in different rows when OpenRouter reports a different slug. Lines from before the release have no `requestedModel`. `state` on `model.failed` now goes through the same fixed finish-reason names; no saved query or code groups by its raw value (checked: `scripts/cloudwatch-logs.mjs`, `src/coding/diagnostics.ts`).
 
 ## Implementation and review
 
@@ -63,7 +63,7 @@ Independent review of the earlier head returned approve with nits:
 - the requested and served models were undocumented;
 - three tests were weak (an inexact history-size check, an alias check that read only the first `stats` clause, no streamed finish reason).
 
-All were fixed in the next commit, and `state` on `model.failed` was mapped to fixed names too. Re-review of the new head: pending.
+All were fixed in the next commit, and `state` on `model.failed` was mapped to fixed names too. Re-review of the fixed head approved with nits: the saved queries still group by served model (documented above), and `requestedModel` was added to the shared query field list.
 
 ## Verification and outcome
 
