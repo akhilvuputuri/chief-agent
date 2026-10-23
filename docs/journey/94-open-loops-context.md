@@ -97,3 +97,4 @@ The stale proposal-time values for monitoring remain a documented limitation. Co
 - One automatic retry for classified transient coding faults (owner-approved).
 - Pause notices that name the cause.
 - A shadow-measured proactive nudge for expired cards, if the owner-turn offer is not enough.
+- [Journal 117](117-open-loops-and-memory-offers.md) keeps a lapsed monitoring card until its own end date, matches a re-proposal by title, and adds Chief's unanswered questions.

@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
 import { CustomAgent } from "../src/custom-agent.js";
 import { Execution, Stop, type StopReason } from "../src/execution.js";
-import { NotDispatchedError } from "../src/tool-errors.js";
+import { NotDispatchedError, ToolValidationError } from "../src/tool-errors.js";
 import type { AgentRequest } from "../src/protocol.js";
 import type { Message, ModelAdapter } from "../src/model.js";
 import type { Database } from "../src/db.js";
@@ -622,4 +622,35 @@ test("waiting for prepared input does not spend active model or tool time", asyn
       dateNow.mock.restore();
     }
   }
+});
+test("new owner input lets an identical refused call run again", async () => {
+  // The identical-call cap survives successful reads, but not the owner's next message.
+  const bad = ["memory_set", { key: "style", value: "long" }] as [
+    string,
+    unknown,
+  ];
+  let modelCalls = 0;
+  const f = fixture({
+    generate: async () => {
+      modelCalls++;
+      if (modelCalls === 3) f.enqueue("Yes, try that again");
+      if (modelCalls <= 4) return calls([bad]);
+      return text("Done");
+    },
+  });
+  f.req.execute = async (input) => {
+    f.dispatched.push(input);
+    throw new ToolValidationError("Synthetic refusal");
+  };
+  await f.run();
+  const codes = f.records
+    .filter((r) => r.operation === "memory_set" && r.state !== "skipped")
+    .map((r) => (r.result as any)?.error?.code);
+  // Two refusals, then the steered retry is dispatched instead of refused.
+  assert.deepEqual(codes, [
+    "VALIDATION_FAILED",
+    "VALIDATION_FAILED",
+    "VALIDATION_FAILED",
+  ]);
+  assert.equal(f.dispatched.length, 3);
 });

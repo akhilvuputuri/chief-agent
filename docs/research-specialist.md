@@ -8,7 +8,16 @@ An assignment contains an objective, explicitly selected background, up to six c
 
 The child can use only `web_search`, `web_read`, `source_read`, `research_report` and `finish_turn`. The dispatcher independently checks the live child/parent relationship, authenticated owner and cancellation. Neither model arguments nor a prompt can grant extra authority. Shared authoritative memory and job records remain managed by the parent using existing tools and approval boundaries. A child cannot save its own competing version of user facts.
 
-The report must cover exactly the assigned target IDs once. A complete target requires evidence. Each evidence quotation must occur in an owner-scoped source actually read by this child. This verifies recorded source access and quoted text, not the relevance of a page or correctness of the conclusion. Partial and blocked targets remain explicit. The parent receives the compact report; full source observations remain in the child's records. There is no bot-detection bypass or authenticated browser in this phase.
+The report must cover exactly the assigned target IDs once. A complete target requires evidence. Each evidence quotation must be the words of an owner-scoped source actually read by this child: whitespace, quote-mark and dash style may differ, matches may not start or end inside a word or number, and `...` or `…` may mark omitted words between exact pieces in a bounded span that hides no negating or limiting word (rules in [agents: report checks](agents.md#report-checks)). The parent receives the source's own words: the whole span when it is short, so omitted words stay visible. This verifies recorded source access and quoted text, not the relevance of a page or correctness of the conclusion. Partial and blocked targets remain explicit. The parent receives the compact report; full source observations remain in the child's records. There is no bot-detection bypass or authenticated browser in this phase.
+
+### Partial results
+
+A rejected report names every failing target and evidence item, and is returned as a retryable `VALIDATION_FAILED`. A child running low is told to report, and its last call offers and dispatches only `research_report` (see [agents: running low](agents.md#running-low-and-partial-results)). If the child still stops by answering or running out of allocation without an accepted report, the host does not discard what passed its checks:
+
+- a report the host recorded before the allocation ran out is returned with `status: "partial"`;
+- otherwise the last rejected report is returned with `status: "partial"` and only its checked evidence. Every `complete` target that lost evidence, or had none, becomes `partial`. Each affected target is marked `unsupported`, for example `["evidence 2"]`, and keeps the specialist's summary.
+
+Both carry `partialReason` and `observedSources`. `partialReason` lists every failing item, for example `target 1 evidence 2`. With neither, the result is `incomplete`, as before, with every target `blocked` and `observedSources`. Job-alignment and media specialists (`ResearchProfile`) keep exact quotes and their all-or-nothing results.
 
 ## Execution and recovery
 

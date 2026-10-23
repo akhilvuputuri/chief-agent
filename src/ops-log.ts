@@ -58,7 +58,13 @@ const fields: Record<string, Shape> = {
   inputTokens: "count",
   outputTokens: "count",
   cachedTokens: "count",
+  /** Prompt tokens written to the provider's cache (OpenRouter prompt_tokens_details). */
+  cacheWriteTokens: "count",
   reasoningTokens: "count",
+  /** The model the host asked for; `model` on model.completed is the one that served. */
+  requestedModel: "model",
+  /** Why the model stopped, mapped to a fixed name (see finishName). */
+  finishReason: "name",
   messages: "count",
   characters: "count",
   httpStatus: "count",
@@ -80,6 +86,16 @@ const fields: Record<string, Shape> = {
   serializedChars: "count",
   omittedCount: "count",
   trimmedGroups: "count",
+  exchangeChars: "count",
+  workingChars: "count",
+  reservedChars: "count",
+  historyChars: "count",
+  historyMessages: "count",
+  historyAllowanceChars: "count",
+  reasoningChars: "count",
+  compactedCount: "count",
+  reasoningDropped: "bool",
+  wireCompacted: "bool",
   approvalCount: "count",
   offeredCount: "count",
   unusedCount: "count",
@@ -254,9 +270,46 @@ function usageFields(usage: unknown): OpsFields {
     inputTokens: num(u.prompt_tokens),
     outputTokens: num(u.completion_tokens),
     cachedTokens: num(u.prompt_tokens_details?.cached_tokens),
+    cacheWriteTokens: num(u.prompt_tokens_details?.cache_write_tokens),
     reasoningTokens: num(u.completion_tokens_details?.reasoning_tokens),
     costUsd: num(u.cost) ?? null,
   };
+}
+
+// OpenRouter's normalized finish reasons. Anything else is "other", so the logged
+// value is always one of these fixed names, never provider text.
+const finishNames = new Set([
+  "stop",
+  "tool_calls",
+  "length",
+  "content_filter",
+  "error",
+]);
+function finishName(value: unknown) {
+  if (typeof value !== "string" || !value) return undefined;
+  return finishNames.has(value) ? value : "other";
+}
+
+// OpenRouter provider display names mapped to fixed slugs, so the logged provider is
+// always a host-defined name, never provider text. Seen in production (model.completed,
+// 9–23 October 2026): Claude Platform on AWS, Google, Google AI Studio, Azure, OpenAI.
+// Not yet seen, listed as anticipated routes for Anthropic and Gemini models: Anthropic,
+// Amazon Bedrock, Google Vertex. "Claude Platform on AWS" has four words and failed the
+// generic provider shape, so Opus calls logged no provider (journal 118). Any unlisted
+// label is logged as "other"; the raw label stays in the private trace.
+const providerSlugs: Record<string, string> = {
+  "Claude Platform on AWS": "claude-aws",
+  Anthropic: "anthropic",
+  "Amazon Bedrock": "bedrock",
+  "Google Vertex": "vertex",
+  Google: "google",
+  "Google AI Studio": "google-ai-studio",
+  OpenAI: "openai",
+  Azure: "azure",
+};
+function providerName(value: unknown) {
+  if (typeof value !== "string" || !value) return undefined;
+  return Object.hasOwn(providerSlugs, value) ? providerSlugs[value] : "other";
 }
 
 /** Prefix before ": " in the bounded model.failed error string, e.g. "TypeError". */
@@ -280,9 +333,11 @@ const projections: Record<string, Projection> = {
       runId: run,
       invocationId: d.invocationId,
       model: d.model,
-      provider: d.provider,
+      requestedModel: d.requestedModel ?? undefined,
+      provider: providerName(d.provider),
       latencyMs: d.latencyMs,
       effort: d.effort,
+      finishReason: finishName(d.finishReason),
       ...usageFields(d.usage),
     },
   ],
@@ -291,13 +346,17 @@ const projections: Record<string, Projection> = {
     {
       runId: run,
       invocationId: d.invocationId,
+      // No response, so the requested model is the only one known.
+      model: d.model,
+      requestedModel: d.model,
       attempt: d.attempt,
       latencyMs: d.latencyMs,
       transient: d.transient,
-      provider: d.diagnostics?.provider,
+      provider: providerName(d.diagnostics?.provider),
       errorCode: d.diagnostics?.errorCode,
       httpStatus: d.diagnostics?.httpStatus,
-      state: d.diagnostics?.finishReason,
+      state: finishName(d.diagnostics?.finishReason),
+      finishReason: finishName(d.diagnostics?.finishReason),
       phase: d.contextSizes ? "context" : "model",
       errorCategory: errorName(d.error),
     },
@@ -359,9 +418,21 @@ const projections: Record<string, Projection> = {
         typeof d.exchangeSize === "number" && typeof d.workingSize === "number"
           ? d.exchangeSize + d.workingSize + (d.reservedSize ?? 0)
           : undefined,
+      exchangeChars: d.exchangeSize,
+      workingChars: d.workingSize,
+      reservedChars: d.reservedSize,
+      // Older history admitted under the turn's allowance (outside protectedHistoryChars).
+      historyChars: d.historySize,
+      historyMessages: d.historyMessages,
+      historyAllowanceChars: d.historyAllowance,
+      // Earlier in-turn reasoning kept for caching (journal 108).
+      reasoningChars: d.reasoningSize,
+      reasoningDropped: d.reasoningDropped,
       serializedChars: d.serializedSize,
       omittedCount: d.omitted,
       trimmedGroups: d.trimmed,
+      compactedCount: d.compacted,
+      wireCompacted: d.wireCompacted,
     },
   ],
   "tools.selected": (run, d) => ["info", { runId: run, toolCount: d.offered }],
@@ -481,6 +552,11 @@ const projections: Record<string, Projection> = {
       stopReason: d.stopReason,
       approvalCount: d.approvals,
     },
+  ],
+  // A child low on allocation was told to report; final means only its report tool was offered.
+  "agent.budget_notice": (run, d) => [
+    "info",
+    { runId: run, state: d.final ? "final" : "warning" },
   ],
   "agent.failed": (run, d) => [
     d.cancelled ? "warn" : "error",

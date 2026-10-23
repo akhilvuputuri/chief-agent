@@ -169,12 +169,29 @@ Each foreground turn's runtime context carries `openLoops` when something waits 
 
 A requirements card is any event carrying `requirements`, including the first card (the attempt's `:finished` event). It counts only for the job's current revision. The worker's summary or question goes into a separate `workerText` field, which the note marks as data, never instructions.
 
-**Monitoring cards.** Up to three monitoring confirmation cards that were delivered and expired unanswered in the last day, each with its title. A card is dropped when a later proposal revised the same existing concern (same responsibility id). A re-proposal of a concern that was never confirmed gets a new id, so its earlier card can still be listed for that day.
+**Monitoring cards.** Up to three monitoring confirmation cards that were delivered and expired unanswered, each with its title ([journal 117](journey/117-open-loops-and-memory-offers.md)):
+
+- A card whose spec has `expiresAt` stays listed until one day after it. `expiresAt` is the end of monitoring; it is used as a proxy for the event date. The card carries `endsAt`, and `due: true` from a day before that date onwards. If monitoring was set to end after the event, `due` starts late. Due cards are listed first.
+- A card without `expiresAt` stays listed for seven days after it expired.
+- No card stays listed more than 30 days after it expired.
+- A card is dropped when a later proposal revised the same concern (same responsibility id).
+- A later card with the same title (ignoring case and surrounding spaces) also drops it, but only when that card was confirmed, or is pending and was delivered, and it ends no earlier than the older card (or either has no `expiresAt`). This covers a never-confirmed concern proposed again, which gets a new id, and that proposal's later confirmation. A denied or undelivered card does not hide the older one, and neither does a same-titled card for an earlier date, such as a different trip. If the owner corrects a concern to an earlier date, the newer card ends earlier and does not hide the stale later-dated card, which stays listed, and may show as due, until its own date plus a day.
+- Only three cards are listed: due cards first, then the earliest end date, then the most recently expired. With more than three, an undated or later-dated card can be left out.
+
+**Chief's own questions.** Up to three replies from the last three days that ended Chief's turn with `awaiting_user`. They come from the saved conversation state (`conversation_contexts.pending_reply`). Each has:
+
+- an excerpt of at most 200 characters (code points, including the ellipsis), ending at the reply's last question mark. The saved reply is already cut to 3,000 characters, so a question after that point is missed;
+- the date, the thread, the reply's message id for `conversation_read`, and a host `awaiting` label.
+
+A question counts as answered once a later owner message in the same thread has been handled by a completed turn. The message being handled now does not count, and neither does a message in another thread. Any later completed message in the thread clears the question, whether or not it answered it. `awaiting_approval` pauses are not listed: their cards are tracked elsewhere. Only the newest three are listed, so an older fourth question is left out. The excerpt goes into the model context only. The host does not log it, and traces record only the size of each context key.
 
 The note tells Chief to:
 
 - cover these items when asked for status;
 - revise or resume a listed job instead of starting a duplicate;
-- mention an expired card only when relevant, without re-sending it.
+- mention an expired card only when relevant, without re-sending it. A `due` card is mentioned once, briefly, with an offer to check it now;
+- use a listed question if the current message answers it, and otherwise ask it again briefly when the owner asks for status or the subject comes up.
+
+No message is sent proactively. If the owner does not write while a card is due, nothing reminds them.
 
 The section is omitted when empty and is bounded to a few kilobytes. A failed read logs `context.open_loops_failed` without failing the turn.

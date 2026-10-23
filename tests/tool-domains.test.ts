@@ -316,6 +316,14 @@ test("coding tools form their own domain, so ordinary work turns do not carry th
   assert.ok(coding.tools.some((t) => t.name === "coding_start"));
 });
 
+test("Chief offers to remember a stated preference and saves it only after a yes", () => {
+  // Production review, 14-21 October: durable preferences the owner stated were never saved.
+  assert.match(
+    instructions,
+    /end your answer with one short offer such as "Want me to remember that you prefer X\?"/,
+  );
+  assert.match(instructions, /call memory_set only after they agree/);
+});
 test("domain guidance travels with its offered domain instead of the fixed instructions", () => {
   assert.doesNotMatch(instructions, /When canvas tools are available/);
   assert.doesNotMatch(instructions, /job-alignment skill/);

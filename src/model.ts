@@ -48,6 +48,8 @@ export type Generation = {
   provider?: string;
   usage?: Record<string, unknown>;
   model?: string;
+  /** Why the model stopped (provider value, at most 60 characters), e.g. stop or length. */
+  finishReason?: string;
 };
 export const REASONING_EFFORTS = ["low", "medium", "high"] as const;
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
@@ -335,6 +337,9 @@ export class OpenRouter implements ModelAdapter {
       provider: data.provider,
       model: data.model ?? this.model,
       usage: data.usage,
+      ...(diagnostics.finishReason
+        ? { finishReason: diagnostics.finishReason }
+        : {}),
     };
   }
 }
