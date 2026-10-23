@@ -1,3 +1,7 @@
+# Coding cancel correctness — in review, 23 October 2026
+
+Duplicate-key errors from the coding worker slot no longer surface as an unrelated work-task conflict: each index maps to its own code and message, and a turn stops repeating an identical refused call after two refusals even when reads succeed in between. `coding_cancel` refuses with the reason and next step when the job did not change (for example a published PR the owner must close on GitHub). Resuming or replying to a coding job idle for more than 24 hours requires `confirmStale`, set only when the owner explicitly asked to resume that job; the host's one automatic transient retry is unaffected. [Journal 114](journey/114-coding-cancel-correctness.md), [design](coding.md).
+
 # Bigger context and cached fixed state — in review, 21 October 2026
 
 After the fixed tool list, ordinary Opus turns hit the 120k-character compaction threshold: older history was dropped mid-turn and results were excerpted. Compaction now starts at about 1.08M characters (about 300k tokens, the owner's choice). The 11k of runtime state that never changes (agent and skill catalogues, domain guidance, availability) moves into the cached opening system message. See [journal 113](journey/113-bigger-context-and-cached-state.md).
