@@ -12,9 +12,16 @@ import { ZodError } from "zod";
 import { McpFailure } from "./mcp-errors.js";
 /** This call form already failed the same way in consecutive steps of the run; it was not dispatched. */
 export class RepeatedFailureError extends Error {
-  constructor(operation: string, code: string, count: number) {
+  constructor(
+    operation: string,
+    code: string,
+    count: number,
+    identical = false,
+  ) {
     super(
-      `${operation} failed the same way (${code}) in ${count} steps of this request with no success in between, so this call with the same argument names was not made. Do not retry it in this request: use another form (for example listing without an id), answer with what you have, or ask the owner.`,
+      identical
+        ? `${operation} with these exact arguments was already refused (${code}) in ${count} steps of this request, and nothing has been written since, so it was not made again. Reads do not change why it was refused. Do not retry it: act on the reason given in the earlier result, answer with what you have, or ask the owner.`
+        : `${operation} failed the same way (${code}) in ${count} steps of this request with no success in between, so this call with the same argument names was not made. Do not retry it in this request: use another form (for example listing without an id), answer with what you have, or ask the owner.`,
     );
   }
 }
@@ -22,6 +29,17 @@ export class RepeatedFailureError extends Error {
 export class ToolValidationError extends Error {}
 /** An earlier write's outcome is uncertain, so this write was refused before any mutation. */
 export class WriteBlockedError extends ToolValidationError {}
+/**
+ * The index or constraint a Postgres unique violation (SQLSTATE 23505) names, "" when
+ * it names none, or undefined when this is not a unique violation.
+ */
+function uniqueViolation(error: unknown, message: string) {
+  const fields = (error ?? {}) as { code?: unknown; constraint?: unknown };
+  if (fields.code !== "23505" && !/duplicate key/i.test(message)) return;
+  if (typeof fields.constraint === "string" && fields.constraint)
+    return fields.constraint;
+  return /unique constraint "([^"]+)"/.exec(message)?.[1] ?? "";
+}
 export function toolError(error: unknown) {
   const message = error instanceof Error ? error.message : "";
   if (error instanceof McpFailure)
@@ -121,12 +139,36 @@ export function toolError(error: unknown) {
       message:
         "The requested resource is unavailable or belongs to another scope.",
     };
-  if (/duplicate key|work_one_active/i.test(message))
+  // A unique violation names its index. Only work_one_active is about durable work tasks;
+  // blaming work_status for another index sent the owner to cancel an unrelated task.
+  const constraint = uniqueViolation(error, message);
+  if (constraint === "coding_one_active_worker")
+    return {
+      code: "CODING_WORKER_BUSY",
+      retryable: false,
+      message:
+        "Nothing changed: another coding job is using the single coding worker slot (running, publishing, or waiting for its sandbox cleanup). Wait for it to finish or cancel that coding job first; read coding_status to find it. This is not a work_status task.",
+    };
+  if (constraint?.startsWith("coding_"))
+    return {
+      code: "CODING_CONFLICT",
+      retryable: false,
+      message:
+        "Nothing changed: a coding record with the same identity already exists. Read coding_status for the job and retry with its current revision or a new requestKey. This is not a work_status task.",
+    };
+  if (constraint === "work_one_active" || /work_one_active/.test(message))
     return {
       code: "ACTIVE_WORK_EXISTS",
       retryable: false,
       message:
         "Inspect work_status and revise or cancel the current task before starting another.",
+    };
+  if (constraint !== undefined)
+    return {
+      code: "DUPLICATE_RECORD",
+      retryable: false,
+      message:
+        "Nothing changed: a record with the same identity already exists. Read its current state before retrying.",
     };
   return {
     code: "TOOL_FAILED",

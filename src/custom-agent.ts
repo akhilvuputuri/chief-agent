@@ -36,6 +36,26 @@ function callForm(op: string, raw: string) {
     return `${op}(?)`;
   }
 }
+/** Times one exact call (operation and argument values) may be refused in a turn before it is no longer made. */
+const IDENTICAL_LIMIT = 2;
+/** An operation plus its exact argument values, independent of key order. */
+function exactCall(op: string, raw: string) {
+  const order = (v: unknown): unknown =>
+    Array.isArray(v)
+      ? v.map(order)
+      : v && typeof v === "object"
+        ? Object.fromEntries(
+            Object.entries(v)
+              .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+              .map(([k, x]) => [k, order(x)]),
+          )
+        : v;
+  try {
+    return `${op}:${JSON.stringify(order(JSON.parse(raw)))}`;
+  } catch {
+    return `${op}:${raw}`;
+  }
+}
 import { domainOf } from "./tool-domains.js";
 import { runFamily } from "./run-family.js";
 import { higher as higherEffort } from "./effort.js";
@@ -133,6 +153,15 @@ export class CustomAgent implements Agent {
       string,
       { code: string; count: number; step: number }
     >();
+    // Per exact call (operation and argument values): the last failure code, how many
+    // steps it was refused in, and the step that last counted. Unlike the form guard,
+    // successful reads do not reset it (20 October: a refused coding_cancel was retried
+    // between status reads); only a successful write or new owner input can change the
+    // state that refused it.
+    const refusals = new Map<
+      string,
+      { code: string; count: number; step: number }
+    >();
     let step = 0;
     // Set when the host refuses a write because an earlier write's outcome is uncertain.
     // That refusal holds for the rest of this turn: later writes are refused without
@@ -180,6 +209,7 @@ export class CustomAgent implements Agent {
         req.message = inputs.at(-1)!.message;
         // New owner input (for example the id the model asked for) can make a refused form valid.
         failures.clear();
+        refusals.clear();
         // An absorbed follow-up can be harder than the message the effort was picked for.
         askEffort(true);
       }
@@ -456,6 +486,7 @@ export class CustomAgent implements Agent {
           }
           const op = call.function.name;
           const form = callForm(op, call.function.arguments);
+          const exact = exactCall(op, call.function.arguments);
           let result: unknown;
           let candidate: typeof finish;
           const start = Date.now();
@@ -491,6 +522,19 @@ export class CustomAgent implements Agent {
               repeated.step !== step
             )
               throw new RepeatedFailureError(op, repeated.code, repeated.count);
+            const refused = refusals.get(exact);
+            if (
+              op !== "finish_turn" &&
+              refused &&
+              refused.count >= IDENTICAL_LIMIT &&
+              refused.step !== step
+            )
+              throw new RepeatedFailureError(
+                op,
+                refused.code,
+                refused.count,
+                true,
+              );
             // A new delegation could only retry the refused writes in another context.
             if (
               writesBlocked &&
@@ -592,6 +636,8 @@ export class CustomAgent implements Agent {
             // Any success is progress and may supply what a failing form lacked
             // (such as an id from parcel_match), so every count starts again.
             failures.clear();
+            // Reads change nothing, so an identical refused call would be refused again.
+            if (!readOperations.has(op) || op === "agent_run") refusals.clear();
             if (candidate) {
               finish = candidate;
               finishObservation = op === "finish_turn" ? journal : undefined;
@@ -622,6 +668,17 @@ export class CustomAgent implements Agent {
                     : last.step === step
                       ? last.count
                       : last.count + 1,
+              });
+              const prior = refusals.get(exact);
+              refusals.set(exact, {
+                code,
+                step,
+                count:
+                  prior?.code !== code
+                    ? 1
+                    : prior.step === step
+                      ? prior.count
+                      : prior.count + 1,
               });
             }
             const uncertain =

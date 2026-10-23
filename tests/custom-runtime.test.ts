@@ -1147,3 +1147,48 @@ test("a write refused for an earlier uncertain write blocks later writes in the 
     await f.pg.close();
   }
 });
+test("an identical refused call is not made a third time, even with successful reads in between", async () => {
+  // 20 October: one refused coding_cancel was retried between status reads, and each
+  // successful read reset the call-form guard.
+  const bad = { key: "Bad Key", value: "x" };
+  const script = [
+    call("memory_set", bad),
+    call("memory_list", {}),
+    call("memory_set", { value: "x", key: "Bad Key" }), // same values, other key order
+    call("memory_list", {}),
+    call("memory_set", bad), // refused without dispatch
+    call("memory_set", { key: "Other Key", value: "x" }), // other values still run
+    call("memory_set", { key: "saved", value: "1" }), // a successful write
+    call("memory_set", bad), // may run again: a write can change why it was refused
+  ];
+  let n = 0;
+  const f = await fixture({
+    generate: async () => script[n++] ?? text("done"),
+  });
+  try {
+    await f.assistant.respond("owner", "Remember it");
+    const calls = (
+      await f.db.query(
+        "SELECT operation,state,result FROM runtime_calls ORDER BY started_at,id",
+      )
+    ).rows;
+    assert.deepEqual(
+      calls.map((c) => c.result?.error?.code ?? c.state),
+      [
+        "INVALID_INPUT",
+        "success",
+        "INVALID_INPUT",
+        "success",
+        "REPEATED_FAILURE",
+        "INVALID_INPUT",
+        "success",
+        "INVALID_INPUT",
+      ],
+    );
+    const refusal = calls[4].result.error;
+    assert.match(refusal.message, /exact arguments was already refused/);
+    assert.match(refusal.message, /Reads do not change/);
+  } finally {
+    await f.pg.close();
+  }
+});

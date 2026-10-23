@@ -59,6 +59,31 @@ const active = ["provisioning", "running"];
 export type PauseCause = "sandbox_stopped" | "heartbeat_lost";
 const hash = (v: unknown) =>
   createHash("sha256").update(canonicalJson(v)).digest("hex");
+/** Hours a job may wait before the model must state the owner's explicit request to restart it. */
+const STALE_HOURS = 24;
+/** Why coding_cancel left a job as it was, and what the owner can do instead. */
+export function cancelRefusal(job: {
+  state: string;
+  stage?: string | null;
+  pr_url?: string | null;
+  merge_flow?: string | null;
+}) {
+  if (job.state === "pr_ready") {
+    if (
+      job.stage === "merging" ||
+      job.stage === "release_pending" ||
+      job.stage === "deployed"
+    )
+      return `Not cancelled: this job's PR is already ${job.stage === "merging" ? "merging" : "merged"} (stage ${job.stage}), so the job cannot be cancelled. Report its stage from coding_status; undoing a merged change needs a new job.`;
+    const pr = job.pr_url ? ` (${job.pr_url})` : "";
+    return `Not cancelled: this job already published a PR${pr}, so it stays pr_ready with that PR. Chief has no tool to close pull requests. Tell the owner it was not cancelled; to abandon it, the owner closes the PR on GitHub. ${
+      job.merge_flow === "owner_merge"
+        ? "It never merges without the owner's tap on its Merge card."
+        : "It is a draft PR that only the owner can merge on GitHub."
+    }`;
+  }
+  return `Not cancelled: the job is ${job.state}${job.stage ? ` (stage ${job.stage})` : ""}. Read coding_status and retry only if its state changed.`;
+}
 export type CodingJob = {
   id: string;
   user_id: string;
@@ -568,7 +593,7 @@ export class CodingController {
       );
       const current = (
         await this.db.query(
-          "SELECT state,publication_started FROM coding_jobs WHERE id=$1 AND user_id=$2",
+          "SELECT state,stage,pr_url,publication_started,settings->>'prWorkflow' AS merge_flow,settings->>'autoMerge' AS auto_merge FROM coding_jobs WHERE id=$1 AND user_id=$2",
           [a.id, user],
         )
       ).rows[0];
@@ -577,6 +602,8 @@ export class CodingController {
           "PR publication is in flight or uncertain; inspect its result before cancelling",
         );
       if (current?.state === "cancelled") this.abortModels(a.id);
+      // Nothing changed: say why, so the job is never reported as cancelled while it is not.
+      else if (current) throw new ToolValidationError(cancelRefusal(current));
       return this.status(user, a.id);
     }
     const job = (
@@ -623,6 +650,7 @@ export class CodingController {
         throw new ToolValidationError(
           "Coding revision changed; read coding_status and retry with the current revision",
         );
+      await this.assertFreshOrConfirmed(job, a);
       const automation = (
         await this.db.query(
           "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key=$2",
@@ -671,6 +699,7 @@ export class CodingController {
         throw new ToolValidationError("Coding revision request key conflict");
       return this.status(user, a.id);
     }
+    await this.assertFreshOrConfirmed(job, a);
     if (
       a.operation === "coding_reply" &&
       job.context.length + message.length + 18 > 24000
@@ -716,6 +745,30 @@ export class CodingController {
                   : "This job already has a draft PR; it predates the owner-merge workflow, so it can only be merged on GitHub or replaced by a new job.",
       );
     return this.status(user, a.id);
+  }
+  /**
+   * Work that has waited more than a day restarts only on the owner's explicit request in
+   * the current conversation (20 October: a three-day-old parked job was resumed while
+   * answering an unrelated question, and held the worker slot until the owner cancelled
+   * it). The model states that request with confirmStale. The host's own transient retry
+   * (autoRetryOnce) does not come through here.
+   */
+  private async assertFreshOrConfirmed(
+    job: CodingJob,
+    a: { operation: string; confirmStale?: boolean },
+  ) {
+    if (a.confirmStale === true) return;
+    const waiting = (
+      await this.db.query(
+        `SELECT updated_at FROM coding_jobs WHERE id=$1 AND updated_at < now() - interval '${STALE_HOURS} hours'`,
+        [job.id],
+      )
+    ).rows[0];
+    if (!waiting) return;
+    const since = new Date(waiting.updated_at).toISOString().slice(0, 10);
+    throw new ToolValidationError(
+      `Nothing changed: this coding job has been waiting since ${since}, more than ${STALE_HOURS} hours, so ${a.operation} needs the owner's explicit request to restart it. Ask the owner whether to resume this specific job. Repeat the call with confirmStale: true only if the owner explicitly asked, in this conversation, to resume or answer this job.`,
+    );
   }
   async authenticate(
     id: string,
