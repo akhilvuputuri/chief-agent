@@ -4,6 +4,7 @@ import { candidate, fixture } from "./helpers/coding-fixture.js";
 import { editCodingStatus } from "../src/coding/delivery.js";
 import { formatTelegram } from "../src/telegram-format.js";
 import { AgentPublicationMismatch } from "../src/coding/github.js";
+import { setOpsSink } from "../src/ops-log.js";
 import {
   StatusMessageGone,
   fitStatus,
@@ -655,4 +656,125 @@ test("a separate notice sent while a status delivery is in flight keeps the stat
   assert.equal(tg.edits.length, 0);
   assert.equal(tg.sends.length, 2);
   assert.match(tg.sends[1]!.text, /Checks/);
+});
+
+test("a status opened by another process before a separate notice's send is closed after it", async (t) => {
+  const f = await fixture(t),
+    job = await f.start();
+  await f.c.tick();
+  const j = await f.row(job.id);
+  const tg = telegram();
+  await f.c.progress(j, {
+    key: "one",
+    stage: "implementing",
+    summary: "Started",
+  });
+  await f.c.deliver(tg.send, { edit: tg.edit });
+  const running = await f.row(job.id);
+  await f.c.finish(running, {
+    kind: "awaiting_input",
+    summary: "Needs a decision",
+    question: "Which file?",
+    checkpoint: running.checkpoint,
+    checks: [],
+  });
+  const anchor = async () =>
+    (
+      await f.db.query(
+        "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='status-message'",
+        [job.id],
+      )
+    ).rows[0].payload;
+  // Between the first close and the question's send, an overlapping gateway opens a new status.
+  const send = async (
+    user: string,
+    target: unknown,
+    text: string,
+    approval?: unknown,
+  ) => {
+    await f.db.query(
+      "UPDATE coding_events SET payload=payload || jsonb_build_object('current',true,'messageId',999) WHERE job_id=$1 AND event_key='status-message'",
+      [job.id],
+    );
+    return tg.send(user, target, text, approval);
+  };
+  await f.c.deliver(send, { edit: tg.edit });
+  assert.match(tg.sends.at(-1)!.text, /Which file\?/);
+  assert.equal((await anchor()).current, false);
+});
+
+test("a lost status lease is never edited through and an orphaned send is logged", async (t) => {
+  const f = await fixture(t),
+    job = await f.start();
+  await f.c.tick();
+  const j = await f.row(job.id);
+  const tg = telegram();
+  const logs: any[] = [];
+  const previous = setOpsSink((line) => logs.push(JSON.parse(line)));
+  t.after(() => setOpsSink(previous));
+  const retake = () =>
+    f.db.query(
+      "UPDATE coding_events SET payload=payload || jsonb_build_object('lease','other','leaseUntil',(now()+interval '2 minutes')::text,'leasedAt',clock_timestamp()::text) WHERE job_id=$1 AND event_key='status-message'",
+      [job.id],
+    );
+  const anchor = async () =>
+    (
+      await f.db.query(
+        "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='status-message'",
+        [job.id],
+      )
+    ).rows[0].payload;
+  // The lease is lost while the new status message is being sent.
+  await f.c.progress(j, {
+    key: "one",
+    stage: "implementing",
+    summary: "Started",
+  });
+  const send = async (user: string, target: unknown, text: string) => {
+    await retake();
+    return tg.send(user, target, text);
+  };
+  await f.c.deliver(send, { edit: tg.edit });
+  assert.equal(tg.sends.length, 1);
+  assert.equal((await anchor()).messageId, undefined);
+  assert.equal((await anchor()).lease, "other");
+  const lost = logs.filter((l) => l.event === "coding.status_lease_lost");
+  assert.equal(lost.length, 1);
+  assert.equal(lost[0].taskId, job.id);
+  assert.equal(lost[0].messages, 1);
+  assert.equal(
+    (await deliveries(f, job.id)).find((e) => e.event_key.endsWith(":one"))
+      ?.delivery,
+    "sent",
+  );
+  // A current status whose lease is lost before the edit: nothing is attempted.
+  await f.db.query(
+    "UPDATE coding_events SET payload=(payload - 'lease' - 'leaseUntil') || jsonb_build_object('current',true,'messageId',501) WHERE job_id=$1 AND event_key='status-message'",
+    [job.id],
+  );
+  await f.c.progress(j, {
+    key: "two",
+    stage: "implementing",
+    summary: "Checks",
+  });
+  const query = f.db.query.bind(f.db);
+  let once = true;
+  f.db.query = async (sql, values) => {
+    if (
+      once &&
+      sql.startsWith("UPDATE coding_events SET payload=(payload - 'messageId')")
+    ) {
+      once = false;
+      await retake();
+    }
+    return query(sql, values);
+  };
+  await f.c.deliver(tg.send, { edit: tg.edit });
+  f.db.query = query;
+  assert.equal(tg.edits.length, 0);
+  assert.equal(
+    (await deliveries(f, job.id)).find((e) => e.event_key.endsWith(":two"))
+      ?.delivery,
+    "pending",
+  );
 });

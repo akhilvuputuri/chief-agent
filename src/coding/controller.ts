@@ -2139,6 +2139,10 @@ export class CodingController {
           );
         }
         await this.markSent(ctx.claimed);
+        // Close again after the send: with overlapping gateways, another process may have
+        // taken the lease and opened a new status message between the first close and the
+        // send. Needs no lease; the notice is already sent, so a failure here changes nothing.
+        await this.closeStatus(e.id).catch(() => {});
       } catch {
         await this.db.query(
           "UPDATE coding_events SET delivery=$2 WHERE id=ANY($1::uuid[]) AND delivery='sending'",
@@ -2172,12 +2176,20 @@ export class CodingController {
    * clears the old one. A close at or after the lease was taken stays closed, and a save
    * whose lease has been lost (expired and taken by another process) writes nothing.
    */
-  private async saveStatus(job: string, anchor: StatusAnchor, lease: string) {
-    await this.db.query(
-      `UPDATE coding_events SET payload=(payload - 'messageId') || $2::jsonb
+  private async saveStatus(
+    job: string,
+    anchor: StatusAnchor,
+    lease: string,
+  ): Promise<boolean> {
+    return (
+      (
+        await this.db.query(
+          `UPDATE coding_events SET payload=(payload - 'messageId') || $2::jsonb
          || CASE WHEN (payload->>'closedAt')::timestamptz>=(payload->>'leasedAt')::timestamptz THEN '{"current":false}'::jsonb ELSE '{}'::jsonb END
-       WHERE job_id=$1 AND event_key='status-message' AND payload->>'lease'=$3`,
-      [job, JSON.stringify(anchor), lease],
+       WHERE job_id=$1 AND event_key='status-message' AND payload->>'lease'=$3 RETURNING id`,
+          [job, JSON.stringify(anchor), lease],
+        )
+      ).rows.length === 1
     );
   }
   /** Folds the job's run of pending progress, up to its next separate notice, into its status message. */
@@ -2314,7 +2326,7 @@ export class CodingController {
     );
     if (current) {
       // The intended text is saved first: if this edit fails or its outcome is lost, the next edit shows it.
-      await this.saveStatus(
+      const saved = await this.saveStatus(
         e.job_id,
         {
           messageId: current.messageId,
@@ -2324,6 +2336,14 @@ export class CodingController {
         },
         lease,
       );
+      if (!saved) {
+        // The lease was lost (expired and taken by another process): nothing was attempted.
+        await this.db.query(
+          "UPDATE coding_events SET delivery='pending' WHERE id=ANY($1::uuid[]) AND delivery='sending'",
+          [ctx.claimed],
+        );
+        return;
+      }
       ctx.attempted = true;
       try {
         await options.edit!(j.user_id, current.messageId!, text);
@@ -2355,13 +2375,19 @@ export class CodingController {
       text,
     )) as { message_id?: number } | undefined;
     const id = receipt?.message_id;
-    await this.saveStatus(
+    const saved = await this.saveStatus(
       e.job_id,
       Number.isSafeInteger(id) && id! > 0
         ? { messageId: id, current: true, lines, total }
         : { current: false, lines, total },
       lease,
     );
+    // The message went out but its id was not recorded: it is an orphan, never edited again.
+    if (!saved)
+      opsLog("coding.status_lease_lost", "warn", {
+        taskId: e.job_id,
+        messages: ctx.claimed.length,
+      });
     await this.markSent(ctx.claimed);
   }
   /** One summary for the owner's pending cancellations instead of one notice per job. */
