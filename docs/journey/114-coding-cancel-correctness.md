@@ -1,7 +1,7 @@
 # 114 — Why did cancelling old coding jobs blame a work task, and report jobs cancelled that were not?
 
 Work date(s): 2026-10-23. Written/revised: 2026-10-23.
-Status: in review. Independent review: approve with nits and one medium finding on `e06cbcf`, all addressed; re-review of the new head pending. Three host changes: unique-index violations are reported by the index they name; `coding_cancel` fails with its reason when nothing changed; and restarting coding work that has waited more than 24 hours needs an explicit owner confirmation in the call. A turn also stops repeating an identical refused call after two refusals, even when reads succeed in between. Not released; no live acceptance yet.
+Status: in review. Independent review: approve with nits and one medium finding on the branch at `d913f98`, all addressed; delta review of `6fe6dcd` approved. Three host changes: unique-index violations are reported by the index they name; `coding_cancel` fails with its reason when nothing changed; and restarting coding work that has waited more than 24 hours needs an explicit owner confirmation in the call. A turn also stops repeating an identical refused call after two refusals, even when reads succeed in between. Not released; no live acceptance yet.
 
 ## User-visible problem and preceding iteration
 
@@ -39,14 +39,14 @@ The common mechanism is that the host reported something other than what happene
 - `docs/coding.md`: the cancel and stale-resume behaviour.
 - Tests: `tests/coding-cancel.test.ts` (9 tests), one in `tests/custom-runtime.test.ts` and one in `tests/steering-loop.test.ts`.
 
-Independent review of `e06cbcf` (23 October, Opus 5.5): approve with nits, one medium finding.
+Independent review of the branch at `d913f98` (23 October, Opus 5.5): approve with nits, one medium finding.
 
 - **Medium:** the stale gate ran before the update's own preconditions, so a stale `pr_ready` job awaiting the Merge tap, or a cancelled job, got a false request for confirmation, then a different reason with the flag. Fixed: the gate uses the update's own conditions (`RESTARTABLE`, `CONTINUABLE`) and runs after the merged-PR check. Tested with both jobs.
 - **Low-medium:** the form guard blocked a valid bulk cancel after three distinct `pr_ready` refusals. Fixed by including a write's target id in its form; tested end to end through the assistant.
 - **Low:** the identical-call message overstated that reads cannot change the cause; softened. `cancelRefusal` was wrong at `merge_approved` and for an already-closed PR; fixed and tested.
 - **Nits:** journal wording on policy, the transient-retry test name, an unused column, and a test that new owner input clears the identical-call cap; all addressed.
 
-Re-review of the new head: pending.
+Delta review of `6fe6dcd` (23 October, Opus 5.5): approve. The reviewer's stale probe now gives non-restartable jobs their own reason, with or without `confirmStale`; the remaining nits were this attribution and status. Optional hardening not taken: keep a names-only form cap for writes that fail with codes other than VALIDATION_FAILED.
 
 ## Verification and outcome
 
