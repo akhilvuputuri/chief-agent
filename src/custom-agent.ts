@@ -381,6 +381,7 @@ export class CustomAgent implements Agent {
           } catch (error) {
             await execution.trace("model.failed", {
               invocationId,
+              model: model.model ?? null,
               ...(error instanceof ModelError
                 ? { diagnostics: error.diagnostics, transient: error.transient }
                 : error instanceof ContextLimitError

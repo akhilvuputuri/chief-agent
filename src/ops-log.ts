@@ -286,6 +286,26 @@ function finishName(value: unknown) {
   return finishNames.has(value) ? value : "other";
 }
 
+// OpenRouter provider display names seen in production (model.completed, 9–23 October
+// 2026), mapped to stable slugs. "Claude Platform on AWS" has four words and failed the
+// generic provider shape, so Opus calls logged no provider (journal 118). An unlisted
+// label keeps that shape check, and one that fails it is logged as "other".
+const providerSlugs: Record<string, string> = {
+  "Claude Platform on AWS": "claude-aws",
+  Anthropic: "anthropic",
+  "Amazon Bedrock": "bedrock",
+  "Google Vertex": "vertex",
+  Google: "google",
+  "Google AI Studio": "google-ai-studio",
+  OpenAI: "openai",
+  Azure: "azure",
+};
+function providerName(value: unknown) {
+  if (typeof value !== "string" || !value) return undefined;
+  if (Object.hasOwn(providerSlugs, value)) return providerSlugs[value];
+  return PROVIDER.test(value) ? value : "other";
+}
+
 /** Prefix before ": " in the bounded model.failed error string, e.g. "TypeError". */
 function errorName(value: unknown) {
   if (typeof value !== "string") return undefined;
@@ -307,7 +327,7 @@ const projections: Record<string, Projection> = {
       runId: run,
       invocationId: d.invocationId,
       model: d.model,
-      provider: d.provider,
+      provider: providerName(d.provider),
       latencyMs: d.latencyMs,
       effort: d.effort,
       finishReason: finishName(d.finishReason),
@@ -319,10 +339,11 @@ const projections: Record<string, Projection> = {
     {
       runId: run,
       invocationId: d.invocationId,
+      model: d.model,
       attempt: d.attempt,
       latencyMs: d.latencyMs,
       transient: d.transient,
-      provider: d.diagnostics?.provider,
+      provider: providerName(d.diagnostics?.provider),
       errorCode: d.diagnostics?.errorCode,
       httpStatus: d.diagnostics?.httpStatus,
       state: d.diagnostics?.finishReason,

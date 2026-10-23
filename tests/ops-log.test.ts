@@ -237,7 +237,7 @@ test("model.completed projects model, latency, tokens and reported cost", () => 
     });
     const [line] = log.parsed();
     assert.equal(line.runId, run);
-    assert.equal(line.provider, "OpenAI");
+    assert.equal(line.provider, "openai");
     assert.equal(line.finishReason, "length");
     assert.equal(line.inputTokens, 1000);
     assert.equal(line.cachedTokens, 800);
@@ -286,6 +286,61 @@ test("finish reasons are logged only as fixed names", () => {
     );
     // model.failed keeps its earlier state field for existing queries.
     assert.equal(lines[7].state, "length");
+  } finally {
+    log.restore();
+  }
+});
+
+test("model providers are logged as fixed slugs, and failures carry the model", () => {
+  const log = capture();
+  try {
+    for (const provider of [
+      "Claude Platform on AWS",
+      "Google AI Studio",
+      "Google",
+      "Azure",
+      "Together",
+      PRIVATE[0],
+      "ya29.a0AfH6SMB very secret token",
+      "constructor",
+    ])
+      projectEvent("model.completed", randomUUID(), {
+        model: "anthropic/claude-opus-5.5",
+        provider,
+      });
+    projectEvent("model.failed", randomUUID(), {
+      model: "anthropic/claude-opus-5.5",
+      transient: true,
+      diagnostics: { provider: "Claude Platform on AWS", httpStatus: 529 },
+    });
+    projectEvent("model.failed", randomUUID(), {
+      model: PRIVATE[0],
+      diagnostics: { provider: PRIVATE[1] },
+    });
+    assertClean(log.lines);
+    const lines = log.parsed();
+    assert.deepEqual(
+      lines.map((l) => l.provider),
+      [
+        "claude-aws",
+        "google-ai-studio",
+        "google",
+        "azure",
+        // An unlisted label that fits the generic shape is kept as before.
+        "Together",
+        "other",
+        "other",
+        "constructor",
+        "claude-aws",
+        "other",
+      ],
+    );
+    assert.ok(lines.slice(0, 9).every((l) => !("dropped" in l)));
+    assert.equal(lines[8].model, "anthropic/claude-opus-5.5");
+    assert.equal(lines[8].event, "model.failed");
+    // A model that fails the model shape is still dropped, never logged.
+    assert.equal("model" in lines[9], false);
+    assert.equal(lines[9].dropped, 1);
   } finally {
     log.restore();
   }

@@ -709,6 +709,8 @@ test("empty provider responses retry before tools and preserve safe diagnostics"
     ).rows[0].data;
     assert.equal(failure.transient, true);
     assert.equal(failure.diagnostics.responseId, "gen-test");
+    // Failures record the requested model so they group by model (journal 118).
+    assert.equal(failure.model, model.model);
   } finally {
     await f.pg.close();
   }
