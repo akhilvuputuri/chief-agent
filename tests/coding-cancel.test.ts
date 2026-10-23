@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { fixture } from "./helpers/coding-fixture.js";
 import { toolError, ToolValidationError } from "../src/tool-errors.js";
+import { Assistant } from "../src/agent.js";
+import { CustomAgent } from "../src/custom-agent.js";
+import { JobTools } from "../src/tools.js";
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 const cancel = (f: Fixture, id: string) =>
@@ -114,9 +117,25 @@ test("cancelling a job with a published PR fails with the reason and leaves it u
     (e: any) =>
       e instanceof ToolValidationError &&
       /Merge card/.test(e.message) &&
-      /no tool to close pull requests/.test(e.message),
+      /no tool to close pull requests/.test(e.message) &&
+      /If the PR is already closed, nothing further happens/.test(e.message),
   );
   assert.equal((await f.row(owner)).state, "pr_ready");
+
+  // The owner already tapped Merge: only closing the PR now stops it.
+  const approved = await prReady(f, "approved", {
+    flow: "owner_merge",
+    stage: "merge_approved",
+  });
+  await assert.rejects(
+    () => cancel(f, approved),
+    (e: any) =>
+      e instanceof ToolValidationError &&
+      /already approved its merge, so Chief will merge it/.test(e.message) &&
+      /closes the PR on GitHub now/.test(e.message) &&
+      !/never merges without/.test(e.message),
+  );
+  assert.equal((await f.row(approved)).stage, "merge_approved");
 
   const merging = await prReady(f, "merging", {
     autoMerge: true,
@@ -252,7 +271,10 @@ test("continuing a stale owner-merge PR needs the confirmation", async (t) => {
   assert.equal((await f.row(id)).stage, "awaiting_ci");
 });
 
-test("the host's transient retry is not gated by the owner confirmation", async (t) => {
+// autoRetryOnce only considers pauses from the last day, so its window never overlaps
+// the 24-hour gate; this guards that the retry still runs near that boundary, and the
+// gate itself lives only in call().
+test("the host's transient retry still runs for a pause nearly a day old", async (t) => {
   const f = await fixture(t);
   const job = await parked(f, "transient", "23 hours");
   await f.db.query(
@@ -267,4 +289,120 @@ test("the host's transient retry is not gated by the owner confirmation", async 
   const retried = await f.row(job.id);
   assert.equal(retried.state, "queued");
   assert.equal(retried.revision, job.revision + 1);
+});
+
+test("a stale job that cannot be restarted gets its own reason, not a confirmation request", async (t) => {
+  const f = await fixture(t);
+  // An owner-merge PR waiting for the Merge tap: coding_resume is not a continue here.
+  const pr = await prReady(f, "waiting-pr", {
+    flow: "owner_merge",
+    stage: "awaiting_merge_approval",
+  });
+  const cancelled = (await f.start("gone", "plan")).id as string;
+  await f.db.query(
+    "UPDATE coding_jobs SET state='cancelled',stage='cancelled' WHERE id=$1",
+    [cancelled],
+  );
+  await f.db.query(
+    "UPDATE coding_jobs SET updated_at=now()-interval '3 days' WHERE id=ANY($1::uuid[])",
+    [[pr, cancelled]],
+  );
+  for (const [id, operation] of [
+    [pr, "coding_resume"],
+    [cancelled, "coding_reply"],
+  ] as const) {
+    const job = await f.row(id);
+    const reasons: string[] = [];
+    for (const extra of [{}, { confirmStale: true }])
+      await assert.rejects(
+        () =>
+          f.c.call("a", f.run, {
+            operation,
+            id,
+            baseRevision: job.revision,
+            requestKey: `${operation}-${id}`,
+            ...(operation === "coding_reply" ? { message: "Continue" } : {}),
+            ...extra,
+          } as any),
+        (e: any) => {
+          reasons.push(e.message);
+          return e instanceof ToolValidationError;
+        },
+      );
+    // Same precondition reason with or without the flag, and never the stale gate.
+    assert.equal(reasons[0], reasons[1]);
+    assert.doesNotMatch(reasons[0]!, /waiting since/);
+    assert.equal((await f.row(id)).state, job.state);
+  }
+});
+
+test("a bulk cancel keeps going after distinct jobs with PRs refuse", async (t) => {
+  const f = await fixture(t);
+  const withPr = [
+    await prReady(f, "pr-1"),
+    await prReady(f, "pr-2"),
+    await prReady(f, "pr-3"),
+  ];
+  const paused = (await parked(f, "old", "1 hour")).id as string;
+  const targets = [...withPr, paused];
+  let n = 0;
+  const assistant = new Assistant(
+    f.db,
+    new CustomAgent({
+      model: "fixture/chief",
+      generate: async () =>
+        n < targets.length
+          ? {
+              message: {
+                role: "assistant",
+                content: null,
+                tool_calls: [
+                  {
+                    id: `cancel-${n}`,
+                    type: "function",
+                    function: {
+                      name: "coding_cancel",
+                      arguments: JSON.stringify({ id: targets[n++] }),
+                    },
+                  },
+                ],
+              },
+            }
+          : {
+              message: {
+                role: "assistant",
+                content: "Three jobs keep their PRs; one was cancelled.",
+              },
+            },
+    }),
+    new JobTools(
+      f.db,
+      { call: async () => ({}) },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      f.c,
+    ),
+    { coding: true },
+  );
+  await assistant.respond("a", "Cancel my old coding jobs");
+  const codes = (
+    await f.db.query(
+      "SELECT state,result FROM runtime_calls WHERE operation='coding_cancel' ORDER BY started_at,id",
+    )
+  ).rows.map((c) => c.result?.error?.code ?? c.state);
+  // One call per step, each a different job: the fourth is not refused as a repeat.
+  assert.deepEqual(codes, [
+    "VALIDATION_FAILED",
+    "VALIDATION_FAILED",
+    "VALIDATION_FAILED",
+    "success",
+  ]);
+  assert.equal((await f.row(paused)).state, "cancelled");
 });

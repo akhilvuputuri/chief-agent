@@ -27,11 +27,22 @@ import {
 } from "./tool-errors.js";
 /** Model steps, with no successful call between them, in which one call form failed the same way before it is refused. */
 const REPEAT_LIMIT = 3;
-/** An operation plus its argument names: listing without an id is a different form than reading one. */
+/**
+ * An operation plus its argument names: listing without an id is a different form than
+ * reading one. A write's target id is part of its form: refusals of distinct targets (a
+ * bulk cancel where some jobs have a PR) are separate decisions, not one guess repeated.
+ */
 function callForm(op: string, raw: string) {
   try {
     const args = JSON.parse(raw);
-    return `${op}(${args && typeof args === "object" ? Object.keys(args).sort().join(",") : ""})`;
+    const target =
+      !readOperations.has(op) &&
+      args &&
+      typeof args === "object" &&
+      typeof args.id === "string"
+        ? `@${args.id}`
+        : "";
+    return `${op}(${args && typeof args === "object" ? Object.keys(args).sort().join(",") : ""})${target}`;
   } catch {
     return `${op}(?)`;
   }

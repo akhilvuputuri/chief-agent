@@ -1187,7 +1187,7 @@ test("an identical refused call is not made a third time, even with successful r
     );
     const refusal = calls[4].result.error;
     assert.match(refusal.message, /exact arguments was already refused/);
-    assert.match(refusal.message, /Reads do not change/);
+    assert.match(refusal.message, /their next message can retry it/);
   } finally {
     await f.pg.close();
   }

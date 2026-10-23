@@ -20,7 +20,7 @@ export class RepeatedFailureError extends Error {
   ) {
     super(
       identical
-        ? `${operation} with these exact arguments was already refused (${code}) in ${count} steps of this request, and nothing has been written since, so it was not made again. Reads do not change why it was refused. Do not retry it: act on the reason given in the earlier result, answer with what you have, or ask the owner.`
+        ? `${operation} with these exact arguments was already refused (${code}) in ${count} steps of this request, and nothing has been written since, so it was not made again in this request. Do not retry it: act on the reason given in the earlier result, answer with what you have, or ask the owner. If a read shows the cause has since cleared, tell the owner; their next message can retry it.`
         : `${operation} failed the same way (${code}) in ${count} steps of this request with no success in between, so this call with the same argument names was not made. Do not retry it in this request: use another form (for example listing without an id), answer with what you have, or ask the owner.`,
     );
   }
