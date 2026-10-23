@@ -1,3 +1,7 @@
+# Fewer coding notices — in review, 23 October 2026
+
+Coding progress now goes into one Telegram status message per job, edited in place, instead of a new message per milestone; questions, approval cards, failures and outcomes still arrive as their own messages. Progress that would start a new message is held during quiet hours (`CODING_QUIET_HOURS`, default 23:00–08:00 Singapore). Cancellations within 15 seconds are sent as one summary. On a rebase the host now logs whether the rebased candidate is byte-identical to the reviewed one; reusing the review is not enabled (it needs a worker image change and an owner decision). [Journal 115](journey/115-fewer-coding-notices.md), [design](coding.md).
+
 # Bigger context and cached fixed state — in review, 21 October 2026
 
 After the fixed tool list, ordinary Opus turns hit the 120k-character compaction threshold: older history was dropped mid-turn and results were excerpted. Compaction now starts at about 1.08M characters (about 300k tokens, the owner's choice). The 11k of runtime state that never changes (agent and skill catalogues, domain guidance, availability) moves into the cached opening system message. See [journal 113](journey/113-bigger-context-and-cached-state.md).
