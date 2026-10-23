@@ -1,7 +1,7 @@
 # 114 — Why did cancelling old coding jobs blame a work task, and report jobs cancelled that were not?
 
 Work date(s): 2026-10-23. Written/revised: 2026-10-23.
-Status: in review. Independent review: approve with nits and one medium finding on the branch at `d913f98`, all addressed; delta review of `6fe6dcd` approved. Three host changes: unique-index violations are reported by the index they name; `coding_cancel` fails with its reason when nothing changed; and restarting coding work that has waited more than 24 hours needs an explicit owner confirmation in the call. A turn also stops repeating an identical refused call after two refusals, even when reads succeed in between. Not released; no live acceptance yet.
+Status: released in `79933ce` (PR 312, version 0.3.99) on 23 October 2026; live acceptance pending. Independent review: approve with nits and one medium finding on the branch at `d913f98`, all addressed; delta review of `6fe6dcd` approved. Three host changes: unique-index violations are reported by the index they name; `coding_cancel` fails with its reason when nothing changed; and restarting coding work that has waited more than 24 hours needs an explicit owner confirmation in the call. A turn also stops repeating an identical refused call after two refusals, even when reads succeed in between.
 
 ## User-visible problem and preceding iteration
 
@@ -55,6 +55,13 @@ Delta review of `6fe6dcd` (23 October, Opus 5.5): approve. The reviewer's stale 
 - **Not measured.** Whether the clearer errors and descriptions change the model's behaviour in a live conversation; no paid evaluation was run.
 
 Pending: independent review of the exact head, release, and a live check that a refused cancel is reported with its reason.
+
+### Release closure — 2026-10-23
+
+- **Merged.** [PR 312](https://github.com/akhilvuputuri/chief-agent/pull/312) as `79933cea6e377820ca87aa1a3b003dac92d67154`, version 0.3.99.
+- **Review.** Independent review (Claude Opus 5.5): approve with nits plus one medium finding (the stale gate ran before the state check) and one low-medium (bulk cancels tripped the form guard); both fixed, delta review approved. Devin and hosted CI passed.
+- **Release.** The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/39945473300) succeeded and `release:status` recorded the exact commit deployed with startup health passing at 11:26 UTC on 23 October. No migration. CloudWatch showed no warn or error lines from 08:42 to 15:42 UTC on 23 October.
+- **Not yet observed.** A refused cancel and a stale resume in live use.
 
 ## Coding-harness learning record
 

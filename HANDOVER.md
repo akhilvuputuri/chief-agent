@@ -1,3 +1,16 @@
+# Review fixes 114–119 — live as v0.3.103, 23 October 2026
+
+Seven PRs from the weekly review of 14–21 October, plus a reported double reply, are deployed with exact release receipts. CloudWatch showed no warn or error lines in the seven hours after the first. Live acceptance is pending for all. [Release record](docs/releases.md).
+
+- Telemetry: token sums in the `models` query, finish reasons, cache writes, provider slugs, older-history size. PR 310, `fac557b`. [Journal 118](docs/journey/118-telemetry-gaps.md).
+- Open loops keep dated monitoring and Chief's own unanswered questions; memory is offered, saved only on a yes. PR 311, `fdb88c7`. [Journal 117](docs/journey/117-open-loops-and-memory-offers.md).
+- Coding cancel and resume: truthful index errors, no false "cancelled", identical-refusal cap, stale resumes need owner confirmation. PR 312, `79933ce`. [Journal 114](docs/journey/114-coding-cancel-correctness.md).
+- Web and research reports: tolerant, word-bounded quote and short-ref checks, last-call warning, partial results. PR 313, `a39f8eb`; follow-up PR 317, `56e34cc`. [Journal 116](docs/journey/116-tolerant-agent-reports.md).
+- A reply repeated beside `finish_turn` is sent once. PR 315, `7084064`. [Journal 119](docs/journey/119-double-reply.md).
+- Coding notices: one edited status message per job, quiet hours, bulk-cancel summary; identical rebases logged only. PR 314, `3130950`. [Journal 115](docs/journey/115-fewer-coding-notices.md).
+
+Owner decisions open: a proactive reminder when a monitored date arrives; whether failures and outcomes also wait for morning; whether cancel may retire a job whose PR was closed on GitHub; reusing review for byte-identical rebases once `coding.rebase_candidate` counts exist.
+
 # Opus 5.5, a leaner prompt and replies for any model — live as v0.3.91, 20 October 2026
 
 Three P1 changes from the two-week review are deployed with exact release receipts. Live measurement is pending for all three. [Release record](docs/releases.md).

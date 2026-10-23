@@ -1,7 +1,7 @@
 # 113 — Can a larger context and cached fixed state stop Opus turns losing history and cache?
 
 Work date(s): 2026-10-21. Written/revised: 2026-10-21.
-Status: in review. The compaction threshold rises from 120k to about 1.08M characters (about 300k tokens), and the hard ceiling from 400k to 1.3M. The parts of the runtime state that never change move from the per-call state message into the cached opening system message. Not yet measured in production.
+Status: released in `9fc5ecc` (PR 309, version 0.3.96) on 21 October 2026; live acceptance pending. The compaction threshold rises from 120k to about 1.08M characters (about 300k tokens), and the hard ceiling from 400k to 1.3M. The parts of the runtime state that never change move from the per-call state message into the cached opening system message. Not yet measured in production.
 
 ## User-visible problem and preceding iteration
 
@@ -84,6 +84,13 @@ Pending:
   - later calls reading at least through the owner's message;
   - the state message shrinking to about 4.5k (derived: `runtimeParts` measures the whole state before the split, so subtract the stable keys);
   - cost per call against 21 October.
+
+### Release closure — 2026-10-21
+
+- **Merged.** [PR 309](https://github.com/akhilvuputuri/chief-agent/pull/309) as `9fc5ecceb519684254a4ede3385787529cccda35`, version 0.3.96.
+- **Review.** Exact-head independent review (Claude Opus 5.5) approved, after a test that the opening message stays byte-identical and corrections to journal costs.
+- **Release.** The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/39584597049) succeeded and `release:status` recorded the exact commit deployed with startup health passing at 10:31 UTC on 21 October. No migration.
+- **Not yet observed.** No mid-turn history drop or wire compaction on ordinary Opus turns, and later calls reading the cached prefix, on a week of conversations.
 
 ## Follow-up and next iteration
 
