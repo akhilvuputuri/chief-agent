@@ -107,6 +107,7 @@ A new test covers both: an undated card hidden by a newer delivered dated one, a
 ### Release closure — 2026-10-23
 
 - **Merged.** [PR 311](https://github.com/akhilvuputuri/chief-agent/pull/311) as `fdb88c79e644d037bb93ae0030dd742a527e1a87`, version 0.3.98.
+- **Heads.** Delta review approved `2d1f466`. The coverage nits (`baaa8f3`), Devin's wording fix (`e843b6f`) and the merge of main (`5b3ee34`, the merged head) were checked by the coordinator; CI and Devin passed on the merged head.
 - **Review.** Independent review (Claude Opus 5.5): approve with nits, then approve after stronger tests (13 mutations checked). Devin found that the note said a due card's date "has arrived" when it may be a day away; fixed before merge.
 - **Release.** The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/39939022244) succeeded and `release:status` recorded the exact commit deployed with startup health passing at 10:31 UTC on 23 October. No migration. CloudWatch showed no warn or error lines from 08:42 to 15:42 UTC on 23 October.
 - **Not yet observed.** Chief mentioning a due card, re-raising an unanswered question across topics, and making a memory offer in live conversation.

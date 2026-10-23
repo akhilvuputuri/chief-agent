@@ -146,6 +146,7 @@ Each fix fails its test when reverted (checked by hand). No further independent 
 ### Release closure — 2026-10-23
 
 - **Merged.** [PR 314](https://github.com/akhilvuputuri/chief-agent/pull/314) as `3130950f492d0fc580330b8120ab8b90ac6965ea`, version 0.3.102.
+- **Heads.** Delta review approved `7e63151` with nits. The two lease nits (`d326146`) and the merge of main (`1be86ff`, the merged head) were checked by the coordinator; CI passed and Devin left no open findings on the merged head.
 - **Review.** Independent review (Claude Opus 5.5): approve with nits, twice, with an outbox-stall finding fixed in between. Devin found two lease races under overlapping gateways on the merged-up head; the merge was held until both were fixed and a further delta review approved. Hosted CI passed.
 - **Release.** The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/39971116118) succeeded and `release:status` recorded the exact commit deployed with startup health passing at 14:41 UTC on 23 October. No migration. CloudWatch showed no warn or error lines from 08:42 to 15:42 UTC on 23 October.
 - **Not yet observed.** A live coding job showing one edited status message, overnight progress held, and message counts compared with the 107-a-week baseline.

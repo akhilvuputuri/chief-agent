@@ -88,6 +88,7 @@ Pending:
 ### Release closure — 2026-10-21
 
 - **Merged.** [PR 309](https://github.com/akhilvuputuri/chief-agent/pull/309) as `9fc5ecceb519684254a4ede3385787529cccda35`, version 0.3.96.
+- **Heads.** Independent review (Claude Opus 5.5) approved `a3e1d49` and then `a67cf17`. The merged head `a527976` adds only journal cost corrections and a reading-path link, checked by the coordinator; hosted CI and Devin passed on it.
 - **Review.** Exact-head independent review (Claude Opus 5.5) approved, after a test that the opening message stays byte-identical and corrections to journal costs.
 - **Release.** The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/39584597049) succeeded and `release:status` recorded the exact commit deployed with startup health passing at 10:31 UTC on 21 October. No migration.
 - **Not yet observed.** No mid-turn history drop or wire compaction on ordinary Opus turns, and later calls reading the cached prefix, on a week of conversations.

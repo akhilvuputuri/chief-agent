@@ -150,8 +150,10 @@ Released in `a39f8eb` (PR 313). Devin posted two findings on the final head that
 ### Release closure — 2026-10-23
 
 - **Merged.** [PR 313](https://github.com/akhilvuputuri/chief-agent/pull/313) as `a39f8eb684a77192b468b352496c524b5b3d5330`, version 0.3.100.
+- **Heads.** Second delta review approved `9573b37`. The three final nits (`938b23b`) and the merge of main (`6322df5`, the merged head) were checked by the coordinator; CI passed on it. Devin's two findings on `6322df5` were missed before merge and fixed in PR 317 (below).
 - **Review.** Independent review (Claude Opus 5.5) requested changes (meaning-inverting quotes reproduced), then approve with nits, then approve (40,000 fuzz cases against a brute-force reference). Devin posted two findings on the final head after its check passed and the merge did not wait; both were fixed in PR 317.
 - **Release.** The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/39951629213) succeeded and `release:status` recorded the exact commit deployed with startup health passing at 12:18 UTC on 23 October. No migration. CloudWatch showed no warn or error lines from 08:42 to 15:42 UTC on 23 October.
+- **Follow-up release.** [PR 317](https://github.com/akhilvuputuri/chief-agent/pull/317) merged as `56e34ccde9bc0c19bb98445e27eefc97e1d3c881`, version 0.3.103. Independent review (Claude Opus 5.5) approved `34932a3`, fuzzing the matcher against an exhaustive reference; the merged head `c507a2f` adds only a merge of main (version conflict), and CI and Devin passed on it. The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/39979578299) succeeded and `release:status` recorded the exact commit deployed at 15:40 UTC on 23 October.
 - **Not yet observed.** Fewer web-agent `budget_exhausted` endings without a report, compared with the two October reviews.
 
 ## Follow-up and next iteration

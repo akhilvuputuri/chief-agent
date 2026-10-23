@@ -59,6 +59,7 @@ Pending: independent review of the exact head, release, and a live check that a 
 ### Release closure — 2026-10-23
 
 - **Merged.** [PR 312](https://github.com/akhilvuputuri/chief-agent/pull/312) as `79933cea6e377820ca87aa1a3b003dac92d67154`, version 0.3.99.
+- **Heads.** Delta review approved `6fe6dcd`. The merged head `189f932` adds journal wording (`b6a3b33`) and a merge of main with one test-file conflict resolved, checked by the coordinator with the focused suites; CI and Devin passed on it.
 - **Review.** Independent review (Claude Opus 5.5): approve with nits plus one medium finding (the stale gate ran before the state check) and one low-medium (bulk cancels tripped the form guard); both fixed, delta review approved. Devin and hosted CI passed.
 - **Release.** The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/39945473300) succeeded and `release:status` recorded the exact commit deployed with startup health passing at 11:26 UTC on 23 October. No migration. CloudWatch showed no warn or error lines from 08:42 to 15:42 UTC on 23 October.
 - **Not yet observed.** A refused cancel and a stale resume in live use.
