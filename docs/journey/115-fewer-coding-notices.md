@@ -1,7 +1,7 @@
 # 115 — Can a coding job keep the owner informed without a message per milestone?
 
 Work date: 2026-10-23. Written: 2026-10-23.
-Status: in review. The notice changes and the rebase measurement are implemented and pass their offline tests. Independent review approved `11cc462` with nits, and the delta review approved `5627761` with nits. The fixes for both are in place, and re-review is pending. CI, release and a live job after the release are pending.
+Status: in review. The notice changes and the rebase measurement are implemented and pass their offline tests. Independent review approved `11cc462` with nits, and the delta review approved `5627761` with nits. The fixes for both are in place; the final lease fix applies the delta reviewer's suggested claim condition and was checked by the coordinator rather than a third review. CI, release and a live job after the release are pending.
 
 ## User-visible problem and preceding iteration
 
@@ -114,7 +114,7 @@ The delta review of `5627761` (23 October 2026) approved with nits. One finding 
 - the claim now excludes progress for a job with a live lease;
 - `recoverDelivery` releases leases at startup.
 
-A new test holds stale leases on two jobs whose progress is the oldest. A newer question is still delivered, and the held progress goes out after a restart. Without the claim change, that test fails (checked by hand). Re-review: pending.
+A new test holds stale leases on two jobs whose progress is the oldest. A newer question is still delivered, and the held progress goes out after a restart. Without the claim change, that test fails (checked by hand). The coordinator checked this fix against the reviewer's suggestion; no third independent review was run.
 
 ## Verification and outcome
 
