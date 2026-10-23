@@ -1,7 +1,7 @@
 # 117 — Why did Chief drop dated monitoring, its own questions and stated preferences?
 
 Work date(s): 2026-10-23. Written/revised: 2026-10-23.
-Status: in review, on branch `fix/d-loops-memory`. Independent review: approve with nits on `c69597f` and `584f54f`; the delta review of `f635abb` and `2d1f466` approved, and its two coverage nits are fixed. Not merged or deployed. No live behavior has been observed yet.
+Status: released in `fdb88c7` (PR 311, version 0.3.98) on 23 October 2026; live acceptance pending. Independent review: approve with nits on `c69597f` and `584f54f`; the delta review of `f635abb` and `2d1f466` approved, and its two coverage nits are fixed. No live behavior has been observed yet.
 
 ## User-visible problem and preceding iteration
 
@@ -103,6 +103,14 @@ A new test covers both: an undated card hidden by a newer delivered dated one, a
   - a lapsed dated monitoring card is mentioned when its date arrives;
   - an unanswered question appears in a later status answer;
   - a stated preference draws one offer, and is saved only after a yes.
+
+### Release closure — 2026-10-23
+
+- **Merged.** [PR 311](https://github.com/akhilvuputuri/chief-agent/pull/311) as `fdb88c79e644d037bb93ae0030dd742a527e1a87`, version 0.3.98.
+- **Heads.** Delta review approved `2d1f466`. The coverage nits (`baaa8f3`), Devin's wording fix (`e843b6f`) and the merge of main (`5b3ee34`, the merged head) were checked by the coordinator; CI and Devin passed on the merged head.
+- **Review.** Independent review (Claude Opus 5.5): approve with nits, then approve after stronger tests (13 mutations checked). Devin found that the note said a due card's date "has arrived" when it may be a day away; fixed before merge.
+- **Release.** The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/39939022244) succeeded and `release:status` recorded the exact commit deployed with startup health passing at 10:31 UTC on 23 October. No migration. CloudWatch showed no warn or error lines from 08:42 to 15:42 UTC on 23 October.
+- **Not yet observed.** Chief mentioning a due card, re-raising an unanswered question across topics, and making a memory offer in live conversation.
 
 ## Follow-up and next iteration
 

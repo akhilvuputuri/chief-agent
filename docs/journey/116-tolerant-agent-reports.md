@@ -1,14 +1,14 @@
 # 116 — Can web and research agents report what they found instead of failing their own report checks?
 
 Work date(s): 2026-10-23. Written/revised: 2026-10-23.
-Status: in review. Changes:
+Status: released in `a39f8eb` (PR 313, version 0.3.100) on 23 October 2026; live acceptance pending. Changes:
 
 - Quote checks for findings agents and public research tolerate whitespace, quote-mark and dash differences and `...` omissions. Matches are word-bounded. Short elided spans come back whole, and long ones are refused.
 - Short refs are accepted when they appear as a whole token inside a value in a tool result, or in the brief.
 - A child's last model call offers and dispatches only its report tool.
 - A rejected or cut-short report returns its checked part as `partial`, with unsupported items marked, instead of nothing.
 
-Tested with mocked models only. The first independent review (23 October, on `ac4622c`) requested changes, which were fixed in `8865161`. The delta review of `8865161` approved with nits, fixed in `9573b37`. The second delta review approved `9573b37`; its three nits are fixed in the final commit. No further review is pending, apart from the coordinator's check of that commit. Not released and not measured in production.
+Tested with mocked models only. The first independent review (23 October, on `ac4622c`) requested changes, which were fixed in `8865161`. The delta review of `8865161` approved with nits, fixed in `9573b37`. The second delta review approved `9573b37`; its three nits are fixed in the final commit. No further review is pending, apart from the coordinator's check of that commit. Not measured in production.
 
 ## User-visible problem and preceding iteration
 
@@ -146,6 +146,15 @@ Released in `a39f8eb` (PR 313). Devin posted two findings on the final head that
 
 1. **Repeated occurrences.** Only the shortest span was checked for a hidden qualifier, so a valid, longer, clean occurrence elsewhere in the source was refused. The search now keeps the shortest _acceptable_ span. A new test fails on the released matcher.
 2. **Latest observations.** An incomplete child returned its _earliest_ 12 successful calls, hiding its latest work when it made more than 12. It now returns the latest 12 in call order (`latestObservations`). A new test fails with the old ordering.
+
+### Release closure — 2026-10-23
+
+- **Merged.** [PR 313](https://github.com/akhilvuputuri/chief-agent/pull/313) as `a39f8eb684a77192b468b352496c524b5b3d5330`, version 0.3.100.
+- **Heads.** Second delta review approved `9573b37`. The three final nits (`938b23b`) and the merge of main (`6322df5`, the merged head) were checked by the coordinator; CI passed on it. Devin's two findings on `6322df5` were missed before merge and fixed in PR 317 (below).
+- **Review.** Independent review (Claude Opus 5.5) requested changes (meaning-inverting quotes reproduced), then approve with nits, then approve (40,000 fuzz cases against a brute-force reference). Devin posted two findings on the final head after its check passed and the merge did not wait; both were fixed in PR 317.
+- **Release.** The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/39951629213) succeeded and `release:status` recorded the exact commit deployed with startup health passing at 12:18 UTC on 23 October. No migration. CloudWatch showed no warn or error lines from 08:42 to 15:42 UTC on 23 October.
+- **Follow-up release.** [PR 317](https://github.com/akhilvuputuri/chief-agent/pull/317) merged as `56e34ccde9bc0c19bb98445e27eefc97e1d3c881`, version 0.3.103. Independent review (Claude Opus 5.5) approved `34932a3`, fuzzing the matcher against an exhaustive reference; the merged head `c507a2f` adds only a merge of main (version conflict), and CI and Devin passed on it. The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/39979578299) succeeded and `release:status` recorded the exact commit deployed at 15:40 UTC on 23 October.
+- **Not yet observed.** Fewer web-agent `budget_exhausted` endings without a report, compared with the two October reviews.
 
 ## Follow-up and next iteration
 

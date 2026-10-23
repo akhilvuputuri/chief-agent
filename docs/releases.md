@@ -1,3 +1,67 @@
+## Deployed `3130950` (untagged) — fewer coding notices
+
+- **What merged.** [PR 314](https://github.com/akhilvuputuri/chief-agent/pull/314) merged as `3130950f492d0fc580330b8120ab8b90ac6965ea` (version 0.3.102). Coding progress goes into one Telegram status message per job, edited in place; progress that would start a new message is held 23:00–08:00 Singapore; cancellations within 15 seconds become one summary; non-owner-merge PR notices carry the coder's summary; a per-job lease serialises status edits; identical rebases are detected and logged only.
+- **Review.** Independent review (Claude Opus 5.5): approve with nits, twice, with an outbox-stall finding fixed in between. Devin found two lease races under overlapping gateways on the merged-up head; the merge was held until both were fixed and a further delta review approved. Hosted CI passed.
+- **Release.** Live at 14:41 UTC on 23 October, with `release:status` success ([release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39971116118)). No migration.
+- **Not yet observed.** A live coding job showing one edited status message, overnight progress held, and message counts compared with the 107-a-week baseline.
+
+[Journal 115](journey/115-fewer-coding-notices.md#release-closure--2026-10-23).
+
+## Deployed `7084064` (untagged) — no more double replies
+
+- **What merged.** [PR 315](https://github.com/akhilvuputuri/chief-agent/pull/315) merged as `70840644f11a0fc41d655e3cf781d6b466fc8e8d` (version 0.3.101). Text a model writes beside tool calls is not sent as progress when the `finish_turn` reply that will be delivered already contains it.
+- **Review.** Independent review (Claude Opus 5.5): approve with nits; the containment check replaced the first version. Devin found an earlier or invalid `finish_turn` could hide text; fixed before merge by comparing only the reply that will be delivered.
+- **Release.** Live at 13:51 UTC on 23 October, with `release:status` success ([release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39963924539)). No migration.
+- **Not yet observed.** No progress delivery the same size as its run's answer, at the next weekly review.
+
+[Journal 119](journey/119-double-reply.md#release-closure--2026-10-23).
+
+## Deployed `a39f8eb` (untagged) — tolerant agent reports and partial results
+
+- **What merged.** [PR 313](https://github.com/akhilvuputuri/chief-agent/pull/313) merged as `a39f8eb684a77192b468b352496c524b5b3d5330` (version 0.3.100). Short refs are accepted as whole tokens the child saw; research quotes match after normalising whitespace, quote marks and dashes, word-bounded and with bounded, qualifier-safe gaps; rejections list every failure; children are warned before their last call; rejected or late reports return as `partial` with unsupported items marked.
+- **Review.** Independent review (Claude Opus 5.5) requested changes (meaning-inverting quotes reproduced), then approve with nits, then approve (40,000 fuzz cases against a brute-force reference). Devin posted two findings on the final head after its check passed and the merge did not wait; both were fixed in PR 317.
+- **Release.** Live at 12:18 UTC on 23 October, with `release:status` success ([release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39951629213)). No migration.
+- **Follow-up.** [PR 317](https://github.com/akhilvuputuri/chief-agent/pull/317) merged as `56e34ccde9bc0c19bb98445e27eefc97e1d3c881` (version 0.3.103) and deployed at 15:40 UTC on 23 October ([release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39979578299)): the shortest _acceptable_ quote span is used, and an incomplete child returns its latest 12 calls. Independent review approved (fuzzed against an exhaustive reference).
+- **Not yet observed.** Fewer web-agent `budget_exhausted` endings without a report, compared with the two October reviews.
+
+[Journal 116](journey/116-tolerant-agent-reports.md#release-closure--2026-10-23).
+
+## Deployed `79933ce` (untagged) — coding cancel correctness
+
+- **What merged.** [PR 312](https://github.com/akhilvuputuri/chief-agent/pull/312) merged as `79933cea6e377820ca87aa1a3b003dac92d67154` (version 0.3.99). Unique-index violations are reported by the index they name, so a busy coding worker slot no longer reads as a work-task conflict. Identical refused calls stop after two refusals. `coding_cancel` refuses with the reason and next step when nothing changed. Restarting coding work idle for more than 24 hours needs explicit owner confirmation.
+- **Review.** Independent review (Claude Opus 5.5): approve with nits plus one medium finding (the stale gate ran before the state check) and one low-medium (bulk cancels tripped the form guard); both fixed, delta review approved. Devin and hosted CI passed.
+- **Release.** Live at 11:26 UTC on 23 October, with `release:status` success ([release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39945473300)). No migration.
+- **Not yet observed.** A refused cancel and a stale resume in live use.
+
+[Journal 114](journey/114-coding-cancel-correctness.md#release-closure--2026-10-23).
+
+## Deployed `fdb88c7` (untagged) — open loops that last and memory offers
+
+- **What merged.** [PR 311](https://github.com/akhilvuputuri/chief-agent/pull/311) merged as `fdb88c79e644d037bb93ae0030dd742a527e1a87` (version 0.3.98). Lapsed monitoring cards stay in open loops until a day after their end date (seven days undated, at most 30); Chief's own unanswered questions are listed for three days; the coordinator offers to remember a stated durable preference and saves it only after the owner agrees.
+- **Review.** Independent review (Claude Opus 5.5): approve with nits, then approve after stronger tests (13 mutations checked). Devin found that the note said a due card's date "has arrived" when it may be a day away; fixed before merge.
+- **Release.** Live at 10:31 UTC on 23 October, with `release:status` success ([release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39939022244)). No migration.
+- **Not yet observed.** Chief mentioning a due card, re-raising an unanswered question across topics, and making a memory offer in live conversation.
+
+[Journal 117](journey/117-open-loops-and-memory-offers.md#release-closure--2026-10-23).
+
+## Deployed `fac557b` (untagged) — telemetry gaps
+
+- **What merged.** [PR 310](https://github.com/akhilvuputuri/chief-agent/pull/310) merged as `fac557b8cfa6922f0b21ac498cd9dab488b34744` (version 0.3.97). The `models` CloudWatch query returns token sums again (its aliases had shadowed the summed fields). Model calls log a fixed finish reason, cache-write tokens, a provider slug and the requested model; `context.selected` logs the older history admitted. New `finishes` and `context` queries.
+- **Review.** Independent review (Claude Opus 5.5): approve with nits, then approve on the fixed head. Devin asked for journal 118 in the Context reading path; added before merge.
+- **Release.** Live at 09:35 UTC on 23 October, with `release:status` success ([release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39932225778)). No migration.
+- **Not yet observed.** No model calls between the release and this record, so the new fields (`finishReason`, `provider: claude-aws`, `historyChars`) are not yet seen on a production line.
+
+[Journal 118](journey/118-telemetry-gaps.md#release-closure--2026-10-23).
+
+## Deployed `9fc5ecc` (untagged) — compaction at about 300k tokens and cached fixed state
+
+- **What merged.** [PR 309](https://github.com/akhilvuputuri/chief-agent/pull/309) merged as `9fc5ecceb519684254a4ede3385787529cccda35` (version 0.3.96). Compaction starts at about 1.08M characters (about 300k tokens), with a 1.3M hard ceiling. The 11k of runtime state that never changes moves into the cached opening system message.
+- **Review.** Exact-head independent review (Claude Opus 5.5) approved, after a test that the opening message stays byte-identical and corrections to journal costs.
+- **Release.** Live at 10:31 UTC on 21 October, with `release:status` success ([release](https://github.com/akhilvuputuri/chief-agent/actions/runs/39584597049)). No migration.
+- **Not yet observed.** No mid-turn history drop or wire compaction on ordinary Opus turns, and later calls reading the cached prefix, on a week of conversations.
+
+[Journal 113](journey/113-bigger-context-and-cached-state.md#release-closure--2026-10-21).
+
 ## Deployed `eb03a02` (untagged) — US AQI next to PSI
 
 - **What merged.** [PR 306](https://github.com/akhilvuputuri/chief-agent/pull/306) merged as `eb03a0257c00679faf67e9379f9f328924e6cb7a`.

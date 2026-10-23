@@ -1,7 +1,7 @@
 # 115 — Can a coding job keep the owner informed without a message per milestone?
 
 Work date: 2026-10-23. Written: 2026-10-23.
-Status: in review. The notice changes and the rebase measurement are implemented and pass their offline tests. Independent review approved `11cc462` with nits, and the delta review approved `5627761` with nits. The fixes for both are in place; the final lease fix applies the delta reviewer's suggested claim condition and was checked by the coordinator rather than a third review. Devin's two findings on `24a76bc` are fixed, and the delta review of `7e63151` approved with nits, which are also fixed. Ordinary releases do not overlap gateways, so no further independent review is pending beyond the coordinator's check of the final commit. CI, release and a live job after the release are pending.
+Status: released in `3130950` (PR 314, version 0.3.102) on 23 October 2026; live acceptance pending. The notice changes and the rebase measurement are implemented and pass their offline tests. Independent review approved `11cc462` with nits, and the delta review approved `5627761` with nits. The fixes for both are in place; the final lease fix applies the delta reviewer's suggested claim condition and was checked by the coordinator rather than a third review. Devin's two findings on `24a76bc` are fixed, and the delta review of `7e63151` approved with nits, which are also fixed. Ordinary releases do not overlap gateways, so no further independent review is pending beyond the coordinator's check of the final commit. CI, release and a live job after the release are pending.
 
 ## User-visible problem and preceding iteration
 
@@ -142,6 +142,14 @@ Each fix fails its test when reverted (checked by hand). No further independent 
 - **Not measured:** how many messages a real job now sends, whether the owner notices status edits, and how often a rebase reproduces the reviewed artifact.
 - **Hypothesis:** each box attempt's 8–10 progress messages become one status message plus silent edits.
 - **Pending:** the coordinator's check of the final commit, CI, release, and a live job checked against the counts above.
+
+### Release closure — 2026-10-23
+
+- **Merged.** [PR 314](https://github.com/akhilvuputuri/chief-agent/pull/314) as `3130950f492d0fc580330b8120ab8b90ac6965ea`, version 0.3.102.
+- **Heads.** Delta review approved `7e63151` with nits. The two lease nits (`d326146`) and the merge of main (`1be86ff`, the merged head) were checked by the coordinator; CI passed and Devin left no open findings on the merged head.
+- **Review.** Independent review (Claude Opus 5.5): approve with nits, twice, with an outbox-stall finding fixed in between. Devin found two lease races under overlapping gateways on the merged-up head; the merge was held until both were fixed and a further delta review approved. Hosted CI passed.
+- **Release.** The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/39971116118) succeeded and `release:status` recorded the exact commit deployed with startup health passing at 14:41 UTC on 23 October. No migration. CloudWatch showed no warn or error lines from 08:42 to 15:42 UTC on 23 October.
+- **Not yet observed.** A live coding job showing one edited status message, overnight progress held, and message counts compared with the 107-a-week baseline.
 
 ## Coding-harness learning record
 

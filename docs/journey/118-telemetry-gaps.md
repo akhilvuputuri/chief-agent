@@ -1,7 +1,7 @@
 # 118 — Why did the CloudWatch logs not show token sums, finish reasons or older-history size?
 
 Work date(s): 2026-10-23. Written/revised: 2026-10-23.
-Status: in review. Independent review: approve with nits on the first head; approve on the fixed head (2f018c6). `model.completed` now records why the model stopped (`finishReason`) and cache-write tokens; model providers are logged as fixed slugs, so Opus calls carry a provider again; `model.failed` carries the model; `context.selected` records the older history admitted and its remaining size parts; the `models` CloudWatch query reports token sums again, and new `finishes` and `context` queries exist. Not released; nothing here is measured from the new fields yet.
+Status: released in `fac557b` (PR 310, version 0.3.97) on 23 October 2026; live acceptance pending. Independent review: approve with nits on the first head; approve on the fixed head (2f018c6). `model.completed` now records why the model stopped (`finishReason`) and cache-write tokens; model providers are logged as fixed slugs, so Opus calls carry a provider again; `model.failed` carries the model; `context.selected` records the older history admitted and its remaining size parts; the `models` CloudWatch query reports token sums again, and new `finishes` and `context` queries exist.
 
 ## User-visible problem and preceding iteration
 
@@ -74,6 +74,14 @@ All were fixed in the next commit, and `state` on `model.failed` was mapped to f
   - `models` shows `cacheWriteTokensSum` for Opus;
   - `context` shows `historyChars` and `historyAllowanceChars`;
   - `models` shows `claude-aws` as the Opus provider, and `model.failed` rows carry a model.
+
+### Release closure — 2026-10-23
+
+- **Merged.** [PR 310](https://github.com/akhilvuputuri/chief-agent/pull/310) as `fac557b8cfa6922f0b21ac498cd9dab488b34744`, version 0.3.97.
+- **Heads.** Independent review approved `2f018c6`. The merged head `252802c` adds the reviewer's two nits (query field list, journal wording), the 0.3.97 version and the Context reading-path link Devin asked for, checked by the coordinator; CI and Devin passed on it.
+- **Review.** Independent review (Claude Opus 5.5): approve with nits, then approve on the fixed head. Devin asked for journal 118 in the Context reading path; added before merge.
+- **Release.** The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/39932225778) succeeded and `release:status` recorded the exact commit deployed with startup health passing at 09:35 UTC on 23 October. No migration. CloudWatch showed no warn or error lines from 08:42 to 15:42 UTC on 23 October.
+- **Not yet observed.** No model calls between the release and this record, so the new fields (`finishReason`, `provider: claude-aws`, `historyChars`) are not yet seen on a production line.
 
 ## Follow-up and next iteration
 

@@ -1,7 +1,7 @@
 # 119 — Why did Chief send the same reply twice?
 
 Work date(s): 2026-10-23. Written/revised: 2026-10-23.
-Status: tested, in review. Text that a model writes beside tool calls is no longer sent as a progress message when a `finish_turn` reply in the same step already contains it. Not released.
+Status: released in `7084064` (PR 315, version 0.3.101) on 23 October 2026; live acceptance pending. Text that a model writes beside tool calls is no longer sent as a progress message when a `finish_turn` reply in the same step already contains it.
 
 ## User-visible problem and preceding iteration
 
@@ -56,8 +56,16 @@ Devin on the merged-up head (`64fc2e9`): text matching an earlier or invalid `fi
   - steering-telegram: 13/13.
   - context-continuity: 33/33.
   - `tsc --noEmit` passes.
-- **Not released.**
+- **Released** in `7084064`; see the release closure.
 - **Pending live check.** After release, the weekly review should find no progress delivery with the same size as its run's answer.
+
+### Release closure — 2026-10-23
+
+- **Merged.** [PR 315](https://github.com/akhilvuputuri/chief-agent/pull/315) as `70840644f11a0fc41d655e3cf781d6b466fc8e8d`, version 0.3.101.
+- **Heads.** Independent review approved `4b23f9f` with nits. The containment fix (`dba2933`), Devin's fix (`d2f1031`, the merged head, after a merge of main) were checked by the coordinator with a test that fails on the earlier guard; CI and Devin passed on the merged head.
+- **Review.** Independent review (Claude Opus 5.5): approve with nits; the containment check replaced the first version. Devin found an earlier or invalid `finish_turn` could hide text; fixed before merge by comparing only the reply that will be delivered.
+- **Release.** The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/39963924539) succeeded and `release:status` recorded the exact commit deployed with startup health passing at 13:51 UTC on 23 October. No migration. CloudWatch showed no warn or error lines from 08:42 to 15:42 UTC on 23 October.
+- **Not yet observed.** No progress delivery the same size as its run's answer, at the next weekly review.
 
 ## Follow-up and next iteration
 
