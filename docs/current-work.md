@@ -1,3 +1,7 @@
+# Telemetry gaps — in review, 23 October 2026
+
+The CloudWatch `models` query showed no token sums because its `stats` aliases reused the summed field names, which Logs Insights drops; the fields were on every line. Renamed aliases return them. Successful model calls now log a fixed finish reason, cache-write tokens and a provider slug (Opus's four-word provider label was dropped before); failed calls carry the model; `context.selected` logs the older history admitted and the other size fields. New `finishes` and `context` queries. [Journal 118](journey/118-telemetry-gaps.md), [operational logs](operational-logs.md).
+
 # Bigger context and cached fixed state — in review, 21 October 2026
 
 After the fixed tool list, ordinary Opus turns hit the 120k-character compaction threshold: older history was dropped mid-turn and results were excerpted. Compaction now starts at about 1.08M characters (about 300k tokens, the owner's choice). The 11k of runtime state that never changes (agent and skill catalogues, domain guidance, availability) moves into the cached opening system message. See [journal 113](journey/113-bigger-context-and-cached-state.md).
