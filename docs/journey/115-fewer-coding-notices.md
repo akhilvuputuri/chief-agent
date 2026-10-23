@@ -1,7 +1,7 @@
 # 115 — Can a coding job keep the owner informed without a message per milestone?
 
 Work date: 2026-10-23. Written: 2026-10-23.
-Status: in review. The notice changes and the rebase measurement are implemented and pass their offline tests. Independent review approved `11cc462` with nits, and the delta review approved `5627761` with nits. The fixes for both are in place; the final lease fix applies the delta reviewer's suggested claim condition and was checked by the coordinator rather than a third review. CI, release and a live job after the release are pending.
+Status: in review. The notice changes and the rebase measurement are implemented and pass their offline tests. Independent review approved `11cc462` with nits, and the delta review approved `5627761` with nits. The fixes for both are in place; the final lease fix applies the delta reviewer's suggested claim condition and was checked by the coordinator rather than a third review. Devin's two findings on `24a76bc` are fixed in the following commit, and re-review is pending. CI, release and a live job after the release are pending.
 
 ## User-visible problem and preceding iteration
 
@@ -73,7 +73,9 @@ Outbox guarantees kept:
 - Progress payloads are never modified, so the worker's retry-equality check (`progress()` hashing) still holds.
 - Owner scoping, revoked-owner suppression, the requirements-card gate and `codingDestination` routing are unchanged. Edits address the owner's chat and message id, so they need no topic.
 
-- **One deliverer per status message.** Two gateway processes can overlap during a release. A status delivery therefore takes a two-minute lease on the job's `status-message` row (an atomic conditional upsert, like the Telegram views lease) for the anchor read, the edit or send, and the save. A delivery that finds the lease held returns its notices to `pending` without trying. The claim skips progress for a job whose lease is live, so a held lease never blocks the rest of the outbox. A lease left by a process that died delays only that job's progress until it expires, at most two minutes. Startup recovery also releases leases: it runs before any delivery timer and already treats every `sending` notice as interrupted.
+- **One deliverer per status message.** Two gateway processes can overlap during a release. A status delivery therefore takes a two-minute lease on the job's `status-message` row (an atomic conditional upsert, like the Telegram views lease) for the anchor read, the edit or send, and the save. A delivery that finds the lease held returns its notices to `pending` without trying. The claim skips progress for a job whose lease is live, so a held lease never blocks the rest of the outbox. A lease left by a process that died delays only that job's progress until it expires, at most two minutes. Startup recovery leaves leases alone, because an overlapping gateway may still hold one.
+  - **Can gateways overlap?** Read from source (24 October 2026): the release (`scripts/cloud-release.py`) runs `docker compose up -d --no-deps --no-build gateway` on the single `gateway` service, which stops the old container before starting the new one. There is no rolling start and no replica setting, so an ordinary release should not overlap (hypothesis from the code; not observed). The code stays correct under overlap anyway: an operator-started process, a container that outlives its stop, or a future rolling deploy must not break it.
+  - **A separate notice does not wait for the lease.** Closing the status message (`current:false`) takes no lease, so a question is never held up by a status delivery. The close records `closedAt` and the lease records `leasedAt`. A save made under a lease keeps the status closed when `closedAt` is at or after `leasedAt`, so a delivery that was in flight cannot reopen a message that now sits above a newer question. Saves also write only while their own lease still holds; a lease lost to expiry writes nothing, and the next progress starts a new message.
 - **One Telegram message.** Before the anchor is saved, the oldest lines are dropped until the text formats to exactly one message. The line bound counts code points, but Telegram splits by UTF-16 length, so emoji-heavy lines could otherwise split the message and make every later edit fail.
 - **Publication mismatch.** A PR that does not match the reviewed artifact pauses the job, as before, and now also sends a pause notice (`publication-paused:<revision>:<attempt>`). Without it, the status message would end at "publishing" with nothing after it.
 
@@ -91,7 +93,8 @@ Tests:
   - pending progress for a cancelled job suppressed;
   - emoji-heavy progress fitting one editable message;
   - the status lease: a held lease defers delivery, and an expired lease does not;
-  - a held lease delays only that job's progress, while a newer question is delivered, and startup recovery releases it;
+  - a held lease delays only that job's progress until it expires, a newer question is delivered meanwhile, and a restart does not release it;
+  - a separate notice sent while a status delivery is in flight keeps the status closed, and the next progress starts a new message;
   - the publication-mismatch pause notice;
   - the bulk cancel summary, with each job's objective.
 - [`tests/coding-pi-owner-merge.test.ts`](../../tests/coding-pi-owner-merge.test.ts): the carried artifact, plus identical and different rebased candidates, each with its `coding.rebase_candidate` ops-log line (`revision`, `matched`).
@@ -112,9 +115,16 @@ Each nit is fixed as described above, with a test. Both surviving mutations now 
 The delta review of `5627761` (23 October 2026) approved with nits. One finding needed a fix before merge, and the reviewer reproduced it. The claim still picked the oldest pending notice. If that was progress for a job whose lease was live, every tick claimed it, found the lease taken and returned it, so questions, cards and failures for any job waited until the lease expired. `recoverDelivery` did not clear leases either. Fixes:
 
 - the claim now excludes progress for a job with a live lease;
-- `recoverDelivery` releases leases at startup.
+- `recoverDelivery` released leases at startup (reverted after Devin's review, below).
 
-A new test holds stale leases on two jobs whose progress is the oldest. A newer question is still delivered, and the held progress goes out after a restart. Without the claim change, that test fails (checked by hand). The coordinator checked this fix against the reviewer's suggestion; no third independent review was run.
+A new test holds stale leases on two jobs whose progress is the oldest. A newer question is still delivered, and the held progress goes out once the leases expire. Without the claim change, that test fails (checked by hand). The coordinator checked this fix against the reviewer's suggestion; no third independent review was run.
+
+Devin reviewed PR 314 at `24a76bc` (the branch with main merged in) and left two findings, both fixed:
+
+1. **`recoverDelivery` cleared live leases.** If gateways overlap, a new gateway's startup would remove a lease the old one still uses, and both could edit or send the same status. Startup no longer touches leases. An expired lease is already reclaimed by the atomic upsert, and the claim limits a held lease to delaying its own job's progress.
+2. **A separate notice closed the status without the lease.** A delivery that was in flight could then save `current:true` and reopen a message above the question. Fixed with `closedAt` and `leasedAt`, and with saves bound to their own lease, as described above.
+
+Each fix fails its test when reverted (checked by hand). Re-review: pending.
 
 ## Verification and outcome
 

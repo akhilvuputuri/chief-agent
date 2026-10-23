@@ -1952,11 +1952,9 @@ export class CodingController {
     await this.db.query(
       "UPDATE coding_events SET delivery='uncertain' WHERE delivery='sending'",
     );
-    // Startup runs before any delivery timer, like the line above: no lease is live, so a
-    // lease left by a stopped process is released rather than waited out.
-    await this.db.query(
-      "UPDATE coding_events SET payload=payload - 'lease' - 'leaseUntil' WHERE event_key='status-message' AND payload ? 'lease'",
-    );
+    // Status leases are left alone: an overlapping gateway may still hold one. A lease left
+    // by a stopped process expires within two minutes, and until then it delays only that
+    // job's progress (the claim skips it).
   }
   /**
    * After a gateway restart no model call is in flight: a call cut off mid-way never ran
@@ -2061,12 +2059,7 @@ export class CodingController {
           await this.deliverCancellations(e, j, send, ctx);
           return;
         }
-        // A separate notice ends the job's current status message; later progress goes below it.
-        await this.db.query(
-          `INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT job_id,'status-message',jsonb_build_object('current',false,'lines','[]'::jsonb,'total',0,'separateAt',created_at::text),'suppressed' FROM coding_events WHERE id=$1
-           ON CONFLICT(job_id,event_key) DO UPDATE SET payload=coding_events.payload || jsonb_build_object('current',false,'separateAt',GREATEST((coding_events.payload->>'separateAt')::timestamptz,(EXCLUDED.payload->>'separateAt')::timestamptz)::text)`,
-          [e.id],
-        );
+        await this.closeStatus(e.id);
         const attachment =
           req && j.settings.runtime === "pi"
             ? {
@@ -2162,12 +2155,29 @@ export class CodingController {
       [ids],
     );
   }
-  private async saveStatus(job: string, anchor: StatusAnchor) {
-    // Keeps `separateAt`; a missing messageId clears the old one.
+  /**
+   * A separate notice ends the job's current status message; later progress goes below it.
+   * It takes no lease, so it never waits; `closedAt` lets a status delivery already in
+   * flight see the close and not reopen the message (`saveStatus`).
+   */
+  private async closeStatus(eventId: string) {
     await this.db.query(
-      `INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'status-message',$2::jsonb,'suppressed')
-       ON CONFLICT(job_id,event_key) DO UPDATE SET payload=(coding_events.payload - 'messageId') || EXCLUDED.payload`,
-      [job, JSON.stringify(anchor)],
+      `INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT job_id,'status-message',jsonb_build_object('current',false,'lines','[]'::jsonb,'total',0,'separateAt',created_at::text,'closedAt',clock_timestamp()::text),'suppressed' FROM coding_events WHERE id=$1
+       ON CONFLICT(job_id,event_key) DO UPDATE SET payload=coding_events.payload || jsonb_build_object('current',false,'closedAt',clock_timestamp()::text,'separateAt',GREATEST((coding_events.payload->>'separateAt')::timestamptz,(EXCLUDED.payload->>'separateAt')::timestamptz)::text)`,
+      [eventId],
+    );
+  }
+  /**
+   * Saves the anchor under this delivery's lease. Keeps `separateAt`; a missing messageId
+   * clears the old one. A close at or after the lease was taken stays closed, and a save
+   * whose lease has been lost (expired and taken by another process) writes nothing.
+   */
+  private async saveStatus(job: string, anchor: StatusAnchor, lease: string) {
+    await this.db.query(
+      `UPDATE coding_events SET payload=(payload - 'messageId') || $2::jsonb
+         || CASE WHEN (payload->>'closedAt')::timestamptz>=(payload->>'leasedAt')::timestamptz THEN '{"current":false}'::jsonb ELSE '{}'::jsonb END
+       WHERE job_id=$1 AND event_key='status-message' AND payload->>'lease'=$3`,
+      [job, JSON.stringify(anchor), lease],
     );
   }
   /** Folds the job's run of pending progress, up to its next separate notice, into its status message. */
@@ -2194,8 +2204,8 @@ export class CodingController {
     const lease = randomUUID();
     const leased = (
       await this.db.query(
-        `INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'status-message',jsonb_build_object('current',false,'lines','[]'::jsonb,'total',0,'lease',$2::text,'leaseUntil',(now()+interval '2 minutes')::text),'suppressed')
-         ON CONFLICT(job_id,event_key) DO UPDATE SET payload=coding_events.payload || jsonb_build_object('lease',$2::text,'leaseUntil',(now()+interval '2 minutes')::text)
+        `INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'status-message',jsonb_build_object('current',false,'lines','[]'::jsonb,'total',0,'lease',$2::text,'leaseUntil',(now()+interval '2 minutes')::text,'leasedAt',clock_timestamp()::text),'suppressed')
+         ON CONFLICT(job_id,event_key) DO UPDATE SET payload=coding_events.payload || jsonb_build_object('lease',$2::text,'leaseUntil',(now()+interval '2 minutes')::text,'leasedAt',clock_timestamp()::text)
          WHERE NOT (coding_events.payload ? 'leaseUntil') OR (coding_events.payload->>'leaseUntil')::timestamptz<now() RETURNING id`,
         [e.job_id, lease],
       )
@@ -2209,7 +2219,7 @@ export class CodingController {
       return;
     }
     try {
-      await this.foldStatus(e, j, send, options, quiet, ctx);
+      await this.foldStatus(e, j, send, options, quiet, ctx, lease);
     } finally {
       await this.db.query(
         "UPDATE coding_events SET payload=payload - 'lease' - 'leaseUntil' WHERE job_id=$1 AND event_key='status-message' AND payload->>'lease'=$2",
@@ -2234,6 +2244,7 @@ export class CodingController {
     },
     quiet: boolean,
     ctx: { claimed: string[]; attempted: boolean },
+    lease: string,
   ) {
     const following = (
       await this.db.query(
@@ -2303,12 +2314,16 @@ export class CodingController {
     );
     if (current) {
       // The intended text is saved first: if this edit fails or its outcome is lost, the next edit shows it.
-      await this.saveStatus(e.job_id, {
-        messageId: current.messageId,
-        current: true,
-        lines,
-        total,
-      });
+      await this.saveStatus(
+        e.job_id,
+        {
+          messageId: current.messageId,
+          current: true,
+          lines,
+          total,
+        },
+        lease,
+      );
       ctx.attempted = true;
       try {
         await options.edit!(j.user_id, current.messageId!, text);
@@ -2318,7 +2333,11 @@ export class CodingController {
         if (!(error instanceof StatusMessageGone)) throw error;
         // Telegram refused the edit, so nothing changed; a new status message replaces it.
         ctx.attempted = false;
-        await this.saveStatus(e.job_id, { current: false, lines, total });
+        await this.saveStatus(
+          e.job_id,
+          { current: false, lines, total },
+          lease,
+        );
       }
     }
     if (quiet) {
@@ -2341,6 +2360,7 @@ export class CodingController {
       Number.isSafeInteger(id) && id! > 0
         ? { messageId: id, current: true, lines, total }
         : { current: false, lines, total },
+      lease,
     );
     await this.markSent(ctx.claimed);
   }

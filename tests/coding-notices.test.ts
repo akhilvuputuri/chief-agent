@@ -522,7 +522,7 @@ test("a published PR that does not match the reviewed artifact pauses with an ow
   );
 });
 
-test("a held status lease delays only that job's progress, never other notices", async (t) => {
+test("a held status lease delays only that job's progress until it expires, never other notices", async (t) => {
   const f = await fixture(t),
     a = await f.start("lease-a"),
     b = await f.start("lease-b");
@@ -580,8 +580,15 @@ test("a held status lease delays only that job's progress, never other notices",
       )
     ).rows.map((r) => r.event_key);
   assert.deepEqual(await pending(), [`${j.attempt_id}:two`, "other:progress"]);
-  // A restart releases the stopped process's leases, so the held progress is delivered.
+  // A restart leaves leases alone: an overlapping gateway may still hold them.
   await f.c.recoverDelivery();
+  await f.c.deliver(tg.send, options);
+  assert.equal(tg.sends.length, 2);
+  assert.deepEqual(await pending(), [`${j.attempt_id}:two`, "other:progress"]);
+  // Once the stopped process's leases expire, the held progress is delivered.
+  await f.db.query(
+    "UPDATE coding_events SET payload=payload || jsonb_build_object('leaseUntil',(now()-interval '1 second')::text) WHERE event_key='status-message'",
+  );
   await f.c.deliver(tg.send, options);
   await f.c.deliver(tg.send, options);
   assert.deepEqual(await pending(), []);
@@ -596,4 +603,56 @@ test("a held status lease delays only that job's progress, never other notices",
     ).rows[0].delivery,
     "suppressed",
   );
+});
+
+test("a separate notice sent while a status delivery is in flight keeps the status closed", async (t) => {
+  const f = await fixture(t),
+    job = await f.start();
+  await f.c.tick();
+  const j = await f.row(job.id);
+  const tg = telegram();
+  await f.c.progress(j, {
+    key: "one",
+    stage: "implementing",
+    summary: "Started",
+  });
+  // While this process sends the status message under its lease, another process
+  // delivers a question for the same job, closing the status without the lease.
+  const question = (
+    await f.db.query(
+      "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'other:question',$2::jsonb,'sent') RETURNING id",
+      [
+        job.id,
+        JSON.stringify({
+          summary: "Needs a decision",
+          question: "Which file?",
+        }),
+      ],
+    )
+  ).rows[0].id;
+  const send = async (user: string, target: unknown, text: string) => {
+    await (
+      f.c as unknown as { closeStatus: (id: string) => Promise<void> }
+    ).closeStatus(question);
+    return tg.send(user, target, text);
+  };
+  await f.c.deliver(send, { edit: tg.edit });
+  assert.equal(tg.sends.length, 1);
+  const anchor = (
+    await f.db.query(
+      "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='status-message'",
+      [job.id],
+    )
+  ).rows[0].payload;
+  assert.equal(anchor.current, false);
+  // Later progress starts a new message below the question instead of editing the old one.
+  await f.c.progress(j, {
+    key: "two",
+    stage: "implementing",
+    summary: "Checks",
+  });
+  await f.c.deliver(tg.send, { edit: tg.edit });
+  assert.equal(tg.edits.length, 0);
+  assert.equal(tg.sends.length, 2);
+  assert.match(tg.sends[1]!.text, /Checks/);
 });
