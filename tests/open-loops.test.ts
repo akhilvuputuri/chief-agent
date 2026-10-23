@@ -4,7 +4,12 @@ import { readFile, readdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { PGlite } from "@electric-sql/pglite";
 import { ensureUser, type Database } from "../src/db.js";
-import { codingWaitsOnOwner, openLoops } from "../src/open-loops.js";
+import {
+  codingWaitsOnOwner,
+  openLoops,
+  questionExcerpt,
+} from "../src/open-loops.js";
+import { saveConversationState } from "../src/conversation-state.js";
 async function fixture() {
   const pg = new PGlite();
   // Every migration in order, so the approvals operation check matches production.
@@ -76,6 +81,8 @@ async function fixture() {
     concern = randomUUID(),
     delivered = true,
     age = "1 day",
+    title = `Track ${randomUUID()}`,
+    endsAt = undefined as string | undefined,
   } = {}) =>
     db.query(
       "INSERT INTO approvals(id,user_id,run_id,operation,payload,status,expires_at,created_at) VALUES($1,$2,$3,'responsibility_confirm',$4::jsonb,$5,now()+$6::interval,now()-$7::interval)",
@@ -85,7 +92,10 @@ async function fixture() {
         randomUUID(),
         JSON.stringify({
           id: concern,
-          spec: { title: "Track the return flight" },
+          spec: {
+            title,
+            ...(endsAt ? { end: "date", expiresAt: endsAt } : {}),
+          },
           ...(delivered ? { telegramDeliveryState: "sent" } : {}),
         }),
         status,
@@ -93,7 +103,82 @@ async function fixture() {
         age,
       ],
     );
-  return { db, job, card, monitoring };
+  let ordinal = 0;
+  /**
+   * A finished turn as the agent records it: the owner's triggering input (completed, received
+   * before the state is saved), Chief's final reply message, and the saved conversation state.
+   */
+  const asked = async ({
+    user = "123",
+    reply = "Which date is the flight?",
+    reason = "awaiting_user",
+    thread = 0,
+    age = "1 hour",
+    delivery = "sent",
+  } = {}) => {
+    const run = randomUUID();
+    await db.query(
+      "INSERT INTO runtime_runs(id,user_id,state,stop_reason) VALUES($1,$2,'stopped',$3)",
+      [run, user, reason],
+    );
+    await db.query(
+      "INSERT INTO conversation_inputs(id,user_id,run_id,message,metadata,state,received_at) VALUES($1,$2,$3,'Track a family member''s flight',$4::jsonb,'completed',now()-$5::interval-interval '1 minute')",
+      [
+        randomUUID(),
+        user,
+        run,
+        JSON.stringify(thread ? { threadId: thread } : {}),
+        age,
+      ],
+    );
+    await saveConversationState(
+      db,
+      user,
+      run,
+      "",
+      "Track a family member's flight",
+      reply,
+      reason,
+      thread,
+    );
+    await db.query(
+      "UPDATE conversation_contexts SET created_at=now()-$2::interval WHERE run_id=$1",
+      [run, age],
+    );
+    const hash = randomUUID();
+    await db.query(
+      "INSERT INTO conversations(user_id) VALUES($1) ON CONFLICT DO NOTHING",
+      [user],
+    );
+    await db.query(
+      "INSERT INTO message_contents(user_id,hash,payload,characters) VALUES($1,$2,$3::jsonb,$4)",
+      [
+        user,
+        hash,
+        JSON.stringify({ role: "assistant", content: reply }),
+        reply.length,
+      ],
+    );
+    const replyId = (
+      await db.query(
+        "INSERT INTO conversation_messages(user_id,ordinal,hash,run_id,delivery_state) VALUES($1,$2,$3,$4,$5) RETURNING id",
+        [user, ++ordinal, hash, run, delivery],
+      )
+    ).rows[0].id as string;
+    return { run, replyId };
+  };
+  /** A later owner message in a thread, in the given turn state. */
+  const said = async ({ thread = 0, state = "completed", user = "123" } = {}) =>
+    db.query(
+      "INSERT INTO conversation_inputs(id,user_id,message,metadata,state,received_at) VALUES($1,$2,'yes',$3::jsonb,$4,now()+interval '1 second')",
+      [
+        randomUUID(),
+        user,
+        JSON.stringify(thread ? { threadId: thread } : {}),
+        state,
+      ],
+    );
+  return { db, job, card, monitoring, asked, said };
 }
 const hour = (n: number) => new Date(Date.now() + n * 3600000).toISOString();
 const awaiting = async (db: Database) =>
@@ -218,10 +303,11 @@ test("decided, old, other-owner and long-failed jobs are left out; a recent fail
     ],
   );
 });
-test("only delivered monitoring cards that expired in the last day and were not superseded are listed", async () => {
+test("only delivered, undecided, unsuperseded monitoring cards are listed; an undated one for a week", async () => {
   const f = await fixture();
-  await f.monitoring(); // listed
-  await f.monitoring({ expires: "-2 days" }); // too old
+  await f.monitoring({ title: "Track a family member's flight" }); // listed
+  await f.monitoring({ title: "Watch the visa email", expires: "-6 days" }); // listed
+  await f.monitoring({ expires: "-8 days" }); // undated and over a week old
   await f.monitoring({ expires: "2 hours" }); // still open
   await f.monitoring({ status: "approved" }); // decided
   await f.monitoring({ delivered: false }); // never shown to the owner
@@ -229,12 +315,193 @@ test("only delivered monitoring cards that expired in the last day and were not 
   const concern = randomUUID();
   await f.monitoring({ concern, age: "2 days" }); // superseded by the next proposal
   await f.monitoring({ concern, expires: "3 hours", age: "1 hour" });
+  // A never-confirmed concern proposed again gets a new id; the same title supersedes it.
+  await f.monitoring({ title: "Track the parcel", age: "2 days" });
+  await f.monitoring({ title: "track the parcel ", expires: "3 hours" });
   const loops = await openLoops(f.db, "123", { coding: false });
   assert.deepEqual(
-    loops!.expiredCards!.map((c) => [c.operation, c.title]),
-    [["responsibility_confirm", "Track the return flight"]],
+    loops!.expiredCards!.map((c) => [c.operation, c.title, c.due]),
+    [
+      ["responsibility_confirm", "Track a family member's flight", false],
+      ["responsibility_confirm", "Watch the visa email", false],
+    ],
   );
   assert.equal(loops!.coding, undefined);
+  assert.equal(loops!.questions, undefined);
+});
+test("an expired monitoring card stays until its own date has passed, and is due as the date arrives", async () => {
+  // Production review, 14-21 October: a return-flight card dropped out after a day, and its
+  // date passed with no mention.
+  const f = await fixture();
+  const at = (hours: number) =>
+    new Date(Date.now() + hours * 3600000).toISOString();
+  await f.monitoring({
+    title: "Flight in two days",
+    expires: "-3 days",
+    endsAt: at(48),
+  });
+  await f.monitoring({
+    title: "Flight tonight",
+    expires: "-3 days",
+    endsAt: at(12),
+  });
+  await f.monitoring({
+    title: "Flight this morning",
+    expires: "-3 days",
+    endsAt: at(-12),
+  });
+  await f.monitoring({
+    title: "Flight two days ago",
+    expires: "-3 days",
+    endsAt: at(-48),
+  });
+  await f.monitoring({
+    title: "Too old to keep",
+    expires: "-40 days",
+    endsAt: at(240),
+  });
+  const cards = (await openLoops(f.db, "123", { coding: false }))!
+    .expiredCards!;
+  assert.deepEqual(
+    cards.map((c) => [c.title, c.due]),
+    [
+      ["Flight this morning", true],
+      ["Flight tonight", true],
+      ["Flight in two days", false],
+    ],
+  );
+  assert.ok(
+    cards.every(
+      (c) => c.endsAt instanceof Date || typeof c.endsAt === "string",
+    ),
+  );
+});
+test("a same-titled card hides an older one only when it was confirmed or delivered and ends no earlier", async () => {
+  const f = await fixture();
+  const at = (hours: number) =>
+    new Date(Date.now() + hours * 3600000).toISOString();
+  // A newer card for an earlier date is a different trip: both stay.
+  await f.monitoring({
+    title: "Flight",
+    age: "4 days",
+    expires: "-3 days",
+    endsAt: at(48),
+  });
+  await f.monitoring({
+    title: "flight",
+    age: "1 day",
+    expires: "-1 hour",
+    endsAt: at(12),
+  });
+  // A denied or undelivered newer card does not hide the older one.
+  await f.monitoring({ title: "Parcel", age: "2 days" });
+  await f.monitoring({ title: "Parcel", status: "denied", expires: "3 hours" });
+  await f.monitoring({ title: "Parcel", delivered: false, expires: "3 hours" });
+  // A confirmed newer card that ends later, or one without a date, hides it.
+  await f.monitoring({ title: "Hotel", age: "2 days", endsAt: at(12) });
+  await f.monitoring({
+    title: "Hotel",
+    status: "approved",
+    expires: "3 hours",
+    endsAt: at(48),
+  });
+  await f.monitoring({ title: "Visa", age: "2 days", endsAt: at(12) });
+  await f.monitoring({ title: "Visa", expires: "3 hours" });
+  const cards = (await openLoops(f.db, "123", { coding: false }))!
+    .expiredCards!;
+  assert.deepEqual(cards.map((c) => c.title).sort(), [
+    "Flight",
+    "Parcel",
+    "flight",
+  ]);
+});
+test("an undated card is hidden by a newer delivered dated one; another owner's card never hides it", async () => {
+  // Delta review, f635abb: neither clause had a test that failed without it.
+  const f = await fixture();
+  const at = (hours: number) =>
+    new Date(Date.now() + hours * 3600000).toISOString();
+  await f.monitoring({ title: "Ferry", age: "2 days" });
+  await f.monitoring({ title: "Ferry", expires: "3 hours", endsAt: at(48) });
+  await f.monitoring({ title: "Train", age: "2 days" });
+  await f.monitoring({ title: "Train", user: "456", age: "1 hour" });
+  assert.deepEqual(
+    (await openLoops(f.db, "123", { coding: false }))!.expiredCards!.map(
+      (c) => c.title,
+    ),
+    ["Train"],
+  );
+});
+test("Chief's unanswered question is listed until the owner replies in its thread", async () => {
+  const f = await fixture();
+  const flight = await f.asked();
+  await f.asked({
+    reply: "Do you want the dates?",
+    reason: "awaiting_approval",
+  });
+  await f.asked({ reply: "Is it still on?", age: "4 days" }); // too old
+  await f.asked({ reply: "Not sent yet?", delivery: "pending" }); // reply still being delivered
+  const branch = await f.asked({
+    reply: "Which branch?",
+    thread: 7,
+    age: "2 hours",
+  });
+  // Another owner's question, card and reply never reach this owner.
+  await f.asked({
+    user: "456",
+    reply: "Someone else's question?",
+    thread: 9,
+  });
+  await f.monitoring({ user: "456", title: "Someone else's card" });
+  await f.said({ user: "456" });
+  const questions = async () =>
+    (await openLoops(f.db, "123", { coding: false }))?.questions?.map((q) => [
+      q.excerpt,
+      q.thread,
+      q.awaiting,
+      q.replyId,
+    ]);
+  assert.deepEqual(await questions(), [
+    [
+      "Which date is the flight?",
+      0,
+      "owner to answer your question",
+      flight.replyId,
+    ],
+    ["Which branch?", 7, "owner to answer your question", branch.replyId],
+  ]);
+  assert.equal(
+    (await openLoops(f.db, "123", { coding: false }))!.expiredCards,
+    undefined,
+  );
+  // The message being handled now has not answered it yet, and another thread does not.
+  await f.said({ state: "running" });
+  await f.said({ thread: 3 });
+  assert.equal((await questions())!.length, 2);
+  await f.said();
+  assert.deepEqual(await questions(), [
+    ["Which branch?", 7, "owner to answer your question", branch.replyId],
+  ]);
+  await f.said({ thread: 7 });
+  assert.equal(await openLoops(f.db, "123", { coding: false }), undefined);
+  // The other owner's question and card are theirs.
+  const theirs = (await openLoops(f.db, "456", { coding: false }))!;
+  assert.deepEqual(
+    [
+      theirs.questions!.map((q) => q.excerpt),
+      theirs.expiredCards!.map((c) => c.title),
+    ],
+    [["Someone else's question?"], ["Someone else's card"]],
+  );
+});
+test("a question excerpt is short and ends at the reply's last question", () => {
+  const long = `${"Here is what I found about the flights and fares. ".repeat(10)}Which of these dates should I watch?\n\nI can also check hotels.`;
+  const excerpt = questionExcerpt(long);
+  assert.ok([...excerpt].length <= 200, excerpt);
+  assert.match(excerpt, /^…\S/);
+  assert.match(excerpt, /Which of these dates should I watch\?$/);
+  assert.equal(questionExcerpt("Short  \n question?"), "Short question?");
+  assert.equal([...questionExcerpt("x".repeat(300))].length, 200);
+  assert.equal([...questionExcerpt(`${"x".repeat(300)}?`)].length, 200);
 });
 test("a merge stage without a live card for the current head is not reported as actionable", async () => {
   // Devin, PR 251: a pending or expired merge card was still labelled "choose Merge or Keep open".

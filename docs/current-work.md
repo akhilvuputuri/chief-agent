@@ -1,3 +1,7 @@
+# Open loops that last and memory offers — in review, 23 October 2026
+
+Expired monitoring cards now stay in open loops until one day after their end date (seven days when undated, never more than 30), with cards near their date marked due and listed first; a confirmed or delivered later card with the same title and no earlier end replaces an older one. Chief's own clarifying questions that the owner has not answered within three days appear as short excerpts until a later owner message in that thread is handled. The coordinator instructions add one line: offer to remember a stated durable preference and call `memory_set` only after the owner agrees. No proactive nudge is sent when a date arrives; that needs owner approval. [Journal 117](journey/117-open-loops-and-memory-offers.md).
+
 # Telemetry gaps — in review, 23 October 2026
 
 The CloudWatch `models` query showed no token sums because its `stats` aliases reused the summed field names, which Logs Insights drops; the fields were on every line. Renamed aliases return them. Successful model calls now log a fixed finish reason, cache-write tokens and a provider slug (Opus's four-word provider label was dropped before); failed calls carry the model; `context.selected` logs the older history admitted and the other size fields. New `finishes` and `context` queries. [Journal 118](journey/118-telemetry-gaps.md), [operational logs](operational-logs.md).
