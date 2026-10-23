@@ -305,6 +305,10 @@ export class CustomAgent implements Agent {
               workingSize: input.workingSize,
               reasoningSize: input.reasoningSize,
               reasoningDropped: input.reasoningDropped,
+              // Older history admitted before the preceding exchange (sizes only).
+              historyAllowance: input.historyAllowance,
+              historySize: input.historySize,
+              historyMessages: input.historyMessages,
               trimmed: input.trimmed,
               compacted: input.compacted,
               wireCompacted: input.wireCompacted,
@@ -369,6 +373,7 @@ export class CustomAgent implements Agent {
               model: generation.model ?? model.model,
               provider: generation.provider,
               usage: generation.usage ?? null,
+              finishReason: generation.finishReason ?? null,
               latencyMs: Date.now() - start,
               effort,
             });

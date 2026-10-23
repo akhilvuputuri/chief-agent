@@ -58,7 +58,11 @@ const fields: Record<string, Shape> = {
   inputTokens: "count",
   outputTokens: "count",
   cachedTokens: "count",
+  /** Prompt tokens written to the provider's cache (OpenRouter prompt_tokens_details). */
+  cacheWriteTokens: "count",
   reasoningTokens: "count",
+  /** Why the model stopped, mapped to a fixed name (see finishName). */
+  finishReason: "name",
   messages: "count",
   characters: "count",
   httpStatus: "count",
@@ -80,6 +84,16 @@ const fields: Record<string, Shape> = {
   serializedChars: "count",
   omittedCount: "count",
   trimmedGroups: "count",
+  exchangeChars: "count",
+  workingChars: "count",
+  reservedChars: "count",
+  historyChars: "count",
+  historyMessages: "count",
+  historyAllowanceChars: "count",
+  reasoningChars: "count",
+  compactedCount: "count",
+  reasoningDropped: "bool",
+  wireCompacted: "bool",
   approvalCount: "count",
   offeredCount: "count",
   unusedCount: "count",
@@ -252,9 +266,24 @@ function usageFields(usage: unknown): OpsFields {
     inputTokens: num(u.prompt_tokens),
     outputTokens: num(u.completion_tokens),
     cachedTokens: num(u.prompt_tokens_details?.cached_tokens),
+    cacheWriteTokens: num(u.prompt_tokens_details?.cache_write_tokens),
     reasoningTokens: num(u.completion_tokens_details?.reasoning_tokens),
     costUsd: num(u.cost) ?? null,
   };
+}
+
+// OpenRouter's normalized finish reasons. Anything else is "other", so the logged
+// value is always one of these fixed names, never provider text.
+const finishNames = new Set([
+  "stop",
+  "tool_calls",
+  "length",
+  "content_filter",
+  "error",
+]);
+function finishName(value: unknown) {
+  if (typeof value !== "string" || !value) return undefined;
+  return finishNames.has(value) ? value : "other";
 }
 
 /** Prefix before ": " in the bounded model.failed error string, e.g. "TypeError". */
@@ -281,6 +310,7 @@ const projections: Record<string, Projection> = {
       provider: d.provider,
       latencyMs: d.latencyMs,
       effort: d.effort,
+      finishReason: finishName(d.finishReason),
       ...usageFields(d.usage),
     },
   ],
@@ -296,6 +326,7 @@ const projections: Record<string, Projection> = {
       errorCode: d.diagnostics?.errorCode,
       httpStatus: d.diagnostics?.httpStatus,
       state: d.diagnostics?.finishReason,
+      finishReason: finishName(d.diagnostics?.finishReason),
       phase: d.contextSizes ? "context" : "model",
       errorCategory: errorName(d.error),
     },
@@ -357,9 +388,21 @@ const projections: Record<string, Projection> = {
         typeof d.exchangeSize === "number" && typeof d.workingSize === "number"
           ? d.exchangeSize + d.workingSize + (d.reservedSize ?? 0)
           : undefined,
+      exchangeChars: d.exchangeSize,
+      workingChars: d.workingSize,
+      reservedChars: d.reservedSize,
+      // Older history admitted under the turn's allowance (outside protectedHistoryChars).
+      historyChars: d.historySize,
+      historyMessages: d.historyMessages,
+      historyAllowanceChars: d.historyAllowance,
+      // Earlier in-turn reasoning kept for caching (journal 108).
+      reasoningChars: d.reasoningSize,
+      reasoningDropped: d.reasoningDropped,
       serializedChars: d.serializedSize,
       omittedCount: d.omitted,
       trimmedGroups: d.trimmed,
+      compactedCount: d.compacted,
+      wireCompacted: d.wireCompacted,
     },
   ],
   "tools.selected": (run, d) => ["info", { runId: run, toolCount: d.offered }],

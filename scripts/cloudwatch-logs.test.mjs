@@ -130,3 +130,59 @@ test("picker query summarises decisions without the in-list form", () => {
   assert.match(q, /by event, state/);
   assert.doesNotMatch(q, / in \[/);
 });
+
+test("no stats alias reuses the name of a field the query aggregates or groups by", () => {
+  // Measured October 2026 (journal 118): `sum(inputTokens) as inputTokens` made
+  // Logs Insights omit the column, so the models query showed no token sums.
+  for (const [name, spec] of Object.entries(QUERIES)) {
+    const q = spec.query("run-1", "tool.finished");
+    const m = /\bstats (.+?)(?: by (.+?))?(?: \| |$)/.exec(q);
+    if (!m) continue;
+    const used = new Set([
+      ...[...m[1].matchAll(/\w+\((\w+)\)/g)].map((x) => x[1]),
+      ...(m[2] ?? "").split(",").map((f) => f.trim()),
+    ]);
+    for (const [, alias] of m[1].matchAll(/ as (\w+)/g))
+      assert.ok(!used.has(alias), `${name}: alias ${alias} shadows a field`);
+  }
+});
+
+test("models query sums every token count by model and provider", () => {
+  const q = QUERIES.models.query();
+  for (const field of [
+    "inputTokens",
+    "cachedTokens",
+    "cacheWriteTokens",
+    "outputTokens",
+    "reasoningTokens",
+    "costUsd",
+  ])
+    assert.match(q, new RegExp(`sum\\(${field}\\) as \\w+`), field);
+  assert.match(q, /by event, model, provider$/);
+});
+
+test("finishes query groups model calls by finish reason", () => {
+  const q = QUERIES.finishes.query();
+  assert.match(q, /model\.completed/);
+  assert.match(q, /by event, model, finishReason/);
+});
+
+test("context query shows every projected context size", () => {
+  const q = QUERIES.context.query();
+  assert.match(q, /filter event = "context\.selected"/);
+  for (const field of [
+    "instructionsChars",
+    "memoriesChars",
+    "runtimeContextChars",
+    "summaryChars",
+    "reservedChars",
+    "historyChars",
+    "historyMessages",
+    "historyAllowanceChars",
+    "reasoningChars",
+    "reasoningDropped",
+    "trimmedGroups",
+    "compactedCount",
+  ])
+    assert.match(q, new RegExp(`\\b${field}\\b`), field);
+});

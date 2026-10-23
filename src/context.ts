@@ -99,6 +99,10 @@ type ContextSelection = {
   reasoningDropped: boolean;
   /** Older-history allowance this call used; the agent reuses it for the rest of the turn. */
   historyAllowance: number;
+  /** Serialized characters of the older history admitted under that allowance; 0 when none. */
+  historySize: number;
+  /** Messages of older history admitted (before the preceding exchange). */
+  historyMessages: number;
   overBudget: boolean;
   fixedSize: number;
   fixedParts: FixedParts;
@@ -439,6 +443,10 @@ export function context(
     reasoningSize: keptReasoning,
     reasoningDropped: !!request.reasoningDropped,
     historyAllowance,
+    historySize: bounded.messages.length
+      ? JSON.stringify(bounded.messages).length
+      : 0,
+    historyMessages: bounded.messages.length,
     overBudget,
     fixedSize,
     fixedParts,

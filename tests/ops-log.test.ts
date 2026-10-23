@@ -162,8 +162,29 @@ test("each projected event type emits no content from hostile payloads", () => {
     "objective",
   ])
     hostile[key] = PRIVATE[0];
-  hostile.diagnostics = { provider: PRIVATE[1], errorCode: PRIVATE[2] };
-  hostile.usage = { prompt_tokens: PRIVATE[3] };
+  for (const key of [
+    "finishReason",
+    "historySize",
+    "historyMessages",
+    "historyAllowance",
+    "reasoningSize",
+    "reasoningDropped",
+    "compacted",
+    "wireCompacted",
+    "exchangeSize",
+    "workingSize",
+    "reservedSize",
+  ])
+    hostile[key] = PRIVATE[0];
+  hostile.diagnostics = {
+    provider: PRIVATE[1],
+    errorCode: PRIVATE[2],
+    finishReason: PRIVATE[0],
+  };
+  hostile.usage = {
+    prompt_tokens: PRIVATE[3],
+    prompt_tokens_details: { cache_write_tokens: PRIVATE[3] },
+  };
   hostile.contextSizes = { a: PRIVATE[4] };
   const log = capture();
   try {
@@ -205,21 +226,66 @@ test("model.completed projects model, latency, tokens and reported cost", () => 
       model: "openai/gpt-6-sol",
       provider: "OpenAI",
       latencyMs: 1234,
+      finishReason: "length",
       usage: {
         prompt_tokens: 1000,
         completion_tokens: 50,
-        prompt_tokens_details: { cached_tokens: 800 },
+        prompt_tokens_details: { cached_tokens: 800, cache_write_tokens: 150 },
         completion_tokens_details: { reasoning_tokens: 20 },
         cost: 0.0042,
       },
     });
     const [line] = log.parsed();
     assert.equal(line.runId, run);
+    assert.equal(line.provider, "OpenAI");
+    assert.equal(line.finishReason, "length");
     assert.equal(line.inputTokens, 1000);
     assert.equal(line.cachedTokens, 800);
+    assert.equal(line.cacheWriteTokens, 150);
+    assert.equal(line.outputTokens, 50);
     assert.equal(line.reasoningTokens, 20);
+    assert.equal("dropped" in line, false);
     assert.equal(line.costUsd, 0.0042);
     assert.equal(line.latencyMs, 1234);
+  } finally {
+    log.restore();
+  }
+});
+
+test("finish reasons are logged only as fixed names", () => {
+  const log = capture();
+  try {
+    for (const finishReason of [
+      "stop",
+      "tool_calls",
+      "content_filter",
+      "end_turn",
+      PRIVATE[0],
+      42,
+    ])
+      projectEvent("model.completed", randomUUID(), { finishReason });
+    projectEvent("model.completed", randomUUID(), { finishReason: null });
+    projectEvent("model.failed", randomUUID(), {
+      transient: false,
+      diagnostics: { finishReason: "length" },
+    });
+    assertClean(log.lines);
+    const lines = log.parsed();
+    assert.deepEqual(
+      lines.map((l) => l.finishReason),
+      [
+        "stop",
+        "tool_calls",
+        "content_filter",
+        "other",
+        "other",
+        undefined,
+        undefined,
+        "length",
+      ],
+    );
+    // model.failed keeps its earlier state field for existing queries.
+    assert.equal(lines[7].state, "length");
   } finally {
     log.restore();
   }
@@ -459,14 +525,33 @@ test("context.selected projects component sizes only", () => {
       exchangeSize: 900,
       workingSize: 500,
       reservedSize: 100,
+      historyAllowance: 6000,
+      historySize: 5400,
+      historyMessages: 8,
+      reasoningSize: 700,
+      reasoningDropped: false,
       serializedSize: 76000,
       omitted: 12,
+      trimmed: 2,
+      compacted: 3,
+      wireCompacted: true,
     });
     assertClean(log.lines);
     const [line] = log.parsed();
     assert.equal(line.toolsChars, 38480);
     assert.equal(line.toolCount, 70);
     assert.equal(line.protectedHistoryChars, 1500);
+    assert.equal(line.exchangeChars, 900);
+    assert.equal(line.workingChars, 500);
+    assert.equal(line.reservedChars, 100);
+    assert.equal(line.historyChars, 5400);
+    assert.equal(line.historyMessages, 8);
+    assert.equal(line.historyAllowanceChars, 6000);
+    assert.equal(line.reasoningChars, 700);
+    assert.equal(line.reasoningDropped, false);
+    assert.equal(line.trimmedGroups, 2);
+    assert.equal(line.compactedCount, 3);
+    assert.equal(line.wireCompacted, true);
     assert.equal("messageChars" in line, false);
     assert.equal(line.dropped, 1);
   } finally {

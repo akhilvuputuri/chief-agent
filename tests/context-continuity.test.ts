@@ -1077,6 +1077,9 @@ test("older history stays the same across a turn's calls as its results grow", (
   const first = call(0);
   const admitted = earlier(first);
   assert.ok(admitted >= 10, String(admitted));
+  // context.selected records the admitted older history's size (journal 118).
+  assert.equal(first.historyMessages, admitted);
+  assert.ok(first.historySize > admitted * 600, String(first.historySize));
   // Without the frozen allowance, history would shrink as this turn's results grow.
   assert.ok(earlier(call(4)) <= admitted - 4, String(earlier(call(4))));
   // With it, every later call sends the same older history.
@@ -1141,6 +1144,8 @@ test("with a full fixed envelope, older history leaves at most once per turn and
     const input = call(results, allowance);
     allowance = input.historyAllowance;
     latched.push(earlier(input));
+    assert.equal(input.historyMessages, earlier(input));
+    assert.equal(input.historySize === 0, input.historyMessages === 0);
   }
   // Recomputed per call, older history shrinks and returns as trimming frees room.
   assert.ok(free.some((n, i) => i > 0 && n > free[i - 1]!));
