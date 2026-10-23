@@ -128,6 +128,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 23 October | [117 — Open loops and memory offers](117-open-loops-and-memory-offers.md): can Chief keep dated monitoring and its own unanswered questions in view, and offer to remember stated preferences? | In review: dated cards stay until their date plus a day; unanswered questions listed for three days; memory offered, saved only on a yes |
 | 23 October | [118 — Telemetry gaps](118-telemetry-gaps.md): why did the models query show no token sums, and what was missing from model and context logs? | In review: duplicate stats aliases hid the sums; finish reason, cache writes, provider slugs and older-history size added |
 | 23 October | [119 — Double reply](119-double-reply.md): why did Chief send the same clarifying question twice? | In review: text a finish_turn reply already contains is no longer also sent as progress |
+| 23 October | [120 — Kronos CPU spike](120-kronos-cpu-spike.md): can Kronos run cheaply on CPU, and do its forecasts beat a random walk? | Tested locally: cheap on CPU; lost to an EWMA random walk on AAPL in all 12 configurations; nothing deployed |
 
 ## Coding-agent learning path
 

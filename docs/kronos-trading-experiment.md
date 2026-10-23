@@ -73,6 +73,10 @@ Fixed before the ledger starts, so results cannot be tuned after the fact:
 
 See [journal 120](journey/120-kronos-cpu-spike.md) for the measurements, method and limits.
 
+- **Cost (measured on an Apple M4, 4 threads).** Kronos-small samples 25 symbols × 32 paths at lookback 400 in 134 s, or about 30 s at lookback 64. Kronos-base takes 696 s at lookback 400. Peak memory is about 3.2–3.4 GB, so a small box is enough.
+- **Quality (measured, AAPL only, 60 dates after the pretraining cutoff).** Every configuration lost to the EWMA random-walk band on pinball loss and interval coverage. The best was Kronos-small at lookback 64, with skill −0.10 at 1 day and −0.23 at 5 days. Kronos-base was worst, with 5-day intervals covering 13% of outcomes. At long lookbacks Kronos forecast large drops whenever the stock sat near its window high.
+- **Decision needed before phase 2.** Repeat the walk on about ten symbols with settings fixed in advance, and decide whether to build the daily ledger if the result stays negative.
+
 - **Runtime.** [`forecast_runtime/`](../forecast_runtime): `kronos_runner.py` (`bench` for timings and memory, `walk` for walk-forward scores), `scoring.py` (standard library; its tests run in `npm test`), `fetch_artifacts.py` and the lock file. [`scripts/kronos-spike-bars.mjs`](../scripts/kronos-spike-bars.mjs) fetches split-adjusted daily bars and drops an unfinished session.
 - **Local run.**
 
