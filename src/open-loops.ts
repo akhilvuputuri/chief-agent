@@ -33,7 +33,8 @@ const QUESTION_DAYS = 3;
 /**
  * A short excerpt of Chief's own reply that ends at its last question mark, so a long reply
  * that closes with a question shows the question. Whitespace is collapsed; at most `max` code
- * points including the ellipsis, cut at a word boundary where there is one.
+ * points including the ellipsis. When the front is cut, it starts at a word boundary where there
+ * is one; when there is no question mark, the end is cut mid-word before the "…".
  */
 export function questionExcerpt(text: string, max = 200) {
   const flat = [...text.replace(/\s+/g, " ").trim()];

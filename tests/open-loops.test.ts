@@ -415,6 +415,22 @@ test("a same-titled card hides an older one only when it was confirmed or delive
     "flight",
   ]);
 });
+test("an undated card is hidden by a newer delivered dated one; another owner's card never hides it", async () => {
+  // Delta review, f635abb: neither clause had a test that failed without it.
+  const f = await fixture();
+  const at = (hours: number) =>
+    new Date(Date.now() + hours * 3600000).toISOString();
+  await f.monitoring({ title: "Ferry", age: "2 days" });
+  await f.monitoring({ title: "Ferry", expires: "3 hours", endsAt: at(48) });
+  await f.monitoring({ title: "Train", age: "2 days" });
+  await f.monitoring({ title: "Train", user: "456", age: "1 hour" });
+  assert.deepEqual(
+    (await openLoops(f.db, "123", { coding: false }))!.expiredCards!.map(
+      (c) => c.title,
+    ),
+    ["Train"],
+  );
+});
 test("Chief's unanswered question is listed until the owner replies in its thread", async () => {
   const f = await fixture();
   const flight = await f.asked();

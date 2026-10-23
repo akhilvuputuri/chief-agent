@@ -1,7 +1,7 @@
 # 117 — Why did Chief drop dated monitoring, its own questions and stated preferences?
 
 Work date(s): 2026-10-23. Written/revised: 2026-10-23.
-Status: in review, on branch `fix/d-loops-memory`. Independent review: approve with nits on the first revision (`c69597f`); the fixes below await re-review. Not merged or deployed. No live behavior has been observed yet.
+Status: in review, on branch `fix/d-loops-memory`. Independent review: approve with nits on `c69597f` and `584f54f`; the delta review of `f635abb` and `2d1f466` approved, and its two coverage nits are fixed. Not merged or deployed. No live behavior has been observed yet.
 
 ## User-visible problem and preceding iteration
 
@@ -36,7 +36,7 @@ A longer window made the supersession gap from journal 94 matter more. A never-c
 - that card was confirmed, or is pending and was delivered, so a denied or undelivered proposal does not hide it; and
 - it ends no earlier than the older card, or either has no `expiresAt`, so a same-titled card for an earlier date (another trip) does not hide a later one.
 
-Two different concerns with the same title and compatible dates would still hide the older card. This is accepted as rarer and less harmful than nudging about something already set up.
+Two different concerns with the same title and compatible dates would still hide the older card. This is accepted as rarer and less harmful than nudging about something already set up. If the owner corrects a concern to an earlier date, the newer card ends earlier and does not hide the stale later-dated card, which stays listed, and may show as due, until its own date plus a day.
 
 - **Rejected for now: parsing a date out of the title or outcome.** Free text is unreliable. A card without `expiresAt` falls back to seven days, which would have covered this incident's dates (hypothesis: whether that card had `expiresAt` set was not checked).
 - **Deferred: a proactive nudge.** The scheduler (`schedule_create` reminders) runs only on the owner's explicit request. Journal 94 rejected re-sending expired cards because that sends unrequested messages. A host-created reminder for a concern the owner never confirmed would be a new kind of unprompted message. That needs the owner's decision. For now a due card is listed first with `due: true`, and the note tells Chief to mention it once when the owner next writes. If the owner does not write while it is due, nothing reminds them.
@@ -70,13 +70,14 @@ Any completed message in the same thread clears it, whether or not it was an ans
   - `tests/open-loops.test.ts`:
     - the monitoring test is rewritten for seven-day undated retention and same-title supersession;
     - a new test covers the narrowed same-title rule: a newer card for an earlier date, a denied one and an undelivered one leave the older card listed; a confirmed later-ending one and an undated delivered one hide it;
+    - a new test covers an undated card hidden by a newer delivered dated one, and another owner's same-titled card leaving this owner's listed;
     - a new test covers dated cards: a future date stays, the date arriving or just passed is `due`, a date past the grace period drops, and any card past 30 days drops;
     - a new test covers questions. Each fixture turn is recorded as the agent records it: the triggering owner input (completed, received before the state is saved), Chief's reply message, and the state from the real `saveConversationState`. A question is listed with its `replyId`. A running message in the same thread, a completed one in another thread and another owner's completed message in the same thread do not clear it. A completed reply in the same thread does. Old questions, `awaiting_approval` pauses, a reply still pending delivery and another owner's question and card are left out;
     - an excerpt test.
   - `tests/tool-domains.test.ts` pins the memory-offer sentence.
 - Design docs: [context management](../context-management.md#open-loops), [responsibilities](../responsibilities.md) and [agents](../agents.md).
 
-Independent review (Opus 5.5) of `c69597f`: approve with nits.
+Independent review (Opus 5.5) of `c69597f` and `584f54f`: approve with nits.
 
 - **The question tests were weak.** All 15 tests still passed when the reviewer removed `i.received_at > x.created_at`, replaced `i.user_id=x.user_id` with `true`, or dropped the pending-delivery exclusion. The fixtures now record the triggering input and the reply message, and add another owner's records and a pending reply.
 - **The same-title match was too broad.** A denied, undelivered or earlier-dated card hid an older one. Narrowed as described above.
@@ -85,9 +86,16 @@ Independent review (Opus 5.5) of `c69597f`: approve with nits.
 
 Mutation check after the fixes, each applied to `src/open-loops.ts` on its own and then restored: removing `i.received_at > x.created_at`, `i.user_id=x.user_id` (as `true`), the pending-delivery exclusion, `i.state='completed'`, the same-title status and delivery condition, or the same-title end-date condition each fails exactly one test. Widening the owner filter of the cards query fails two tests, and of the questions query one.
 
+Delta review (Opus 5.5) of `f635abb` and `2d1f466`: approve. It ran 13 mutations of `src/open-loops.ts`: 10 failed a test, 2 survived and 1 was harmless (a mutation that depends on `run_id`, which is a per-run UUID). The 2 survivors were coverage gaps in correct code, recorded as nits:
+
+- removing the clause that lets a newer dated card hide an undated older one;
+- removing `b.user_id=a.user_id`, so another owner's same-titled card could hide this owner's.
+
+A new test covers both: an undated card hidden by a newer delivered dated one, and another owner's later same-titled card that leaves this owner's card listed. Each of the two mutations now fails that test.
+
 ## Verification and outcome
 
-- **Tested** (local, PGlite), after the review fixes: `tests/open-loops.test.ts` 16/16, `tests/tool-domains.test.ts` 17/17 and `context-continuity` 33/33; `npx tsc --noEmit -p .` passes. On the first revision, also passing: `conversation-control` 13/13, `context-continuity` 33/33, `steering-loop` 13/13, `steering-inbox` 17/17, `responsibilities` 32/32, `telegram-feeds` 7/7, `spending` 3/3 and `topic-routing` 6/6.
+- **Tested** (local, PGlite), after the review fixes: `tests/open-loops.test.ts` 17/17 (after the delta-review nits; 16/16 before), `tests/tool-domains.test.ts` 17/17 and `context-continuity` 33/33; `npx tsc --noEmit -p .` passes. On the first revision, also passing: `conversation-control` 13/13, `context-continuity` 33/33, `steering-loop` 13/13, `steering-inbox` 17/17, `responsibilities` 32/32, `telegram-feeds` 7/7, `spending` 3/3 and `topic-routing` 6/6.
 - **Not measured:**
   - whether Chief mentions a due card, re-asks an open question, or offers to remember a preference;
   - the cost of the slightly longer instructions. The instructions sit in the cached prefix, so the change costs one cache rewrite per deployment.
