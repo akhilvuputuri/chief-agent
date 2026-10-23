@@ -1,3 +1,7 @@
+# Kronos short-term trading experiment — spike, 23 October 2026
+
+The owner asked to test Kronos, an open-weight candlestick model, for short-term suggestions: Chief suggests and the owner decides whether to draft an IBKR order. A pinned CPU runtime (`forecast_runtime/`) shows a daily run is cheap. Kronos-small handles 25 symbols in about 30 s at lookback 64. On AAPL over 60 dates after its pretraining cutoff, though, every configuration lost to a zero-drift EWMA random walk. Upstream inference also runs in training mode, which the runner corrects. Nothing is deployed. Next: a ten-symbol walk with settings fixed in advance, then the owner decides on the box profile. [Design](kronos-trading-experiment.md), [journal 120](journey/120-kronos-cpu-spike.md).
+
 # Fewer coding notices — in review, 23 October 2026
 
 Coding progress now goes into one Telegram status message per job, edited in place, instead of a new message per milestone; questions, approval cards, failures and outcomes still arrive as their own messages. Progress that would start a new message is held during quiet hours (`CODING_QUIET_HOURS`, default 23:00–08:00 Singapore). Cancellations within 15 seconds are sent as one summary. On a rebase the host now logs whether the rebased candidate is byte-identical to the reviewed one; reusing the review is not enabled (it needs a worker image change and an owner decision). [Journal 115](journey/115-fewer-coding-notices.md), [design](coding.md).
