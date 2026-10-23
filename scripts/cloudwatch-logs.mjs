@@ -25,7 +25,11 @@ const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$/;
 const EVENT = /^[a-z][a-z0-9_.]{0,79}$/;
 
 const common =
-  "fields @timestamp, ts, level, event, runId, parentRunId, childRunId, taskId, callId, operation, state, stopReason, errorCode, errorCategory, httpStatus, latencyMs, model, provider, kind, lane, inputId, approvalId, approved, messages, attempt, transient, costUsd, fixedChars, toolsChars, toolCount, domainCount, protectedHistoryChars, serializedChars, omittedCount, release";
+  "fields @timestamp, ts, level, event, runId, parentRunId, childRunId, taskId, callId, operation, state, stopReason, errorCode, errorCategory, httpStatus, latencyMs, model, requestedModel, provider, kind, lane, inputId, approvalId, approved, messages, attempt, transient, costUsd, finishReason, inputTokens, cachedTokens, cacheWriteTokens, outputTokens, fixedChars, toolsChars, toolCount, domainCount, protectedHistoryChars, historyChars, serializedChars, omittedCount, release";
+
+// Per-call context sizes (characters and counts only) from context.selected.
+const contextFields =
+  "fields @timestamp, ts, runId, fixedChars, instructionsChars, memoriesChars, runtimeContextChars, toolsChars, toolCount, summaryChars, messageChars, exchangeChars, workingChars, reservedChars, protectedHistoryChars, historyChars, historyMessages, historyAllowanceChars, reasoningChars, reasoningDropped, serializedChars, omittedCount, trimmedGroups, compactedCount, wireCompacted, release";
 
 export const QUERIES = {
   errors: {
@@ -63,9 +67,23 @@ export const QUERIES = {
   },
   models: {
     group: "runtime",
-    help: "model calls, latency, tokens and reported cost",
+    help: "model calls, latency, token sums and reported cost by model and provider",
+    // A stats alias must not reuse the name of the field it aggregates: Logs Insights
+    // then omits the column (measured October 2026; journal 118).
     query: () =>
-      `filter event in ["model.completed", "model.failed"] | stats count(*) as calls, avg(latencyMs) as avgMs, sum(inputTokens) as inputTokens, sum(cachedTokens) as cachedTokens, sum(outputTokens) as outputTokens, sum(costUsd) as reportedUsd by event, model, provider`,
+      `filter event in ["model.completed", "model.failed"] | stats count(*) as calls, avg(latencyMs) as avgMs, sum(inputTokens) as inputTokensSum, sum(cachedTokens) as cachedTokensSum, sum(cacheWriteTokens) as cacheWriteTokensSum, sum(outputTokens) as outputTokensSum, sum(reasoningTokens) as reasoningTokensSum, sum(costUsd) as reportedUsd by event, model, provider`,
+  },
+  finishes: {
+    group: "runtime",
+    help: "why model calls stopped (stop, tool_calls, length, content_filter) by model",
+    query: () =>
+      `filter event in ["model.completed", "model.failed"] | stats count(*) as calls, max(outputTokens) as maxOutputTokens by event, model, finishReason | sort calls desc`,
+  },
+  context: {
+    group: "runtime",
+    help: "per-call context sizes: fixed parts, protected and older history, reasoning, trimming",
+    query: () =>
+      `${contextFields} | filter event = "context.selected" | sort @timestamp desc`,
   },
   picker: {
     group: "runtime",

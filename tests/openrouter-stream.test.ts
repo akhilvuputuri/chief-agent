@@ -837,3 +837,43 @@ test("Gemini text and encrypted reasoning with the same index survive streamed t
     StreamFailure,
   );
 });
+
+test("a complete stream reports its finish reason on the generation", async () => {
+  for (const [delta, finish] of [
+    [{ content: "Done." }, "stop"],
+    [
+      {
+        tool_calls: [
+          {
+            index: 0,
+            id: "call_1",
+            type: "function",
+            function: { name: "lookup", arguments: "{}" },
+          },
+        ],
+      },
+      "tool_calls",
+    ],
+  ] as const) {
+    const adapter = new OpenRouter(
+      "fixture-key",
+      "fixture/model",
+      2,
+      10,
+      async () =>
+        response([
+          frame(chunk(delta)),
+          frame({ ...chunk({}, finish), usage: { cost: 0.001 } }),
+          frame("[DONE]"),
+        ]),
+    );
+    const generation = await adapter.generate({
+      messages: [],
+      tools: [],
+      reasoning: "high",
+      signal: new AbortController().signal,
+      stream: true,
+    });
+    assert.equal(generation.finishReason, finish);
+  }
+});

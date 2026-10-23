@@ -251,8 +251,12 @@ test("a foreground turn starts at Jev's effort and raises it mid-turn, logged st
         efforts.push(input.reasoning);
         n++;
         if (n > steps)
-          return { message: { role: "assistant", content: "Done." } };
+          return {
+            message: { role: "assistant", content: "Done." },
+            finishReason: "stop",
+          };
         return {
+          finishReason: "tool_calls",
           message: {
             role: "assistant",
             content: null,
@@ -325,6 +329,33 @@ test("a foreground turn starts at Jev's effort and raises it mid-turn, logged st
       )
     ).rows.map((r) => r.e);
     assert.deepEqual(completed, efforts);
+    // Each records why the model stopped, privately and on its log line (journal 118).
+    const finishes = (
+      await db.query(
+        "SELECT data->>'finishReason' f FROM events WHERE type='model.completed' ORDER BY id",
+      )
+    ).rows.map((r) => r.f);
+    assert.equal(finishes.at(-1), "stop");
+    assert.ok(finishes.slice(0, -1).every((f) => f === "tool_calls"));
+    assert.deepEqual(
+      lines
+        .map((l) => JSON.parse(l))
+        .filter((l) => l.event === "model.completed")
+        .map((l) => l.finishReason),
+      finishes,
+    );
+    // context.selected records the older history admitted, as sizes only.
+    const selected = (
+      await db.query(
+        "SELECT data FROM events WHERE type='context.selected' ORDER BY id",
+      )
+    ).rows.map((r) => r.data);
+    assert.ok(selected.length > 0);
+    for (const d of selected) {
+      assert.equal(typeof d.historySize, "number");
+      assert.equal(typeof d.historyMessages, "number");
+      assert.equal(typeof d.historyAllowance, "number");
+    }
     const effortLines = lines
       .map((l) => JSON.parse(l))
       .filter((l) => l.event === "effort.decided");
