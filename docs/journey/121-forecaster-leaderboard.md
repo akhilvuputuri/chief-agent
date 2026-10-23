@@ -40,7 +40,7 @@ Status: tested locally; nothing deployed. None of Kronos-small, Chronos-2 or Tim
 | TimesFM 2.5  | 5 days  | −0.019        | +1.7 [+0.1, +3.3]      | 3/10                | 79%          | 0.257 |
 | Kronos-small | 5 days  | −0.249        | +21.4 [+12.4, +32.4]   | 0/10                | 51%          | 0.323 |
 
-- **2026-only subset (400 forecasts per engine).** The ranking is the same. TimesFM's 1-day interval includes zero (−0.014, Δ +0.6 bp [−0.3, +1.4]). Chronos-2's 5-day result is −0.003. Kronos-small is worse again: −0.172 at 1 day and −0.273 at 5 days.
+- **2026-only subset (400 forecasts per engine).** The ranking is the same. TimesFM's intervals include zero at both horizons (1 day: skill −0.014, Δ +0.6 bp [−0.3, +1.4]; 5 days: −0.019, +1.8 bp [−0.6, +3.5]). Chronos-2's 5-day result is −0.003. Kronos-small is worse again: −0.172 at 1 day and −0.273 at 5 days.
 - **Direction.** No model's median called the sign of the move better than about 50%: 45–52% across engines and horizons.
 - **Compute (measured, Apple M4, 4 threads, all 600 dates).** Including model loading: Chronos-2 24 s, TimesFM 76 s, Kronos-small 1,090 s, GARCH 6 s. Kronos's time comes from sampling 64 paths autoregressively.
 
@@ -73,7 +73,7 @@ Status: tested locally; nothing deployed. None of Kronos-small, Chronos-2 or Tim
     - exact-zero quantiles are handled;
     - `--rows-out` saves every forecast.
   - **Kronos sees only 64 bars** (the others see 500–512). Not changed; the result is labelled "Kronos-small at lookback 64". On AAPL, longer lookbacks were worse ([journal 120](120-kronos-cpu-spike.md)).
-- **Pre-registered run (`bfcacaf`) and post-review rerun (`b42c044`).** Every model's scores were identical across the two runs, and every interval kept its sign. GARCH's 5-day figures moved from skill +0.007 with 79% coverage to +0.002 with 83%.
+- **Pre-registered run (`bfcacaf`) and post-review rerun (`b42c044`).** Every model's scores were identical across the two runs, and every full-period interval kept its sign. In the 2026 subset, TimesFM's 5-day interval now includes zero (+1.8 bp [−0.6, +3.5]). GARCH's 5-day figures moved from skill +0.007 with 79% coverage to +0.002 with 83%.
 
 ## Verification and outcome
 
