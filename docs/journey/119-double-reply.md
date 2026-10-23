@@ -45,10 +45,12 @@ Chosen: skip progress only when a `finish_turn` reply in the same step contains 
 
 Independent review of `4b23f9f` (23 October, Opus 5.5): approve with nits. Findings: the mixed-step duplicate and the dropped differing text, both fixed as above; whitespace-only replies pass the schema (not changed here); and owner input arriving just after `finish_turn` is dispatched discards that answer without marking it undelivered (pre-existing, now a follow-up). The final guard was checked by the coordinator, not re-reviewed.
 
+Devin on the merged-up head (`64fc2e9`): text matching an earlier or invalid `finish_turn` was hidden while a different reply was delivered. Fixed: only the last `finish_turn` that passes the schema, the one the loop honours, is compared. A new test covers two finishes in one step and an invalid finish followed by a valid one; it fails on the earlier guard.
+
 ## Verification and outcome
 
 - **Tested.**
-  - steering-loop: 17/17.
+  - steering-loop: 19/19 (after merging main).
   - custom-runtime: 29/29.
   - effort: 11/11.
   - steering-telegram: 13/13.

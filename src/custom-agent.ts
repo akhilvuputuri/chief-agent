@@ -115,22 +115,27 @@ const finishTool: ToolDefinition = {
   parameters: jsonSchema(finishSchema),
 };
 const squash = (text: string) => text.replace(/\s+/g, " ").trim();
-/** True when a finish_turn call in `calls` has a reply containing `text`, ignoring whitespace. */
+/**
+ * True when the reply the step will deliver contains `text`, ignoring whitespace: the last
+ * valid finish_turn call is the one honoured, so only its reply counts. An invalid or
+ * superseded finish_turn never hides text from the owner.
+ */
 export function repeatsFinishReply(
   text: string,
   calls: Array<{ function: { name: string; arguments: string } }>,
 ) {
   const said = squash(text);
   if (!said) return true;
-  return calls.some((c) => {
-    if (c.function.name !== "finish_turn") return false;
+  for (const c of [...calls].reverse()) {
+    if (c.function.name !== "finish_turn") continue;
     try {
-      const reply = JSON.parse(c.function.arguments)?.reply;
-      return typeof reply === "string" && squash(reply).includes(said);
+      const parsed = finishSchema.safeParse(JSON.parse(c.function.arguments));
+      if (parsed.success) return squash(parsed.data.reply).includes(said);
     } catch {
-      return false;
+      // Unparseable arguments are refused; an earlier finish_turn may still count.
     }
-  });
+  }
+  return false;
 }
 /** Image parts are replaced before tracing so model-input records never retain raw bytes. */
 export function omitImages(messages: ModelMessage[]) {

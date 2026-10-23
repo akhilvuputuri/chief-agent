@@ -720,3 +720,34 @@ test("text that differs from a lone finish_turn reply is still sent", async () =
   assert.equal((await f.run()).reply, "See my question above.");
   assert.deepEqual(f.progress, ["What time is dinner, and where?"]);
 });
+
+test("only the finish_turn that will be delivered can hide progress text", async () => {
+  // Devin on PR 315: an earlier or invalid finish_turn matched while another reply was sent.
+  const twoFinishes = fixture({
+    generate: async () =>
+      calls(
+        [
+          ["finish_turn", { reply: "What time?", reason: "answer" }],
+          [
+            "finish_turn",
+            { reply: "Please send the address.", reason: "awaiting_user" },
+          ],
+        ],
+        "What time?",
+      ),
+  });
+  await twoFinishes.run();
+  assert.deepEqual(twoFinishes.progress, ["What time?"]);
+  let calls2 = 0;
+  const invalid = fixture({
+    generate: async () =>
+      ++calls2 === 1
+        ? calls(
+            [["finish_turn", { reply: "What time?", reason: "not-a-reason" }]],
+            "What time?",
+          )
+        : calls([["finish_turn", { reply: "Noted.", reason: "answer" }]]),
+  });
+  assert.equal((await invalid.run()).reply, "Noted.");
+  assert.deepEqual(invalid.progress, ["What time?"]);
+});
