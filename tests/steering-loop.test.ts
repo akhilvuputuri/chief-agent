@@ -657,3 +657,35 @@ test("text beside working calls is still sent as progress", async () => {
   assert.equal((await f.run()).reply, "Done.");
   assert.deepEqual(f.progress, ["Checking your saved notes."]);
 });
+
+test("text repeating the reply is not sent as progress beside a working call either", async () => {
+  const f = fixture({
+    generate: async () =>
+      calls(
+        [
+          ["memory_list", {}],
+          ["finish_turn", { reply: "Dinner is at 7.", reason: "answer" }],
+        ],
+        "Dinner is at 7.",
+      ),
+  });
+  assert.equal((await f.run()).reply, "Dinner is at 7.");
+  assert.deepEqual(f.progress, []);
+});
+
+test("text that differs from a lone finish_turn reply is still sent", async () => {
+  const f = fixture({
+    generate: async () =>
+      calls(
+        [
+          [
+            "finish_turn",
+            { reply: "See my question above.", reason: "awaiting_user" },
+          ],
+        ],
+        "What time is dinner, and where?",
+      ),
+  });
+  assert.equal((await f.run()).reply, "See my question above.");
+  assert.deepEqual(f.progress, ["What time is dinner, and where?"]);
+});

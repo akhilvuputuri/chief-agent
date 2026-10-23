@@ -123,7 +123,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 21 October | [112 — Box view in coding_status](112-coding-status-box-view.md): what does coding_status say about the box an attempt runs in? | Tested: a boxed attempt reports its box phase, launch time, last report and, once gone, its end reason; older sandboxes are unchanged; review and release pending |
 | 21 October | [113 — Bigger context and cached state](113-bigger-context-and-cached-state.md): can a larger context and cached fixed state stop Opus turns losing history and cache? | In review: compaction at ~300k tokens; unchanging runtime state in the cached system message |
 | 23 October | [118 — Telemetry gaps](118-telemetry-gaps.md): why did the models query show no token sums, and what was missing from model and context logs? | In review: duplicate stats aliases hid the sums; finish reason, cache writes, provider slugs and older-history size added |
-| 23 October | [119 — Double reply](119-double-reply.md): why did Chief send the same clarifying question twice? | In review: text beside a lone finish_turn is no longer also sent as progress |
+| 23 October | [119 — Double reply](119-double-reply.md): why did Chief send the same clarifying question twice? | In review: text a finish_turn reply already contains is no longer also sent as progress |
 
 ## Coding-agent learning path
 

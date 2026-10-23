@@ -45,6 +45,24 @@ const finishTool: ToolDefinition = {
     "Pause with your natural reply and an explicit reason after completing any independent runnable work.",
   parameters: jsonSchema(finishSchema),
 };
+const squash = (text: string) => text.replace(/\s+/g, " ").trim();
+/** True when a finish_turn call in `calls` has a reply containing `text`, ignoring whitespace. */
+export function repeatsFinishReply(
+  text: string,
+  calls: Array<{ function: { name: string; arguments: string } }>,
+) {
+  const said = squash(text);
+  if (!said) return true;
+  return calls.some((c) => {
+    if (c.function.name !== "finish_turn") return false;
+    try {
+      const reply = JSON.parse(c.function.arguments)?.reply;
+      return typeof reply === "string" && squash(reply).includes(said);
+    } catch {
+      return false;
+    }
+  });
+}
 /** Image parts are replaced before tracing so model-input records never retain raw bytes. */
 export function omitImages(messages: ModelMessage[]) {
   return messages.map((m) =>
@@ -436,15 +454,13 @@ export class CustomAgent implements Agent {
           await steer();
           continue;
         }
-        // Text beside a lone finish_turn is the answer itself, which finish_turn already carries
-        // (its reply is required): sending it as progress too showed the owner the same reply twice.
-        const finishOnly = calls.every(
-          (c) => c.function.name === "finish_turn",
-        );
+        // Text that a finish_turn reply in this step already contains is the answer itself:
+        // sending it as progress too showed the owner the same reply twice. Text that differs
+        // from every reply (narration, or a reply that only points at it) is still sent.
         if (
           calls.length &&
-          !finishOnly &&
           generation.message.content &&
+          !repeatsFinishReply(generation.message.content, calls) &&
           req.progress
         ) {
           try {

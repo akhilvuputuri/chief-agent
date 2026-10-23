@@ -33,7 +33,7 @@ Answer and progress deliveries pass through `tidyOwnerText` (`src/owner-text.ts`
 - Longer responses: Show more, Previous/Next text, Sections, Sources and Records as appropriate. Summary returns to the model’s original reply. Record buttons are read-only references, never tool dispatches.
 - Refresh reads current saved state. Answer sections remain the original answer snapshot; Refresh does not regenerate it. Display timestamps are Singapore time. Views expire after seven days; open a fresh command afterward.
 
-Regular text, voice-note text replies, foreground progress, resumed work and scheduled deliveries share the view controller. Foreground progress is the text a model writes beside working tool calls; text beside a lone `finish_turn` is not sent as progress, because `finish_turn` already carries the reply ([journal 119](journey/119-double-reply.md)). Speech continues to read the main model reply, not every hidden section. Approval notices remain separate always-visible messages; Calendar uses its existing approval cards.
+Regular text, voice-note text replies, foreground progress, resumed work and scheduled deliveries share the view controller. Foreground progress is the text a model writes beside working tool calls; text that a `finish_turn` reply in the same step already contains is not sent as progress, because the reply carries it ([journal 119](journey/119-double-reply.md)). Speech continues to read the main model reply, not every hidden section. Approval notices remain separate always-visible messages; Calendar uses its existing approval cards.
 
 ## Contract and persistence
 

@@ -1,6 +1,6 @@
 # No more double replies — in review, 23 October 2026
 
-On 23 October Chief sent the same clarifying question twice: Opus wrote its reply both as text and in `finish_turn`, and the host sent the text as a progress message before delivering the answer. Text beside a lone `finish_turn` is no longer sent as progress; steps with working calls still narrate. Once in 14 days so far. [Journal 119](journey/119-double-reply.md), [Telegram views](telegram-views.md).
+On 23 October Chief sent the same clarifying question twice: Opus wrote its reply both as text and in `finish_turn`, and the host sent the text as a progress message before delivering the answer. Text that a `finish_turn` reply in the same step already contains is no longer sent as progress; narration and differing text still are. Once in 14 days so far. [Journal 119](journey/119-double-reply.md), [Telegram views](telegram-views.md).
 
 # Telemetry gaps — in review, 23 October 2026
 
