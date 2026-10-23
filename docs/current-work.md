@@ -1,3 +1,7 @@
+# Tolerant agent reports and partial results — in review, 23 October 2026
+
+Web and research children no longer burn their few calls on report rejections caused by formatting: short IDs are accepted when they appear as a whole value the child actually saw, and research quotes match after whitespace, quote-mark, dash and ellipsis normalisation (still case- and word-exact, returned in the source's words). A rejection names every failing item and its fix at once; a child is warned one call before its last and offered only its report tool on the last; a rejected or late report is returned as `partial` with failing items removed. Job-alignment and media quotes stay exact. [Journal 116](journey/116-tolerant-agent-reports.md), [agents](agents.md#report-checks).
+
 # Bigger context and cached fixed state — in review, 21 October 2026
 
 After the fixed tool list, ordinary Opus turns hit the 120k-character compaction threshold: older history was dropped mid-turn and results were excerpted. Compaction now starts at about 1.08M characters (about 300k tokens, the owner's choice). The 11k of runtime state that never changes (agent and skill catalogues, domain guidance, availability) moves into the cached opening system message. See [journal 113](journey/113-bigger-context-and-cached-state.md).

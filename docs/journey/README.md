@@ -122,6 +122,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 21 October | [111 — US AQI from NEA](111-us-aqi-from-nea.md): can Merlion give the aqicn.org comparison without a new data source? | Released in `eb03a02`: US AQI computed from NEA PM2.5 tracks aqicn for the five regions; owner acceptance pending |
 | 21 October | [112 — Box view in coding_status](112-coding-status-box-view.md): what does coding_status say about the box an attempt runs in? | Tested: a boxed attempt reports its box phase, launch time, last report and, once gone, its end reason; older sandboxes are unchanged; review and release pending |
 | 21 October | [113 — Bigger context and cached state](113-bigger-context-and-cached-state.md): can a larger context and cached fixed state stop Opus turns losing history and cache? | In review: compaction at ~300k tokens; unchanging runtime state in the cached system message |
+| 23 October | [116 — Tolerant agent reports](116-tolerant-agent-reports.md): why did web and research children exhaust their budget on rejected reports? | In review: short refs accepted as whole tokens seen in tool results; quotes matched after normalising whitespace, quote marks, dashes and ellipses; partial reports salvaged with failing items removed |
 
 ## Coding-agent learning path
 
