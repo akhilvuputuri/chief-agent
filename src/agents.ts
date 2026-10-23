@@ -259,7 +259,8 @@ export async function runFindingsAgent(
   };
   let report: AgentReport | undefined;
   /** The last rejected report, with its failing quotes, links and refs already removed. */
-  let rejected: { report: AgentReport; problems: string[] } | undefined;
+  let rejected:
+    { report: AgentReport; problems: string[]; failed: string[] } | undefined;
   try {
     // The child inherits its parent's lane: a background job's agent is background too, so
     // foreground-only writes (routines, watchlist, news settings) stay refused.
@@ -432,9 +433,9 @@ export async function runFindingsAgent(
             ? {
                 report: rejected.report,
                 reason:
-                  `The agent's last report failed host checks and was not corrected before it stopped (${stop}). Quotes, observation links and refs that failed were removed: ${rejected.problems.slice(0, 3).join("; ")}`.slice(
+                  `The agent's last report failed host checks and was not corrected before it stopped (${stop}). Removed: ${rejected.failed.join("; ")}. A finding marked unsupported keeps the agent's text without the support that failed.`.slice(
                     0,
-                    1500,
+                    2000,
                   ),
               }
             : undefined;
@@ -546,11 +547,17 @@ async function checkReport(
     )
   ).rows as { id: string; result: string }[];
   const problems: string[] = [];
-  const findings: AgentReport["findings"] = [];
+  /** Compact labels of every failing item, for partialReason. */
+  const failed: string[] = [];
+  const findings: (AgentReport["findings"][number] & {
+    unsupported?: string[];
+  })[] = [];
   for (const [i, f] of report.findings.entries()) {
     const n = i + 1;
-    const kept = { ...f };
+    const kept: (typeof findings)[number] = { ...f };
+    const lost: string[] = [];
     if (f.quote && !f.sourceId) {
+      lost.push("quote");
       problems.push(
         `finding ${n}: a quote needs the sourceId it came from; add the sourceId your web_read or source_read returned, or drop the quote`,
       );
@@ -569,6 +576,7 @@ async function checkReport(
         problems.push(
           `finding ${n}: ${message.slice("Research validation: ".length)}`,
         );
+        lost.push("quote");
         delete kept.quote;
         delete kept.sourceId;
       }
@@ -576,7 +584,12 @@ async function checkReport(
       problems.push(
         `finding ${n}: observationId ${f.observationId} must be one of this agent's own calls; use the observationId of a call you made, or drop it`,
       );
+      lost.push("observationId");
       delete kept.observationId;
+    }
+    if (lost.length) {
+      kept.unsupported = lost;
+      failed.push(`finding ${n} ${lost.join("+")}`);
     }
     findings.push(kept);
   }
@@ -587,7 +600,8 @@ async function checkReport(
   for (const r of results) resultValues(r.result, values);
   const shown = values.join("\n");
   // An ID-sized ref may appear anywhere in what the agent saw. A short one, such as a 6-digit
-  // record number, must appear as a whole value or word: never inside a longer number or word.
+  // record number, must appear as a whole token inside a string or number value the agent was
+  // shown (not a JSON key): never inside a longer number or word.
   const seen = (ref: string) =>
     ref.length >= ID_SIZED_REF
       ? raw.includes(ref) || shown.includes(ref)
@@ -595,6 +609,8 @@ async function checkReport(
         values.some((v) => containsToken(v, ref));
   const refs = report.refs.filter((ref) => seen(ref));
   const unseen = report.refs.filter((ref) => !seen(ref));
+  if (unseen.length)
+    failed.push(`refs ${unseen.map((r) => `"${r.slice(0, 40)}"`).join(", ")}`);
   if (unseen.length)
     problems.push(
       `refs must be IDs your tools returned or the brief named; not found: ${unseen
@@ -618,5 +634,6 @@ async function checkReport(
       refs,
     },
     problems,
+    failed,
   };
 }

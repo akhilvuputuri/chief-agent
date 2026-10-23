@@ -803,7 +803,11 @@ async function runWebAgent(
     new JobTools(db, {
       call: async (operation: string) =>
         operation === "web_search"
-          ? { results: [{ url: "https://example.com/library" }] }
+          ? {
+              results: [{ url: "https://example.com/library" }],
+              // A short number that appears only as a key, never as a value.
+              byRecord: { "5550001": "branch hours" },
+            }
           : { content: LIBRARY_PAGE },
     }),
     { web: true },
@@ -892,10 +896,12 @@ test("a short numeric ref the agent saw and typographic or elided quotes pass; i
     assert.deepEqual(run.result.refs, ["1234567", "042"]);
     // What the coordinator receives is the page's own words.
     assert.equal(run.result.findings[0].quote, "“Open daily, 9am – 5pm.”");
+    // The elided quote spans few words, so the coordinator gets them all.
     assert.equal(
       run.result.findings[1].quote,
-      "Open daily … closed on public holidays",
+      "Open daily, 9am – 5pm.” The branch is closed on public holidays",
     );
+    assert.equal(run.result.findings[0].unsupported, undefined);
   } finally {
     await run.close();
   }
@@ -944,11 +950,29 @@ test("a web agent whose report was rejected and then ran out of calls returns th
     assert.equal(run.result.stopReason, "budget_exhausted");
     assert.equal(run.result.status, "partial");
     assert.match(run.result.partialReason, /failed host checks/);
-    assert.match(run.result.partialReason, /Sundays until midnight/);
+    // Every failing item is listed, compactly.
+    assert.match(run.result.partialReason, /finding 2 quote; refs "9999999"/);
     assert.equal(run.result.findings[0].quote, "Open daily, 9am – 5pm.");
     // The unverified quote is not passed on as a quote.
     assert.equal(run.result.findings[1].quote, undefined);
     assert.equal(run.result.findings[1].sourceId, undefined);
+    // The kept text is marked as having lost its support.
+    assert.deepEqual(run.result.findings[1].unsupported, ["quote"]);
+    assert.equal(run.result.findings[0].unsupported, undefined);
+    // The search asked for on the last call was refused, not run.
+    const refused = (
+      await run.db.query(
+        "SELECT state,result FROM runtime_calls WHERE operation='web_search' ORDER BY started_at",
+      )
+    ).rows;
+    assert.deepEqual(
+      refused.map((r) => r.state),
+      ["success", "success", "success", "failed"],
+    );
+    assert.match(
+      refused[3].result.error.message,
+      /last model call, so only agent_report runs/,
+    );
     assert.deepEqual(run.result.refs, ["1234567"]);
     assert.equal(
       (
@@ -972,7 +996,8 @@ test("a web agent that never reports before its allocation ends returns its comp
     assert.equal(run.result.status, "incomplete");
     assert.deepEqual(run.result.findings, []);
     assert.match(run.result.summary, /used its allocation before it reported/);
-    assert.equal(run.result.observations.length, 6);
+    // The sixth read, asked for on the last call, was refused rather than run.
+    assert.equal(run.result.observations.length, 5);
     assert(
       run.result.observations.every(
         (o: { operation: string }) => o.operation === "web_read",
@@ -980,5 +1005,85 @@ test("a web agent that never reports before its allocation ends returns its comp
     );
   } finally {
     await run.close();
+  }
+});
+
+test("a short ref that appears only as a JSON key in a tool result is refused", async () => {
+  const run = await runWebAgent((n, input) => {
+    if (n === 1) return call("web_search", { query: "branch hours" });
+    if (n === 2)
+      return call("agent_report", {
+        status: "complete",
+        summary: "Found the branch record.",
+        findings: [],
+        refs: ["5550001"],
+      });
+    if (n === 3) {
+      assert.match(lastTool(input).error.message, /not found: "5550001"/);
+      return call("agent_report", {
+        status: "partial",
+        summary: "Found search results only.",
+        findings: [],
+        refs: [],
+      });
+    }
+    throw new Error("unexpected child call " + n);
+  });
+  try {
+    assert.equal(run.childCalls, 3);
+    assert.equal(run.result.status, "partial");
+  } finally {
+    await run.close();
+  }
+});
+
+test("a child short of time gets one final notice, runs only its report, and reports", async () => {
+  // Each of the first two model calls takes 35 s of a 90 s allocation; later ones take 1 s.
+  const realNow = Date.now;
+  let offset = 0;
+  Date.now = () => realNow() + offset;
+  try {
+    const run = await runWebAgent((n, input) => {
+      offset += n <= 2 ? 35000 : 1000;
+      const finals = input.messages.filter((m) =>
+        String(m.content).startsWith("[Host notice] This is your last"),
+      );
+      if (n <= 2) {
+        assert.equal(finals.length, 0);
+        return call("web_read", { url: "https://example.com/library" });
+      }
+      // From the third call on, less than 20 s remain on every call, but the notice is given once.
+      assert.equal(finals.length, 1);
+      assert.deepEqual(
+        input.tools.map((t) => t.name),
+        ["agent_report"],
+      );
+      if (n === 3)
+        return call("web_read", { url: "https://example.com/library" });
+      assert.match(lastTool(input).error.message, /only agent_report runs/);
+      return call("agent_report", {
+        status: "partial",
+        summary: "Open daily 9am to 5pm.",
+        findings: [],
+        refs: ["1234567"],
+      });
+    });
+    try {
+      assert.equal(run.childCalls, 4);
+      assert.equal(run.result.status, "partial");
+      assert.deepEqual(run.result.refs, ["1234567"]);
+      assert.equal(
+        (
+          await run.db.query(
+            "SELECT count(*)::int n FROM events WHERE type='agent.budget_notice' AND (data->>'final')::boolean",
+          )
+        ).rows[0].n,
+        1,
+      );
+    } finally {
+      await run.close();
+    }
+  } finally {
+    Date.now = realNow;
   }
 });

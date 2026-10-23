@@ -96,31 +96,37 @@ A package chooses one of the host's contracts. It cannot add its own validation 
 
 The checks exist so that a report cannot cite an invented ID, source or quote. Since [journal 116](journey/116-tolerant-agent-reports.md) they tolerate what models routinely change when copying, and no more (`src/quote-match.ts`, `checkReport` in `src/agents.ts`):
 
-- **Quotes** (`findings/v1` and `public-research/v1`). Whitespace runs, curly versus straight quote marks, dash variants and zero-width characters are ignored. `...`, `…` or `[...]` marks omitted words: each piece around it must occur in that one source, in order, with at least 8 characters per piece and at most 4 pieces. A leading or trailing ellipsis just marks an excerpt. Case and wording must match. The coordinator receives the source's own words (whitespace collapsed, pieces joined with `…`), not the model's copy.
-- **Refs.** A ref of 8 or more characters must appear anywhere in the agent's tool results or brief, as before. A shorter ref, such as a 6- or 7-digit record number or a ticker, must appear as a whole value in a tool result or the brief: not inside a longer number or word (`1234567` does not match `91234567` or `1234567.5`). Refs under 3 characters are refused.
+- **Quotes** (`findings/v1` and `public-research/v1`). What the host guarantees: every character of the returned quote comes from that one source, and every quoted word appears there whole, in order.
+  - Ignored: whitespace runs, curly versus straight quote marks, dash variants and zero-width characters. Case and characters otherwise count.
+  - A quote, and each piece of an elided one, must start and end on a word boundary of the source, so "profitable" never matches inside "unprofitable". Scripts written without spaces (Chinese, Japanese, Thai and similar) have no boundary to check, and there a piece can still start mid-word.
+  - `...`, `…` or `[...]` marks omitted words. Each piece must occur in that one source, in order, with at least 8 characters per piece and at most 4 pieces. A leading or trailing ellipsis just marks an excerpt.
+  - Among the possible matches, the host takes the shortest source span from the first piece to the last. If that span is at most 300 characters (the quote limit), the coordinator receives the whole span, omitted words included: "The drug is ... effective" comes back as "The drug is not effective". A span of 301–600 characters comes back elided, as the source's pieces joined with `…`. A longer span is refused.
+  - The coordinator always receives the source's own words, with whitespace collapsed, never the model's copy. What is left out of a 301–600 character span is not shown, so an elided quote can still omit qualifying words between its pieces.
+  - Other quote checks are unchanged. `work_evidence` (`src/work.ts`) still requires a contiguous quote (whitespace-normalised only), so an elided quote returned for a long span cannot be reused as work evidence.
+- **Refs.** A ref of 8 or more characters must appear anywhere in the agent's tool results or brief, as before. A shorter ref, such as a 6- or 7-digit record number or a ticker, must appear as a whole token inside a string or number value of a tool result, or in the brief. It must not sit inside a longer number or word (`1234567` does not match `91234567` or `1234567.5`), and a JSON key does not count. Refs under 3 characters are refused. Short refs without a digit, such as tickers, are allowed.
 - **Rejections.** One rejection names every failing item (`finding 2: the quote "…" is not in source <id>`, `refs … not found: "7654321"`) and how to fix it, so one corrected report can pass. It is returned as `VALIDATION_FAILED` with `retryable: true`.
 - **Job alignment and media** keep exact quote matching. Job-alignment quotes flow into the preparation chain and the preparation Sheet, which re-check them exactly; media quotes are stored and reused.
 
 ### Running low and partial results
 
-A child's last model calls are reserved for reporting (`budgetNotice` in `src/custom-agent.ts`). For any child with a report tool:
+A child's last model calls are reserved for reporting (`budgetNotice` in `src/custom-agent.ts`). This applies to every child with a report tool: findings agents, public research, and the media and job-alignment specialists, whose quote checks are unchanged:
 
 - when one model call will remain after the current one, the host adds a notice telling it to report now, so a rejected report can still be fixed;
-- on the last model call, or when its tool allocation or time (under 20 seconds, or a quarter of its allocation if that is less) could not cover another round, the call offers only the report tool, with a notice. A call to another tool is still dispatched normally.
+- on the last model call, or when its tool allocation or time (under 20 seconds, or a quarter of its allocation if that is less) could not cover another round, the call offers only the report tool, with a notice. A call to any other tool from that step, including `finish_turn`, is refused without dispatch.
 
 Each notice records `agent.budget_notice` (`final` true or false) in the child run.
 
 A findings agent's result then follows these rules:
 
-| Situation                                            | `status`               | Content                                                                                                        |
-| ---------------------------------------------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------- |
-| Report accepted, child finished                      | the report's           | the report                                                                                                     |
-| Report accepted, allocation ran out in the same step | `partial` (or blocked) | the report, with `partialReason`                                                                               |
-| Last report rejected, child then answered or ran out | `partial` (or blocked) | the rejected report with every failing quote, `sourceId`, `observationId` and ref removed, and `partialReason` |
-| No report, allocation ran out                        | `incomplete`           | `observations`: up to 12 of the child's successful calls (`observationId`, `operation`) for `observation_read` |
-| Interrupted, failed, or reported then failed         | `incomplete`           | as before; the report is not relied on                                                                         |
+| Situation                                            | `status`               | Content                                                                                                                                                    |
+| ---------------------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Report accepted, child finished                      | the report's           | the report                                                                                                                                                 |
+| Report accepted, allocation ran out in the same step | `partial` (or blocked) | the report, with `partialReason`                                                                                                                           |
+| Last report rejected, child then answered or ran out | `partial` (or blocked) | the rejected report with every failing quote, `sourceId`, `observationId` and ref removed, each affected finding marked `unsupported`, and `partialReason` |
+| No report, allocation ran out                        | `incomplete`           | `observations`: up to 12 of the child's successful calls (`observationId`, `operation`) for `observation_read`                                             |
+| Interrupted, failed, or reported then failed         | `incomplete`           | as before; the report is not relied on                                                                                                                     |
 
-Nothing unchecked is passed on as a quote or ref. A salvaged finding keeps its text without the quote that failed; like any finding, the text is the agent's reading, not verified truth. The coordinator instructions say `partial`, `blocked` and `incomplete` are not complete. Public research follows the same salvage rules per target ([research specialist](research-specialist.md#partial-results)); job alignment and media keep their all-or-nothing contracts.
+Nothing unchecked is passed on as a quote, link or ref. A salvaged finding keeps its text even when its support failed. Such a finding is marked, for example `unsupported: ["quote"]` or `["observationId"]`, and its text is the agent's unsupported claim. `partialReason` lists every failing item compactly, for example `finding 2 quote; refs "9999999"`. The coordinator instructions say `partial`, `blocked` and `incomplete` are not complete. Public research follows the same salvage rules per target ([research specialist](research-specialist.md#partial-results)); job alignment and media keep their all-or-nothing contracts.
 
 ## Models and effort
 

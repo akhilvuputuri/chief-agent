@@ -152,7 +152,8 @@ export async function runResearchSpecialist(
   let output: AgentResponse | undefined;
   let report: any;
   /** The last rejected public-research report, with only its checked evidence kept. */
-  let rejected: { targets: any[]; problems: string[] } | undefined;
+  let rejected:
+    { targets: any[]; problems: string[]; failed: string[] } | undefined;
   try {
     // Preserve task context for inspection. Search-cache identity resolves the trusted parent link independently of budget attachment.
     await db.query(
@@ -292,9 +293,11 @@ export async function runResearchSpecialist(
               // Every problem is named at once, so one corrected report can pass; the
               // checked remainder is kept in case the specialist cannot report again.
               const problems: string[] = [];
+              const failed: string[] = [];
               const checked = [];
-              for (const item of candidate.targets) {
+              for (const [t, item] of candidate.targets.entries()) {
                 const evidence = [];
+                const lost: string[] = [];
                 for (const [i, e] of item.evidence.entries())
                   try {
                     const { quote } = await checkResearchQuote(
@@ -312,14 +315,20 @@ export async function runResearchSpecialist(
                     problems.push(
                       `target ${item.targetId} evidence ${i + 1}: ${message.slice("Research validation: ".length)}`,
                     );
+                    lost.push(`evidence ${i + 1}`);
                   }
-                if (item.status === "complete" && !item.evidence.length)
+                if (item.status === "complete" && !item.evidence.length) {
                   problems.push(
                     `target ${item.targetId}: complete targets require observed source evidence; add a quote from a source you read, or mark the target partial`,
                   );
+                  lost.push("evidence for complete");
+                }
+                if (lost.length)
+                  failed.push(`target ${t + 1} ${lost.join("+")}`);
                 checked.push({
                   ...item,
                   evidence,
+                  ...(lost.length ? { unsupported: lost } : {}),
                   status:
                     item.status === "complete" &&
                     (!evidence.length || evidence.length < item.evidence.length)
@@ -328,7 +337,7 @@ export async function runResearchSpecialist(
                 });
               }
               if (problems.length) {
-                rejected = { targets: checked, problems };
+                rejected = { targets: checked, problems, failed };
                 throw new ReportRejectedError(
                   `Research validation: your report was not recorded. Fix each item and call ${reportName} again with the whole corrected report:\n- ${problems.join("\n- ")}`,
                 );
@@ -363,7 +372,7 @@ export async function runResearchSpecialist(
           : rejected
             ? {
                 targets: rejected.targets,
-                reason: `The specialist's last report failed host checks and was not corrected before it stopped (${output.stopReason}); evidence that failed was removed: ${rejected.problems.slice(0, 3).join("; ")}`,
+                reason: `The specialist's last report failed host checks and was not corrected before it stopped (${output.stopReason}); removed: ${rejected.failed.join("; ")}. A target marked unsupported keeps the specialist's summary without the evidence that failed.`,
               }
             : undefined
         : undefined;

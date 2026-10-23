@@ -262,6 +262,8 @@ export class CustomAgent implements Agent {
     let historyAllowance: number | undefined;
     // The low-allocation notices a child has already been given (see budgetNotice).
     const noticed = new Set<boolean>();
+    // Set for a child's last model call: the only tool its calls may dispatch.
+    let onlyTool: string | undefined;
     try {
       turn: while (true) {
         if (await steer()) {
@@ -319,8 +321,9 @@ export class CustomAgent implements Agent {
             tools = [...(req.runtime?.tools ?? []), finishTool];
             enabled = new Set(tools.map((t) => t.name));
             // What this call offers. A child low on allocation is told so, and its last call
-            // offers only its report tool; dispatch still accepts every enabled tool.
+            // offers and dispatches only its report tool.
             let offered = tools;
+            onlyTool = undefined;
             const reportTool = req.specialist
               ? tools.find((t) => REPORT_TOOLS.has(t.name))
               : undefined;
@@ -340,7 +343,10 @@ export class CustomAgent implements Agent {
                   final: notice.final,
                 });
               }
-              if (notice?.final) offered = [reportTool];
+              if (notice?.final) {
+                offered = [reportTool];
+                onlyTool = reportTool.name;
+              }
             }
             const input = context(
               {
@@ -564,6 +570,11 @@ export class CustomAgent implements Agent {
               (!readOperations.has(op) || op === "agent_run")
             )
               throw new WriteBlockedError(writesBlocked);
+            // A child's last call may only report: another lookup could not be used.
+            if (onlyTool && op !== onlyTool)
+              throw new Error(
+                `Agent validation: this was your last model call, so only ${onlyTool} runs; ${op} was not dispatched. Report what you have now.`,
+              );
             if (!enabled.has(op)) {
               // A known tool whose domain is not loaded yet: load the domain and
               // dispatch. Arguments are still validated and the owner-scoped

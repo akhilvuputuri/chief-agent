@@ -482,9 +482,12 @@ test("public research accepts typographic and elided quotes as the source's word
     assert.equal(result.stopReason, "budget_exhausted");
     assert.match(result.partialReason, /failed host checks/);
     assert.equal(result.targets[0].status, "partial");
+    // The short elided span comes back whole, in the source's words.
     assert.deepEqual(result.targets[0].evidence, [
-      { sourceId: source, quote: "Supports Linux … Detailed source text" },
+      { sourceId: source, quote: "Supports Linux. Detailed source text" },
     ]);
+    assert.deepEqual(result.targets[0].unsupported, ["evidence 2"]);
+    assert.match(result.partialReason, /removed: target 1 evidence 2\./);
     assert.equal(result.observedSources[0].sourceId, source);
     // Job alignment and media keep exact matching: the same variant is refused there.
     const childRun = (

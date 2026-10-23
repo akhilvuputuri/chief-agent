@@ -1,8 +1,10 @@
 /**
- * Tolerant quote grounding. A quote still has to be the source's own words, in order, from
- * one source; only typography that models routinely change is ignored:
- * whitespace runs, curly versus straight quote marks, dash variants, invisible characters,
- * and "..." or "…" standing for omitted text between exact pieces.
+ * Tolerant quote grounding. A quote must be the source's own words, in order, from one
+ * source; only typography that models routinely change is ignored: whitespace runs, curly
+ * versus straight quote marks, dash variants and invisible characters. "..." or "…" may stand
+ * for omitted words between exact pieces. Every match starts and ends on a word boundary (in
+ * scripts written with spaces). An elided quote whose source span is short is returned whole,
+ * so an omitted word such as "not" stays visible; a longer span is refused past a fixed bound.
  */
 
 const SINGLE_QUOTES = new Set(["‘", "’", "‚", "‛", "′"]);
@@ -16,6 +18,15 @@ const GAP = /\s*\[?\s*\.{3,}\s*\]?\s*/;
 export const MIN_QUOTE_PIECE = 8;
 /** At most three omissions: a quote is an excerpt, not a collage. */
 export const MAX_QUOTE_PIECES = 4;
+/**
+ * An elided match whose source span (normalised characters, first piece to last) fits the
+ * report's quote limit is returned as the whole contiguous span, omitted words included.
+ */
+export const WHOLE_SPAN_LIMIT = 300;
+/** Longer spans are returned elided, up to this bound; beyond it the quote is refused. */
+export const MAX_ELIDED_SPAN = 600;
+/** Occurrences of a first piece tried when looking for the shortest span. */
+const MAX_STARTS = 1000;
 
 /**
  * The normalised text, with the original UTF-16 span of every normalised unit so a match can
@@ -69,40 +80,87 @@ const verbatim = (
     .replace(/\s+/g, " ")
     .trim();
 
+const WORD_CHAR = /[\p{L}\p{N}_]/u;
+/** Scripts written without spaces between words, where a word boundary cannot be told. */
+const UNSPACED =
+  /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u;
+/** True when two adjacent characters belong to one word, so a match may not split them. */
+const joined = (a: string | undefined, b: string | undefined) =>
+  !!a &&
+  !!b &&
+  WORD_CHAR.test(a) &&
+  WORD_CHAR.test(b) &&
+  !UNSPACED.test(a) &&
+  !UNSPACED.test(b);
+
+/** First occurrence of `piece` at or after `from` that does not start or end inside a word. */
+function findBounded(text: string, piece: string, from: number) {
+  for (let at = text.indexOf(piece, from); at >= 0;) {
+    const end = at + piece.length;
+    if (!joined(text[at - 1], text[at]) && !joined(text[end - 1], text[end]))
+      return at;
+    at = text.indexOf(piece, at + 1);
+  }
+  return -1;
+}
+
 /**
  * Returns the source's own words for a quote that is grounded in `content`, or undefined.
- * The result is the matching source text (whitespace collapsed), with " … " between the
- * pieces of an elided quote, so what the host passes on is what the source says.
+ * The result is source text with whitespace collapsed: the contiguous match, or for an elided
+ * quote the whole span when it is at most WHOLE_SPAN_LIMIT characters, else the pieces joined
+ * by " … " when the span is at most MAX_ELIDED_SPAN.
  */
 export function matchQuote(content: string, quote: string): string | undefined {
-  if (content.includes(quote)) return quote;
   const source = normalizeForQuote(content);
   const wanted = normalizeForQuote(quote).text.trim();
   if (!wanted) return undefined;
   const attempt = (q: string) => {
     // The whole quote first, so a source that itself contains "..." still matches directly.
-    const whole = source.text.indexOf(q);
+    const whole = findBounded(source.text, q, 0);
     if (whole >= 0) return verbatim(content, source, whole, q.length);
     const pieces = q
       .split(GAP)
       .map((p) => p.trim())
       .filter(Boolean);
+    if (!pieces.length || pieces.length > MAX_QUOTE_PIECES) return undefined;
     // A leading or trailing "..." only says the quote is an excerpt: the piece alone must match.
-    if (
-      !pieces.length ||
-      pieces.length > MAX_QUOTE_PIECES ||
-      (pieces.length > 1 && pieces.some((p) => p.length < MIN_QUOTE_PIECE))
-    )
-      return undefined;
-    const spans: string[] = [];
-    let from = 0;
-    for (const piece of pieces) {
-      const at = source.text.indexOf(piece, from);
-      if (at < 0) return undefined;
-      spans.push(verbatim(content, source, at, piece.length));
-      from = at + piece.length;
+    if (pieces.length === 1) {
+      const at = findBounded(source.text, pieces[0]!, 0);
+      return at < 0
+        ? undefined
+        : verbatim(content, source, at, pieces[0]!.length);
     }
-    return spans.join(" … ");
+    if (pieces.some((p) => p.length < MIN_QUOTE_PIECE)) return undefined;
+    // The shortest span over the first piece's occurrences; later pieces match greedily,
+    // which gives the shortest span for that start.
+    let best: number[] | undefined;
+    let span = Infinity;
+    for (
+      let start = findBounded(source.text, pieces[0]!, 0), tries = 0;
+      start >= 0 && tries < MAX_STARTS;
+      start = findBounded(source.text, pieces[0]!, start + 1), tries++
+    ) {
+      const at = [start];
+      let from = start + pieces[0]!.length;
+      for (const piece of pieces.slice(1)) {
+        const found = findBounded(source.text, piece, from);
+        if (found < 0) break;
+        at.push(found);
+        from = found + piece.length;
+      }
+      // No later piece can follow a start whose rest did not match; later starts only shrink the text.
+      if (at.length < pieces.length) break;
+      if (from - start < span) {
+        span = from - start;
+        best = at;
+      }
+    }
+    if (!best || span > MAX_ELIDED_SPAN) return undefined;
+    if (span <= WHOLE_SPAN_LIMIT)
+      return verbatim(content, source, best[0]!, span);
+    return best
+      .map((at, i) => verbatim(content, source, at, pieces[i]!.length))
+      .join(" … ");
   };
   const found = attempt(wanted);
   if (found !== undefined) return found;
@@ -122,7 +180,7 @@ const WORD = /[\p{L}\p{N}_]/u;
 const DIGIT = /\d/;
 
 /**
- * True when `token` appears in `text` as a whole value: not inside a longer word or number.
+ * True when `token` appears in `text` as a whole token: not inside a longer word or number.
  * "1234567" matches "record 1234567," but not "91234567" or "1234567.5".
  */
 export function containsToken(text: string, token: string) {
