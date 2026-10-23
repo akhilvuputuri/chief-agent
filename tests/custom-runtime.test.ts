@@ -709,6 +709,8 @@ test("empty provider responses retry before tools and preserve safe diagnostics"
     ).rows[0].data;
     assert.equal(failure.transient, true);
     assert.equal(failure.diagnostics.responseId, "gen-test");
+    // Failures record the requested model so they group by model (journal 118).
+    assert.equal(failure.model, model.model);
   } finally {
     await f.pg.close();
   }
@@ -1145,5 +1147,31 @@ test("a write refused for an earlier uncertain write blocks later writes in the 
     );
   } finally {
     await f.pg.close();
+  }
+});
+
+test("a successful generation reports why the model stopped", async () => {
+  for (const [finish, expected] of [
+    ["length", "length"],
+    ["tool_calls", "tool_calls"],
+    [undefined, undefined],
+  ] as const) {
+    const model = new OpenRouter("test", undefined, 2, 10, (async () =>
+      Response.json({
+        choices: [
+          {
+            message: { content: "Partial answer" },
+            ...(finish ? { finish_reason: finish } : {}),
+          },
+        ],
+        usage: { prompt_tokens: 10, completion_tokens: 8000 },
+      })) as typeof fetch);
+    const generation = await model.generate({
+      messages: [{ role: "user", content: "hello" }],
+      tools: [],
+      reasoning: "low",
+      signal: new AbortController().signal,
+    });
+    assert.equal(generation.finishReason, expected);
   }
 });
