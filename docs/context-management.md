@@ -171,17 +171,19 @@ A requirements card is any event carrying `requirements`, including the first ca
 
 **Monitoring cards.** Up to three monitoring confirmation cards that were delivered and expired unanswered, each with its title ([journal 117](journey/117-open-loops-and-memory-offers.md)):
 
-- A card whose spec has an end date (`expiresAt`, the event or due date) stays listed until one day after that date. It carries `endsAt`, and `due: true` from a day before that date onwards. Due cards are listed first.
-- A card without an end date stays listed for seven days after it expired.
+- A card whose spec has `expiresAt` stays listed until one day after it. `expiresAt` is the end of monitoring; it is used as a proxy for the event date. The card carries `endsAt`, and `due: true` from a day before that date onwards. If monitoring was set to end after the event, `due` starts late. Due cards are listed first.
+- A card without `expiresAt` stays listed for seven days after it expired.
 - No card stays listed more than 30 days after it expired.
-- A card is dropped when a later proposal revised the same concern (same responsibility id), or proposed one with the same title (ignoring case and surrounding spaces). The title match covers a never-confirmed concern proposed again, which gets a new id, and that proposal's later confirmation. Two different concerns that share a title also hide the earlier card.
+- A card is dropped when a later proposal revised the same concern (same responsibility id).
+- A later card with the same title (ignoring case and surrounding spaces) also drops it, but only when that card was confirmed, or is pending and was delivered, and it ends no earlier than the older card (or either has no `expiresAt`). This covers a never-confirmed concern proposed again, which gets a new id, and that proposal's later confirmation. A denied or undelivered card does not hide the older one, and neither does a same-titled card for an earlier date, such as a different trip.
+- Only three cards are listed: due cards first, then the earliest end date, then the most recently expired. With more than three, an undated or later-dated card can be left out.
 
 **Chief's own questions.** Up to three replies from the last three days that ended Chief's turn with `awaiting_user`. They come from the saved conversation state (`conversation_contexts.pending_reply`). Each has:
 
-- an excerpt of at most 200 characters, ending at the reply's last question mark;
+- an excerpt of at most 200 characters (code points, including the ellipsis), ending at the reply's last question mark. The saved reply is already cut to 3,000 characters, so a question after that point is missed;
 - the date, the thread, the reply's message id for `conversation_read`, and a host `awaiting` label.
 
-A question counts as answered once a later owner message in the same thread has been handled by a completed turn. The message being handled now does not count, and neither does a message in another thread. Any later completed message in the thread clears the question, whether or not it answered it. `awaiting_approval` pauses are not listed: their cards are tracked elsewhere. The excerpt goes into the model context only. The host does not log it, and traces record only the size of each context key.
+A question counts as answered once a later owner message in the same thread has been handled by a completed turn. The message being handled now does not count, and neither does a message in another thread. Any later completed message in the thread clears the question, whether or not it answered it. `awaiting_approval` pauses are not listed: their cards are tracked elsewhere. Only the newest three are listed, so an older fourth question is left out. The excerpt goes into the model context only. The host does not log it, and traces record only the size of each context key.
 
 The note tells Chief to:
 

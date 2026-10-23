@@ -1,7 +1,7 @@
 # 117 — Why did Chief drop dated monitoring, its own questions and stated preferences?
 
 Work date(s): 2026-10-23. Written/revised: 2026-10-23.
-Status: in review, on branch `fix/d-loops-memory`. Independent review: pending. Not merged or deployed. No live behavior has been observed yet.
+Status: in review, on branch `fix/d-loops-memory`. Independent review: approve with nits on the first revision (`c69597f`); the fixes below await re-review. Not merged or deployed. No live behavior has been observed yet.
 
 ## User-visible problem and preceding iteration
 
@@ -25,13 +25,18 @@ Status: in review, on branch `fix/d-loops-memory`. Independent review: pending. 
 
 ## Diagnosis and alternatives
 
-**Monitoring.** The one-day window from journal 94 was sized for a card that is answered late, not for an event that is still days away. The card's own `expiresAt` is the best available date for the event or deadline. Chosen:
+**Monitoring.** The one-day window from journal 94 was sized for a card that is answered late, not for an event that is still days away. The card's own `expiresAt` is the end of monitoring, not the event date. It is used as a proxy for the event date because it is the only date in the spec (hypothesis: that Chief sets it near the event). If monitoring was set to end after the event, `due` starts late. Chosen:
 
 - Keep the card until one day after `expiresAt`. Mark it `due` from a day before that date.
 - Keep a card without a date for seven days.
 - Never keep a card more than 30 days after it expired.
 
-A longer window made the supersession gap from journal 94 matter more. A never-confirmed concern proposed again gets a new id, so its old card would have stayed listed for days, even after the owner confirmed the new one. A later proposal with the same title (case-insensitive, trimmed) now also drops it. Two different concerns with the same title would hide the older card. This is accepted as rarer and less harmful than nudging about something already set up.
+A longer window made the supersession gap from journal 94 matter more. A never-confirmed concern proposed again gets a new id, so its old card would have stayed listed for days, even after the owner confirmed the new one. A later card with the same title (case-insensitive, trimmed) now also drops it, but only when:
+
+- that card was confirmed, or is pending and was delivered, so a denied or undelivered proposal does not hide it; and
+- it ends no earlier than the older card, or either has no `expiresAt`, so a same-titled card for an earlier date (another trip) does not hide a later one.
+
+Two different concerns with the same title and compatible dates would still hide the older card. This is accepted as rarer and less harmful than nudging about something already set up.
 
 - **Rejected for now: parsing a date out of the title or outcome.** Free text is unreliable. A card without `expiresAt` falls back to seven days, which would have covered this incident's dates (hypothesis: whether that card had `expiresAt` set was not checked).
 - **Deferred: a proactive nudge.** The scheduler (`schedule_create` reminders) runs only on the owner's explicit request. Journal 94 rejected re-sending expired cards because that sends unrequested messages. A host-created reminder for a concern the owner never confirmed would be a new kind of unprompted message. That needs the owner's decision. For now a due card is listed first with `due: true`, and the note tells Chief to mention it once when the owner next writes. If the owner does not write while it is due, nothing reminds them.
@@ -41,10 +46,11 @@ A longer window made the supersession gap from journal 94 matter more. A never-c
 - the message being handled now does not clear the question it may be answering;
 - a message in another topic does not clear it.
 
-Any completed message in the same thread clears it, whether or not it was an answer. Telling an answer from a change of subject would need a model judgment or a host-side tracker. This version does not try. Its gain is mainly across topics, and across turns where the owner writes elsewhere.
+Any completed message in the same thread clears it, whether or not it was an answer. Telling an answer from a change of subject would need a model judgment or a host-side tracker. This version does not try. In a single-thread chat, the newest question is already in context through `pendingReply` and `lastExchangeHere`, and the owner's next message there clears it from open loops. So the gain is mainly across topics: a question asked in one topic stays listed while the owner writes in others. Whether this would have caught the observed case is unknown: the review's aggregates do not say which thread the question was in, or whether the owner wrote in that thread again.
 
 - **Rejected: `runtime_runs.stop_reason` alone.** It has the reason but not the question text or the thread. `pending_reply` has all three.
 - **Rejected: listing `awaiting_approval` pauses.** Their cards are already tracked elsewhere.
+- **Limitation:** `pending_reply.question` is saved cut to 3,000 characters, so a question after that point in a long reply is not in the excerpt.
 
 **Memory.** This is a behavior gap, not a missing capability. Chief can already save with `memory_set`. Chosen: one instruction sentence. When the owner states a durable preference or fact that is not saved yet, Chief ends its answer with one short offer ("Want me to remember that you prefer X?"), calls `memory_set` only after a yes, and does not repeat a declined offer.
 
@@ -54,26 +60,34 @@ Any completed message in the same thread clears it, whether or not it was an ans
 ## Implementation and review
 
 - `src/open-loops.ts`:
-  - **Expired monitoring cards** follow the retention above, with a `CROSS JOIN LATERAL` that casts `expiresAt` only when it looks like an ISO date. Each card carries `endsAt` and `due`. Order: due first, then the earliest end date.
-  - **`questions`**: up to three from the last three days, read from `conversation_contexts`. Each has a host `awaiting` label, the date, the thread, the reply's message id (for `conversation_read`), and an excerpt.
-  - **`questionExcerpt`** collapses whitespace and keeps at most 200 characters, ending at the reply's last question mark. A long reply that closes with a question therefore shows the question.
+  - **Expired monitoring cards** follow the retention above, with a `specEnd` SQL expression that casts `expiresAt` only when it looks like an ISO date. Each card carries `endsAt` and `due`. Order: due first, then the earliest end date, then the most recently expired. With more than three cards, an undated or later-dated one can be left out.
+  - **`questions`**: the newest three from the last three days, read from `conversation_contexts`, so an older fourth is left out. Each has a host `awaiting` label, the date, the thread, the reply's message id (for `conversation_read`), and an excerpt.
+  - **`questionExcerpt`** collapses whitespace and keeps at most 200 code points, including the ellipsis, ending at the reply's last question mark. A long reply that closes with a question therefore shows the question.
   - **The note** marks `excerpt` as data alongside `workerText` and `title`. It also says how to treat `due` cards and unanswered questions.
   - Excerpts go into the model context only. The host does not log them, and traces record only each context key's size.
 - `src/context.ts`: the memory-offer sentence follows "Use memories only for explicit facts/preferences."
 - Tests:
   - `tests/open-loops.test.ts`:
     - the monitoring test is rewritten for seven-day undated retention and same-title supersession;
+    - a new test covers the narrowed same-title rule: a newer card for an earlier date, a denied one and an undelivered one leave the older card listed; a confirmed later-ending one and an undated delivered one hide it;
     - a new test covers dated cards: a future date stays, the date arriving or just passed is `due`, a date past the grace period drops, and any card past 30 days drops;
-    - a new test covers questions, using the real `saveConversationState`. A question is listed. A running message in the same thread and a completed one in another thread do not clear it. A completed reply in the same thread does. Old questions and `awaiting_approval` pauses are left out;
+    - a new test covers questions. Each fixture turn is recorded as the agent records it: the triggering owner input (completed, received before the state is saved), Chief's reply message, and the state from the real `saveConversationState`. A question is listed with its `replyId`. A running message in the same thread, a completed one in another thread and another owner's completed message in the same thread do not clear it. A completed reply in the same thread does. Old questions, `awaiting_approval` pauses, a reply still pending delivery and another owner's question and card are left out;
     - an excerpt test.
   - `tests/tool-domains.test.ts` pins the memory-offer sentence.
 - Design docs: [context management](../context-management.md#open-loops), [responsibilities](../responsibilities.md) and [agents](../agents.md).
 
-Independent review: pending.
+Independent review (Opus 5.5) of `c69597f`: approve with nits.
+
+- **The question tests were weak.** All 15 tests still passed when the reviewer removed `i.received_at > x.created_at`, replaced `i.user_id=x.user_id` with `true`, or dropped the pending-delivery exclusion. The fixtures now record the triggering input and the reply message, and add another owner's records and a pending reply.
+- **The same-title match was too broad.** A denied, undelivered or earlier-dated card hid an older one. Narrowed as described above.
+- **`expiresAt` was called the event date.** It is the end of monitoring, used as a proxy; the wording is corrected.
+- **Nits:** the excerpt could reach 201 code points, the 3,000-character truncation and the three-item limits were undocumented, and the dates and fixture text are made consistent and generic.
+
+Mutation check after the fixes, each applied to `src/open-loops.ts` on its own and then restored: removing `i.received_at > x.created_at`, `i.user_id=x.user_id` (as `true`), the pending-delivery exclusion, `i.state='completed'`, the same-title status and delivery condition, or the same-title end-date condition each fails exactly one test. Widening the owner filter of the cards query fails two tests, and of the questions query one.
 
 ## Verification and outcome
 
-- **Tested** (local, PGlite): `tests/open-loops.test.ts` 15/15, `tests/tool-domains.test.ts` 17/17. Also passing: `conversation-control` 13/13, `context-continuity` 33/33, `steering-loop` 13/13, `steering-inbox` 17/17, `responsibilities` 32/32, `telegram-feeds` 7/7, `spending` 3/3 and `topic-routing` 6/6. `npx tsc --noEmit -p .` passes.
+- **Tested** (local, PGlite), after the review fixes: `tests/open-loops.test.ts` 16/16, `tests/tool-domains.test.ts` 17/17 and `context-continuity` 33/33; `npx tsc --noEmit -p .` passes. On the first revision, also passing: `conversation-control` 13/13, `context-continuity` 33/33, `steering-loop` 13/13, `steering-inbox` 17/17, `responsibilities` 32/32, `telegram-feeds` 7/7, `spending` 3/3 and `topic-routing` 6/6.
 - **Not measured:**
   - whether Chief mentions a due card, re-asks an open question, or offers to remember a preference;
   - the cost of the slightly longer instructions. The instructions sit in the cached prefix, so the change costs one cache rewrite per deployment.

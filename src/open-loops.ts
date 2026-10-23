@@ -18,29 +18,32 @@ export async function codingWaitsOnOwner(db: Database, user: string) {
   );
 }
 
-/** Grace after a monitoring card's own end date, so a passed date is still mentioned once. */
+/** Grace after a monitoring card's own end date (a proxy for the event date), so a passed date is still mentioned once. */
 const EVENT_GRACE = "1 day";
 /** How long an expired card without an end date stays listed. */
 const UNDATED_DAYS = 7;
 /** Hard bound for any expired card, however far away its end date is. */
 const MAX_DAYS = 30;
+/** A monitoring card's spec end (expiresAt) as a timestamp, or NULL when it has none. */
+const specEnd = (alias: string) =>
+  `(CASE WHEN ${alias}.payload->'spec'->>'expiresAt' ~ '^\\d{4}-\\d{2}-\\d{2}T' THEN (${alias}.payload->'spec'->>'expiresAt')::timestamptz END)`;
 /** How long an unanswered question of Chief's stays listed. */
 const QUESTION_DAYS = 3;
 
 /**
  * A short excerpt of Chief's own reply that ends at its last question mark, so a long reply
- * that closes with a question shows the question. Whitespace is collapsed; at most `max`
- * characters, cut at a word boundary.
+ * that closes with a question shows the question. Whitespace is collapsed; at most `max` code
+ * points including the ellipsis, cut at a word boundary where there is one.
  */
 export function questionExcerpt(text: string, max = 200) {
   const flat = [...text.replace(/\s+/g, " ").trim()];
   const mark = flat.lastIndexOf("?");
-  const end = mark < 0 ? Math.min(flat.length, max) : mark + 1;
-  const start = Math.max(0, end - max);
-  let excerpt = flat.slice(start, end).join("");
-  if (start > 0) excerpt = "…" + excerpt.slice(excerpt.indexOf(" ") + 1);
-  if (mark < 0 && end < flat.length) excerpt += "…";
-  return excerpt;
+  const end = mark < 0 ? flat.length : mark + 1;
+  if (end <= max) return flat.slice(0, end).join("");
+  // Too long: keep max - 1 code points and add an ellipsis, so the result is at most max.
+  if (mark < 0) return flat.slice(0, max - 1).join("") + "…";
+  const tail = flat.slice(end - (max - 1), end).join("");
+  return "…" + tail.slice(tail.indexOf(" ") + 1);
 }
 
 /**
@@ -125,25 +128,27 @@ export async function openLoops(
     : [];
   const expiredCards = (
     await db.query(
-      // Delivered monitoring cards that lapsed unconfirmed. Each stays listed until the end date in its
-      // spec (expiresAt, the event or due date) has passed by a grace period, or for UNDATED_DAYS when it
-      // has none, and never beyond MAX_DAYS. It is dropped when a later proposal revised the same concern
-      // (same responsibility id) or re-proposed one with the same title, which also covers a concern
-      // confirmed later from a fresh card.
-      `SELECT a.id,a.operation,left(a.payload->'spec'->>'title',120) title,a.expires_at,ends.at AS ends_at,
-         ends.at IS NOT NULL AND ends.at - interval '1 day' <= now() AS due
+      // Delivered monitoring cards that lapsed unconfirmed. Each stays listed until its spec's expiresAt
+      // (the end of monitoring, used as a proxy for the event date) has passed by a grace period, or for
+      // UNDATED_DAYS when it has none, and never beyond MAX_DAYS. It is dropped when a later proposal
+      // revised the same concern (same responsibility id), or when a later card with the same title was
+      // confirmed or delivered and ends no earlier (or is undated): a re-proposal of a never-confirmed
+      // concern gets a new id. A denied or undelivered same-titled card, or one for an earlier date,
+      // does not hide it.
+      `SELECT a.id,a.operation,left(a.payload->'spec'->>'title',120) title,a.expires_at,${specEnd("a")} AS ends_at,
+         ${specEnd("a")} IS NOT NULL AND ${specEnd("a")} - interval '1 day' <= now() AS due
        FROM approvals a
-       CROSS JOIN LATERAL (SELECT CASE WHEN a.payload->'spec'->>'expiresAt' ~ '^\\d{4}-\\d{2}-\\d{2}T'
-         THEN (a.payload->'spec'->>'expiresAt')::timestamptz END AS at) ends
        WHERE a.user_id=$1 AND a.status='pending' AND a.operation='responsibility_confirm'
          AND a.payload->>'telegramDeliveryState'='sent'
          AND a.expires_at <= now() AND a.expires_at > now() - interval '${MAX_DAYS} days'
-         AND now() < COALESCE(ends.at + interval '${EVENT_GRACE}', a.expires_at + interval '${UNDATED_DAYS} days')
+         AND now() < COALESCE(${specEnd("a")} + interval '${EVENT_GRACE}', a.expires_at + interval '${UNDATED_DAYS} days')
          AND NOT EXISTS(SELECT 1 FROM approvals b WHERE b.user_id=a.user_id AND b.operation=a.operation
            AND b.created_at > a.created_at
            AND (b.payload->>'id'=a.payload->>'id'
-             OR lower(btrim(b.payload->'spec'->>'title'))=lower(btrim(a.payload->'spec'->>'title'))))
-       ORDER BY due DESC, ends.at NULLS LAST, a.expires_at DESC LIMIT 3`,
+             OR (lower(btrim(b.payload->'spec'->>'title'))=lower(btrim(a.payload->'spec'->>'title'))
+               AND (b.status='approved' OR (b.status='pending' AND b.payload->>'telegramDeliveryState'='sent'))
+               AND (${specEnd("a")} IS NULL OR ${specEnd("b")} IS NULL OR ${specEnd("b")} >= ${specEnd("a")}))))
+       ORDER BY due DESC, ends_at NULLS LAST, a.expires_at DESC LIMIT 3`,
       [user],
     )
   ).rows.map((a) => ({
