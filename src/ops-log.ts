@@ -104,6 +104,8 @@ const fields: Record<string, Shape> = {
   agree: "bool",
   matched: "bool",
   step: "count",
+  /** A coding job's revision (journal 115: rebased-candidate measurement). */
+  revision: "count",
   previousEffort: "name",
   recalled: "count",
   referenceCount: "count",

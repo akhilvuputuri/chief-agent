@@ -11,6 +11,15 @@ import {
 } from "./model-settings.js";
 import { assertSquadCheckpoint } from "./squad-state.js";
 import { codingDestination } from "./delivery-routing.js";
+import {
+  StatusMessageGone,
+  fitStatus,
+  inQuietHours,
+  statusLine,
+  type QuietHours,
+  type StatusAnchor,
+  type StatusLine,
+} from "./notices.js";
 import { CodingRequirements, requirementScope } from "./requirements.js";
 import { CodingMergeApprovals } from "./merge-approvals.js";
 import type { AgentGitHubTokens, AgentToken } from "./agent-github.js";
@@ -59,6 +68,20 @@ const active = ["provisioning", "running"];
 export type PauseCause = "sandbox_stopped" | "heartbeat_lost";
 const hash = (v: unknown) =>
   createHash("sha256").update(canonicalJson(v)).digest("hex");
+/**
+ * Progress-only coding notices (`e` a coding_events row, `j` its job), folded into the
+ * status message: worker progress, automatic retry/rebase/feedback re-queues, the approved
+ * candidate of the job's current attempt (its PR notice follows) and a PR rebuilt at an
+ * already announced URL. Questions, approval cards, cancellations, pauses, failures and
+ * outcomes are separate messages; so is any notice this list does not name.
+ */
+const STATUS_NOTICE = `(e.event_key NOT IN ('cancelled','status-message')
+  AND NOT (e.payload ? 'requirements' OR e.payload ? 'merge' OR COALESCE(e.payload->>'question','')<>'')
+  AND ((e.payload ? 'stage' AND e.payload ? 'key' AND NOT e.payload ? 'url')
+    OR e.event_key LIKE 'auto-retry:%' OR e.event_key LIKE 'rebase:%' OR e.event_key LIKE 'mr-feedback:%'
+    OR (e.event_key=j.attempt_id::text||':finished' AND j.result->>'kind'='candidate')
+    OR (e.event_key LIKE '%:pr' AND EXISTS(SELECT 1 FROM coding_events p WHERE p.job_id=e.job_id AND p.id<>e.id
+      AND p.event_key LIKE '%:pr' AND p.created_at<e.created_at AND p.payload->>'url'=e.payload->>'url'))))`;
 /** Hours a job may wait before the model must state the owner's explicit request to restart it. */
 const STALE_HOURS = 24;
 /** Jobs a coding_resume or coding_reply can requeue (with a matching revision). */
@@ -1072,7 +1095,52 @@ export class CodingController {
       ],
     );
     if (!update.rows.length) throw new Error("Worker attempt superseded");
+    // The checked candidate is about to be reviewed: measure whether a rebase reproduced the
+    // reviewed artifact. Measurement only; it never changes the save.
+    if (c.piState?.phase === "review" && c.piState.reviewCandidate)
+      await this.noteRebasedCandidate(
+        job,
+        c.piState.reviewCandidate.hash,
+      ).catch(() => {});
     return { saved: true };
+  }
+  /**
+   * Detection only (journal 115): records, once per rebased revision, whether the first
+   * candidate sent to review is byte-identical to the artifact the previous revision's
+   * review approved (same artifact hash: identical whole-file contents and identical diff).
+   * Review still runs; reusing the earlier approval needs a worker change and an owner
+   * decision on the review exception, because the reviewer saw the change against the old
+   * base.
+   */
+  private async noteRebasedCandidate(job: CodingJob, candidate: string) {
+    const carried = (
+      await this.db.query(
+        "SELECT payload->>'carriedArtifact' AS artifact FROM coding_events WHERE job_id=$1 AND event_key=$2",
+        [job.id, `rebase-approval:${job.revision}`],
+      )
+    ).rows[0]?.artifact;
+    if (typeof carried !== "string" || !/^[a-f0-9]{64}$/.test(carried)) return;
+    const identical = carried === candidate;
+    const recorded = await this.db.query(
+      "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,$2,$3::jsonb,'suppressed') ON CONFLICT DO NOTHING RETURNING id",
+      [
+        job.id,
+        `rebase-candidate:${job.revision}`,
+        JSON.stringify({
+          kind: "rebase_candidate",
+          identical,
+          candidate,
+          carriedArtifact: carried,
+        }),
+      ],
+    );
+    if (recorded.rows.length)
+      // `matched`: the rebased candidate is byte-identical to the reviewed artifact.
+      opsLog("coding.rebase_candidate", "info", {
+        taskId: job.id,
+        revision: job.revision,
+        matched: identical,
+      });
   }
   async finish(job: CodingJob, raw: unknown) {
     const r = outcome.parse(raw);
@@ -1822,19 +1890,22 @@ export class CodingController {
               : await this.publisher.publish(fresh);
         } catch (error) {
           if (!(error instanceof AgentPublicationMismatch)) throw error;
-          // A PR that is not the reviewed artifact is never retried or recorded.
+          // A PR that is not the reviewed artifact is never retried or recorded. The owner is
+          // told, since the status message last said the change was being published.
           await this.db.query(
-            "UPDATE coding_jobs SET state='paused',stage='paused',publication_started=false,summary=$2,updated_at=now() WHERE id=$1 AND state='publishing'",
+            `WITH changed AS (UPDATE coding_jobs SET state='paused',stage='paused',publication_started=false,summary=$2,updated_at=now() WHERE id=$1 AND state='publishing' RETURNING id)
+            INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$3,jsonb_build_object('summary',$2::text) FROM changed ON CONFLICT DO NOTHING`,
             [
               j.id,
               "Agent PR does not match the independently reviewed artifact; inspect it, then resume to republish the reviewed candidate or cancel",
+              `publication-paused:${j.revision}:${j.attempt_id}`,
             ],
           );
           return;
         }
         await this.db.query(
           `WITH changed AS (UPDATE coding_jobs SET state='pr_ready',stage='pr_ready',pr_url=$2,head_sha=$3,summary=$6,updated_at=now() WHERE id=$1 AND state='publishing' RETURNING id)
-          INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$4,jsonb_build_object('summary',$6::text,'url',$2::text,'tree',$5::text) FROM changed ON CONFLICT DO NOTHING`,
+          INSERT INTO coding_events(job_id,event_key,payload) SELECT id,$4,jsonb_build_object('summary',$6::text,'url',$2::text,'tree',$5::text,'coderSummary',$7::text) FROM changed ON CONFLICT DO NOTHING`,
           [
             j.id,
             published.url,
@@ -1846,6 +1917,11 @@ export class CodingController {
               : j.settings.prWorkflow
                 ? "Draft PR prepared; collecting CI, Devin and MR feedback before asking the owner to merge."
                 : "Draft PR prepared; CI and independent review of its head remain required.",
+            // The approved candidate's notice is folded into the status message, so the coder's
+            // summary travels with the PR notice (journal 115).
+            typeof fresh.result?.summary === "string"
+              ? fresh.result.summary
+              : null,
           ],
         );
         if ((j.settings.autoMerge || j.settings.prWorkflow) && published.tree) {
@@ -1876,6 +1952,9 @@ export class CodingController {
     await this.db.query(
       "UPDATE coding_events SET delivery='uncertain' WHERE delivery='sending'",
     );
+    // Status leases are left alone: an overlapping gateway may still hold one. A lease left
+    // by a stopped process expires within two minutes, and until then it delays only that
+    // job's progress (the claim skips it).
   }
   /**
    * After a gateway restart no model call is in flight: a call cut off mid-way never ran
@@ -1891,6 +1970,15 @@ export class CodingController {
       "UPDATE coding_jobs SET model_busy=false WHERE model_busy",
     );
   }
+  /**
+   * Delivers the coding outbox, one claim per call (journal 115). Progress-only notices are
+   * folded into one status message per job, edited in place until a separate notice for that
+   * job (question, approval card, failure or outcome) goes out; the next progress then starts
+   * a new status message below it. In quiet hours, progress that would need a new message
+   * waits, while edits of a current status message (which do not notify) continue. Pending
+   * cancellations for one owner become one summary. Notices claimed together share one
+   * outcome: a send whose outcome is unknown makes all of them `uncertain`, never replayed.
+   */
   async deliver(
     send: (
       user: string,
@@ -1899,17 +1987,32 @@ export class CodingController {
       approval?: import("./delivery.js").CodingApproval,
       document?: import("./delivery.js").CodingDocument,
     ) => Promise<unknown>,
+    options: {
+      /** Edits a status message in place; without it, each progress run is a new message. */
+      edit?: (
+        user: string,
+        messageId: number,
+        text: string,
+      ) => Promise<unknown>;
+      quietHours?: QuietHours;
+    } = {},
   ) {
     if (this.delivering) return;
     this.delivering = true;
     try {
+      const quiet = inQuietHours(this.clock(), options.quietHours);
       const e = (
         await this.db.query(
-          `UPDATE coding_events SET delivery='sending' WHERE id=(SELECT e.id FROM coding_events e JOIN coding_jobs j ON j.id=e.job_id WHERE e.delivery='pending' AND (NOT(e.payload ? 'requirements') OR j.state!='plan_ready' OR j.revision!=(e.payload->'requirements'->>'revision')::int OR (j.cleanup IN ('none','complete') AND (j.lease IS NULL OR j.lease_until<now()))) ORDER BY e.created_at FOR UPDATE OF e SKIP LOCKED LIMIT 1) RETURNING *`,
+          `UPDATE coding_events SET delivery='sending' WHERE id=(SELECT e.id FROM coding_events e JOIN coding_jobs j ON j.id=e.job_id WHERE e.delivery='pending' AND (NOT(e.payload ? 'requirements') OR j.state!='plan_ready' OR j.revision!=(e.payload->'requirements'->>'revision')::int OR (j.cleanup IN ('none','complete') AND (j.lease IS NULL OR j.lease_until<now())))
+           AND NOT (e.event_key='cancelled' AND e.created_at>now()-interval '15 seconds')
+           AND NOT ($1::boolean AND ${STATUS_NOTICE} AND NOT ($2::boolean AND EXISTS(SELECT 1 FROM coding_events s WHERE s.job_id=e.job_id AND s.event_key='status-message' AND s.payload->>'current'='true')))
+           AND NOT (${STATUS_NOTICE} AND EXISTS(SELECT 1 FROM coding_events s WHERE s.job_id=e.job_id AND s.event_key='status-message' AND (s.payload->>'leaseUntil')::timestamptz>now()))
+           ORDER BY e.created_at FOR UPDATE OF e SKIP LOCKED LIMIT 1) RETURNING *`,
+          [quiet, !!options.edit],
         )
       ).rows[0];
       if (!e) return;
-      let attempted = false;
+      const ctx = { claimed: [e.id as string], attempted: false };
       try {
         const j = (
           await this.db.query("SELECT * FROM coding_jobs WHERE id=$1", [
@@ -1918,8 +2021,17 @@ export class CodingController {
         ).rows[0];
         const req = e.payload.requirements;
         const merge = e.payload.merge;
+        const status =
+          (
+            await this.db.query(
+              `SELECT ${STATUS_NOTICE} AS status FROM coding_events e JOIN coding_jobs j ON j.id=e.job_id WHERE e.id=$1`,
+              [e.id],
+            )
+          ).rows[0]?.status === true;
         if (
           !this.allowed(j.user_id) ||
+          // Progress after the owner cancelled the job is noise.
+          (status && j.state === "cancelled") ||
           (merge &&
             (j.state !== "pr_ready" ||
               j.stage !== "awaiting_merge_approval" ||
@@ -1939,6 +2051,15 @@ export class CodingController {
           );
           return;
         }
+        if (status) {
+          await this.deliverStatus(e, j, send, options, quiet, ctx);
+          return;
+        }
+        if (e.event_key === "cancelled") {
+          await this.deliverCancellations(e, j, send, ctx);
+          return;
+        }
+        await this.closeStatus(e.id);
         const attachment =
           req && j.settings.runtime === "pi"
             ? {
@@ -1952,7 +2073,20 @@ export class CodingController {
         const caption = attachment
           ? `**Coding plan — revision ${req.revision}**\n\n${summaryPreview}\n\nThe complete plan and original request are attached. Review the document, then approve the requirements or request changes. You can also reply yes directly to this message. Confirmation stays valid for 24 hours.\n\nJob: ${e.job_id}`
           : undefined;
-        attempted = true;
+        // Without the owner-merge workflow no Merge card repeats the coder's summary, so the
+        // first PR notice carries it (bounded like the Merge card).
+        const coderSummary =
+          !req &&
+          !merge &&
+          e.event_key.endsWith(":pr") &&
+          j.settings.prWorkflow !== "owner_merge"
+            ? typeof e.payload.coderSummary === "string"
+              ? e.payload.coderSummary
+              : e.event_key === `${j.attempt_id}:pr`
+                ? j.result?.summary
+                : undefined
+            : undefined;
+        ctx.attempted = true;
         const sent = await send(
           j.user_id,
           codingDestination(e.payload),
@@ -1968,6 +2102,9 @@ export class CodingController {
                 ? e.payload.question.slice(0, 2000)
                 : undefined,
               e.payload.url,
+              typeof coderSummary === "string" && coderSummary
+                ? `Coder's own summary (not verified by Chief): ${Array.from(coderSummary).slice(0, 800).join("")}`
+                : undefined,
               req ? req.plan : undefined,
               req
                 ? `**Execution**\nLeader: ${j.settings.leaderModel ?? j.settings.model}\nCoder: ${j.settings.model}\nReviewer: ${j.settings.reviewerModel}\n${j.settings.autoMerge ? "Ordinary changes may merge after exact-artifact review and GitHub checks; protected changes stop for explicit review." : "Draft PR for owner review."}\n\nApprove this scope, or reply directly to this message with yes. To revise it, tell Chief what to change. Confirmation stays valid for 24 hours.\nJob: ${e.job_id}`
@@ -2001,18 +2138,300 @@ export class CodingController {
             ],
           );
         }
-        await this.db.query(
-          "UPDATE coding_events SET delivery='sent' WHERE id=$1",
-          [e.id],
-        );
+        await this.markSent(ctx.claimed);
+        // Close again after the send: with overlapping gateways, another process may have
+        // taken the lease and opened a new status message between the first close and the
+        // send. Needs no lease; the notice is already sent, so a failure here changes nothing.
+        await this.closeStatus(e.id).catch(() => {});
       } catch {
         await this.db.query(
-          "UPDATE coding_events SET delivery=$2 WHERE id=$1",
-          [e.id, attempted ? "uncertain" : "pending"],
+          "UPDATE coding_events SET delivery=$2 WHERE id=ANY($1::uuid[]) AND delivery='sending'",
+          [ctx.claimed, ctx.attempted ? "uncertain" : "pending"],
         );
       }
     } finally {
       this.delivering = false;
     }
+  }
+  private async markSent(ids: string[]) {
+    await this.db.query(
+      "UPDATE coding_events SET delivery='sent' WHERE id=ANY($1::uuid[]) AND delivery='sending'",
+      [ids],
+    );
+  }
+  /**
+   * A separate notice ends the job's current status message; later progress goes below it.
+   * It takes no lease, so it never waits; `closedAt` lets a status delivery already in
+   * flight see the close and not reopen the message (`saveStatus`).
+   */
+  private async closeStatus(eventId: string) {
+    await this.db.query(
+      `INSERT INTO coding_events(job_id,event_key,payload,delivery) SELECT job_id,'status-message',jsonb_build_object('current',false,'lines','[]'::jsonb,'total',0,'separateAt',created_at::text,'closedAt',clock_timestamp()::text),'suppressed' FROM coding_events WHERE id=$1
+       ON CONFLICT(job_id,event_key) DO UPDATE SET payload=coding_events.payload || jsonb_build_object('current',false,'closedAt',clock_timestamp()::text,'separateAt',GREATEST((coding_events.payload->>'separateAt')::timestamptz,(EXCLUDED.payload->>'separateAt')::timestamptz)::text)`,
+      [eventId],
+    );
+  }
+  /**
+   * Saves the anchor under this delivery's lease. Keeps `separateAt`; a missing messageId
+   * clears the old one. A close at or after the lease was taken stays closed, and a save
+   * whose lease has been lost (expired and taken by another process) writes nothing.
+   */
+  private async saveStatus(
+    job: string,
+    anchor: StatusAnchor,
+    lease: string,
+  ): Promise<boolean> {
+    return (
+      (
+        await this.db.query(
+          `UPDATE coding_events SET payload=(payload - 'messageId') || $2::jsonb
+         || CASE WHEN (payload->>'closedAt')::timestamptz>=(payload->>'leasedAt')::timestamptz THEN '{"current":false}'::jsonb ELSE '{}'::jsonb END
+       WHERE job_id=$1 AND event_key='status-message' AND payload->>'lease'=$3 RETURNING id`,
+          [job, JSON.stringify(anchor), lease],
+        )
+      ).rows.length === 1
+    );
+  }
+  /** Folds the job's run of pending progress, up to its next separate notice, into its status message. */
+  private async deliverStatus(
+    e: any,
+    j: CodingJob,
+    send: (
+      user: string,
+      target: import("../delivery-routing.js").Destination,
+      text: string,
+    ) => Promise<unknown>,
+    options: {
+      edit?: (
+        user: string,
+        messageId: number,
+        text: string,
+      ) => Promise<unknown>;
+    },
+    quiet: boolean,
+    ctx: { claimed: string[]; attempted: boolean },
+  ) {
+    // One deliverer per job's status message, even across overlapping gateway processes:
+    // the anchor's read, edit or send, and save happen under a short lease on its row.
+    const lease = randomUUID();
+    const leased = (
+      await this.db.query(
+        `INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'status-message',jsonb_build_object('current',false,'lines','[]'::jsonb,'total',0,'lease',$2::text,'leaseUntil',(now()+interval '2 minutes')::text,'leasedAt',clock_timestamp()::text),'suppressed')
+         ON CONFLICT(job_id,event_key) DO UPDATE SET payload=coding_events.payload || jsonb_build_object('lease',$2::text,'leaseUntil',(now()+interval '2 minutes')::text,'leasedAt',clock_timestamp()::text)
+         WHERE NOT (coding_events.payload ? 'leaseUntil') OR (coding_events.payload->>'leaseUntil')::timestamptz<now() RETURNING id`,
+        [e.job_id, lease],
+      )
+    ).rows.length;
+    if (!leased) {
+      // Another deliverer holds it; nothing was attempted, so these wait for the next tick.
+      await this.db.query(
+        "UPDATE coding_events SET delivery='pending' WHERE id=ANY($1::uuid[]) AND delivery='sending'",
+        [ctx.claimed],
+      );
+      return;
+    }
+    try {
+      await this.foldStatus(e, j, send, options, quiet, ctx, lease);
+    } finally {
+      await this.db.query(
+        "UPDATE coding_events SET payload=payload - 'lease' - 'leaseUntil' WHERE job_id=$1 AND event_key='status-message' AND payload->>'lease'=$2",
+        [e.job_id, lease],
+      );
+    }
+  }
+  private async foldStatus(
+    e: any,
+    j: CodingJob,
+    send: (
+      user: string,
+      target: import("../delivery-routing.js").Destination,
+      text: string,
+    ) => Promise<unknown>,
+    options: {
+      edit?: (
+        user: string,
+        messageId: number,
+        text: string,
+      ) => Promise<unknown>;
+    },
+    quiet: boolean,
+    ctx: { claimed: string[]; attempted: boolean },
+    lease: string,
+  ) {
+    const following = (
+      await this.db.query(
+        `SELECT e.id,${STATUS_NOTICE} AS status FROM coding_events e JOIN coding_jobs j ON j.id=e.job_id
+         WHERE e.job_id=$1 AND e.delivery='pending' AND e.created_at>=(SELECT created_at FROM coding_events WHERE id=$2)
+         ORDER BY e.created_at,e.id LIMIT 50`,
+        [e.job_id, e.id],
+      )
+    ).rows;
+    const run: string[] = [];
+    for (const r of following) {
+      if (r.status !== true) break;
+      run.push(r.id);
+    }
+    if (run.length) {
+      const more = new Set(
+        (
+          await this.db.query(
+            "UPDATE coding_events SET delivery='sending' WHERE id=ANY($1::uuid[]) AND delivery='pending' RETURNING id",
+            [run],
+          )
+        ).rows.map((r: { id: string }) => r.id),
+      );
+      ctx.claimed.push(...run.filter((id) => more.has(id)));
+    }
+    // Progress held over quiet hours is superseded by a separate notice already sent after it.
+    const superseded = new Set(
+      (
+        await this.db.query(
+          `UPDATE coding_events e SET delivery='suppressed' FROM coding_events s
+           WHERE e.id=ANY($1::uuid[]) AND e.delivery='sending' AND s.job_id=e.job_id AND s.event_key='status-message'
+           AND s.payload ? 'separateAt' AND e.created_at<=(s.payload->>'separateAt')::timestamptz RETURNING e.id`,
+          [ctx.claimed],
+        )
+      ).rows.map((r: { id: string }) => r.id),
+    );
+    ctx.claimed = ctx.claimed.filter((id) => !superseded.has(id));
+    if (!ctx.claimed.length) return;
+    const fresh: StatusLine[] = (
+      await this.db.query(
+        "SELECT event_key,payload,created_at FROM coding_events WHERE id=ANY($1::uuid[]) ORDER BY created_at,id",
+        [ctx.claimed],
+      )
+    ).rows.map((r: any) => ({
+      at: new Date(r.created_at).toISOString(),
+      text: statusLine(r.event_key, r.payload),
+    }));
+    const anchor = (
+      await this.db.query(
+        "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='status-message'",
+        [e.job_id],
+      )
+    ).rows[0]?.payload as StatusAnchor | undefined;
+    const current =
+      options.edit &&
+      anchor?.current === true &&
+      Number.isSafeInteger(anchor.messageId) &&
+      anchor.messageId! > 0
+        ? anchor
+        : undefined;
+    const total = (current?.total ?? 0) + fresh.length;
+    // Oldest lines go first until the text is one Telegram message, so it stays editable.
+    const { lines, text } = fitStatus(
+      e.job_id,
+      [...(current?.lines ?? []), ...fresh],
+      total,
+    );
+    if (current) {
+      // The intended text is saved first: if this edit fails or its outcome is lost, the next edit shows it.
+      const saved = await this.saveStatus(
+        e.job_id,
+        {
+          messageId: current.messageId,
+          current: true,
+          lines,
+          total,
+        },
+        lease,
+      );
+      if (!saved) {
+        // The lease was lost (expired and taken by another process): nothing was attempted.
+        await this.db.query(
+          "UPDATE coding_events SET delivery='pending' WHERE id=ANY($1::uuid[]) AND delivery='sending'",
+          [ctx.claimed],
+        );
+        return;
+      }
+      ctx.attempted = true;
+      try {
+        await options.edit!(j.user_id, current.messageId!, text);
+        await this.markSent(ctx.claimed);
+        return;
+      } catch (error) {
+        if (!(error instanceof StatusMessageGone)) throw error;
+        // Telegram refused the edit, so nothing changed; a new status message replaces it.
+        ctx.attempted = false;
+        await this.saveStatus(
+          e.job_id,
+          { current: false, lines, total },
+          lease,
+        );
+      }
+    }
+    if (quiet) {
+      // A new message would notify the owner at night: hold the run until quiet hours end.
+      await this.db.query(
+        "UPDATE coding_events SET delivery='pending' WHERE id=ANY($1::uuid[]) AND delivery='sending'",
+        [ctx.claimed],
+      );
+      return;
+    }
+    ctx.attempted = true;
+    const receipt = (await send(
+      j.user_id,
+      codingDestination(e.payload),
+      text,
+    )) as { message_id?: number } | undefined;
+    const id = receipt?.message_id;
+    const saved = await this.saveStatus(
+      e.job_id,
+      Number.isSafeInteger(id) && id! > 0
+        ? { messageId: id, current: true, lines, total }
+        : { current: false, lines, total },
+      lease,
+    );
+    // The message went out but its id was not recorded: it is an orphan, never edited again.
+    if (!saved)
+      opsLog("coding.status_lease_lost", "warn", {
+        taskId: e.job_id,
+        messages: ctx.claimed.length,
+      });
+    await this.markSent(ctx.claimed);
+  }
+  /** One summary for the owner's pending cancellations instead of one notice per job. */
+  private async deliverCancellations(
+    e: any,
+    j: CodingJob,
+    send: (
+      user: string,
+      target: import("../delivery-routing.js").Destination,
+      text: string,
+    ) => Promise<unknown>,
+    ctx: { claimed: string[]; attempted: boolean },
+  ) {
+    const others = (
+      await this.db.query(
+        `UPDATE coding_events e SET delivery='sending' FROM coding_jobs j
+         WHERE j.id=e.job_id AND j.user_id=$1 AND e.event_key='cancelled' AND e.delivery='pending' AND e.id<>$2
+         RETURNING e.id,e.job_id`,
+        [j.user_id, e.id],
+      )
+    ).rows as { id: string; job_id: string }[];
+    ctx.claimed.push(...others.map((r) => r.id));
+    const jobs = [e.job_id as string, ...others.map((r) => r.job_id)];
+    const objectives = new Map<string, string>(
+      (
+        await this.db.query(
+          "SELECT id,objective FROM coding_jobs WHERE id=ANY($1::uuid[]) AND user_id=$2",
+          [jobs, j.user_id],
+        )
+      ).rows.map((r: { id: string; objective: string }) => [
+        r.id,
+        Array.from(String(r.objective).split("\n")[0]!.trim())
+          .slice(0, 80)
+          .join(""),
+      ]),
+    );
+    ctx.attempted = true;
+    await send(
+      j.user_id,
+      codingDestination(e.payload),
+      jobs.length === 1
+        ? `Coding job ${e.job_id}\n\n${String(e.payload.summary ?? "").slice(0, 1500)}`
+        : `**${jobs.length} coding jobs cancelled**\n${jobs.map((id) => `• ${objectives.get(id) || "Coding job"} (job ${id})`).join("\n")}\n\nTheir coding boxes are cleaned up separately.`,
+    );
+    await this.markSent(ctx.claimed);
   }
 }

@@ -1,7 +1,8 @@
 import { InputFile } from "grammy";
 import { MediaOutbox } from "./media-outbox.js";
 import { sendRunMedia } from "./telegram-media.js";
-import { sendCodingDelivery } from "./coding/delivery.js";
+import { editCodingStatus, sendCodingDelivery } from "./coding/delivery.js";
+import { parseQuietHours } from "./coding/notices.js";
 import { selectCodingBackend } from "./coding/backend.js";
 import { randomUUID } from "node:crypto";
 import { LinkResolver, postEvidenceSchema } from "./link-resolution.js";
@@ -408,6 +409,7 @@ if (c.BOXES_RUNTIME === "on") {
   await boxes.recoverNotices();
 }
 let coding: CodingController | undefined;
+const codingQuietHours = parseQuietHours(c.CODING_QUIET_HOURS);
 if (c.CODING_RUNTIME === "on") {
   if (
     !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=24")).rows
@@ -1153,31 +1155,43 @@ const routineTimer = setInterval(() => {
       opsLog("coding.tick_failed", "error", errorFields(error)),
     );
   void coding
-    ?.deliver(async (user, target, text, approval, document) =>
-      sendCodingDelivery(text, approval, document, {
-        text: (part, keyboard) =>
-          topics.deliver(user, target, (extra) =>
-            bot.api.sendMessage(user, part.text, {
-              ...extra,
+    ?.deliver(
+      async (user, target, text, approval, document) =>
+        sendCodingDelivery(text, approval, document, {
+          text: (part, keyboard) =>
+            topics.deliver(user, target, (extra) =>
+              bot.api.sendMessage(user, part.text, {
+                ...extra,
+                entities: part.entities,
+                link_preview_options: { is_disabled: true },
+                ...(keyboard ? { reply_markup: keyboard } : {}),
+              }),
+            ),
+          document: (file, caption, keyboard) =>
+            topics.deliver(user, target, (extra) =>
+              bot.api.sendDocument(
+                user,
+                new InputFile(Buffer.from(file.content, "utf8"), file.filename),
+                {
+                  ...extra,
+                  caption: caption.text,
+                  caption_entities: caption.entities,
+                  ...(keyboard ? { reply_markup: keyboard } : {}),
+                },
+              ),
+            ),
+        }),
+      {
+        // Progress edits one status message in place (journal 115).
+        edit: (user, messageId, text) =>
+          editCodingStatus(text, (part) =>
+            bot.api.editMessageText(user, messageId, part.text, {
               entities: part.entities,
               link_preview_options: { is_disabled: true },
-              ...(keyboard ? { reply_markup: keyboard } : {}),
             }),
           ),
-        document: (file, caption, keyboard) =>
-          topics.deliver(user, target, (extra) =>
-            bot.api.sendDocument(
-              user,
-              new InputFile(Buffer.from(file.content, "utf8"), file.filename),
-              {
-                ...extra,
-                caption: caption.text,
-                caption_entities: caption.entities,
-                ...(keyboard ? { reply_markup: keyboard } : {}),
-              },
-            ),
-          ),
-      }),
+        quietHours: codingQuietHours,
+      },
     )
     .catch((error) =>
       opsLog("coding.delivery_failed", "error", errorFields(error)),

@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { readFileSync } from "node:fs";
 import { z } from "zod";
+import { quietHoursPattern } from "./coding/notices.js";
 const schema = z.object({
   MCP_RUNTIME: z.enum(["on", "off"]).default("off"),
   MCP_CREDENTIALS_JSON: z.string().default("{}"),
@@ -33,6 +34,13 @@ const schema = z.object({
   CODING_AGENT_GITHUB_PRIVATE_KEY: z.string().default(""),
   CODING_COMMIT_NAME: z.string().default(""),
   CODING_COMMIT_EMAIL: z.string().default(""),
+  // Owner's quiet hours for coding progress, Asia/Singapore time (journal 115). Progress that
+  // would start a new message waits until the window ends; questions, approval cards and
+  // results still arrive. Empty turns it off.
+  CODING_QUIET_HOURS: z
+    .string()
+    .regex(quietHoursPattern, "Use HH:MM-HH:MM, for example 23:00-08:00")
+    .default("23:00-08:00"),
   MINIAPP_ORIGIN: z
     .union([
       z.literal(""),
@@ -176,6 +184,7 @@ export const RUNTIME_SETTINGS = [
   "GROQ_STT_MODEL",
   "IBKR_ORDER_DRAFTS",
   "IBKR_DRAFT_MAX_USD",
+  "CODING_QUIET_HOURS",
   // PORT is deployment wiring (Compose ports, health checks), not behaviour; it stays in the environment.
 ] as const satisfies readonly (keyof z.infer<typeof schema>)[];
 type RuntimeSetting = (typeof RUNTIME_SETTINGS)[number];
