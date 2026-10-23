@@ -27,7 +27,7 @@ The experiment is therefore expected to find little or no edge. A clean negative
 Read in the pinned code (`model/kronos.py` at `67b630e`) and `huggingface_hub` 0.33.1:
 
 - **Samples are averaged away.** `auto_regressive_inference` reshapes its samples and returns their mean, so `predict()` gives one path with no spread. The runner draws each sample as its own batch row with `sample_count=1` and keeps them.
-- **Inference runs in training mode.** Checkpoints load through `PyTorchModelHubMixin`'s safetensors path, which never calls `.eval()`, and `KronosPredictor` never calls it either. README-style use therefore has two side effects:
+- **Inference runs in training mode with `huggingface_hub` below 2.0.** Before 2.0, `PyTorchModelHubMixin`'s safetensors path never calls `.eval()`; 2.0.0 added the call. `KronosPredictor` never calls it either, so with the 0.33.1 that Kronos's `requirements.txt` pins, README-style use runs in training mode (tested: `model.training` is `True` after `from_pretrained`). That has two side effects:
   - dropout is active: Kronos-small's config sets FFN and residual dropout to 0.25 and attention and token dropout to 0.1; Kronos-base sets FFN and residual dropout to 0.2;
   - the s2 head's cross-attention becomes causal (`is_causal = self.training` in `module.py`). Its single query, the sampled s1 token, then sees only the oldest context position, so the s2 half of each token no longer depends on the sampled s1.
 

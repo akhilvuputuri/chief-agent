@@ -10,8 +10,9 @@ Runs pinned Kronos checkpoints on daily bars and prints one JSON document on std
 Two upstream behaviours are handled here rather than patched:
 - `auto_regressive_inference` averages its samples, so each sample is drawn as its own batch
   row (sample_count=1) and the spread is kept.
-- Checkpoints load through huggingface_hub's safetensors path, which never calls `.eval()`,
-  and KronosPredictor does not either, so upstream inference runs in training mode. That
+- Before huggingface_hub 2.0 (Kronos pins 0.33.1), checkpoints load through a safetensors
+  path that never calls `.eval()`, and KronosPredictor does not either, so upstream
+  inference runs in training mode. That
   turns on dropout (up to 0.25 in Kronos-small) and also makes the s2 head's cross-attention
   causal (`is_causal = self.training` in module.py): its single sampled-s1 query then sees
   only the oldest context position, so s2 loses its s1 conditioning. `--modes` compares
