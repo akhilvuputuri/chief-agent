@@ -623,3 +623,37 @@ test("waiting for prepared input does not spend active model or tool time", asyn
     }
   }
 });
+
+test("text beside a lone finish_turn is not also sent as progress", async () => {
+  let modelCalls = 0;
+  const f = fixture({
+    generate: async () => {
+      modelCalls++;
+      return calls(
+        [
+          [
+            "finish_turn",
+            { reply: "What time is dinner?", reason: "awaiting_user" },
+          ],
+        ],
+        "What time is dinner?",
+      );
+    },
+  });
+  const result = await f.run();
+  assert.equal(result.reply, "What time is dinner?");
+  assert.equal(modelCalls, 1);
+  assert.deepEqual(f.progress, []);
+});
+
+test("text beside working calls is still sent as progress", async () => {
+  let modelCalls = 0;
+  const f = fixture({
+    generate: async () =>
+      ++modelCalls === 1
+        ? calls([["memory_list", {}]], "Checking your saved notes.")
+        : calls([["finish_turn", { reply: "Done.", reason: "answer" }]]),
+  });
+  assert.equal((await f.run()).reply, "Done.");
+  assert.deepEqual(f.progress, ["Checking your saved notes."]);
+});

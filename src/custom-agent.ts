@@ -436,7 +436,17 @@ export class CustomAgent implements Agent {
           await steer();
           continue;
         }
-        if (calls.length && generation.message.content && req.progress) {
+        // Text beside a lone finish_turn is the answer itself, which finish_turn already carries
+        // (its reply is required): sending it as progress too showed the owner the same reply twice.
+        const finishOnly = calls.every(
+          (c) => c.function.name === "finish_turn",
+        );
+        if (
+          calls.length &&
+          !finishOnly &&
+          generation.message.content &&
+          req.progress
+        ) {
           try {
             await req.progress(generation.message.content);
           } catch {
