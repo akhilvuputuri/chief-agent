@@ -1,5 +1,6 @@
 import { formatTelegram, type FormattedMessage } from "../telegram-format.js";
 import type { InlineKeyboardMarkup } from "grammy/types";
+import { StatusMessageGone } from "./notices.js";
 export type CodingDocument = { filename: string; content: string };
 /** Which owner decision a delivered message's buttons answer. */
 export type CodingApproval = { kind: "requirements" | "merge"; id: string };
@@ -67,4 +68,34 @@ export async function sendCodingDelivery(
     );
   if (!last) throw new Error("Coding delivery has no message");
   return last;
+}
+/**
+ * Edits the owner's coding status message in place. An unchanged text is already shown; a
+ * message that is gone or no longer editable is reported as StatusMessageGone (Telegram
+ * refused it, so nothing changed), and the controller starts a new status message.
+ */
+export async function editCodingStatus(
+  text: string,
+  edit: (part: FormattedMessage) => Promise<unknown>,
+): Promise<void> {
+  const parts = formatTelegram(text);
+  if (parts.length !== 1)
+    throw new Error("Coding status exceeds its presentation bound");
+  try {
+    await edit(parts[0]!);
+  } catch (error) {
+    const description = String(
+      (error as { description?: unknown })?.description ??
+        (error as Error)?.message ??
+        "",
+    );
+    if (/message is not modified/i.test(description)) return;
+    if (
+      /message to edit not found|message can't be edited|MESSAGE_ID_INVALID/i.test(
+        description,
+      )
+    )
+      throw new StatusMessageGone();
+    throw error;
+  }
 }

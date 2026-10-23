@@ -1,6 +1,6 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
 import { ensureUser, type Database } from "../src/db.js";
@@ -13,7 +13,7 @@ import {
 import { CodingController, type CodingJob } from "../src/coding/controller.js";
 import { ToolValidationError } from "../src/tool-errors.js";
 import { codingSettings, outcome } from "../src/coding/schema.js";
-import { artifactHash } from "../src/coding/github.js";
+import { artifactHash, canonicalJson } from "../src/coding/github.js";
 import type { PrInspection } from "../src/coding/merge-policy.js";
 
 const base = "a".repeat(40),
@@ -586,6 +586,8 @@ test("when main moves, an owner-merge job is rebased automatically with its appr
   ).rows[0].payload;
   assert.equal(carried.approvedScope, requirementScope(queued));
   assert.equal(carried.carriedFrom, requirementScope(before));
+  // The reviewed artifact is recorded so the rebased candidate can be compared with it.
+  assert.equal(carried.carriedArtifact, artifactHash(before.result.checkpoint));
   const budget = (
     await f.db.query(
       "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key='feedback:2'",
@@ -601,6 +603,122 @@ test("when main moves, an owner-merge job is rebased automatically with its appr
   ).rows;
   assert.equal(notice.length, 1);
   assert.equal(notice[0].delivery, "pending");
+});
+
+/** Rebases the fixture job onto a moved main and starts its new attempt. */
+async function rebasedAttempt(f: Awaited<ReturnType<typeof fixture>>) {
+  const before = await f.job();
+  await f.db.query(
+    "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'owner-approved',$2::jsonb,'suppressed')",
+    [
+      f.id,
+      JSON.stringify({
+        decision: "approved",
+        approvedScope: requirementScope(before),
+      }),
+    ],
+  );
+  f.setInspection({ checks: "passed", draft: false, main: "f".repeat(40) });
+  await f.auto.tick();
+  await f.db.query(
+    "UPDATE coding_jobs SET state='running',stage='implementing',attempt_id=$2,attempt_deadline=$3 WHERE id=$1",
+    [f.id, randomUUID(), new Date(Date.now() + 600000)],
+  );
+  const job = await f.job();
+  assert.equal(job.revision, 2);
+  const c = new CodingController(
+    f.db,
+    settings,
+    {} as any,
+    {} as any,
+    "c".repeat(64),
+    "https://coding.example.com",
+    () => true,
+    () => ({
+      generate: async () => ({ message: { role: "assistant", content: "" } }),
+    }),
+    () => new Date(),
+  );
+  /** The worker's checked candidate, saved just before its first reviewer call. */
+  const review = (
+    files: { path: string; content: string }[],
+    patch: string,
+  ) => {
+    const cp: any = {
+      ...job.checkpoint,
+      files,
+      patch,
+      piState: { ...job.checkpoint.piState },
+    };
+    const hash = artifactHash(cp);
+    const identity = (intent: string, value: string) =>
+      createHash("sha256")
+        .update(
+          canonicalJson({
+            objective: job.objective,
+            context: job.context,
+            plan: cp.plan,
+            base: job.base_sha,
+            intent,
+            hash: value,
+          }),
+        )
+        .digest("hex");
+    cp.piState = {
+      ...cp.piState,
+      phase: "review",
+      reviewRound: 3,
+      reviewCandidate: {
+        hash,
+        checks: ["check", "build", "format:check"].map((s) => ({
+          command: `npm run ${s}`,
+          exitCode: 0,
+          output: "passed",
+        })),
+      },
+      scopeIdentity: identity("review", hash),
+      sessionScope: identity("review-session", `${hash}:3`),
+    };
+    return c.save(job, cp);
+  };
+  const recorded = async () =>
+    (
+      await f.db.query(
+        "SELECT payload,delivery FROM coding_events WHERE job_id=$1 AND event_key='rebase-candidate:2'",
+        [f.id],
+      )
+    ).rows;
+  return { before, review, recorded };
+}
+
+test("a rebase that reproduces the reviewed artifact byte for byte is recorded, and review still runs", async (t) => {
+  const f = await fixture(t);
+  const { before, review, recorded } = await rebasedAttempt(f);
+  await review(before.checkpoint.files, before.checkpoint.patch);
+  const [row] = await recorded();
+  assert.equal(row.delivery, "suppressed");
+  assert.equal(row.payload.identical, true);
+  assert.equal(row.payload.candidate, artifactHash(before.result.checkpoint));
+  // Detection only: nothing about the attempt or its approval changes.
+  const job = await f.job();
+  assert.equal(job.state, "running");
+  assert.equal(job.result, null);
+  assert.equal(job.checkpoint.piState.phase, "review");
+});
+
+test("a rebase whose candidate differs at all is recorded as not identical", async (t) => {
+  const f = await fixture(t);
+  const { before, review, recorded } = await rebasedAttempt(f);
+  await review(
+    before.checkpoint.files.map((file: any) => ({
+      ...file,
+      content: `${file.content}\n`,
+    })),
+    before.checkpoint.patch,
+  );
+  const rows = await recorded();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].payload.identical, false);
 });
 
 test("automatic rebases stop after two rounds and hand back to the owner", async (t) => {
