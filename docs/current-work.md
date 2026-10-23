@@ -1,3 +1,7 @@
+# Coding cancel correctness — in review, 23 October 2026
+
+Duplicate-key errors from the coding worker slot no longer surface as an unrelated work-task conflict: each index maps to its own code and message, and a turn stops repeating an identical refused call after two refusals even when reads succeed in between. `coding_cancel` refuses with the reason and next step when the job did not change (for example a published PR the owner must close on GitHub). Resuming or replying to a coding job idle for more than 24 hours requires `confirmStale`, set only when the owner explicitly asked to resume that job; the host's one automatic transient retry is unaffected. [Journal 114](journey/114-coding-cancel-correctness.md), [design](coding.md).
+
 # Open loops that last and memory offers — in review, 23 October 2026
 
 Expired monitoring cards now stay in open loops until one day after their end date (seven days when undated, never more than 30), with cards near their date marked due and listed first; a confirmed or delivered later card with the same title and no earlier end replaces an older one. Chief's own clarifying questions that the owner has not answered within three days appear as short excerpts until a later owner message in that thread is handled. The coordinator instructions add one line: offer to remember a stated durable preference and call `memory_set` only after the owner agrees. No proactive nudge is sent when a date arrives; that needs owner approval. [Journal 117](journey/117-open-loops-and-memory-offers.md).
