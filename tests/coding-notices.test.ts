@@ -521,3 +521,79 @@ test("a published PR that does not match the reviewed artifact pauses with an ow
     /does not match the independently reviewed artifact/,
   );
 });
+
+test("a held status lease delays only that job's progress, never other notices", async (t) => {
+  const f = await fixture(t),
+    a = await f.start("lease-a"),
+    b = await f.start("lease-b");
+  await f.c.tick();
+  const j = await f.row(a.id);
+  assert.equal(j.state, "provisioning");
+  const tg = telegram();
+  const options = { edit: tg.edit };
+  await f.c.progress(j, {
+    key: "one",
+    stage: "implementing",
+    summary: "Started",
+  });
+  await f.c.deliver(tg.send, options);
+  assert.equal(tg.sends.length, 1);
+  const hold = (job: string) =>
+    f.db.query(
+      "INSERT INTO coding_events(job_id,event_key,payload,delivery) VALUES($1,'status-message',jsonb_build_object('current',false,'lines','[]'::jsonb,'total',0,'lease','stale','leaseUntil',(now()+interval '2 minutes')::text),'suppressed') ON CONFLICT(job_id,event_key) DO UPDATE SET payload=coding_events.payload || jsonb_build_object('lease','stale','leaseUntil',(now()+interval '2 minutes')::text)",
+      [job],
+    );
+  // Another process stopped while holding both jobs' leases; their progress is the oldest.
+  await hold(a.id);
+  await hold(b.id);
+  await f.db.query(
+    "INSERT INTO coding_events(job_id,event_key,payload,created_at) VALUES($1,'other:progress',$2::jsonb,now()-interval '1 minute')",
+    [
+      b.id,
+      JSON.stringify({
+        key: "progress",
+        stage: "implementing",
+        summary: "Other job progress",
+      }),
+    ],
+  );
+  await f.c.progress(j, {
+    key: "two",
+    stage: "implementing",
+    summary: "Checks",
+  });
+  await f.db.query(
+    "INSERT INTO coding_events(job_id,event_key,payload,created_at) VALUES($1,'later:question',$2::jsonb,now()+interval '1 second')",
+    [
+      a.id,
+      JSON.stringify({ summary: "Needs a decision", question: "Which file?" }),
+    ],
+  );
+  await f.c.deliver(tg.send, options);
+  assert.equal(tg.sends.length, 2, JSON.stringify(tg.sends));
+  assert.match(tg.sends[1]!.text, /Which file\?/);
+  assert.equal(tg.edits.length, 0);
+  const pending = async () =>
+    (
+      await f.db.query(
+        "SELECT event_key FROM coding_events WHERE delivery='pending' ORDER BY event_key",
+      )
+    ).rows.map((r) => r.event_key);
+  assert.deepEqual(await pending(), [`${j.attempt_id}:two`, "other:progress"]);
+  // A restart releases the stopped process's leases, so the held progress is delivered.
+  await f.c.recoverDelivery();
+  await f.c.deliver(tg.send, options);
+  await f.c.deliver(tg.send, options);
+  assert.deepEqual(await pending(), []);
+  assert(tg.sends.some((m) => /Other job progress/.test(m.text)));
+  // The same job's held progress predates the question that went out, so it is superseded.
+  assert.equal(
+    (
+      await f.db.query(
+        "SELECT delivery FROM coding_events WHERE event_key=$1",
+        [`${j.attempt_id}:two`],
+      )
+    ).rows[0].delivery,
+    "suppressed",
+  );
+});

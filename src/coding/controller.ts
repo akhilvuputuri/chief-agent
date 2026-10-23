@@ -1888,6 +1888,11 @@ export class CodingController {
     await this.db.query(
       "UPDATE coding_events SET delivery='uncertain' WHERE delivery='sending'",
     );
+    // Startup runs before any delivery timer, like the line above: no lease is live, so a
+    // lease left by a stopped process is released rather than waited out.
+    await this.db.query(
+      "UPDATE coding_events SET payload=payload - 'lease' - 'leaseUntil' WHERE event_key='status-message' AND payload ? 'lease'",
+    );
   }
   /**
    * After a gateway restart no model call is in flight: a call cut off mid-way never ran
@@ -1939,6 +1944,7 @@ export class CodingController {
           `UPDATE coding_events SET delivery='sending' WHERE id=(SELECT e.id FROM coding_events e JOIN coding_jobs j ON j.id=e.job_id WHERE e.delivery='pending' AND (NOT(e.payload ? 'requirements') OR j.state!='plan_ready' OR j.revision!=(e.payload->'requirements'->>'revision')::int OR (j.cleanup IN ('none','complete') AND (j.lease IS NULL OR j.lease_until<now())))
            AND NOT (e.event_key='cancelled' AND e.created_at>now()-interval '15 seconds')
            AND NOT ($1::boolean AND ${STATUS_NOTICE} AND NOT ($2::boolean AND EXISTS(SELECT 1 FROM coding_events s WHERE s.job_id=e.job_id AND s.event_key='status-message' AND s.payload->>'current'='true')))
+           AND NOT (${STATUS_NOTICE} AND EXISTS(SELECT 1 FROM coding_events s WHERE s.job_id=e.job_id AND s.event_key='status-message' AND (s.payload->>'leaseUntil')::timestamptz>now()))
            ORDER BY e.created_at FOR UPDATE OF e SKIP LOCKED LIMIT 1) RETURNING *`,
           [quiet, !!options.edit],
         )

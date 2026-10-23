@@ -1,7 +1,7 @@
 # 115 — Can a coding job keep the owner informed without a message per milestone?
 
 Work date: 2026-10-23. Written: 2026-10-23.
-Status: in review. The notice changes and the rebase measurement are implemented and pass their offline tests. Independent review approved `11cc462` with nits; the fixes are in place, and re-review is pending. CI, release and a live job after the release are pending.
+Status: in review. The notice changes and the rebase measurement are implemented and pass their offline tests. Independent review approved `11cc462` with nits, and the delta review approved `5627761` with nits. The fixes for both are in place, and re-review is pending. CI, release and a live job after the release are pending.
 
 ## User-visible problem and preceding iteration
 
@@ -73,7 +73,7 @@ Outbox guarantees kept:
 - Progress payloads are never modified, so the worker's retry-equality check (`progress()` hashing) still holds.
 - Owner scoping, revoked-owner suppression, the requirements-card gate and `codingDestination` routing are unchanged. Edits address the owner's chat and message id, so they need no topic.
 
-- **One deliverer per status message.** Two gateway processes can overlap during a release. A status delivery therefore takes a two-minute lease on the job's `status-message` row (an atomic conditional upsert, like the Telegram views lease) for the anchor read, the edit or send, and the save. A delivery that finds the lease held returns its notices to `pending` without trying. A lease left by a process that died expires.
+- **One deliverer per status message.** Two gateway processes can overlap during a release. A status delivery therefore takes a two-minute lease on the job's `status-message` row (an atomic conditional upsert, like the Telegram views lease) for the anchor read, the edit or send, and the save. A delivery that finds the lease held returns its notices to `pending` without trying. The claim skips progress for a job whose lease is live, so a held lease never blocks the rest of the outbox. A lease left by a process that died delays only that job's progress until it expires, at most two minutes. Startup recovery also releases leases: it runs before any delivery timer and already treats every `sending` notice as interrupted.
 - **One Telegram message.** Before the anchor is saved, the oldest lines are dropped until the text formats to exactly one message. The line bound counts code points, but Telegram splits by UTF-16 length, so emoji-heavy lines could otherwise split the message and make every later edit fail.
 - **Publication mismatch.** A PR that does not match the reviewed artifact pauses the job, as before, and now also sends a pause notice (`publication-paused:<revision>:<attempt>`). Without it, the status message would end at "publishing" with nothing after it.
 
@@ -91,6 +91,7 @@ Tests:
   - pending progress for a cancelled job suppressed;
   - emoji-heavy progress fitting one editable message;
   - the status lease: a held lease defers delivery, and an expired lease does not;
+  - a held lease delays only that job's progress, while a newer question is delivered, and startup recovery releases it;
   - the publication-mismatch pause notice;
   - the bulk cancel summary, with each job's objective.
 - [`tests/coding-pi-owner-merge.test.ts`](../../tests/coding-pi-owner-merge.test.ts): the carried artifact, plus identical and different rebased candidates, each with its `coding.rebase_candidate` ops-log line (`revision`, `matched`).
@@ -106,7 +107,14 @@ Independent review (Claude Opus 5.5, 23 October 2026) approved `11cc462` with ni
 6. The bulk-cancel summary listed only bare job ids.
 7. The rebase tests did not assert the ops-log line.
 
-Each nit is fixed as described above, with a test. Both surviving mutations now fail their new tests (checked by hand), and so does disabling the one-message fit. Re-review: pending.
+Each nit is fixed as described above, with a test. Both surviving mutations now fail their new tests (checked by hand), and so does disabling the one-message fit.
+
+The delta review of `5627761` (23 October 2026) approved with nits. One finding needed a fix before merge, and the reviewer reproduced it. The claim still picked the oldest pending notice. If that was progress for a job whose lease was live, every tick claimed it, found the lease taken and returned it, so questions, cards and failures for any job waited until the lease expired. `recoverDelivery` did not clear leases either. Fixes:
+
+- the claim now excludes progress for a job with a live lease;
+- `recoverDelivery` releases leases at startup.
+
+A new test holds stale leases on two jobs whose progress is the oldest. A newer question is still delivered, and the held progress goes out after a restart. Without the claim change, that test fails (checked by hand). Re-review: pending.
 
 ## Verification and outcome
 
