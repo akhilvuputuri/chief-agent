@@ -761,3 +761,224 @@ test("if the child's write-block lookup fails, the coordinator treats the child 
     await pg.close();
   }
 });
+
+/** A web page whose numbers and typography models routinely copy imperfectly. */
+const LIBRARY_PAGE =
+  "Library record 1234567 (branch 042).\n  “Open   daily, 9am – 5pm.”\nThe branch is closed on public holidays and for stocktake in March.";
+
+/** Runs the core web agent once under a coordinator; returns its agent_run result. */
+async function runWebAgent(
+  child: (
+    n: number,
+    input: Parameters<ModelAdapter["generate"]>[0],
+  ) => ReturnType<typeof call> | ReturnType<typeof text>,
+) {
+  const { pg, db } = await database();
+  let coordinator = 0,
+    childCalls = 0,
+    result: any;
+  const errors: unknown[] = [];
+  const main: ModelAdapter = {
+    model: "main/model",
+    generate: async (input) => {
+      try {
+        if (system(input).includes("You are the web lookup agent"))
+          return child(++childCalls, input);
+        if (++coordinator === 1)
+          return call("agent_run", {
+            type: "web",
+            objective: "When is the branch open?",
+          });
+        result = lastTool(input).result;
+        return text("Relayed.");
+      } catch (error) {
+        errors.push(error);
+        throw error;
+      }
+    },
+  };
+  const assistant = new Assistant(
+    db,
+    new CustomAgent(main),
+    new JobTools(db, {
+      call: async (operation: string) =>
+        operation === "web_search"
+          ? { results: [{ url: "https://example.com/library" }] }
+          : { content: LIBRARY_PAGE },
+    }),
+    { web: true },
+  );
+  try {
+    await assistant.respondDetailed("owner", "when is the branch open?");
+    assert.deepEqual(errors, []);
+    return { result, childCalls, db, close: () => pg.close() };
+  } catch (error) {
+    await pg.close();
+    throw error;
+  }
+}
+
+test("a short numeric ref the agent saw and typographic or elided quotes pass; invented ones are named so one retry fixes them", async () => {
+  let source = "";
+  const run = await runWebAgent((n, input) => {
+    if (n === 1)
+      return call("web_read", { url: "https://example.com/library" });
+    if (n === 2) {
+      source = lastTool(input).result.sourceId;
+      return call("agent_report", {
+        status: "complete",
+        summary: "Open daily 9am to 5pm.",
+        findings: [
+          // Straight quotes, a hyphen and single spaces for the page's curly quotes,
+          // en dash and repeated spaces.
+          {
+            text: "Hours",
+            sourceId: source,
+            quote: '"Open daily, 9am - 5pm."',
+          },
+          {
+            text: "Closures",
+            sourceId: source,
+            quote: "Open daily ... closed on public holidays",
+          },
+          {
+            text: "Sundays",
+            sourceId: source,
+            quote: "Open on Sundays until midnight",
+          },
+        ],
+        refs: ["1234567", "7654321", "123456", "12"],
+      });
+    }
+    if (n === 3) {
+      const error = lastTool(input).error;
+      assert.equal(error.code, "VALIDATION_FAILED");
+      assert.equal(error.retryable, true);
+      // Every failing item is named, with how to fix it; the passing ones are not.
+      assert.match(error.message, /not recorded/);
+      assert.match(
+        error.message,
+        /finding 3: .*"Open on Sundays until midnight" is not in source/,
+      );
+      assert.doesNotMatch(error.message, /finding [12]:/);
+      assert.match(error.message, /refs must be IDs.*"7654321"/);
+      // A prefix of a longer number is not the number the agent saw.
+      assert.match(error.message, /"123456"/);
+      assert.match(error.message, /"12" \(too short/);
+      assert.doesNotMatch(error.message, /"1234567"/);
+      return call("agent_report", {
+        status: "complete",
+        summary: "Open daily 9am to 5pm.",
+        findings: [
+          {
+            text: "Hours",
+            sourceId: source,
+            quote: '"Open daily, 9am - 5pm."',
+          },
+          {
+            text: "Closures",
+            sourceId: source,
+            quote: "Open daily … closed on public holidays",
+          },
+        ],
+        refs: ["1234567", "042"],
+      });
+    }
+    throw new Error("unexpected child call " + n);
+  });
+  try {
+    assert.equal(run.childCalls, 3);
+    assert.equal(run.result.status, "complete");
+    assert.deepEqual(run.result.refs, ["1234567", "042"]);
+    // What the coordinator receives is the page's own words.
+    assert.equal(run.result.findings[0].quote, "“Open daily, 9am – 5pm.”");
+    assert.equal(
+      run.result.findings[1].quote,
+      "Open daily … closed on public holidays",
+    );
+  } finally {
+    await run.close();
+  }
+});
+
+test("a web agent whose report was rejected and then ran out of calls returns the checked part as partial", async () => {
+  let source = "";
+  const run = await runWebAgent((n, input) => {
+    if (n === 1)
+      return call("web_read", { url: "https://example.com/library" });
+    if (n === 2) {
+      source = lastTool(input).result.sourceId;
+      return call("agent_report", {
+        status: "complete",
+        summary: "Open daily 9am to 5pm, and Sundays until midnight.",
+        findings: [
+          { text: "Hours", sourceId: source, quote: "Open daily, 9am – 5pm." },
+          {
+            text: "Sundays",
+            sourceId: source,
+            quote: "Sundays until midnight",
+          },
+        ],
+        refs: ["1234567", "9999999"],
+      });
+    }
+    const notices = input.messages
+      .map((m) => String(m.content))
+      .filter((c) => c.startsWith("[Host notice]"));
+    const last = String(notices.at(-1));
+    if (n < 5) assert.equal(notices.length, 0);
+    if (n === 5) assert.match(last, /one model call left after this one/);
+    if (n === 6) {
+      // The last call offers only the report tool, and says so.
+      assert.deepEqual(
+        input.tools.map((t) => t.name),
+        ["agent_report"],
+      );
+      assert.match(last, /last model call/);
+    }
+    // The agent keeps searching instead of fixing its report.
+    return call("web_search", { query: "branch hours " + n });
+  });
+  try {
+    assert.equal(run.childCalls, 6);
+    assert.equal(run.result.stopReason, "budget_exhausted");
+    assert.equal(run.result.status, "partial");
+    assert.match(run.result.partialReason, /failed host checks/);
+    assert.match(run.result.partialReason, /Sundays until midnight/);
+    assert.equal(run.result.findings[0].quote, "Open daily, 9am – 5pm.");
+    // The unverified quote is not passed on as a quote.
+    assert.equal(run.result.findings[1].quote, undefined);
+    assert.equal(run.result.findings[1].sourceId, undefined);
+    assert.deepEqual(run.result.refs, ["1234567"]);
+    assert.equal(
+      (
+        await run.db.query(
+          "SELECT count(*)::int n FROM events WHERE type='agent.budget_notice'",
+        )
+      ).rows[0].n,
+      2,
+    );
+  } finally {
+    await run.close();
+  }
+});
+
+test("a web agent that never reports before its allocation ends returns its completed calls, not a report", async () => {
+  const run = await runWebAgent(() =>
+    call("web_read", { url: "https://example.com/library" }),
+  );
+  try {
+    assert.equal(run.result.stopReason, "budget_exhausted");
+    assert.equal(run.result.status, "incomplete");
+    assert.deepEqual(run.result.findings, []);
+    assert.match(run.result.summary, /used its allocation before it reported/);
+    assert.equal(run.result.observations.length, 6);
+    assert(
+      run.result.observations.every(
+        (o: { operation: string }) => o.operation === "web_read",
+      ),
+    );
+  } finally {
+    await run.close();
+  }
+});

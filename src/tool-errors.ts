@@ -22,6 +22,11 @@ export class RepeatedFailureError extends Error {
 export class ToolValidationError extends Error {}
 /** An earlier write's outcome is uncertain, so this write was refused before any mutation. */
 export class WriteBlockedError extends ToolValidationError {}
+/**
+ * A child's final report failed host checks and was not recorded. Its message names every
+ * failing item and how to fix it; a corrected report is expected, so it is retryable.
+ */
+export class ReportRejectedError extends Error {}
 export function toolError(error: unknown) {
   const message = error instanceof Error ? error.message : "";
   if (error instanceof McpFailure)
@@ -55,6 +60,8 @@ export function toolError(error: unknown) {
     };
   if (error instanceof ToolValidationError)
     return { code: "VALIDATION_FAILED", retryable: false, message };
+  if (error instanceof ReportRejectedError)
+    return { code: "VALIDATION_FAILED", retryable: true, message };
   if (error instanceof RepeatedFailureError)
     return { code: "REPEATED_FAILURE", retryable: false, message };
   if (error instanceof ZodError)

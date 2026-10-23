@@ -86,11 +86,41 @@ The host registry (`plugins/registry.json`) pins each package's content hash and
 A package chooses one of the host's contracts. It cannot add its own validation code.
 
 - **`findings/v1`** (general). The agent finishes with `agent_report`: status (complete, partial, blocked), summary, up to 12 findings, refs and optional `needsOwner`. The host checks that:
-  - a quote comes with a `sourceId` the agent read, and occurs in that source;
+  - a quote comes with a `sourceId` the agent read, and is that source's own words (see [report checks](#report-checks));
   - an `observationId` is one of the agent's own calls;
   - every ref appears in the agent's tool results or its brief.
 - **`public-research/v1`**. One result per target with source-quoted evidence ([research specialist](research-specialist.md)).
 - **`media/v1`**. Facts per image or document with page or region references; image extractions are stored and reused ([media specialist](media-specialist.md)). Media agents may only read stored sources.
+
+## Report checks
+
+The checks exist so that a report cannot cite an invented ID, source or quote. Since [journal 116](journey/116-tolerant-agent-reports.md) they tolerate what models routinely change when copying, and no more (`src/quote-match.ts`, `checkReport` in `src/agents.ts`):
+
+- **Quotes** (`findings/v1` and `public-research/v1`). Whitespace runs, curly versus straight quote marks, dash variants and zero-width characters are ignored. `...`, `…` or `[...]` marks omitted words: each piece around it must occur in that one source, in order, with at least 8 characters per piece and at most 4 pieces. A leading or trailing ellipsis just marks an excerpt. Case and wording must match. The coordinator receives the source's own words (whitespace collapsed, pieces joined with `…`), not the model's copy.
+- **Refs.** A ref of 8 or more characters must appear anywhere in the agent's tool results or brief, as before. A shorter ref, such as a 6- or 7-digit record number or a ticker, must appear as a whole value in a tool result or the brief: not inside a longer number or word (`1234567` does not match `91234567` or `1234567.5`). Refs under 3 characters are refused.
+- **Rejections.** One rejection names every failing item (`finding 2: the quote "…" is not in source <id>`, `refs … not found: "7654321"`) and how to fix it, so one corrected report can pass. It is returned as `VALIDATION_FAILED` with `retryable: true`.
+- **Job alignment and media** keep exact quote matching. Job-alignment quotes flow into the preparation chain and the preparation Sheet, which re-check them exactly; media quotes are stored and reused.
+
+### Running low and partial results
+
+A child's last model calls are reserved for reporting (`budgetNotice` in `src/custom-agent.ts`). For any child with a report tool:
+
+- when one model call will remain after the current one, the host adds a notice telling it to report now, so a rejected report can still be fixed;
+- on the last model call, or when its tool allocation or time (under 20 seconds, or a quarter of its allocation if that is less) could not cover another round, the call offers only the report tool, with a notice. A call to another tool is still dispatched normally.
+
+Each notice records `agent.budget_notice` (`final` true or false) in the child run.
+
+A findings agent's result then follows these rules:
+
+| Situation                                            | `status`               | Content                                                                                                        |
+| ---------------------------------------------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Report accepted, child finished                      | the report's           | the report                                                                                                     |
+| Report accepted, allocation ran out in the same step | `partial` (or blocked) | the report, with `partialReason`                                                                               |
+| Last report rejected, child then answered or ran out | `partial` (or blocked) | the rejected report with every failing quote, `sourceId`, `observationId` and ref removed, and `partialReason` |
+| No report, allocation ran out                        | `incomplete`           | `observations`: up to 12 of the child's successful calls (`observationId`, `operation`) for `observation_read` |
+| Interrupted, failed, or reported then failed         | `incomplete`           | as before; the report is not relied on                                                                         |
+
+Nothing unchecked is passed on as a quote or ref. A salvaged finding keeps its text without the quote that failed; like any finding, the text is the agent's reading, not verified truth. The coordinator instructions say `partial`, `blocked` and `incomplete` are not complete. Public research follows the same salvage rules per target ([research specialist](research-specialist.md#partial-results)); job alignment and media keep their all-or-nothing contracts.
 
 ## Models and effort
 
@@ -135,5 +165,5 @@ A package chooses one of the host's contracts. It cannot add its own validation 
 ## Observability
 
 - **Traces.** Chief's run records `agent.completed` or `agent.failed` for every `agent_run`, whatever the contract. It also records `agent.started` (findings agents) or `research.started` (research and media) with the child run ID; `runFamily` uses those to find a turn's children. A findings child's run records `agent.child_started`, which holds its type, definition hash, tools, model choice, limits and references; research and media children record `research.child_started`. Child model calls are ordinary `model.started` and `model.completed` events under the child run.
-- **Operational log.** `agent.child_started` logs `agentType`, `model`, `tier` and `effort` for findings agents. `agent.completed` logs `agentType`, `state`, `stopReason` and `approvalCount` for every agent run. Briefs and reports are never logged.
+- **Operational log.** `agent.child_started` logs `agentType`, `model`, `tier` and `effort` for findings agents. `agent.completed` logs `agentType`, `state`, `stopReason` and `approvalCount` for every agent run; `state` is `partial` for a salvaged report. `agent.budget_notice` logs `state` `warning` or `final` for a child running low. Briefs and reports are never logged.
 - **Queries.** Use `npm run logs:cloudwatch -- event --event agent.completed` for outcomes, and `run --run <id>` for a whole delegation.

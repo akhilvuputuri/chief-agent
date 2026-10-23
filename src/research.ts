@@ -16,7 +16,8 @@ import { Execution } from "./execution.js";
 import { jsonSchema } from "./runtime.js";
 import { spending, Spending } from "./spending.js";
 import { publicHttps } from "./security.js";
-import { NotDispatchedError } from "./tool-errors.js";
+import { NotDispatchedError, ReportRejectedError } from "./tool-errors.js";
+import { matchQuote, quoteExcerpt, MIN_QUOTE_PIECE } from "./quote-match.js";
 
 import { plugins } from "./plugin-registry.js";
 import type { PluginAgent } from "./plugins.js";
@@ -150,6 +151,8 @@ export async function runResearchSpecialist(
   await child.start();
   let output: AgentResponse | undefined;
   let report: any;
+  /** The last rejected public-research report, with only its checked evidence kept. */
+  let rejected: { targets: any[]; problems: string[] } | undefined;
   try {
     // Preserve task context for inspection. Search-cache identity resolves the trusted parent link independently of budget attachment.
     await db.query(
@@ -281,15 +284,57 @@ export async function runResearchSpecialist(
               new Set(ids).size !== ids.length ||
               ids.some((id: string) => !targets.some((t) => t.targetId === id))
             )
-              invalid("report exactly the assigned target set");
+              invalid(
+                `report exactly the assigned target set, one entry per targetId: ${targets.map((t) => t.targetId).join(", ")}`,
+              );
             if (profile) await profile.validate(candidate, childRun);
-            else
+            else {
+              // Every problem is named at once, so one corrected report can pass; the
+              // checked remainder is kept in case the specialist cannot report again.
+              const problems: string[] = [];
+              const checked = [];
               for (const item of candidate.targets) {
+                const evidence = [];
+                for (const [i, e] of item.evidence.entries())
+                  try {
+                    const { quote } = await checkResearchQuote(
+                      req,
+                      childRun,
+                      e.sourceId,
+                      e.quote,
+                      { tolerant: true },
+                    );
+                    evidence.push({ ...e, quote });
+                  } catch (error) {
+                    const message = (error as Error)?.message ?? "";
+                    if (!message.startsWith("Research validation: "))
+                      throw error;
+                    problems.push(
+                      `target ${item.targetId} evidence ${i + 1}: ${message.slice("Research validation: ".length)}`,
+                    );
+                  }
                 if (item.status === "complete" && !item.evidence.length)
-                  invalid("complete targets require observed source evidence");
-                for (const e of item.evidence)
-                  await checkResearchQuote(req, childRun, e.sourceId, e.quote);
+                  problems.push(
+                    `target ${item.targetId}: complete targets require observed source evidence; add a quote from a source you read, or mark the target partial`,
+                  );
+                checked.push({
+                  ...item,
+                  evidence,
+                  status:
+                    item.status === "complete" &&
+                    (!evidence.length || evidence.length < item.evidence.length)
+                      ? "partial"
+                      : item.status,
+                });
               }
+              if (problems.length) {
+                rejected = { targets: checked, problems };
+                throw new ReportRejectedError(
+                  `Research validation: your report was not recorded. Fix each item and call ${reportName} again with the whole corrected report:\n- ${problems.join("\n- ")}`,
+                );
+              }
+              candidate.targets = checked;
+            }
             checkDispatch();
             report = candidate;
             return { recorded: true, targets: candidate.targets };
@@ -303,10 +348,33 @@ export async function runResearchSpecialist(
         },
       }),
     );
+    // Public research falls back to what was checked when it stopped with something to show:
+    // a recorded report the allocation cut short, or the last report the host rejected.
+    // Profiles (job alignment, media) keep their stricter all-or-nothing contract.
+    const salvage =
+      !profile &&
+      (output.stopReason === "answer" ||
+        output.stopReason === "budget_exhausted")
+        ? report
+          ? {
+              targets: report.targets,
+              reason: `The specialist's checked report was recorded, but it stopped (${output.stopReason}) before finishing.`,
+            }
+          : rejected
+            ? {
+                targets: rejected.targets,
+                reason: `The specialist's last report failed host checks and was not corrected before it stopped (${output.stopReason}); evidence that failed was removed: ${rejected.problems.slice(0, 3).join("; ")}`,
+              }
+            : undefined
+        : undefined;
     const status =
-      output.stopReason === "answer" && report ? "reported" : "incomplete";
+      output.stopReason === "answer" && report
+        ? "reported"
+        : salvage
+          ? "partial"
+          : "incomplete";
     const observedSources =
-      status === "incomplete"
+      status !== "reported"
         ? (
             await db.query(
               `SELECT DISTINCT ON (s.id) s.id AS "sourceId",s.url,c.id AS "observationId"
@@ -324,19 +392,27 @@ export async function runResearchSpecialist(
       ...(observedSources.length ? { observedSources } : {}),
       status,
       stopReason: output.stopReason,
+      ...(status === "partial" ? { partialReason: salvage!.reason } : {}),
       targets:
-        report?.targets ??
-        targets.map((t) => ({
-          targetId: t.targetId,
-          status: "blocked",
-          summary:
-            output?.stopReason === "interrupted"
-              ? "Specialist paused for newer input; completed source reads remain available"
-              : "Specialist stopped without a validated report",
-          evidence: [],
-        })),
-      notice:
-        "Evidence checks establish recorded source access and exact quotes, not semantic correctness. Only complete targets are reported complete; consult each target status. Full observations remain stored in the child run.",
+        status === "reported"
+          ? report.targets
+          : status === "partial"
+            ? salvage!.targets.map((t: any) => ({
+                ...t,
+                status: t.status === "complete" ? "partial" : t.status,
+              }))
+            : targets.map((t) => ({
+                targetId: t.targetId,
+                status: "blocked",
+                summary:
+                  output?.stopReason === "interrupted"
+                    ? "Specialist paused for newer input; completed source reads remain available"
+                    : "Specialist stopped without a validated report",
+                evidence: [],
+              })),
+      notice: profile
+        ? "Evidence checks establish recorded source access and exact quotes, not semantic correctness. Only complete targets are reported complete; consult each target status. Full observations remain stored in the child run."
+        : "Evidence checks establish recorded source access and that each quote is that source's own words (returned verbatim; spacing, quote-mark and dash style ignored; \u2026 marks omitted words), not semantic correctness. Only complete targets are reported complete; consult each target status. Full observations remain stored in the child run.",
     };
     await parent.trace("research.completed", {
       version: 1,
@@ -360,11 +436,18 @@ export async function runResearchSpecialist(
   }
 }
 
+/**
+ * A quote must come from an owner-scoped source this child read. Exact by default; with
+ * `tolerant`, typography differences and "..." omissions are accepted (see quote-match.ts)
+ * and the returned `quote` is the source's own words. Messages name the failing source and
+ * quote and say how to fix it, so a retry can succeed.
+ */
 export async function checkResearchQuote(
   req: AgentRequest,
   childRun: string,
   sourceId: string,
   quote: string,
+  options: { tolerant?: boolean } = {},
 ) {
   const { db, user } = req.execution!;
   const source = (
@@ -373,9 +456,21 @@ export async function checkResearchQuote(
       [sourceId, user, childRun],
     )
   ).rows[0];
-  if (!source || !source.content.includes(quote))
+  if (!source)
     throw new Error(
-      "Research validation: evidence must quote an owner-scoped source read by this specialist",
+      `Research validation: evidence must quote an owner-scoped source read by this specialist; sourceId ${sourceId} is not a source you read with web_read or source_read. Use the sourceId your own read returned, or drop the quote.`,
     );
-  return source;
+  const matched = options.tolerant
+    ? matchQuote(source.content, quote)
+    : source.content.includes(quote)
+      ? quote
+      : undefined;
+  if (matched === undefined)
+    throw new Error(
+      `Research validation: evidence must quote an owner-scoped source read by this specialist; the quote "${quoteExcerpt(quote)}" is not in source ${sourceId}. ` +
+        (options.tolerant
+          ? `Copy the words from that source's text in order (spacing, quote marks and dashes may differ); mark left-out words with "..." with at least ${MIN_QUOTE_PIECE} characters in each piece, quote a shorter passage, or drop the quote.`
+          : "Copy the words exactly as they appear in that source, quote a shorter passage, or drop the quote."),
+    );
+  return { ...source, quote: matched as string };
 }

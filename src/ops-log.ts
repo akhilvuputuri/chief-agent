@@ -480,6 +480,11 @@ const projections: Record<string, Projection> = {
       approvalCount: d.approvals,
     },
   ],
+  // A child low on allocation was told to report; final means only its report tool was offered.
+  "agent.budget_notice": (run, d) => [
+    "info",
+    { runId: run, state: d.final ? "final" : "warning" },
+  ],
   "agent.failed": (run, d) => [
     d.cancelled ? "warn" : "error",
     { runId: run, childRunId: d.childRunId, agentType: d.type },

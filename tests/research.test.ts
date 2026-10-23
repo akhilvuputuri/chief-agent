@@ -11,6 +11,7 @@ import { type ModelAdapter } from "../src/model.js";
 import { spending, Spending } from "../src/spending.js";
 import { Execution, recoverRuntime } from "../src/execution.js";
 import { scrubTrace } from "../src/trace-scrub.js";
+import { checkResearchQuote } from "../src/research.js";
 const text = (content: string) => ({
   message: { role: "assistant" as const, content },
 });
@@ -416,6 +417,98 @@ test("restart does not replay delegated reads; trace scrubbing preserves non-sec
         text: "Bearer [REDACTED_CREDENTIAL]",
         normal: "Linux",
       },
+    );
+  } finally {
+    await f.pg.close();
+  }
+});
+test("public research accepts typographic and elided quotes as the source's words, and a rejected report becomes a partial result when calls run out", async () => {
+  let c = 0,
+    source = "",
+    result: any;
+  const f = await fixture({
+    generate: async (input) => {
+      if (!child(input)) {
+        if (input.messages.some((m) => m.role === "tool")) {
+          result = observation(input).result;
+          return text("Relayed.");
+        }
+        return call("agent_run", brief);
+      }
+      c++;
+      if (c === 1) return call("web_read", { url: assignment.urls[0] });
+      if (c === 2) {
+        source = observation(input).result.sourceId;
+        return call("research_report", {
+          targets: [
+            {
+              targetId: assignment.urls[0],
+              status: "complete",
+              summary: "Linux and Windows are supported.",
+              evidence: [
+                {
+                  sourceId: source,
+                  quote: "Supports   Linux … Detailed source text",
+                },
+                { sourceId: source, quote: "Supports Windows" },
+              ],
+            },
+          ],
+        });
+      }
+      if (c === 3) {
+        const error = observation(input).error;
+        assert.equal(error.code, "VALIDATION_FAILED");
+        assert.equal(error.retryable, true);
+        assert.match(
+          error.message,
+          /evidence 2: .*"Supports Windows" is not in source/,
+        );
+        assert.doesNotMatch(error.message, /evidence 1:/);
+      }
+      if (c === 8)
+        assert.deepEqual(
+          input.tools.map((t) => t.name),
+          ["research_report"],
+        );
+      // The specialist keeps searching instead of fixing its report.
+      return call("web_search", { query: "platforms " + c });
+    },
+  });
+  try {
+    await f.assistant.respond("owner", "Research it");
+    assert.equal(c, 8);
+    assert.equal(result.status, "partial");
+    assert.equal(result.stopReason, "budget_exhausted");
+    assert.match(result.partialReason, /failed host checks/);
+    assert.equal(result.targets[0].status, "partial");
+    assert.deepEqual(result.targets[0].evidence, [
+      { sourceId: source, quote: "Supports Linux … Detailed source text" },
+    ]);
+    assert.equal(result.observedSources[0].sourceId, source);
+    // Job alignment and media keep exact matching: the same variant is refused there.
+    const childRun = (
+      await f.db.query(
+        "SELECT run_id FROM events WHERE type='research.child_started'",
+      )
+    ).rows[0].run_id;
+    const req = { execution: { db: f.db, user: "owner" } } as any;
+    await assert.rejects(
+      checkResearchQuote(req, childRun, source, "Supports   Linux"),
+      /"Supports Linux" is not in source .*Copy the words exactly/,
+    );
+    assert.equal(
+      (
+        await checkResearchQuote(req, childRun, source, "Supports   Linux", {
+          tolerant: true,
+        })
+      ).quote,
+      "Supports Linux",
+    );
+    // Another run's read does not ground a quote.
+    await assert.rejects(
+      checkResearchQuote(req, randomUUID(), source, "Supports Linux"),
+      /is not a source you read/,
     );
   } finally {
     await f.pg.close();
