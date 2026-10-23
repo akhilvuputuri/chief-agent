@@ -140,6 +140,13 @@ No further review is pending, apart from the coordinator's check of this final c
 
 **Not measured.** Whether production rejections and `budget_exhausted` endings fall. Whether models follow the last-call restriction. How often salvaged reports reach the owner, and whether they help.
 
+### Post-merge findings — 23 October 2026
+
+Released in `a39f8eb` (PR 313). Devin posted two findings on the final head that the merge did not wait for; both were fixed in a follow-up PR:
+
+1. **Repeated occurrences.** Only the shortest span was checked for a hidden qualifier, so a valid, longer, clean occurrence elsewhere in the source was refused. The search now keeps the shortest _acceptable_ span. A new test fails on the released matcher.
+2. **Latest observations.** An incomplete child returned its _earliest_ 12 successful calls, hiding its latest work when it made more than 12. It now returns the latest 12 in call order (`latestObservations`). A new test fails with the old ordering.
+
 ## Follow-up and next iteration
 
 - After release, compare `agent.completed` states (`partial` versus `incomplete`) and `stopReason` for `agentType: web` with the two reviews above. Also count `agent.budget_notice` `final` events and failed `agent_report` calls over a comparable window.

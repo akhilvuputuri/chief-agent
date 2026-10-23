@@ -455,12 +455,7 @@ export async function runFindingsAgent(
     const observations =
       accepted || stop === "interrupted"
         ? []
-        : (
-            await db.query(
-              "SELECT id AS \"observationId\",operation FROM runtime_calls WHERE run_id=$1 AND state='success' AND operation NOT IN ('agent_report','skill_read') ORDER BY started_at LIMIT 12",
-              [childRun],
-            )
-          ).rows;
+        : await latestObservations(db, childRun);
     return {
       childRunId: childRun,
       status,
@@ -504,6 +499,26 @@ export async function runFindingsAgent(
       Object.assign(error, { childRunId: childRun });
     throw error;
   }
+}
+
+/**
+ * An incomplete agent's latest twelve successful calls, in call order: later calls build on
+ * earlier ones, and observation_read needs the exact ID of each.
+ */
+export async function latestObservations(
+  db: Execution["db"],
+  childRun: string,
+): Promise<Array<{ observationId: string; operation: string }>> {
+  const rows = (
+    await db.query(
+      "SELECT * FROM (SELECT id AS \"observationId\",operation,started_at,id AS sort_id FROM runtime_calls WHERE run_id=$1 AND state='success' AND operation NOT IN ('agent_report','skill_read') ORDER BY started_at DESC,id DESC LIMIT 12) latest ORDER BY started_at,sort_id",
+      [childRun],
+    )
+  ).rows;
+  return rows.map(({ observationId, operation }) => ({
+    observationId,
+    operation,
+  }));
 }
 
 /** String and number values in a stored tool result: what the agent was shown, not JSON keys. */

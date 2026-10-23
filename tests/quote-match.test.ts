@@ -344,3 +344,18 @@ test("a child is warned one call before its last and offered only its report on 
     undefined,
   );
 });
+
+test("a shorter span that hides a qualifier does not stop a clean span elsewhere from matching", () => {
+  // Devin on PR 313: the shortest span was the only one checked for omitted qualifiers.
+  const quote = "The board said the merger ... approved by regulators";
+  const source = `The board said the merger ${words(330)} was not approved by regulators. Later: The board said the merger ${words(400)} was approved by regulators.`;
+  assert.equal(
+    matchQuote(source, quote),
+    "The board said the merger … approved by regulators",
+  );
+  // With only the hiding span, it is still refused.
+  assert.deepEqual(
+    matchQuoteDetailed(source.slice(0, source.indexOf(" Later:")), quote),
+    { refused: "hidden_qualifier" },
+  );
+});

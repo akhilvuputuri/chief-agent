@@ -12,7 +12,7 @@ import { JobTools } from "../src/tools.js";
 import { ensureUser, type Database } from "../src/db.js";
 import type { ModelAdapter } from "../src/model.js";
 import { runtimeContext } from "../src/runtime.js";
-import { runAgentType } from "../src/agents.js";
+import { runAgentType, latestObservations } from "../src/agents.js";
 import { Execution } from "../src/execution.js";
 import { PluginRegistry, readBundle, contentHash } from "../src/plugins.js";
 import { resolveAgentModel, readModelPolicy } from "../src/model-policy.js";
@@ -1144,6 +1144,36 @@ test("a lookup refused on the last call does not take the tool unit its report n
     assert.match(
       refused[0].result.error.message,
       /^Not dispatched: .*only agent_report runs/,
+    );
+  } finally {
+    await run.close();
+  }
+});
+
+test("an incomplete agent's observations are its latest twelve calls, in call order", async () => {
+  // Devin on PR 313: the earliest twelve were returned, hiding an agent's latest work.
+  const run = await runWebAgent(() =>
+    call("web_read", { url: "https://example.com/library" }),
+  );
+  try {
+    const childRun = run.result.childRunId;
+    for (let i = 0; i < 10; i++)
+      await run.db.query(
+        "INSERT INTO runtime_calls(id,run_id,call_id,operation,arguments,is_write,state,started_at) VALUES(gen_random_uuid(),$1,$2,'web_search','{}',false,'success',now()+make_interval(secs=>$3))",
+        [childRun, `later-${i}`, i + 1],
+      );
+    const latest = await latestObservations(run.db, childRun);
+    assert.equal(latest.length, 12);
+    const ids = (
+      await run.db.query(
+        "SELECT id FROM runtime_calls WHERE run_id=$1 AND state='success' AND operation NOT IN ('agent_report','skill_read') ORDER BY started_at,id",
+        [childRun],
+      )
+    ).rows.map((r) => r.id);
+    assert.equal(ids.length, 15);
+    assert.deepEqual(
+      latest.map((o) => o.observationId),
+      ids.slice(-12),
     );
   } finally {
     await run.close();

@@ -200,12 +200,19 @@ export function matchQuoteDetailed(
       return at < 0 ? undefined : verbatim(prepared, at, pieces[0]!.length);
     }
     if (pieces.some((p) => p.length < MIN_QUOTE_PIECE)) return undefined;
-    // The shortest span over every occurrence of the first piece, later pieces matched
-    // greedily. As the start moves right, each later piece's greedy position never moves
-    // left, so each piece keeps a cursor and the whole search is one pass over the text.
+    // The shortest acceptable span over every occurrence of the first piece, later pieces
+    // matched greedily. As the start moves right, each later piece's greedy position never
+    // moves left, so each piece keeps a cursor and the whole search is one pass over the text.
+    // A span is acceptable when it is at most WHOLE_SPAN_LIMIT (returned whole), or at most
+    // MAX_ELIDED_SPAN with no QUALIFIER word in an omitted part: an omitted "not" or "only"
+    // would reverse or narrow the quote unseen. A shorter span that hides one does not stop a
+    // longer, clean occurrence elsewhere in the source from matching.
     const cursors: number[] = pieces.map(() => -1);
     let best: number[] | undefined;
     let span = Infinity;
+    let hidden = false;
+    const gaps = (at: number[]) =>
+      at.slice(1).map((p, i) => text.slice(at[i]! + pieces[i]!.length, p));
     for (
       let start = findBounded(prepared, pieces[0]!, 0);
       start >= 0;
@@ -222,21 +229,23 @@ export function matchQuoteDetailed(
       }
       // A later piece missing after this start is missing after every later start too.
       if (at.length < pieces.length) break;
-      if (from - start < span) {
-        span = from - start;
-        best = at;
+      const length = from - start;
+      if (length >= span || length > MAX_ELIDED_SPAN) continue;
+      if (
+        length > WHOLE_SPAN_LIMIT &&
+        gaps(at).some((gap) => QUALIFIER.test(gap))
+      ) {
+        hidden = true;
+        continue;
       }
+      span = length;
+      best = at;
     }
-    if (!best || span > MAX_ELIDED_SPAN) return undefined;
-    if (span <= WHOLE_SPAN_LIMIT) return verbatim(prepared, best[0]!, span);
-    // In a long span, an omitted "not" or "only" would reverse or narrow the quote unseen.
-    const omitted = best
-      .slice(1)
-      .map((at, i) => text.slice(best![i]! + pieces[i]!.length, at));
-    if (omitted.some((gap) => QUALIFIER.test(gap))) {
-      refused = "hidden_qualifier";
+    if (!best) {
+      if (hidden) refused = "hidden_qualifier";
       return undefined;
     }
+    if (span <= WHOLE_SPAN_LIMIT) return verbatim(prepared, best[0]!, span);
     return best
       .map((at, i) => verbatim(prepared, at, pieces[i]!.length))
       .join(" … ");
