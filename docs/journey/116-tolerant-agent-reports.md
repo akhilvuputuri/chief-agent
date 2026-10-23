@@ -8,7 +8,7 @@ Status: in review. Changes:
 - A child's last model call offers and dispatches only its report tool.
 - A rejected or cut-short report returns its checked part as `partial`, with unsupported items marked, instead of nothing.
 
-Tested with mocked models only. The first independent review (23 October, on `ac4622c`) requested changes. The fixes are below and await re-review. Not released and not measured in production.
+Tested with mocked models only. The first independent review (23 October, on `ac4622c`) requested changes, which were fixed in `8865161`. The delta review of `8865161` approved with nits. Those fixes are below and await re-review. Not released and not measured in production.
 
 ## User-visible problem and preceding iteration
 
@@ -35,9 +35,9 @@ Chosen mechanism:
 
 1. **Tolerant quote matching** (`src/quote-match.ts`). Normalise whitespace, quote marks, dashes and zero-width characters in both source and quote. The resulting guarantees:
    - Every returned character comes from the one cited source.
-   - Each quoted word appears there whole and in order: a match, or each piece of an elided one, starts and ends on a word boundary in scripts written with spaces.
+   - A match, or each piece of an elided one, starts and ends on a word boundary in scripts written with spaces. An apostrophe or hyphen between letters, or a "." or "," between digits, does not end a word: "they can" is refused out of "they can't", and "5 million" out of "1.5 million". The cost is that "The firm" cannot be quoted out of "The firm's".
    - `...`, `…` and `[...]` mark gaps. There are at most 4 pieces of at least 8 characters each.
-   - The host takes the shortest source span from the first piece to the last. A span of at most 300 characters (the quote limit) is returned whole, so an omitted "not" is visible to the coordinator. Spans of 301–600 characters are returned elided, as the source's pieces joined with `…`; there, omitted qualifiers are not shown. Longer spans are refused.
+   - The host takes the shortest source span from the first piece to the last. A span of at most 300 characters (the quote limit) is returned whole, so an omitted "not" is visible to the coordinator. Spans of 301–600 characters are returned elided, as the source's pieces joined with `…`. They are refused when the omitted text contains not, no, never, `n't`, only, except, unless or without. Spans over 600 characters are refused. Qualifiers outside that list, such as "rarely", can still be omitted in the 301–600 band.
    - Matching is otherwise character-exact, including case.
 2. **Whole-token refs.** Refs of 8 or more characters keep the old substring check. Shorter refs must appear as a whole token inside a string or number value of a tool result, or in the brief. They may not sit inside a longer number or word, or form part of a decimal or grouped number. A JSON key is not a value, so a short number that only keys an object does not pass. Refs under 3 characters are refused.
 3. **Complete, retryable rejections.** One rejection lists every failing item, says how to fix each, and is `VALIDATION_FAILED` with `retryable: true`.
@@ -59,7 +59,7 @@ What would change the conclusion: production traces showing rejections dominated
 - `src/quote-match.ts`: `normalizeForQuote`, `matchQuote`, `containsToken`.
 - `src/research.ts`: `checkResearchQuote` takes `{ tolerant }` and returns the matched `quote`. Its messages say whether the source was not read or the quote was not found. Public-research reports collect every problem and salvage a partial result. Profiles (job alignment, media) are unchanged and exact.
 - `src/agents.ts`: `checkReport` returns the checked report, all problems and a compact list of failures, and marks unsupported findings. `runFindingsAgent` adds `partialReason` and `observations` and applies the salvage rules. The findings contract tells children to use `...` for omitted words.
-- `src/custom-agent.ts`: `budgetNotice`, and the last-call restriction. The call offers only the report tool, and any other tool call from that step is refused without dispatch.
+- `src/custom-agent.ts`: `budgetNotice`, and the last-call restriction. The call offers only the report tool, and any other tool call from that step is refused without dispatch, before it can use a tool unit.
 - `src/tool-errors.ts`: `ReportRejectedError` gives `VALIDATION_FAILED` with `retryable: true`.
 - `src/ops-log.ts`: `agent.budget_notice` is projected with `state` set to `warning` or `final`.
 - `src/context.ts`: the coordinator is told that `partial`, `blocked` and `incomplete` are not complete, and what `partialReason` means.
@@ -80,6 +80,17 @@ Independent reviewer, 23 October 2026, reviewing head `ac4622c`. Verdict: **REQU
 6. **Nit. `work_evidence` refuses elided quotes.** Documented above.
 7. **Nit. Tests that survive mutations.** Tests added; the mutation results are below.
 8. **Docs accuracy.** This entry and the design docs were corrected. `1234567.5` was listed as tested but was not; it is now tested.
+
+Second review, the delta review of `8865161`, 23 October 2026. Verdict: **APPROVE WITH NITS**. Findings and fixes:
+
+1. **Punctuation inside words counted as a word boundary.** "they can" matched out of "they can't", and likewise "toxic in rats" out of "non-toxic", "234 units" out of "1,234 units", "5 million" out of "1.5 million" and "99 per month" out of "$12.99". Fixed: one character of look-around on each side. A match may not start or end between digit `.`/`,` digit, or between letter `'` letter, or between letter and hyphen and letter. A hyphen is judged by the source's own character, so en and em dashes still separate words.
+2. **The 301–600 band could still hide a negation.** Fixed: the band is refused when the omitted text contains a negating or limiting word. The message tells the child to quote the passage contiguously or shorten it.
+3. **A lookup refused on the last call took a tool unit first.** That unit could be the one the report in the same step needed. Fixed: the refusal comes before tool consumption. It is a `ToolValidationError` with the neutral prefix "Not dispatched:".
+4. **Performance.**
+   - Sources are now read and normalised once per report check.
+   - Normalisation builds its text with an array join.
+   - `MAX_STARTS` is gone: the shortest-span search keeps one forward-moving cursor per piece, so it is one pass over the source.
+5. **Docs.** This entry and the design docs were corrected, and plugins 8/8 was added to the tested list.
 
 Re-review: pending.
 
@@ -102,7 +113,10 @@ Re-review: pending.
   - A short ref that appears only as a JSON key in a tool result is refused.
   - A time-based last call, using a faked clock through the agent loop: the final notice is given once across two last calls, a lookup there is refused, and the following report is accepted.
 - `tests/research.test.ts`, 1 new test: public research accepts an elided, whitespace-variant quote and returns the whole short span in the source's words. A rejected report followed by running out of calls returns `partial`, with the checked evidence, `unsupported: ["evidence 2"]`, and every failure listed. The exact (job alignment and media) mode still refuses the same variant, and a source read in another run does not ground a quote.
-- After the review fixes: quote-match 7/7, agents 14/14, research 7/7, alignment 5/5, media 6/6, steering-loop 13/13, ops-log 16/16 and delegation-accounting 3/3. That includes the alignment assertion that an invented identity quote is refused. `npx tsc --noEmit -p .` and Prettier pass. Before the review, the full tsx suite passed on `c93c2a9`; it was not rerun after the fixes.
+- Delta-review tests:
+  - in `tests/quote-match.test.ts`: the five reproduced punctuation cases, plus an elided one, are refused, while whole numbers, possessives with their "'s", and words beside en dashes match; a hidden "not" about 380 characters into a span and a hidden "only" about 350 characters in are refused; the refusal message asks for a contiguous quote; and a source is read once per check;
+  - in `tests/agents.test.ts`: on the last call with one tool unit left, `[web_search, agent_report]` refuses the search and accepts the report.
+- After the delta fixes: quote-match 10/10, agents 15/15, research 7/7, alignment 5/5, media 6/6, steering-loop 13/13, ops-log 16/16, delegation-accounting 3/3 and plugins 8/8. That includes the alignment assertion that an invented identity quote is refused. `npx tsc --noEmit -p .` and Prettier pass. Before the review, the full tsx suite passed on `c93c2a9`; it was not rerun after the fixes.
 - Mutations: each of these was applied alone and failed at least one focused test:
   - removing the `MAX_QUOTE_PIECES` check;
   - removing the word-boundary check;
@@ -111,6 +125,11 @@ Re-review: pending.
   - removing the notice de-duplication;
   - removing the last-call dispatch refusal;
   - checking short refs against raw JSON instead of values.
+- Delta mutations, each failing at least one focused test:
+  - consuming a tool unit before the last-call refusal;
+  - removing the punctuation look-around;
+  - letting every dash join words;
+  - removing the qualifier check.
 
 **Not measured.** Whether production rejections and `budget_exhausted` endings fall. Whether models follow the last-call restriction. How often salvaged reports reach the owner, and whether they help.
 

@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { matchQuote, containsToken } from "../src/quote-match.js";
+import {
+  matchQuote,
+  matchQuoteDetailed,
+  containsToken,
+} from "../src/quote-match.js";
+import { checkResearchQuote } from "../src/research.js";
 import { budgetNotice } from "../src/custom-agent.js";
 
 const page =
@@ -133,6 +138,124 @@ test("an elided quote is refused when its pieces split words, come out of order 
     ),
     undefined,
   );
+});
+
+test("a match may not start or end inside a word joined by an apostrophe, hyphen or number punctuation", () => {
+  // Reproduced in the delta review: each of these passed before.
+  for (const [source, quote] of [
+    ["Officials say they can't confirm the date.", "they can"],
+    ["The compound is non-toxic in rats.", "toxic in rats"],
+    ["Stock: 1,234 units remain.", "234 units"],
+    ["Revenue was 1.5 million last year.", "5 million"],
+    ["The plan costs $12.99 per month.", "99 per month"],
+    // The same holds for each piece of an elided quote.
+    [
+      "Officials say they can't confirm the date of the meeting.",
+      "Officials say they can ... the meeting",
+    ],
+  ])
+    assert.equal(matchQuote(source, quote), undefined, quote);
+  // The accepted cost: a possessive's word cannot be quoted without its "'s".
+  assert.equal(matchQuote("The firm's revenue rose.", "The firm"), undefined);
+  assert.equal(
+    matchQuote("The firm's revenue rose.", "The firm's revenue"),
+    "The firm's revenue",
+  );
+  // Whole words and numbers still match, and sentence punctuation ends a word.
+  assert.equal(
+    matchQuote("Revenue was 1.5 million last year.", "1.5 million"),
+    "1.5 million",
+  );
+  assert.equal(
+    matchQuote("It ended in 2024. Then", "ended in 2024"),
+    "ended in 2024",
+  );
+  assert.equal(matchQuote("They can't, he said.", "they can't"), undefined);
+  assert.equal(matchQuote("They can't, he said.", "They can't"), "They can't");
+  // An en or em dash between words separates them; a hyphen joins them.
+  assert.equal(
+    matchQuote("Open Monday–Friday from 9am.", "Friday from 9am"),
+    "Friday from 9am",
+  );
+  assert.equal(matchQuote("A well-known fact.", "known fact"), undefined);
+});
+
+/** A span of `length` filler characters, in words. */
+const words = (length: number) =>
+  "the quarterly figures were reviewed in detail by staff "
+    .repeat(Math.ceil(length / 55))
+    .slice(0, length)
+    .replace(/\S*$/, "");
+
+test("a long elided span may not hide a negating or limiting word", () => {
+  // Reproduced in the delta review: "not" about 380 characters into the span.
+  const negated = `The board said the merger ${words(350)} was not approved by regulators this year.`;
+  const quote = "The board said the merger ... approved by regulators";
+  assert.deepEqual(matchQuoteDetailed(negated, quote), {
+    refused: "hidden_qualifier",
+  });
+  // The same span without the negation comes back elided.
+  assert.equal(
+    matchQuote(negated.replace("was not approved", "was approved"), quote),
+    "The board said the merger … approved by regulators",
+  );
+  // "only" about 350 characters in.
+  const limited = `Members may borrow ten books ${words(320)} only from the central branch each month.`;
+  assert.deepEqual(
+    matchQuoteDetailed(
+      limited,
+      "Members may borrow ten books ... from the central branch",
+    ),
+    { refused: "hidden_qualifier" },
+  );
+  // A qualifier inside a quoted piece is shown, so it is not refused.
+  assert.equal(
+    matchQuote(
+      negated,
+      "The board said the merger ... was not approved by regulators",
+    ),
+    "The board said the merger … was not approved by regulators",
+  );
+});
+
+test("a hidden-qualifier refusal tells the child to quote the passage contiguously", async () => {
+  const content = `The board said the merger ${words(350)} was not approved by regulators.`;
+  const req = {
+    execution: {
+      user: "owner",
+      db: { query: async () => ({ rows: [{ content, url: "https://x" }] }) },
+    },
+  } as any;
+  await assert.rejects(
+    checkResearchQuote(
+      req,
+      "run",
+      "source",
+      "The board said the merger ... approved by regulators",
+      { tolerant: true },
+    ),
+    /leaving out a negating or limiting word.*Quote that passage without "\.\.\."/,
+  );
+  // One report check reads and normalises a cited source once.
+  let reads = 0;
+  const counting = {
+    execution: {
+      user: "owner",
+      db: {
+        query: async () => {
+          reads++;
+          return { rows: [{ content, url: "https://x" }] };
+        },
+      },
+    },
+  } as any;
+  const sources = new Map();
+  for (const quote of ["The board said", "approved by regulators"])
+    await checkResearchQuote(counting, "run", "source", quote, {
+      tolerant: true,
+      sources,
+    });
+  assert.equal(reads, 1);
 });
 
 test("a fabricated or altered quote is refused", () => {

@@ -3,8 +3,10 @@
  * source; only typography that models routinely change is ignored: whitespace runs, curly
  * versus straight quote marks, dash variants and invisible characters. "..." or "…" may stand
  * for omitted words between exact pieces. Every match starts and ends on a word boundary (in
- * scripts written with spaces). An elided quote whose source span is short is returned whole,
- * so an omitted word such as "not" stays visible; a longer span is refused past a fixed bound.
+ * scripts written with spaces), where an apostrophe or hyphen between letters and a "." or ","
+ * between digits do not end a word. An elided quote whose source span is short is returned
+ * whole, so an omitted word such as "not" stays visible; a longer span is returned elided only
+ * when the omitted text has no negating or limiting word, and refused past a fixed bound.
  */
 
 const SINGLE_QUOTES = new Set(["‘", "’", "‚", "‛", "′"]);
@@ -25,31 +27,37 @@ export const MAX_QUOTE_PIECES = 4;
 export const WHOLE_SPAN_LIMIT = 300;
 /** Longer spans are returned elided, up to this bound; beyond it the quote is refused. */
 export const MAX_ELIDED_SPAN = 600;
-/** Occurrences of a first piece tried when looking for the shortest span. */
-const MAX_STARTS = 1000;
+/**
+ * Words that change what the surrounding text means. Omitted text containing one is never
+ * hidden behind " … ": the quote must show it.
+ */
+const QUALIFIER = /\b(?:not|no|never|only|except|unless|without)\b|n't\b/i;
 
 /**
  * The normalised text, with the original UTF-16 span of every normalised unit so a match can
  * be mapped back to the source's own words.
  */
 export function normalizeForQuote(input: string) {
-  let text = "";
+  const parts: string[] = [];
   const starts: number[] = [];
   const ends: number[] = [];
   let index = 0;
+  let space = false;
   for (const ch of input) {
     const at = index;
     index += ch.length;
     if (INVISIBLE.has(ch)) continue;
     if (/\s/.test(ch)) {
-      if (text.endsWith(" ")) ends[ends.length - 1] = index;
+      if (space) ends[ends.length - 1] = index;
       else {
-        text += " ";
+        parts.push(" ");
         starts.push(at);
         ends.push(index);
+        space = true;
       }
       continue;
     }
+    space = false;
     const mapped =
       ch === "…"
         ? "..."
@@ -61,17 +69,26 @@ export function normalizeForQuote(input: string) {
               ? "-"
               : ch;
     for (let u = 0; u < mapped.length; u++) {
-      text += mapped[u];
+      parts.push(mapped[u]!);
       starts.push(at);
       ends.push(index);
     }
   }
-  return { text, starts, ends };
+  return { text: parts.join(""), starts, ends };
 }
 
+/** A source prepared once for several quotes. */
+export type PreparedSource = {
+  content: string;
+  normalized: ReturnType<typeof normalizeForQuote>;
+};
+export const prepareSource = (content: string): PreparedSource => ({
+  content,
+  normalized: normalizeForQuote(content),
+});
+
 const verbatim = (
-  content: string,
-  source: ReturnType<typeof normalizeForQuote>,
+  { content, normalized: source }: PreparedSource,
   at: number,
   length: number,
 ) =>
@@ -84,6 +101,8 @@ const WORD_CHAR = /[\p{L}\p{N}_]/u;
 /** Scripts written without spaces between words, where a word boundary cannot be told. */
 const UNSPACED =
   /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u;
+const LETTER = /\p{L}/u;
+const DIGIT_CHAR = /\p{N}/u;
 /** True when two adjacent characters belong to one word, so a match may not split them. */
 const joined = (a: string | undefined, b: string | undefined) =>
   !!a &&
@@ -92,32 +111,66 @@ const joined = (a: string | undefined, b: string | undefined) =>
   WORD_CHAR.test(b) &&
   !UNSPACED.test(a) &&
   !UNSPACED.test(b);
+/** Characters that join two words into one; en and em dashes separate words instead. */
+const HYPHENS = new Set(["-", "‐", "‑"]);
+/**
+ * True when the punctuation at normalised position `p` joins its neighbours into one word or
+ * number: "can't", "non-toxic", "1,234", "1.5". A dash is judged by the source's own
+ * character, since all dashes normalise to "-".
+ */
+function bridges({ content, normalized }: PreparedSource, p: number) {
+  const text = normalized.text;
+  const [a, mark, b] = [text[p - 1], text[p], text[p + 1]];
+  if (!a || !mark || !b) return false;
+  if (mark === "." || mark === ",")
+    return DIGIT_CHAR.test(a) && DIGIT_CHAR.test(b);
+  if (
+    mark !== "'" &&
+    !(mark === "-" && HYPHENS.has(content[normalized.starts[p]!]!))
+  )
+    return false;
+  return (
+    LETTER.test(a) && LETTER.test(b) && !UNSPACED.test(a) && !UNSPACED.test(b)
+  );
+}
+/** True when position `i` (between text[i-1] and text[i]) lies inside a word or number. */
+const inside = (source: PreparedSource, i: number) =>
+  joined(source.normalized.text[i - 1], source.normalized.text[i]) ||
+  bridges(source, i - 1) ||
+  bridges(source, i);
 
 /** First occurrence of `piece` at or after `from` that does not start or end inside a word. */
-function findBounded(text: string, piece: string, from: number) {
+function findBounded(source: PreparedSource, piece: string, from: number) {
+  const text = source.normalized.text;
   for (let at = text.indexOf(piece, from); at >= 0;) {
-    const end = at + piece.length;
-    if (!joined(text[at - 1], text[at]) && !joined(text[end - 1], text[end]))
-      return at;
+    if (!inside(source, at) && !inside(source, at + piece.length)) return at;
     at = text.indexOf(piece, at + 1);
   }
   return -1;
 }
 
+/** Why a quote was refused, when the reason can tell the child how to fix it. */
+export type QuoteRefusal = "hidden_qualifier";
+
 /**
- * Returns the source's own words for a quote that is grounded in `content`, or undefined.
- * The result is source text with whitespace collapsed: the contiguous match, or for an elided
- * quote the whole span when it is at most WHOLE_SPAN_LIMIT characters, else the pieces joined
- * by " … " when the span is at most MAX_ELIDED_SPAN.
+ * Matches a quote against a source. On success `quote` is source text with whitespace
+ * collapsed: the contiguous match; for an elided quote, the whole span when it is at most
+ * WHOLE_SPAN_LIMIT characters, else the pieces joined by " … " when the span is at most
+ * MAX_ELIDED_SPAN and no omitted part contains a QUALIFIER word.
  */
-export function matchQuote(content: string, quote: string): string | undefined {
-  const source = normalizeForQuote(content);
+export function matchQuoteDetailed(
+  source: string | PreparedSource,
+  quote: string,
+): { quote: string } | { refused?: QuoteRefusal } {
+  const prepared = typeof source === "string" ? prepareSource(source) : source;
+  const text = prepared.normalized.text;
   const wanted = normalizeForQuote(quote).text.trim();
-  if (!wanted) return undefined;
-  const attempt = (q: string) => {
+  if (!wanted) return {};
+  let refused: QuoteRefusal | undefined;
+  const attempt = (q: string): string | undefined => {
     // The whole quote first, so a source that itself contains "..." still matches directly.
-    const whole = findBounded(source.text, q, 0);
-    if (whole >= 0) return verbatim(content, source, whole, q.length);
+    const whole = findBounded(prepared, q, 0);
+    if (whole >= 0) return verbatim(prepared, whole, q.length);
     const pieces = q
       .split(GAP)
       .map((p) => p.trim())
@@ -125,30 +178,31 @@ export function matchQuote(content: string, quote: string): string | undefined {
     if (!pieces.length || pieces.length > MAX_QUOTE_PIECES) return undefined;
     // A leading or trailing "..." only says the quote is an excerpt: the piece alone must match.
     if (pieces.length === 1) {
-      const at = findBounded(source.text, pieces[0]!, 0);
-      return at < 0
-        ? undefined
-        : verbatim(content, source, at, pieces[0]!.length);
+      const at = findBounded(prepared, pieces[0]!, 0);
+      return at < 0 ? undefined : verbatim(prepared, at, pieces[0]!.length);
     }
     if (pieces.some((p) => p.length < MIN_QUOTE_PIECE)) return undefined;
-    // The shortest span over the first piece's occurrences; later pieces match greedily,
-    // which gives the shortest span for that start.
+    // The shortest span over every occurrence of the first piece, later pieces matched
+    // greedily. As the start moves right, each later piece's greedy position never moves
+    // left, so each piece keeps a cursor and the whole search is one pass over the text.
+    const cursors: number[] = pieces.map(() => -1);
     let best: number[] | undefined;
     let span = Infinity;
     for (
-      let start = findBounded(source.text, pieces[0]!, 0), tries = 0;
-      start >= 0 && tries < MAX_STARTS;
-      start = findBounded(source.text, pieces[0]!, start + 1), tries++
+      let start = findBounded(prepared, pieces[0]!, 0);
+      start >= 0;
+      start = findBounded(prepared, pieces[0]!, start + 1)
     ) {
       const at = [start];
       let from = start + pieces[0]!.length;
-      for (const piece of pieces.slice(1)) {
-        const found = findBounded(source.text, piece, from);
-        if (found < 0) break;
-        at.push(found);
-        from = found + piece.length;
+      for (let i = 1; i < pieces.length; i++) {
+        if (cursors[i]! < from)
+          cursors[i] = findBounded(prepared, pieces[i]!, from);
+        if (cursors[i]! < 0) break;
+        at.push(cursors[i]!);
+        from = cursors[i]! + pieces[i]!.length;
       }
-      // No later piece can follow a start whose rest did not match; later starts only shrink the text.
+      // A later piece missing after this start is missing after every later start too.
       if (at.length < pieces.length) break;
       if (from - start < span) {
         span = from - start;
@@ -156,18 +210,38 @@ export function matchQuote(content: string, quote: string): string | undefined {
       }
     }
     if (!best || span > MAX_ELIDED_SPAN) return undefined;
-    if (span <= WHOLE_SPAN_LIMIT)
-      return verbatim(content, source, best[0]!, span);
+    if (span <= WHOLE_SPAN_LIMIT) return verbatim(prepared, best[0]!, span);
+    // In a long span, an omitted "not" or "only" would reverse or narrow the quote unseen.
+    const omitted = best
+      .slice(1)
+      .map((at, i) => text.slice(best![i]! + pieces[i]!.length, at));
+    if (omitted.some((gap) => QUALIFIER.test(gap))) {
+      refused = "hidden_qualifier";
+      return undefined;
+    }
     return best
-      .map((at, i) => verbatim(content, source, at, pieces[i]!.length))
+      .map((at, i) => verbatim(prepared, at, pieces[i]!.length))
       .join(" … ");
   };
   const found = attempt(wanted);
-  if (found !== undefined) return found;
+  if (found !== undefined) return { quote: found };
   // Models often wrap a quote in its own quotation marks; the marks are not the source's words.
-  const wrapped = /^(["'])([\s\S]*)\1$/.exec(wanted);
-  const inner = wrapped?.[2]?.trim();
-  return inner ? attempt(inner) : undefined;
+  const inner = /^(["'])([\s\S]*)\1$/.exec(wanted)?.[2]?.trim();
+  const unwrapped = inner ? attempt(inner) : undefined;
+  return unwrapped !== undefined
+    ? { quote: unwrapped }
+    : refused
+      ? { refused }
+      : {};
+}
+
+/** The source's own words for a grounded quote, or undefined (see matchQuoteDetailed). */
+export function matchQuote(
+  source: string | PreparedSource,
+  quote: string,
+): string | undefined {
+  const result = matchQuoteDetailed(source, quote);
+  return "quote" in result ? result.quote : undefined;
 }
 
 /** A short excerpt of a rejected quote for a validation message. */

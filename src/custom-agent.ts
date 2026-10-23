@@ -23,6 +23,7 @@ import {
   toolError,
   NotDispatchedError,
   RepeatedFailureError,
+  ToolValidationError,
   WriteBlockedError,
 } from "./tool-errors.js";
 /** Model steps, with no successful call between them, in which one call form failed the same way before it is refused. */
@@ -534,7 +535,10 @@ export class CustomAgent implements Agent {
           if (req.signal.aborted) throw new Stop("cancelled");
           if (op.startsWith("work_") && op !== "work_status")
             await execution.attach(true);
-          await execution.consume("tools");
+          // On a child's last call only its report runs. A refused call costs no tool unit,
+          // so it cannot take the unit the report in the same step needs.
+          const lastCallRefusal = !!onlyTool && op !== onlyTool;
+          if (!lastCallRefusal) await execution.consume("tools");
           if (op !== "finish_turn") {
             toolCalls++;
             toolsUsed.add(op);
@@ -571,9 +575,9 @@ export class CustomAgent implements Agent {
             )
               throw new WriteBlockedError(writesBlocked);
             // A child's last call may only report: another lookup could not be used.
-            if (onlyTool && op !== onlyTool)
-              throw new Error(
-                `Agent validation: this was your last model call, so only ${onlyTool} runs; ${op} was not dispatched. Report what you have now.`,
+            if (lastCallRefusal)
+              throw new ToolValidationError(
+                `Not dispatched: this was your last model call, so only ${onlyTool} runs; ${op} was not run. Report what you have now.`,
               );
             if (!enabled.has(op)) {
               // A known tool whose domain is not loaded yet: load the domain and

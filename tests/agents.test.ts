@@ -1087,3 +1087,65 @@ test("a child short of time gets one final notice, runs only its report, and rep
     Date.now = realNow;
   }
 });
+
+/** One model step asking for several tool calls. */
+const calls = (...items: [string, unknown][]) => ({
+  message: {
+    role: "assistant" as const,
+    content: null,
+    tool_calls: items.map(([name, args]) => ({
+      id: randomUUID(),
+      type: "function" as const,
+      function: { name, arguments: JSON.stringify(args) },
+    })),
+  },
+});
+
+test("a lookup refused on the last call does not take the tool unit its report needs", async () => {
+  const run = await runWebAgent((n, input) => {
+    // The web agent may make 12 tool calls; the first step uses 11 of them.
+    if (n === 1)
+      return calls(
+        ...Array.from(
+          { length: 11 },
+          (_, i) =>
+            ["web_search", { query: "branch hours " + i }] as [string, unknown],
+        ),
+      );
+    // One tool unit is left, so this is the last call.
+    assert.deepEqual(
+      input.tools.map((t) => t.name),
+      ["agent_report"],
+    );
+    return calls(
+      ["web_search", { query: "one more" }],
+      [
+        "agent_report",
+        {
+          status: "partial",
+          summary: "Search results only.",
+          findings: [],
+          refs: [],
+        },
+      ],
+    );
+  });
+  try {
+    assert.equal(run.childCalls, 2);
+    assert.equal(run.result.stopReason, "answer");
+    assert.equal(run.result.status, "partial");
+    assert.equal(run.result.summary, "Search results only.");
+    const refused = (
+      await run.db.query(
+        "SELECT result FROM runtime_calls WHERE operation='web_search' AND state='failed'",
+      )
+    ).rows;
+    assert.equal(refused.length, 1);
+    assert.match(
+      refused[0].result.error.message,
+      /^Not dispatched: .*only agent_report runs/,
+    );
+  } finally {
+    await run.close();
+  }
+});

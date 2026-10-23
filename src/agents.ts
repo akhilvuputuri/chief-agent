@@ -12,7 +12,11 @@ import { spending, Spending } from "./spending.js";
 import { NotDispatchedError, ReportRejectedError } from "./tool-errors.js";
 import { containsToken } from "./quote-match.js";
 import { skillPage } from "./skill-content.js";
-import { delegateResearch, checkResearchQuote } from "./research.js";
+import {
+  delegateResearch,
+  checkResearchQuote,
+  type QuoteSources,
+} from "./research.js";
 import { delegateMedia } from "./media.js";
 import { opsLog, errorFields } from "./ops-log.js";
 
@@ -547,6 +551,8 @@ async function checkReport(
     )
   ).rows as { id: string; result: string }[];
   const problems: string[] = [];
+  // Each cited source is read and normalised once for the whole report.
+  const sources: QuoteSources = new Map();
   /** Compact labels of every failing item, for partialReason. */
   const failed: string[] = [];
   const findings: (AgentReport["findings"][number] & {
@@ -568,6 +574,7 @@ async function checkReport(
         kept.quote = (
           await checkResearchQuote(req, childRun, f.sourceId, f.quote, {
             tolerant: true,
+            sources,
           })
         ).quote;
       } catch (error) {
