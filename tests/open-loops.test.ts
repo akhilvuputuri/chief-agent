@@ -4,7 +4,12 @@ import { readFile, readdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { PGlite } from "@electric-sql/pglite";
 import { ensureUser, type Database } from "../src/db.js";
-import { codingWaitsOnOwner, openLoops } from "../src/open-loops.js";
+import {
+  codingWaitsOnOwner,
+  openLoops,
+  questionExcerpt,
+} from "../src/open-loops.js";
+import { saveConversationState } from "../src/conversation-state.js";
 async function fixture() {
   const pg = new PGlite();
   // Every migration in order, so the approvals operation check matches production.
@@ -76,6 +81,8 @@ async function fixture() {
     concern = randomUUID(),
     delivered = true,
     age = "1 day",
+    title = `Track ${randomUUID()}`,
+    endsAt = undefined as string | undefined,
   } = {}) =>
     db.query(
       "INSERT INTO approvals(id,user_id,run_id,operation,payload,status,expires_at,created_at) VALUES($1,$2,$3,'responsibility_confirm',$4::jsonb,$5,now()+$6::interval,now()-$7::interval)",
@@ -85,7 +92,10 @@ async function fixture() {
         randomUUID(),
         JSON.stringify({
           id: concern,
-          spec: { title: "Track the return flight" },
+          spec: {
+            title,
+            ...(endsAt ? { end: "date", expiresAt: endsAt } : {}),
+          },
           ...(delivered ? { telegramDeliveryState: "sent" } : {}),
         }),
         status,
@@ -93,7 +103,41 @@ async function fixture() {
         age,
       ],
     );
-  return { db, job, card, monitoring };
+  /** A finished turn whose reply is saved as the conversation state, as the agent saves it. */
+  const asked = async ({
+    reply = "Which date is the return flight?",
+    reason = "awaiting_user",
+    thread = 0,
+    age = "1 hour",
+  } = {}) => {
+    const run = randomUUID();
+    await db.query(
+      "INSERT INTO runtime_runs(id,user_id,state,stop_reason) VALUES($1,'123','stopped',$2)",
+      [run, reason],
+    );
+    await saveConversationState(
+      db,
+      "123",
+      run,
+      "",
+      "Track my mother's flight",
+      reply,
+      reason,
+      thread,
+    );
+    await db.query(
+      "UPDATE conversation_contexts SET created_at=now()-$2::interval WHERE run_id=$1",
+      [run, age],
+    );
+    return run;
+  };
+  /** A later owner message in a thread, in the given turn state. */
+  const said = async ({ thread = 0, state = "completed" } = {}) =>
+    db.query(
+      "INSERT INTO conversation_inputs(id,user_id,message,metadata,state,received_at) VALUES($1,'123','yes',$2::jsonb,$3,now()+interval '1 second')",
+      [randomUUID(), JSON.stringify(thread ? { threadId: thread } : {}), state],
+    );
+  return { db, job, card, monitoring, asked, said };
 }
 const hour = (n: number) => new Date(Date.now() + n * 3600000).toISOString();
 const awaiting = async (db: Database) =>
@@ -218,10 +262,11 @@ test("decided, old, other-owner and long-failed jobs are left out; a recent fail
     ],
   );
 });
-test("only delivered monitoring cards that expired in the last day and were not superseded are listed", async () => {
+test("only delivered, undecided, unsuperseded monitoring cards are listed; an undated one for a week", async () => {
   const f = await fixture();
-  await f.monitoring(); // listed
-  await f.monitoring({ expires: "-2 days" }); // too old
+  await f.monitoring({ title: "Track the return flight" }); // listed
+  await f.monitoring({ title: "Watch the visa email", expires: "-6 days" }); // listed
+  await f.monitoring({ expires: "-8 days" }); // undated and over a week old
   await f.monitoring({ expires: "2 hours" }); // still open
   await f.monitoring({ status: "approved" }); // decided
   await f.monitoring({ delivered: false }); // never shown to the owner
@@ -229,12 +274,105 @@ test("only delivered monitoring cards that expired in the last day and were not 
   const concern = randomUUID();
   await f.monitoring({ concern, age: "2 days" }); // superseded by the next proposal
   await f.monitoring({ concern, expires: "3 hours", age: "1 hour" });
+  // A never-confirmed concern proposed again gets a new id; the same title supersedes it.
+  await f.monitoring({ title: "Track the parcel", age: "2 days" });
+  await f.monitoring({ title: "track the parcel ", expires: "3 hours" });
   const loops = await openLoops(f.db, "123", { coding: false });
   assert.deepEqual(
-    loops!.expiredCards!.map((c) => [c.operation, c.title]),
-    [["responsibility_confirm", "Track the return flight"]],
+    loops!.expiredCards!.map((c) => [c.operation, c.title, c.due]),
+    [
+      ["responsibility_confirm", "Track the return flight", false],
+      ["responsibility_confirm", "Watch the visa email", false],
+    ],
   );
   assert.equal(loops!.coding, undefined);
+  assert.equal(loops!.questions, undefined);
+});
+test("an expired monitoring card stays until its own date has passed, and is due as the date arrives", async () => {
+  // Production review, 14-21 October: a return-flight card dropped out after a day, and its
+  // date passed with no mention.
+  const f = await fixture();
+  const at = (hours: number) =>
+    new Date(Date.now() + hours * 3600000).toISOString();
+  await f.monitoring({
+    title: "Flight in two days",
+    expires: "-3 days",
+    endsAt: at(48),
+  });
+  await f.monitoring({
+    title: "Flight tonight",
+    expires: "-3 days",
+    endsAt: at(12),
+  });
+  await f.monitoring({
+    title: "Flight this morning",
+    expires: "-3 days",
+    endsAt: at(-12),
+  });
+  await f.monitoring({
+    title: "Flight two days ago",
+    expires: "-3 days",
+    endsAt: at(-48),
+  });
+  await f.monitoring({
+    title: "Too old to keep",
+    expires: "-40 days",
+    endsAt: at(240),
+  });
+  const cards = (await openLoops(f.db, "123", { coding: false }))!
+    .expiredCards!;
+  assert.deepEqual(
+    cards.map((c) => [c.title, c.due]),
+    [
+      ["Flight this morning", true],
+      ["Flight tonight", true],
+      ["Flight in two days", false],
+    ],
+  );
+  assert.ok(
+    cards.every(
+      (c) => c.endsAt instanceof Date || typeof c.endsAt === "string",
+    ),
+  );
+});
+test("Chief's unanswered question is listed until the owner replies in its thread", async () => {
+  const f = await fixture();
+  await f.asked();
+  await f.asked({
+    reply: "Do you want the dates?",
+    reason: "awaiting_approval",
+  });
+  await f.asked({ reply: "Is it still on?", age: "4 days" }); // too old
+  await f.asked({ reply: "Which branch?", thread: 7, age: "2 hours" });
+  const questions = async () =>
+    (await openLoops(f.db, "123", { coding: false }))?.questions?.map((q) => [
+      q.excerpt,
+      q.thread,
+      q.awaiting,
+    ]);
+  assert.deepEqual(await questions(), [
+    ["Which date is the return flight?", 0, "owner to answer your question"],
+    ["Which branch?", 7, "owner to answer your question"],
+  ]);
+  // The message being handled now has not answered it yet, and another thread does not.
+  await f.said({ state: "running" });
+  await f.said({ thread: 3 });
+  assert.equal((await questions())!.length, 2);
+  await f.said();
+  assert.deepEqual(await questions(), [
+    ["Which branch?", 7, "owner to answer your question"],
+  ]);
+  await f.said({ thread: 7 });
+  assert.equal(await openLoops(f.db, "123", { coding: false }), undefined);
+});
+test("a question excerpt is short and ends at the reply's last question", () => {
+  const long = `${"Here is what I found about the flights and fares. ".repeat(10)}Which of these dates should I watch?\n\nI can also check hotels.`;
+  const excerpt = questionExcerpt(long);
+  assert.ok(excerpt.length <= 201, excerpt);
+  assert.match(excerpt, /^…\S/);
+  assert.match(excerpt, /Which of these dates should I watch\?$/);
+  assert.equal(questionExcerpt("Short  \n question?"), "Short question?");
+  assert.equal(questionExcerpt("x".repeat(300)).length, 201);
 });
 test("a merge stage without a live card for the current head is not reported as actionable", async () => {
   // Devin, PR 251: a pending or expired merge card was still labelled "choose Merge or Keep open".
