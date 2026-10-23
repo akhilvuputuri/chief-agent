@@ -31,7 +31,8 @@ export const MAX_ELIDED_SPAN = 600;
  * Words that change what the surrounding text means. Omitted text containing one is never
  * hidden behind " … ": the quote must show it.
  */
-const QUALIFIER = /\b(?:not|no|never|only|except|unless|without)\b|n't\b/i;
+const QUALIFIER =
+  /\b(?:not|no|never|cannot|none|nothing|nobody|neither|nor|nowhere|only|except|excluding|unless|without)\b|n't\b/i;
 
 /**
  * The normalised text, with the original UTF-16 span of every normalised unit so a match can
@@ -137,7 +138,24 @@ function bridges({ content, normalized }: PreparedSource, p: number) {
 const inside = (source: PreparedSource, i: number) =>
   joined(source.normalized.text[i - 1], source.normalized.text[i]) ||
   bridges(source, i - 1) ||
-  bridges(source, i);
+  bridges(source, i) ||
+  signed(source, i);
+/** Characters that, before a digit, are a number's sign rather than a dash. */
+const SIGNS = new Set(["-", "−"]);
+/**
+ * True when position `i` falls between a leading sign and its digits: "-5%" and "−5%" are one
+ * number, so "5%" may not be quoted out of them. A dash after a word ("9am-5pm") is a range,
+ * not a sign.
+ */
+function signed({ content, normalized }: PreparedSource, i: number) {
+  const text = normalized.text;
+  return (
+    text[i - 1] === "-" &&
+    SIGNS.has(content[normalized.starts[i - 1]!]!) &&
+    DIGIT_CHAR.test(text[i] ?? "") &&
+    !WORD_CHAR.test(text[i - 2] ?? "")
+  );
+}
 
 /** First occurrence of `piece` at or after `from` that does not start or end inside a word. */
 function findBounded(source: PreparedSource, piece: string, from: number) {

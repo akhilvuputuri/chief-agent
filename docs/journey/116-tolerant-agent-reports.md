@@ -8,7 +8,7 @@ Status: in review. Changes:
 - A child's last model call offers and dispatches only its report tool.
 - A rejected or cut-short report returns its checked part as `partial`, with unsupported items marked, instead of nothing.
 
-Tested with mocked models only. The first independent review (23 October, on `ac4622c`) requested changes, which were fixed in `8865161`. The delta review of `8865161` approved with nits. Those fixes are below and await re-review. Not released and not measured in production.
+Tested with mocked models only. The first independent review (23 October, on `ac4622c`) requested changes, which were fixed in `8865161`. The delta review of `8865161` approved with nits, fixed in `9573b37`. The second delta review approved `9573b37`; its three nits are fixed in the final commit. No further review is pending, apart from the coordinator's check of that commit. Not released and not measured in production.
 
 ## User-visible problem and preceding iteration
 
@@ -37,7 +37,7 @@ Chosen mechanism:
    - Every returned character comes from the one cited source.
    - A match, or each piece of an elided one, starts and ends on a word boundary in scripts written with spaces. An apostrophe or hyphen between letters, or a "." or "," between digits, does not end a word: "they can" is refused out of "they can't", and "5 million" out of "1.5 million". The cost is that "The firm" cannot be quoted out of "The firm's".
    - `...`, `…` and `[...]` mark gaps. There are at most 4 pieces of at least 8 characters each.
-   - The host takes the shortest source span from the first piece to the last. A span of at most 300 characters (the quote limit) is returned whole, so an omitted "not" is visible to the coordinator. Spans of 301–600 characters are returned elided, as the source's pieces joined with `…`. They are refused when the omitted text contains not, no, never, `n't`, only, except, unless or without. Spans over 600 characters are refused. Qualifiers outside that list, such as "rarely", can still be omitted in the 301–600 band.
+   - The host takes the shortest source span from the first piece to the last. A span of at most 300 characters (the quote limit) is returned whole, so an omitted "not" is visible to the coordinator. Spans of 301–600 characters are returned elided, as the source's pieces joined with `…`. They are refused when the omitted text contains not, no, never, cannot, `n't`, none, nothing, nobody, neither, nor, nowhere, only, except, excluding, unless or without. Spans over 600 characters are refused. Qualifiers outside that list, such as "rarely", can still be omitted in the 301–600 band.
    - Matching is otherwise character-exact, including case.
 2. **Whole-token refs.** Refs of 8 or more characters keep the old substring check. Shorter refs must appear as a whole token inside a string or number value of a tool result, or in the brief. They may not sit inside a longer number or word, or form part of a decimal or grouped number. A JSON key is not a value, so a short number that only keys an object does not pass. Refs under 3 characters are refused.
 3. **Complete, retryable rejections.** One rejection lists every failing item, says how to fix each, and is `VALIDATION_FAILED` with `retryable: true`.
@@ -92,7 +92,13 @@ Second review, the delta review of `8865161`, 23 October 2026. Verdict: **APPROV
    - `MAX_STARTS` is gone: the shortest-span search keeps one forward-moving cursor per piece, so it is one pass over the source.
 5. **Docs.** This entry and the design docs were corrected, and plugins 8/8 was added to the tested list.
 
-Re-review: pending.
+Third review, the second delta review of `9573b37`, 23 October 2026. Verdict: **APPROVE**. It raised three nits, all fixed in the final commit:
+
+1. **`cannot` was not caught**, because `\bnot\b` misses it. The qualifier list now also has cannot, none, nothing, nobody, neither, nor, nowhere and excluding.
+2. **A leading sign was not part of its number.** A `-` or `−` after a non-word character and before a digit now joins the number, judged by the source's own character. So "5% today" is refused out of "fell -5% today" or "−5%", while "5pm" can still be quoted out of "9am-5pm".
+3. **The source cache depended on the call mode.** A call with a cache but without `tolerant` cached an empty normalised text. A cached source is now always prepared.
+
+No further review is pending, apart from the coordinator's check of this final commit.
 
 ## Verification and outcome
 
@@ -125,6 +131,7 @@ Re-review: pending.
   - removing the notice de-duplication;
   - removing the last-call dispatch refusal;
   - checking short refs against raw JSON instead of values.
+- Final nits: `tests/quote-match.test.ts` adds a hidden "cannot" in the 301–600 band (refused), "5% today" out of "-5%" and "−5%" (refused), "5pm daily" out of "9am-5pm" (accepted), and an exact-mode cache entry serving a later tolerant check. Removing each of the three fixes on its own fails a test. After the nits: quote-match 10/10, agents 15/15 and research 7/7; tsc and Prettier pass.
 - Delta mutations, each failing at least one focused test:
   - consuming a tool unit before the last-call refusal;
   - removing the punctuation look-around;

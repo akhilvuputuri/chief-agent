@@ -178,6 +178,11 @@ test("a match may not start or end inside a word joined by an apostrophe, hyphen
     "Friday from 9am",
   );
   assert.equal(matchQuote("A well-known fact.", "known fact"), undefined);
+  // A leading sign belongs to its number; a dash after a word is a range.
+  assert.equal(matchQuote("Shares fell -5% today.", "5% today"), undefined);
+  assert.equal(matchQuote("Shares fell −5% today.", "5% today"), undefined);
+  assert.equal(matchQuote("Shares fell -5% today.", "-5% today"), "-5% today");
+  assert.equal(matchQuote("Open 9am-5pm daily.", "5pm daily"), "5pm daily");
 });
 
 /** A span of `length` filler characters, in words. */
@@ -205,6 +210,15 @@ test("a long elided span may not hide a negating or limiting word", () => {
     matchQuoteDetailed(
       limited,
       "Members may borrow ten books ... from the central branch",
+    ),
+    { refused: "hidden_qualifier" },
+  );
+  // "cannot" and other reversing words count too.
+  const cannot = `The review found the treatment ${words(350)} cannot be effective in adults.`;
+  assert.deepEqual(
+    matchQuoteDetailed(
+      cannot,
+      "The review found the treatment ... be effective in adults",
     ),
     { refused: "hidden_qualifier" },
   );
@@ -256,6 +270,20 @@ test("a hidden-qualifier refusal tells the child to quote the passage contiguous
       sources,
     });
   assert.equal(reads, 1);
+  // A source cached by an exact check still serves a later tolerant one.
+  const mixed = new Map();
+  await checkResearchQuote(counting, "run", "source", "The board said", {
+    sources: mixed,
+  });
+  assert.equal(
+    (
+      await checkResearchQuote(counting, "run", "source", "The   board said", {
+        tolerant: true,
+        sources: mixed,
+      })
+    ).quote,
+    "The board said",
+  );
 });
 
 test("a fabricated or altered quote is refused", () => {

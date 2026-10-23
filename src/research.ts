@@ -488,12 +488,14 @@ export async function checkResearchQuote(
     cached = {
       url: row.url,
       // Normalised once per source, however many quotes cite it.
-      prepared: options.tolerant
-        ? prepareSource(row.content)
-        : {
-            content: row.content,
-            normalized: { text: "", starts: [], ends: [] },
-          },
+      // A cached source is always prepared, so a later tolerant check can use it.
+      prepared:
+        options.tolerant || options.sources
+          ? prepareSource(row.content)
+          : {
+              content: row.content,
+              normalized: { text: "", starts: [], ends: [] },
+            },
     };
     options.sources?.set(sourceId, cached);
   }
