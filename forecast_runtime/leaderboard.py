@@ -10,7 +10,7 @@ Engines, with settings fixed in SETTINGS before a run:
 - chronos-2 and timesfm-2.5: their quantile heads on the close series, pinned by revision.
 
 Output: JSON with, per engine and horizon, pooled scores, the pinball difference to ewma with
-a 95% interval from resampling whole origin dates, per-symbol skill and a 2026-only subset.
+a 95% interval from resampling blocks of consecutive origin dates, per-symbol skill and a 2026-only subset.
 Usage: python leaderboard.py --bars-dir DIR --symbols AAPL,MSFT,... [--engines ...]
 """
 
@@ -41,6 +41,8 @@ SETTINGS = {
         "context": 512,
     },
     "seed": 7,
+    # Consecutive origin dates resampled together for intervals (4 dates = 20 sessions).
+    "bootstrapBlock": 4,
 }
 LEVELS = [round(0.1 * i, 1) for i in range(1, 10)]
 ENGINES = ["ewma", "garch", "kronos-small", "chronos-2", "timesfm-2.5"]
@@ -61,8 +63,9 @@ def origin_indices(n):
 
 def from_levels(log_q):
     """Quantile dict for TAUS plus P(up) from log-return quantiles at LEVELS."""
-    q = {tau: float(log_q[LEVELS.index(tau)]) for tau in scoring.TAUS}
-    return q, scoring.p_up_from_quantiles(LEVELS, log_q)
+    ordered = sorted(float(v) for v in log_q)  # same rearrangement p_up uses
+    q = {tau: ordered[LEVELS.index(tau)] for tau in scoring.TAUS}
+    return q, scoring.p_up_from_quantiles(LEVELS, ordered)
 
 
 def ewma_engine(df, origins):
@@ -89,7 +92,10 @@ def garch_engine(df, origins):
         per_h = {}
         for h in SETTINGS["horizons"]:
             s = math.sqrt(float(var[:h].sum())) / 100
-            per_h[h] = ({tau: s * unit * float(student.ppf(tau, nu)) for tau in scoring.TAUS}, 0.5)
+            # One day is Student-t; a sum of several days is close to normal, so a single
+            # t quantile would make multi-day intervals too narrow.
+            z = {tau: unit * float(student.ppf(tau, nu)) for tau in scoring.TAUS} if h == 1 else scoring.NORMAL_Z
+            per_h[h] = ({tau: s * z[tau] for tau in scoring.TAUS}, 0.5)
         out.append(per_h)
     return out
 
@@ -179,6 +185,10 @@ def summarize_engine(rows, reference):
     """rows and reference: records with y, q, p_up, date and symbol, aligned one to one."""
     if not rows:
         return {"n": 0}
+    if len(rows) != len(reference) or any(
+        (r["symbol"], r["date"]) != (b["symbol"], b["date"]) for r, b in zip(rows, reference)
+    ):
+        raise SystemExit("Engine rows are not aligned with the reference")
     records = [{"y": r["y"], "model": r["q"], "baseline": b["q"], "p_up": r["p_up"]} for r, b in zip(rows, reference)]
     by_date, by_symbol = {}, {}
     for r, b in zip(rows, reference):
@@ -186,7 +196,9 @@ def summarize_engine(rows, reference):
         by_date.setdefault(r["date"], []).append(d)
         by_symbol.setdefault(r["symbol"], []).append((mean_pinball(r["y"], r["q"]), mean_pinball(b["y"], b["q"])))
     summary = scoring.summarize(records)
-    summary["pinballDiffVsEwma"] = scoring.cluster_bootstrap_ci(by_date, seed=SETTINGS["seed"])
+    summary["pinballDiffVsEwma"] = scoring.cluster_bootstrap_ci(
+        by_date, seed=SETTINGS["seed"], block=SETTINGS["bootstrapBlock"]
+    )
     skills = {s: 1 - sum(m for m, _ in v) / sum(b for _, b in v) for s, v in by_symbol.items()}
     summary["symbolSkill"] = {s: round(v, 3) for s, v in sorted(skills.items())}
     summary["symbolsBeatingEwma"] = sum(v > 0 for v in skills.values())
@@ -199,6 +211,7 @@ def main():
     parser.add_argument("--symbols", type=lambda s: s.split(","), required=True)
     parser.add_argument("--engines", type=lambda s: s.split(","), default=ENGINES)
     parser.add_argument("--threads", type=int, default=4)
+    parser.add_argument("--rows-out", help="Also write every scored forecast here, for re-analysis")
     args = parser.parse_args()
     unknown = set(args.engines) - set(RUNNERS)
     if unknown or "ewma" not in args.engines:
@@ -250,6 +263,9 @@ def main():
                 results[engine][f"h{h}"]["pinballSkillVsGarch"] = 1 - sum(
                     mean_pinball(r["y"], r["q"]) for r in mine
                 ) / sum(mean_pinball(r["y"], r["q"]) for r in g)
+    if args.rows_out:
+        with open(args.rows_out, "w") as f:
+            json.dump({e: {f"h{h}": v for h, v in by_h.items()} for e, by_h in rows.items()}, f)
     json.dump({"settings": SETTINGS, "symbols": coverage, "results": results}, sys.stdout, indent=2)
     sys.stdout.write("\n")
 

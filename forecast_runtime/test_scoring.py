@@ -71,6 +71,9 @@ class ScoringTest(unittest.TestCase):
         self.assertAlmostEqual(scoring.p_up_from_quantiles(levels, [-0.03, -0.01, 0.01]), 0.3)
         self.assertAlmostEqual(scoring.p_up_from_quantiles(levels, [0.01, 0.02, 0.03]), 0.95)
         self.assertAlmostEqual(scoring.p_up_from_quantiles(levels, [-0.03, -0.02, -0.01]), 0.05)
+        # A quantile exactly at zero gives that level's CDF on either edge.
+        self.assertAlmostEqual(scoring.p_up_from_quantiles(levels, [0.0, 0.01, 0.02]), 0.9)
+        self.assertAlmostEqual(scoring.p_up_from_quantiles(levels, [-0.02, -0.01, 0.0]), 0.1)
         # Crossed quantiles are put back in order rather than trusted.
         self.assertAlmostEqual(scoring.p_up_from_quantiles(levels, [0.02, 0.0, -0.02]), 0.5)
 
@@ -84,6 +87,16 @@ class ScoringTest(unittest.TestCase):
         self.assertEqual((same["low"], same["high"]), (2.0, 2.0))
         with self.assertRaises(ValueError):
             scoring.cluster_bootstrap_ci({})
+
+    def test_block_bootstrap_keeps_runs_of_consecutive_clusters(self):
+        values = {f"d{i:02d}": [float(i // 5)] for i in range(20)}
+        out = scoring.cluster_bootstrap_ci(values, draws=400, block=5)
+        self.assertAlmostEqual(out["mean"], 1.5)
+        self.assertLessEqual(out["low"], 1.5)
+        self.assertGreaterEqual(out["high"], 1.5)
+        # A block as long as the data always resamples everything, so the interval collapses.
+        whole = scoring.cluster_bootstrap_ci(values, draws=50, block=99)
+        self.assertEqual((whole["low"], whole["high"]), (1.5, 1.5))
 
     def test_toy_signals_need_probability_and_a_move_above_cost(self):
         base = {0.1: -0.01, 0.5: 0.0, 0.9: 0.01}

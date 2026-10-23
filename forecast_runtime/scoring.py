@@ -106,10 +106,12 @@ def p_up_from_quantiles(levels, values) -> float:
     remaining tail mass is assumed to lie on each side of zero.
     """
     ls, xs = sorted(levels), sorted(float(v) for v in values)
-    if 0 <= xs[0]:
+    if 0 < xs[0]:
         cdf = ls[0] / 2
-    elif 0 >= xs[-1]:
+    elif 0 > xs[-1]:
         cdf = (1 + ls[-1]) / 2
+    elif 0 == xs[-1]:
+        cdf = ls[-1]
     else:
         i = max(k for k in range(len(xs)) if xs[k] <= 0)
         span = xs[i + 1] - xs[i]
@@ -117,18 +119,28 @@ def p_up_from_quantiles(levels, values) -> float:
     return 1 - cdf
 
 
-def cluster_bootstrap_ci(values_by_cluster: dict, draws: int = 2000, seed: int = 0) -> dict:
+def cluster_bootstrap_ci(values_by_cluster: dict, draws: int = 2000, seed: int = 0, block: int = 1) -> dict:
     """Mean of all values with a 95% interval from resampling whole clusters (e.g. dates),
-    so values that move together on the same day are not counted as independent."""
+    so values that move together on the same day are not counted as independent.
+
+    With block > 1, runs of `block` consecutive clusters (in sorted key order) are resampled
+    together, so dependence between nearby dates, such as volatility clustering, is kept.
+    """
     keys = sorted(values_by_cluster)
     sums = {k: sum(values_by_cluster[k]) for k in keys}
     counts = {k: len(values_by_cluster[k]) for k in keys}
     if not keys or not sum(counts.values()):
         raise ValueError("No values")
+    block = max(1, min(block, len(keys)))
+    starts = len(keys) - block + 1
     rng = random.Random(seed)
     stats = []
     for _ in range(draws):
-        pick = [rng.choice(keys) for _ in keys]
+        pick = []
+        while len(pick) < len(keys):
+            first = rng.randrange(starts)
+            pick.extend(keys[first : first + block])
+        pick = pick[: len(keys)]
         stats.append(sum(sums[k] for k in pick) / sum(counts[k] for k in pick))
     stats.sort()
     return {
