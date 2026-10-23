@@ -27,7 +27,12 @@ The experiment is therefore expected to find little or no edge. A clean negative
 Read in the pinned code (`model/kronos.py` at `67b630e`) and `huggingface_hub` 0.33.1:
 
 - **Samples are averaged away.** `auto_regressive_inference` reshapes its samples and returns their mean, so `predict()` gives one path with no spread. The runner draws each sample as its own batch row with `sample_count=1` and keeps them.
-- **Dropout stays on.** Checkpoints load through `PyTorchModelHubMixin`'s safetensors path, which never calls `.eval()`, and `KronosPredictor` never calls it either. Kronos-small's published config sets FFN and residual dropout to 0.25 and attention and token dropout to 0.1; Kronos-base uses 0.2. README-style use therefore samples with dropout active. The runner sets the mode explicitly and the spike compares both.
+- **Inference runs in training mode.** Checkpoints load through `PyTorchModelHubMixin`'s safetensors path, which never calls `.eval()`, and `KronosPredictor` never calls it either. README-style use therefore has two side effects:
+  - dropout is active: Kronos-small's config sets FFN and residual dropout to 0.25 and attention and token dropout to 0.1; Kronos-base sets FFN and residual dropout to 0.2;
+  - the s2 head's cross-attention becomes causal (`is_causal = self.training` in `module.py`). Its single query, the sampled s1 token, then sees only the oldest context position, so the s2 half of each token no longer depends on the sampled s1.
+
+  The runner sets the mode explicitly. The spike compares `eval` with this upstream default, called `train`; the comparison measures both effects together, not dropout alone.
+
 - **top-p is skipped when top-k is set.** `top_k_top_p_filtering` returns right after top-k filtering. The runner uses top-k 0 and top-p 0.9, the README defaults.
 - **Normalisation** uses the lookback window's own mean and standard deviation, which is causal.
 - **Reported hang.** `predict()` hangs after 20–40 calls in a loop on Windows ([#403](https://github.com/shiyu-coder/Kronos/issues/403)); the runner loads once and makes a few large batched calls.
@@ -48,7 +53,8 @@ Chief (Lightsail, after the US close, e.g. 06:30 SGT Tue–Sat)
 ```
 
 - **Box profile.** A new `forecast` profile on the existing [box layer](boxes.md), with no retention (terminate after the run) and concurrency 1. Its image builds the Node worker (the box agent is installed from `/opt/chief-worker/dist/boxes` in the profile image) and adds the Python runtime, Kronos source and checkpoints fetched and verified at build time by [`fetch_artifacts.py`](../forecast_runtime/fetch_artifacts.py). A small `forecast-task.js` speaks the box task protocol and calls the runner, so the task needs no network. The owner applies the AWS change (a launch template and the instance type in the controller policy), as for the other profiles.
-- **Instance size.** Chosen from the spike timings below and confirmed by the first EC2 run, because the Mac numbers do not transfer directly to x86.
+- **Instance size.** Chosen from the [spike timings](journey/120-kronos-cpu-spike.md) and confirmed by the first EC2 run, because the Mac numbers do not transfer directly to x86.
+- **Future dates.** Kronos uses calendar features of the bars it forecasts. Chief sends the next session dates from `src/market-calendar.ts`, so live runs see the same holiday-aware dates the backtest used.
 - **Storage.** New tables (one migration): runs, forecasts and signals, all append-only, each forecast carrying its model provenance; owner trades link to a signal ID when the owner drafts from one.
 - **Baselines** are computed host-side in TypeScript beside `src/stock-stats.ts`, so they do not depend on the box: no trade (zero-drift random walk with an EWMA band), a simple momentum rule on the same symbols, and holding SPY.
 - **Suggestions.** A separate experiment agent formats them; the stocks and portfolio agents keep their facts-only instructions. Drafting stays a foreground owner request with explicit terms, exactly as today.
@@ -57,11 +63,11 @@ Chief (Lightsail, after the US close, e.g. 06:30 SGT Tue–Sat)
 
 Fixed before the ledger starts, so results cannot be tuned after the fact:
 
-- **Forecast.** At least 32 samples per symbol; quantiles 10/50/90 of the log return at 1 and 5 days; P(up) is the share of samples above zero.
+- **Forecast.** At least 32 samples per symbol; quantiles 10/50/90 of the log return at 1 and 5 days, taken at Weibull plotting positions so a calibrated model's 10–90% interval covers 80% on average (the linear method covers about 75% with 32 samples); P(up) is the share of samples above zero.
 - **Signal.** Long only: P(up) ≥ 0.55 and a median move above the assumed round-trip cost of 0.30%. No shorting, margin or options.
 - **Engine ledger.** Every signal is recorded whether or not the owner acts, and scored net of cost when its horizon closes. The owner's trades are scored separately, so the model's record and the owner's selection can be told apart.
 - **Forecast scores.** Pinball loss (skill against the EWMA random-walk band), coverage of the 80% interval, Brier score of P(up) and sign hit rate, per horizon.
-- **Stop rule.** After at least 100 signals in a horizon, the arm is reported as failed if its mean net return is not above zero at 95% confidence or its pinball skill is not above zero. The owner may keep it running; the report still says failed.
+- **Stop rule.** After at least 100 signals in a horizon, the arm is reported as failed if its mean net return is not above zero at 95% confidence or its pinball skill is not above zero. Daily 5-day signals overlap and same-day signals move together, so the test uses Newey–West standard errors (at least 4 lags) clustered by signal date, not a plain t-test. The owner may keep the arm running; the report still says failed.
 
 ## Spike — 23 October 2026
 

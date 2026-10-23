@@ -33,11 +33,20 @@ class ScoringTest(unittest.TestCase):
         self.assertAlmostEqual(scoring.quantile([4, 1, 3, 2], 0.1), 1.3)
         self.assertAlmostEqual(scoring.quantile([4, 1, 3, 2], 0.5), 2.5)
         self.assertEqual(scoring.quantile([5.0], 0.9), 5.0)
-        self.assertEqual(
-            scoring.sample_quantiles([0.0, 1.0, 2.0]), {0.1: 0.2, 0.5: 1.0, 0.9: 1.8}
-        )
         with self.assertRaises(ValueError):
             scoring.quantile([], 0.5)
+
+    def test_sample_quantiles_use_unbiased_plotting_positions(self):
+        values = [float(v) for v in range(1, 33)]
+        out = scoring.sample_quantiles(values)
+        self.assertAlmostEqual(out[0.1], 3.3)
+        self.assertAlmostEqual(out[0.5], 16.5)
+        self.assertAlmostEqual(out[0.9], 29.7)
+        # Expected coverage of [X(3.3), X(29.7)] among 32 draws is (29.7 - 3.3) / 33 = 0.8.
+        self.assertAlmostEqual((out[0.9] - out[0.1]) / 33, 0.8)
+        self.assertEqual(scoring.sample_quantiles([0.0, 1.0, 2.0]), {0.1: 0.0, 0.5: 1.0, 0.9: 2.0})
+        with self.assertRaises(ValueError):
+            scoring.weibull_quantile([], 0.5)
 
     def test_summarize_reports_coverage_skill_and_brier(self):
         wide = {0.1: -0.05, 0.5: 0.0, 0.9: 0.05}

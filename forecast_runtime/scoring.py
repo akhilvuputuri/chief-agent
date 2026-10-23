@@ -47,9 +47,25 @@ def quantile(values, tau: float) -> float:
     return s[lo] + (h - lo) * (s[hi] - s[lo])
 
 
+def weibull_quantile(values, tau: float) -> float:
+    """Interpolates at rank (n + 1) * tau, so the expected coverage of the interval between
+    two sample quantiles equals their nominal coverage. With 32 samples the linear method's
+    10-90% interval covers about 75% for a perfectly calibrated model."""
+    s = sorted(float(v) for v in values)
+    if not s:
+        raise ValueError("No samples")
+    h = (len(s) + 1) * tau
+    if h <= 1:
+        return s[0]
+    if h >= len(s):
+        return s[-1]
+    lo = math.floor(h)
+    return s[lo - 1] + (h - lo) * (s[lo] - s[lo - 1])
+
+
 def sample_quantiles(samples) -> dict:
     s = [float(v) for v in samples]
-    return {tau: quantile(s, tau) for tau in TAUS}
+    return {tau: weibull_quantile(s, tau) for tau in TAUS}
 
 
 def _side(records, key):

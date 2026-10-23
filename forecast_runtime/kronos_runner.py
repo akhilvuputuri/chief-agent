@@ -11,8 +11,13 @@ Two upstream behaviours are handled here rather than patched:
 - `auto_regressive_inference` averages its samples, so each sample is drawn as its own batch
   row (sample_count=1) and the spread is kept.
 - Checkpoints load through huggingface_hub's safetensors path, which never calls `.eval()`,
-  and KronosPredictor does not either. Kronos-small's config sets dropout up to 0.25, so
-  `--modes` compares "eval" with the library's default "train" mode.
+  and KronosPredictor does not either, so upstream inference runs in training mode. That
+  turns on dropout (up to 0.25 in Kronos-small) and also makes the s2 head's cross-attention
+  causal (`is_causal = self.training` in module.py): its single sampled-s1 query then sees
+  only the oldest context position, so s2 loses its s1 conditioning. `--modes` compares
+  "eval" with this upstream default, "train".
+
+`peakRssMiB` is the process peak so far; run one model per process for a clean figure.
 """
 
 import argparse

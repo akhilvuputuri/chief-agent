@@ -14,14 +14,19 @@ from pathlib import Path
 
 
 def download(url: str, dest: Path, sha256: str) -> None:
+    """Writes to a .part file and renames it only after the hash matches."""
+    part = dest.with_name(dest.name + ".part")
     digest = hashlib.sha256()
-    with urllib.request.urlopen(url, timeout=600) as response, dest.open("wb") as out:
-        while chunk := response.read(1 << 20):
-            digest.update(chunk)
-            out.write(chunk)
-    if digest.hexdigest() != sha256:
-        dest.unlink()
-        raise SystemExit(f"SHA-256 mismatch for {url}: got {digest.hexdigest()}")
+    try:
+        with urllib.request.urlopen(url, timeout=600) as response, part.open("wb") as out:
+            while chunk := response.read(1 << 20):
+                digest.update(chunk)
+                out.write(chunk)
+        if digest.hexdigest() != sha256:
+            raise SystemExit(f"SHA-256 mismatch for {url}: got {digest.hexdigest()}")
+        part.replace(dest)
+    finally:
+        part.unlink(missing_ok=True)
 
 
 def main(lock_path: str, source_dir: str, weights_dir: str) -> None:
