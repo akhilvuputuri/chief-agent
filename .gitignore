@@ -30,3 +30,7 @@ build/
 
 # Generated manual acceptance workflow; source template is versioned.
 tests/pi-acceptance.manual.ts
+
+# Local Kronos forecast runtime (docs/kronos-trading-experiment.md)
+.venv-forecast/
+.forecast/

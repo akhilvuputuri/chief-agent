@@ -1,0 +1,34 @@
+{
+  "source": {
+    "repo": "shiyu-coder/Kronos",
+    "commit": "67b630e67f6a18c9e9be918d9b4337c960db1e9a",
+    "url": "https://codeload.github.com/shiyu-coder/Kronos/tar.gz/67b630e67f6a18c9e9be918d9b4337c960db1e9a",
+    "sha256": "969719e47b2134d8a56533784508b6d859bd1c9aacb1b62e4a504cb4fc096021"
+  },
+  "models": {
+    "Kronos-Tokenizer-base": {
+      "repo": "NeoQuasar/Kronos-Tokenizer-base",
+      "revision": "0e0117387f39004a9016484a186a908917e22426",
+      "files": {
+        "config.json": "2366e7ccfec76cbc19cf3c4c1b9c5d901be336ca1e83f2d2292c9bff381b77a2",
+        "model.safetensors": "59d85f6af76a2c3b8240ea06cb21db4213b4eeca053f246b23e29cf832fc6bee"
+      }
+    },
+    "Kronos-small": {
+      "repo": "NeoQuasar/Kronos-small",
+      "revision": "901c26c1332695a2a8f243eb2f37243a37bea320",
+      "files": {
+        "config.json": "5e0f6a605d5f81b5c9b559fe5cf716a1acb041c744e6f41bd05b097b7a685396",
+        "model.safetensors": "b082dfcbd8e8c142a725c8bbb99781802f38fec81210e13479effb32b3c3e020"
+      }
+    },
+    "Kronos-base": {
+      "repo": "NeoQuasar/Kronos-base",
+      "revision": "2b554741eca47781b64468546e77fef3e85130e6",
+      "files": {
+        "config.json": "77ebc3038b647709b92be002f801d72e1a385f4c8c2c5aa1cc6cf21fcfe44eb2",
+        "model.safetensors": "abff193acab6db1a0368e9773e75799d11403b6d054ee6d5f0a11aeabc5f4b83"
+      }
+    }
+  }
+}
