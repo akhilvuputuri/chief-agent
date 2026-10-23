@@ -7,6 +7,7 @@ tests run in the repository's check without the runtime's dependencies.
 """
 
 import math
+import random
 from statistics import fmean, median
 
 TAUS = (0.1, 0.5, 0.9)
@@ -95,6 +96,57 @@ def summarize(records) -> dict:
         "brier": fmean((r["p_up"] - u) ** 2 for r, u in zip(records, up)),
         "upRate": fmean(up),
         "medianSignHitRate": fmean((m > 0) == (y > 0) for m, y in signed) if signed else None,
+    }
+
+
+def p_up_from_quantiles(levels, values) -> float:
+    """P(value > 0) from quantile forecasts, interpolating the CDF linearly between them.
+
+    Crossed quantiles are rearranged into order. Beyond the outermost quantile, half of the
+    remaining tail mass is assumed to lie on each side of zero.
+    """
+    ls, xs = sorted(levels), sorted(float(v) for v in values)
+    if 0 < xs[0]:
+        cdf = ls[0] / 2
+    elif 0 > xs[-1]:
+        cdf = (1 + ls[-1]) / 2
+    elif 0 == xs[-1]:
+        cdf = ls[-1]
+    else:
+        i = max(k for k in range(len(xs)) if xs[k] <= 0)
+        span = xs[i + 1] - xs[i]
+        cdf = ls[i] + (ls[i + 1] - ls[i]) * ((0 - xs[i]) / span if span else 0.5)
+    return 1 - cdf
+
+
+def cluster_bootstrap_ci(values_by_cluster: dict, draws: int = 2000, seed: int = 0, block: int = 1) -> dict:
+    """Mean of all values with a 95% interval from resampling whole clusters (e.g. dates),
+    so values that move together on the same day are not counted as independent.
+
+    With block > 1, runs of `block` consecutive clusters (in sorted key order) are resampled
+    together, so dependence between nearby dates, such as volatility clustering, is kept.
+    """
+    keys = sorted(values_by_cluster)
+    sums = {k: sum(values_by_cluster[k]) for k in keys}
+    counts = {k: len(values_by_cluster[k]) for k in keys}
+    if not keys or not sum(counts.values()):
+        raise ValueError("No values")
+    block = max(1, min(block, len(keys)))
+    starts = len(keys) - block + 1
+    rng = random.Random(seed)
+    stats = []
+    for _ in range(draws):
+        pick = []
+        while len(pick) < len(keys):
+            first = rng.randrange(starts)
+            pick.extend(keys[first : first + block])
+        pick = pick[: len(keys)]
+        stats.append(sum(sums[k] for k in pick) / sum(counts[k] for k in pick))
+    stats.sort()
+    return {
+        "mean": sum(sums.values()) / sum(counts.values()),
+        "low": stats[int(0.025 * draws)],
+        "high": stats[int(0.975 * draws) - 1],
     }
 
 
