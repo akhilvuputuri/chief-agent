@@ -114,6 +114,29 @@ const finishTool: ToolDefinition = {
     "Pause with your natural reply and an explicit reason after completing any independent runnable work.",
   parameters: jsonSchema(finishSchema),
 };
+const squash = (text: string) => text.replace(/\s+/g, " ").trim();
+/**
+ * True when the reply the step will deliver contains `text`, ignoring whitespace: the last
+ * valid finish_turn call is the one honoured, so only its reply counts. An invalid or
+ * superseded finish_turn never hides text from the owner.
+ */
+export function repeatsFinishReply(
+  text: string,
+  calls: Array<{ function: { name: string; arguments: string } }>,
+) {
+  const said = squash(text);
+  if (!said) return true;
+  for (const c of [...calls].reverse()) {
+    if (c.function.name !== "finish_turn") continue;
+    try {
+      const parsed = finishSchema.safeParse(JSON.parse(c.function.arguments));
+      if (parsed.success) return squash(parsed.data.reply).includes(said);
+    } catch {
+      // Unparseable arguments are refused; an earlier finish_turn may still count.
+    }
+  }
+  return false;
+}
 /** Image parts are replaced before tracing so model-input records never retain raw bytes. */
 export function omitImages(messages: ModelMessage[]) {
   return messages.map((m) =>
@@ -550,7 +573,15 @@ export class CustomAgent implements Agent {
           await steer();
           continue;
         }
-        if (calls.length && generation.message.content && req.progress) {
+        // Text that a finish_turn reply in this step already contains is the answer itself:
+        // sending it as progress too showed the owner the same reply twice. Text that differs
+        // from every reply (narration, or a reply that only points at it) is still sent.
+        if (
+          calls.length &&
+          generation.message.content &&
+          !repeatsFinishReply(generation.message.content, calls) &&
+          req.progress
+        ) {
           try {
             await req.progress(generation.message.content);
           } catch {
