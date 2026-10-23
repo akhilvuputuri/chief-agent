@@ -21,26 +21,26 @@ Status: tested locally; nothing deployed. None of Kronos-small, Chronos-2 or Tim
 
 **Data (measured).** About five years of split-adjusted daily bars per symbol from Yahoo's public chart endpoint, used locally and not committed; Twelve Data had no local key. AAPL closes matched the Twelve Data bars used in journal 120 to within 0.1% on all 1,200 shared days (largest difference 0.000%).
 
-**Scores (measured).** 600 forecasts per engine and horizon, all scored on log returns.
+**Scores (measured).** 600 forecasts per engine and horizon, all scored on log returns. The table is the post-review rerun at `b42c044`; see Implementation and review for how it differs from the pre-registered run.
 
 - **Pinball skill** is 1 − (engine's loss ÷ EWMA's loss); below 0 is worse than the random walk.
-- **Δ vs EWMA** is the mean pinball difference in basis points; its 95% interval comes from resampling whole forecast dates, because the stocks move together.
+- **Δ vs EWMA** is the mean pinball difference in basis points; its 95% interval comes from resampling blocks of four consecutive forecast dates, because the stocks move together and volatility clusters.
 - **Coverage** is for the 10–90% interval; a Brier score of 0.25 is a coin flip.
 
 | Engine       | Horizon | Pinball skill | Δ vs EWMA, bp [95% CI] | Stocks beating EWMA | 80% coverage | Brier |
 | ------------ | ------- | ------------- | ---------------------- | ------------------- | ------------ | ----- |
 | EWMA (ref.)  | 1 day   | 0             | —                      | —                   | 80%          | 0.250 |
-| GARCH-t      | 1 day   | +0.002        | −0.1 [−0.5, +0.4]      | 6/10                | 76%          | 0.250 |
-| Chronos-2    | 1 day   | −0.042        | +1.7 [+0.6, +2.8]      | 1/10                | 81%          | 0.264 |
+| GARCH-t      | 1 day   | +0.002        | −0.1 [−0.6, +0.5]      | 6/10                | 76%          | 0.250 |
+| Chronos-2    | 1 day   | −0.042        | +1.7 [+0.5, +2.8]      | 1/10                | 81%          | 0.264 |
 | TimesFM 2.5  | 1 day   | −0.029        | +1.1 [+0.4, +1.8]      | 2/10                | 85%          | 0.254 |
-| Kronos-small | 1 day   | −0.162        | +6.4 [+4.3, +8.5]      | 0/10                | 59%          | 0.316 |
+| Kronos-small | 1 day   | −0.162        | +6.4 [+4.2, +9.1]      | 0/10                | 59%          | 0.316 |
 | EWMA (ref.)  | 5 days  | 0             | —                      | —                   | 81%          | 0.250 |
-| GARCH-t      | 5 days  | +0.007        | −0.6 [−1.4, +0.2]      | 6/10                | 79%          | 0.250 |
-| Chronos-2    | 5 days  | −0.010        | +0.8 [−0.8, +2.9]      | 4/10                | 76%          | 0.257 |
-| TimesFM 2.5  | 5 days  | −0.019        | +1.7 [+0.4, +3.0]      | 3/10                | 79%          | 0.257 |
-| Kronos-small | 5 days  | −0.249        | +21.4 [+14.4, +29.0]   | 0/10                | 51%          | 0.323 |
+| GARCH-t      | 5 days  | +0.002        | −0.2 [−1.1, +0.5]      | 5/10                | 83%          | 0.250 |
+| Chronos-2    | 5 days  | −0.010        | +0.8 [−1.5, +3.4]      | 4/10                | 76%          | 0.257 |
+| TimesFM 2.5  | 5 days  | −0.019        | +1.7 [+0.1, +3.3]      | 3/10                | 79%          | 0.257 |
+| Kronos-small | 5 days  | −0.249        | +21.4 [+12.4, +32.4]   | 0/10                | 51%          | 0.323 |
 
-- **2026-only subset (400 forecasts per engine).** The ranking is the same. TimesFM's 1-day interval includes zero (−0.014, Δ +0.6 bp [−0.5, +1.6]). Chronos-2's 5-day result is −0.003. Kronos-small is worse again: −0.172 at 1 day and −0.273 at 5 days.
+- **2026-only subset (400 forecasts per engine).** The ranking is the same. TimesFM's 1-day interval includes zero (−0.014, Δ +0.6 bp [−0.3, +1.4]). Chronos-2's 5-day result is −0.003. Kronos-small is worse again: −0.172 at 1 day and −0.273 at 5 days.
 - **Direction.** No model's median called the sign of the move better than about 50%: 45–52% across engines and horizons.
 - **Compute (measured, Apple M4, 4 threads, all 600 dates).** Including model loading: Chronos-2 24 s, TimesFM 76 s, Kronos-small 1,090 s, GARCH 6 s. Kronos's time comes from sampling 64 paths autoregressively.
 
@@ -64,7 +64,16 @@ Status: tested locally; nothing deployed. None of Kronos-small, Chronos-2 or Tim
 
 - **Leaderboard.** [`leaderboard.py`](../../forecast_runtime/leaderboard.py) adds the five engines. `scoring.py` gains `p_up_from_quantiles` (CDF interpolation for quantile-only models) and `cluster_bootstrap_ci`, both standard library, with tests in `npm test`. Model dependencies are in [`requirements-leaderboard.txt`](../../forecast_runtime/requirements-leaderboard.txt); installing them upgrades `huggingface_hub` to 2.x.
 - **Upstream report.** While preparing it, I found that the training-mode problem from journal 120 depends on the `huggingface_hub` version: 2.0.0 added `model.eval()` to the safetensors load path. Tested: `model.training` was `True` with 0.33.1, which Kronos pins, and `False` with 2.3.0. Also tested: in training mode with dropout set to zero, the s2 logits did not change when the sampled s1 changed. Reported upstream as [shiyu-coder/Kronos#415](https://github.com/shiyu-coder/Kronos/issues/415).
-- **Independent review of `bfcacaf`:** pending at the time of writing; its findings and fixes will be added here.
+- **Independent review of `bfcacaf`** (Opus 5.5, read-only) found no causality, alignment or quantile-extraction error, and nothing that could turn a loss into a win. Its findings, fixed in `b42c044`:
+  - **GARCH 5-day intervals were too narrow.** A single Student-t quantile was used for a multi-day sum, which hurt the baseline. Multi-day sums now use a normal quantile.
+  - **Intervals ignored dependence between nearby dates.** They now resample blocks of four consecutive dates.
+  - **Robustness:**
+    - rows must align with the reference, or the run fails;
+    - quantiles are sorted once for both scores and P(up);
+    - exact-zero quantiles are handled;
+    - `--rows-out` saves every forecast.
+  - **Kronos sees only 64 bars** (the others see 500–512). Not changed; the result is labelled "Kronos-small at lookback 64". On AAPL, longer lookbacks were worse ([journal 120](120-kronos-cpu-spike.md)).
+- **Pre-registered run (`bfcacaf`) and post-review rerun (`b42c044`).** Every model's scores were identical across the two runs, and every interval kept its sign. GARCH's 5-day figures moved from skill +0.007 with 79% coverage to +0.002 with 83%.
 
 ## Verification and outcome
 
