@@ -61,6 +61,8 @@ const fields: Record<string, Shape> = {
   /** Prompt tokens written to the provider's cache (OpenRouter prompt_tokens_details). */
   cacheWriteTokens: "count",
   reasoningTokens: "count",
+  /** The model the host asked for; `model` on model.completed is the one that served. */
+  requestedModel: "model",
   /** Why the model stopped, mapped to a fixed name (see finishName). */
   finishReason: "name",
   messages: "count",
@@ -286,10 +288,13 @@ function finishName(value: unknown) {
   return finishNames.has(value) ? value : "other";
 }
 
-// OpenRouter provider display names seen in production (model.completed, 9–23 October
-// 2026), mapped to stable slugs. "Claude Platform on AWS" has four words and failed the
-// generic provider shape, so Opus calls logged no provider (journal 118). An unlisted
-// label keeps that shape check, and one that fails it is logged as "other".
+// OpenRouter provider display names mapped to fixed slugs, so the logged provider is
+// always a host-defined name, never provider text. Seen in production (model.completed,
+// 9–23 October 2026): Claude Platform on AWS, Google, Google AI Studio, Azure, OpenAI.
+// Not yet seen, listed as anticipated routes for Anthropic and Gemini models: Anthropic,
+// Amazon Bedrock, Google Vertex. "Claude Platform on AWS" has four words and failed the
+// generic provider shape, so Opus calls logged no provider (journal 118). Any unlisted
+// label is logged as "other"; the raw label stays in the private trace.
 const providerSlugs: Record<string, string> = {
   "Claude Platform on AWS": "claude-aws",
   Anthropic: "anthropic",
@@ -302,8 +307,7 @@ const providerSlugs: Record<string, string> = {
 };
 function providerName(value: unknown) {
   if (typeof value !== "string" || !value) return undefined;
-  if (Object.hasOwn(providerSlugs, value)) return providerSlugs[value];
-  return PROVIDER.test(value) ? value : "other";
+  return Object.hasOwn(providerSlugs, value) ? providerSlugs[value] : "other";
 }
 
 /** Prefix before ": " in the bounded model.failed error string, e.g. "TypeError". */
@@ -327,6 +331,7 @@ const projections: Record<string, Projection> = {
       runId: run,
       invocationId: d.invocationId,
       model: d.model,
+      requestedModel: d.requestedModel ?? undefined,
       provider: providerName(d.provider),
       latencyMs: d.latencyMs,
       effort: d.effort,
@@ -339,14 +344,16 @@ const projections: Record<string, Projection> = {
     {
       runId: run,
       invocationId: d.invocationId,
+      // No response, so the requested model is the only one known.
       model: d.model,
+      requestedModel: d.model,
       attempt: d.attempt,
       latencyMs: d.latencyMs,
       transient: d.transient,
       provider: providerName(d.diagnostics?.provider),
       errorCode: d.diagnostics?.errorCode,
       httpStatus: d.diagnostics?.httpStatus,
-      state: d.diagnostics?.finishReason,
+      state: finishName(d.diagnostics?.finishReason),
       finishReason: finishName(d.diagnostics?.finishReason),
       phase: d.contextSizes ? "context" : "model",
       errorCategory: errorName(d.error),

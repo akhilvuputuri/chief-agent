@@ -371,6 +371,7 @@ export class CustomAgent implements Agent {
             await execution.trace("model.completed", {
               invocationId,
               model: generation.model ?? model.model,
+              requestedModel: model.model ?? null,
               provider: generation.provider,
               usage: generation.usage ?? null,
               finishReason: generation.finishReason ?? null,

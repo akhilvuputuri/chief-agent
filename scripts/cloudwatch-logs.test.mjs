@@ -134,17 +134,27 @@ test("picker query summarises decisions without the in-list form", () => {
 test("no stats alias reuses the name of a field the query aggregates or groups by", () => {
   // Measured October 2026 (journal 118): `sum(inputTokens) as inputTokens` made
   // Logs Insights omit the column, so the models query showed no token sums.
-  for (const [name, spec] of Object.entries(QUERIES)) {
-    const q = spec.query("run-1", "tool.finished");
-    const m = /\bstats (.+?)(?: by (.+?))?(?: \| |$)/.exec(q);
-    if (!m) continue;
-    const used = new Set([
-      ...[...m[1].matchAll(/\w+\((\w+)\)/g)].map((x) => x[1]),
-      ...(m[2] ?? "").split(",").map((f) => f.trim()),
-    ]);
-    for (const [, alias] of m[1].matchAll(/ as (\w+)/g))
-      assert.ok(!used.has(alias), `${name}: alias ${alias} shadows a field`);
-  }
+  const check = (name, q) => {
+    for (const m of q.matchAll(/\bstats (.+?)(?: by (.+?))?(?= \| |$)/g)) {
+      const used = new Set([
+        ...[...m[1].matchAll(/\w+\((\w+)\)/g)].map((x) => x[1]),
+        ...(m[2] ?? "").split(",").map((f) => f.trim()),
+      ]);
+      for (const [, alias] of m[1].matchAll(/ as (\w+)/g))
+        assert.ok(!used.has(alias), `${name}: alias ${alias} shadows a field`);
+    }
+  };
+  for (const [name, spec] of Object.entries(QUERIES))
+    check(name, spec.query("run-1", "tool.finished"));
+  // Every stats clause is checked, not only the first.
+  assert.throws(
+    () =>
+      check(
+        "fixture",
+        "stats count(*) as n by model | stats sum(n) as n by model",
+      ),
+    /alias n shadows/,
+  );
 });
 
 test("models query sums every token count by model and provider", () => {

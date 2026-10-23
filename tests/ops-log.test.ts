@@ -164,6 +164,7 @@ test("each projected event type emits no content from hostile payloads", () => {
     hostile[key] = PRIVATE[0];
   for (const key of [
     "finishReason",
+    "requestedModel",
     "historySize",
     "historyMessages",
     "historyAllowance",
@@ -224,6 +225,7 @@ test("model.completed projects model, latency, tokens and reported cost", () => 
     projectEvent("model.completed", run, {
       invocationId: randomUUID(),
       model: "openai/gpt-6-sol",
+      requestedModel: "openai/gpt-6.1-sol",
       provider: "OpenAI",
       latencyMs: 1234,
       finishReason: "length",
@@ -238,6 +240,9 @@ test("model.completed projects model, latency, tokens and reported cost", () => 
     const [line] = log.parsed();
     assert.equal(line.runId, run);
     assert.equal(line.provider, "openai");
+    // Served and requested models are both kept, so failure rates group by request.
+    assert.equal(line.model, "openai/gpt-6-sol");
+    assert.equal(line.requestedModel, "openai/gpt-6.1-sol");
     assert.equal(line.finishReason, "length");
     assert.equal(line.inputTokens, 1000);
     assert.equal(line.cachedTokens, 800);
@@ -326,21 +331,24 @@ test("model providers are logged as fixed slugs, and failures carry the model", 
         "google-ai-studio",
         "google",
         "azure",
-        // An unlisted label that fits the generic shape is kept as before.
-        "Together",
+        // Any unlisted label, even one that fits the generic shape, is "other".
         "other",
         "other",
-        "constructor",
+        "other",
+        "other",
         "claude-aws",
         "other",
       ],
     );
     assert.ok(lines.slice(0, 9).every((l) => !("dropped" in l)));
+    // A failure has no response, so the requested model is the model.
     assert.equal(lines[8].model, "anthropic/claude-opus-5.5");
+    assert.equal(lines[8].requestedModel, "anthropic/claude-opus-5.5");
     assert.equal(lines[8].event, "model.failed");
     // A model that fails the model shape is still dropped, never logged.
     assert.equal("model" in lines[9], false);
-    assert.equal(lines[9].dropped, 1);
+    assert.equal("requestedModel" in lines[9], false);
+    assert.equal(lines[9].dropped, 2);
   } finally {
     log.restore();
   }
