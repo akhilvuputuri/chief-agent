@@ -1,3 +1,7 @@
+# Fewer coding notices — in review, 23 October 2026
+
+Coding progress now goes into one Telegram status message per job, edited in place, instead of a new message per milestone; questions, approval cards, failures and outcomes still arrive as their own messages. Progress that would start a new message is held during quiet hours (`CODING_QUIET_HOURS`, default 23:00–08:00 Singapore). Cancellations within 15 seconds are sent as one summary. On a rebase the host now logs whether the rebased candidate is byte-identical to the reviewed one; reusing the review is not enabled (it needs a worker image change and an owner decision). [Journal 115](journey/115-fewer-coding-notices.md), [design](coding.md).
+
 # No more double replies — in review, 23 October 2026
 
 On 23 October Chief sent the same clarifying question twice: Opus wrote its reply both as text and in `finish_turn`, and the host sent the text as a progress message before delivering the answer. Text that a `finish_turn` reply in the same step already contains is no longer sent as progress; narration and differing text still are. Once in 14 days so far. [Journal 119](journey/119-double-reply.md), [Telegram views](telegram-views.md).

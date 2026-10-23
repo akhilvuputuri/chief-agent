@@ -297,3 +297,15 @@ A synthetic cache probe is only as good as its resemblance to production. The fi
 **A tool error must name the real cause (23 October).** Cancelling old coding jobs failed on the single-worker index, but the host mapped every `duplicate key` to "inspect work_status", so Chief blamed an unrelated work task and the owner cancelled it. A cancel that changed nothing returned the job's status like a success, and Chief reported jobs cancelled that were not. Retries of the identical refused call were never capped, because each successful status read reset the guard. The host now reports the refusing index (`CODING_WORKER_BUSY`), fails a no-op cancel with its reason, caps identical refused calls even across reads, and asks for an explicit owner confirmation (`confirmStale`) before restarting coding work idle for more than a day ([journal 114](114-coding-cancel-correctness.md)). Tested on synthetic jobs only; the effect on live turns is unmeasured.
 
 Lesson: when a write changes nothing, say so and why; a status read is not an acknowledgement.
+
+**Fewer coding notices, and a measurement before reusing review (23 October).** A private review of 14–20 October (reported) counted 107 coding notices in 7 days. One two-line README job sent 42, and 24 notices went out at night. PR 292 had made the wording plain, but the count did not change, because the outbox sent every milestone as its own message. Progress now folds into one status message per stretch of work, edited in place. Questions, approval cards, failures and results still arrive separately, so they notify. Progress that would start a new message waits out the owner's quiet hours, and a bulk cancel becomes one summary. The outbox rules hold for edits too: an uncertain edit is never replayed, and the intended text is saved before each edit, so the next one catches up ([journal 115](115-fewer-coding-notices.md)).
+
+The same job spent about 42 minutes of box time on two rebases, each repeating the full review. Skipping review when the rebase reproduces the reviewed artifact byte for byte needs two things: a worker change shipped through the pinned image, and an owner decision. The reviewer saw the diff against the old main, and the review exception binds approval to the exact attempt and tree. So this change only records, per rebased revision, whether the candidate matches. Lessons:
+
+- Notice volume is a delivery property. Fix it where messages are made, not where milestones are named.
+- Measure how often a shortcut would apply before changing a review safeguard for it.
+
+Evidence boundary:
+
+- **Tested:** synthetic outbox and rebase tests.
+- **Not yet measured:** messages per live job after release, and the share of identical rebases.

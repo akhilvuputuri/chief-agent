@@ -27,6 +27,7 @@
     "ELEVENLABS_TTS_MODEL": "eleven_flash_v2_5",
     "GROQ_STT_MODEL": "whisper-large-v3-turbo",
     "IBKR_ORDER_DRAFTS": "on",
-    "IBKR_DRAFT_MAX_USD": 100
+    "IBKR_DRAFT_MAX_USD": 100,
+    "CODING_QUIET_HOURS": "23:00-08:00"
   }
 }

@@ -114,7 +114,8 @@ test("progress duplicates do not rewrite later state and uncertain Telegram deli
   const events = (
     await f.db.query("SELECT delivery FROM coding_events ORDER BY created_at")
   ).rows;
-  assert.equal(events.filter((e) => e.delivery === "uncertain").length, 1);
+  // Both progress notices were folded into the one status message whose send was uncertain.
+  assert.equal(events.filter((e) => e.delivery === "uncertain").length, 2);
   await f.db.query(
     "UPDATE coding_events SET delivery='sending' WHERE delivery='pending'",
   );
