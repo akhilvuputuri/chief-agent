@@ -44,6 +44,8 @@ FEATURES = ["open", "high", "low", "close", "volume", "amount"]
 CLOSE = FEATURES.index("close")
 TOKENIZER = "Kronos-Tokenizer-base"
 MAX_CONTEXT = 512
+# Enough bars for a meaningful window and for the EWMA baseline's three-close minimum.
+MIN_LOOKBACK = 16
 CLIP = 5
 
 
@@ -106,6 +108,8 @@ def sample_paths(tokenizer, model, windows, futures, horizon, samples, chunk, te
 
 
 def future_business_days(last, horizon):
+    # Weekdays only, so a market holiday can appear. Only `bench` uses this, for timings and
+    # spread; `walk` uses the real next bars, and live runs send exchange session dates.
     return list(pd.bdate_range(last + pd.Timedelta(days=1), periods=horizon))
 
 
@@ -251,8 +255,8 @@ def main():
     sub.choices["walk"].add_argument("--origins", type=int, default=60)
     sub.choices["walk"].add_argument("--step", type=int, default=5)
     args = parser.parse_args()
-    if not 0 < args.lookback <= MAX_CONTEXT:
-        raise SystemExit(f"--lookback must be 1..{MAX_CONTEXT}")
+    if not MIN_LOOKBACK <= args.lookback <= MAX_CONTEXT:
+        raise SystemExit(f"--lookback must be {MIN_LOOKBACK}..{MAX_CONTEXT}")
     if any(m not in ("eval", "train") for m in args.modes):
         raise SystemExit("--modes takes eval and/or train")
     if args.threads:
