@@ -1,6 +1,6 @@
 # Coordinator and agents
 
-Chief is a coordinator. It keeps the conversation, memory, recall, work tracking, canvases and the job-alignment workflow. Domain work runs in agents: each is a separate run with its own context, its own tools and, by default, a cheaper model. Chief starts one with a single generic tool and relays what it reports.
+Chief is a coordinator. It keeps the conversation, memory, recall, work tracking, canvases and the job-alignment workflow. Memories are explicit: when the owner states a durable preference or fact, Chief offers to remember it in one short line and calls `memory_set` only after the owner agrees ([journal 117](journey/117-open-loops-and-memory-offers.md)). Domain work runs in agents: each is a separate run with its own context, its own tools and, by default, a cheaper model. Chief starts one with a single generic tool and relays what it reports.
 
 Heavy work that needs its own compute is planned as [boxed sub-agents](boxes.md); the light agents described here are unchanged.
 

@@ -346,6 +346,10 @@ export class CustomAgent implements Agent {
               workingSize: input.workingSize,
               reasoningSize: input.reasoningSize,
               reasoningDropped: input.reasoningDropped,
+              // Older history admitted before the preceding exchange (sizes only).
+              historyAllowance: input.historyAllowance,
+              historySize: input.historySize,
+              historyMessages: input.historyMessages,
               trimmed: input.trimmed,
               compacted: input.compacted,
               wireCompacted: input.wireCompacted,
@@ -408,8 +412,10 @@ export class CustomAgent implements Agent {
             await execution.trace("model.completed", {
               invocationId,
               model: generation.model ?? model.model,
+              requestedModel: model.model ?? null,
               provider: generation.provider,
               usage: generation.usage ?? null,
+              finishReason: generation.finishReason ?? null,
               latencyMs: Date.now() - start,
               effort,
             });
@@ -417,6 +423,7 @@ export class CustomAgent implements Agent {
           } catch (error) {
             await execution.trace("model.failed", {
               invocationId,
+              model: model.model ?? null,
               ...(error instanceof ModelError
                 ? { diagnostics: error.diagnostics, transient: error.transient }
                 : error instanceof ContextLimitError
