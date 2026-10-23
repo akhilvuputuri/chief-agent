@@ -1,3 +1,7 @@
+# Open loops that last and memory offers — in review, 22 October 2026
+
+Expired monitoring cards now stay in open loops until one day after their end date (seven days when undated, never more than 30), with cards near their date marked due and listed first; a later card with the same title replaces an older one. Chief's own clarifying questions that the owner has not answered within three days appear as short excerpts until a later owner message in that thread is handled. The coordinator instructions add one line: offer to remember a stated durable preference and call `memory_set` only after the owner agrees. No proactive nudge is sent when a date arrives; that needs owner approval. [Journal 117](journey/117-open-loops-and-memory-offers.md).
+
 # Bigger context and cached fixed state — in review, 21 October 2026
 
 After the fixed tool list, ordinary Opus turns hit the 120k-character compaction threshold: older history was dropped mid-turn and results were excerpted. Compaction now starts at about 1.08M characters (about 300k tokens, the owner's choice). The 11k of runtime state that never changes (agent and skill catalogues, domain guidance, availability) moves into the cached opening system message. See [journal 113](journey/113-bigger-context-and-cached-state.md).
