@@ -74,6 +74,7 @@ import { CalendarTools } from "./calendar.js";
 import { DailySheet } from "./daily-sheet.js";
 import { SheetsTools } from "./sheets.js";
 import { GmailTools } from "./gmail.js";
+import { MailIndex, OpenRouterEmbedder } from "./mail-recall.js";
 import { buildBriefing } from "./daily-briefing.js";
 import { readConfig } from "./config.js";
 import { connect, ensureUser, event } from "./db.js";
@@ -204,6 +205,18 @@ const gmail = new GmailTools({
       }
     : {}),
 });
+// Email memory MVP: built in the background after start, primary mailbox only.
+const mailIndex =
+  c.MAIL_INDEX === "on" &&
+  c.GMAIL_OWNER_USER_ID &&
+  c.GOOGLE_REFRESH_TOKEN &&
+  c.OPENROUTER_API_KEY
+    ? new MailIndex(
+        gmail,
+        new OpenRouterEmbedder(c.OPENROUTER_API_KEY),
+        c.GMAIL_OWNER_USER_ID,
+      )
+    : undefined;
 const calendar = new CalendarTools({
   ...google,
   refreshToken: c.CALENDAR_REFRESH_TOKEN,
@@ -734,6 +747,7 @@ const assistant = new Assistant(
     mcp,
     links,
     singapore,
+    mailIndex,
   ),
   {
     links: !!links,
@@ -741,6 +755,7 @@ const assistant = new Assistant(
     canvases: !!c.MINIAPP_ORIGIN,
     web: !!(c.TAVILY_API_KEY || c.OPENROUTER_API_KEY),
     gmail: !!c.GOOGLE_REFRESH_TOKEN,
+    mailIndex: !!mailIndex,
     calendar: !!c.CALENDAR_REFRESH_TOKEN,
     subscriptions: true,
     parcels: true,
@@ -1302,6 +1317,8 @@ const scheduleTimer = setInterval(() => {
 }, 15000);
 scheduleTimer.unref();
 await app.listen({ host: "0.0.0.0", port: c.PORT });
+// Failures are logged by the index and retried on the next gmail_recall.
+void mailIndex?.start();
 for (const signal of ["SIGINT", "SIGTERM"])
   process.once(signal, () => {
     opsLog("gateway.stopping", "info");

@@ -70,6 +70,9 @@ const schema = z.object({
   // Jev picks the tool domains per message; "off" uses the deterministic cues; "all" offers
   // every available domain on every call, so the cached tool list never changes (journal 107).
   TOOL_PICKER: z.enum(["jev", "off", "all"]).default("all"),
+  // Email memory MVP (docs/mail-recall.md): an in-memory meaning index over the primary
+  // mailbox's last 30 days of Primary mail, offered to the email agent as gmail_recall.
+  MAIL_INDEX: z.enum(["on", "off"]).default("off"),
   // Shadow decisions (#127): Jev predicts beside each turn without changing it. Separate
   // from TOOL_PICKER so the picker can be turned off while measurement continues.
   SHADOW_DECISIONS: z.enum(["jev", "off"]).default("jev"),
@@ -167,6 +170,7 @@ export const RUNTIME_SETTINGS = [
   "SEARCH_MODEL",
   "MEDIA_MODEL",
   "TOOL_PICKER",
+  "MAIL_INDEX",
   "SHADOW_DECISIONS",
   "EFFORT_PICKER",
   "TELEGRAM_TOPICS",

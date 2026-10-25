@@ -576,6 +576,13 @@ export const action = z.discriminatedUnion("operation", [
     .strict(),
   z
     .object({
+      operation: z.literal("gmail_recall"),
+      query: z.string().min(1).max(500),
+      limit: z.number().int().min(1).max(10).optional(),
+    })
+    .strict(),
+  z
+    .object({
       operation: z.literal("job_save"),
       title: z.string().min(1).max(300),
       company: z.string().min(1).max(300),

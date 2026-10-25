@@ -14,6 +14,7 @@
         "gmail_search",
         "gmail_thread",
         "gmail_read",
+        "gmail_recall",
         "observation_read"
       ],
       "skills": [],

@@ -128,6 +128,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 23 October | [117 — Open loops and memory offers](117-open-loops-and-memory-offers.md): can Chief keep dated monitoring and its own unanswered questions in view, and offer to remember stated preferences? | Released in `fdb88c7`: dated cards stay until their date plus a day; unanswered questions listed for three days; memory offered, saved only on a yes |
 | 23 October | [118 — Telemetry gaps](118-telemetry-gaps.md): why did the models query show no token sums, and what was missing from model and context logs? | Released in `fac557b`: duplicate stats aliases hid the sums; finish reason, cache writes, provider slugs and older-history size added |
 | 23 October | [119 — Double reply](119-double-reply.md): why did Chief send the same clarifying question twice? | Released in `7084064`: text a finish_turn reply already contains is no longer also sent as progress |
+| 25 October | [120 — Email memory MVP](120-email-memory-mvp.md): does a meaning index find emails that Gmail search misses? | In progress: `gmail_recall` over the last 30 days of Primary mail, in memory; not released or measured |
 
 ## Coding-agent learning path
 

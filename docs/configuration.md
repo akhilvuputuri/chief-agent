@@ -30,7 +30,7 @@ Other reviewed policy files already in the repo:
 An environment value still wins over the file.
 
 - **Passed by Compose (20 names):** production's Compose file passes these with Compose defaults, so the file cannot change them in production until Compose stops passing them. That step is part of the operator rollout in #143.
-- **Not passed (`MEDIA_MODEL`, `TOOL_PICKER`, `SHADOW_DECISIONS`, `EFFORT_PICKER`, `TELEGRAM_TOPICS`, `CODING_QUIET_HOURS`):** the file is already authoritative in production. Editing them in a PR changes production on the next release, with no operator step. `CODING_QUIET_HOURS` (`HH:MM-HH:MM`, Asia/Singapore, empty for off) holds coding progress that would start a new message ([journal 115](journey/115-fewer-coding-notices.md)).
+- **Not passed (`MEDIA_MODEL`, `TOOL_PICKER`, `MAIL_INDEX`, `SHADOW_DECISIONS`, `EFFORT_PICKER`, `TELEGRAM_TOPICS`, `CODING_QUIET_HOURS`):** the file is already authoritative in production. Editing them in a PR changes production on the next release, with no operator step. `CODING_QUIET_HOURS` (`HH:MM-HH:MM`, Asia/Singapore, empty for off) holds coding progress that would start a new message ([journal 115](journey/115-fewer-coding-notices.md)).
 
 To make the switch safe:
 
