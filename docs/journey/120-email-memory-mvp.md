@@ -59,7 +59,33 @@ Mocked tests pass. The retrieval eval on the owner's mailbox and an end-to-end T
 - **Merged.** [PR 320](https://github.com/akhilvuputuri/chief-agent/pull/320) merged as `d98f91201488956c2af7245007ac5991a3c9fdef` from the approved head `8dbae1c`. Hosted CI and Devin Review passed.
 - **Deployed.** Live at 12:56 UTC on 25 October. `release:status` reported success ([release](https://github.com/akhilvuputuri/chief-agent/actions/runs/40194920183)), the server `RELEASE` matched and health was ok. No migration.
 - **First build, measured** from `mail_index.built`: 119 messages in the 30-day window, 65,925 embedding prompt tokens, 40.5 seconds, none left out, no `mail_index.failed`.
-- **Not yet observed.** The retrieval eval result and live Telegram use.
+- **Not yet observed.** Owner-written questions and live Telegram use.
+
+## Retrieval eval, 30-day window
+
+Measured on 25 October 2026 with `mail-recall-eval.js` in the production container on release `d98f912`. The private per-question output stays in the operations folder.
+
+- **Setup:**
+  - 119 indexed messages.
+  - 30 questions written by `google/gemini-3.8-flash` from randomly sampled messages, without the subject's or sender's words.
+  - The same model wrote up to three Gmail queries per question.
+  - A question counts as found when the target message is in the results.
+- **Results:**
+
+| Condition                                                 |   Found | 95% Wilson interval |
+| --------------------------------------------------------- | ------: | ------------------- |
+| Keyword: up to three Gmail searches (today's email agent) | 17 / 30 | 39–73%              |
+| `gmail_recall` top 8 by itself                            | 28 / 30 | 79–98%              |
+| Keyword plus `gmail_recall`                               | 29 / 30 | 83–99%              |
+
+- **Paired comparison** (keyword against `gmail_recall` alone): 12 targets were found only by `gmail_recall` and 1 only by keyword. Exact McNemar p ≈ 0.003.
+- **Ranks:** when `gmail_recall` found the target it ranked it first 17 times and never below fifth. Eight random messages out of 119 would include the target about 7% of the time.
+- **Cost:** about $0.28 in model calls for the run, plus embeddings.
+- **Limits:**
+  - The questions avoid subject and sender words by design, which models half-remembered requests and disadvantages keyword search.
+  - The questions and queries are synthetic.
+  - This is a retrieval score, not a check of the agent's answers.
+  - 119 messages is a small pool, so the 12-month run is the harder test.
 
 ## Window widened to 12 months
 
