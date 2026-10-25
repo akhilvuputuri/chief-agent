@@ -4,7 +4,7 @@
   "enabled": [
     {
       "path": "core",
-      "sha256": "47daf82583bbf6d0b4b9e820a33d8dd0c2d080fad83db019a710cfce293681d7",
+      "sha256": "5bd3a00ceff42d1cf3d967631ec9a33f178773dbc0f352ff09fecce333577227",
       "agents": [
         "email",
         "parcels",
@@ -38,6 +38,7 @@
         "gather_status",
         "gmail_accounts",
         "gmail_read",
+        "gmail_recall",
         "gmail_search",
         "gmail_thread",
         "item_list",
@@ -156,6 +157,7 @@
     "gather_search",
     "gmail_accounts",
     "gmail_read",
+    "gmail_recall",
     "gmail_search",
     "gmail_thread",
     "item_list",

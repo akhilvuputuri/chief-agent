@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ToolValidationError } from "./tool-errors.js";
+import { cleanText } from "./news-feed.js";
 const tokenSchema = z.object({
   access_token: z.string().min(1),
   expires_in: z.number().positive(),
@@ -100,6 +101,32 @@ export function plainBody(p?: Part): string {
   if (p.mimeType === "text/plain" && p.body?.data)
     return Buffer.from(p.body.data, "base64url").toString("utf8");
   return (p.parts ?? []).map(plainBody).filter(Boolean).join("\n");
+}
+/** First inline HTML part, for indexing messages that have no plain-text part. */
+function htmlBody(p?: Part): string {
+  if (!p || p.filename) return "";
+  if (p.mimeType === "text/html" && p.body?.data)
+    return Buffer.from(p.body.data, "base64url").toString("utf8");
+  for (const child of p.parts ?? []) {
+    const html = htmlBody(child);
+    if (html) return html;
+  }
+  return "";
+}
+const QUOTED_HTML =
+  /<blockquote\b|class=["']?gmail_quote|id=["']?(?:divRplyFwdMsg|appendonsend)/i;
+/** Text the mail index embeds: the plain-text part, else the HTML part as display text. */
+export function indexBody(p?: Part, max = 12_000) {
+  const plain = plainBody(p);
+  if (plain.trim()) return plain.slice(0, max);
+  // Quoted history in HTML replies starts at the client's quote container; display text
+  // collapses lines, so the line-based quote rules cannot find it afterwards.
+  const full = htmlBody(p);
+  const quote = full.search(QUOTED_HTML);
+  // Cut at the start of the tag that carries the marker, so no half tag remains.
+  const tag = quote < 0 ? -1 : full.lastIndexOf("<", quote);
+  const html = quote < 0 ? full : full.slice(0, tag < 0 ? quote : tag);
+  return html ? cleanText(html, max) : "";
 }
 function header(
   list: { name: string; value: string }[] | undefined,
@@ -675,6 +702,58 @@ export class GmailTools {
     return { ...result, ...identity };
   }
 
+  /**
+   * Mail index (src/mail-recall.ts): one IDs-only page of the primary mailbox. Host-driven
+   * and outside the per-turn request budget; the index bounds its own window and count.
+   */
+  async indexPage(user: string, query: string, pageToken?: string) {
+    const token = await this.access(user);
+    const url = new URL(
+      "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+    );
+    url.searchParams.set("q", query);
+    url.searchParams.set("maxResults", "100");
+    if (pageToken) url.searchParams.set("pageToken", pageToken);
+    return z
+      .object({
+        messages: z
+          .array(
+            z.object({
+              id: z.string().regex(ID),
+              threadId: z.string().regex(ID),
+            }),
+          )
+          .max(100)
+          .default([]),
+        nextPageToken: z.string().max(1000).optional(),
+      })
+      .parse(await this.get(token, url));
+  }
+  /** One primary-mailbox message as index text: headers plus a bounded body. */
+  async indexMessage(user: string, id: string) {
+    if (!ID.test(id))
+      throw new ToolValidationError("Invalid message reference");
+    const token = await this.access(user);
+    const url = new URL(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}`,
+    );
+    url.searchParams.set("format", "full");
+    const m = messageSchema
+      .and(z.object({ internalDate: z.string().optional() }))
+      .parse(await this.get(token, url));
+    if (m.id !== id || !ID.test(m.threadId))
+      throw new ToolValidationError("Message identity did not match");
+    return {
+      id,
+      threadId: m.threadId,
+      at: Number(m.internalDate ?? 0),
+      from: header(m.payload?.headers, "from", FROM) ?? "",
+      to: header(m.payload?.headers, "to", TO) ?? "",
+      subject: header(m.payload?.headers, "subject", SUBJECT) ?? "",
+      date: header(m.payload?.headers, "date", DATE) ?? "",
+      text: indexBody(m.payload) || m.snippet || "",
+    };
+  }
   /** Internal query-scoped monitoring: one bounded IDs-only page, no model or bodies. */
   async poll(
     user: string,

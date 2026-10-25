@@ -114,6 +114,11 @@ function unique(values: string[], what: string) {
   if (new Set(values).size !== values.length)
     throw new Error(`Plugin compatibility: duplicate ${what}`);
 }
+/**
+ * Host-defined tools an agent may list without depending on them: when one is unavailable
+ * the agent stays invocable without it. Packages cannot add to this set.
+ */
+export const OPTIONAL_OPERATIONS = new Set(["gmail_recall"]);
 /** Coordinator and report operations; an agent can never be granted these. */
 export const NEVER_GRANTED = new Set([
   "mcp_tools",
@@ -428,12 +433,14 @@ export class PluginRegistry {
     );
     return [...this.agents.values()]
       .filter(
-        (a) => a.invocable !== false && a.tools.every((t) => available.has(t)),
+        (a) =>
+          a.invocable !== false &&
+          a.tools.every((t) => available.has(t) || OPTIONAL_OPERATIONS.has(t)),
       )
       .map((a) => ({
         type: names.get(a.agentId) ?? a.agentId,
         description: a.description,
-        tools: a.tools,
+        tools: a.tools.filter((t) => available.has(t)),
         model: a.model ?? null,
         effort: a.effort ?? null,
       }));

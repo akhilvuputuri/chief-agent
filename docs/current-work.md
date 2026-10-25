@@ -1,3 +1,7 @@
+# Email memory MVP — branch `feature/mail-recall`, 25 October 2026
+
+The email agent gets `gmail_recall`: an in-memory meaning index over the primary mailbox's Primary mail from the last 30 days, built with OpenRouter embeddings after each start. It is for emails the owner half-remembers by content. Not released or measured; the operator-run retrieval eval decides whether it stays. See [mail recall](mail-recall.md) and [journal 120](journey/120-email-memory-mvp.md).
+
 # Fewer coding notices — live in `3130950`, 23 October 2026
 
 Coding progress now goes into one Telegram status message per job, edited in place, instead of a new message per milestone; questions, approval cards, failures and outcomes still arrive as their own messages. Progress that would start a new message is held during quiet hours (`CODING_QUIET_HOURS`, default 23:00–08:00 Singapore). Cancellations within 15 seconds are sent as one summary. On a rebase the host now logs whether the rebased candidate is byte-identical to the reviewed one; reusing the review is not enabled (it needs a worker image change and an owner decision). [Journal 115](journey/115-fewer-coding-notices.md), [design](coding.md).

@@ -97,6 +97,7 @@ export const readOperations = new Set([
   "gmail_search",
   "gmail_read",
   "gmail_thread",
+  "gmail_recall",
   "job_list",
   "job_analyze",
   "memory_list",

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AgentRequest, AgentResponse } from "./protocol.js";
 import { agentRun, agentReport, type AgentReport } from "./agent-schema.js";
 import { plugins } from "./plugin-registry.js";
+import { OPTIONAL_OPERATIONS } from "./plugins.js";
 import type { PluginAgent, PluginRegistry } from "./plugins.js";
 import { pinPlugin } from "./plugin-execution.js";
 import { resolveAgentModel, type ModelTier } from "./model-policy.js";
@@ -236,13 +237,19 @@ export async function runFindingsAgent(
     user = parent.user,
     signal = req.signal!;
   const available = req.runtime?.allTools ?? req.runtime?.tools ?? [];
+  // An optional host tool that is not connected is left out of the toolset, not required.
   const missing = definition.tools.filter(
-    (name) => !available.some((t) => t.name === name),
+    (name) =>
+      !OPTIONAL_OPERATIONS.has(name) && !available.some((t) => t.name === name),
   );
   if (missing.length)
     throw new Error(
       `Agent validation: ${a.type} needs tools that are not connected here: ${missing.join(", ")}`,
     );
+  const missingOptional = definition.tools.filter(
+    (name) =>
+      OPTIONAL_OPERATIONS.has(name) && !available.some((t) => t.name === name),
+  );
   const left = await parent.remaining();
   if (left.models <= 1 || left.tools <= 1 || left.ms <= 2000)
     throw new Error(
@@ -285,7 +292,7 @@ export async function runFindingsAgent(
       pluginVersion: definition.pluginVersion,
       pluginHash: definition.pluginHash,
       contract: definition.contract,
-      tools: definition.tools,
+      tools: definition.tools.filter((t) => !missingOptional.includes(t)),
       model: choice,
       limits,
       references: refs,
@@ -402,7 +409,10 @@ export async function runFindingsAgent(
             report = checked.report;
             return { recorded: true };
           }
-          if (!definition.tools.includes(input.operation))
+          if (
+            !definition.tools.includes(input.operation) ||
+            missingOptional.includes(input.operation)
+          )
             invalid("operation outside this agent's tools");
           checkDispatch();
           return req.executeAgent!(childRun, input);
