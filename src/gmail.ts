@@ -113,11 +113,19 @@ function htmlBody(p?: Part): string {
   }
   return "";
 }
+const QUOTED_HTML =
+  /<blockquote\b|class=["']?gmail_quote|id=["']?(?:divRplyFwdMsg|appendonsend)/i;
 /** Text the mail index embeds: the plain-text part, else the HTML part as display text. */
 export function indexBody(p?: Part, max = 12_000) {
   const plain = plainBody(p);
   if (plain.trim()) return plain.slice(0, max);
-  const html = htmlBody(p);
+  // Quoted history in HTML replies starts at the client's quote container; display text
+  // collapses lines, so the line-based quote rules cannot find it afterwards.
+  const full = htmlBody(p);
+  const quote = full.search(QUOTED_HTML);
+  // Cut at the start of the tag that carries the marker, so no half tag remains.
+  const tag = quote < 0 ? -1 : full.lastIndexOf("<", quote);
+  const html = quote < 0 ? full : full.slice(0, tag < 0 ? quote : tag);
   return html ? cleanText(html, max) : "";
 }
 function header(

@@ -19,19 +19,23 @@ This is retrieval-augmented generation: the host retrieves the relevant emails, 
 
 `src/mail-recall.ts`:
 
-1. **Backfill.** After the gateway starts, `MailIndex.start()` lists the window's message IDs (`GmailTools.indexPage`) and fetches each message (`indexMessage`), four at a time. These host reads are outside the per-turn Gmail request budget.
+1. **Backfill.** After the gateway starts, `MailIndex.start()` lists the window's message IDs (`GmailTools.indexPage`), then fetches and embeds them oldest first in groups of ten, four reads at a time. These host reads are outside the per-turn Gmail request budget. A message is marked indexed only when all its chunks are embedded. A message that cannot be read is retried once, then left out and counted.
 2. **Chunks.** Each body is split into chunks of 1,500 characters with 200 characters of overlap, at most six per message. Every chunk is prefixed with From, To, Date and Subject, so a chunk alone is findable.
-3. **Embeddings.** OpenRouter's `/embeddings` endpoint with the existing OpenRouter key, model `openai/text-embedding-3-small`, in batches of 64. Vectors are cut to their first 512 values and re-normalised; text-embedding-3 models are trained to allow that. Calls made during a turn are recorded in the spending ledger as `openrouter-embeddings`.
+3. **Embeddings.** OpenRouter's `/embeddings` endpoint with the existing OpenRouter key, model `openai/text-embedding-3-small`, one request per group. Vectors are cut to their first 512 values and re-normalised; text-embedding-3 models are trained to allow that. The query embedding and the top-up are part of the turn and are recorded in its spending ledger as `openrouter-embeddings`. A build, including a rebuild a turn triggers, runs outside any turn: it is not in the ledger, and `mail_index.built` logs its reported prompt tokens instead.
 4. **Storage.** In the gateway's memory only. Nothing is written to Postgres or disk, so there is no migration. The index is rebuilt after every restart.
-5. **Top-up on use.** Each `gmail_recall` first indexes up to 50 messages newer than the newest indexed one (`after:` with an hour of overlap), bounded to 10 seconds. A slow top-up answers from what is indexed and says so.
+5. **Top-up on use.** Each `gmail_recall` first lists mail received since the previous listing (`after:`, with an hour of overlap) and queues it, oldest first. It then indexes up to 50 queued messages, within 10 seconds. Queued mail is never dropped: anything left waits for the next call, and the result says some recent mail is not indexed yet.
 6. **Search.** The query is embedded and compared with every chunk (cosine similarity, brute force). Each message scores as its best chunk.
 
-While the index is building, or after a failed build, the tool returns `building` or `unavailable` with a hint to use `gmail_search`; the next call retries a failed build. The gateway logs `mail_index.built` (message count and duration) and `mail_index.failed` (error class only).
+While the index is building, or after a failed build, the tool returns `building` or `unavailable` with a hint to use `gmail_search`. A failed build keeps what it indexed, and a call at least five minutes after the failure resumes it. The gateway logs:
+
+- `mail_index.built`: message count, messages left out, duration and prompt tokens;
+- `mail_index.failed`: error class, which dependency failed (Gmail or OpenRouter) and its HTTP status.
 
 ## Privacy
 
 - The index sends the text of every message in the window to the embedding provider through OpenRouter, not only the messages the agent reads. The owner accepted this for the MVP on 25 October 2026. The agent's own model calls already send the emails it reads.
-- Email text stays in gateway memory and never reaches Postgres, the operational log or the repository.
+- The index itself (bodies, chunks and vectors) stays in gateway memory. It is never written to Postgres, the operational log or the repository.
+- What `gmail_recall` returns to the agent is stored like every other Gmail tool result (`runtime_calls`): the query and up to ten senders, subjects, dates and 300-character excerpts.
 - Results carry the untrusted-content warning, and email text remains data, never instructions.
 
 ## Configuration and availability

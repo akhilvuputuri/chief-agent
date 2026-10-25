@@ -20,10 +20,12 @@ const MAX_MESSAGES = 3000;
 const CHUNK_CHARS = 1500;
 const CHUNK_OVERLAP = 200;
 const MAX_CHUNKS = 6;
+/** Messages per fetch-and-embed group are EMBED_BATCH / MAX_CHUNKS, so one request holds a group. */
 const EMBED_BATCH = 64;
 const FETCH_CONCURRENCY = 4;
 const TOP_UP_LIMIT = 50;
 const TOP_UP_MS = 10_000;
+const RETRY_MS = 300_000;
 const RESULTS = 8;
 const EXCERPT = 300;
 const DAY_MS = 86_400_000;
@@ -59,6 +61,8 @@ function unit(values: ArrayLike<number>) {
 
 /** OpenRouter's embeddings endpoint with the existing key. Usage goes to the run's ledger. */
 export class OpenRouterEmbedder implements Embedder {
+  /** Prompt tokens the provider reported, for the build log. */
+  tokens = 0;
   constructor(
     private key: string,
     private model = EMBEDDING_MODEL,
@@ -90,8 +94,14 @@ export class OpenRouterEmbedder implements Embedder {
         usage = { cost: 0 };
         throw new Error(`Embedding request failed (${response.status})`);
       }
-      const body = embeddingResponse.parse(await response.json());
+      const raw = await response.text();
+      if (raw.length > 20_000_000)
+        throw new Error("Embedding response too large");
+      const body = embeddingResponse.parse(JSON.parse(raw));
       usage = body.usage ?? null;
+      const prompt = body.usage?.prompt_tokens;
+      if (typeof prompt === "number" && Number.isFinite(prompt))
+        this.tokens += prompt;
       if (body.data.length !== texts.length)
         throw new Error("Embedding count did not match the request");
       return [...body.data]
@@ -147,16 +157,41 @@ export function chunks(m: Message) {
 
 export type MailIndexState = "idle" | "building" | "ready" | "failed";
 
+/** A failure attributed to Gmail or the embedding provider, for the operational log. */
+class DependencyError extends Error {
+  constructor(
+    readonly dependency: "gmail" | "openrouter",
+    cause: unknown,
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause));
+  }
+  get httpStatus() {
+    const status = this.message.match(/\((\d{3})\)/)?.[1];
+    return status ? Number(status) : undefined;
+  }
+}
+
+/** Keeps a result below the observation projection limit (src/observations.ts) so its
+ * untrusted-content warning stays a field; escaping can grow dense text past its length. */
+const SERIALISED_LIMIT = 11_000;
+const CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
+
 export class MailIndex {
   private entries: Entry[] = [];
   private indexed = new Set<string>();
-  private latest = 0;
+  /** Listed but not yet indexed, oldest first. Nothing listed is lost when a call stops early. */
+  private pending = new Set<string>();
+  private attempts = new Map<string, number>();
+  private abandoned = 0;
+  /** Every message listed before this time is indexed, pending or abandoned. */
+  private synced = 0;
+  private failedAt = 0;
   private building?: Promise<void>;
-  private topping?: Promise<void>;
+  private topping?: Promise<boolean>;
   state: MailIndexState = "idle";
   constructor(
     private gmail: Pick<GmailTools, "indexPage" | "indexMessage">,
-    private embedder: Embedder,
+    private embedder: Embedder & { tokens?: number },
     readonly owner: string,
     private now: () => number = Date.now,
   ) {}
@@ -170,70 +205,111 @@ export class MailIndex {
       if (!first.has(e.messageId)) first.set(e.messageId, e);
     return [...first.values()].map(({ vector, ...e }) => e);
   }
-  /** Starts the backfill once; a failed build can be started again. */
+  /** Starts the backfill once. A failed build resumes from what it indexed. */
   start() {
     if (!this.building) {
       const started = this.now();
+      const tokens = this.embedder.tokens ?? 0;
       this.state = "building";
       this.building = this.backfill().then(
         () => {
           this.state = "ready";
           opsLog("mail_index.built", "info", {
             messages: this.indexed.size,
+            omittedCount: this.abandoned + this.pending.size,
             latencyMs: this.now() - started,
+            inputTokens: (this.embedder.tokens ?? 0) - tokens,
           });
         },
         (error) => {
           this.state = "failed";
+          this.failedAt = this.now();
           this.building = undefined;
-          opsLog("mail_index.failed", "warn", errorFields(error));
+          opsLog("mail_index.failed", "warn", {
+            ...errorFields(error),
+            ...(error instanceof DependencyError
+              ? { dependency: error.dependency, httpStatus: error.httpStatus }
+              : {}),
+            messages: this.indexed.size,
+          });
         },
       );
     }
     return this.building;
   }
-  private async backfill() {
+  private async list(query: string, cap: number) {
     const ids: string[] = [];
     let page: string | undefined;
-    do {
-      const listed = await this.gmail.indexPage(
-        this.owner,
-        `${MAIL_INDEX_QUERY} newer_than:${MAIL_INDEX_DAYS}d`,
-        page,
-      );
-      ids.push(...listed.messages.map((m) => m.id));
-      page = listed.nextPageToken;
-    } while (page && ids.length < MAX_MESSAGES);
-    await this.add(ids.slice(0, MAX_MESSAGES));
+    try {
+      do {
+        const listed = await this.gmail.indexPage(this.owner, query, page);
+        ids.push(...listed.messages.map((m) => m.id));
+        page = listed.nextPageToken;
+      } while (page && ids.length < cap);
+    } catch (error) {
+      throw new DependencyError("gmail", error);
+    }
+    // Gmail lists newest first; index oldest first so a partial pass leaves the newest pending.
+    for (const id of ids.slice(0, cap).reverse())
+      if (!this.indexed.has(id)) this.pending.add(id);
   }
-  /** Fetches, chunks and embeds new messages. A message that cannot be read is skipped. */
-  private async add(ids: string[], signal?: AbortSignal) {
-    const wanted = [...new Set(ids)].filter((id) => !this.indexed.has(id));
-    const fetched: Message[] = [];
-    let next = 0;
-    const worker = async () => {
-      for (let i = next++; i < wanted.length; i = next++) {
-        if (signal?.aborted) return;
-        try {
-          fetched.push(await this.gmail.indexMessage(this.owner, wanted[i]!));
-        } catch {
-          /* Skipped; the next top-up does not retry it unless it is listed again. */
-        }
-      }
-    };
-    await Promise.all(
-      Array.from({ length: Math.min(FETCH_CONCURRENCY, wanted.length) }, () =>
-        worker(),
-      ),
+  private async backfill() {
+    const started = this.now();
+    await this.list(
+      `${MAIL_INDEX_QUERY} newer_than:${MAIL_INDEX_DAYS}d`,
+      MAX_MESSAGES,
     );
-    const pending = fetched.flatMap((m) => chunks(m).map((c) => ({ m, ...c })));
-    for (let at = 0; at < pending.length; at += EMBED_BATCH) {
-      const batch = pending.slice(at, at + EMBED_BATCH);
-      const vectors = await this.embedder.embed(
-        batch.map((b) => b.embedText),
-        signal,
+    this.synced = started;
+    await this.add(Infinity);
+  }
+  /**
+   * Fetches, chunks and embeds pending messages in small groups, so memory stays bounded and
+   * a failure keeps what was already indexed. A message is marked indexed only once all its
+   * chunks are embedded. A message that cannot be read is retried once, then abandoned.
+   */
+  private async add(limit: number, signal?: AbortSignal) {
+    let taken = 0;
+    while (this.pending.size && taken < limit && !signal?.aborted) {
+      const group = [...this.pending].slice(
+        0,
+        Math.min(Math.floor(EMBED_BATCH / MAX_CHUNKS), limit - taken),
       );
-      batch.forEach((b, i) => {
+      taken += group.length;
+      const fetched: Message[] = [];
+      let next = 0;
+      const worker = async () => {
+        for (let i = next++; i < group.length; i = next++) {
+          const id = group[i]!;
+          try {
+            fetched.push(await this.gmail.indexMessage(this.owner, id));
+          } catch {
+            const tries = (this.attempts.get(id) ?? 0) + 1;
+            this.attempts.set(id, tries);
+            if (tries >= 2) {
+              this.pending.delete(id);
+              this.attempts.delete(id);
+              this.abandoned += 1;
+            }
+          }
+        }
+      };
+      await Promise.all(
+        Array.from({ length: Math.min(FETCH_CONCURRENCY, group.length) }, () =>
+          worker(),
+        ),
+      );
+      if (!fetched.length) continue;
+      const parts = fetched.flatMap((m) => chunks(m).map((c) => ({ m, ...c })));
+      let vectors: Float32Array[];
+      try {
+        vectors = await this.embedder.embed(
+          parts.map((b) => b.embedText),
+          signal,
+        );
+      } catch (error) {
+        throw new DependencyError("openrouter", error);
+      }
+      parts.forEach((b, i) =>
         this.entries.push({
           messageId: b.m.id,
           threadId: b.m.threadId,
@@ -243,29 +319,31 @@ export class MailIndex {
           date: b.m.date,
           text: b.text,
           vector: vectors[i]!,
-        });
-        this.indexed.add(b.m.id);
-        this.latest = Math.max(this.latest, b.m.at);
-      });
+        }),
+      );
+      for (const m of fetched) {
+        this.indexed.add(m.id);
+        this.pending.delete(m.id);
+        this.attempts.delete(m.id);
+      }
     }
   }
-  /** Indexes mail that arrived since the newest indexed message, a bounded amount per call. */
+  /**
+   * Lists mail that arrived since the last listing and indexes a bounded amount of what is
+   * pending. Resolves true when nothing is left pending.
+   */
   private topUp() {
     this.topping ??= (async () => {
+      const listedAt = this.now();
       // Gmail's after: takes epoch seconds; an hour of overlap absorbs delivery delays.
       const since = Math.floor(
-        Math.max(this.latest, this.now() - MAIL_INDEX_DAYS * DAY_MS) / 1000 -
+        Math.max(this.synced, listedAt - MAIL_INDEX_DAYS * DAY_MS) / 1000 -
           3600,
       );
-      const listed = await this.gmail.indexPage(
-        this.owner,
-        `${MAIL_INDEX_QUERY} after:${since}`,
-      );
-      const fresh = listed.messages
-        .map((m) => m.id)
-        .filter((id) => !this.indexed.has(id))
-        .slice(0, TOP_UP_LIMIT);
-      await this.add(fresh, AbortSignal.timeout(TOP_UP_MS));
+      await this.list(`${MAIL_INDEX_QUERY} after:${since}`, MAX_MESSAGES);
+      this.synced = listedAt;
+      await this.add(TOP_UP_LIMIT, AbortSignal.timeout(TOP_UP_MS));
+      return this.pending.size === 0;
     })().finally(() => (this.topping = undefined));
     return this.topping;
   }
@@ -284,7 +362,9 @@ export class MailIndex {
     };
     if (this.state !== "ready") {
       const status = this.state === "failed" ? "unavailable" : "building";
-      void this.start();
+      // A failed build is retried after a pause, outside this turn's usage ledger.
+      if (this.state !== "failed" || this.now() - this.failedAt >= RETRY_MS)
+        void spending.exit(() => this.start());
       return {
         status,
         ...scope,
@@ -292,18 +372,17 @@ export class MailIndex {
         hint: "The mail index is not ready. Use gmail_search for now.",
       };
     }
-    let stale = false;
+    let complete = false;
     let timer: NodeJS.Timeout | undefined;
     try {
-      await Promise.race([
+      complete = await Promise.race([
         this.topUp(),
-        new Promise((_, reject) => {
+        new Promise<boolean>((_, reject) => {
           timer = setTimeout(() => reject(new Error("timeout")), TOP_UP_MS);
         }),
       ]);
     } catch {
       // A slow or failed top-up still answers from what is indexed.
-      stale = true;
     } finally {
       clearTimeout(timer);
     }
@@ -317,31 +396,42 @@ export class MailIndex {
       if (!seen || score > seen.score)
         best.set(entry.messageId, { entry, score });
     }
+    const clean = (text: string) =>
+      text.replace(CONTROL, " ").replace(/\s+/g, " ").trim();
     const results = [...best.values()]
       .sort((a, b) => b.score - a.score)
       .slice(0, Math.max(1, Math.min(limit, 10)))
       .map(({ entry: e, score }) => ({
         messageId: e.messageId,
         threadId: e.threadId,
-        from: e.from,
-        subject: e.subject,
-        date: e.date,
+        from: clean(e.from),
+        subject: clean(e.subject),
+        date: clean(e.date),
         score: Math.round(score * 1000) / 1000,
-        excerpt: e.text.replace(/\s+/g, " ").trim().slice(0, EXCERPT),
+        excerpt: clean(e.text).slice(0, EXCERPT),
       }));
-    return {
+    const result = {
       warning: UNTRUSTED,
       status: "ready",
       ...scope,
       indexedMessages: this.indexed.size,
-      ...(stale
-        ? {
-            note: "The newest mail may not be indexed yet; gmail_search covers it.",
-          }
-        : {}),
+      ...(complete
+        ? {}
+        : {
+            note: "Some recent mail is not indexed yet; gmail_search covers it.",
+          }),
       results,
+      omitted: 0,
       guidance:
         "Ranked by meaning, not keywords: the top result is the closest match, not necessarily a match. Confirm with gmail_thread before reporting. No match does not prove an email does not exist, and older or non-Primary mail is outside this index.",
     };
+    while (
+      results.length > 1 &&
+      JSON.stringify(result).length > SERIALISED_LIMIT
+    ) {
+      results.pop();
+      result.omitted += 1;
+    }
+    return result;
   }
 }

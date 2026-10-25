@@ -31,7 +31,24 @@ This entry tests the first owned retrieval (RAG) capability in Chief: a meaning 
 - Email agent manifest, instructions and registry pin.
 - `src/mail-recall-eval.ts`: the operator-run retrieval eval.
 - Tests: `tests/mail-recall.test.ts` (chunking and quotes, HTML text, owner scoping, ranking, top-up and pruning, failed-build retry, embedder parsing, availability and catalogue).
-- Independent review: pending.
+- **Independent review, Opus 5.5, `44c411d`: REQUEST CHANGES.**
+  - **Blocker:** with the index unavailable, the email agent stayed listed but every run for it failed, because `runFindingsAgent` required every listed tool. The coordinator also kept delegating Gmail to it.
+  - **Should-fix:**
+    - the top-up watermark skipped mail after more than 50 new messages;
+    - a failed build re-read the whole window on every call, with no pause;
+    - the backfill held every body in memory before embedding;
+    - the privacy note left out that tool results are stored like other Gmail results;
+    - a rebuild a turn started was charged to that turn.
+  - **Nits:** quoted HTML history; escape-heavy results past the projection limit; messages skipped silently; the failure log did not name the dependency.
+  - **Fixes:**
+    - optional tools are left out of the child's toolset and grant instead of being required;
+    - listed mail is queued oldest first and never dropped;
+    - fetching and embedding run in groups of ten that keep their progress;
+    - a failed build resumes after five minutes, outside the turn's ledger;
+    - unreadable messages are retried once, then counted;
+    - results are trimmed below the limit;
+    - the docs are corrected.
+  - Each finding has a regression test in `tests/mail-recall.test.ts`.
 
 ## Verification and outcome
 

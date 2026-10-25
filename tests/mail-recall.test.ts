@@ -12,6 +12,8 @@ import { action } from "../src/protocol.js";
 import { runtimeContext } from "../src/runtime.js";
 import { projectObservation } from "../src/observations.js";
 import { plugins } from "../src/plugin-registry.js";
+import { runFindingsAgent } from "../src/agents.js";
+import { spending, type Spending } from "../src/spending.js";
 
 const DAY = 86_400_000;
 const NOW = Date.UTC(2026, 9, 25);
@@ -320,4 +322,167 @@ test("index reads stay in the primary mailbox and check message identity", async
   await assert.rejects(gmail.indexMessage("123", "../x"), /Invalid/);
   await assert.rejects(gmail.indexPage("999", "x"), /not connected/);
   assert.ok(calls.some((c) => c.includes("maxResults=100")));
+});
+
+test("the email agent runs without the index and gains gmail_recall with it", async () => {
+  for (const mailIndex of [false, true]) {
+    const runtime = runtimeContext(
+      { gmail: true, mailIndex },
+      null,
+      undefined,
+      undefined,
+      true,
+    );
+    const definition = plugins.get(plugins.resolve("email"));
+    // Tool validation passes; the run then stops at the allocation check.
+    await assert.rejects(
+      runFindingsAgent(
+        {
+          executeAgent: async () => ({}),
+          execution: {
+            db: {},
+            user: "owner",
+            remaining: async () => ({ models: 1, tools: 1, ms: 1000 }),
+          },
+          signal: new AbortController().signal,
+          runtime,
+        } as any,
+        { type: "email", objective: "find it", context: "" },
+        definition,
+        {} as any,
+        {} as any,
+        async () => ({}) as any,
+      ),
+      /remaining allocation is reserved/,
+    );
+    // The coordinator still delegates Gmail to the email agent instead of losing it.
+    assert.ok(!runtime.tools.some((t) => t.name === "gmail_search"));
+    assert.equal(
+      runtime.allTools!.some((t) => t.name === "gmail_recall"),
+      mailIndex,
+    );
+  }
+});
+
+test("a burst of new mail is indexed over several recalls without gaps", async () => {
+  let now = NOW;
+  const box = mailbox([
+    { id: "a0", at: NOW - DAY, subject: "s", text: "seed" },
+  ]);
+  // Gmail lists newest first.
+  const listNewestFirst = box.gmail.indexPage;
+  box.gmail.indexPage = async (user, query) => {
+    const page = await listNewestFirst(user, query);
+    return { messages: page.messages.reverse() };
+  };
+  const index = new MailIndex(box.gmail, words, "owner", () => now);
+  await index.start();
+  for (let i = 1; i <= 80; i++)
+    box.mail.push({
+      id: "n" + i,
+      // One message from the future must not stop later listings.
+      at: i === 80 ? NOW + 400 * DAY : NOW + i * 1000,
+      subject: "s" + i,
+      text: "burst message " + i,
+    });
+  now = NOW + 2 * DAY;
+  const first = await index.recall("owner", "burst");
+  assert.match(first.note!, /not indexed yet/);
+  assert.equal(index.messages, 51);
+  // The oldest new mail is indexed first, so nothing older is left behind.
+  assert.ok(box.reads.includes("n1") && !box.reads.includes("n80"));
+  const second = await index.recall("owner", "burst");
+  assert.equal(second.note, undefined);
+  assert.equal(index.messages, 81);
+  box.mail.push({ id: "z1", at: now, subject: "late", text: "late arrival" });
+  await index.recall("owner", "late arrival");
+  assert.equal(index.messages, 82);
+});
+
+test("a failed build keeps its progress, pauses before retrying and runs outside the turn ledger", async () => {
+  let now = NOW;
+  const mail = Array.from({ length: 25 }, (_, i) => ({
+    id: "m" + i,
+    at: NOW - i * 1000,
+    subject: "s" + i,
+    text: "message body " + i,
+  }));
+  const box = mailbox(mail);
+  let calls = 0;
+  let ledgers = 0;
+  const flaky: Embedder = {
+    async embed(texts) {
+      if (spending.getStore()) ledgers += 1;
+      if (++calls === 2) throw new Error("Embedding request failed (429)");
+      return words.embed(texts);
+    },
+  };
+  const index = new MailIndex(box.gmail, flaky, "owner", () => now);
+  await index.start();
+  assert.equal(index.state, "failed");
+  assert.equal(index.messages, 10);
+  const reads = box.reads.length;
+  const turn = { begin: async () => "c", settle: async () => {} };
+  const ask = () =>
+    spending.run(turn as unknown as Spending, () =>
+      index.recall("owner", "message"),
+    );
+  assert.equal((await ask()).status, "unavailable");
+  assert.equal(box.reads.length, reads);
+  now += 6 * 60_000;
+  assert.equal((await ask()).status, "unavailable");
+  await index.start();
+  assert.equal(index.state, "ready");
+  assert.equal(index.messages, 25);
+  // Only the 15 messages not yet indexed were read again.
+  assert.equal(box.reads.length, reads + 15);
+  assert.equal(ledgers, 0);
+});
+
+test("an unreadable message is retried once and then left out", async () => {
+  const box = mailbox([
+    { id: "ok", at: NOW, subject: "s", text: "fine" },
+    { id: "bad", at: NOW, subject: "s", text: "broken" },
+  ]);
+  const read = box.gmail.indexMessage;
+  box.gmail.indexMessage = async (user, id) => {
+    if (id === "bad") throw new Error("Gmail request failed (500)");
+    return read(user, id);
+  };
+  const index = new MailIndex(box.gmail, words, "owner", () => NOW);
+  await index.start();
+  assert.equal(index.state, "ready");
+  assert.equal(index.messages, 1);
+  await index.recall("owner", "fine");
+  assert.equal(index.messages, 1);
+});
+
+test("a full page of escape-heavy results keeps its warning field", async () => {
+  const dense = '"\\'.repeat(60);
+  const box = mailbox(
+    Array.from({ length: 10 }, (_, i) => ({
+      id: "d" + i,
+      at: NOW - i,
+      subject: dense,
+      from: dense,
+      text: dense.repeat(10) + " common words",
+    })),
+  );
+  const index = new MailIndex(box.gmail, words, "owner", () => NOW);
+  await index.start();
+  const found = await index.recall("owner", "common words", 10);
+  assert.ok(JSON.stringify(found).length < 12_000);
+  assert.ok(found.omitted! > 0);
+  const projected = projectObservation("gmail_recall", found).result;
+  assert.match(projected.warning, /Untrusted email content/);
+});
+
+test("quoted history in HTML replies is not indexed", () => {
+  const html = Buffer.from(
+    '<div>Yes, Tuesday works.</div><div class="gmail_quote">On Mon, Ann wrote:<blockquote>Can we meet about the deposit?</blockquote></div>',
+  ).toString("base64url");
+  assert.equal(
+    indexBody({ mimeType: "text/html", body: { data: html } }),
+    "Yes, Tuesday works.",
+  );
 });
