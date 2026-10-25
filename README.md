@@ -1,145 +1,143 @@
-# Chief
+# ◈ Chief
 
-This is a personal project.
+**A personal chief of staff that lives in Telegram.**
 
-Current release and open work: [current-work.md](docs/current-work.md). For an incident, start with [troubleshooting.md](docs/troubleshooting.md). [Published releases](https://github.com/akhilvuputuri/chief-agent/releases) record verified deployment milestones; a branch push alone is not a deployment.
+Chief keeps one conversation with you, by text or voice, and hands the work to specialist agents: your inbox, calendar, bills, portfolio, reading, local conditions and even its own code. Anything that writes, spends or commits waits for you to tap approve.
 
-**A personal assistant with a TypeScript agent runtime we own.** Talk to it through Telegram text or voice, ask it to research, maintain notes, plan preparation, and manage reminders. Postgres is the durable source of truth; Google Sheets gives you a familiar viewing surface.
+This is a personal project: a self-hosted, single-owner agent, built and run in the open. Current release and open work: [current work](docs/current-work.md) · [releases](https://github.com/akhilvuputuri/chief-agent/releases).
 
-Repository: https://github.com/akhilvuputuri/chief-agent. Formerly Companion Agent. See [rebrand compatibility](docs/rebranding.md) for stable operational identifiers.
+---
+
+## What you can ask it
+
+> _"Find the delivery email for my headphones and track it."_
+> _"Add Netflix, 22.98 SGD monthly, renews on the 5th. Remind me three days before."_
+> _"Gather last month's invoices from my cloud providers."_
+> _"Tell me when VOO closes 15% below its 52-week high."_
+> _"Is it going to rain at my pin in the next hour?"_
+> _"Every night at 11, research these topics and send me a sourced summary."_
+> _"There's a bug in the briefing timezone. Fix it."_
+
+## Features
+
+### 🗣 Conversation that remembers
+
+- Text and **voice notes** in, optional spoken replies out (ElevenLabs, OpenAI or Groq).
+- **Photos and PDFs**, read by an isolated media agent. Image bytes are never stored.
+- A rolling conversation with **history recall**, explicit memories and versioned skills.
+- Topics in your private chat: **Main** for conversation, **News**, **Markets** and **Coding** for feeds.
+- Phone-friendly **interactive views** (`/status`, `/items`, `/schedules`, `/drafts`, `/briefing`) and a Telegram **Mini App** with revisioned canvases for plans and analyses.
+
+### 📅 Your day, handled
+
+- Tasks, reminders and daily briefings built from the sources you pick.
+- **Scheduled routines**: recurring agent runs on any schedule.
+- **Responsibilities**: "keep an eye on this". Chief watches the email, calendar or parcels you name, respects quiet hours and only starts once you confirm the card.
+- **Gmail, read-only**, across several accounts, with experimental recall of half-remembered emails by meaning. **Calendar** reads, plus event drafts that are created only after you tap approve.
+- A **parcel tracker** fed from email or your own updates. Nothing scans your mailbox unasked.
+
+### 💳 Money, tracked
+
+- A **subscription tracker** with renewal reminders, price-change alerts and a monthly summary.
+- **Invoice gathering**: original PDFs from Gmail, files you send or billing portals. For portals, you log in yourself in an isolated browser handoff, and Chief never sees your password.
+- **Portfolio**: read-only IBKR holdings, stock lookups, daily-drop alerts and "tell me when…" price rules.
+- **IBKR order drafts** that you review and submit in IBKR. Chief can't place, change or cancel an order.
+
+### 📰 Reading and research
+
+- A **daily news bulletin** from sites you follow. It learns from what you save to Reader, and building an edition makes no model call.
+- **Evidence-checked research**: every quote in an agent's report must appear in a source it actually read.
+- Public link resolution, plus NLB library ebook availability.
+- **Job search**: saved roles, fit assessments that keep unknowns visible, and preparation tied to evidence.
+
+### 🇸🇬 Merlion, the Singapore agent
+
+Weather, rain radar (with maps and loops for a shared location), PSI and US AQI, alerts, carparks, traffic cameras, bus arrivals, MRT status, holidays and hawker closures, all from data.gov.sg and LTA DataMall.
+
+### 🛠 Chief builds Chief
+
+Describe a bug or feature in plain words. Chief writes a plan, and nothing is built until you approve it. A coding agent then implements it in a disposable **EC2 box**, runs the real checks and gets a separate reviewer model to review it. It then opens a PR and works through review feedback. Chief merges only after you say "okay", then watches the release.
+
+## How it stays in your control
+
+| Principle                                | In practice                                                                                                                                             |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **The model proposes, the host decides** | Identity comes from Telegram authentication, never from model arguments. Every tool has a strict schema and is scoped to you.                           |
+| **Approval for consequential actions**   | Calendar events, coding plans and merges, role deletions and new monitoring all wait for a bound Telegram card or reply.                                |
+| **Read-only by default**                 | Gmail and IBKR holdings are read-only. There is no email sending, and orders are only drafts.                                                           |
+| **No silent retries**                    | A write whose outcome is uncertain pauses for inspection instead of running twice.                                                                      |
+| **Bounded work**                         | Every task has time, model-call and tool-call allowances. You can check, continue or cancel it with `/status`, `/continue` and `/workcancel`.           |
+| **Deterministic where possible**         | Stock alerts, news editions, reminders and monthly summaries are plain code, with no model in the loop.                                                 |
+| **Isolated agents**                      | Agents get a brief, not your conversation. Agents can't start other agents, and untrusted code runs only in throwaway boxes without production secrets. |
+| **Private logs**                         | Operational logs carry IDs, counts and codes, never message text, email or tokens.                                                                      |
+
+Details: [security](docs/security.md), [calendar approval](docs/calendar-approval.md), [reliable execution](docs/reliable-execution.md), [operational logs](docs/operational-logs.md).
+
+## How it works
 
 ```mermaid
 flowchart LR
-  T[Telegram text / voice] <--> G[Authenticated gateway]
-  G <--> V[ElevenLabs STT / TTS]
-  G --> A[Our TypeScript agent loop]
-  A <--> M[OpenRouter · Sol · medium]
-  A --> D[Validated owner-scoped tools]
-  A <--> P[(Postgres history / checkpoints / budgets)]
-  D <--> P
-  D --> W[Public research · Gemini Flash helper]
-  D --> R[Gmail reads / Calendar queries and approved creation]
-  D --> S[Preparation and daily Sheets]
+  U[You · Telegram text, voice, photos, location] <--> G[Gateway · allowlisted owner]
+  G --> C[Chief coordinator · Claude Opus 5.5]
+  C -- agent_run --> A[Specialist agents · Gemini Flash<br/>email · calendar · daily · parcels · subscriptions<br/>bills · stocks · brokerage · news · research · media · Merlion]
+  C -- coding_start --> B[EC2 coding boxes<br/>plan · build · review · PR]
+  C & A --> H{Host guard<br/>owner scope · approvals · budgets · uncertain writes}
+  H --> I[Gmail · Calendar · IBKR · Reader MCP<br/>data.gov.sg · LTA · public web]
+  H <--> P[(Postgres · history, records, journals)]
+  M[Deterministic monitors<br/>stocks · news · reminders · summaries] --> G
 ```
 
-## What it does
+- **Coordinator and agents.** Chief keeps the conversation, memory and work tracking. Domain work runs in [plugin-defined agents](docs/agents.md) with their own context, tools and a cheaper model. Their reports are validated against a contract before Chief sees them.
+- **Models are configuration.** [`config/model-policy.json`](config/model-policy.json) maps the main model and agent tiers, and is changed through review and release like any code. A small decision model picks the [reasoning effort](docs/reasoning-effort.md) for each message.
+- **Durable by design.** Model responses and tool calls are journalled before the turn advances. Background jobs keep their own context while chat stays responsive. See [rolling conversation](docs/rolling-conversation.md).
+- **Extensible.** Add agents as [declarative plugins](docs/plugins.md) and remote tools through [MCP connectors](docs/mcp.md), each with explicit tool grants.
 
-- Read-only interactive Telegram views: `/roles`, `/items`, `/schedules`, `/drafts`, `/briefing` and `/status` job selection; long answers expand within one message. See [views and answer envelopes](docs/telegram-views.md).
-- Topics in the private chat: when threaded mode is on, the news bulletin and stock alerts go to their own topics, and a message typed in a topic is answered there. See [topics](docs/telegram-topics.md).
-- Rolling conversation with a protected recent exchange, source-linked history retrieval, explicit memories and on-demand versioned text skills. Background jobs have independent contexts and can run while chat remains responsive. See [conversation architecture](docs/rolling-conversation.md).
-- General tasks, notes, reminders and source-selectable daily briefings.
-- Public web research and evidence-backed role preparation, including questions about unknown experience.
-- Telegram voice notes through ElevenLabs Scribe v2, with optional Flash v2.5 spoken replies.
-- Photos and PDF documents sent on Telegram: an isolated media specialist reads current-turn images and answers targeted questions over stored documents, returning referenced facts and uncertainty; PDF text is extracted in-process, stored as an owner-scoped source and readable page by page with `source_read`. Image bytes are never retained. Scanned PDFs without selectable text are reported, not guessed. See [media processing](docs/media-specialist.md).
-- NLB library assistant: "is this available as an ebook?" answered with the Lucky Day and hold rule and Kobo reachability; an optional phone-linked Libby card (encrypted identity, approval-card linking and revoke) for loans with days left and holds. Paced, pinned-route calls; no downloads, returns or renewals. See [library assistant](docs/library.md).
-- Read-only Gmail; Calendar queries and [button-approved event creation](docs/calendar-approval.md); separate preparation and daily-assistant Sheet mirrors.
-- Durable task steps, source evidence, action receipts, execution budgets and cancellation.
-- Approval-gated role deletion and skill activation. No email sending, arbitrary shell execution or self-deployment.
+## Status
 
-## Runtime
+| Area                                                            | Status                                                       |
+| --------------------------------------------------------------- | ------------------------------------------------------------ |
+| Conversation, voice, attachments, topics, views, canvases       | Live                                                         |
+| Tasks, reminders, briefings, routines, responsibilities         | Live                                                         |
+| Gmail (read-only), Calendar with approved drafts, parcels       | Live                                                         |
+| Email recall by meaning                                         | Experimental; under evaluation                               |
+| Subscriptions, invoice gathering, price alerts, monthly summary | Live; newest parts awaiting real-use checks                  |
+| IBKR holdings and order drafts, stock alerts and rules          | Live; needs your IBKR consent and a market-data key          |
+| News bulletin, research, job alignment                          | Live                                                         |
+| Merlion (Singapore)                                             | Live; awaiting real-use checks                               |
+| Coding on EC2 boxes, merge on your okay                         | Live                                                         |
+| NLB library account linking                                     | Blocked by provider API access; catalogue availability works |
 
-The runtime uses OpenRouter with explicit medium reasoning. Its checked-in `config/model-policy.json` initially leaves the main model at the existing environment/default `openai/gpt-5.6-sol`; a reviewed policy pin lets future coding agents change it through the ordinary PR and release pipeline without server access. Every request requires supported parameters and uses OpenRouter's default outage-aware provider routing (no price sort), capped at $2 per million input tokens and $10 per million output tokens by default. A request fails if no eligible provider exists. Missing provider cost data is unknown, never recorded as zero. See [model selection and release](docs/deployment.md#changing-the-production-model-through-a-release).
+Status means released and running. It is not a measure of answer quality. The project publishes quality, latency or cost numbers only once they've been measured; see the [roadmap](docs/roadmap.md#evaluation-before-marketing-claims).
 
-Tools have individual names and Zod-validated argument schemas. Identity comes from Telegram authentication and server-owned callbacks, never model arguments. Calls execute sequentially. Model responses and invocation records are saved before advancing. An interrupted write with an uncertain outcome pauses execution for inspection.
+## Run your own
 
-Telegram replies are model-written, guided by the mobile delivery context. The renderer handles supported Markdown and Telegram length limits. `/status` is the separate deterministic view of recorded task state; no ledger template replaces conversational answers.
-
-## Start here: a new developer or coding agent
-
-GitHub `main` is the source of truth for integrated code. The last successful `release` workflow and server `RELEASE` identify what is live; main may be ahead after a failed or pending deployment. The production branch is **main**, not master.
-
-1. Read [AGENTS.md](AGENTS.md), [current work](docs/current-work.md), then [HANDOVER.md](HANDOVER.md). For failures, follow the [shared troubleshooting runbook](docs/troubleshooting.md).
-2. Follow [portable development](docs/portable-development.md): clone, use Node 22, install dependencies, and run the mocked checks without production keys.
-3. Develop on an independent branch or worktree, open a PR, verify checks and merge. Passing main changes deploy through GitHub Actions; no local production SSH key is needed for ordinary app releases.
-4. Watch the release and report its SHA and health. Database/Compose changes, secret rotation and trusted server-command changes still require the documented operator procedure.
-
-[Release/version policy](docs/releases.md) explains tags and notes. [Cloud development](docs/cloud-development.md) explains deployment security and remaining access gaps. Do not rely on another chat's context, unpushed local files or a developer's absolute filesystem path.
-
-## Local setup
-
-Requires Node 22+ and Docker Compose.
+Requires Node 22+ and Docker Compose. Every integration beyond Telegram and a model provider is optional.
 
 ```sh
 npm ci
-npm run setup
-# Fill in the private .env file locally; never commit provider credentials.
+npm run setup              # creates a private .env; never commit credentials
 docker compose up -d postgres
 docker compose run --rm migrate
 npm run check:env
+npm run pair               # then press Start in the link it prints
+npm run pair:finish
 npm run dev
 ```
 
-Use the local Postgres URL from `.env.example`. Pair your Telegram user using `npm run pair` and `npm run pair:finish` if setting up a new bot. Existing installations keep their current allowlist. Run only one Telegram poller per bot token.
+Production runs the same Compose stack (`docker compose up -d --build`): a gateway and Postgres, both bound to loopback. An optional `gathering` profile adds the isolated invoice browser and its egress proxy. Guides: [deployment](docs/deployment.md), [configuration](docs/configuration.md), [Google](docs/google-integrations.md), [voice](docs/voice-setup.md), [IBKR](docs/ibkr-portfolio.md), [Singapore data](docs/singapore-open-data.md), [troubleshooting](docs/troubleshooting.md).
 
-For the full container stack:
+## Built in the open
 
-```sh
-docker compose up -d --build
-```
-
-Only the gateway and Postgres are long-running services; migration is a one-shot job. No Python checkout is downloaded. Postgres and the health endpoint are bound to server loopback. Named volumes persist state; do not delete volumes when updating.
-
-Secrets stay in private environment files, outside Git and container images. See [Google setup](docs/google-integrations.md), [voice setup](docs/voice-setup.md), and [deployment](docs/deployment.md).
-
-## Durable work
-
-Simple conversation needs no plan. Substantial requests can establish tracked steps. Each task initially receives 15 minutes of active execution, 40 model calls and 100 tool calls; the operator can change those defaults. Automatic continuation consumes the same persisted allocation. Model retries and read retries count toward it; writes are never blindly retried.
-
-- `/status`: recorded progress, state and budget usage.
-- `/continue`: add another allocation without clearing completed steps.
-- `/workcancel`: abort the current model request and prevent subsequent tools; completed actions remain recorded.
-- `/approve ID` and `/deny ID`: decide a specific saved approval.
-
-Source quotes, applicability labels and receipts validate recorded support and execution. They cannot prove that a model understood every requirement or judged a source correctly. See [runtime design and recovery](docs/reliable-execution.md).
-
-## Verification
+The [engineering journal](docs/journey/README.md) has more than a hundred entries on decisions, production incidents and experiments. Each one keeps measured results apart from hypotheses. Good starting points: [owning the runtime](docs/journey/01-owned-runtime.md), [token cost](docs/journey/03-token-cost.md), [coordinator agents](docs/journey/49-coordinator-agents.md) and [boxed sub-agents](docs/journey/91-boxed-subagents.md).
 
 ```sh
-npm run check
-npm run build
-npm run format:check
-# Optional: paid, bounded Sol smoke test against synthetic in-memory data.
-npm run smoke:runtime
+npm run check && npm run build && npm run format:check   # mocked; no production keys needed
 ```
 
-Tests cover the actual request body, conversation/tool/observation loop, ownership, approval replay and expiry, evidence checks, budgets, cancellation, recovery, context boundaries, schedules, Telegram and provider contracts. They do not claim semantic correctness or production-scale reliability. [Verification record](docs/verification.md) documents live checks.
+## Contributing
 
-## Roadmap
+Human and coding-agent contributors start with [AGENTS.md](AGENTS.md), [CONTRIBUTING.md](CONTRIBUTING.md), [current work](docs/current-work.md) and [portable development](docs/portable-development.md). Merging to `main` triggers checks and then an automatic release; see [cloud development](docs/cloud-development.md) and the [release policy](docs/releases.md).
 
-Daily usage drives the next changes: better context selection, memory retrieval, semantic deduplication, richer tracing and faster voice responses. Realtime voice, parallel specialist teams, sandbox/shell tools, self-deployment and a web client are separate milestones. The runtime and normalized message boundary allow those clients to be added without moving ownership or permissions into model prompts.
+## Attribution
 
-## References and attribution
-
-The initial prototype used [Nous Research Hermes Agent](https://github.com/NousResearch/hermes-agent/tree/9c4c548cd555905563b146a6974932b0c5eb8a01). The obsolete Python adapter has been removed; its implementation remains available in Git history at commit `489f73e`. Historical deployment context is archived under `docs/history`. Upstream projects retain their licenses. This application is independently developed and MIT licensed.
-
-## Evaluations and development
-
-See [evaluation guide](docs/evals/guide.md) and [development process](docs/development-process.md). `npm run eval` is an offline diagnostic; `npm run eval -- --live` runs bounded paid model scenarios in isolated synthetic databases. Production runtime fixes are evaluated separately from the tooling.
-
-## Developing from Codex cloud
-
-Use the connected `akhilvuputuri/chief-agent` environment and read [AGENTS.md](AGENTS.md). The [cloud development guide](docs/cloud-development.md) covers testing, PRs, automatic production releases after passing main checks, bounded diagnostics and operational limits. Live credentials remain on the production host (AWS Lightsail). Sanitized operational logs are readable through `npm run logs:cloudwatch` with a scoped reader identity; see [docs/lightsail.md](docs/lightsail.md).
-
-## Engineering journey
-
-The [development journal](docs/journey/README.md) records runtime decisions, production incidents, cost investigation, experiments and remaining evidence gaps. Start with [token cost](docs/journey/03-token-cost.md) for a concrete example. [Claude cloud setup](docs/claude-cloud.md) describes using another coding client with the same repository and release pipeline.
-
-## Research specialist
-
-The main agent can delegate bounded public research to an isolated, read-only specialist. It returns exact-target, source-linked findings; the main agent remains responsible for synthesis and authorized changes. Runs share execution limits and retain linked model/tool traces and separate charges. See [architecture, limits and inspection](docs/research-specialist.md). A [media specialist](docs/media-specialist.md) reuses the same boundary for images and stored documents, optionally on a separate `MEDIA_MODEL`.
-
-## Job alignment
-
-Ask about selected roles or all saved roles. The [job-alignment specialist](docs/job-alignment.md) assesses requirements, established experience, qualified interview evidence and minimum useful preparation. It retains the exact requested scope across internal batches, keeps unknowns explicit, and returns detailed persisted reports for the main agent to synthesize and save using existing tools. General research remains available for other tasks.
-
-## Telegram canvases
-
-The optional Mini App offers persistent, revisioned canvases and a read-only saved-role browser. Open `/canvases` in the bot, or ask it to save a plan or analysis as a canvas. Multiple topics stay separate; earlier revisions remain accessible. Telegram validates the owner before any private content loads. Read the [canvas contract](docs/canvases.md) and [HTTPS rollout](docs/miniapp-deployment.md) for configuration, migration 011 and live verification requirements. Calendar approvals remain in Telegram.
-
-## Portable capability plugins
-
-General public research is packaged as a versioned declarative plugin. Enable reviewed agents through the host registry, export/import supported text-only bundles and inspect exact package/skill versions in execution traces. The host retains owner scope, evidence validation, approvals and budgets. See [plugin format and operation](docs/plugins.md). Job alignment and media still use their existing host profiles; external vendor adapters and MCP integration are future work.
-
-### Authoritative state and history
-
-Postgres stores current application records and ordered conversation/execution references. Message content is shared within each owner; active history reads are bounded, with original messages retrieved through conversation search/read tools. Model context is not the complete archive. See [storage, diagnostics and migration](docs/authoritative-storage.md). No automatic trace-retention purge is enabled.
+Chief was formerly Companion Agent; stable operational identifiers are listed in [rebranding](docs/rebranding.md). The first prototype used [Nous Research Hermes Agent](https://github.com/NousResearch/hermes-agent/tree/9c4c548cd555905563b146a6974932b0c5eb8a01). Chief now runs its own TypeScript runtime, and the removed adapter remains in Git history at `489f73e`. MIT licensed.

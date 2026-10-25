@@ -1,19 +1,14 @@
-# Five-minute application demo
+# Five-minute demo
 
-Use an isolated database, a test Telegram bot and synthetic personal information. The goal is to demonstrate inspectable behavior, not imply successful real job applications.
+Use an isolated database, a test Telegram bot and synthetic personal information. Never record the production bot, real mail, real holdings or real invoices. The goal is to show inspectable behaviour and its control boundaries, not to imply measured quality.
 
-1. **Conversational intent.** “I’m exploring AI engineering. Help me decide where to focus.” Let the assistant ask about experience and preferences.
-2. **Explicit memory.** “Remember that I’ve built Python APIs and want to learn agent evaluation.” Restart the gateway, then ask what background it has saved.
-3. **Research and state.** Search for a role, inspect its source, and ask to save it. If live search is not configured, paste synthetic role text and clearly label it as fixture data.
-4. **Grounded comparison.** Ask “Where do I match, where am I weak, and what do you still need to know?” Show the role/profile evidence and unknowns rather than a made-up numeric score.
-5. **Voice.** Send a short voice note asking to mark the role as interested. Show the same saved state through a follow-up text query.
-6. **Control.** Ask to delete it, show the precise approval preview, deny, verify it remains, then approve a fresh request if desired.
-7. **Trace.** Show metadata events and explain that domain tools, permissions and state are owned by the app and the TypeScript runtime owns the reasoning loop.
+1. **Conversation and memory.** "Remember that I prefer short morning briefings." Restart the gateway, then ask what it has saved.
+2. **Voice.** Send a short voice note: "Remind me to renew my passport next Friday at 9." Then show the saved reminder in `/items` or `/schedules`.
+3. **Approval.** "Put a 30-minute call with Sam on Thursday at 3pm on my calendar." Show the approval card, deny it, and confirm that nothing was created. Then approve a fresh request if a test calendar is connected.
+4. **Tracking.** "Add a streaming service, 15 SGD monthly, renews on the 5th. Remind me three days before." Ask what renews in the next 30 days, and open the Mini App's Subscriptions tab.
+5. **Delegation and evidence.** Ask a public research question. Open `/status` to show the steps, the agent run and its source-backed evidence.
+6. **Local data.** If Singapore keys are configured: "Is it raining near Orchard right now?" or "When is the next bus at stop 01012?"
+7. **Coding (optional).** On a test repository, describe a small change. Show the plan card, and show that nothing is built until it is approved.
+8. **Trace.** Show the sanitized operational log lines for the turn. Explain that identity, tools, approvals and budgets belong to the host, not the model.
 
-Before recording: verify live provider access, keep keys out of the terminal, redact personal data, and label synthesized speech. After recording: document one real failure and how it informed the roadmap.
-
-Suggested project description:
-
-> Built a persistent Telegram personal assistant with an owned TypeScript runtime and Postgres, with voice-note input, conversational job-search tools, per-run authorization and database-enforced approvals. Separated the agent runtime from durable product state to support future clients and tool providers.
-
-Only add performance, usage or quality numbers after measuring them. Pair the demo with the architecture diagram and an explanation of the current delivery/recovery tradeoff.
+Before recording: verify live provider access, keep keys out of the terminal, redact personal data and label synthesized speech. Do not claim performance, usage or quality numbers that have not been measured. Pair the demo with the README architecture diagram, and with one real failure from the [engineering journal](journey/README.md) and how it was fixed.
