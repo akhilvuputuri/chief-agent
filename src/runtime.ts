@@ -376,7 +376,7 @@ export function runtimeContext(
               gmail_thread:
                 "Read one whole conversation oldest first using a threadId from gmail_search. Bounded per message and in total; truncated messages can be read in full with gmail_read. Prefer this over reading messages one by one.",
               gmail_recall:
-                "Find emails by meaning when the owner half-remembers one: describe what it was about in plain words (no Gmail operators). Searches an index of the primary mailbox's Primary-category mail received in the last 30 days and returns up to ten messages with sender, subject, date, score and an excerpt, closest first. Use gmail_search for exact senders, subjects, dates and older or archived mail. Confirm a result with gmail_thread before relying on it; the top result is the closest match, not necessarily a match.",
+                "Find emails by meaning when the owner half-remembers one: describe what it was about in plain words (no Gmail operators). Searches an index of the primary mailbox's Primary-category mail received in the last 12 months and returns up to ten messages with sender, subject, date, score and an excerpt, closest first. Use gmail_search for exact senders, subjects, dates and older or archived mail. Confirm a result with gmail_thread before relying on it; the top result is the closest match, not necessarily a match.",
               gmail_read:
                 "Read one message in full plain text by its messageId. Use only when a thread read is truncated or a single message is enough. HTML and attachments are never fetched.",
               subscription_record:

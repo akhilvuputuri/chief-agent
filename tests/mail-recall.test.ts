@@ -146,7 +146,7 @@ test("recall finds an email by what it was about, owner-scoped", async () => {
   const early = await index.recall("owner", "deposit for the flat");
   assert.equal(early.status, "building");
   await index.start();
-  assert.match(box.queries[0]!, /category:primary .*newer_than:30d/);
+  assert.match(box.queries[0]!, /category:primary .*newer_than:365d/);
   const found = await index.recall("owner", "late delivery sofa apology");
   assert.equal(found.status, "ready");
   assert.equal(found.results![0]!.messageId, "a1");
@@ -161,7 +161,7 @@ test("recall finds an email by what it was about, owner-scoped", async () => {
 test("new mail is topped up on recall and old mail leaves the window", async () => {
   let now = NOW;
   const box = mailbox([
-    { id: "a1", at: NOW - 29 * DAY, subject: "Old", text: "dentist checkup" },
+    { id: "a1", at: NOW - 364 * DAY, subject: "Old", text: "dentist checkup" },
   ]);
   const index = new MailIndex(box.gmail, words, "owner", () => now);
   await index.start();
@@ -175,7 +175,7 @@ test("new mail is topped up on recall and old mail leaves the window", async () 
   const found = await index.recall("owner", "badminton court booking");
   assert.match(box.queries.at(-1)!, /after:\d+/);
   assert.equal(found.results![0]!.messageId, "n9");
-  // a1 is now 31 days old.
+  // a1 is now 366 days old.
   assert.ok(found.results!.every((r) => r.messageId !== "a1"));
   assert.equal(index.messages, 1);
   // Already-indexed mail is not fetched again.
@@ -313,7 +313,7 @@ test("index reads stay in the primary mailbox and check message identity", async
     },
     request,
   );
-  const page = await gmail.indexPage("123", "category:primary newer_than:30d");
+  const page = await gmail.indexPage("123", "category:primary newer_than:365d");
   assert.deepEqual(page.messages, [{ id: "abc", threadId: "def" }]);
   const m = await gmail.indexMessage("123", "abc");
   assert.equal(m.text, "Body text");

@@ -1,5 +1,5 @@
 // Email memory MVP (docs/mail-recall.md). An in-memory meaning index over the primary
-// mailbox's Primary-category mail from the last 30 days. Nothing is persisted: the index is
+// mailbox's Primary-category mail from the last 12 months. Nothing is persisted: the index is
 // rebuilt after each gateway start, and Gmail stays the source of truth. Results are message
 // and thread IDs that the email agent confirms with gmail_thread before reporting.
 import { z } from "zod";
@@ -7,7 +7,7 @@ import type { GmailTools } from "./gmail.js";
 import { errorFields, opsLog } from "./ops-log.js";
 import { spending } from "./spending.js";
 
-export const MAIL_INDEX_DAYS = 30;
+export const MAIL_INDEX_DAYS = 365;
 /** Received Primary-category mail; sent mail, chats, spam and trash are left out. */
 export const MAIL_INDEX_QUERY =
   "category:primary -in:sent -in:chats -in:spam -in:trash";
@@ -358,7 +358,7 @@ export class MailIndex {
       throw new Error("Gmail is not connected for this user");
     const scope = {
       account: "primary",
-      window: `Primary category, received in the last ${MAIL_INDEX_DAYS} days`,
+      window: "Primary category, received in the last 12 months",
     };
     if (this.state !== "ready") {
       const status = this.state === "failed" ? "unavailable" : "building";

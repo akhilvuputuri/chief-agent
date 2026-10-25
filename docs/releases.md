@@ -1,3 +1,12 @@
+## Deployed `d98f912` (untagged) — email memory MVP
+
+- **What merged.** [PR 320](https://github.com/akhilvuputuri/chief-agent/pull/320) merged as `d98f91201488956c2af7245007ac5991a3c9fdef` (version 0.3.103; the PR did not bump the version). The email agent gets `gmail_recall`, an in-memory meaning index over the primary mailbox's Primary mail from the last 30 days. Embeddings come from OpenRouter, and the index rebuilds after each start. Optional host tools keep the email agent usable without it.
+- **Review.** Independent review (Claude Opus 5.5) requested changes: the email agent failed without the index, a top-up gap, re-reads after a failed build. It then approved, and approved a delta for an eval counter Devin flagged. Devin's deleted-mail finding is deferred. Hosted CI passed.
+- **Release.** Live at 12:56 UTC on 25 October, with `release:status` success ([release](https://github.com/akhilvuputuri/chief-agent/actions/runs/40194920183)). No migration. First build: 119 messages, 65,925 embedding tokens, 40 seconds.
+- **Not yet observed.** The retrieval eval and live use.
+
+[Journal 120](journey/120-email-memory-mvp.md#release-closure--2026-10-25).
+
 ## Deployed `3130950` (untagged) — fewer coding notices
 
 - **What merged.** [PR 314](https://github.com/akhilvuputuri/chief-agent/pull/314) merged as `3130950f492d0fc580330b8120ab8b90ac6965ea` (version 0.3.102). Coding progress goes into one Telegram status message per job, edited in place; progress that would start a new message is held 23:00–08:00 Singapore; cancellations within 15 seconds become one summary; non-owner-merge PR notices carry the coder's summary; a per-job lease serialises status edits; identical rebases are detected and logged only.

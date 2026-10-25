@@ -1,6 +1,6 @@
-# Email memory MVP — branch `feature/mail-recall`, 25 October 2026
+# Email memory MVP — live in `d98f912`, 25 October 2026
 
-The email agent gets `gmail_recall`: an in-memory meaning index over the primary mailbox's Primary mail from the last 30 days, built with OpenRouter embeddings after each start. It is for emails the owner half-remembers by content. Not released or measured; the operator-run retrieval eval decides whether it stays. See [mail recall](mail-recall.md) and [journal 120](journey/120-email-memory-mvp.md).
+The email agent has `gmail_recall`: an in-memory meaning index over the primary mailbox's Primary mail, built with OpenRouter embeddings after each start, for emails the owner half-remembers by content. Live with a 30-day window in `d98f912` (PR 320); the follow-up widens it to 12 months. The operator-run retrieval eval decides whether it stays. See [mail recall](mail-recall.md) and [journal 120](journey/120-email-memory-mvp.md).
 
 # Fewer coding notices — live in `3130950`, 23 October 2026
 
