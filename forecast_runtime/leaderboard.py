@@ -43,6 +43,22 @@ SETTINGS = {
     "seed": 7,
     # Consecutive origin dates resampled together for intervals (4 dates = 20 sessions).
     "bootstrapBlock": 4,
+    # chronos-2-cov (journal 122): Chronos-2 with past-only covariates, files in --bars-dir.
+    "covariates": {
+        "market": "SPY",
+        "vix": "VIX",
+        "sectors": {
+            "AAPL": "XLK",
+            "MSFT": "XLK",
+            "NVDA": "XLK",
+            "AMZN": "XLY",
+            "JPM": "XLF",
+            "XOM": "XLE",
+            "JNJ": "XLV",
+            "WMT": "XLP",
+            "KO": "XLP",
+        },
+    },
 }
 LEVELS = [round(0.1 * i, 1) for i in range(1, 10)]
 ENGINES = ["ewma", "garch", "kronos-small", "chronos-2", "timesfm-2.5"]
@@ -140,6 +156,51 @@ def chronos_engine(df, origins):
     return out
 
 
+def chronos_cov_engine(df, origins):
+    """Chronos-2 on the close with past-only covariates: log closes of the market and the
+    stock's sector ETF, the VIX level and the stock's log volume, aligned to its dates."""
+    import torch  # noqa: F401  (Chronos needs torch loaded)
+    from chronos import Chronos2Pipeline
+
+    s = SETTINGS["chronos"]
+    with contextlib.redirect_stdout(sys.stderr):
+        pipe = Chronos2Pipeline.from_pretrained(s["repo"], revision=s["revision"], device_map="cpu")
+    c, cov = closes_of(df), df.attrs["covariates"]
+    inputs = [
+        {
+            "target": c[t - s["context"] + 1 : t + 1].astype(np.float32),
+            "past_covariates": {k: v[t - s["context"] + 1 : t + 1].astype(np.float32) for k, v in cov.items()},
+        }
+        for t in origins
+    ]
+    quantiles, _ = pipe.predict_quantiles(inputs, prediction_length=SETTINGS["horizon"], quantile_levels=LEVELS)
+    out = []
+    for i, t in enumerate(origins):
+        q = quantiles[i][0].numpy()
+        out.append({h: from_levels(np.log(q[h - 1] / c[t])) for h in SETTINGS["horizons"]})
+    return out
+
+
+def covariates_for(symbol, df, bars_dir):
+    """Covariate arrays aligned to df's dates (forward-filled), each as long as df."""
+    import kronos_runner as kr
+
+    settings = SETTINGS["covariates"]
+    dates = df["datetime"]
+
+    def aligned(name, column="close", log=True):
+        _, other = kr.load_bars(os.path.join(bars_dir, f"{name}.json"))
+        series = other.set_index("datetime")[column].reindex(dates).ffill().bfill().to_numpy(dtype=float)
+        return np.log(series) if log else series
+
+    cov = {"vix": aligned(settings["vix"], log=False), "logVolume": np.log1p(df["volume"].to_numpy(dtype=float))}
+    if symbol != settings["market"]:
+        cov["market"] = aligned(settings["market"])
+    if symbol in settings["sectors"]:
+        cov["sector"] = aligned(settings["sectors"][symbol])
+    return cov
+
+
 def timesfm_engine(df, origins):
     import timesfm
 
@@ -173,6 +234,7 @@ RUNNERS = {
     "garch": garch_engine,
     "kronos-small": kronos_engine,
     "chronos-2": chronos_engine,
+    "chronos-2-cov": chronos_cov_engine,
     "timesfm-2.5": timesfm_engine,
 }
 
@@ -227,6 +289,8 @@ def main():
     coverage = {}
     for symbol in args.symbols:
         _, df = kr.load_bars(os.path.join(args.bars_dir, f"{symbol}.json"))
+        if "chronos-2-cov" in args.engines:
+            df.attrs["covariates"] = covariates_for(symbol, df, args.bars_dir)
         origins = origin_indices(len(df))
         c = closes_of(df)
         coverage[symbol] = [str(df["datetime"].iloc[origins[0]].date()), str(df["datetime"].iloc[origins[-1]].date()), len(origins)]

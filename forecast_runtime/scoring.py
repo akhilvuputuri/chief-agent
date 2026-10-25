@@ -150,6 +150,33 @@ def cluster_bootstrap_ci(values_by_cluster: dict, draws: int = 2000, seed: int =
     }
 
 
+def ranks(values) -> list:
+    """1-based ranks, ties sharing their average rank."""
+    order = sorted(range(len(values)), key=lambda i: values[i])
+    out = [0.0] * len(values)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and values[order[j + 1]] == values[order[i]]:
+            j += 1
+        for k in range(i, j + 1):
+            out[order[k]] = (i + j) / 2 + 1
+        i = j + 1
+    return out
+
+
+def spearman(xs, ys) -> float:
+    """Rank correlation; 0 when either side has no variation."""
+    if len(xs) != len(ys) or len(xs) < 3:
+        raise ValueError("Need at least three paired values")
+    rx, ry = ranks(xs), ranks(ys)
+    mx, my = fmean(rx), fmean(ry)
+    sxy = sum((a - mx) * (b - my) for a, b in zip(rx, ry))
+    sxx = sum((a - mx) ** 2 for a in rx)
+    syy = sum((b - my) ** 2 for b in ry)
+    return sxy / math.sqrt(sxx * syy) if sxx and syy else 0.0
+
+
 def toy_long_signals(records, p_threshold: float = 0.55, round_trip_cost: float = 0.003) -> dict:
     """Long-only picks whose P(up) and median move clear the threshold and the cost.
 

@@ -98,6 +98,16 @@ class ScoringTest(unittest.TestCase):
         whole = scoring.cluster_bootstrap_ci(values, draws=50, block=99)
         self.assertEqual((whole["low"], whole["high"]), (1.5, 1.5))
 
+    def test_spearman_uses_average_ranks_for_ties(self):
+        self.assertEqual(scoring.ranks([10, 20, 20, 5]), [2.0, 3.5, 3.5, 1.0])
+        self.assertAlmostEqual(scoring.spearman([1, 2, 3, 4], [10, 20, 30, 40]), 1.0)
+        self.assertAlmostEqual(scoring.spearman([1, 2, 3, 4], [4, 3, 2, 1]), -1.0)
+        self.assertEqual(scoring.spearman([1, 1, 1], [1, 2, 3]), 0.0)
+        # The Pearson correlation of the ranks: 1 - 6*4/(5*24) = 0.8 for this pair.
+        self.assertAlmostEqual(scoring.spearman([1, 2, 3, 4, 5], [2, 1, 4, 3, 5]), 0.8)
+        with self.assertRaises(ValueError):
+            scoring.spearman([1, 2], [1, 2])
+
     def test_toy_signals_need_probability_and_a_move_above_cost(self):
         base = {0.1: -0.01, 0.5: 0.0, 0.9: 0.01}
         records = [
