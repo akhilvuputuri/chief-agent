@@ -93,7 +93,14 @@ async function main() {
   await index.start();
   if (index.state !== "ready") throw new Error("The mail index did not build");
   let cost = 0;
-  const totals = { questions: 0, keyword: 0, recall: 0, recallOnly: 0 };
+  // recallAlone: gmail_recall by itself; recallExtra: found by gmail_recall and not by keyword.
+  const totals = {
+    questions: 0,
+    keyword: 0,
+    recall: 0,
+    recallAlone: 0,
+    recallExtra: 0,
+  };
   for (const m of shuffle(index.sample())) {
     if (totals.questions >= wanted) break;
     if (m.text.trim().length < 80) continue;
@@ -146,7 +153,8 @@ async function main() {
     totals.questions += 1;
     if (keyword) totals.keyword += 1;
     if (recall) totals.recall += 1;
-    if (recallIds.has(m.messageId)) totals.recallOnly += 1;
+    if (recallIds.has(m.messageId)) totals.recallAlone += 1;
+    if (!keyword && recallIds.has(m.messageId)) totals.recallExtra += 1;
     // Private line: question and target subject, for the operator's review only.
     console.log(
       JSON.stringify({
@@ -167,8 +175,8 @@ async function main() {
       ...totals,
       keywordRate: totals.questions ? totals.keyword / totals.questions : 0,
       recallRate: totals.questions ? totals.recall / totals.questions : 0,
-      recallOnlyRate: totals.questions
-        ? totals.recallOnly / totals.questions
+      recallAloneRate: totals.questions
+        ? totals.recallAlone / totals.questions
         : 0,
       modelCostUsd: Math.round(cost * 10000) / 10000,
     }),

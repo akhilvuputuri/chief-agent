@@ -63,4 +63,5 @@ Pending: independent review, merge, release and the operator-run eval.
 - Run `mail-recall-eval.js` with 30 generated questions and add about 10 owner-written ones. Record keyword and recall rates here as aggregates only.
 - Check a few real half-remembered requests in Telegram.
 - If recall clearly helps, persist the index (additive migration), sync in the background, and consider the second account and attachments.
+- Deleted or moved mail stays in the index until it is 30 days old (Devin Review on #320). The agent's `gmail_thread` check keeps it out of answers, but it can take a result slot. Reconcile indexed IDs against Gmail if the eval or live use shows it matters.
 - If it does not help, turn `MAIL_INDEX` off and record why.

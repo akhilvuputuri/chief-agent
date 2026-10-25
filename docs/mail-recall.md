@@ -57,6 +57,7 @@ ssh -F "$OPS/ssh_config" chief-lightsail "sudo -n docker exec hermes-companion-g
   - **keyword:** up to three Gmail searches the model writes, as the email agent does today;
   - **recall:** the same searches plus `gmail_recall`'s top eight results.
 - A question counts as found when the target message is among the results.
+- The summary reports `keywordRate`, `recallRate` (keyword plus `gmail_recall`), `recallAloneRate` (`gmail_recall` by itself) and `recallExtra` (questions only `gmail_recall` found).
 - It measures retrieval, not the agent's final answer. Owner-written questions and live Telegram checks cover the end-to-end behaviour.
 - Its output contains private questions and subjects. `docker exec` output goes to the operator's terminal, not the container log. Keep it in the private operations folder. Only the summary line's aggregates belong in the journal.
 - Cost: about two Flash calls per question plus embeddings, well under a dollar for 30 questions (estimate).
