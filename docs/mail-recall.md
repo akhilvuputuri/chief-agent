@@ -36,7 +36,7 @@ While the index is building, or after a failed build, the tool returns `building
 
 ## Configuration and availability
 
-- `MAIL_INDEX` in `config/runtime.json` (`on` or `off`, default `off` in code). Production Compose does not pass it, so the file is authoritative.
+- `MAIL_INDEX` in `config/runtime.json` (`on` or `off`; `on`, matching the code default). Production Compose does not pass it, so the file is authoritative. Set it to `off` in a PR to stop the index on the next release.
 - The index runs only with `MAIL_INDEX=on`, a connected primary Gmail account and an OpenRouter key. Otherwise `gmail_recall` is not offered.
 - `gmail_recall` is a delegated email-agent tool. It is in the host's `OPTIONAL_OPERATIONS` (`src/plugins.ts`), so the email agent stays in the agent catalogue without it. Without that rule, an agent leaves the catalogue when any of its tools is unavailable.
 
