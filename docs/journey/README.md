@@ -129,6 +129,8 @@ For the latest verified release and open work, read [current work](../current-wo
 | 23 October | [118 — Telemetry gaps](118-telemetry-gaps.md): why did the models query show no token sums, and what was missing from model and context logs? | In review: duplicate stats aliases hid the sums; finish reason, cache writes, provider slugs and older-history size added |
 | 23 October | [119 — Double reply](119-double-reply.md): why did Chief send the same clarifying question twice? | In review: text a finish_turn reply already contains is no longer also sent as progress |
 | 23 October | [120 — Kronos CPU spike](120-kronos-cpu-spike.md): can Kronos run cheaply on CPU, and do its forecasts beat a random walk? | Tested locally: cheap on CPU; lost to an EWMA random walk on AAPL in all 12 configurations; nothing deployed |
+| 23–24 October | [121 — Forecaster leaderboard](121-forecaster-leaderboard.md): does any open-weight forecaster beat a random walk on ten US stocks? | Tested locally: none did; Kronos-small clearly worse, Chronos-2 and TimesFM 2.5 slightly worse, GARCH tied; nothing deployed |
+| 25–26 October | [122 — Covariates and ranking](122-covariates-and-ranking.md): do market inputs or cross-sectional ranking give the models an edge? | Tested locally: no; covariates made Chronos-2 slightly worse, ranking IC was zero (Chronos-2) or negative (TimesFM); nothing deployed |
 
 ## Coding-agent learning path
 

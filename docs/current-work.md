@@ -1,3 +1,22 @@
+# Forecaster covariates and ranking — tested, 26 October 2026
+
+Two follow-ups to the leaderboard, with settings fixed before the runs, both negative:
+
+- **Covariates.** Adding market, sector, VIX and volume inputs made Chronos-2 slightly worse.
+- **Ranking.** Weekly ranking of about 100 S&P 100 stocks gave Chronos-2 a rank IC of −0.001 and TimesFM 2.5 a significantly negative −0.043. Momentum and reversal were not significant.
+
+The harness stays as a benchmark; the trading-suggestion phases stay on hold. [Journal 122](journey/122-covariates-and-ranking.md).
+
+# Open-weight forecaster leaderboard — tested, 24 October 2026
+
+The settings were fixed before the run: 10 large US stocks, 600 forecasts per engine, horizons of 1 and 5 days. Against a zero-drift EWMA random walk:
+
+- Kronos-small was 16–25% worse on pinball loss;
+- Chronos-2 and TimesFM 2.5 were 1–4% worse;
+- GARCH tied.
+
+No model called direction better than a coin flip. By the pre-registered rule the trading-suggestion arms fail, and the box profile is not started. Kronos's training-mode inference was reported upstream as [shiyu-coder/Kronos#415](https://github.com/shiyu-coder/Kronos/issues/415). Next: the owner decides whether to stop, keep the harness as a benchmark, or test an untried direction. [Journal 121](journey/121-forecaster-leaderboard.md), [design](kronos-trading-experiment.md#leaderboard--2324-october-2026).
+
 # Kronos short-term trading experiment — spike, 23 October 2026
 
 The owner asked to test Kronos, an open-weight candlestick model, for short-term suggestions: Chief suggests and the owner decides whether to draft an IBKR order. A pinned CPU runtime (`forecast_runtime/`) shows a daily run is cheap. Kronos-small handles 25 symbols in about 30 s at lookback 64. On AAPL over 60 dates after its pretraining cutoff, though, every configuration lost to a zero-drift EWMA random walk. Upstream inference also runs in training mode, which the runner corrects. Nothing is deployed. Next: a ten-symbol walk with settings fixed in advance, then the owner decides on the box profile. [Design](kronos-trading-experiment.md), [journal 120](journey/120-kronos-cpu-spike.md).

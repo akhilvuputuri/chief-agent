@@ -87,6 +87,29 @@ See [journal 120](journey/120-kronos-cpu-spike.md) for the measurements, method 
   KRONOS_SRC=.forecast/kronos KRONOS_WEIGHTS=.forecast/weights .venv-forecast/bin/python forecast_runtime/kronos_runner.py walk --bars .forecast/AAPL.json --models Kronos-small --modes eval,train
   ```
 
+## Leaderboard — 23–24 October 2026
+
+See [journal 121](journey/121-forecaster-leaderboard.md). The settings were fixed in `bfcacaf` before the run. The test used 10 large US stocks, 60 dates each (2025-08-13 to 2026-10-15) and horizons of 1 and 5 days.
+
+- **Result.** No open-weight model beat the zero-drift EWMA random walk on pinball loss:
+  - Chronos-2 and TimesFM 2.5 were 1–4% worse, with well-calibrated intervals;
+  - Kronos-small was 16–25% worse, with 51–59% coverage, and lost on every stock;
+  - GARCH(1,1)-t tied EWMA.
+- **Direction.** No model called up or down better than a coin flip (Brier ≥ 0.25).
+- **Upstream.** The training-mode finding (with `huggingface_hub` below 2.0) is reported as [shiyu-coder/Kronos#415](https://github.com/shiyu-coder/Kronos/issues/415).
+- **Consequence.** By the pre-registered rule every model arm fails, so phase 2 (the box profile) is not started. The owner chooses between stopping, keeping the harness as a benchmark, or testing an untried direction.
+
+## Covariates and ranking — 25–26 October 2026
+
+See [journal 122](journey/122-covariates-and-ranking.md). Settings were fixed in `d528887` before the full runs.
+
+- **Market inputs.** Giving Chronos-2 past SPY, sector-ETF, VIX and volume inputs made it slightly worse on the 10 stocks: 1-day skill −0.090 against −0.074 without them.
+- **Ranking.** Across about 100 S&P 100 stocks over 60 weeks:
+  - Chronos-2's rank IC was −0.001;
+  - TimesFM 2.5's was −0.043 (95% CI −0.080 to −0.019), losing 1.30% a week net long-short;
+  - momentum (+0.010) and reversal (+0.031) were not significant.
+- **Consequence.** No tested setting shows an edge. Phases 2–5 stay on hold, and the harness is kept as a benchmark.
+
 ## Phases
 
 1. **Spike** (this change): pinned runtime, CPU timings, walk-forward sanity check, design.
