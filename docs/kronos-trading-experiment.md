@@ -99,6 +99,17 @@ See [journal 121](journey/121-forecaster-leaderboard.md). The settings were fixe
 - **Upstream.** The training-mode finding (with `huggingface_hub` below 2.0) is reported as [shiyu-coder/Kronos#415](https://github.com/shiyu-coder/Kronos/issues/415).
 - **Consequence.** By the pre-registered rule every model arm fails, so phase 2 (the box profile) is not started. The owner chooses between stopping, keeping the harness as a benchmark, or testing an untried direction.
 
+## Covariates and ranking — 25–26 October 2026
+
+See [journal 122](journey/122-covariates-and-ranking.md). Settings were fixed in `d528887` before the full runs.
+
+- **Market inputs.** Giving Chronos-2 past SPY, sector-ETF, VIX and volume inputs made it slightly worse on the 10 stocks: 1-day skill −0.090 against −0.074 without them.
+- **Ranking.** Across about 100 S&P 100 stocks over 60 weeks:
+  - Chronos-2's rank IC was −0.001;
+  - TimesFM 2.5's was −0.043 (95% CI −0.080 to −0.019), losing 1.30% a week net long-short;
+  - momentum (+0.010) and reversal (+0.031) were not significant.
+- **Consequence.** No tested setting shows an edge. Phases 2–5 stay on hold, and the harness is kept as a benchmark.
+
 ## Phases
 
 1. **Spike** (this change): pinned runtime, CPU timings, walk-forward sanity check, design.

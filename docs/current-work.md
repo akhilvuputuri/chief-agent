@@ -1,3 +1,12 @@
+# Forecaster covariates and ranking — tested, 26 October 2026
+
+Two follow-ups to the leaderboard, with settings fixed before the runs, both negative:
+
+- **Covariates.** Adding market, sector, VIX and volume inputs made Chronos-2 slightly worse.
+- **Ranking.** Weekly ranking of about 100 S&P 100 stocks gave Chronos-2 a rank IC of −0.001 and TimesFM 2.5 a significantly negative −0.043. Momentum and reversal were not significant.
+
+The harness stays as a benchmark; the trading-suggestion phases stay on hold. [Journal 122](journey/122-covariates-and-ranking.md).
+
 # Open-weight forecaster leaderboard — tested, 24 October 2026
 
 The settings were fixed before the run: 10 large US stocks, 600 forecasts per engine, horizons of 1 and 5 days. Against a zero-drift EWMA random walk:
