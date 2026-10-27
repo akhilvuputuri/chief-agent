@@ -2,11 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import {
   errorFields,
   opsLog,
@@ -355,13 +355,7 @@ test("model providers are logged as fixed slugs, and failures carry the model", 
 });
 
 async function database() {
-  const pg = new PGlite();
-  for (const file of (await readdir(new URL("../db/", import.meta.url)))
-    .filter((f) => /^\d.*sql$/.test(f))
-    .sort())
-    await pg.exec(
-      await readFile(new URL("../db/" + file, import.meta.url), "utf8"),
-    );
+  const pg = await migratedPGlite();
   const db = pg as unknown as Database;
   await ensureUser(db, "owner");
   return db;

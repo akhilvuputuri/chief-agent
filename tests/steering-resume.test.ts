@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readFile, readdir } from "node:fs/promises";
-import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import { Assistant } from "../src/agent.js";
 import { CustomAgent } from "../src/custom-agent.js";
 import { HistoryStore } from "../src/history.js";
@@ -47,13 +46,7 @@ function deferred<T>() {
   return { resolve, promise };
 }
 async function fixture() {
-  const pg = new PGlite();
-  for (const file of (await readdir(new URL("../db/", import.meta.url)))
-    .filter((file) => file.endsWith(".sql"))
-    .sort())
-    await pg.exec(
-      await readFile(new URL(`../db/${file}`, import.meta.url), "utf8"),
-    );
+  const pg = await migratedPGlite();
   const db = pg as unknown as Database;
   await db.query("INSERT INTO users(id) VALUES('owner'),('other')");
   const assistant = (model: ModelAdapter) =>

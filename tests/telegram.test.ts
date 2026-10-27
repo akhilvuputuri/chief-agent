@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import { readFile } from "node:fs/promises";
 import { telegram } from "../src/telegram.js";
 import { readConfig } from "../src/config.js";
@@ -111,8 +112,7 @@ test("Telegram handles natural text once and ignores unauthorized users and grou
 });
 
 test("status responds while a conversation is still running", async () => {
-  const pg = new PGlite();
-  for (const f of [
+  const pg = await migratedPGlite([
     "001_initial",
     "002_preparation",
     "003_skills",
@@ -122,10 +122,7 @@ test("status responds while a conversation is still running", async () => {
     "012_message_storage",
     "013_conversation_control",
     "014_checkpoint_steering",
-  ])
-    await pg.exec(
-      await readFile(new URL("../db/" + f + ".sql", import.meta.url), "utf8"),
-    );
+  ]);
   await pg.exec(
     await readFile(
       new URL("../db/012_message_storage.sql", import.meta.url),
@@ -217,8 +214,7 @@ test("status responds while a conversation is still running", async () => {
 
 test("photos and PDF documents reach the agent as bounded, owner-scoped attachments", async () => {
   const { minimalPdf } = await import("./attachments.test.js");
-  const pg = new PGlite();
-  for (const f of [
+  const pg = await migratedPGlite([
     "001_initial",
     "002_preparation",
     "003_skills",
@@ -228,10 +224,7 @@ test("photos and PDF documents reach the agent as bounded, owner-scoped attachme
     "012_message_storage",
     "013_conversation_control",
     "014_checkpoint_steering",
-  ])
-    await pg.exec(
-      await readFile(new URL("../db/" + f + ".sql", import.meta.url), "utf8"),
-    );
+  ]);
   await pg.exec(
     await readFile(
       new URL("../db/012_message_storage.sql", import.meta.url),

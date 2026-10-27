@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readFile, readdir } from "node:fs/promises";
-import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import { ensureUser, type Database } from "../src/db.js";
 import {
   NewsBulletin,
@@ -97,13 +96,7 @@ const hoursBefore = (d: Date, h: number) => new Date(d.getTime() - h * 3600000);
 const sgtAt = (iso: string) => new Date(`${iso}+08:00`);
 
 async function fixture(now: Date) {
-  const pg = new PGlite();
-  for (const file of (await readdir(new URL("../db/", import.meta.url)))
-    .filter((f) => /^\d.*sql$/.test(f))
-    .sort())
-    await pg.exec(
-      await readFile(new URL("../db/" + file, import.meta.url), "utf8"),
-    );
+  const pg = await migratedPGlite();
   const db = pg as unknown as Database;
   await ensureUser(db, "a");
   await ensureUser(db, "b");

@@ -576,14 +576,7 @@ async function realFixture(
   const { readFile, readdir } = await import("node:fs/promises");
   const { Assistant } = await import("../src/agent.js");
   const { JobTools } = await import("../src/tools.js");
-  const pg = new PGlite();
-  for (const file of (await readdir(new URL("../db/", import.meta.url)))
-    .filter((file) => file.endsWith(".sql"))
-    .sort()) {
-    await pg.exec(
-      await readFile(new URL(`../db/${file}`, import.meta.url), "utf8"),
-    );
-  }
+  const pg = await migratedPGlite();
   const db: Database = {
     query: async (sql, values = []) => {
       const result = await pg.query(sql, values);

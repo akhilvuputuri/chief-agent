@@ -1,20 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import { recordContext } from "../src/record-context.js";
 import type { Database } from "../src/db.js";
 
 test("record inventory survives restart and excludes other owners and unrelated tasks", async () => {
-  const pg = new PGlite();
+  const pg = await migratedPGlite();
   try {
-    for (const f of (await readdir(new URL("../db/", import.meta.url)))
-      .filter((f) => f.endsWith(".sql"))
-      .sort())
-      await pg.exec(
-        await readFile(new URL("../db/" + f, import.meta.url), "utf8"),
-      );
     const db = pg as unknown as Database;
     await db.query("INSERT INTO users(id) VALUES('a'),('b')");
     const task = randomUUID(),

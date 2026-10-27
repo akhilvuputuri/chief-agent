@@ -1,3 +1,7 @@
+# Faster checks — branch `claude/build-speed-research`, 27 October 2026
+
+Tests restore each PGlite database from a migrated snapshot instead of booting Postgres and replaying every migration, and a close hook stops `node:test` from keeping closed databases in memory. Test files run four at a time, and `checks` runs as parallel jobs with three test shards behind one `test` job. Locally, the test files went from 1,767 s serially to 520 s; the GitHub wall time is measured on the first run. Not released. [Journal 123](journey/123-faster-checks.md).
+
 # Email memory MVP — branch `feature/mail-recall`, 25 October 2026
 
 The email agent gets `gmail_recall`: an in-memory meaning index over the primary mailbox's Primary mail from the last 30 days, built with OpenRouter embeddings after each start. It is for emails the owner half-remembers by content. Not released or measured; the operator-run retrieval eval decides whether it stays. See [mail recall](mail-recall.md) and [journal 120](journey/120-email-memory-mvp.md).

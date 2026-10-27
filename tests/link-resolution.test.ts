@@ -1,8 +1,7 @@
 import test, { mock } from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import { ensureUser, type Database } from "../src/db.js";
 import { LinkResolver, postEvidence } from "../src/link-resolution.js";
 import {
@@ -25,8 +24,7 @@ const post = "https://www.reddit.com/r/worldnews/comments/abc123/story/";
 const article = "https://www.euronews.com/2026/10/02/example-story";
 const html = `<a href="https://ads.example.com/ad">Advertisement</a><shreddit-post id="t3_abc123" content-href="${article}" post-type="link"></shreddit-post><a href="https://comments.example.com">Comment</a>`;
 async function fixture() {
-  const pg = new PGlite();
-  for (const name of [
+  const pg = await migratedPGlite([
     "001_initial",
     "002_preparation",
     "003_skills",
@@ -35,10 +33,7 @@ async function fixture() {
     "006_runtime",
     "030_mcp",
     "031_link_resolution",
-  ])
-    await pg.exec(
-      await readFile(new URL(`../db/${name}.sql`, import.meta.url), "utf8"),
-    );
+  ]);
   const db = pg as unknown as Database;
   await ensureUser(db, "123");
   await ensureUser(db, "456");

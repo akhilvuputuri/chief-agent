@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readFile, readdir } from "node:fs/promises";
-import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import { WatchlistTools, StockMonitor, StockDelivery } from "../src/stocks.js";
 import {
   ProviderError,
@@ -94,13 +93,7 @@ const ACME: SymbolHit = {
 };
 
 async function fixture(now: Date) {
-  const pg = new PGlite();
-  for (const file of (await readdir(new URL("../db/", import.meta.url)))
-    .filter((f) => /^\d.*sql$/.test(f))
-    .sort())
-    await pg.exec(
-      await readFile(new URL("../db/" + file, import.meta.url), "utf8"),
-    );
+  const pg = await migratedPGlite();
   const db = pg as unknown as Database;
   await ensureUser(db, "a");
   await ensureUser(db, "b");
@@ -731,14 +724,8 @@ test("watchlist mutations are foreground-only and scoped to the owner", async ()
 });
 
 test("watchlist_add without a configured provider fails cleanly", async () => {
-  const pg = new PGlite();
+  const pg = await migratedPGlite();
   try {
-    for (const file of (await readdir(new URL("../db/", import.meta.url)))
-      .filter((f) => /^\d.*sql$/.test(f))
-      .sort())
-      await pg.exec(
-        await readFile(new URL("../db/" + file, import.meta.url), "utf8"),
-      );
     const db = pg as unknown as Database;
     await ensureUser(db, "a");
     const run = randomUUID();

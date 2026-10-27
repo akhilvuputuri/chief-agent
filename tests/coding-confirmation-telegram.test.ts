@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { PGlite } from "@electric-sql/pglite";
+import { closeAfter, migratedPGlite } from "./helpers/pglite.js";
 import { CodingController } from "../src/coding/controller.js";
 import { codingSettings } from "../src/coding/schema.js";
 import { ensureUser, type Database } from "../src/db.js";
@@ -17,14 +17,8 @@ test("Telegram buttons and direct yes replies confirm the displayed coding brief
     "button-ack-fails",
     "reply-ack-fails",
   ]) {
-    const pg = new PGlite();
-    t.after(() => pg.close());
-    for (const file of (await readdir(new URL("../db/", import.meta.url)))
-      .filter((f) => /^\d.*sql$/.test(f))
-      .sort())
-      await pg.exec(
-        await readFile(new URL(`../db/${file}`, import.meta.url), "utf8"),
-      );
+    const pg = await migratedPGlite();
+    closeAfter(t, pg);
     const db = pg as unknown as Database;
     await ensureUser(db, "123");
     const run = randomUUID();

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import { DailyTools } from "../src/daily.js";
 import { ScheduleParser } from "../src/schedule.js";
 import { ensureUser, type Database } from "../src/db.js";
@@ -56,12 +56,8 @@ test("write-path modules never raise a generic error that would be recorded as u
 });
 
 test("rejected reminder schedules are validation failures and save nothing", async () => {
-  const pg = new PGlite();
+  const pg = await migratedPGlite(["001_initial.sql", "004_daily.sql"]);
   try {
-    for (const f of ["001_initial.sql", "004_daily.sql"])
-      await pg.exec(
-        await readFile(new URL("../db/" + f, import.meta.url), "utf8"),
-      );
     const db = pg as unknown as Database;
     await ensureUser(db, "a");
     const tools = new DailyTools(

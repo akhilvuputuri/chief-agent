@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import { ensureUser, type Database } from "../src/db.js";
 import { CalendarActions } from "../src/calendar-actions.js";
 import { CalendarNotSentError, CalendarTools } from "../src/calendar.js";
@@ -194,8 +194,7 @@ test("ambiguous daylight-saving wall times require an explicit offset and never 
   await assert.rejects(read);
 });
 async function fixture() {
-  const pg = new PGlite();
-  for (const f of [
+  const pg = await migratedPGlite([
     "001_initial",
     "002_preparation",
     "003_skills",
@@ -203,10 +202,7 @@ async function fixture() {
     "005_work",
     "006_runtime",
     "009_calendar_approval",
-  ])
-    await pg.exec(
-      await readFile(new URL(`../db/${f}.sql`, import.meta.url), "utf8"),
-    );
+  ]);
   const db = pg as unknown as Database;
   await ensureUser(db, "123");
   await ensureUser(db, "456");
