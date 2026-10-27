@@ -115,12 +115,13 @@ Requires Node 22.19+ (`.nvmrc` pins the tested version) and Docker Compose. Ever
 
 ```sh
 npm ci
-npm run setup              # creates a private .env; never commit credentials
+npm run setup              # creates a private .env with database credentials
+# Edit .env: set TELEGRAM_BOT_TOKEN and OPENROUTER_API_KEY. Never commit it.
 docker compose up -d postgres
 docker compose run --rm migrate
-npm run check:env
 npm run pair               # then press Start in the link it prints
-npm run pair:finish
+npm run pair:finish        # saves your Telegram user ID to .env
+npm run check:env
 npm run dev
 ```
 
