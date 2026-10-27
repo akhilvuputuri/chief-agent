@@ -6,7 +6,7 @@ Planning uses a focused investigation pass: after 32 navigation operations or te
 
 ## Setup
 
-Use Node 22.19.0 or newer. The worker and CI pin 22.19.0. Install without dependency lifecycle scripts:
+Use Node 22.19.0 or newer. The worker and CI pin 22.23.4 (its bundled undici 6.29.1 fixes a fetch hang on corrupt gzip bodies, journal 126). Install without dependency lifecycle scripts:
 
 ```sh
 npm ci --ignore-scripts
