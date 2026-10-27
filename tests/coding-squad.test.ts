@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PGlite } from "@electric-sql/pglite";
-import { readFile, readdir } from "node:fs/promises";
+import { closeAfter, migratedPGlite } from "./helpers/pglite.js";
+import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { ensureUser, type Database } from "../src/db.js";
 import { CodingController } from "../src/coding/controller.js";
@@ -42,14 +42,8 @@ test("working-state selector cannot target an incompatible legacy worker", () =>
 });
 
 async function setup(t: any) {
-  const pg = new PGlite();
-  t.after(() => pg.close());
-  for (const file of (await readdir(new URL("../db/", import.meta.url)))
-    .filter((f) => /^\d.*sql$/.test(f))
-    .sort())
-    await pg.exec(
-      await readFile(new URL(`../db/${file}`, import.meta.url), "utf8"),
-    );
+  const pg = await migratedPGlite();
+  closeAfter(t, pg);
   const db = pg as unknown as Database;
   await ensureUser(db, "a");
   const run = randomUUID();

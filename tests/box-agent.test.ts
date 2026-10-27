@@ -4,7 +4,7 @@ import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PGlite } from "@electric-sql/pglite";
+import { closeAfter, migratedPGlite } from "./helpers/pglite.js";
 import { ensureUser, type Database } from "../src/db.js";
 import { BoxController } from "../src/boxes/controller.js";
 import { LocalProcessProvider } from "../src/boxes/local-provider.js";
@@ -133,14 +133,8 @@ test("a hello retried after a lost response stores the same credential and never
 });
 
 async function harness(t: TestContext) {
-  const pg = new PGlite();
-  t.after(() => pg.close());
-  for (const f of (await readdir(new URL("../db/", import.meta.url)))
-    .filter((f) => f.endsWith(".sql"))
-    .sort())
-    await pg.exec(
-      await readFile(new URL("../db/" + f, import.meta.url), "utf8"),
-    );
+  const pg = await migratedPGlite();
+  closeAfter(t, pg);
   const db = pg as unknown as Database;
   await ensureUser(db, "owner");
   let offset = 0;

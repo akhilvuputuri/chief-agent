@@ -2,7 +2,7 @@ import { HistoryStore } from "../src/history.js";
 import { boundedBytes } from "../src/providers.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { Assistant } from "../src/agent.js";
@@ -23,8 +23,7 @@ async function fixture(
   model: ModelAdapter,
   budget = { ms: 900000, models: 40, tools: 100 },
 ) {
-  const pg = new PGlite();
-  for (const f of [
+  const pg = await migratedPGlite([
     "001_initial",
     "002_preparation",
     "003_skills",
@@ -36,10 +35,7 @@ async function fixture(
     "013_conversation_control",
     "014_checkpoint_steering",
     "022_telegram_delivery",
-  ])
-    await pg.exec(
-      await readFile(new URL("../db/" + f + ".sql", import.meta.url), "utf8"),
-    );
+  ]);
   const db = pg as unknown as Database;
   const assistant = new Assistant(
     db,

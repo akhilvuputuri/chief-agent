@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readFile, readdir } from "node:fs/promises";
-import { PGlite } from "@electric-sql/pglite";
+import { readFile } from "node:fs/promises";
+import { migratedPGlite } from "./helpers/pglite.js";
 import {
   SubscriptionTools,
   subscriptionReminders,
@@ -22,13 +22,7 @@ import {
 import { buildBriefing } from "../src/daily-briefing.js";
 
 async function fixture() {
-  const pg = new PGlite();
-  for (const name of (await readdir(new URL("../db/", import.meta.url)))
-    .filter((n) => /^\d.*sql$/.test(n))
-    .sort())
-    await pg.exec(
-      await readFile(new URL("../db/" + name, import.meta.url), "utf8"),
-    );
+  const pg = await migratedPGlite();
   const db = pg as unknown as Database;
   await ensureUser(db, "a");
   await ensureUser(db, "b");

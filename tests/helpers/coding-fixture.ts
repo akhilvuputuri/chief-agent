@@ -8,20 +8,9 @@ import {
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID, generateKeyPairSync } from "node:crypto";
-import {
-  readFile,
-  readdir,
-  mkdtemp,
-  mkdir,
-  symlink,
-  writeFile,
-  rm,
-  chmod,
-  stat,
-} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PGlite } from "@electric-sql/pglite";
+import { closeAfter, migratedPGlite } from "./pglite.js";
 import { ensureUser, type Database } from "../../src/db.js";
 import { requirementScope } from "../../src/coding/requirements.js";
 import { CodingController } from "../../src/coding/controller.js";
@@ -100,14 +89,8 @@ export async function fixture(
     settings?: typeof settings;
   } = {},
 ) {
-  const pg = new PGlite();
-  t.after(() => pg.close());
-  for (const file of (await readdir(new URL("../../db/", import.meta.url)))
-    .filter((f) => /^\d.*sql$/.test(f))
-    .sort())
-    await pg.exec(
-      await readFile(new URL(`../../db/${file}`, import.meta.url), "utf8"),
-    );
+  const pg = await migratedPGlite();
+  closeAfter(t, pg);
   const db = pg as unknown as Database;
   await ensureUser(db, "a");
   await ensureUser(db, "b");

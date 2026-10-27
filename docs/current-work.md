@@ -1,3 +1,19 @@
+# Fetch hygiene and Node 22.23.4 — live in `9ab96c2`, 27 October 2026
+
+On Node 22.22, reading a response with a corrupt gzip body hung forever, even under an abort signal; Node 22.23.4 (undici 6.29.1) rejects it in about 140 ms. CI, the release workflow, the host-built gateway and browser images and the Pi images now pin 22.23.4; the host reused a cached floating base, so pinning forces the pull. The Pi image takes effect after it is republished, and `gateway.started` now logs `nodeVersion`. Released in `9ab96c2`, whose `gateway.started` logged `v22.23.4`. Fetch failures now log the real cause code, unread error bodies are cancelled, and the Singapore client limits bodies while decoding. See [journal 126](journey/126-fetch-hygiene-and-node.md) and issue #329.
+
+# Postgres connection drops and shutdown — live in `211b2a2`, 27 October 2026
+
+A Postgres session ending (restart, failover, terminated backend) made the gateway exit, because neither the pool nor a client inside a transaction had an `error` listener. Both now log and recover; a broken client is discarded. Shutdown now stops intake, waits for running Telegram handlers, then closes HTTP and the database within an 8 s deadline, and reports what was left. Reproduced and verified on a local Postgres 16. Released in `211b2a2`; its first production stop logged `gateway.stopped` in 160 ms. See [journal 125](journey/125-db-drops-and-shutdown.md) and issue #329.
+
+# Caddy root redirect — merged in `cd45085`, host install pending, 27 October 2026
+
+The site root returned an empty `200` instead of redirecting to the Mini App, because `redir /miniapp/ 302` parses `/miniapp/` as a path matcher. That empty response also skipped the security headers and leaked `Server: Caddy`. Both Caddyfiles now use `redir * /miniapp/ 302`, tested on Caddy 2.6.2. Caddy is a host service, so the live host needs the one-line operator install in [journal 124](journey/124-caddy-root-redirect.md).
+
+# Faster checks — live in `8ea6263`, 27 October 2026
+
+Tests restore each PGlite database from a migrated snapshot instead of booting Postgres and replaying every migration, and a close hook stops `node:test` from keeping closed databases in memory. `checks` runs as parallel jobs, with six test shards behind one `test` job. The first GitHub run, with test files four at a time in three shards, took 4 min 20 s instead of about 26 minutes, but one test process crashed with SIGSEGV. The owner chose serial test files within each runner, the process model `main` ran green; serial runs took 3 min 33 s and 4 min 38 s on GitHub, and all test files take 1,211 s instead of 1,767 s locally. Released in `8ea6263`; merge to production took about 11 minutes. [Journal 123](journey/123-faster-checks.md).
+
 # Email memory MVP — live in `d98f912`, 25 October 2026
 
 The email agent has `gmail_recall`: an in-memory meaning index over the primary mailbox's Primary mail, built with OpenRouter embeddings after each start, for emails the owner half-remembers by content. Live with a 30-day window in `d98f912` (PR 320); the follow-up widens it to 12 months. The operator-run retrieval eval decides whether it stays. See [mail recall](mail-recall.md) and [journal 120](journey/120-email-memory-mvp.md).

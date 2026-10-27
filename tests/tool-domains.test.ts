@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PGlite } from "@electric-sql/pglite";
-import { readFile, readdir } from "node:fs/promises";
+import { migratedPGlite } from "./helpers/pglite.js";
 import { randomUUID } from "node:crypto";
 import { Assistant } from "../src/agent.js";
 import { CustomAgent } from "../src/custom-agent.js";
@@ -103,8 +102,7 @@ test("domain-limited runtime offers the core plus selected domains and lists the
 });
 
 async function fixture(model: ModelAdapter, stableTools = false) {
-  const pg = new PGlite();
-  for (const f of [
+  const pg = await migratedPGlite([
     "001_initial",
     "002_preparation",
     "003_skills",
@@ -115,10 +113,7 @@ async function fixture(model: ModelAdapter, stableTools = false) {
     "012_message_storage",
     "013_conversation_control",
     "014_checkpoint_steering",
-  ])
-    await pg.exec(
-      await readFile(new URL("../db/" + f + ".sql", import.meta.url), "utf8"),
-    );
+  ]);
   const db = pg as unknown as Database;
   const assistant = new Assistant(
     db,
@@ -389,13 +384,7 @@ test("stable tools offer every available domain, identically on every call and e
 });
 
 test("an owner follow-up absorbed mid-turn leaves the coordinator's stable tool list unchanged", async () => {
-  const pg = new PGlite();
-  for (const f of (await readdir(new URL("../db/", import.meta.url)))
-    .filter((name) => name.endsWith(".sql"))
-    .sort())
-    await pg.exec(
-      await readFile(new URL("../db/" + f, import.meta.url), "utf8"),
-    );
+  const pg = await migratedPGlite();
   const db = pg as unknown as Database;
   const seen: string[][] = [];
   let entered!: () => void;

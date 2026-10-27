@@ -1,15 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PGlite } from "@electric-sql/pglite";
-import { readFile } from "node:fs/promises";
+import { migratedPGlite } from "./helpers/pglite.js";
 import { Assistant } from "../src/agent.js";
 import { CustomAgent } from "../src/custom-agent.js";
 import { JobTools } from "../src/tools.js";
 import type { Database } from "../src/db.js";
 
 test("an owner's messages share one provider cache key while runs keep their own session", async () => {
-  const pg = new PGlite();
-  for (const f of [
+  const pg = await migratedPGlite([
     "001_initial",
     "002_preparation",
     "003_skills",
@@ -20,10 +18,7 @@ test("an owner's messages share one provider cache key while runs keep their own
     "012_message_storage",
     "013_conversation_control",
     "014_checkpoint_steering",
-  ])
-    await pg.exec(
-      await readFile(new URL("../db/" + f + ".sql", import.meta.url), "utf8"),
-    );
+  ]);
   const db = pg as unknown as Database;
   const seen: Array<{ sessionId?: string; cacheKey?: string }> = [];
   const assistant = new Assistant(

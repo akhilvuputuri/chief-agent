@@ -1,13 +1,21 @@
 import pg from "pg";
-import { projectEvent } from "./ops-log.js";
+import { errorFields, opsLog, projectEvent } from "./ops-log.js";
 export interface Database {
   query(
     text: string,
     values?: unknown[],
   ): Promise<{ rows: any[]; rowCount?: number | null }>;
 }
-export const connect = (url: string) =>
-  new pg.Pool({ connectionString: url, max: 8 });
+export function connect(url: string) {
+  const pool = new pg.Pool({ connectionString: url, max: 8 });
+  // An idle pooled client whose session ends (a Postgres restart, failover or
+  // pg_terminate_backend) emits "error" on the pool, which has already removed it.
+  // Without a listener Node treats that as an uncaught exception and the gateway exits.
+  pool.on("error", (error) =>
+    opsLog("db.idle_client_error", "warn", errorFields(error)),
+  );
+  return pool;
+}
 export async function ensureUser(db: Database, id: string) {
   await db.query("INSERT INTO users(id) VALUES($1) ON CONFLICT DO NOTHING", [
     id,

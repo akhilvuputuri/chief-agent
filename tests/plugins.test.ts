@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import {
   contentHash,
   PluginRegistry,
@@ -68,8 +68,7 @@ function temp() {
   return mkdtempSync(join(tmpdir(), "companion-plugins-test-"));
 }
 async function database() {
-  const pg = new PGlite();
-  for (const name of [
+  const pg = await migratedPGlite([
     "001_initial",
     "002_preparation",
     "003_skills",
@@ -80,10 +79,7 @@ async function database() {
     "012_message_storage",
     "013_conversation_control",
     "014_checkpoint_steering",
-  ])
-    await pg.exec(
-      readFileSync(new URL(`../db/${name}.sql`, import.meta.url), "utf8"),
-    );
+  ]);
   return { pg, db: pg as unknown as Database };
 }
 

@@ -24,7 +24,7 @@ companion.52-77-47-24.sslip.io {
     reverse_proxy 127.0.0.1:3000
   }
   handle / {
-    redir /miniapp/ 302
+    redir * /miniapp/ 302
   }
   handle {
     respond "Not found" 404

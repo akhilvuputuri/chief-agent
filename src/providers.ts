@@ -1,14 +1,23 @@
 import { spending } from "./spending.js";
 import type { Config } from "./config.js";
 import { publicHttps } from "./security.js";
+/** Release a response body the caller will not read. Never throws. */
+export async function discardBody(response: Response) {
+  await response.body?.cancel().catch(() => {});
+}
 export async function boundedBytes(
   response: Response,
   max: number,
 ): Promise<Uint8Array> {
-  if (!response.ok)
+  // A body that is never read keeps its connection until garbage collection.
+  if (!response.ok) {
+    await discardBody(response);
     throw new Error(`Provider request failed (HTTP ${response.status})`);
-  if (Number(response.headers.get("content-length")) > max)
+  }
+  if (Number(response.headers.get("content-length")) > max) {
+    await discardBody(response);
     throw new Error("Response too large");
+  }
   const reader = response.body?.getReader();
   if (!reader) throw new Error("Empty response");
   const chunks: Uint8Array[] = [];

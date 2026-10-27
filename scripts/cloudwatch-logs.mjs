@@ -25,7 +25,7 @@ const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$/;
 const EVENT = /^[a-z][a-z0-9_.]{0,79}$/;
 
 const common =
-  "fields @timestamp, ts, level, event, runId, parentRunId, childRunId, taskId, callId, operation, state, stopReason, errorCode, errorCategory, httpStatus, latencyMs, model, requestedModel, provider, kind, lane, inputId, approvalId, approved, messages, attempt, transient, costUsd, finishReason, inputTokens, cachedTokens, cacheWriteTokens, outputTokens, fixedChars, toolsChars, toolCount, domainCount, protectedHistoryChars, historyChars, serializedChars, omittedCount, release";
+  "fields @timestamp, ts, level, event, runId, parentRunId, childRunId, taskId, callId, operation, state, stopReason, errorCode, errorCategory, causeCategory, httpStatus, latencyMs, model, requestedModel, provider, kind, lane, inputId, approvalId, approved, messages, attempt, transient, costUsd, finishReason, inputTokens, cachedTokens, cacheWriteTokens, outputTokens, fixedChars, toolsChars, toolCount, domainCount, protectedHistoryChars, historyChars, serializedChars, omittedCount, release";
 
 // Per-call context sizes (characters and counts only) from context.selected.
 const contextFields =
@@ -113,7 +113,7 @@ export const QUERIES = {
     group: "runtime",
     help: "gateway start/stop/heartbeat lines",
     query: () =>
-      `fields @timestamp, ts, event, release, uptimeS, rssMb | filter event like /^gateway\\./ | sort @timestamp desc`,
+      `fields @timestamp, ts, event, release, nodeVersion, uptimeS, rssMb, intakeStopped, handlersLeft, httpClosed, databaseClosed | filter event like /^gateway\\./ | sort @timestamp desc`,
   },
   host: {
     group: "host",

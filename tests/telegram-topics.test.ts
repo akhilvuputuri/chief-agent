@@ -1,8 +1,7 @@
 import { Voice } from "../src/providers.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
-import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import { Bot, GrammyError } from "grammy";
 import { ensureUser, type Database } from "../src/db.js";
 import {
@@ -24,13 +23,7 @@ import { Assistant } from "../src/agent.js";
 import { JobTools } from "../src/tools.js";
 
 async function database() {
-  const pg = new PGlite();
-  for (const f of (await readdir(new URL("../db/", import.meta.url)))
-    .filter((f) => f.endsWith(".sql"))
-    .sort())
-    await pg.exec(
-      await readFile(new URL("../db/" + f, import.meta.url), "utf8"),
-    );
+  const pg = await migratedPGlite();
   const db = pg as unknown as Database;
   await ensureUser(db, "123");
   return { pg, db };
