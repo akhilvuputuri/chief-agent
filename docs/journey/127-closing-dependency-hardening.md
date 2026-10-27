@@ -1,7 +1,7 @@
 # 127 — What was left of the dependency hardening, and can #329 close?
 
 Work date: 2026-10-27. Written: 2026-10-27.
-Status: released in `da2a5ff` ([#329](https://github.com/akhilvuputuri/chief-agent/issues/329), now closed). No production stop has gone through `closeServer()` yet; the next release's stop will be the first.
+Status: released in `da2a5ff` ([#329](https://github.com/akhilvuputuri/chief-agent/issues/329), now closed). Its first production stop, through `closeServer()`, completed in 162 ms.
 
 ## User-visible problem and preceding iteration
 
@@ -89,8 +89,8 @@ Tested locally and in CI. Released in `da2a5ff`; see the release closure below.
   - `gateway.started` for `da2a5ff` at 16:35:07, `nodeVersion: v22.23.4`;
   - the previous release, `c4ba246`, logged `gateway.stopped` 14 ms after `gateway.stopping`;
   - no warn or error lines from 16:15 to 16:35.
+- **First stop through `closeServer()` (measured, CloudWatch):** the next release (`1ff88d2`, PR 336) stopped `da2a5ff`. It logged `gateway.stopping` at 16:50:37.821 and `gateway.stopped` at 16:50:37.983 UTC, so the stop was complete in 162 ms, with no `gateway.stop_incomplete`. The new release logged `gateway.started` at 16:50:41. No warn or error lines from 16:20 to 16:50.
 - **Not yet observed:**
-  - A stop through `closeServer()`. The stop above ran `c4ba246`'s code, so the next release's stop will be the first.
   - An Upgrade request to a non-WebSocket route in production.
   - A real Postgres restart.
 - **Issue:** #329 closed as completed on the merge. A [summary comment](https://github.com/akhilvuputuri/chief-agent/issues/329#issuecomment-6447669325) lists the PRs, what was declined and the optional upstream follow-ups.

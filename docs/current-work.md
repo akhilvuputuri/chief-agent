@@ -9,7 +9,7 @@ The last #329 items:
 - `@fastify/websocket` is bumped to 11.3.4.
 - Pool timeouts stay unset, as journal 125 decided.
 
-Released in `da2a5ff` at 16:35 UTC, with no warn or error lines; #329 is closed. No production stop has gone through the new socket cleanup yet. See [journal 127](journey/127-closing-dependency-hardening.md).
+Released in `da2a5ff` at 16:35 UTC, with no warn or error lines; #329 is closed. Its first production stop, through the new socket cleanup, completed in 162 ms. See [journal 127](journey/127-closing-dependency-hardening.md).
 
 # Fetch hygiene and Node 22.23.4 — live in `9ab96c2` (Pi image in `c4ba246`), 27 October 2026
 

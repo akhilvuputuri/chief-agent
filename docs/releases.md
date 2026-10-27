@@ -9,7 +9,7 @@
   - Pool timeouts stay unset.
 - **Review.** Independent review (Claude Opus 5.5) requested changes on `f28a83e`: a regression would have hung a test instead of failing it, there were stale records, and a smoke-script comment over-claimed. It approved the merged head `8498cae`. Devin found no issues.
 - **Release.** The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/40541427136) deployed the exact commit at 16:35 UTC on 27 October, about 10 minutes after the merge. `gateway.started` logged `nodeVersion: v22.23.4`, with no warn or error lines. No migration. #329 is closed.
-- **Not yet observed.** A production stop through `closeServer()`; the next release's stop will be the first.
+- **First stop.** The next release, `1ff88d2`, stopped it at 16:50 UTC. It went through `closeServer()` and logged `gateway.stopped` 162 ms after `gateway.stopping`, with no `stop_incomplete`.
 
 [Journal 127](journey/127-closing-dependency-hardening.md#release-closure--2026-10-27).
 
