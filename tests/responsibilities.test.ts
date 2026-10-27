@@ -350,6 +350,13 @@ test("U1 real runtime reads one admitted email, applies parcel provenance, resol
     await work.tick();
     assert.equal(index, 4);
     assert.equal(progress, 0);
+    // The investigation had no memories in context, and its record says so.
+    assert.deepEqual(
+      (await f.db.query("SELECT selected FROM memory_context")).rows.map(
+        (r) => r.selected,
+      ),
+      [[]],
+    );
     assert.equal(
       (await f.db.query("SELECT status FROM parcels WHERE id=$1", [f.p.id]))
         .rows[0].status,

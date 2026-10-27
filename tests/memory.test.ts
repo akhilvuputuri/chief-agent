@@ -78,7 +78,7 @@ test("memory_set appends revisions with provenance and keeps the memories projec
   );
 });
 
-test("a fact and a lesson cannot share a key, and facts carry no outcome", async (t) => {
+test("a fact cannot use a lesson key, and facts carry no outcome", async (t) => {
   const { store } = await setup(t);
   await store.write("owner", {
     key: "lesson:calendar:timezones",
@@ -99,7 +99,7 @@ test("a fact and a lesson cannot share a key, and facts carry no outcome", async
       reason: "r",
       source: {},
     }),
-    /is a lesson, not a fact/,
+    /start with lesson:/,
   );
   await assert.rejects(
     store.write("owner", {
@@ -133,10 +133,10 @@ test("a learned change to an owner fact wins as a new revision and is flagged as
   const [, learned] = await store.history("owner", "city");
   assert.equal(learned!.trust, "untrusted");
   assert.deepEqual(learned!.untrusted_sources, ["email"]);
-  assert.equal(
-    (await db.query("SELECT value FROM memories WHERE key='city'")).rows[0]
-      .value,
-    "Lives in Penang",
+  // Older readers of the projection never see a learned fact.
+  assert.deepEqual(
+    (await db.query("SELECT value FROM memories WHERE key='city'")).rows,
+    [],
   );
   // A learned change to a learned item is not a conflict.
   assert.deepEqual(
@@ -193,7 +193,7 @@ test("rollback by learner run restores the earlier revision or retires, and a re
   });
   assert.deepEqual(
     await store.rollback("owner", { learnerRun: second }, "Owner undo"),
-    { restored: 1, retired: 1 },
+    { undone: 3, restored: 1, retired: 1 },
   );
   const active = Object.fromEntries(
     (await store.active("owner")).map((r) => [r.key, r.value]),
@@ -219,12 +219,12 @@ test("rollback by learner run restores the earlier revision or retires, and a re
     (await db.query("SELECT key FROM memories ORDER BY key")).rows.map(
       (r) => r.key,
     ),
-    ["meal", "seat", "style"],
+    ["meal", "style"],
   );
   // Rolling back the same run again changes nothing.
   assert.deepEqual(
     await store.rollback("owner", { learnerRun: second }, "again"),
-    { restored: 0, retired: 0 },
+    { undone: 0, restored: 0, retired: 0 },
   );
   await assert.rejects(store.rollback("owner", {}, "all"), /at least one/);
 });
@@ -249,11 +249,11 @@ test("rollback by untrusted source and by kind touch only matching learned items
   });
   assert.deepEqual(
     await store.rollback("owner", { untrustedSource: "email" }, "No email"),
-    { restored: 0, retired: 1 },
+    { undone: 1, restored: 0, retired: 1 },
   );
   assert.deepEqual(
     await store.rollback("owner", { kind: "lesson" }, "No lessons"),
-    { restored: 0, retired: 1 },
+    { undone: 1, restored: 0, retired: 1 },
   );
   assert.deepEqual(
     (await store.active("owner")).map((r) => r.key),
@@ -357,6 +357,7 @@ test("revisions are owner-scoped", async (t) => {
   assert.deepEqual(await store.history("owner", "style"), []);
   assert.deepEqual(await store.active("owner"), []);
   assert.deepEqual(await store.rollback("owner", { learnerRun: run }, "x"), {
+    undone: 0,
     restored: 0,
     retired: 0,
   });
@@ -437,4 +438,173 @@ test("a turn gets owner facts as before, learned items only when present, and re
     [1, 0],
     [1, 1],
   ]);
+});
+
+const owner = (store: MemoryStore, key: string, value: string) =>
+  store.write("owner", {
+    key,
+    value,
+    kind: "fact",
+    origin: "owner",
+    reason: "r",
+    source: {},
+  });
+const value = async (store: MemoryStore, key: string) =>
+  (await store.active("owner")).find((r) => r.key === key)?.value;
+
+test("undoing two learner runs one after the other returns to the owner's value in either order", async (t) => {
+  for (const order of [
+    ["a", "b"],
+    ["b", "a"],
+  ]) {
+    const { db, store } = await setup(t);
+    const runs = { a: await learnerRun(db), b: await learnerRun(db) };
+    await owner(store, "city", "Singapore");
+    await learn(store, "city", "Penang", runs.a);
+    await learn(store, "city", "Johor", runs.b);
+    for (const name of order)
+      await store.rollback(
+        "owner",
+        { learnerRun: runs[name as "a" | "b"] },
+        "undo",
+      );
+    assert.equal(await value(store, "city"), "Singapore", order.join(","));
+    assert.equal(
+      (await db.query("SELECT value FROM memories WHERE key='city'")).rows[0]
+        ?.value,
+      "Singapore",
+    );
+  }
+});
+
+test("a restored learned value keeps its labels, stays rollbackable by source and never becomes explicit", async (t) => {
+  const { db, store } = await setup(t);
+  const [a, b, c] = [
+    await learnerRun(db),
+    await learnerRun(db),
+    await learnerRun(db),
+  ];
+  await learn(store, "city", "Penang", a, { untrustedSources: ["email"] });
+  await learn(store, "city", "Johor", b);
+  await store.rollback("owner", { learnerRun: b }, "undo b");
+  await learn(store, "city", "Melaka", c);
+  await store.rollback("owner", { learnerRun: c }, "undo c");
+  const head = (await store.active("owner"))[0]!;
+  assert.deepEqual(
+    [head.value, head.origin, head.trust, head.untrusted_sources],
+    ["Penang", "rollback", "untrusted", ["email"]],
+  );
+  const original = (await store.history("owner", "city"))[0]!;
+  assert.equal(head.source.restoredFrom, original.id);
+  assert.equal(head.source.restoredOrigin, "learned");
+  const selection = await store.select("owner");
+  assert.deepEqual(selection.explicit, []);
+  assert.deepEqual(
+    selection.learned.map((l) => l.value),
+    ["Penang"],
+  );
+  assert.deepEqual((await db.query("SELECT * FROM memories")).rows, []);
+  // B's value was undone earlier, so removing everything from email retires the key.
+  assert.deepEqual(
+    await store.rollback("owner", { untrustedSource: "email" }, "no email"),
+    { undone: 1, restored: 0, retired: 1 },
+  );
+  assert.equal(await value(store, "city"), undefined);
+});
+
+test("a learner retirement carries its own trust and a rollback by source undoes it", async (t) => {
+  const { db, store } = await setup(t);
+  const run = await learnerRun(db);
+  await owner(store, "dentist", "Dr Tan in Novena");
+  const retired = await store.retire(
+    "owner",
+    "dentist",
+    {
+      origin: "learned",
+      reason: "Clinic closed, per a newsletter",
+      learnerRun: run,
+      untrustedSources: ["email"],
+    },
+    { taskIds: ["t1"] },
+  );
+  assert.equal(retired?.status, "retired");
+  const [, revision] = await store.history("owner", "dentist");
+  assert.deepEqual(
+    [revision!.trust, revision!.untrusted_sources, revision!.learner_run],
+    ["untrusted", ["email"], run],
+  );
+  assert.equal(await value(store, "dentist"), undefined);
+  assert.deepEqual(
+    await store.rollback("owner", { untrustedSource: "email" }, "no email"),
+    { undone: 1, restored: 1, retired: 0 },
+  );
+  assert.equal(await value(store, "dentist"), "Dr Tan in Novena");
+  assert.equal(
+    await store.retire("owner", "missing", { origin: "owner", reason: "r" }),
+    null,
+  );
+});
+
+test("a window rollback may give only its end, and matches the original learning time", async (t) => {
+  const { db, store } = await setup(t);
+  const run = await learnerRun(db);
+  await learn(store, "old", "old", run);
+  await db.query(
+    "UPDATE memory_revisions SET created_at=now()-interval '3 days' WHERE key='old'",
+  );
+  await learn(store, "new", "new", run);
+  assert.deepEqual(
+    await store.rollback(
+      "owner",
+      { until: new Date(Date.now() - 86400000) },
+      "before yesterday",
+    ),
+    { undone: 1, restored: 0, retired: 1 },
+  );
+  assert.deepEqual(
+    (await store.active("owner")).map((r) => r.key),
+    ["new"],
+  );
+});
+
+test("guards refuse before any mutation, as validation errors", async (t) => {
+  const { ToolValidationError } = await import("../src/tool-errors.js");
+  const { db, store } = await setup(t);
+  for (const [key, kind] of [
+    ["lesson:x:y", "fact"],
+    ["plain", "lesson"],
+  ] as const)
+    await assert.rejects(
+      store.write("owner", {
+        key,
+        value: "v",
+        kind,
+        origin: "owner",
+        reason: "r",
+        source: {},
+      }),
+      (e) => e instanceof ToolValidationError && /lesson:/.test(e.message),
+    );
+  await assert.rejects(
+    store.rollback("owner", {}, "all"),
+    (e) => e instanceof ToolValidationError,
+  );
+  assert.equal(
+    (await db.query("SELECT count(*)::int n FROM memory_revisions")).rows[0].n,
+    0,
+  );
+});
+
+test("an older image writing a key whose head was learned is imported as the owner's legacy value", async (t) => {
+  const { db, store } = await setup(t);
+  const run = await learnerRun(db);
+  await owner(store, "city", "Singapore");
+  await learn(store, "city", "Penang", run);
+  await db.query(
+    "INSERT INTO memories(user_id,key,value) VALUES('owner','city','Penang')",
+  );
+  assert.deepEqual(await store.importLegacy(), { imported: 1, projected: 0 });
+  const head = (await store.active("owner"))[0]!;
+  assert.deepEqual([head.origin, head.value], ["legacy", "Penang"]);
+  assert.deepEqual(await store.importLegacy(), { imported: 0, projected: 0 });
 });

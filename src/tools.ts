@@ -34,7 +34,7 @@ import { RuleTools } from "./stock-rules.js";
 import type { SingaporeTools } from "./singapore/tools.js";
 import { isSingaporeAction } from "./singapore/schema.js";
 import type { MailIndex } from "./mail-recall.js";
-import { MemoryStore } from "./memory.js";
+import { isLearned, MemoryStore } from "./memory.js";
 export class JobTools {
   constructor(
     private db: Database,
@@ -423,7 +423,7 @@ export class JobTools {
         key: m.key,
         value: m.value,
         ...(m.kind === "fact" ? {} : { kind: m.kind }),
-        ...(m.origin === "owner" ? {} : { origin: m.origin }),
+        ...(isLearned(m) ? { learned: true } : {}),
       }));
     if (a.operation === "memory_set") {
       const saved = await new MemoryStore(db).write(user, {

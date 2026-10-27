@@ -52,7 +52,7 @@ import {
   type ImageAttachment,
 } from "./protocol.js";
 import type { JobTools } from "./tools.js";
-import { MemoryStore } from "./memory.js";
+import { emptySelection, MemoryStore } from "./memory.js";
 import { runFamily } from "./run-family.js";
 import { recordPickerCheck, type ShadowDecisions } from "./shadow.js";
 import {
@@ -619,14 +619,6 @@ export class Assistant {
       });
       const memoryStore = new MemoryStore(this.db);
       const selection = await memoryStore.select(user);
-      await memoryStore.recordContext(user, run, selection);
-      await event(this.db, user, run, "memory.selected", {
-        explicit: selection.explicit.length,
-        learned: selection.learned.length,
-        omitted: selection.omitted.length,
-        flagged: selection.flagged,
-        chars: selection.chars,
-      });
       const memories = selection.explicit;
       const learned = selection.learned;
       const execution = new Execution(
@@ -1250,6 +1242,16 @@ export class Assistant {
         };
         request.refreshContext = async () => {};
       }
+      // Recorded once the request is final: a responsibility investigation gets none.
+      const inContext = responsibility ? emptySelection : selection;
+      await memoryStore.recordContext(user, run, inContext);
+      await event(this.db, user, run, "memory.selected", {
+        explicit: inContext.explicit.length,
+        learned: inContext.learned.length,
+        omitted: inContext.omitted.length,
+        flagged: inContext.flagged,
+        chars: inContext.chars,
+      });
       const output = await spending.run(new Spending(this.db, user, run), () =>
         this.agent.run(request),
       );

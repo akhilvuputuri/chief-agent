@@ -53,6 +53,16 @@ CREATE TABLE IF NOT EXISTS memory_heads (
   PRIMARY KEY(user_id,key),
   FOREIGN KEY(user_id,revision_id) REFERENCES memory_revisions(user_id,id)
 );
+-- Revisions a rollback undid. A later rollback never restores one, so undoing several
+-- learner runs in any order lands on the latest revision none of them wrote.
+CREATE TABLE IF NOT EXISTS memory_undone (
+  user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  revision_id uuid NOT NULL,
+  reason text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY(user_id,revision_id),
+  FOREIGN KEY(user_id,revision_id) REFERENCES memory_revisions(user_id,id)
+);
 -- What each run had in context: the selected revisions and the ones left out by the budget.
 -- "In context" is never "used".
 CREATE TABLE IF NOT EXISTS memory_context (

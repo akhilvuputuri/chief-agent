@@ -1,12 +1,13 @@
 // Revisioned owner memory (issue #326 phase 1, design in docs/learning.md).
 //
 // Every change is a new immutable revision with its provenance; a head points at the
-// current one. Retiring, undoing and rolling back append revisions too, so nothing learned
-// is ever lost and every change can itself be undone. The legacy `memories` table remains
-// the projection of active fact heads for job analysis, job alignment and older images.
+// current one. Retiring and rolling back append revisions too, so no earlier value is ever
+// lost. The legacy `memories` table remains the projection of the owner's active explicit
+// facts for job analysis, job alignment and older images.
 import { randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
 import { transaction } from "./db-transaction.js";
+import { ToolValidationError } from "./tool-errors.js";
 
 export type MemoryKind = "fact" | "lesson";
 export type MemoryOrigin = "owner" | "learned" | "legacy" | "rollback";
@@ -74,6 +75,16 @@ export interface RollbackFilter {
   kind?: MemoryKind;
 }
 
+/** What a run that receives no memories had in context. */
+export const emptySelection: MemorySelection = {
+  explicit: [],
+  learned: [],
+  selected: [],
+  omitted: [],
+  flagged: 0,
+  chars: 0,
+};
+
 /** Characters of learned facts and lessons offered to one run. Owner facts are not capped. */
 export const LEARNED_BUDGET_CHARS = 4000;
 
@@ -108,21 +119,36 @@ export function scanThreats(text: string): string[] {
 const COLUMNS = `r.id,r.key,r.revision,r.kind,r.status,r.value,r.outcome,r.domain,r.origin,r.reason,
   r.source,r.learner_run,r.trust,r.untrusted_sources,r.flags,r.created_at::text AS created_at`;
 
-const isLearned = (r: Pick<MemoryRevision, "origin" | "source">) =>
+// A restored copy names the original revision it restored (never another copy), so its
+// origin is one level deep.
+export const isLearned = (r: Pick<MemoryRevision, "origin" | "source">) =>
   r.origin === "learned" ||
   (r.origin === "rollback" && r.source.restoredOrigin === "learned");
+
+const trustOf = (origin: "owner" | "learned", untrusted: string[]) =>
+  origin === "learned" && untrusted.length ? "untrusted" : "owner";
+
+const time = (r: Pick<MemoryRevision, "created_at">) =>
+  Date.parse(r.created_at);
 
 export class MemoryStore {
   constructor(private db: Database) {}
 
   /** Record a fact or lesson as the key's next revision. */
   async write(user: string, w: MemoryWrite) {
+    // Refused before any mutation, so a refusal is never an uncertain write.
     if (w.kind === "fact" && (w.outcome || w.domain))
-      throw new Error("Facts carry no outcome or domain");
+      throw new ToolValidationError("Facts carry no outcome or domain");
+    if ((w.kind === "lesson") !== w.key.startsWith("lesson:"))
+      throw new ToolValidationError(
+        "Lesson keys, and only lesson keys, start with lesson:",
+      );
     return transaction(this.db, async (client) => {
       const head = await this.lockHead(client, user, w.key);
       if (head && head.kind !== w.kind)
-        throw new Error(`Memory ${w.key} is a ${head.kind}, not a ${w.kind}`);
+        throw new ToolValidationError(
+          `Memory ${w.key} is a ${head.kind}, not a ${w.kind}`,
+        );
       const flags = scanThreats(w.value);
       // Newer evidence wins as a new revision; a learned change to an owner's fact is
       // flagged for the digest.
@@ -145,26 +171,30 @@ export class MemoryStore {
         reason: w.reason,
         source: w.source,
         learnerRun: w.learnerRun ?? null,
-        trust:
-          w.origin === "owner"
-            ? "owner"
-            : untrusted.length
-              ? "untrusted"
-              : "owner",
+        trust: trustOf(w.origin, untrusted),
         untrusted,
         flags,
       });
     });
   }
 
-  /** Retire a key as a new revision. Returns null when it holds nothing active. */
+  /**
+   * Retire a key as a new revision. Returns null when it holds nothing active. The
+   * retirement carries its own trust: a learner retiring an item after reading email is
+   * tagged with email, so a rollback by source undoes the retirement too.
+   */
   async retire(
     user: string,
     key: string,
-    by: { origin: "owner" | "learned" | "rollback"; reason: string },
+    by: {
+      origin: "owner" | "learned";
+      reason: string;
+      learnerRun?: string;
+      untrustedSources?: string[];
+    },
     source: Record<string, unknown> = {},
-    learnerRun?: string,
   ) {
+    const untrusted = [...new Set(by.untrustedSources ?? [])].sort();
     return transaction(this.db, async (client) => {
       const head = await this.lockHead(client, user, key);
       if (!head || head.status !== "active") return null;
@@ -176,65 +206,95 @@ export class MemoryStore {
         origin: by.origin,
         reason: by.reason,
         source,
-        learnerRun: learnerRun ?? null,
+        learnerRun: by.learnerRun ?? null,
+        trust: trustOf(by.origin, untrusted),
+        untrusted,
         flags: [],
       });
     });
   }
 
   /**
-   * Undo every key whose current revision matches the filter: restore the latest earlier
-   * revision that does not match it, or retire the key when there is none. A key that a
-   * later, non-matching revision already changed is left alone. The undo is itself a
-   * revision, so a rollback can be rolled back.
+   * Undo the learner revisions that match the filter. Each one is recorded in
+   * `memory_undone` and never restored again. A key whose current value came from an undone
+   * revision returns to the latest revision that is neither undone nor a restored copy, or
+   * is retired when that is none or a retirement. A key whose current value came from
+   * anything else, such as a later owner revision, is left alone. The undo is itself a
+   * revision, and repeating a rollback changes nothing.
    */
   async rollback(user: string, filter: RollbackFilter, reason: string) {
     if (
       !filter.learnerRun &&
       !filter.since &&
+      !filter.until &&
       !filter.untrustedSource &&
       !filter.kind
     )
-      throw new Error("A rollback needs at least one filter");
-    // Only the learner's own revisions match; a restored copy is a rollback revision.
+      throw new ToolValidationError("A rollback needs at least one filter");
+    // Only the learner's own revisions match. Restored copies resolve to their original.
     const matches = (r: MemoryRevision) =>
       r.origin === "learned" &&
       (!filter.learnerRun || r.learner_run === filter.learnerRun) &&
-      (!filter.since || new Date(r.created_at) >= filter.since) &&
-      (!filter.until || new Date(r.created_at) < filter.until) &&
+      (!filter.since || time(r) >= filter.since.getTime()) &&
+      (!filter.until || time(r) < filter.until.getTime()) &&
       (!filter.untrustedSource ||
         r.untrusted_sources.includes(filter.untrustedSource)) &&
       (!filter.kind || r.kind === filter.kind);
     return transaction(this.db, async (client) => {
       await this.lockOwner(client, user);
-      const heads = (
+      const revisions = (
         await client.query(
-          `SELECT ${COLUMNS} FROM memory_heads h JOIN memory_revisions r
-           ON r.user_id=h.user_id AND r.id=h.revision_id WHERE h.user_id=$1 ORDER BY r.key`,
+          `SELECT ${COLUMNS} FROM memory_revisions r WHERE r.user_id=$1
+           ORDER BY r.key,r.revision`,
           [user],
         )
       ).rows as MemoryRevision[];
+      const undone = new Set<string>(
+        (
+          await client.query(
+            "SELECT revision_id FROM memory_undone WHERE user_id=$1",
+            [user],
+          )
+        ).rows.map((r) => r.revision_id),
+      );
+      const byKey = new Map<string, MemoryRevision[]>();
+      for (const r of revisions)
+        byKey.set(r.key, [...(byKey.get(r.key) ?? []), r]);
       let restored = 0;
       let retired = 0;
-      for (const head of heads) {
-        if (!matches(head)) continue;
-        const earlier = (
+      let matched = 0;
+      for (const [key, history] of byKey) {
+        const fresh = history.filter((r) => !undone.has(r.id) && matches(r));
+        for (const r of fresh) {
           await client.query(
-            `SELECT ${COLUMNS} FROM memory_revisions r WHERE r.user_id=$1 AND r.key=$2
-             AND r.revision<$3 ORDER BY r.revision DESC`,
-            [user, head.key, head.revision],
-          )
-        ).rows as MemoryRevision[];
-        const keep = earlier.find((r) => !matches(r));
+            "INSERT INTO memory_undone(user_id,revision_id,reason) VALUES($1,$2,$3) ON CONFLICT DO NOTHING",
+            [user, r.id, reason],
+          );
+          undone.add(r.id);
+        }
+        matched += fresh.length;
+        if (!fresh.length) continue;
+        const byId = new Map(history.map((r) => [r.id, r]));
+        const original = (r: MemoryRevision) =>
+          r.origin === "rollback" && typeof r.source.restoredFrom === "string"
+            ? (byId.get(r.source.restoredFrom) ?? r)
+            : r;
+        const head = history.at(-1)!;
+        if (!undone.has(original(head).id)) continue;
+        const keep = history
+          .slice(0, -1)
+          .reverse()
+          .find((r) => r.origin !== "rollback" && !undone.has(r.id));
         const source = {
           rollback: { of: head.id, ...this.describe(filter) },
           ...(keep
             ? { restoredFrom: keep.id, restoredOrigin: keep.origin }
             : {}),
         };
-        if (keep && keep.status === "active") {
+        if (keep?.status === "active") {
           await this.append(client, user, {
             ...this.carry(keep),
+            key,
             revision: head.revision + 1,
             status: "active",
             value: keep.value,
@@ -260,7 +320,7 @@ export class MemoryStore {
           retired++;
         }
       }
-      return { restored, retired };
+      return { undone: matched, restored, retired };
     });
   }
 
@@ -306,7 +366,7 @@ export class MemoryStore {
     candidates.sort(
       (a, b) =>
         Number(b.pinned) - Number(a.pinned) ||
-        b.created_at.localeCompare(a.created_at) ||
+        time(b) - time(a) ||
         a.key.localeCompare(b.key),
     );
     const learned: Array<LearnedItem & { id: string }> = [];
@@ -339,8 +399,9 @@ export class MemoryStore {
       learned: learned.map(({ id: _id, ...item }) => item),
       selected: [...selected],
       omitted,
-      // Rescanned on load, so a pattern added later also flags older items.
-      flagged: items.filter(
+      // Learned items only, rescanned on load so a pattern added later also flags older
+      // ones. The owner's own facts are theirs to word as they like.
+      flagged: candidates.filter(
         (r) =>
           selected.has(r.id) &&
           (r.flags.length > 0 || scanThreats(r.value!).length > 0),
@@ -371,7 +432,8 @@ export class MemoryStore {
         `SELECT m.user_id,m.key,m.value,m.updated_at::text AS updated_at FROM memories m
          LEFT JOIN memory_heads h ON h.user_id=m.user_id AND h.key=m.key
          LEFT JOIN memory_revisions r ON r.user_id=h.user_id AND r.id=h.revision_id
-         WHERE r.id IS NULL OR r.status<>'active' OR r.kind<>'fact' OR r.value<>m.value`,
+         WHERE r.id IS NULL OR r.status<>'active' OR r.kind<>'fact' OR r.value<>m.value
+         OR (r.origin='learned' OR (r.origin='rollback' AND r.source->>'restoredOrigin'='learned'))`,
       )
     ).rows as Array<{
       user_id: string;
@@ -392,6 +454,7 @@ export class MemoryStore {
         if (
           head?.status === "active" &&
           head.kind === "fact" &&
+          !isLearned(head) &&
           head.value === current
         )
           return;
@@ -418,7 +481,7 @@ export class MemoryStore {
       `INSERT INTO memories(user_id,key,value)
        SELECT r.user_id,r.key,r.value FROM memory_heads h JOIN memory_revisions r
        ON r.user_id=h.user_id AND r.id=h.revision_id
-       WHERE r.status='active' AND r.kind='fact'
+       WHERE r.status='active' AND r.kind='fact' AND NOT (r.origin='learned' OR (r.origin='rollback' AND r.source->>'restoredOrigin'='learned'))
        AND NOT EXISTS (SELECT 1 FROM memories m WHERE m.user_id=r.user_id AND m.key=r.key)
        ON CONFLICT DO NOTHING RETURNING key`,
     );
@@ -512,8 +575,10 @@ export class MemoryStore {
        ON CONFLICT(user_id,key) DO UPDATE SET revision_id=EXCLUDED.revision_id`,
       [user, r.key, id],
     );
+    // The projection holds the owner's explicit facts only, so older readers (job analysis,
+    // job alignment, an older image) never see a learned fact unlabelled.
     if (r.kind === "fact") {
-      if (r.status === "active")
+      if (r.status === "active" && !isLearned(r))
         await client.query(
           `INSERT INTO memories(user_id,key,value) VALUES($1,$2,$3)
            ON CONFLICT(user_id,key) DO UPDATE SET value=$3,updated_at=now()`,
