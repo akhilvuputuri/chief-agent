@@ -16,6 +16,8 @@ import { runFindingsAgent } from "../src/agents.js";
 import { spending, type Spending } from "../src/spending.js";
 
 const DAY = 86_400_000;
+/** No read pacing or quota pause in tests. */
+const FAST = { readMs: 0, quotaPauseMs: 0, topUpMs: 10_000 };
 const NOW = Date.UTC(2026, 9, 25);
 
 /** Deterministic bag-of-words vectors: texts sharing words score higher. */
@@ -142,7 +144,7 @@ test("recall finds an email by what it was about, owner-scoped", async () => {
       text: "The security deposit for the flat is two months of rent.",
     },
   ]);
-  const index = new MailIndex(box.gmail, words, "owner", () => NOW);
+  const index = new MailIndex(box.gmail, words, "owner", () => NOW, FAST);
   const early = await index.recall("owner", "deposit for the flat");
   assert.equal(early.status, "building");
   await index.start();
@@ -163,7 +165,7 @@ test("new mail is topped up on recall and old mail leaves the window", async () 
   const box = mailbox([
     { id: "a1", at: NOW - 364 * DAY, subject: "Old", text: "dentist checkup" },
   ]);
-  const index = new MailIndex(box.gmail, words, "owner", () => now);
+  const index = new MailIndex(box.gmail, words, "owner", () => now, FAST);
   await index.start();
   box.mail.push({
     id: "n9",
@@ -192,7 +194,7 @@ test("a failed build reports unavailable and can be retried", async () => {
       return words.embed(texts);
     },
   };
-  const index = new MailIndex(box.gmail, flaky, "owner", () => NOW);
+  const index = new MailIndex(box.gmail, flaky, "owner", () => NOW, FAST);
   await index.start();
   assert.equal(index.state, "failed");
   assert.equal((await index.recall("owner", "hello")).status, "unavailable");
@@ -375,7 +377,7 @@ test("a burst of new mail is indexed over several recalls without gaps", async (
     const page = await listNewestFirst(user, query);
     return { messages: page.messages.reverse() };
   };
-  const index = new MailIndex(box.gmail, words, "owner", () => now);
+  const index = new MailIndex(box.gmail, words, "owner", () => now, FAST);
   await index.start();
   for (let i = 1; i <= 80; i++)
     box.mail.push({
@@ -417,7 +419,7 @@ test("a failed build keeps its progress, pauses before retrying and runs outside
       return words.embed(texts);
     },
   };
-  const index = new MailIndex(box.gmail, flaky, "owner", () => now);
+  const index = new MailIndex(box.gmail, flaky, "owner", () => now, FAST);
   await index.start();
   assert.equal(index.state, "failed");
   assert.equal(index.messages, 10);
@@ -449,7 +451,7 @@ test("an unreadable message is retried once and then left out", async () => {
     if (id === "bad") throw new Error("Gmail request failed (500)");
     return read(user, id);
   };
-  const index = new MailIndex(box.gmail, words, "owner", () => NOW);
+  const index = new MailIndex(box.gmail, words, "owner", () => NOW, FAST);
   await index.start();
   assert.equal(index.state, "ready");
   assert.equal(index.messages, 1);
@@ -468,7 +470,7 @@ test("a full page of escape-heavy results keeps its warning field", async () => 
       text: dense.repeat(10) + " common words",
     })),
   );
-  const index = new MailIndex(box.gmail, words, "owner", () => NOW);
+  const index = new MailIndex(box.gmail, words, "owner", () => NOW, FAST);
   await index.start();
   const found = await index.recall("owner", "common words", 10);
   assert.ok(JSON.stringify(found).length < 12_000);
@@ -485,4 +487,104 @@ test("quoted history in HTML replies is not indexed", () => {
     indexBody({ mimeType: "text/html", body: { data: html } }),
     "Yes, Tuesday works.",
   );
+});
+
+test("a Gmail quota refusal pauses reading without leaving mail out", async () => {
+  const box = mailbox(
+    Array.from({ length: 6 }, (_, i) => ({
+      id: "q" + i,
+      at: NOW - i,
+      subject: "s" + i,
+      text: "quota message " + i,
+    })),
+  );
+  const read = box.gmail.indexMessage;
+  let refusals = 3;
+  box.gmail.indexMessage = async (user, id) => {
+    if (refusals > 0) {
+      refusals -= 1;
+      throw new Error(
+        "Gmail request failed (403); reconnect if authorization expired",
+      );
+    }
+    return read(user, id);
+  };
+  const index = new MailIndex(box.gmail, words, "owner", () => NOW, FAST);
+  await index.start();
+  assert.equal(index.state, "ready");
+  assert.equal(index.messages, 6);
+});
+
+test("a Gmail that keeps refusing fails the build instead of abandoning mail", async () => {
+  const box = mailbox([{ id: "q1", at: NOW, subject: "s", text: "body" }]);
+  let reads = 0;
+  box.gmail.indexMessage = async () => {
+    reads += 1;
+    throw new Error("Gmail request failed (429)");
+  };
+  const index = new MailIndex(box.gmail, words, "owner", () => NOW, FAST);
+  await index.start();
+  assert.equal(index.state, "failed");
+  // Five pauses, then the sixth refusal fails the build; the message stays queued.
+  assert.equal(reads, 6);
+  assert.equal(index.messages, 0);
+});
+
+test("reads are paced one at a time", async () => {
+  const box = mailbox(
+    Array.from({ length: 5 }, (_, i) => ({
+      id: "p" + i,
+      at: NOW - i,
+      subject: "s",
+      text: "paced " + i,
+    })),
+  );
+  let active = 0;
+  let most = 0;
+  const read = box.gmail.indexMessage;
+  box.gmail.indexMessage = async (user, id) => {
+    most = Math.max(most, ++active);
+    try {
+      return await read(user, id);
+    } finally {
+      active -= 1;
+    }
+  };
+  const index = new MailIndex(box.gmail, words, "owner", () => NOW, {
+    readMs: 20,
+    quotaPauseMs: 0,
+    topUpMs: 10_000,
+  });
+  const started = Date.now();
+  await index.start();
+  assert.equal(most, 1);
+  assert.ok(Date.now() - started >= 75);
+});
+
+test("a top-up cut short keeps the messages it already read", async () => {
+  let now = NOW;
+  const box = mailbox([
+    { id: "s0", at: NOW - DAY, subject: "s", text: "seed" },
+  ]);
+  const index = new MailIndex(box.gmail, words, "owner", () => now, {
+    readMs: 20,
+    quotaPauseMs: 0,
+    topUpMs: 150,
+  });
+  await index.start();
+  for (let i = 1; i <= 25; i++)
+    box.mail.push({
+      id: "t" + i,
+      at: NOW + i,
+      subject: "s",
+      text: "topup " + i,
+    });
+  now = NOW + DAY;
+  const reads = box.reads.length;
+  const found = await index.recall("owner", "topup");
+  assert.match(found.note!, /not indexed yet/);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  // Every message read during the cut-short top-up is indexed, none is read twice.
+  assert.equal(index.messages - 1, box.reads.length - reads);
+  assert.ok(index.messages > 1);
 });

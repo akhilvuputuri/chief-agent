@@ -1,3 +1,11 @@
+## Deployed `fcdb81c` in `c4ba246` (untagged) — mail index widened to 12 months
+
+- **What merged.** [PR 321](https://github.com/akhilvuputuri/chief-agent/pull/321) merged as `fcdb81ceb908bb370fb15f1709f323489e8c341c` (version 0.3.104). The `gmail_recall` index covers 12 months of Primary mail instead of 30 days. The PR also records the 30-day retrieval eval.
+- **Review.** Independent review (Claude Opus 5.5) approved the change, a docs delta and the merge of main. Devin flagged a stale journal index row, fixed before merge. Hosted CI passed on the merged head.
+- **Release.** Deployed inside `c4ba246` at 15:47 UTC on 27 October ([release](https://github.com/akhilvuputuri/chief-agent/actions/runs/40534440754)). No migration. First build: 1,024 messages indexed and 384 left out by Gmail's per-user quota; the quota fix follows.
+
+[Journal 120](journey/120-email-memory-mvp.md#release-closure-and-first-12-month-build--2026-10-27).
+
 ## Deployed `c4ba246` (untagged) — Pi worker image on Node 22.23.4
 
 - **What merged.** [PR 334](https://github.com/akhilvuputuri/chief-agent/pull/334) merged as `c4ba246afeaf10d0473a4665125e6bec55516d3d` (version unchanged, 0.3.103). New coding jobs use the Pi image `sha256:2fd65df…`, published by `pi-coding-worker-image` run 13 from `15e6def` on Node 22.23.4. `e8f1c2…` and `ba99d9…` stay in `previousImages` for snapshotted jobs.
