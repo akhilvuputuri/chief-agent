@@ -1,7 +1,7 @@
 # 127 — What was left of the dependency hardening, and can #329 close?
 
 Work date: 2026-10-27. Written: 2026-10-27.
-Status: proposed in branch `hardening-finish` ([#329](https://github.com/akhilvuputuri/chief-agent/issues/329)). Not released.
+Status: released in `da2a5ff` ([#329](https://github.com/akhilvuputuri/chief-agent/issues/329), now closed). No production stop has gone through `closeServer()` yet; the next release's stop will be the first.
 
 ## User-visible problem and preceding iteration
 
@@ -58,7 +58,7 @@ No incident is recorded. [Journal 125](125-db-drops-and-shutdown.md) and [journa
 - Tests:
   - `tests/server-upgrade.test.ts` (3). Upgrade sockets close on `/healthz`, a 404 and `/%zz`. A WebSocket client that ignores the closing handshake cannot hold `closeServer()` open. Ordinary keep-alive requests are unaffected, and the malformed-URL body is Chief's. The file fails within 3 s, rather than hanging, on the old `server.ts` and with either the `onRequest` hook or the `frameworkErrors` cleanup removed.
   - `tests/fetch-hygiene.test.ts` (+3): the corrupt-gzip guard, the shared reader, and the gathering browser client cancelling failed bodies.
-- Independent review (Opus 5.5) of `f28a83e`: **REQUEST CHANGES**. No High findings; the product code was confirmed correct. Its findings, addressed in the commit after the release record:
+- Independent review (Opus 5.5) of `f28a83e`: **REQUEST CHANGES**. No High findings; the reviewer judged the product code correct. Its findings, addressed in the commit after the release record:
   - **Medium:** on a regression, the first upgrade test's cleanup waited forever on the leaked socket, because node:test's timeout does not cover after-hooks. A CI shard would have hung, and this journal said the file "times out". The tests now destroy their client sockets before closing.
   - **Low:** the Pi re-pin records were stale. The release-record commit `229ab4b` had already fixed them.
   - **Low:** the smoke script's comment claimed the full-width query check proves the broken client was discarded. `pg-pool` drops an ended client by itself, so it does not. The comment now says so, and the fixed pauses became polling.
@@ -78,7 +78,22 @@ No incident is recorded. [Journal 125](125-db-drops-and-shutdown.md) and [journa
 
 ## Verification and outcome
 
-Tested locally, as above. Not released.
+Tested locally and in CI. Released in `da2a5ff`; see the release closure below.
+
+### Release closure — 2026-10-27
+
+- **PR:** [PR 335](https://github.com/akhilvuputuri/chief-agent/pull/335) merged as `da2a5ff752e5501f313c51c8904b2df21540631d` (version unchanged, 0.3.104) at 16:25 UTC. It came from the head `8498cae`, which the independent reviewer approved. On that head, all 11 CI checks passed, and Devin found no issues.
+- **CI (measured):** the `sandbox and app images` job ran the new smoke script against PostgreSQL 17 in the built app image. It logged "Idle and in-transaction session terminations were logged; the process and pool survived".
+- **Release:** `checks` passed on `main` (16:25–16:29 UTC). The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/40541427136) deployed it at 16:35 UTC. No migration.
+- **CloudWatch (measured):**
+  - `gateway.started` for `da2a5ff` at 16:35:07, `nodeVersion: v22.23.4`;
+  - the previous release, `c4ba246`, logged `gateway.stopped` 14 ms after `gateway.stopping`;
+  - no warn or error lines from 16:15 to 16:35.
+- **Not yet observed:**
+  - A stop through `closeServer()`. The stop above ran `c4ba246`'s code, so the next release's stop will be the first.
+  - An Upgrade request to a non-WebSocket route in production.
+  - A real Postgres restart.
+- **Issue:** #329 closed as completed on the merge. A [summary comment](https://github.com/akhilvuputuri/chief-agent/issues/329#issuecomment-6447669325) lists the PRs, what was declined and the optional upstream follow-ups.
 
 ## Follow-up and next iteration
 

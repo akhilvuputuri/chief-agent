@@ -1,4 +1,4 @@
-# Dependency hardening (#329) — live in `211b2a2`, `9ab96c2` and `c4ba246`, 27 October 2026
+# Dependency hardening (#329, closed) — live in `211b2a2`, `9ab96c2`, `c4ba246` and `da2a5ff`, 27 October 2026
 
 - **Postgres drops and shutdown ([journal 125](docs/journey/125-db-drops-and-shutdown.md)).**
   - A terminated or restarted Postgres session logs `db.idle_client_error` or `db.client_error` instead of stopping the gateway (tested on a local Postgres 16; not yet observed in production).
@@ -7,7 +7,7 @@
   - The gateway runs Node v22.23.4, which fixes a fetch hang on corrupt gzip bodies.
   - Fetch failures log the cause's code.
   - `npm run logs:cloudwatch -- heartbeat` shows `nodeVersion` and the shutdown fields.
-- **Closing #329 ([journal 127](docs/journey/127-closing-dependency-hardening.md)), proposed in branch `hardening-finish`:** Upgrade sockets close on every route and at shutdown, one shared bounded body reader, a Postgres session-drop smoke test in CI and a corrupt-gzip regression test.
+- **Closing #329 ([journal 127](docs/journey/127-closing-dependency-hardening.md)), live in `da2a5ff`:** Upgrade sockets close on every route and at shutdown, one shared bounded body reader, a Postgres session-drop smoke test in CI and a corrupt-gzip regression test. The next release's stop is the first through `closeServer()`.
 - **Pending:**
   - confirm the next new coding job runs on the Pi image re-pinned to Node 22.23.4 (live in `c4ba246`);
   - the Caddy root redirect needs the operator's one-line host install ([journal 124](docs/journey/124-caddy-root-redirect.md));

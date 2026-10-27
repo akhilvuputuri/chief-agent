@@ -1,3 +1,18 @@
+## Deployed `da2a5ff` (untagged) — closing the dependency hardening (#329)
+
+- **What merged.** [PR 335](https://github.com/akhilvuputuri/chief-agent/pull/335) merged as `da2a5ff752e5501f313c51c8904b2df21540631d` (version unchanged, 0.3.104).
+  - Upgrade requests answered over plain HTTP no longer leave their sockets open, on any route. Shutdown destroys WebSockets that ignore the closing handshake after 1 s.
+  - One shared bounded body reader, and more refused bodies are cancelled.
+  - CI terminates idle and in-transaction Postgres sessions on PostgreSQL 17.
+  - A corrupt-gzip regression test.
+  - `@fastify/websocket` 11.3.4.
+  - Pool timeouts stay unset.
+- **Review.** Independent review (Claude Opus 5.5) requested changes on `f28a83e`: a regression would have hung a test instead of failing it, there were stale records, and a smoke-script comment over-claimed. It approved the merged head `8498cae`. Devin found no issues.
+- **Release.** The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/40541427136) deployed the exact commit at 16:35 UTC on 27 October, about 10 minutes after the merge. `gateway.started` logged `nodeVersion: v22.23.4`, with no warn or error lines. No migration. #329 is closed.
+- **Not yet observed.** A production stop through `closeServer()`; the next release's stop will be the first.
+
+[Journal 127](journey/127-closing-dependency-hardening.md#release-closure--2026-10-27).
+
 ## Deployed `c4ba246` (untagged) — Pi worker image on Node 22.23.4
 
 - **What merged.** [PR 334](https://github.com/akhilvuputuri/chief-agent/pull/334) merged as `c4ba246afeaf10d0473a4665125e6bec55516d3d` (version unchanged, 0.3.103). New coding jobs use the Pi image `sha256:2fd65df…`, published by `pi-coding-worker-image` run 13 from `15e6def` on Node 22.23.4. `e8f1c2…` and `ba99d9…` stay in `previousImages` for snapshotted jobs.
