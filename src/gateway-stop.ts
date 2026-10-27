@@ -13,6 +13,8 @@ export interface StopSteps {
 }
 export interface StopResult {
   complete: boolean;
+  /** The Telegram fetch loop ended; until it does it may still confirm updates. */
+  intakeStopped: boolean;
   handlersLeft: number;
   httpClosed: boolean;
   databaseClosed: boolean;
@@ -54,7 +56,7 @@ export async function stopGateway(
   // Handlers may not use the close steps' share, so a slow handler cannot turn
   // "HTTP or the database hung" into "never had time to close".
   const handlersLeftTime = () => Math.max(0, left() - closeReserveMs);
-  await within(
+  const intakeStopped = await within(
     attempt(() => steps.stopIntake()),
     handlersLeftTime(),
   );
@@ -70,7 +72,9 @@ export async function stopGateway(
     left(),
   );
   return {
-    complete: handlersLeft === 0 && httpClosed && databaseClosed,
+    complete:
+      intakeStopped && handlersLeft === 0 && httpClosed && databaseClosed,
+    intakeStopped,
     handlersLeft,
     httpClosed,
     databaseClosed,

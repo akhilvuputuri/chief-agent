@@ -124,6 +124,7 @@ const fields: Record<string, Shape> = {
   write: "bool",
   interrupted: "bool",
   /** gateway.stop_incomplete: what was still open at the shutdown deadline. */
+  intakeStopped: "bool",
   handlersLeft: "count",
   httpClosed: "bool",
   databaseClosed: "bool",

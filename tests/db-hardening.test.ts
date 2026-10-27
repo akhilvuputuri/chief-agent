@@ -148,6 +148,7 @@ test("shutdown waits for running handlers before closing HTTP and then the datab
   clearInterval(drain);
   assert.deepEqual(result, {
     complete: true,
+    intakeStopped: true,
     handlersLeft: 0,
     httpClosed: true,
     databaseClosed: true,
@@ -209,6 +210,7 @@ test("a handler that outlasts the deadline still leaves time to close HTTP and t
   );
   assert.deepEqual(result, {
     complete: false,
+    intakeStopped: true,
     handlersLeft: 1,
     httpClosed: true,
     databaseClosed: true,
@@ -235,4 +237,25 @@ test("a step that throws synchronously is reported, and later steps still run", 
   assert.equal(result.httpClosed, false);
   assert.equal(result.complete, false);
   assert.equal(databaseClosed, true);
+});
+
+test("a fetch loop that does not stop in time makes the stop incomplete even when everything else closed", async () => {
+  const result = await stopGateway(
+    {
+      // The loop could still confirm updates to Telegram after the database closes.
+      stopIntake: () => new Promise<void>(() => {}),
+      handlersRunning: () => 0,
+      closeHttp: async () => {},
+      closeDatabase: async () => {},
+    },
+    200,
+    10,
+  );
+  assert.deepEqual(result, {
+    complete: false,
+    intakeStopped: false,
+    handlersLeft: 0,
+    httpClosed: true,
+    databaseClosed: true,
+  });
 });

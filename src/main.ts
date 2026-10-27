@@ -1350,6 +1350,7 @@ for (const signal of ["SIGINT", "SIGTERM"])
         return;
       }
       opsLog("gateway.stop_incomplete", "warn", {
+        intakeStopped: result.intakeStopped,
         handlersLeft: result.handlersLeft,
         httpClosed: result.httpClosed,
         databaseClosed: result.databaseClosed,
