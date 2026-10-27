@@ -49,6 +49,8 @@ const fields: Record<string, Shape> = {
   effort: "name",
   errorCode: "code",
   errorCategory: "code",
+  /** The name of error.cause, when present (fetch failures carry the real error there). */
+  causeCategory: "code",
   /** Fixed reason for a refused coding worker request (src/coding/rejection-reason.ts). */
   reason: "code",
   model: "model",
@@ -240,6 +242,13 @@ export function errorFields(error: unknown): OpsFields {
   try {
     if (!(error instanceof Error)) return { errorCategory: "non_error" };
     const code = (error as { code?: unknown }).code;
+    // fetch() reports network failures as TypeError("fetch failed") with the
+    // real code (UND_ERR_SOCKET, ECONNRESET, ...) on error.cause.
+    const cause = (error as { cause?: unknown }).cause;
+    const causeCode =
+      cause && typeof cause === "object"
+        ? (cause as { code?: unknown }).code
+        : undefined;
     const stack = typeof error.stack === "string" ? error.stack : "";
     const frames = stack
       .split("\n")
@@ -257,6 +266,11 @@ export function errorFields(error: unknown): OpsFields {
       errorCategory: typeof error.name === "string" ? error.name : undefined,
       ...(typeof code === "string" || typeof code === "number"
         ? { errorCode: code }
+        : typeof causeCode === "string" || typeof causeCode === "number"
+          ? { errorCode: causeCode }
+          : {}),
+      ...(cause instanceof Error && typeof cause.name === "string"
+        ? { causeCategory: cause.name }
         : {}),
       frames,
     };

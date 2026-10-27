@@ -152,7 +152,7 @@ The owner added the cloud reader to the Claude Code cloud environment as an AWS 
 Measured in that session:
 
 - A `curl` StartQuery through the session proxy returned a `queryId`, so the proxy's signing and the key are valid.
-- The CLI's AWS SDK bypassed the proxy. Node's `https` module ignores `HTTPS_PROXY`, and `NODE_USE_ENV_PROXY=1` on Node 22.22 did not cover it, so requests reached AWS signed with the placeholders.
+- The CLI's AWS SDK bypassed the proxy. Node's `https` module ignores `HTTPS_PROXY`, and `NODE_USE_ENV_PROXY=1` on Node 22.22 did not cover it, so requests reached AWS signed with the placeholders. _Correction (27 October, journal 126; tested on Node 22.22.0): `NODE_USE_ENV_PROXY=1` does route Node's global agent through the proxy. The AWS SDK creates its own `https` agents, which bypass it. That is documented Node behaviour, not a Node bug, and the `HttpsProxyAgent` workaround stays._
 
 The CLI now routes through `HTTPS_PROXY` when it is set.
 

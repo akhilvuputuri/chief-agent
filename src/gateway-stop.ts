@@ -13,7 +13,8 @@ export interface StopSteps {
 }
 export interface StopResult {
   complete: boolean;
-  /** The Telegram fetch loop ended; until it does it may still confirm updates. */
+  /** The Telegram fetch loop ended. It normally ends as soon as stop() aborts its
+   * getUpdates call, and stays pending mainly while the sink is full. */
   intakeStopped: boolean;
   handlersLeft: number;
   httpClosed: boolean;

@@ -1,3 +1,4 @@
+import { boundedBytes, discardBody } from "../providers.js";
 import {
   downloadLink,
   radarImageLink,
@@ -204,20 +205,31 @@ export class SgHttp {
     } catch {
       throw new SgBusyError(provider, 30);
     }
-    if (response.status === 429) {
-      this.blockedUntil.set(provider, this.now() + BREAKER_MS);
-      throw new SgBusyError(provider, BREAKER_MS / 1000);
+    try {
+      if (response.status === 429) {
+        this.blockedUntil.set(provider, this.now() + BREAKER_MS);
+        throw new SgBusyError(provider, BREAKER_MS / 1000);
+      }
+      if (response.status >= 500) throw new SgBusyError(provider, 30);
+      if (provider === "dataMall" && response.status === 401)
+        throw new Error("LTA DataMall rejected the account key");
+      if (!response.ok)
+        throw new Error(`${provider} request failed (${response.status})`);
+    } catch (error) {
+      await discardBody(response);
+      throw error;
     }
-    if (response.status >= 500) throw new SgBusyError(provider, 30);
-    if (provider === "dataMall" && response.status === 401)
-      throw new Error("LTA DataMall rejected the account key");
-    if (!response.ok)
-      throw new Error(`${provider} request failed (${response.status})`);
-    const declared = Number(response.headers.get("content-length") ?? 0);
-    if (declared > limit) throw new Error(`${provider} response is too large`);
-    const body = Buffer.from(await response.arrayBuffer());
-    if (body.length > limit)
-      throw new Error(`${provider} response is too large`);
+    // content-length counts compressed bytes, so the limit is applied again
+    // to the decoded stream; boundedBytes cancels the body when it stops early.
+    if (!response.body) return Buffer.alloc(0);
+    let body: Buffer;
+    try {
+      body = Buffer.from(await boundedBytes(response, limit));
+    } catch (error) {
+      if (error instanceof Error && error.message === "Response too large")
+        throw new Error(`${provider} response is too large`);
+      throw error;
+    }
     return body;
   }
 }
