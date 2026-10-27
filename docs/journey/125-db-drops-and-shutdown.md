@@ -58,7 +58,7 @@ No incident is recorded. Dependency research for #329 found two latent failure p
 
 ## Verification and outcome
 
-Unit tests and the local Postgres reproduction pass. Not released; behaviour in production on a real restart or deploy is not yet observed. After release, the next deploy's container stop should log `gateway.stopped`.
+Unit tests and the local Postgres reproduction pass. Released in `211b2a2`. A deploy's container stop has been observed: the first production stop logged `gateway.stopped` in 160 ms (see the release closure below). A real Postgres restart in production has not been observed.
 
 ### Release closure — 2026-10-27
 

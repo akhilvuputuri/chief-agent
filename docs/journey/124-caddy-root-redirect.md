@@ -1,7 +1,7 @@
 # 124 — Why did the site root return an empty page?
 
 Work date: 2026-10-27. Written: 2026-10-27.
-Status: repository fix proposed; the live host still needs the operator install below. Caddy is a host service, so an ordinary release does not change it.
+Status: repository fix merged in `cd45085` ([PR 328](https://github.com/akhilvuputuri/chief-agent/pull/328)); the live host still needs the operator install below. Caddy is a host service, so an ordinary release does not change it.
 
 ## User-visible problem and preceding iteration
 

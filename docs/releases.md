@@ -23,7 +23,7 @@
   - A Postgres session ending no longer stops the gateway: the pool and checked-out clients have `error` listeners, and broken clients are discarded.
   - Shutdown stops intake, waits for running handlers, then closes HTTP and the database within 8 s, and logs `gateway.stopped` or `gateway.stop_incomplete`.
 - **Review.** Independent review (Claude Opus 5.5) approved, then requested changes once (polling could start after a stop began during startup), and approved the merged head `f105ad8`. Devin's red finding (a stuck fetch loop counted as a complete stop) was fixed in `f105ad8`; the reviewer rated it Low.
-- **Release.** The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/40495096407) deployed it at 11:22 UTC, about 9 minutes after the merge. No migration. Its first production stop, by the next release at 11:54 UTC, logged `gateway.stopped` 160 ms after `gateway.stopping`.
+- **Release.** The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/40495096407) deployed it at 11:22 UTC, about 10 minutes after the merge. No migration. Its first production stop, by the next release at 11:54 UTC, logged `gateway.stopped` 160 ms after `gateway.stopping`.
 - **Not yet observed.** A Postgres restart in production.
 
 [Journal 125](journey/125-db-drops-and-shutdown.md#release-closure--2026-10-27).

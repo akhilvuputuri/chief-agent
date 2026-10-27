@@ -50,10 +50,10 @@ No incident is recorded. Follows [journal 125](125-db-drops-and-shutdown.md), wh
 
 ## Verification and outcome
 
-The tests above pass, and the hang was reproduced and shown fixed on Node 22.23.4. Not released.
+The tests above pass, and the hang was reproduced and shown fixed on Node 22.23.4. Released in `9ab96c2`; see the release closure below.
 
 - **Pi image:** `config/coding-pi.json` pins it by digest, so the new Pi `Dockerfile` takes effect only after the image is republished (`pi-coding-image` workflow, run by hand) and the digest is updated in a reviewed change. Until then, Pi jobs keep their current Node.
-- **Gateway and browser images:** the next release builds the gateway on `node:22.23.4-bookworm-slim`. Verify it with `npm run logs:cloudwatch -- heartbeat`, which now shows `nodeVersion` and, for journal 125, the shutdown fields; the shared field list also shows `causeCategory`. The gathering-browser images are rebuilt only through their operator procedure.
+- **Gateway and browser images:** the release of `9ab96c2` built the gateway on `node:22.23.4-bookworm-slim`, and `npm run logs:cloudwatch -- heartbeat` showed `nodeVersion: v22.23.4` (measured; release closure below). The gathering-browser images are rebuilt only through their operator procedure.
 
 ### Release closure — 2026-10-27
 
