@@ -1,6 +1,6 @@
 # Fetch hygiene and Node 22.23.4 — branch `hardening-fetch`, 27 October 2026
 
-On Node 22.22, reading a response with a corrupt gzip body hung forever, even under an abort signal; Node 22.23.4 (undici 6.29.1) rejects it in about 140 ms. CI, the release workflow and the Pi images now pin 22.23.4 (the Pi image takes effect after it is republished). Fetch failures now log the real cause code, unread error bodies are cancelled, and the Singapore client limits bodies while decoding. See [journal 126](journey/126-fetch-hygiene-and-node.md) and issue #329.
+On Node 22.22, reading a response with a corrupt gzip body hung forever, even under an abort signal; Node 22.23.4 (undici 6.29.1) rejects it in about 140 ms. CI, the release workflow, the host-built gateway and browser images and the Pi images now pin 22.23.4; the host reused a cached floating base, so pinning forces the pull. The Pi image takes effect after it is republished, and `gateway.started` now logs `nodeVersion`. Fetch failures now log the real cause code, unread error bodies are cancelled, and the Singapore client limits bodies while decoding. See [journal 126](journey/126-fetch-hygiene-and-node.md) and issue #329.
 
 # Postgres connection drops and shutdown — branch `hardening-db-shutdown`, 27 October 2026
 

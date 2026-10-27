@@ -74,6 +74,8 @@ const fields: Record<string, Shape> = {
   intendedThreadId: "count",
   messageId: "count",
   uptimeS: "count",
+  /** gateway.started: process.version, e.g. v22.23.4. */
+  nodeVersion: "code",
   rssMb: "count",
   fixedChars: "count",
   instructionsChars: "count",

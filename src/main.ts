@@ -1370,7 +1370,8 @@ if (!stopping)
     sink: { concurrency: 8 },
   });
 const started = Date.now();
-opsLog("gateway.started", "info");
+// The Node version shows which undici fixes are live (journal 126).
+opsLog("gateway.started", "info", { nodeVersion: process.version });
 // Which repo-config settings this environment still overrides (names only, issue #143).
 opsLog("config.loaded", "info", {
   envSettings: c.overridden,

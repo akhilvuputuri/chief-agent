@@ -16,15 +16,15 @@ No incident is recorded. Follows [journal 125](125-db-drops-and-shutdown.md), wh
   | 22.22.0 (6.23.0)                      | Hangs past the 4 s test window in all three read modes; the abort signal doesn't help |
   | 22.23.4 (6.29.1), released 20 October | Rejects with `TypeError` / `Z_DATA_ERROR` in about 140 ms in all three                |
 
-  CI, the release workflow, `.nvmrc` and both Pi images pinned 22.19.0, which is older than both. The gateway, browser and Python-squad images use the floating `node:22-bookworm-slim` tag, so they pick up the current Node 22 when rebuilt.
+  CI, the release workflow, `.nvmrc` and both Pi images pinned 22.19.0, which is older than both. The gateway and gathering-browser images used the floating `node:22-bookworm-slim` tag. They are built on the Lightsail host (`scripts/cloud-release.py` runs `docker build` without `--pull`; Compose builds the browser images), so they reuse whichever `node:22-bookworm-slim` the host last pulled. The host was set up on 26 September, so the running gateway's Node is unknown and probably predates the fix (inferred from the code; not checked on the host). The Python-squad image is built on fresh GitHub runners by `coding-image.yml`, so its floating tag does resolve to the current Node 22.
 
 - **Fetch failures were logged without their cause (tested).** `errorFields()` read only `error.code`. `fetch()` reports network failures as `TypeError("fetch failed")` with the real code (`UND_ERR_SOCKET`, `ECONNRESET`, …) on `error.cause`, so logs showed only `TypeError`.
 - **Unread bodies (by reading the code).** `boundedBytes()` and the Singapore client threw on non-OK statuses and declared-oversize responses without cancelling the body, so the connection was held until garbage collection.
-- **Singapore decoded size (tested, but not as a failure).** The Singapore client checked `content-length`, which is the _compressed_ size. It then read the whole decoded body with `arrayBuffer()` before comparing it with the limit. A small gzip response that expands past the limit was rejected, but only after the full decoded body was in memory. The new test passes on the old code too: it guards the behaviour and shows no failure.
+- **Singapore decoded size (tested).** The Singapore client checked `content-length`, which is the _compressed_ size. It then read the whole decoded body with `arrayBuffer()` before comparing it with the limit. A gzip response that expands past the limit was rejected only after the full decoded body was in memory, and an endless decoded stream was never rejected. The new test serves endless gzip-encoded zeros: on the old code it never returns (killed at the 30 s test timeout); on the new code it is rejected after about 4 MB. The error-status test (404, 429, 500) also fails on the old code, which never cancelled those bodies.
 
 ## Diagnosis and alternatives
 
-- Move the pinned Node 22 versions to 22.23.4 rather than adding an outer deadline around every body read. The fix belongs in undici, and an outer race would leave the hung read running.
+- Pin Node 22.23.4 everywhere it is built, including the host-built gateway and browser images (`Dockerfile`, `Dockerfile.browser`): a new exact tag forces the host to pull it on the next build. This is preferred to adding an outer deadline around every body read. The fix belongs in undici, and an outer race would leave the hung read running.
 - Log the cause's code when the error has none of its own, plus the cause's name (`causeCategory`). The error's own code still wins.
 - Cancel unread bodies on every early throw. The Singapore client now reads through `boundedBytes()`, which stops and cancels at the limit on the decoded stream. It keeps its provider-specific messages.
 - Not done:
@@ -33,21 +33,27 @@ No incident is recorded. Follows [journal 125](125-db-drops-and-shutdown.md), wh
 
 ## Implementation and review
 
-- `.nvmrc`, `.github/workflows/ci.yml`, `.github/workflows/deploy.yml`, `Dockerfile.coding-pi`, `coding_runtime_pi/Dockerfile` and `coding_runtime_pi/README.md`: Node 22.23.4.
+- `.nvmrc`, `.github/workflows/ci.yml`, `.github/workflows/deploy.yml`, `Dockerfile`, `Dockerfile.browser`, `Dockerfile.coding-pi`, `coding_runtime_pi/Dockerfile` and `coding_runtime_pi/README.md`: Node 22.23.4. `Dockerfile.coding` stays on the floating tag, because it is built on fresh runners.
+- `src/main.ts`: `gateway.started` logs `nodeVersion`, so CloudWatch shows which Node the running gateway uses.
 - `src/ops-log.ts`: `errorFields()` falls back to `error.cause.code` and adds `causeCategory` (allow-listed).
 - `src/providers.ts`: `discardBody()`; `boundedBytes()` cancels the body before throwing on a non-OK status or a declared oversize.
 - `src/singapore/http.ts`: the body is cancelled on 429, 5xx, 401 and other non-OK responses. The body is read through `boundedBytes()`, and `"Response too large"` is mapped back to `"<provider> response is too large"`. An empty body still returns an empty buffer.
 - `src/gateway-stop.ts`: the `intakeStopped` comment no longer overstates the risk (journal 125 review note).
-- `tests/fetch-hygiene.test.ts`: the cause code, cancelled bodies, and the Singapore decoded limit and error status.
-- Records: journal 35's proxy note is corrected; journal 125's test count and final review are recorded; operational logs gain `causeCategory`.
-- Independent review: pending.
+- `tests/fetch-hygiene.test.ts`: the cause code, cancelled bodies, an endless decoded Singapore stream, and Singapore error bodies (404, 429, 500) being cancelled.
+- Records: journal 35's proxy note is corrected; journal 125's test count and final review are recorded; operational logs gain `causeCategory` (in the safety contract) and `nodeVersion`.
+- Independent review (Opus 5.5) of `d0e139c`: **REQUEST CHANGES**. Its findings, all addressed in the next commit:
+  - the record claimed the floating-tag gateway image would pick up the fix on rebuild, but host builds reuse the cached base image;
+  - the Singapore test did not test cancellation and passed on the old code;
+  - the safety contract did not mention `causeCategory`.
+
+  It confirmed by testing: the hang on 22.22.0 and the fix on 22.23.4; that the cause-code and body-cancel tests fail on the base code; and `errorFields` behaviour for real DNS, socket and mid-body failures. Re-review pending.
 
 ## Verification and outcome
 
 The tests above pass, and the hang was reproduced and shown fixed on Node 22.23.4. Not released.
 
 - **Pi image:** `config/coding-pi.json` pins it by digest, so the new Pi `Dockerfile` takes effect only after the image is republished (`pi-coding-image` workflow, run by hand) and the digest is updated in a reviewed change. Until then, Pi jobs keep their current Node.
-- **Gateway image:** whether the running gateway image already has Node ≥ 22.23.4 depends on when it was last built; not checked.
+- **Gateway and browser images:** the next release builds the gateway on `node:22.23.4-bookworm-slim`. Verify it from `gateway.started`'s `nodeVersion` in CloudWatch. The gathering-browser images are rebuilt only through their operator procedure.
 
 ## Follow-up and next iteration
 

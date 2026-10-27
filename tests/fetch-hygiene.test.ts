@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { gzipSync } from "node:zlib";
+import { createGzip } from "node:zlib";
 import { boundedBytes } from "../src/providers.js";
 import { SgHttp } from "../src/singapore/http.js";
 import { errorFields } from "../src/ops-log.js";
@@ -57,38 +57,56 @@ test("a failed or oversized response's body is cancelled, not left holding its c
   assert.equal(declared.state.cancelled, true);
 });
 
-test("Singapore responses are limited after decompression and error bodies are released", async (t) => {
-  // About 5 MB of JSON that gzips to a few KB: content-length passes, the decoded body does not.
-  const big = gzipSync(
-    Buffer.from(JSON.stringify({ code: 0, data: "a".repeat(5 * 1024 * 1024) })),
-  );
-  const server = createServer((req, res) => {
-    if (req.url?.includes("fail")) {
-      res.writeHead(404, { "content-type": "text/plain" });
-      res.end("not found");
-      return;
-    }
-    res.writeHead(200, {
-      "content-type": "application/json",
-      "content-encoding": "gzip",
-      "content-length": String(big.length),
+test(
+  "Singapore reads stop at the limit on the decoded stream",
+  { timeout: 30_000 },
+  async (t) => {
+    // An endless gzip stream of zeros: tiny on the wire, unbounded once decoded.
+    // Reading it whole (the old arrayBuffer() path) never finishes.
+    const server = createServer((req, res) => {
+      res.writeHead(200, {
+        "content-type": "application/json",
+        "content-encoding": "gzip",
+      });
+      const gzip = createGzip();
+      gzip.pipe(res);
+      const zeros = Buffer.alloc(64 * 1024);
+      let open = true;
+      req.socket.on("close", () => {
+        open = false;
+        gzip.destroy();
+      });
+      const pump = () => {
+        while (open && gzip.write(zeros));
+        if (open) gzip.once("drain", pump);
+      };
+      pump();
+    }).listen(0, "127.0.0.1");
+    await once(server, "listening");
+    t.after(() => {
+      server.closeAllConnections();
+      server.close();
     });
-    res.end(big);
-  }).listen(0, "127.0.0.1");
-  await once(server, "listening");
-  t.after(() => server.close());
-  const port = (server.address() as { port: number }).port;
-  let failNext = false;
-  const http = new SgHttp({
-    fetch: (_url, init) =>
-      fetch(`http://127.0.0.1:${port}/${failNext ? "fail" : "ok"}`, init),
-    sleep: async () => {},
-  });
-  assert.ok(big.length < 4 * 1024 * 1024);
-  await assert.rejects(
-    http.json("psi"),
-    /dataGovRealtime response is too large/,
-  );
-  failNext = true;
-  await assert.rejects(http.json("psi"), /request failed \(404\)/);
+    const port = (server.address() as { port: number }).port;
+    const http = new SgHttp({
+      fetch: (_url, init) => fetch(`http://127.0.0.1:${port}/`, init),
+      sleep: async () => {},
+    });
+    await assert.rejects(
+      http.json("psi"),
+      /dataGovRealtime response is too large/,
+    );
+  },
+);
+
+test("Singapore error responses release their bodies", async () => {
+  for (const status of [404, 429, 500]) {
+    const tracked = trackedBody("error body");
+    const http = new SgHttp({
+      fetch: async () => new Response(tracked.body, { status }),
+      sleep: async () => {},
+    });
+    await assert.rejects(http.json("psi"));
+    assert.equal(tracked.state.cancelled, true, `status ${status}`);
+  }
 });
