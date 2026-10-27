@@ -1,3 +1,7 @@
+# Caddy root redirect — branch `fix-caddy-root-redirect`, 27 October 2026
+
+The site root returned an empty `200` instead of redirecting to the Mini App, because `redir /miniapp/ 302` parses `/miniapp/` as a path matcher. That empty response also skipped the security headers and leaked `Server: Caddy`. Both Caddyfiles now use `redir * /miniapp/ 302`, tested on Caddy 2.6.2. Caddy is a host service, so the live host needs the one-line operator install in [journal 124](journey/124-caddy-root-redirect.md).
+
 # Faster checks — live in `8ea6263`, 27 October 2026
 
 Tests restore each PGlite database from a migrated snapshot instead of booting Postgres and replaying every migration, and a close hook stops `node:test` from keeping closed databases in memory. `checks` runs as parallel jobs, with six test shards behind one `test` job. The first GitHub run, with test files four at a time in three shards, took 4 min 20 s instead of about 26 minutes, but one test process crashed with SIGSEGV. The owner chose serial test files within each runner, the process model `main` ran green; serial runs took 3 min 33 s and 4 min 38 s on GitHub, and all test files take 1,211 s instead of 1,767 s locally. Released in `8ea6263`; merge to production took about 11 minutes. [Journal 123](journey/123-faster-checks.md).

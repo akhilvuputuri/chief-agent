@@ -130,6 +130,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 23 October | [119 — Double reply](119-double-reply.md): why did Chief send the same clarifying question twice? | Released in `7084064`: text a finish_turn reply already contains is no longer also sent as progress |
 | 25 October | [120 — Email memory MVP](120-email-memory-mvp.md): does a meaning index find emails that Gmail search misses? | In progress: `gmail_recall` over the last 30 days of Primary mail, in memory; not released or measured |
 | 27 October | [123 — Faster checks](123-faster-checks.md): why did every PR wait 26 minutes for checks? | Released in `8ea6263`: snapshot-restored test databases, a close hook that frees them and six serial CI shards; `checks` about 4 minutes instead of 26 |
+| 27 October | [124 — Caddy root redirect](124-caddy-root-redirect.md): why did the site root return an empty page? | Repository fix proposed: `redir * /miniapp/ 302`, tested on Caddy 2.6.2; the live host needs the operator install in the entry |
 
 ## Coding-agent learning path
 
