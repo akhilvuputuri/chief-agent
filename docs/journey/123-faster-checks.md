@@ -1,7 +1,15 @@
 # 123 — Why did every PR wait 26 minutes for checks?
 
 Work date(s): 2026-10-27. Written/revised: 2026-10-27.
-Status: in progress. The test fixture, parallel test files and the split `checks` workflow are in PR 324. The first GitHub run took 4 min 20 s instead of about 26 minutes, but one test process crashed with SIGSEGV; the cause is not established (see Verification).
+Status: tested, in PR 324. `checks` takes about 3½ to 4½ minutes instead of about 26. Test files run one at a time within each runner, because four at a time crashed one test process with SIGSEGV; the cause is not established (see Verification).
+
+Summary of the improvements:
+
+- **Faster PR checks:** about 26 minutes to 3 min 33 s and 4 min 38 s in the two serial runs (reported, GitHub). Documentation-only PRs still run every job.
+- **Faster tests anywhere they run serially:** all test files took 1,211 s instead of 1,767 s locally (measured). Coding boxes run the same serial `npm run check`; their check of about 14 minutes should fall by a similar share (estimate, not measured in a box).
+- **Less memory:** a close hook that drops its reference stops `node:test` keeping closed databases; `boxes.test.ts` peaks at 1.5 GB instead of 10.4 GB (measured), well inside a coding box's 12 GB.
+- **Not changed:** a release still takes 5 to 6 minutes, because the Lightsail host builds the image itself, so merge to production is now about 10 minutes instead of about 32.
+- **Same coverage:** every command of `npm run format:check`, `npm run check` and `npm run build` still runs, including Pi's tests against the root lockfile, and the required `test` check keeps its name.
 
 ## User-visible problem and preceding iteration
 
@@ -48,6 +56,7 @@ Alternatives considered:
 
 ## Verification and outcome
 
+- **Measured, all test files serially after the change (the final configuration):** 1,211 s against 1,767 s before; 1,286 pass, 0 fail, 1 skipped. A few review checks shared the machine.
 - **Measured, five slowest PGlite files, serial:** 388 s before, 207 s after; all 203 tests pass.
 - **Measured, `boxes.test.ts` with `closeAfter`:** peak 1.5 GB, 39 s.
 - **Measured, all test files at concurrency 4 with the fixture in 30 files:** 520 s, peak 7.7 GB used; 1,286 pass, 0 fail, 1 skipped (the Docker box test, which needs an image).
@@ -71,7 +80,8 @@ Alternatives considered:
   - Reported, second run (40468756960, `a6dc4ef`, same configuration): passed in 4 min 16 s. One crash in two runs.
   - Hypothesis: concurrent test processes, or the shared compiled module, expose a WASM crash that serial runs on `main` did not hit. The recent `main` runs checked were all green. One sample does not separate the two.
   - Decision (owner, 27 October): run test files one at a time within each runner, with six CI shards (`7ca7cfa`).
-- **Reported, run 40469257930 on `7ca7cfa` (serial files, six shards):** passed in 3 min 33 s. The shards' test steps took 1 min 7 s to 2 min 24 s, the Pi job about 3 min. The shards together ran 1,287 tests: 1,286 pass, 0 fail, 1 skipped.
+- **Reported, runs 40469257930 on `7ca7cfa` and 40469806917 on `bcfa00f` (serial files, six shards):** passed in 3 min 33 s and 4 min 38 s.
+- **Reported, run 40469257930 in detail:** passed in 3 min 33 s. The shards' test steps took 1 min 7 s to 2 min 24 s, the Pi job about 3 min. The shards together ran 1,287 tests: 1,286 pass, 0 fail, 1 skipped.
 - Independent review (Claude Opus 5.5): APPROVE `7ca7cfa`, after checking that six shards cover every file once, against stub files and the run's test counts.
 
 ## Follow-up and next iteration
