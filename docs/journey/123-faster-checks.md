@@ -47,7 +47,9 @@ Alternatives considered:
 - **Measured, five slowest PGlite files, serial:** 388 s before, 207 s after; all 203 tests pass.
 - **Measured, `boxes.test.ts` with `closeAfter`:** peak 1.5 GB, 39 s.
 - **Measured, all test files at concurrency 4 with the fixture in 30 files:** 520 s, peak 7.7 GB used; 1,286 pass, 0 fail, 1 skipped (the Docker box test, which needs an image).
-- **Measured, full `npm run format:check && npm run check && npm run build` after the change:** pending in this revision.
+- **Tested, full `npm run format:check && npm run check && npm run build`:**
+  - `e1af778` failed: three `steering-telegram.test.ts` tests threw `ReferenceError: migratedPGlite is not defined`. That file imports PGlite dynamically inside its fixture, so the conversion replaced the setup without adding the import. A check for any call without an import found no other file. Fixed in `3406d31`.
+  - `3406d31` passed: 1,286 of 1,287 TypeScript tests (1 skipped), 55 script tests, the four Python eval suites, ruff, mypy `--strict`, 61 Python runtime tests, the Pi package check and the build. 1,157 s, sharing the machine with the reviewer's own runs, so not a timing comparison.
 - **Not measured:** the GitHub wall time of the new workflow.
 
 ## Follow-up and next iteration
