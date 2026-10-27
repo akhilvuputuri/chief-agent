@@ -47,7 +47,7 @@ import {
   saveKeyboard,
 } from "./news.js";
 import { PublicFeedFetcher } from "./news-feed.js";
-import { run as runTelegram } from "@grammyjs/runner";
+import { run as runTelegram, type RunnerHandle } from "@grammyjs/runner";
 import { CustomAgent } from "./custom-agent.js";
 import { OpenRouter } from "./model.js";
 import { resolveMainModel, resolvePriceCeilings } from "./model-policy.js";
@@ -85,6 +85,7 @@ import { ToolPicker } from "./tool-picker.js";
 import { ShadowDecisions } from "./shadow.js";
 import { EffortPicker } from "./effort.js";
 import { server } from "./server.js";
+import { stopGateway } from "./gateway-stop.js";
 import {
   telegram,
   sendCalendarApprovals,
@@ -1319,8 +1320,13 @@ scheduleTimer.unref();
 await app.listen({ host: "0.0.0.0", port: c.PORT });
 // Failures are logged by the index and retried on the next gmail_recall.
 void mailIndex?.start();
+// Assigned after bot.init(); a signal during startup finds no runner yet and
+// must also stop it from starting against a closed pool.
+let runner: RunnerHandle | undefined;
+let stopping = false;
 for (const signal of ["SIGINT", "SIGTERM"])
   process.once(signal, () => {
+    stopping = true;
     opsLog("gateway.stopping", "info");
     void (async () => {
       clearInterval(scheduleTimer);
@@ -1330,19 +1336,39 @@ for (const signal of ["SIGINT", "SIGTERM"])
       if (boxTimer) clearInterval(boxTimer);
       shutdown.abort();
       assistant.shutdown();
-      await runner.stop();
-      await app.close();
-      await db.end();
+      const result = await stopGateway({
+        stopIntake: async () => runner?.stop(),
+        handlersRunning: () => runner?.size() ?? 0,
+        closeHttp: () => app.close(),
+        closeDatabase: () => db.end(),
+      });
+      if (result.complete) {
+        opsLog("gateway.stopped", "info");
+        // Another open handle (an MCP client, a box connection) must not hold
+        // the process until SIGKILL once everything owned here has closed.
+        setTimeout(() => process.exit(0), 1000).unref();
+        return;
+      }
+      opsLog("gateway.stop_incomplete", "warn", {
+        intakeStopped: result.intakeStopped,
+        handlersLeft: result.handlersLeft,
+        httpClosed: result.httpClosed,
+        databaseClosed: result.databaseClosed,
+      });
+      process.exit(1);
     })();
   });
 await bot.init();
-const runner = runTelegram(bot, {
-  runner: {
-    silent: true,
-    fetch: { allowed_updates: ["message", "callback_query"] },
-  },
-  sink: { concurrency: 8 },
-});
+// Never start polling after a stop began: the next getUpdates would confirm
+// updates to Telegram that a closed pool can no longer record.
+if (!stopping)
+  runner = runTelegram(bot, {
+    runner: {
+      silent: true,
+      fetch: { allowed_updates: ["message", "callback_query"] },
+    },
+    sink: { concurrency: 8 },
+  });
 const started = Date.now();
 opsLog("gateway.started", "info");
 // Which repo-config settings this environment still overrides (names only, issue #143).

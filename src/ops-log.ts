@@ -123,6 +123,11 @@ const fields: Record<string, Shape> = {
   approved: "bool",
   write: "bool",
   interrupted: "bool",
+  /** gateway.stop_incomplete: what was still open at the shutdown deadline. */
+  intakeStopped: "bool",
+  handlersLeft: "count",
+  httpClosed: "bool",
+  databaseClosed: "bool",
 };
 
 // Written as null rather than omitted: an unknown charge stays visibly unknown.
