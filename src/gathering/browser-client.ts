@@ -1,5 +1,6 @@
 import { createHmac, randomUUID } from "node:crypto";
 import { z } from "zod";
+import { discardBody, readBody } from "../http-body.js";
 export type BrowserCommand = { kind: string; [key: string]: unknown };
 export interface BrowserClient {
   call(
@@ -47,28 +48,22 @@ export class BrowserRpc implements BrowserClient {
       ]),
       redirect: "error",
     });
-    if (response.status === 404) throw new BrowserSessionMissing();
-    if (!response.ok)
+    if (response.status === 404) {
+      await discardBody(response);
+      throw new BrowserSessionMissing();
+    }
+    if (!response.ok) {
+      await discardBody(response);
       throw new Error(
         "Browser request could not be completed; inspect status before retrying",
       );
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error("Browser is unavailable");
-    let size = 0;
-    const chunks: Uint8Array[] = [];
-    try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        size += value.length;
-        if (size > 29_000_000) throw new Error("Browser response is too large");
-        chunks.push(value);
-      }
-    } finally {
-      await reader.cancel();
     }
-    return z
-      .record(z.unknown())
-      .parse(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+    if (!response.body) throw new Error("Browser is unavailable");
+    const bytes = await readBody(
+      response,
+      29_000_000,
+      () => new Error("Browser response is too large"),
+    );
+    return z.record(z.unknown()).parse(JSON.parse(bytes.toString("utf8")));
   }
 }

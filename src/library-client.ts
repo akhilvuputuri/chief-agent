@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { setTimeout as delay } from "node:timers/promises";
 import { ToolValidationError } from "./tool-errors.js";
+import { readBody } from "./http-body.js";
 import {
   permitted,
   routes,
@@ -293,7 +294,9 @@ export class LibraryClient {
         : this.limits.bodyBytes;
     let text: string | null;
     try {
-      text = await readBounded(response, limit);
+      text = (
+        await readBody(response, limit, () => new BodyTooLarge())
+      ).toString("utf8");
     } catch (error) {
       if (!(error instanceof BodyTooLarge))
         throw await this.transient(route, started, "timeout");
@@ -469,20 +472,3 @@ export function scrubExcerpt(
     .slice(0, limit);
 }
 class BodyTooLarge extends Error {}
-async function readBounded(response: Response, limit: number) {
-  if (!response.body) return "";
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > limit) {
-      await reader.cancel().catch(() => {});
-      throw new BodyTooLarge();
-    }
-    chunks.push(value);
-  }
-  return Buffer.concat(chunks).toString("utf8");
-}

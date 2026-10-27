@@ -1,4 +1,5 @@
 import { IBKR, IbkrAuthError } from "./oauth.js";
+import { readBody } from "../http-body.js";
 import {
   IBKR_DRAFT_TOOLS,
   IBKR_QUERY_TOOLS,
@@ -235,19 +236,10 @@ export class IbkrMcp {
 }
 
 async function bounded(response: Response) {
-  const reader = response.body?.getReader();
-  if (!reader) return "";
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > MAX_BODY) {
-      await reader.cancel().catch(() => {});
-      throw new IbkrMcpError("IBKR response too large", "too_large", false);
-    }
-    chunks.push(value);
-  }
-  return Buffer.concat(chunks).toString("utf8");
+  const body = await readBody(
+    response,
+    MAX_BODY,
+    () => new IbkrMcpError("IBKR response too large", "too_large", false),
+  );
+  return body.toString("utf8");
 }

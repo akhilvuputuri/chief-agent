@@ -7,10 +7,11 @@
   - The gateway runs Node v22.23.4, which fixes a fetch hang on corrupt gzip bodies.
   - Fetch failures log the cause's code.
   - `npm run logs:cloudwatch -- heartbeat` shows `nodeVersion` and the shutdown fields.
+- **Closing #329 ([journal 127](docs/journey/127-closing-dependency-hardening.md)), proposed in branch `hardening-finish`:** Upgrade sockets close on every route and at shutdown, one shared bounded body reader, a Postgres session-drop smoke test in CI and a corrupt-gzip regression test.
 - **Pending:**
   - release the Pi image re-pin (published on Node 22.23.4, branch `pin-pi-image-node-22-23-4`);
   - the Caddy root redirect needs the operator's one-line host install ([journal 124](docs/journey/124-caddy-root-redirect.md));
-  - upstream contributions for node-postgres docs and the `@fastify/websocket` socket fix ([#329](https://github.com/akhilvuputuri/chief-agent/issues/329)).
+  - upstream contributions for node-postgres docs and the `@fastify/websocket` socket fix (owner's choice; not needed to close [#329](https://github.com/akhilvuputuri/chief-agent/issues/329)).
 
 [Release record](docs/releases.md).
 

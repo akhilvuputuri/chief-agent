@@ -43,7 +43,7 @@
     "@aws-sdk/client-ec2": "3.1141.0",
     "@aws-sdk/client-sts": "3.1141.0",
     "@chief-agent/pi-runtime": "file:./coding_runtime_pi",
-    "@fastify/websocket": "11.3.2",
+    "@fastify/websocket": "11.3.4",
     "@grammyjs/runner": "^2.0.3",
     "@modelcontextprotocol/sdk": "1.32.1",
     "ajv": "8.20.0",
