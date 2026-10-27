@@ -111,7 +111,7 @@ Status describes released code, not experiments. It is not a measure of answer q
 
 ## Run your own
 
-Requires Node 22.19+ (`.nvmrc` pins the tested version) and Docker Compose. Every integration beyond Telegram and a model provider is optional. The full check suite also covers the Python and Pi coding workers; see [portable development](docs/portable-development.md).
+Requires Node 22.19+ (`.nvmrc` pins the tested version) and Docker Compose. Every integration beyond Telegram and a model provider is optional. The full check suite also covers the coding workers; see [portable development](docs/portable-development.md).
 
 ```sh
 npm ci
