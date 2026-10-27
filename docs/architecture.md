@@ -47,7 +47,7 @@ History selection keeps tool calls and their results together. Full payloads sta
 
 ## Execution outside the gateway
 
-- **Coding.** The gateway never runs coding shell commands. Approved plans run in disposable EC2 boxes under a separate, minimal GitHub identity. A separate reviewer model reviews the work, and the host merges only after the owner taps Merge on a card bound to the exact head. See [coding](coding.md), [boxes](boxes.md) and [coding automation](coding-automation.md).
+- **Coding.** The gateway never runs coding shell commands. Approved plans run in disposable EC2 boxes that hold no GitHub credential. A separate reviewer model reviews the work, the host publishes the reviewed artifact to a `chief/coding-*` branch, and the host merges only after the owner taps Merge on a card bound to the exact head. See [coding](coding.md), [boxes](boxes.md) and [coding automation](coding-automation.md).
 - **Invoice browsing.** The browser and egress proxy run apart from the gateway. The owner logs in during a live handoff; the agent sees no password, cookie or full page text. See [gathering](gathering.md).
 
 There is no realtime audio, public web client or general shell tool. Those require separate permission and execution designs.

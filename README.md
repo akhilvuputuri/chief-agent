@@ -2,7 +2,7 @@
 
 **A personal chief of staff that lives in Telegram.**
 
-Chief keeps one conversation with you, by text or voice, and hands the work to specialist agents: your inbox, calendar, bills, portfolio, reading, local conditions and even its own code. Anything that writes, spends or commits waits for you to tap approve.
+Chief keeps one conversation with you, by text or voice, and hands the work to specialist agents: your inbox, calendar, bills, portfolio, reading, local conditions and even its own code. Consequential actions, such as calendar events, coding plans and merges, deletions and new monitoring, wait for your approval. It cannot send email or place trades.
 
 This is a personal project: a self-hosted, single-owner agent, built and run in the open. Current release and open work: [current work](docs/current-work.md) · [releases](https://github.com/akhilvuputuri/chief-agent/releases).
 
@@ -22,7 +22,7 @@ This is a personal project: a self-hosted, single-owner agent, built and run in 
 
 ### 🗣 Conversation that remembers
 
-- Text and **voice notes** in, optional spoken replies out (ElevenLabs, OpenAI or Groq).
+- Text and **voice notes** in (ElevenLabs, OpenAI or Groq), with optional spoken replies (ElevenLabs or OpenAI).
 - **Photos and PDFs**, read by an isolated media agent. Image bytes are never stored.
 - A rolling conversation with **history recall**, explicit memories and versioned skills.
 - Topics in your private chat: **Main** for conversation, **News**, **Markets** and **Coding** for feeds.
@@ -34,7 +34,7 @@ This is a personal project: a self-hosted, single-owner agent, built and run in 
 - **Scheduled routines**: recurring agent runs on any schedule.
 - **Responsibilities**: "keep an eye on this". Chief watches the email, calendar or parcels you name, respects quiet hours and only starts once you confirm the card.
 - **Gmail, read-only**, across several accounts, with experimental recall of half-remembered emails by meaning. **Calendar** reads, plus event drafts that are created only after you tap approve.
-- A **parcel tracker** fed from email or your own updates. Nothing scans your mailbox unasked.
+- A **parcel tracker** fed from email or your own updates. Parcel details are searched for only when you ask.
 
 ### 💳 Money, tracked
 
@@ -45,7 +45,7 @@ This is a personal project: a self-hosted, single-owner agent, built and run in 
 
 ### 📰 Reading and research
 
-- A **daily news bulletin** from sites you follow. It learns from what you save to Reader, and building an edition makes no model call.
+- A **daily news bulletin** from sites you follow. Each item has a Save-to-Reader button, and building an edition makes no model call. Ranking from your Reader saves turns on once Reader exposes them.
 - **Evidence-checked research**: every quote in an agent's report must appear in a source it actually read.
 - Public link resolution, plus NLB library ebook availability.
 - **Job search**: saved roles, fit assessments that keep unknowns visible, and preparation tied to evidence.
@@ -56,7 +56,7 @@ Weather, rain radar (with maps and loops for a shared location), PSI and US AQI,
 
 ### 🛠 Chief builds Chief
 
-Describe a bug or feature in plain words. Chief writes a plan, and nothing is built until you approve it. A coding agent then implements it in a disposable **EC2 box**, runs the real checks and gets a separate reviewer model to review it. It then opens a PR and works through review feedback. Chief merges only after you say "okay", then watches the release.
+Describe a bug or feature in plain words. Chief writes a plan, and nothing is built until you approve it. A coding agent then implements it in a disposable **EC2 box**, runs the real checks and gets a separate reviewer model to review it. It then opens a PR and works through review feedback. Chief merges only after you tap Merge on a card for that exact PR head, then watches the release.
 
 ## How it stays in your control
 
@@ -79,7 +79,7 @@ Details: [security](docs/security.md), [calendar approval](docs/calendar-approva
 flowchart LR
   U[You · Telegram text, voice, photos, location] <--> G[Gateway · allowlisted owner]
   G --> C[Chief coordinator · Claude Opus 5.5]
-  C -- agent_run --> A[Specialist agents · Gemini Flash<br/>email · calendar · daily · parcels · subscriptions<br/>bills · stocks · brokerage · news · research · media · Merlion]
+  C -- agent_run --> A[Specialist agents · Gemini Flash by default<br/>email · calendar · daily · parcels · subscriptions<br/>bills · stocks · brokerage · news · research · media · Merlion]
   C -- coding_start --> B[EC2 coding boxes<br/>plan · build · review · PR]
   C & A --> H{Host guard<br/>owner scope · approvals · budgets · uncertain writes}
   H --> I[Gmail · Calendar · IBKR · Reader MCP<br/>data.gov.sg · LTA · public web]
@@ -87,7 +87,7 @@ flowchart LR
   M[Deterministic monitors<br/>stocks · news · reminders · summaries] --> G
 ```
 
-- **Coordinator and agents.** Chief keeps the conversation, memory and work tracking. Domain work runs in [plugin-defined agents](docs/agents.md) with their own context, tools and a cheaper model. Their reports are validated against a contract before Chief sees them.
+- **Coordinator and agents.** Chief keeps the conversation, memory and work tracking. Domain work runs in [plugin-defined agents](docs/agents.md) with their own context, tools and, by default, a cheaper model. Their reports are validated against a contract before Chief sees them.
 - **Models are configuration.** [`config/model-policy.json`](config/model-policy.json) maps the main model and agent tiers, and is changed through review and release like any code. A small decision model picks the [reasoning effort](docs/reasoning-effort.md) for each message.
 - **Durable by design.** Model responses and tool calls are journalled before the turn advances. Background jobs keep their own context while chat stays responsive. See [rolling conversation](docs/rolling-conversation.md).
 - **Extensible.** Add agents as [declarative plugins](docs/plugins.md) and remote tools through [MCP connectors](docs/mcp.md), each with explicit tool grants.
@@ -99,19 +99,19 @@ flowchart LR
 | Conversation, voice, attachments, topics, views, canvases       | Live                                                         |
 | Tasks, reminders, briefings, routines, responsibilities         | Live                                                         |
 | Gmail (read-only), Calendar with approved drafts, parcels       | Live                                                         |
-| Email recall by meaning                                         | Experimental; under evaluation                               |
+| Email recall by meaning                                         | Experimental; merged, under evaluation                       |
 | Subscriptions, invoice gathering, price alerts, monthly summary | Live; newest parts awaiting real-use checks                  |
 | IBKR holdings and order drafts, stock alerts and rules          | Live; needs your IBKR consent and a market-data key          |
-| News bulletin, research, job alignment                          | Live                                                         |
+| News bulletin, research, job alignment                          | Live; Reader-based ranking pending                           |
 | Merlion (Singapore)                                             | Live; awaiting real-use checks                               |
-| Coding on EC2 boxes, merge on your okay                         | Live                                                         |
+| Coding on EC2 boxes, merge on your tap                          | Live                                                         |
 | NLB library account linking                                     | Blocked by provider API access; catalogue availability works |
 
-Status means released and running. It is not a measure of answer quality. The project publishes quality, latency or cost numbers only once they've been measured; see the [roadmap](docs/roadmap.md#evaluation-before-marketing-claims).
+Status describes released code, not experiments. It is not a measure of answer quality. The project publishes quality, latency or cost numbers only once they've been measured; see the [roadmap](docs/roadmap.md#evaluation-before-marketing-claims).
 
 ## Run your own
 
-Requires Node 22.19+ (`.nvmrc` pins the tested version) and Docker Compose. Every integration beyond Telegram and a model provider is optional.
+Requires Node 22.19+ (`.nvmrc` pins the tested version) and Docker Compose. Every integration beyond Telegram and a model provider is optional. The full check suite also covers the Python and Pi coding workers; see [portable development](docs/portable-development.md).
 
 ```sh
 npm ci
