@@ -46,14 +46,14 @@ No incident is recorded. Follows [journal 125](125-db-drops-and-shutdown.md), wh
   - the Singapore test did not test cancellation and passed on the old code;
   - the safety contract did not mention `causeCategory`.
 
-  It confirmed by testing: the hang on 22.22.0 and the fix on 22.23.4; that the cause-code and body-cancel tests fail on the base code; and `errorFields` behaviour for real DNS, socket and mid-body failures. Re-review pending.
+  It confirmed by testing: the hang on 22.22.0 and the fix on 22.23.4; that the cause-code and body-cancel tests fail on the base code; and `errorFields` behaviour for real DNS, socket and mid-body failures. Re-review of `ae90de6`: **APPROVE**. It confirmed all four new tests fail on the base code (the endless stream at the 30 s test timeout) and pass on the head in about 118 ms. Its one Low finding was that the repository's log reader did not select `nodeVersion` or `causeCategory`. Fixed in the next commit, which adds them, and the journal 125 shutdown fields, to `scripts/cloudwatch-logs.mjs`. Re-review pending.
 
 ## Verification and outcome
 
 The tests above pass, and the hang was reproduced and shown fixed on Node 22.23.4. Not released.
 
 - **Pi image:** `config/coding-pi.json` pins it by digest, so the new Pi `Dockerfile` takes effect only after the image is republished (`pi-coding-image` workflow, run by hand) and the digest is updated in a reviewed change. Until then, Pi jobs keep their current Node.
-- **Gateway and browser images:** the next release builds the gateway on `node:22.23.4-bookworm-slim`. Verify it from `gateway.started`'s `nodeVersion` in CloudWatch. The gathering-browser images are rebuilt only through their operator procedure.
+- **Gateway and browser images:** the next release builds the gateway on `node:22.23.4-bookworm-slim`. Verify it with `npm run logs:cloudwatch -- heartbeat`, which now shows `nodeVersion` and, for journal 125, the shutdown fields; the shared field list also shows `causeCategory`. The gathering-browser images are rebuilt only through their operator procedure.
 
 ## Follow-up and next iteration
 
