@@ -39,8 +39,8 @@ Alternatives considered:
   - `closeAfter(t, db)` registers a close hook that drops its reference first.
 - 60 test files and `tests/helpers/coding-fixture.ts` (used by 28 more) use them. `history.test.ts` (legacy migration replay), `library-migrations.test.ts`, `media-outbox.test.ts`, `core.test.ts` and the first `telegram.test.ts` case keep their own setup because they test or build schemas differently.
 - Rows that migrations seed with `now()` (`runtime_migrations.applied_at`, `library_pacing.updated_at`) now carry the snapshot's creation time rather than each database's. Nothing in `src` or the tests reads them.
-- `package.json`: `npm test` runs `test:ts` (`--test-concurrency=4`, with an optional `TEST_SHARD`) and `test:other`. `npm run check` still runs everything.
-- `.github/workflows/ci.yml`: parallel jobs for format and types, three test shards, scripts/evals/Python runtime, the Pi package and its images, and the other images. A final `test` job passes only when all of them passed, so the `test` check that branch protection requires keeps its name; the release workflow still requires the whole workflow to succeed.
+- `package.json`: `npm test` runs `test:ts` (with an optional `TEST_SHARD`) and `test:other`. `npm run check` still runs everything. `test:ts` first ran four files at a time; after the SIGSEGV below, the owner chose one at a time (`--test-concurrency=1`, as before).
+- `.github/workflows/ci.yml`: parallel jobs for format and types, test shards (three at first, six once files run serially), scripts/evals/Python runtime, the Pi package and its images, and the other images. A final `test` job passes only when all of them passed, so the `test` check that branch protection requires keeps its name; the release workflow still requires the whole workflow to succeed.
 - Independent review (Claude Opus 5.5):
   - REQUEST CHANGES on `e1af778` for the `steering-telegram` import defect, fixed in `3406d31`.
   - REQUEST CHANGES on `9315ab2`: the `pi` job ran Pi's unit tests only after installing Pi's own lockfile, while the images install Pi's dependencies from the root lockfile (31 of 148 top-level Pi packages resolve differently), so a root lockfile change could break Pi's tests without failing `checks`. Fixed by running `npm run check:pi` straight after the root install. Also fixed: an unused import, the converted-file count and the workflow comment.
@@ -68,6 +68,7 @@ Alternatives considered:
 - **Open failure, cause not established:** in tests 2/3, the process running `tests/coding-report-contract.test.ts` was killed by SIGSEGV after 6.5 s; the shard's other 439 tests passed. No assertion failed and no stack was printed.
   - Tested, not reproduced: shard 2/3 locally (448 of 448), and the file eight times, four at a time, under the CI's Node 22.19.0.
   - Reported upstream: [nodejs/node#64500](https://github.com/nodejs/node/issues/64500) (intermittent SIGSEGV when processes initialise PGlite concurrently), later attributed by its reporter to faulty hardware, with no flag reliably preventing it; and a separate V8 `CHECK` abort when one process creates and closes many PGlite instances, about 4.5 % of one project's CI builds on Node 24.
+  - Reported, second run (40468756960, `a6dc4ef`, same configuration): passed in 4 min 16 s. One crash in two runs.
   - Hypothesis: concurrent test processes, or the shared compiled module, expose a WASM crash that serial runs on `main` did not hit. The recent `main` runs checked were all green. One sample does not separate the two.
 
 ## Follow-up and next iteration

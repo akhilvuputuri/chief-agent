@@ -1,6 +1,6 @@
 # Faster checks — branch `claude/build-speed-research`, 27 October 2026
 
-Tests restore each PGlite database from a migrated snapshot instead of booting Postgres and replaying every migration, and a close hook stops `node:test` from keeping closed databases in memory. Test files run four at a time, and `checks` runs as parallel jobs with three test shards behind one `test` job. Locally, the test files went from 1,767 s serially to 520 s at four at a time (measured with the fixture in 30 of the files). The first GitHub run took 4 min 20 s instead of about 26 minutes, but one test process crashed with SIGSEGV, cause not established. PR 324, not merged. [Journal 123](journey/123-faster-checks.md).
+Tests restore each PGlite database from a migrated snapshot instead of booting Postgres and replaying every migration, and a close hook stops `node:test` from keeping closed databases in memory. `checks` runs as parallel jobs, with six test shards behind one `test` job. The first GitHub run, with test files four at a time in three shards, took 4 min 20 s instead of about 26 minutes, but one test process crashed with SIGSEGV. The owner chose serial test files within each runner, the process model `main` ran green. PR 324, not merged. [Journal 123](journey/123-faster-checks.md).
 
 # Email memory MVP — branch `feature/mail-recall`, 25 October 2026
 
