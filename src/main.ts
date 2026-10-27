@@ -1320,10 +1320,13 @@ scheduleTimer.unref();
 await app.listen({ host: "0.0.0.0", port: c.PORT });
 // Failures are logged by the index and retried on the next gmail_recall.
 void mailIndex?.start();
-// Assigned after bot.init(); a signal during startup finds no runner yet.
+// Assigned after bot.init(); a signal during startup finds no runner yet and
+// must also stop it from starting against a closed pool.
 let runner: RunnerHandle | undefined;
+let stopping = false;
 for (const signal of ["SIGINT", "SIGTERM"])
   process.once(signal, () => {
+    stopping = true;
     opsLog("gateway.stopping", "info");
     void (async () => {
       clearInterval(scheduleTimer);
@@ -1355,13 +1358,16 @@ for (const signal of ["SIGINT", "SIGTERM"])
     })();
   });
 await bot.init();
-runner = runTelegram(bot, {
-  runner: {
-    silent: true,
-    fetch: { allowed_updates: ["message", "callback_query"] },
-  },
-  sink: { concurrency: 8 },
-});
+// Never start polling after a stop began: the next getUpdates would confirm
+// updates to Telegram that a closed pool can no longer record.
+if (!stopping)
+  runner = runTelegram(bot, {
+    runner: {
+      silent: true,
+      fetch: { allowed_updates: ["message", "callback_query"] },
+    },
+    sink: { concurrency: 8 },
+  });
 const started = Date.now();
 opsLog("gateway.started", "info");
 // Which repo-config settings this environment still overrides (names only, issue #143).
