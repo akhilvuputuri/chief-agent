@@ -5,7 +5,7 @@ Status: repository fix proposed; the live host still needs the operator install 
 
 ## User-visible problem and preceding iteration
 
-Opening the site root (`https://companion.52-77-47-24.sslip.io/`) should redirect to the Mini App at `/miniapp/`. Instead it returns an empty `200`. [Journal 35](35-lightsail-private-logs.md) diagnosed this during the Lightsail move and listed the fix as future work. The same line has been in the repository Caddyfiles since `677683a` (PR #36).
+Opening the site root (`https://companion.52-77-47-24.sslip.io/`) should redirect to the Mini App at `/miniapp/`. Instead it returns an empty `200`. [Journal 35](35-lightsail-private-logs.md) diagnosed this during the Lightsail move and listed the fix as future work. The same line has been in `deploy/miniapp/Caddyfile` since `677683a` (PR #36) and in `ops/oauth-site/Caddyfile` since `625189d` (PR #68).
 
 ## Evidence
 
@@ -29,7 +29,7 @@ Add the `*` matcher so the single argument is the target, as journal 35 suggeste
 ## Implementation and review
 
 - `ops/oauth-site/Caddyfile` (the Lightsail host's ingress) and `deploy/miniapp/Caddyfile` (the retired DigitalOcean variant) now use `redir * /miniapp/ 302`. No other route changes.
-- Independent review: pending for the exact head.
+- Independent review (Opus 5.5) of `c51ceed`: **REQUEST CHANGES**. It confirmed the Caddyfile fix by testing (`caddy adapt` diff, live runs on 2.6.2 and master, and `scripts/test-deploy-boxes.py` passing). But the operator procedure's validation and one-line checks did not stop the install, the `sed` pattern was unanchored, the history credit was imprecise, verification skipped the unchanged routes, and the DevOps topic path lacked this entry. All addressed in the next commit; re-review pending.
 
 ## Verification and outcome
 
@@ -41,11 +41,17 @@ The live `/etc/caddy/Caddyfile` has drifted from the repository: it has routes a
 
 ```sh
 sudo cp -p /etc/caddy/Caddyfile /root/Caddyfile.before-124
-sudo sed 's|redir /miniapp/ 302|redir * /miniapp/ 302|' /etc/caddy/Caddyfile | sudo tee /etc/caddy/Caddyfile.124 >/dev/null
-sudo diff /etc/caddy/Caddyfile /etc/caddy/Caddyfile.124   # expect exactly one changed line
-sudo caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile.124
-sudo mv /etc/caddy/Caddyfile.124 /etc/caddy/Caddyfile && sudo systemctl reload caddy
+sudo sed 's|^\([[:space:]]*\)redir /miniapp/ 302$|\1redir * /miniapp/ 302|' /etc/caddy/Caddyfile | sudo tee /etc/caddy/Caddyfile.124 >/dev/null
+sudo diff /etc/caddy/Caddyfile /etc/caddy/Caddyfile.124   # read it: exactly one changed line
+test "$(sudo diff /etc/caddy/Caddyfile /etc/caddy/Caddyfile.124 | grep -c '^[<>]')" = 2 \
+  && sudo caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile.124 \
+  && sudo chmod --reference=/etc/caddy/Caddyfile /etc/caddy/Caddyfile.124 \
+  && sudo chown --reference=/etc/caddy/Caddyfile /etc/caddy/Caddyfile.124 \
+  && sudo mv /etc/caddy/Caddyfile.124 /etc/caddy/Caddyfile \
+  && sudo systemctl reload caddy
 ```
+
+The last command is one chain: the file is installed only if exactly one line changed and the new file validates. If any step before `mv` fails, stop, delete `/etc/caddy/Caddyfile.124` and leave the live file unchanged. If `systemctl reload` fails after `mv`, run the rollback below. The chain was tested locally (tested, without `sudo` or systemd, on Caddy 2.6.2): it installs on the space- and tab-indented repository files, and stops on an already-fixed file and on a file with two matching lines.
 
 Verify from outside, with normal certificate validation:
 
@@ -53,6 +59,8 @@ Verify from outside, with normal certificate validation:
 curl -sSI https://companion.52-77-47-24.sslip.io/          # 302, Location: /miniapp/, Cache-Control: no-store, no Server header
 curl -sSI https://companion.52-77-47-24.sslip.io/miniapp/  # 200
 curl -sSI https://companion.52-77-47-24.sslip.io/healthz   # 404
+curl -sSI https://companion.52-77-47-24.sslip.io/about     # 200, unchanged static page
+curl -sS  https://companion.52-77-47-24.sslip.io/oauth/ibkr/callback   # answered by the gateway, not Caddy's plain "Not found"
 ```
 
 Also confirm that the Mini App still opens from Telegram.
