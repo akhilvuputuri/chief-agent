@@ -1,3 +1,33 @@
+## Deployed `9ab96c2` (untagged) — fetch hygiene and Node 22.23.4
+
+- **What merged.** [PR 332](https://github.com/akhilvuputuri/chief-agent/pull/332) merged as `9ab96c2754370d170b60357b1faa0702df6a2b2b` (version unchanged, 0.3.103).
+  - Node 22.23.4 is pinned in CI, the release workflow, `.nvmrc`, the host-built gateway and browser images and the Pi images. Its undici 6.29.1 fixes a fetch hang on corrupt gzip bodies, reproduced on Node 22.22.
+  - `gateway.started` logs `nodeVersion`.
+  - Fetch failures log the cause's code and class.
+  - Unread error bodies are cancelled, and the Singapore client stops at its limit on the decoded stream.
+- **Review.** Independent review (Claude Opus 5.5):
+  - requested changes on `d0e139c`: the gateway image built on the host reused a cached floating Node base, so the fix would not have reached it; the Singapore test proved nothing;
+  - found a Low gap on `ae90de6`: the log reader did not show the new fields;
+  - approved the merged head `30537c4`.
+
+  Devin found no issues.
+
+- **Release.** The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/40498941212) deployed the exact commit at 11:54 UTC on 27 October, about 10 minutes after the merge. `gateway.started` logged `nodeVersion: v22.23.4`. No migration.
+- **Not yet done.** Republish the Pi image and update its digest in `config/coding-pi.json`.
+
+[Journal 126](journey/126-fetch-hygiene-and-node.md#release-closure--2026-10-27).
+
+## Deployed `211b2a2` (untagged) — Postgres connection drops and bounded shutdown
+
+- **What merged.** [PR 331](https://github.com/akhilvuputuri/chief-agent/pull/331) merged as `211b2a2add939647e1e4a46e34932d839eca2430` (version unchanged, 0.3.103).
+  - A Postgres session ending no longer stops the gateway: the pool and checked-out clients have `error` listeners, and broken clients are discarded.
+  - Shutdown stops intake, waits for running handlers, then closes HTTP and the database within 8 s, and logs `gateway.stopped` or `gateway.stop_incomplete`.
+- **Review.** Independent review (Claude Opus 5.5) approved, then requested changes once (polling could start after a stop began during startup), and approved the merged head `f105ad8`. Devin's red finding (a stuck fetch loop counted as a complete stop) was fixed in `f105ad8`; the reviewer rated it Low.
+- **Release.** The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/40495096407) deployed it at 11:22 UTC, about 10 minutes after the merge. No migration. Its first production stop, by the next release at 11:54 UTC, logged `gateway.stopped` 160 ms after `gateway.stopping`.
+- **Not yet observed.** A Postgres restart in production.
+
+[Journal 125](journey/125-db-drops-and-shutdown.md#release-closure--2026-10-27).
+
 ## Deployed `8ea6263` (untagged) — faster checks
 
 - **What merged.** [PR 324](https://github.com/akhilvuputuri/chief-agent/pull/324) merged as `8ea62631b0a2e30f77e0076fde07a4bfd300d72e` (version unchanged, 0.3.103). Tests restore each PGlite database from a per-process migrated snapshot, a close hook stops `node:test` keeping closed databases in memory, and `checks` runs as parallel jobs with six serial test shards behind the unchanged `test` job. Tests, CI and docs only; no runtime change.
