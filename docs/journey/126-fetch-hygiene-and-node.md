@@ -75,7 +75,7 @@ The tests above pass, and the hang was reproduced and shown fixed on Node 22.23.
   - the security smoke test as uid 1000 with no new privileges and an empty bounding set;
   - the box Docker tests.
 - **Pin.** `config/coding-pi.json` and the `coding` profile in `config/boxes.json` now use the new digest. The previous digest `e8f1c2…` moves to `previousImages`, alongside `ba99d9…`, so jobs snapshotted with either can still start a box. Both the new image (built from `15e6def`) and `e8f1c2…` (built from `6ab96c0` by run 12 on 20 October) include `7e648f9`, as `docs/boxes.md` requires; `ba99d9…` was already listed. Remove a previous image only once no open job uses it, which this session can't check.
-- **After release:** the next new coding job runs on Node 22.23.4. Existing and resumed jobs keep their snapshotted `e8f1c2…` image, so they stay on Node 22.19.0 (and the corrupt-gzip hang) until they finish.
+- **After release:** the next new coding job runs on Node 22.23.4. Existing and resumed jobs keep their snapshotted `e8f1c2…` image, so they stay on Node 22.19.0 (and the corrupt-gzip hang) until they finish. No real coding job has been run on the new image as acceptance.
 
 ## Follow-up and next iteration
 
