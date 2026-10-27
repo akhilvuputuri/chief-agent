@@ -19,7 +19,12 @@ This is retrieval-augmented generation: the host retrieves the relevant emails, 
 
 `src/mail-recall.ts`:
 
-1. **Backfill.** After the gateway starts, `MailIndex.start()` lists the window's message IDs (`GmailTools.indexPage`), then fetches and embeds them oldest first in groups of ten, four reads at a time. These host reads are outside the per-turn Gmail request budget. A message is marked indexed only when all its chunks are embedded. A message that cannot be read is retried once, then left out and counted.
+1. **Backfill.** After the gateway starts, `MailIndex.start()` lists the window's message IDs (`GmailTools.indexPage`), then fetches and embeds them oldest first in groups of ten. These host reads are outside the per-turn Gmail request budget, but they share Gmail's per-user quota with the email agent: 6,000 query-cost units a minute (`totalQueryCostPerMinutePerUser`). So messages are read one at a time, about two a second.
+   - On a 403 or 429 quota refusal, reading pauses for a minute and the message stays queued; five consecutive pauses without a successful read fail the build.
+   - A message is marked indexed only when all its chunks are embedded.
+   - A message that cannot be read for another reason is retried once, then left out and counted.
+   - The refusal is recognised by its HTTP status alone, so a 403 that is not about quota, such as a revoked scope, also pauses; it fails the build after about five minutes.
+   - The operator eval builds its own index, which reads against the same per-user quota while it runs.
 2. **Chunks.** Each body is split into chunks of 1,500 characters with 200 characters of overlap, at most six per message. Every chunk is prefixed with From, To, Date and Subject, so a chunk alone is findable.
 3. **Embeddings.** OpenRouter's `/embeddings` endpoint with the existing OpenRouter key, model `openai/text-embedding-3-small`, one request per group. Vectors are cut to their first 512 values and re-normalised; text-embedding-3 models are trained to allow that. The query embedding and the top-up are part of the turn and are recorded in its spending ledger as `openrouter-embeddings`. A build, including a rebuild a turn triggers, runs outside any turn: it is not in the ledger, and `mail_index.built` logs its reported prompt tokens instead.
 4. **Storage.** In the gateway's memory only. Nothing is written to Postgres or disk, so there is no migration. The index is rebuilt after every restart.
