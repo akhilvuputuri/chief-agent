@@ -1,7 +1,7 @@
 # 126 — Can a corrupt response hang a fetch, and what do fetch failures leave behind?
 
 Work date: 2026-10-27. Written: 2026-10-27.
-Status: released in `9ab96c2` ([#329](https://github.com/akhilvuputuri/chief-agent/issues/329) items 3–5). The gateway now runs Node v22.23.4. The Pi image still runs its old Node until it is republished.
+Status: released in `9ab96c2` ([#329](https://github.com/akhilvuputuri/chief-agent/issues/329) items 3–5). The gateway now runs Node v22.23.4. The Pi image was republished on Node 22.23.4 and re-pinned in branch `pin-pi-image-node-22-23-4` (not released).
 
 ## User-visible problem and preceding iteration
 
@@ -62,7 +62,22 @@ The tests above pass, and the hang was reproduced and shown fixed on Node 22.23.
 - **Node (measured, CloudWatch `heartbeat`):** `gateway.started` for `9ab96c2` at 11:54:07 logged `nodeVersion: v22.23.4`. So the host pulled the pinned base image, and the corrupt-gzip fix (undici 6.29.1) is live in the gateway. No warn or error lines from 11:37 to 12:07.
 - **Not yet done:** the Pi image is still the digest pinned in `config/coding-pi.json`, so it keeps its old Node until it is republished and the digest is updated. The gathering-browser images change only through their operator procedure.
 
+### Pi image re-pin — 2026-10-27 (proposed)
+
+- **Published.** The `pi-coding-worker-image` workflow ([run 13](https://github.com/akhilvuputuri/chief-agent/actions/runs/40530740990)), dispatched on `main` at `15e6def`, published tag `pi-15e6defa86ce1cab534e5525a1872cbebef05853`. Its digest is `ghcr.io/akhilvuputuri/chief-agent-coding@sha256:2fd65df0435207659473420dc061f4bf1151510b42c862ec09d0f3f0db496887`.
+- **Verified here (tested):**
+  - the manifest index pulls anonymously;
+  - it holds linux/amd64 plus a build attestation, the same layout as the previous pin;
+  - the amd64 image has 18 layers totalling 424.3 MB, against 423.7 MB before.
+- **Not verified here.** Registry blobs redirect to `pkg-containers.githubusercontent.com`, which this cloud session's network policy blocks. So the image's user, command, Node binary and Pi package versions could not be read directly.
+- **Relied on (tested in CI on `15e6def`):** the `Pi package and worker boundary` job builds the same `Dockerfile.coding-pi` from the same commit and runs:
+  - the CLI container smoke test;
+  - the security smoke test as uid 1000 with no new privileges and an empty bounding set;
+  - the box Docker tests.
+- **Pin.** `config/coding-pi.json` and the `coding` profile in `config/boxes.json` now use the new digest. The previous digest `e8f1c2…` moves to `previousImages`, alongside `ba99d9…`, so jobs snapshotted with either can still start a box. Both the new image (built from `15e6def`) and `e8f1c2…` (built from `6ab96c0` by run 12 on 20 October) include `7e648f9`, as `docs/boxes.md` requires; `ba99d9…` was already listed. Remove a previous image only once no open job uses it, which this session can't check.
+- **After release:** the next new coding job runs on Node 22.23.4. No real coding job has been run as acceptance.
+
 ## Follow-up and next iteration
 
-- Republish the Pi image and update its digest.
+- Release the Pi image re-pin, and confirm a new coding job runs on the new image.
 - Upstream: a comment on nodejs/undici#5999 confirming the fix, the node-postgres docs fix, and the `@fastify/websocket` socket fix.

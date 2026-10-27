@@ -8,7 +8,7 @@
   - Fetch failures log the cause's code.
   - `npm run logs:cloudwatch -- heartbeat` shows `nodeVersion` and the shutdown fields.
 - **Pending:**
-  - republish the Pi image and update its digest;
+  - release the Pi image re-pin (published on Node 22.23.4, branch `pin-pi-image-node-22-23-4`);
   - the Caddy root redirect needs the operator's one-line host install ([journal 124](docs/journey/124-caddy-root-redirect.md));
   - upstream contributions for node-postgres docs and the `@fastify/websocket` socket fix ([#329](https://github.com/akhilvuputuri/chief-agent/issues/329)).
 
