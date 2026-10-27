@@ -1,6 +1,19 @@
-# Fetch hygiene and Node 22.23.4 — live in `9ab96c2`, 27 October 2026
+# Closing the dependency hardening — proposed, 27 October 2026
 
-On Node 22.22, reading a response with a corrupt gzip body hung forever, even under an abort signal; Node 22.23.4 (undici 6.29.1) rejects it in about 140 ms. CI, the release workflow, the host-built gateway and browser images and the Pi images now pin 22.23.4; the host reused a cached floating base, so pinning forces the pull. The Pi image was republished on 22.23.4 and its re-pin is proposed in branch `pin-pi-image-node-22-23-4`, and `gateway.started` now logs `nodeVersion`. Released in `9ab96c2`, whose `gateway.started` logged `v22.23.4`. Fetch failures now log the real cause code, unread error bodies are cancelled, and the Singapore client limits bodies while decoding. See [journal 126](journey/126-fetch-hygiene-and-node.md) and issue #329.
+The last #329 items:
+
+- An Upgrade request answered over plain HTTP (to `/healthz`, a missing route or a malformed URL) no longer leaves its socket open, and shutdown destroys WebSockets that ignore the closing handshake after 1 s.
+- One shared bounded body reader replaces five copies, and more failure paths release their bodies.
+- CI terminates idle and in-transaction Postgres sessions against PostgreSQL 17.
+- A test fails if Node regresses to the corrupt-gzip hang.
+- `@fastify/websocket` is bumped to 11.3.4.
+- Pool timeouts stay unset, as journal 125 decided.
+
+Branch `hardening-finish`. See [journal 127](journey/127-closing-dependency-hardening.md) and issue #329.
+
+# Fetch hygiene and Node 22.23.4 — live in `9ab96c2` (Pi image in `c4ba246`), 27 October 2026
+
+On Node 22.22, reading a response with a corrupt gzip body hung forever, even under an abort signal; Node 22.23.4 (undici 6.29.1) rejects it in about 140 ms. CI, the release workflow, the host-built gateway and browser images and the Pi images now pin 22.23.4; the host reused a cached floating base, so pinning forces the pull. `gateway.started` now logs `nodeVersion`. Released in `9ab96c2`, whose `gateway.started` logged `v22.23.4`. The Pi image was republished on 22.23.4 and re-pinned in `c4ba246`, live since 15:51 UTC; no coding job has run on it yet. Fetch failures now log the real cause code, unread error bodies are cancelled, and the Singapore client limits bodies while decoding. See [journal 126](journey/126-fetch-hygiene-and-node.md) and issue #329.
 
 # Postgres connection drops and shutdown — live in `211b2a2`, 27 October 2026
 

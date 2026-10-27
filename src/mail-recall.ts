@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { GmailTools } from "./gmail.js";
 import { errorFields, opsLog } from "./ops-log.js";
 import { spending } from "./spending.js";
+import { discardBody, readBody } from "./http-body.js";
 
 export const MAIL_INDEX_DAYS = 365;
 /** Received Primary-category mail; sent mail, chats, spam and trash are left out. */
@@ -92,11 +93,16 @@ export class OpenRouterEmbedder implements Embedder {
       if (!response.ok) {
         // A definite rejection costs nothing.
         usage = { cost: 0 };
+        await discardBody(response);
         throw new Error(`Embedding request failed (${response.status})`);
       }
-      const raw = await response.text();
-      if (raw.length > 20_000_000)
-        throw new Error("Embedding response too large");
+      const raw = (
+        await readBody(
+          response,
+          20_000_000,
+          () => new Error("Embedding response too large"),
+        )
+      ).toString("utf8");
       const body = embeddingResponse.parse(JSON.parse(raw));
       usage = body.usage ?? null;
       const prompt = body.usage?.prompt_tokens;

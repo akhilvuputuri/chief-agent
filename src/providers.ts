@@ -1,10 +1,8 @@
 import { spending } from "./spending.js";
 import type { Config } from "./config.js";
 import { publicHttps } from "./security.js";
-/** Release a response body the caller will not read. Never throws. */
-export async function discardBody(response: Response) {
-  await response.body?.cancel().catch(() => {});
-}
+import { discardBody, readBody } from "./http-body.js";
+export { discardBody };
 export async function boundedBytes(
   response: Response,
   max: number,
@@ -14,32 +12,8 @@ export async function boundedBytes(
     await discardBody(response);
     throw new Error(`Provider request failed (HTTP ${response.status})`);
   }
-  if (Number(response.headers.get("content-length")) > max) {
-    await discardBody(response);
-    throw new Error("Response too large");
-  }
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error("Empty response");
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.length;
-      if (size > max) throw new Error("Response too large");
-      chunks.push(value);
-    }
-  } finally {
-    await reader.cancel();
-  }
-  const result = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    result.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return result;
+  if (!response.body) throw new Error("Empty response");
+  return readBody(response, max);
 }
 export interface SpeechToText {
   transcribe(bytes: Uint8Array): Promise<string>;

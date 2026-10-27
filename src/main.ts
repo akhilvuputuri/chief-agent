@@ -84,7 +84,7 @@ import { Assistant } from "./agent.js";
 import { ToolPicker } from "./tool-picker.js";
 import { ShadowDecisions } from "./shadow.js";
 import { EffortPicker } from "./effort.js";
-import { server } from "./server.js";
+import { closeServer, server } from "./server.js";
 import { stopGateway } from "./gateway-stop.js";
 import {
   telegram,
@@ -1339,7 +1339,7 @@ for (const signal of ["SIGINT", "SIGTERM"])
       const result = await stopGateway({
         stopIntake: async () => runner?.stop(),
         handlersRunning: () => runner?.size() ?? 0,
-        closeHttp: () => app.close(),
+        closeHttp: () => closeServer(app),
         closeDatabase: () => db.end(),
       });
       if (result.complete) {

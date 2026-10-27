@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ToolValidationError } from "./tool-errors.js";
 import { cleanText } from "./news-feed.js";
+import { discardBody, readBody } from "./http-body.js";
 const tokenSchema = z.object({
   access_token: z.string().min(1),
   expires_in: z.number().positive(),
@@ -75,26 +76,15 @@ export class ResponseTooLarge extends Error {
   }
 }
 async function json(response: Response, maxBytes = 2_000_000) {
-  if (!response.ok)
+  if (!response.ok) {
+    await discardBody(response);
     throw new Error(
       `Gmail request failed (${response.status}); reconnect if authorization expired`,
     );
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error("Empty Gmail response");
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.length;
-      if (size > maxBytes) throw new ResponseTooLarge();
-      chunks.push(value);
-    }
-  } finally {
-    await reader.cancel();
   }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+  if (!response.body) throw new Error("Empty Gmail response");
+  const body = await readBody(response, maxBytes, () => new ResponseTooLarge());
+  return JSON.parse(body.toString("utf8")) as unknown;
 }
 export function plainBody(p?: Part): string {
   if (!p || p.filename) return "";

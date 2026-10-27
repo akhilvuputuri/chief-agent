@@ -1,3 +1,12 @@
+## Deployed `c4ba246` (untagged) — Pi worker image on Node 22.23.4
+
+- **What merged.** [PR 334](https://github.com/akhilvuputuri/chief-agent/pull/334) merged as `c4ba246afeaf10d0473a4665125e6bec55516d3d` (version unchanged, 0.3.103). New coding jobs use the Pi image `sha256:2fd65df…`, published by `pi-coding-worker-image` run 13 from `15e6def` on Node 22.23.4. `e8f1c2…` and `ba99d9…` stay in `previousImages` for snapshotted jobs.
+- **Review.** Independent review (Claude Opus 5.5) approved `4e8621f` with three Low/Info record findings. It approved the merged head `fc3ca35` after a dropped sentence was restored. Devin's one yellow finding (a stale journal index row) was fixed.
+- **Release.** The first release run for this commit ([286](https://github.com/akhilvuputuri/chief-agent/actions/runs/40534214107)) was triggered by PR 321's checks and refused at "Verify current main", because `main` had already moved to `c4ba246`. [Run 287](https://github.com/akhilvuputuri/chief-agent/actions/runs/40534440754) deployed `c4ba246` at 15:51 UTC on 27 October, about 10 minutes after the merge. That release also carries PR 321. `gateway.started` logged `nodeVersion: v22.23.4`. The previous release logged `gateway.stopped` 188 ms after `gateway.stopping`. No warn or error lines from 15:30 to 15:55. No migration.
+- **Not yet observed.** A coding job running on the new image.
+
+[Journal 126](journey/126-fetch-hygiene-and-node.md#pi-image-re-pin--2026-10-27).
+
 ## Deployed `9ab96c2` (untagged) — fetch hygiene and Node 22.23.4
 
 - **What merged.** [PR 332](https://github.com/akhilvuputuri/chief-agent/pull/332) merged as `9ab96c2754370d170b60357b1faa0702df6a2b2b` (version unchanged, 0.3.103).
