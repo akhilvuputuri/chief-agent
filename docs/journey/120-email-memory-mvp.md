@@ -97,6 +97,28 @@ Estimates from the 30-day build, to be checked against the first 12-month `mail_
 - about 8 minutes to build after each restart, during which `gmail_recall` reports `building`;
 - under 20 MB of gateway memory.
 
+### Release closure and first 12-month build — 2026-10-27
+
+- **Merged.** [PR 321](https://github.com/akhilvuputuri/chief-agent/pull/321) merged as `fcdb81ceb908bb370fb15f1709f323489e8c341c` from the approved and tested head `6557562` (a merge of main).
+- **Deployed.** Another session merged `c4ba246` right after, and the release deployed that commit, which contains `fcdb81c`, at 15:47 UTC on 27 October ([release](https://github.com/akhilvuputuri/chief-agent/actions/runs/40534440754)).
+- **First 12-month build, measured** from `mail_index.built`:
+  - 1,024 messages indexed;
+  - **384 left out**;
+  - 842,443 embedding tokens;
+  - 506 seconds;
+  - the host kept about 1.1 GB of memory available.
+
+### Why 384 messages were left out
+
+- **Measured on 28 October** with read-only probes in the gateway container (error metadata only):
+  - 1,408 messages are listed for the window.
+  - Re-reading them four at a time failed 1,077 reads, all with HTTP 403.
+  - The 403 body names Gmail's quota `totalQueryCostPerMinutePerUser`, limit 6,000 query-cost units a minute per user. A probe of 100 reads succeeded, so this was the quota, not authorization.
+- **Mechanism:** the index read four messages at a time. It used up the minute's quota after a few hundred reads, then retried each refused message once and abandoned it.
+- **Risk to the email agent:** the same quota serves its own Gmail calls, so a build could also make its searches fail for the rest of that minute after a restart.
+- **Fix:** read one message at a time, about two a second. A quota refusal pauses reading for a minute without counting against the message; five consecutive pauses fail the build.
+- **Expected after the fix (estimate):** builds take about 12 minutes for 1,408 messages and leave none out for quota reasons. To be checked against the next `mail_index.built`.
+
 ## Follow-up and next iteration
 
 - Run `mail-recall-eval.js` with 30 generated questions and add about 10 owner-written ones. Record keyword and recall rates here as aggregates only.

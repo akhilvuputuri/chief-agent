@@ -23,7 +23,17 @@ const CHUNK_OVERLAP = 200;
 const MAX_CHUNKS = 6;
 /** Messages per fetch-and-embed group are EMBED_BATCH / MAX_CHUNKS, so one request holds a group. */
 const EMBED_BATCH = 64;
-const FETCH_CONCURRENCY = 4;
+/**
+ * Gmail limits each user to 6,000 query-cost units a minute (totalQueryCostPerMinutePerUser),
+ * shared with the email agent's own searches and reads. Four concurrent full reads used it up
+ * after about 330 messages, so the index reads one message at a time, about two a second.
+ */
+const READ_INTERVAL_MS = 500;
+/** A quota refusal pauses reading for a minute, when the per-minute quota renews. */
+const QUOTA_PAUSE_MS = 60_000;
+/** Consecutive quota pauses without a successful read before the build fails. */
+const QUOTA_PAUSES = 5;
+const QUOTA_REFUSED = /\((403|429)\)/;
 const TOP_UP_LIMIT = 50;
 const TOP_UP_MS = 10_000;
 const RETRY_MS = 300_000;
@@ -161,6 +171,20 @@ export function chunks(m: Message) {
   return parts.map((text) => ({ text, embedText: `${head}\n\n${text}` }));
 }
 
+/** Waits, returning early when the signal aborts. */
+function pause(ms: number, signal?: AbortSignal) {
+  if (ms <= 0 || signal?.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener("abort", done, { once: true });
+    function done() {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    }
+  });
+}
+
 export type MailIndexState = "idle" | "building" | "ready" | "failed";
 
 /** A failure attributed to Gmail or the embedding provider, for the operational log. */
@@ -194,12 +218,15 @@ export class MailIndex {
   private failedAt = 0;
   private building?: Promise<void>;
   private topping?: Promise<boolean>;
+  private nextRead = 0;
+  private quotaPauses = 0;
   state: MailIndexState = "idle";
   constructor(
     private gmail: Pick<GmailTools, "indexPage" | "indexMessage">,
     private embedder: Embedder & { tokens?: number },
     readonly owner: string,
     private now: () => number = Date.now,
+    private pace = { readMs: READ_INTERVAL_MS, quotaPauseMs: QUOTA_PAUSE_MS },
   ) {}
   get messages() {
     return this.indexed.size;
@@ -271,7 +298,8 @@ export class MailIndex {
   /**
    * Fetches, chunks and embeds pending messages in small groups, so memory stays bounded and
    * a failure keeps what was already indexed. A message is marked indexed only once all its
-   * chunks are embedded. A message that cannot be read is retried once, then abandoned.
+   * chunks are embedded. A message that cannot be read is retried once, then abandoned. A
+   * Gmail quota refusal is not the message's fault: reading pauses and the message stays queued.
    */
   private async add(limit: number, signal?: AbortSignal) {
     let taken = 0;
@@ -282,28 +310,29 @@ export class MailIndex {
       );
       taken += group.length;
       const fetched: Message[] = [];
-      let next = 0;
-      const worker = async () => {
-        for (let i = next++; i < group.length; i = next++) {
-          const id = group[i]!;
-          try {
-            fetched.push(await this.gmail.indexMessage(this.owner, id));
-          } catch {
-            const tries = (this.attempts.get(id) ?? 0) + 1;
-            this.attempts.set(id, tries);
-            if (tries >= 2) {
-              this.pending.delete(id);
-              this.attempts.delete(id);
-              this.abandoned += 1;
-            }
+      for (const id of group) {
+        if (signal?.aborted) break;
+        try {
+          await pause(this.nextRead - Date.now(), signal);
+          this.nextRead = Date.now() + this.pace.readMs;
+          fetched.push(await this.gmail.indexMessage(this.owner, id));
+          this.quotaPauses = 0;
+        } catch (error) {
+          if (QUOTA_REFUSED.test(String((error as Error)?.message))) {
+            if (++this.quotaPauses > QUOTA_PAUSES)
+              throw new DependencyError("gmail", error);
+            await pause(this.pace.quotaPauseMs, signal);
+            continue;
+          }
+          const tries = (this.attempts.get(id) ?? 0) + 1;
+          this.attempts.set(id, tries);
+          if (tries >= 2) {
+            this.pending.delete(id);
+            this.attempts.delete(id);
+            this.abandoned += 1;
           }
         }
-      };
-      await Promise.all(
-        Array.from({ length: Math.min(FETCH_CONCURRENCY, group.length) }, () =>
-          worker(),
-        ),
-      );
+      }
       if (!fetched.length) continue;
       const parts = fetched.flatMap((m) => chunks(m).map((c) => ({ m, ...c })));
       let vectors: Float32Array[];
