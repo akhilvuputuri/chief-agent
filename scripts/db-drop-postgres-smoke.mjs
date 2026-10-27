@@ -20,14 +20,18 @@ const admin = new pg.Client({ connectionString: input });
 await admin.connect();
 const terminate = (pid) =>
   admin.query("SELECT pg_terminate_backend($1)", [pid]);
-const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+/** Wait up to 5 s for an operational log line. */
+async function logged(match) {
+  for (let i = 0; i < 50 && !logs.some(match); i++)
+    await new Promise((r) => setTimeout(r, 100));
+  return logs.some(match);
+}
 try {
   // 1. An idle pooled client's session ends.
   const idle = (await pool.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
   await terminate(idle);
-  await pause(500);
   assert.ok(
-    logs.some(
+    await logged(
       (l) => l.event === "db.idle_client_error" && l.errorCode === "57P01",
     ),
     "idle client termination is logged",
@@ -42,12 +46,12 @@ try {
       await db.query("SELECT pg_sleep(2)");
     }),
   );
-  await pause(300);
   assert.ok(
-    logs.some((l) => l.event === "db.client_error"),
+    await logged((l) => l.event === "db.client_error"),
     "in-transaction termination is logged",
   );
-  // The broken client was discarded: every client the pool now hands out works.
+  // The pool still serves queries at full width. (pg-pool also drops an ended client by
+  // itself, so this does not prove release(err) discarded it; the unit tests check that.)
   const checks = await Promise.all(
     Array.from({ length: 8 }, () => pool.query("SELECT 1 AS ok")),
   );

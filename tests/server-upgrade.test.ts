@@ -5,7 +5,14 @@ import { once } from "node:events";
 import websocket from "@fastify/websocket";
 import { closeServer, server } from "../src/server.js";
 
-// Each test has a timeout: on the old code close() never resolves, so a regression fails instead of hanging.
+// On the old code a leaked socket keeps close() pending forever. Each test has a timeout,
+// and cleanup destroys the client sockets first, so a regression fails instead of hanging.
+const clients = new Set<net.Socket>();
+async function stop(instance: Awaited<ReturnType<typeof app>>) {
+  for (const socket of clients) socket.destroy();
+  clients.clear();
+  await closeServer(instance);
+}
 
 /** The production shape: @fastify/websocket registered only in a child context. */
 async function app() {
@@ -28,6 +35,7 @@ function upgrade(port: number, path: string, waitMs = 1000) {
             "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
         ),
       );
+      clients.add(socket);
       let data = "";
       socket.on("data", (d) => (data += d));
       const status = () => data.split("\r\n")[0] ?? "";
@@ -48,7 +56,7 @@ test(
   { timeout: 10_000 },
   async (t) => {
     const instance = await app();
-    t.after(() => closeServer(instance));
+    t.after(() => stop(instance));
     const { port } = instance.server.address() as net.AddressInfo;
     for (const [path, code] of [
       ["/healthz", "200"],
@@ -65,12 +73,14 @@ test(
 test(
   "a WebSocket client that never answers the closing handshake cannot hold the server open",
   { timeout: 10_000 },
-  async () => {
+  async (t) => {
     const instance = await app();
     const { port } = instance.server.address() as net.AddressInfo;
     const held = await upgrade(port, "/ws", 300);
     assert.match(held.status, /^HTTP\/1.1 101/);
     assert.equal(held.closed, false);
+    // If closeServer() regresses, the timeout cancels the test and this lets close() finish.
+    t.after(() => held.socket.destroy());
     const disconnected = once(held.socket, "close");
     const started = Date.now();
     await closeServer(instance, 200);
@@ -84,7 +94,7 @@ test(
   { timeout: 10_000 },
   async (t) => {
     const instance = await app();
-    t.after(() => closeServer(instance));
+    t.after(() => stop(instance));
     const { port } = instance.server.address() as net.AddressInfo;
     for (let i = 0; i < 2; i++) {
       const response = await fetch(`http://127.0.0.1:${port}/healthz`);

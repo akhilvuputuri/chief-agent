@@ -56,9 +56,25 @@ No incident is recorded. [Journal 125](125-db-drops-and-shutdown.md) and [journa
 - `package.json`: `@fastify/websocket` 11.3.4.
 - `.github/workflows/ci.yml`: the PostgreSQL 17 step also runs `scripts/db-drop-postgres-smoke.mjs` in the built app image.
 - Tests:
-  - `tests/server-upgrade.test.ts` (3). Upgrade sockets close on `/healthz`, a 404 and `/%zz`. A WebSocket client that ignores the closing handshake cannot hold `closeServer()` open. Ordinary keep-alive requests and the malformed-URL body are unchanged. On the old `server.ts`, the file times out.
+  - `tests/server-upgrade.test.ts` (3). Upgrade sockets close on `/healthz`, a 404 and `/%zz`. A WebSocket client that ignores the closing handshake cannot hold `closeServer()` open. Ordinary keep-alive requests are unaffected, and the malformed-URL body is Chief's. The file fails within 3 s, rather than hanging, on the old `server.ts` and with either the `onRequest` hook or the `frameworkErrors` cleanup removed.
   - `tests/fetch-hygiene.test.ts` (+3): the corrupt-gzip guard, the shared reader, and the gathering browser client cancelling failed bodies.
-- Independent review: pending.
+- Independent review (Opus 5.5) of `f28a83e`: **REQUEST CHANGES**. No High findings; the product code was confirmed correct. Its findings, addressed in the commit after the release record:
+  - **Medium:** on a regression, the first upgrade test's cleanup waited forever on the leaked socket, because node:test's timeout does not cover after-hooks. A CI shard would have hung, and this journal said the file "times out". The tests now destroy their client sockets before closing.
+  - **Low:** the Pi re-pin records were stale. The release-record commit `229ab4b` had already fixed them.
+  - **Low:** the smoke script's comment claimed the full-width query check proves the broken client was discarded. `pg-pool` drops an ended client by itself, so it does not. The comment now says so, and the fixed pauses became polling.
+
+  It verified by running:
+  - `request.raw.upgrade` is set only when the request goes to an "upgrade" listener;
+  - a real `ws` client on a browser-control-style route still works, and `closeServer()` closes it in 3 ms;
+  - the response is flushed before the destroy;
+  - the 11.3.4 package diff;
+  - the smoke script fails without either listener;
+  - the new tests pass on both Node versions (15 of 15 repeated runs on 22.23.4).
+
+  Info, not changed:
+  - Fastify's 503-while-closing answer bypasses hooks, so an Upgrade request in that window could still hold `close()` until the 8 s deadline (by reading code; not reproduced).
+  - `frameworkErrors` also receives the 414 and async-constraint errors, which now answer `{"error":"Bad request"}` with their own status.
+  - The new `content-length` precheck can refuse a body that doesn't compress and whose decoded size is just under the limit.
 
 ## Verification and outcome
 
