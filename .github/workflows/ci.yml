@@ -10,8 +10,8 @@ concurrency:
   group: checks-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 # The jobs below run in parallel and together cover `npm run format:check`, `npm run check`
-# and `npm run build`. Branch protection and the release workflow read the `test` job,
-# which passes only when every other job passed.
+# and `npm run build`. Branch protection requires the `test` job, which passes only when
+# every other job passed; the release workflow requires the whole workflow to succeed.
 jobs:
   static:
     name: format and types
@@ -71,6 +71,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ripgrep
       - run: npm ci
       - run: npm run build
+      # Before Pi's own `npm ci`: the images install Pi's dependencies from the root lockfile.
+      - run: npm run check:pi
       - name: Verify Pi package independence and actual Linux worker boundary
         run: |
           npm --prefix coding_runtime_pi ci --ignore-scripts

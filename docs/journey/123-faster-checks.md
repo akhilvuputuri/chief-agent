@@ -37,10 +37,14 @@ Alternatives considered:
 - `tests/helpers/pglite.ts`:
   - `migratedPGlite(migrations?)` compiles the WASM module and filesystem bundle once per test process, applies a migration list once (by default every migration, with the same filter as `src/migrate.ts`), and restores each database from that snapshot. Explicit lists keep the partial schemas some tests use; each list has its own snapshot.
   - `closeAfter(t, db)` registers a close hook that drops its reference first.
-- 59 test files and `tests/helpers/coding-fixture.ts` (used by 28 more) use them. `history.test.ts` (legacy migration replay), `library-migrations.test.ts`, `media-outbox.test.ts`, `core.test.ts` and one `telegram.test.ts` case keep their own setup because they test or build schemas differently.
+- 60 test files and `tests/helpers/coding-fixture.ts` (used by 28 more) use them. `history.test.ts` (legacy migration replay), `library-migrations.test.ts`, `media-outbox.test.ts`, `core.test.ts` and the first `telegram.test.ts` case keep their own setup because they test or build schemas differently.
+- Rows that migrations seed with `now()` (`runtime_migrations.applied_at`, `library_pacing.updated_at`) now carry the snapshot's creation time rather than each database's. Nothing in `src` or the tests reads them.
 - `package.json`: `npm test` runs `test:ts` (`--test-concurrency=4`, with an optional `TEST_SHARD`) and `test:other`. `npm run check` still runs everything.
 - `.github/workflows/ci.yml`: parallel jobs for format and types, three test shards, scripts/evals/Python runtime, the Pi package and its images, and the other images. A final `test` job passes only when all of them passed, so the check name that branch protection and the release workflow see is unchanged.
-- Independent review: pending.
+- Independent review (Claude Opus 5.5):
+  - REQUEST CHANGES on `e1af778` for the `steering-telegram` import defect, fixed in `3406d31`.
+  - REQUEST CHANGES on `9315ab2`: the `pi` job ran Pi's unit tests only after installing Pi's own lockfile, while the images install Pi's dependencies from the root lockfile (31 of 148 top-level Pi packages resolve differently), so a root lockfile change could break Pi's tests without failing `checks`. Fixed by running `npm run check:pi` straight after the root install. Also fixed: an unused import, the converted-file count and the workflow comment.
+  - The reviewer independently checked migration lists per file, close-hook counts, snapshot equivalence and isolation against a legacy migration replay, the `closeAfter` memory effect (2,770 MB against 626 MB for 12 databases), shard coverage and the required `test` check name. Docker steps and a GitHub run were not available to it.
 
 ## Verification and outcome
 

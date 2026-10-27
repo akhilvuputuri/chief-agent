@@ -1,6 +1,5 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { migratedPGlite } from "./helpers/pglite.js";
 import { DailyTools, DailyWorker } from "../src/daily.js";
