@@ -1,21 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { readFile, readdir } from "node:fs/promises";
-import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import type { Database } from "../src/db.js";
 import { resolvePreparationChain } from "../src/preparation-chain.js";
 import { PreparationTools } from "../src/preparation.js";
 
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
 async function fixture() {
-  const pg = new PGlite();
-  for (const file of (await readdir(new URL("../db/", import.meta.url)))
-    .filter((f) => f.endsWith(".sql"))
-    .sort())
-    await pg.exec(
-      await readFile(new URL("../db/" + file, import.meta.url), "utf8"),
-    );
+  const pg = await migratedPGlite();
   const db = pg as unknown as Database;
   const jobId = randomUUID(),
     foreignJobId = randomUUID(),

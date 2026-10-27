@@ -9,8 +9,43 @@ permissions:
 concurrency:
   group: checks-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+# The jobs below run in parallel and together cover `npm run format:check`, `npm run check`
+# and `npm run build`. Branch protection requires the `test` job, which passes only when
+# every other job passed; the release workflow requires the whole workflow to succeed.
 jobs:
-  test:
+  static:
+    name: format and types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22.19.0", cache: npm }
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run typecheck
+  tests:
+    name: tests ${{ matrix.shard }}/6
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22.19.0", cache: npm }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Install repository search dependency
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ripgrep
+      - run: python -m pip install --require-hashes -r coding_runtime/requirements-dev.txt
+      - run: npm ci
+      - run: npm run build
+      - run: npm run test:ts
+        env:
+          TEST_SHARD: ${{ matrix.shard }}/6
+  other:
+    name: scripts, evals and Python runtime
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,14 +57,22 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ripgrep
       - run: python -m pip install --require-hashes -r coding_runtime/requirements-dev.txt
       - run: npm ci
-      - run: npm run format:check
-      - run: npm run check
       - run: npm run build
-      - name: Build and inspect the disposable coding worker
-        run: |
-          docker build -f Dockerfile.coding -t chief-coding:test .
-          docker run --rm --entrypoint sh chief-coding:test -c 'test "$(id -u)" != 0 && node --version && git --version && rg --version && python3 --version'
-          docker run --rm --user root --env CODING_TEST_SECRET=synthetic --entrypoint setpriv chief-coding:test --reuid=1000 --regid=1000 --clear-groups --no-new-privs --bounding-set=-all python -I -m chief_coding_runtime.security_smoke
+      - run: npm run test:other
+      - run: npm run check:coding
+  pi:
+    name: Pi package and worker boundary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22.19.0", cache: npm }
+      - name: Install repository search dependency
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ripgrep
+      - run: npm ci
+      - run: npm run build
+      # Before Pi's own `npm ci`: the images install Pi's dependencies from the root lockfile.
+      - run: npm run check:pi
       - name: Verify Pi package independence and actual Linux worker boundary
         run: |
           npm --prefix coding_runtime_pi ci --ignore-scripts
@@ -43,11 +86,20 @@ jobs:
           cd /tmp/pi-runtime-independent
           npm ci --ignore-scripts
           npm run check
+  images:
+    name: sandbox and app images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and inspect the disposable coding worker
+        run: |
+          docker build -f Dockerfile.coding -t chief-coding:test .
+          docker run --rm --entrypoint sh chief-coding:test -c 'test "$(id -u)" != 0 && node --version && git --version && rg --version && python3 --version'
+          docker run --rm --user root --env CODING_TEST_SECRET=synthetic --entrypoint setpriv chief-coding:test --reuid=1000 --regid=1000 --clear-groups --no-new-privs --bounding-set=-all python -I -m chief_coding_runtime.security_smoke
       - name: Verify isolated browser sandbox with synthetic pages
         run: |
           docker build -f Dockerfile.browser --target browser -t chief-browser:test .
           docker run --rm --init --network=none --read-only --tmpfs /tmp:size=192m,mode=1777 --shm-size=192m --cap-drop=ALL --security-opt=no-new-privileges --security-opt=seccomp=deploy/browser/seccomp.json --memory=640m --pids-limit=192 --entrypoint node chief-browser:test /app/browser-smoke.mjs
-
       - name: Verify PostgreSQL gathering revocation interleaving
         run: |
           docker build -t chief-gathering-app:test .
@@ -61,3 +113,14 @@ jobs:
           done
           if [ "$pg_ready" != true ]; then echo 'Disposable PostgreSQL TCP readiness timed out' >&2; exit 1; fi
           docker run --rm --network=container:gathering-pg-proof --read-only --cap-drop=ALL --security-opt=no-new-privileges --memory=384m --pids-limit=96 --env GATHERING_TEST_DATABASE_URL=postgresql://synthetic:synthetic-only@127.0.0.1:5432/gathering_test --mount type=bind,source="$PWD/db",target=/app/db,readonly --mount type=bind,source="$PWD/scripts/gathering-postgres-smoke.mjs",target=/app/scripts/gathering-postgres-smoke.mjs,readonly --entrypoint node chief-gathering-app:test /app/scripts/gathering-postgres-smoke.mjs
+  test:
+    needs: [static, tests, other, pi, images]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every check to pass
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "$RESULTS"
+          for result in $RESULTS; do test "$result" = success; done

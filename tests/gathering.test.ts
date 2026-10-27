@@ -1,8 +1,8 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import { Gathering } from "../src/gathering/controller.js";
 import { FileVault } from "../src/gathering/vault.js";
 import { action } from "../src/gathering/schema.js";
@@ -39,13 +39,7 @@ function pdf(text: string) {
   return Buffer.from(output);
 }
 before(async () => {
-  pg = new PGlite();
-  for (const file of (await readdir(new URL("../db/", import.meta.url)))
-    .filter((f) => f.endsWith(".sql"))
-    .sort())
-    await pg.exec(
-      await readFile(new URL("../db/" + file, import.meta.url), "utf8"),
-    );
+  pg = await migratedPGlite();
   db = pg as unknown as Database;
   vault = new FileVault(db, Buffer.alloc(32, 7));
   gather = new Gathering(db, vault);

@@ -1,8 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import type { Api } from "grammy";
 import { ensureUser, type Database } from "../src/db.js";
 import { TelegramViews } from "../src/telegram-views.js";
@@ -13,8 +12,7 @@ import { telegram } from "../src/telegram.js";
 import { readConfig } from "../src/config.js";
 import type { Assistant } from "../src/agent.js";
 async function fixture() {
-  const pg = new PGlite();
-  for (const name of [
+  const pg = await migratedPGlite([
     "001_initial",
     "002_preparation",
     "003_skills",
@@ -26,10 +24,7 @@ async function fixture() {
     "013_conversation_control",
     "014_checkpoint_steering",
     "009_calendar_approval",
-  ])
-    await pg.exec(
-      await readFile(new URL(`../db/${name}.sql`, import.meta.url), "utf8"),
-    );
+  ]);
   const db = pg as unknown as Database;
   await ensureUser(db, "123");
   await ensureUser(db, "456");

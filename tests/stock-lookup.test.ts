@@ -1,8 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readFile, readdir } from "node:fs/promises";
-import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import { ensureUser, type Database } from "../src/db.js";
 import { CreditBucket } from "../src/market-credits.js";
 import {
@@ -230,13 +229,7 @@ class FakeProvider implements MarketDataProvider {
 }
 
 async function fixture(now = new Date("2026-10-02T15:00:00Z")) {
-  const pg = new PGlite();
-  for (const name of (await readdir(new URL("../db/", import.meta.url)))
-    .filter((n) => /^\d.*sql$/.test(n))
-    .sort())
-    await pg.exec(
-      await readFile(new URL("../db/" + name, import.meta.url), "utf8"),
-    );
+  const pg = await migratedPGlite();
   const db = pg as unknown as Database;
   await ensureUser(db, "owner");
   const provider = new FakeProvider();

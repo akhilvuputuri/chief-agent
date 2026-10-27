@@ -1,7 +1,6 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
-import { PGlite } from "@electric-sql/pglite";
+import { closeAfter, migratedPGlite } from "./helpers/pglite.js";
 import { ensureUser, type Database } from "../src/db.js";
 import {
   BoxController,
@@ -31,14 +30,8 @@ async function fixture(
     timings?: Partial<BoxTimings>;
   } = {},
 ) {
-  const pg = new PGlite();
-  t.after(() => pg.close());
-  for (const f of (await readdir(new URL("../db/", import.meta.url)))
-    .filter((f) => f.endsWith(".sql"))
-    .sort())
-    await pg.exec(
-      await readFile(new URL("../db/" + f, import.meta.url), "utf8"),
-    );
+  const pg = await migratedPGlite();
+  closeAfter(t, pg);
   const db = pg as unknown as Database;
   await ensureUser(db, "owner");
   await ensureUser(db, "other");

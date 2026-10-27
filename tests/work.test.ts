@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import { ensureUser, type Database } from "../src/db.js";
 import { JobTools } from "../src/tools.js";
 import { WorkTools, renderWork } from "../src/work.js";
@@ -12,16 +12,12 @@ import { runtimeContext } from "../src/runtime.js";
 import { Assistant } from "../src/agent.js";
 
 async function fixture() {
-  const pg = new PGlite();
-  for (const f of [
+  const pg = await migratedPGlite([
     "001_initial.sql",
     "002_preparation.sql",
     "003_skills.sql",
     "005_work.sql",
-  ])
-    await pg.exec(
-      await readFile(new URL("../db/" + f, import.meta.url), "utf8"),
-    );
+  ]);
   await pg.exec(
     await readFile(new URL("../db/003_skills.sql", import.meta.url), "utf8"),
   );

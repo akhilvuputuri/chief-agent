@@ -1,20 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PGlite } from "@electric-sql/pglite";
-import { readFile, readdir } from "node:fs/promises";
+import { migratedPGlite } from "./helpers/pglite.js";
 import { randomUUID } from "node:crypto";
 import type { Database } from "../src/db.js";
 import { Execution, recoverRuntime } from "../src/execution.js";
 import { Spending, spending } from "../src/spending.js";
 import { WebTools } from "../src/providers.js";
 async function fixture() {
-  const pg = new PGlite();
-  for (const f of (await readdir(new URL("../db/", import.meta.url)))
-    .filter((f) => f.endsWith(".sql"))
-    .sort())
-    await pg.exec(
-      await readFile(new URL("../db/" + f, import.meta.url), "utf8"),
-    );
+  const pg = await migratedPGlite();
   const db = pg as unknown as Database;
   await db.query("INSERT INTO users(id) VALUES('owner'),('other')");
   const task = randomUUID(),

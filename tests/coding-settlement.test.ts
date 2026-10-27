@@ -1,14 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import { ensureUser, type Database } from "../src/db.js";
 import { settleUncertainCoding } from "../src/execution.js";
 import { toolError, WriteBlockedError } from "../src/tool-errors.js";
 async function fixture() {
-  const pg = new PGlite();
-  for (const f of [
+  const pg = await migratedPGlite([
     "001_initial",
     "002_preparation",
     "003_skills",
@@ -17,10 +15,7 @@ async function fixture() {
     "006_runtime",
     "009_calendar_approval",
     "024_coding",
-  ])
-    await pg.exec(
-      await readFile(new URL(`../db/${f}.sql`, import.meta.url), "utf8"),
-    );
+  ]);
   const db = pg as unknown as Database;
   await ensureUser(db, "123");
   await ensureUser(db, "456");

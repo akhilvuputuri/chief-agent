@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import { ensureUser, type Database } from "../src/db.js";
 import { secretKey } from "../src/secret-box.js";
 import { LibraryClient } from "../src/library-client.js";
@@ -20,13 +20,7 @@ const TOKEN =
   "eyJhbGciOiJIUzI1NiJ9.eyJjaGlwIjoiYXBwcm92YWx0ZXN0In0.YXBwcm92YWxzaWduYXR1cmVzaWc";
 
 async function fixture() {
-  const pg = new PGlite();
-  for (const name of (await readdir(new URL("../db/", import.meta.url)))
-    .filter((n) => n.endsWith(".sql"))
-    .sort())
-    await pg.exec(
-      await readFile(new URL(`../db/${name}`, import.meta.url), "utf8"),
-    );
+  const pg = await migratedPGlite();
   const db = pg as unknown as Database;
   await ensureUser(db, "123");
   await ensureUser(db, "456");

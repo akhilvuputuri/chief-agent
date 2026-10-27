@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import {
   McpTools,
   mcpRegistrySchema,
@@ -95,8 +95,7 @@ const text = (data: unknown) => ({
   content: [{ type: "text", text: JSON.stringify(data) }],
 });
 async function fixture() {
-  const pg = new PGlite();
-  for (const name of [
+  const pg = await migratedPGlite([
     "001_initial",
     "002_preparation",
     "003_skills",
@@ -105,10 +104,7 @@ async function fixture() {
     "006_runtime",
     "030_mcp",
     "031_link_resolution",
-  ])
-    await pg.exec(
-      await readFile(new URL(`../db/${name}.sql`, import.meta.url), "utf8"),
-    );
+  ]);
   const db = pg as unknown as Database;
   await ensureUser(db, "123");
   await ensureUser(db, "456");

@@ -1,19 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import { DailyTools, DailyWorker } from "../src/daily.js";
 import { CalendarTools } from "../src/calendar.js";
 import { ensureUser, type Database } from "../src/db.js";
 import { action } from "../src/protocol.js";
 test("daily items and schedules are owner-scoped; due delivery survives worker recreation, cancellation and errors", async () => {
-  const pg = new PGlite();
+  const pg = await migratedPGlite(["001_initial.sql", "004_daily.sql"]);
   try {
-    for (const f of ["001_initial.sql", "004_daily.sql"])
-      await pg.exec(
-        await readFile(new URL("../db/" + f, import.meta.url), "utf8"),
-      );
     const db = pg as unknown as Database;
     await ensureUser(db, "a");
     await ensureUser(db, "b");

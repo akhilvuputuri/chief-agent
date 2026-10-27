@@ -1,8 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
-import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import Fastify from "fastify";
 import { ensureUser, type Database } from "../src/db.js";
 import { IBKR, IbkrAuth, permitted, readOnly } from "../src/ibkr/oauth.js";
@@ -217,13 +216,7 @@ function fakeIbkr() {
 }
 
 async function fixture({ drafts = false, maxUsd = 100 } = {}) {
-  const pg = new PGlite();
-  for (const name of (await readdir(new URL("../db/", import.meta.url)))
-    .filter((n) => /^\d.*sql$/.test(n))
-    .sort())
-    await pg.exec(
-      await readFile(new URL("../db/" + name, import.meta.url), "utf8"),
-    );
+  const pg = await migratedPGlite();
   const faults = { positions: false };
   const db = {
     query: (text: string, values?: unknown[]) => {

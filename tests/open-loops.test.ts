@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import { ensureUser, type Database } from "../src/db.js";
 import {
   codingWaitsOnOwner,
@@ -11,11 +10,8 @@ import {
 } from "../src/open-loops.js";
 import { saveConversationState } from "../src/conversation-state.js";
 async function fixture() {
-  const pg = new PGlite();
+  const pg = await migratedPGlite();
   // Every migration in order, so the approvals operation check matches production.
-  const dir = new URL("../db/", import.meta.url);
-  for (const f of (await readdir(dir)).filter((f) => f.endsWith(".sql")).sort())
-    await pg.exec(await readFile(new URL(f, dir), "utf8"));
   const db = pg as unknown as Database;
   await ensureUser(db, "123");
   await ensureUser(db, "456");

@@ -7,8 +7,7 @@ import { telegram, sendResponsibilityApprovals } from "../src/telegram.js";
 import { readConfig } from "../src/config.js";
 import { HistoryStore } from "../src/history.js";
 import { CalendarTools } from "../src/calendar.js";
-import { readFile, readdir } from "node:fs/promises";
-import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import { ensureUser, type Database } from "../src/db.js";
 import { Responsibilities, attention } from "../src/responsibilities.js";
 import {
@@ -25,13 +24,7 @@ import { runtimeContext } from "../src/runtime.js";
 import { recoverRuntime } from "../src/execution.js";
 
 async function fixture() {
-  const pg = new PGlite();
-  for (const name of (await readdir(new URL("../db/", import.meta.url)))
-    .filter((f) => /^\d.*sql$/.test(f))
-    .sort())
-    await pg.exec(
-      await readFile(new URL("../db/" + name, import.meta.url), "utf8"),
-    );
+  const pg = await migratedPGlite();
   const db = pg as unknown as Database;
   await ensureUser(db, "a");
   await ensureUser(db, "b");

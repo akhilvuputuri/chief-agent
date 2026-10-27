@@ -1,8 +1,8 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { readFile, readdir } from "node:fs/promises";
-import { PGlite } from "@electric-sql/pglite";
+import { readFile } from "node:fs/promises";
+import { closeAfter, migratedPGlite } from "./helpers/pglite.js";
 import { ensureUser, type Database } from "../src/db.js";
 import { CodingAutomation } from "../src/coding/automation.js";
 import { CodingMergeApprovals } from "../src/coding/merge-approvals.js";
@@ -40,14 +40,8 @@ async function fixture(
   piState: any = undefined,
   paths: string[] = ["docs/fixture.md"],
 ) {
-  const pg = new PGlite();
-  t.after(() => pg.close());
-  for (const f of (await readdir(new URL("../db/", import.meta.url)))
-    .filter((f) => f.endsWith(".sql"))
-    .sort())
-    await pg.exec(
-      await readFile(new URL("../db/" + f, import.meta.url), "utf8"),
-    );
+  const pg = await migratedPGlite();
+  closeAfter(t, pg);
   const db = pg as unknown as Database;
   await ensureUser(db, "owner");
   const id = randomUUID(),

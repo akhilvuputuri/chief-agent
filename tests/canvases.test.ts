@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import { Canvases } from "../src/canvases.js";
 import { canvasDocument, canvasCreate } from "../src/canvas-schema.js";
 import { MiniAuth } from "../src/miniapp-auth.js";
@@ -31,8 +31,7 @@ const doc = (title = "Research") => ({
   sources: [],
 });
 async function fixture() {
-  const pg = new PGlite();
-  for (const name of [
+  const pg = await migratedPGlite([
     "001_initial",
     "002_preparation",
     "003_skills",
@@ -45,13 +44,7 @@ async function fixture() {
     "014_checkpoint_steering",
     "009_calendar_approval",
     "011_canvases",
-  ])
-    await pg.exec(
-      await readFile(
-        new URL("../db/" + name + ".sql", import.meta.url),
-        "utf8",
-      ),
-    );
+  ]);
   const db = pg as unknown as Database;
   await ensureUser(db, "123");
   await ensureUser(db, "456");

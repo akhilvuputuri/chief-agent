@@ -2,21 +2,17 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import { JobTools } from "../src/tools.js";
 import { ensureUser, type Database } from "../src/db.js";
 test("skills preserve drafts, enforce ownership/evaluation/approval, and restore immutable history", async () => {
-  const pg = new PGlite();
+  const pg = await migratedPGlite([
+    "001_initial.sql",
+    "002_preparation.sql",
+    "003_skills.sql",
+    "003_skills.sql",
+  ]);
   try {
-    for (const file of [
-      "001_initial.sql",
-      "002_preparation.sql",
-      "003_skills.sql",
-      "003_skills.sql",
-    ])
-      await pg.exec(
-        await readFile(new URL(`../db/${file}`, import.meta.url), "utf8"),
-      );
     await pg.exec(
       await readFile(
         new URL("../db/002_preparation.sql", import.meta.url),

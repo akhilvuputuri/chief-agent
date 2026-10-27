@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import { CustomAgent } from "../src/custom-agent.js";
 import { Execution, Stop, type StopReason } from "../src/execution.js";
 import { NotDispatchedError, ToolValidationError } from "../src/tool-errors.js";
@@ -375,8 +374,7 @@ test("a task-bound steering handoff closes the old batch without consuming its n
 });
 
 test("research yields after a completed read and returns the exact owner-scoped source reference", async () => {
-  const pg = new PGlite();
-  for (const file of [
+  const pg = await migratedPGlite([
     "001_initial",
     "002_preparation",
     "003_skills",
@@ -387,10 +385,7 @@ test("research yields after a completed read and returns the exact owner-scoped 
     "012_message_storage",
     "013_conversation_control",
     "014_checkpoint_steering",
-  ])
-    await pg.exec(
-      await readFile(new URL(`../db/${file}.sql`, import.meta.url), "utf8"),
-    );
+  ]);
   const db = pg as unknown as Database;
   const signal = new AbortController().signal;
   const parent = new Execution(db, "owner", randomUUID(), signal);

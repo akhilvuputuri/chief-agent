@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import { Assistant } from "../src/agent.js";
 import { CustomAgent } from "../src/custom-agent.js";
 import { JobTools } from "../src/tools.js";
@@ -61,8 +60,7 @@ function observation(input: Parameters<ModelAdapter["generate"]>[0]) {
   );
 }
 async function fixture(model: ModelAdapter, models = 40) {
-  const pg = new PGlite();
-  for (const file of [
+  const pg = await migratedPGlite([
     "001_initial",
     "002_preparation",
     "003_skills",
@@ -73,10 +71,7 @@ async function fixture(model: ModelAdapter, models = 40) {
     "012_message_storage",
     "013_conversation_control",
     "014_checkpoint_steering",
-  ])
-    await pg.exec(
-      await readFile(new URL(`../db/${file}.sql`, import.meta.url), "utf8"),
-    );
+  ]);
   const db = pg as unknown as Database;
   const assistant = new Assistant(
     db,

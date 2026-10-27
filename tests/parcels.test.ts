@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
-import { PGlite } from "@electric-sql/pglite";
+import { migratedPGlite } from "./helpers/pglite.js";
 import { ensureUser, type Database } from "../src/db.js";
 import { ParcelTools, decides, refKey, parcelLimits } from "../src/parcels.js";
 import { action } from "../src/protocol.js";
@@ -9,13 +8,7 @@ import { runtimeContext } from "../src/runtime.js";
 import { projectObservation } from "../src/observations.js";
 import { ToolValidationError, toolError } from "../src/tool-errors.js";
 async function fixture() {
-  const pg = new PGlite();
-  for (const file of (await readdir(new URL("../db/", import.meta.url)))
-    .filter((f) => /^\d.*sql$/.test(f))
-    .sort())
-    await pg.exec(
-      await readFile(new URL("../db/" + file, import.meta.url), "utf8"),
-    );
+  const pg = await migratedPGlite();
   const db = pg as unknown as Database;
   await ensureUser(db, "a");
   await ensureUser(db, "b");

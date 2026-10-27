@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PGlite } from "@electric-sql/pglite";
-import { readFile, readdir } from "node:fs/promises";
+import { migratedPGlite } from "./helpers/pglite.js";
 import { randomUUID } from "node:crypto";
 import { HistoryStore } from "../src/history.js";
 import { projectObservation } from "../src/observations.js";
@@ -10,10 +9,7 @@ import { ensureUser, type Database } from "../src/db.js";
 import type { Message } from "../src/model.js";
 
 test("conversation state builds the exchange index from stored rows with observation IDs", async () => {
-  const pg = new PGlite();
-  const dir = new URL("../db/", import.meta.url);
-  for (const f of (await readdir(dir)).filter((f) => f.endsWith(".sql")).sort())
-    await pg.exec(await readFile(new URL(f, dir), "utf8"));
+  const pg = await migratedPGlite();
   const db = pg as unknown as Database;
   try {
     await ensureUser(db, "owner");
