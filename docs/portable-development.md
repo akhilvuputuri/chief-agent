@@ -63,7 +63,7 @@ Database/Compose migration, account consent, production secret rotation, server 
 
 ## Test databases and parallel tests
 
-Test files run one at a time (`npm run test:ts`; set `TEST_SHARD=1/6` to run one shard, as CI does). Running PGlite test files in parallel crashed one test process with SIGSEGV in CI, so parallelism comes from CI shards on separate runners ([journal 123](journey/123-faster-checks.md)). Create test databases with `migratedPGlite()` from `tests/helpers/pglite.ts`, or `migratedPGlite([...])` for a partial schema, rather than `new PGlite()` plus a migration loop: it restores each database from a snapshot made once per test process. Close a database registered in a hook with `closeAfter(t, pg)`, not `t.after(() => pg.close())`, which keeps the closed database's memory reachable for the rest of the file. See [journal 123](journey/123-faster-checks.md).
+Test files run one at a time (`npm run test:ts`; set `TEST_SHARD=1/6` to run one shard, as CI does). A test process crashed with SIGSEGV in CI while files ran in parallel, so parallelism comes from CI shards on separate runners ([journal 123](journey/123-faster-checks.md)). Create test databases with `migratedPGlite()` from `tests/helpers/pglite.ts`, or `migratedPGlite([...])` for a partial schema, rather than `new PGlite()` plus a migration loop: it restores each database from a snapshot made once per test process. Close a database registered in a hook with `closeAfter(t, pg)`, not `t.after(() => pg.close())`, which keeps the closed database's memory reachable for the rest of the file. See [journal 123](journey/123-faster-checks.md).
 
 ## Python coding-worker checks
 

@@ -70,8 +70,13 @@ Alternatives considered:
   - Reported upstream: [nodejs/node#64500](https://github.com/nodejs/node/issues/64500) (intermittent SIGSEGV when processes initialise PGlite concurrently), later attributed by its reporter to faulty hardware, with no flag reliably preventing it; and a separate V8 `CHECK` abort when one process creates and closes many PGlite instances, about 4.5 % of one project's CI builds on Node 24.
   - Reported, second run (40468756960, `a6dc4ef`, same configuration): passed in 4 min 16 s. One crash in two runs.
   - Hypothesis: concurrent test processes, or the shared compiled module, expose a WASM crash that serial runs on `main` did not hit. The recent `main` runs checked were all green. One sample does not separate the two.
+  - Decision (owner, 27 October): run test files one at a time within each runner, with six CI shards (`7ca7cfa`).
+- **Reported, run 40469257930 on `7ca7cfa` (serial files, six shards):** passed in 3 min 33 s. The shards' test steps took 1 min 7 s to 2 min 24 s, the Pi job about 3 min. The shards together ran 1,287 tests: 1,286 pass, 0 fail, 1 skipped.
+- Independent review (Claude Opus 5.5): APPROVE `7ca7cfa`, after checking that six shards cover every file once, against stub files and the run's test counts.
 
 ## Follow-up and next iteration
 
-- Record the first `checks` run's wall time and job times.
+- Watch for a SIGSEGV under serial running. One there would point at PGlite or WASM in a single process (the shared compiled module is still used) rather than at parallel files, and the required `test` check would fail rather than pass silently.
+- Try parallel files again only with a cause or upstream fix for the crash, measured over repeated CI runs, since the coding box would gain the most from it.
+- Balance shards by recorded file durations instead of file order; shard times range from about 1 to 2.5 minutes.
 - TypeScript 7, a cross-process snapshot cache, skipping heavy jobs for documentation-only PRs, and building the release image in CI are separate changes.
