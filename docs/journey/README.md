@@ -132,7 +132,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 27 October | [123 — Faster checks](123-faster-checks.md): why did every PR wait 26 minutes for checks? | Released in `8ea6263`: snapshot-restored test databases, a close hook that frees them and six serial CI shards; `checks` about 4 minutes instead of 26 |
 | 27 October | [124 — Caddy root redirect](124-caddy-root-redirect.md): why did the site root return an empty page? | Merged in `cd45085`: `redir * /miniapp/ 302`, tested on Caddy 2.6.2; the live host needs the operator install in the entry |
 | 27 October | [125 — Postgres drops and shutdown](125-db-drops-and-shutdown.md): what happens when Postgres drops a connection, or the gateway is told to stop? | Released in `211b2a2`: pool and checked-out client error listeners, and a deadline-bounded shutdown; its first production stop completed in 160 ms |
-| 27 October | [126 — Fetch hygiene and Node 22.23.4](126-fetch-hygiene-and-node.md): can a corrupt response hang a fetch, and what do fetch failures leave behind? | Released in `9ab96c2`: the gateway runs Node v22.23.4 (corrupt-gzip hang fixed), fetch cause codes logged, unread bodies cancelled; Pi image republish pending |
+| 27 October | [126 — Fetch hygiene and Node 22.23.4](126-fetch-hygiene-and-node.md): can a corrupt response hang a fetch, and what do fetch failures leave behind? | Released in `9ab96c2`: the gateway runs Node v22.23.4 (corrupt-gzip hang fixed), fetch cause codes logged, unread bodies cancelled; Pi image republished on 22.23.4, re-pin proposed (not released) |
 
 ## Coding-agent learning path
 

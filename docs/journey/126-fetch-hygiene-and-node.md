@@ -70,12 +70,12 @@ The tests above pass, and the hang was reproduced and shown fixed on Node 22.23.
   - it holds linux/amd64 plus a build attestation, the same layout as the previous pin;
   - the amd64 image has 18 layers totalling 424.3 MB, against 423.7 MB before.
 - **Not verified here.** Registry blobs redirect to `pkg-containers.githubusercontent.com`, which this cloud session's network policy blocks. So the image's user, command, Node binary and Pi package versions could not be read directly.
-- **Relied on (tested in CI on `15e6def`):** the `Pi package and worker boundary` job builds the same `Dockerfile.coding-pi` from the same commit and runs:
+- **Relied on (tested in CI on `15e6def`):** the `Pi package and worker boundary` job builds an equivalent image from the same `Dockerfile.coding-pi` and commit and runs the checks below. It is not the published bytes: the Python base and apt packages are not pinned, and every layer digest differs from the previous image.
   - the CLI container smoke test;
   - the security smoke test as uid 1000 with no new privileges and an empty bounding set;
   - the box Docker tests.
 - **Pin.** `config/coding-pi.json` and the `coding` profile in `config/boxes.json` now use the new digest. The previous digest `e8f1c2…` moves to `previousImages`, alongside `ba99d9…`, so jobs snapshotted with either can still start a box. Both the new image (built from `15e6def`) and `e8f1c2…` (built from `6ab96c0` by run 12 on 20 October) include `7e648f9`, as `docs/boxes.md` requires; `ba99d9…` was already listed. Remove a previous image only once no open job uses it, which this session can't check.
-- **After release:** the next new coding job runs on Node 22.23.4. No real coding job has been run as acceptance.
+- **After release:** the next new coding job runs on Node 22.23.4. Existing and resumed jobs keep their snapshotted `e8f1c2…` image, so they stay on Node 22.19.0 (and the corrupt-gzip hang) until they finish.
 
 ## Follow-up and next iteration
 
