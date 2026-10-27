@@ -572,8 +572,7 @@ async function realFixture(
     onQuery?: (sql: string, values: unknown[]) => void;
   } = {},
 ) {
-  const { PGlite } = await import("@electric-sql/pglite");
-  const { readFile, readdir } = await import("node:fs/promises");
+  const { migratedPGlite } = await import("./helpers/pglite.js");
   const { Assistant } = await import("../src/agent.js");
   const { JobTools } = await import("../src/tools.js");
   const pg = await migratedPGlite();
