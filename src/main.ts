@@ -85,6 +85,7 @@ import { ToolPicker } from "./tool-picker.js";
 import { ShadowDecisions } from "./shadow.js";
 import { EffortPicker } from "./effort.js";
 import { server } from "./server.js";
+import { stopGateway } from "./gateway-stop.js";
 import {
   telegram,
   sendCalendarApprovals,
@@ -1330,9 +1331,19 @@ for (const signal of ["SIGINT", "SIGTERM"])
       if (boxTimer) clearInterval(boxTimer);
       shutdown.abort();
       assistant.shutdown();
-      await runner.stop();
-      await app.close();
-      await db.end();
+      const result = await stopGateway({
+        stopIntake: () => runner.stop() ?? Promise.resolve(),
+        handlersRunning: () => runner.size(),
+        closeHttp: () => app.close(),
+        closeDatabase: () => db.end(),
+      });
+      if (result.complete) return opsLog("gateway.stopped", "info");
+      opsLog("gateway.stop_incomplete", "warn", {
+        handlersLeft: result.handlersLeft,
+        httpClosed: result.httpClosed,
+        databaseClosed: result.databaseClosed,
+      });
+      process.exit(1);
     })();
   });
 await bot.init();

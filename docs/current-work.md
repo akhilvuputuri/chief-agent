@@ -1,3 +1,7 @@
+# Postgres connection drops and shutdown — branch `hardening-db-shutdown`, 27 October 2026
+
+A Postgres session ending (restart, failover, terminated backend) made the gateway exit, because neither the pool nor a client inside a transaction had an `error` listener. Both now log and recover; a broken client is discarded. Shutdown now stops intake, waits for running Telegram handlers, then closes HTTP and the database within an 8 s deadline, and reports what was left. Reproduced and verified on a local Postgres 16. See [journal 125](journey/125-db-drops-and-shutdown.md) and issue #329.
+
 # Caddy root redirect — branch `fix-caddy-root-redirect`, 27 October 2026
 
 The site root returned an empty `200` instead of redirecting to the Mini App, because `redir /miniapp/ 302` parses `/miniapp/` as a path matcher. That empty response also skipped the security headers and leaked `Server: Caddy`. Both Caddyfiles now use `redir * /miniapp/ 302`, tested on Caddy 2.6.2. Caddy is a host service, so the live host needs the one-line operator install in [journal 124](journey/124-caddy-root-redirect.md).
