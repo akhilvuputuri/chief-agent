@@ -1,3 +1,12 @@
+## Deployed `8ea6263` (untagged) — faster checks
+
+- **What merged.** [PR 324](https://github.com/akhilvuputuri/chief-agent/pull/324) merged as `8ea62631b0a2e30f77e0076fde07a4bfd300d72e` (version unchanged, 0.3.103). Tests restore each PGlite database from a per-process migrated snapshot, a close hook stops `node:test` keeping closed databases in memory, and `checks` runs as parallel jobs with six serial test shards behind the unchanged `test` job. Tests, CI and docs only; no runtime change.
+- **Review.** Independent review (Claude Opus 5.5) requested changes twice (a missed import, then Pi's tests no longer running against the root lockfile) and once on docs wording, and approved the merged head `0d2a1cc`. Devin found no issues. One CI run with four test files at a time lost a test process to SIGSEGV; the owner chose serial files per runner.
+- **Release.** `checks` on `main` took 4 min 38 s ([run](https://github.com/akhilvuputuri/chief-agent/actions/runs/40476079773)), against about 26 minutes before. The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/40476636054) deployed the exact commit with startup health passing at 08:59 UTC on 27 October, about 11 minutes after the merge. No migration.
+- **Not yet observed.** A coding box's `npm run check` time with the new fixture.
+
+[Journal 123](journey/123-faster-checks.md#release-closure--2026-10-27).
+
 ## Deployed `3130950` (untagged) — fewer coding notices
 
 - **What merged.** [PR 314](https://github.com/akhilvuputuri/chief-agent/pull/314) merged as `3130950f492d0fc580330b8120ab8b90ac6965ea` (version 0.3.102). Coding progress goes into one Telegram status message per job, edited in place; progress that would start a new message is held 23:00–08:00 Singapore; cancellations within 15 seconds become one summary; non-owner-merge PR notices carry the coder's summary; a per-job lease serialises status edits; identical rebases are detected and logged only.
