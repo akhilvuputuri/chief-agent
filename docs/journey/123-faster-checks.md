@@ -1,14 +1,14 @@
 # 123 — Why did every PR wait 26 minutes for checks?
 
 Work date(s): 2026-10-27. Written/revised: 2026-10-27.
-Status: tested, in PR 324. `checks` takes about 3½ to 5 minutes instead of about 26. Test files run one at a time within each runner, because a test process crashed with SIGSEGV while four ran at a time; the cause is not established (see Verification).
+Status: released in `8ea6263` (PR 324). `checks` takes about 3½ to 5 minutes instead of about 26. Test files run one at a time within each runner, because a test process crashed with SIGSEGV while four ran at a time; the cause is not established (see Verification).
 
 Summary of the improvements:
 
 - **Faster PR checks:** about 26 minutes to 3 min 33 s and 4 min 38 s in the two serial runs (reported, GitHub). Documentation-only PRs still run every job.
 - **Faster tests anywhere they run serially:** all test files took 1,211 s instead of 1,767 s locally (measured). Coding boxes run the same serial `npm run check`; their check of about 14 minutes should fall by a similar share (estimate, not measured in a box).
 - **Less memory:** a close hook that drops its reference stops `node:test` keeping closed databases; `boxes.test.ts` peaks at 1.5 GB instead of 10.4 GB (measured), well inside a coding box's 12 GB.
-- **Not changed:** a release still takes 5 to 6 minutes, because the Lightsail host builds the image itself, so merge to production should take about 10 minutes instead of about 32 (estimate: about 4 minutes of checks plus the 5 to 6 minute release reported before this change; not yet measured).
+- **Not changed:** a release still takes 5 to 6 minutes, because the Lightsail host builds the image itself, so merge to production took about 11 minutes instead of about 32 (reported, the release below).
 - **Same coverage:** every command of `npm run format:check`, `npm run check` and `npm run build` still runs, including Pi's tests against the root lockfile, and the required `test` check keeps its name.
 
 ## User-visible problem and preceding iteration
@@ -83,6 +83,13 @@ Alternatives considered:
 - **Reported, runs 40469257930 on `7ca7cfa` and 40469806917 on `bcfa00f` (serial files, six shards):** passed in 3 min 33 s and 4 min 38 s.
 - **Reported, run 40469257930 in detail:** passed in 3 min 33 s. The shards' test steps took 1 min 7 s to 2 min 24 s, the Pi job about 3 min. The shards together ran 1,287 tests: 1,286 pass, 0 fail, 1 skipped.
 - Independent review (Claude Opus 5.5): APPROVE `7ca7cfa`, after checking that six shards cover every file once, against stub files and the run's test counts.
+
+### Release closure — 2026-10-27
+
+- **Merged.** [PR 324](https://github.com/akhilvuputuri/chief-agent/pull/324) as `8ea62631b0a2e30f77e0076fde07a4bfd300d72e`, version unchanged (0.3.103).
+- **Heads.** Independent review approved the merged head `0d2a1cc`, whose code is the reviewed `7ca7cfa`; CI passed on it ([run 40475388515](https://github.com/akhilvuputuri/chief-agent/actions/runs/40475388515)) and Devin left no findings.
+- **Release.** `checks` on `main` passed in 4 min 38 s ([run 40476079773](https://github.com/akhilvuputuri/chief-agent/actions/runs/40476079773)). The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/40476636054) deployed the exact commit with startup health passing at 08:59 UTC; production logs show `8ea6263` from 08:59:03 UTC and no warn or error lines from 08:00 to 09:00 UTC. Merge to production took about 11 minutes. No migration.
+- **Not yet observed.** A coding box's `npm run check` time with the new fixture.
 
 ## Follow-up and next iteration
 

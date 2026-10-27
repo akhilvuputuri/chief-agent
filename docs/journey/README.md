@@ -129,7 +129,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 23 October | [118 — Telemetry gaps](118-telemetry-gaps.md): why did the models query show no token sums, and what was missing from model and context logs? | Released in `fac557b`: duplicate stats aliases hid the sums; finish reason, cache writes, provider slugs and older-history size added |
 | 23 October | [119 — Double reply](119-double-reply.md): why did Chief send the same clarifying question twice? | Released in `7084064`: text a finish_turn reply already contains is no longer also sent as progress |
 | 25 October | [120 — Email memory MVP](120-email-memory-mvp.md): does a meaning index find emails that Gmail search misses? | In progress: `gmail_recall` over the last 30 days of Primary mail, in memory; not released or measured |
-| 27 October | [123 — Faster checks](123-faster-checks.md): why did every PR wait 26 minutes for checks? | In progress: snapshot-restored test databases, a close hook that frees them and a parallel `checks` workflow with six serial shards; parallel test files crashed once with SIGSEGV |
+| 27 October | [123 — Faster checks](123-faster-checks.md): why did every PR wait 26 minutes for checks? | Released in `8ea6263`: snapshot-restored test databases, a close hook that frees them and six serial CI shards; `checks` about 4 minutes instead of 26 |
 
 ## Coding-agent learning path
 

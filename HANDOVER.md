@@ -1,3 +1,11 @@
+# Faster checks — live in `8ea6263`, 27 October 2026
+
+`checks` takes about 3½ to 5 minutes instead of about 26, and merge to production about 11 minutes instead of about 32. Tests, CI and docs only. [Journal 123](docs/journey/123-faster-checks.md), [release record](docs/releases.md).
+
+- Tests create databases with `migratedPGlite()` and close hooked ones with `closeAfter(t, pg)` from `tests/helpers/pglite.ts`; see [the development guide](docs/portable-development.md#test-databases-and-parallel-tests).
+- Test files run one at a time within each runner; CI runs six shards. Four files at a time lost a test process to SIGSEGV once, cause not established.
+- Next: type-check test files, TypeScript 7, a cross-process snapshot cache, duration-balanced shards, measuring a coding box's check time.
+
 # Review fixes 114–119 — live as v0.3.103, 23 October 2026
 
 Seven PRs from the weekly review of 14–21 October, plus a reported double reply, are deployed with exact release receipts. CloudWatch showed no warn or error lines in the seven hours after the first. Live acceptance is pending for all. [Release record](docs/releases.md).
