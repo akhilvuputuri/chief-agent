@@ -111,7 +111,7 @@ Status means released and running. It is not a measure of answer quality. The pr
 
 ## Run your own
 
-Requires Node 22+ and Docker Compose. Every integration beyond Telegram and a model provider is optional.
+Requires Node 22.19+ (`.nvmrc` pins the tested version) and Docker Compose. Every integration beyond Telegram and a model provider is optional.
 
 ```sh
 npm ci
