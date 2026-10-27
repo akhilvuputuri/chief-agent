@@ -17,7 +17,7 @@ import { spending, type Spending } from "../src/spending.js";
 
 const DAY = 86_400_000;
 /** No read pacing or quota pause in tests. */
-const FAST = { readMs: 0, quotaPauseMs: 0 };
+const FAST = { readMs: 0, quotaPauseMs: 0, topUpMs: 10_000 };
 const NOW = Date.UTC(2026, 9, 25);
 
 /** Deterministic bag-of-words vectors: texts sharing words score higher. */
@@ -553,9 +553,38 @@ test("reads are paced one at a time", async () => {
   const index = new MailIndex(box.gmail, words, "owner", () => NOW, {
     readMs: 20,
     quotaPauseMs: 0,
+    topUpMs: 10_000,
   });
   const started = Date.now();
   await index.start();
   assert.equal(most, 1);
   assert.ok(Date.now() - started >= 75);
+});
+
+test("a top-up cut short keeps the messages it already read", async () => {
+  let now = NOW;
+  const box = mailbox([
+    { id: "s0", at: NOW - DAY, subject: "s", text: "seed" },
+  ]);
+  const index = new MailIndex(box.gmail, words, "owner", () => now, {
+    readMs: 20,
+    quotaPauseMs: 0,
+    topUpMs: 150,
+  });
+  await index.start();
+  for (let i = 1; i <= 25; i++)
+    box.mail.push({
+      id: "t" + i,
+      at: NOW + i,
+      subject: "s",
+      text: "topup " + i,
+    });
+  now = NOW + DAY;
+  const reads = box.reads.length;
+  const found = await index.recall("owner", "topup");
+  assert.match(found.note!, /not indexed yet/);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  // Every message read during the cut-short top-up is indexed, none is read twice.
+  assert.equal(index.messages - 1, box.reads.length - reads);
+  assert.ok(index.messages > 1);
 });

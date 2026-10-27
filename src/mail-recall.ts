@@ -226,7 +226,11 @@ export class MailIndex {
     private embedder: Embedder & { tokens?: number },
     readonly owner: string,
     private now: () => number = Date.now,
-    private pace = { readMs: READ_INTERVAL_MS, quotaPauseMs: QUOTA_PAUSE_MS },
+    private pace = {
+      readMs: READ_INTERVAL_MS,
+      quotaPauseMs: QUOTA_PAUSE_MS,
+      topUpMs: TOP_UP_MS,
+    },
   ) {}
   get messages() {
     return this.indexed.size;
@@ -337,10 +341,9 @@ export class MailIndex {
       const parts = fetched.flatMap((m) => chunks(m).map((c) => ({ m, ...c })));
       let vectors: Float32Array[];
       try {
-        vectors = await this.embedder.embed(
-          parts.map((b) => b.embedText),
-          signal,
-        );
+        // Not the caller's signal: messages already read are embedded even when a top-up's
+        // time ran out mid-group, so their quota-consuming reads are not repeated.
+        vectors = await this.embedder.embed(parts.map((b) => b.embedText));
       } catch (error) {
         throw new DependencyError("openrouter", error);
       }
@@ -377,7 +380,7 @@ export class MailIndex {
       );
       await this.list(`${MAIL_INDEX_QUERY} after:${since}`, MAX_MESSAGES);
       this.synced = listedAt;
-      await this.add(TOP_UP_LIMIT, AbortSignal.timeout(TOP_UP_MS));
+      await this.add(TOP_UP_LIMIT, AbortSignal.timeout(this.pace.topUpMs));
       return this.pending.size === 0;
     })().finally(() => (this.topping = undefined));
     return this.topping;
@@ -413,7 +416,10 @@ export class MailIndex {
       complete = await Promise.race([
         this.topUp(),
         new Promise<boolean>((_, reject) => {
-          timer = setTimeout(() => reject(new Error("timeout")), TOP_UP_MS);
+          timer = setTimeout(
+            () => reject(new Error("timeout")),
+            this.pace.topUpMs,
+          );
         }),
       ]);
     } catch {
