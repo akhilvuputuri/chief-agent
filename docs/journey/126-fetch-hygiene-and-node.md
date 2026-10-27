@@ -1,7 +1,7 @@
 # 126 — Can a corrupt response hang a fetch, and what do fetch failures leave behind?
 
 Work date: 2026-10-27. Written: 2026-10-27.
-Status: released in `9ab96c2` ([#329](https://github.com/akhilvuputuri/chief-agent/issues/329) items 3–5). The gateway now runs Node v22.23.4. The Pi image was republished on Node 22.23.4 and re-pinned in branch `pin-pi-image-node-22-23-4` (not released).
+Status: released in `9ab96c2` ([#329](https://github.com/akhilvuputuri/chief-agent/issues/329) items 3–5). The gateway now runs Node v22.23.4. The Pi image was republished on Node 22.23.4, and its re-pin was released in `c4ba246`.
 
 ## User-visible problem and preceding iteration
 
@@ -62,7 +62,7 @@ The tests above pass, and the hang was reproduced and shown fixed on Node 22.23.
 - **Node (measured, CloudWatch `heartbeat`):** `gateway.started` for `9ab96c2` at 11:54:07 logged `nodeVersion: v22.23.4`. So the host pulled the pinned base image, and the corrupt-gzip fix (undici 6.29.1) is live in the gateway. No warn or error lines from 11:37 to 12:07.
 - **Not yet done:** the Pi image is still the digest pinned in `config/coding-pi.json`, so it keeps its old Node until it is republished and the digest is updated. The gathering-browser images change only through their operator procedure.
 
-### Pi image re-pin — 2026-10-27 (proposed)
+### Pi image re-pin — 2026-10-27
 
 - **Published.** The `pi-coding-worker-image` workflow ([run 13](https://github.com/akhilvuputuri/chief-agent/actions/runs/40530740990)), dispatched on `main` at `15e6def`, published tag `pi-15e6defa86ce1cab534e5525a1872cbebef05853`. Its digest is `ghcr.io/akhilvuputuri/chief-agent-coding@sha256:2fd65df0435207659473420dc061f4bf1151510b42c862ec09d0f3f0db496887`.
 - **Verified here (tested):**
@@ -77,7 +77,14 @@ The tests above pass, and the hang was reproduced and shown fixed on Node 22.23.
 - **Pin.** `config/coding-pi.json` and the `coding` profile in `config/boxes.json` now use the new digest. The previous digest `e8f1c2…` moves to `previousImages`, alongside `ba99d9…`, so jobs snapshotted with either can still start a box. Both the new image (built from `15e6def`) and `e8f1c2…` (built from `6ab96c0` by run 12 on 20 October) include `7e648f9`, as `docs/boxes.md` requires; `ba99d9…` was already listed. Remove a previous image only once no open job uses it, which this session can't check.
 - **After release:** the next new coding job runs on Node 22.23.4. Existing and resumed jobs keep their snapshotted `e8f1c2…` image, so they stay on Node 22.19.0 (and the corrupt-gzip hang) until they finish. No real coding job has been run on the new image as acceptance.
 
+- **Released (measured).** [PR 334](https://github.com/akhilvuputuri/chief-agent/pull/334) merged as `c4ba246afeaf10d0473a4665125e6bec55516d3d` from the independently approved head `fc3ca35`. [Release run 287](https://github.com/akhilvuputuri/chief-agent/actions/runs/40534440754) deployed it at 15:51 UTC. Run 286, triggered by the previous commit's checks, was refused because `main` had moved on. CloudWatch:
+  - `gateway.started` for `c4ba246` at 15:51:53, `nodeVersion: v22.23.4`;
+  - the previous release logged `gateway.stopped` 188 ms after `gateway.stopping`;
+  - no warn or error lines from 15:30 to 15:55.
+
+  New coding jobs now get the new image. No coding job has run on it yet.
+
 ## Follow-up and next iteration
 
-- Release the Pi image re-pin, and confirm a new coding job runs on the new image.
+- Confirm that the next new coding job runs on the new image.
 - Upstream: a comment on nodejs/undici#5999 confirming the fix, the node-postgres docs fix, and the `@fastify/websocket` socket fix.

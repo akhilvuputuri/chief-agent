@@ -1,4 +1,4 @@
-# Dependency hardening (#329) — live in `211b2a2` and `9ab96c2`, 27 October 2026
+# Dependency hardening (#329) — live in `211b2a2`, `9ab96c2` and `c4ba246`, 27 October 2026
 
 - **Postgres drops and shutdown ([journal 125](docs/journey/125-db-drops-and-shutdown.md)).**
   - A terminated or restarted Postgres session logs `db.idle_client_error` or `db.client_error` instead of stopping the gateway (tested on a local Postgres 16; not yet observed in production).
@@ -9,7 +9,7 @@
   - `npm run logs:cloudwatch -- heartbeat` shows `nodeVersion` and the shutdown fields.
 - **Closing #329 ([journal 127](docs/journey/127-closing-dependency-hardening.md)), proposed in branch `hardening-finish`:** Upgrade sockets close on every route and at shutdown, one shared bounded body reader, a Postgres session-drop smoke test in CI and a corrupt-gzip regression test.
 - **Pending:**
-  - release the Pi image re-pin (published on Node 22.23.4, branch `pin-pi-image-node-22-23-4`);
+  - confirm the next new coding job runs on the Pi image re-pinned to Node 22.23.4 (live in `c4ba246`);
   - the Caddy root redirect needs the operator's one-line host install ([journal 124](docs/journey/124-caddy-root-redirect.md));
   - upstream contributions for node-postgres docs and the `@fastify/websocket` socket fix (owner's choice; not needed to close [#329](https://github.com/akhilvuputuri/chief-agent/issues/329)).
 
