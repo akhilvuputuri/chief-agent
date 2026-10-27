@@ -1,3 +1,17 @@
+# Dependency hardening (#329) — live in `211b2a2` and `9ab96c2`, 27 October 2026
+
+- **Postgres drops and shutdown ([journal 125](docs/journey/125-db-drops-and-shutdown.md)).**
+  - A terminated or restarted Postgres session logs `db.idle_client_error` or `db.client_error` instead of stopping the gateway.
+  - Shutdown is bounded at 8 s and drains Telegram handlers first. Its first production stop completed in 160 ms.
+- **Fetch hygiene and Node 22.23.4 ([journal 126](docs/journey/126-fetch-hygiene-and-node.md)).**
+  - The gateway runs Node v22.23.4, which fixes a fetch hang on corrupt gzip bodies.
+  - Fetch failures log the cause's code.
+  - `npm run logs:cloudwatch -- heartbeat` shows `nodeVersion` and the shutdown fields.
+- **Pending:**
+  - republish the Pi image and update its digest;
+  - the Caddy root redirect needs the operator's one-line host install ([journal 124](docs/journey/124-caddy-root-redirect.md));
+  - upstream contributions for node-postgres docs and the `@fastify/websocket` socket fix ([#329](https://github.com/akhilvuputuri/chief-agent/issues/329)). [Release record](docs/releases.md).
+
 # Faster checks — live in `8ea6263`, 27 October 2026
 
 `checks` takes about 3½ to 5 minutes instead of about 26, and merge to production about 11 minutes instead of about 32. Tests, CI and docs only. [Journal 123](docs/journey/123-faster-checks.md), [release record](docs/releases.md).

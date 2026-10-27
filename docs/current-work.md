@@ -1,12 +1,12 @@
-# Fetch hygiene and Node 22.23.4 — branch `hardening-fetch`, 27 October 2026
+# Fetch hygiene and Node 22.23.4 — live in `9ab96c2`, 27 October 2026
 
 On Node 22.22, reading a response with a corrupt gzip body hung forever, even under an abort signal; Node 22.23.4 (undici 6.29.1) rejects it in about 140 ms. CI, the release workflow, the host-built gateway and browser images and the Pi images now pin 22.23.4; the host reused a cached floating base, so pinning forces the pull. The Pi image takes effect after it is republished, and `gateway.started` now logs `nodeVersion`. Fetch failures now log the real cause code, unread error bodies are cancelled, and the Singapore client limits bodies while decoding. See [journal 126](journey/126-fetch-hygiene-and-node.md) and issue #329.
 
-# Postgres connection drops and shutdown — branch `hardening-db-shutdown`, 27 October 2026
+# Postgres connection drops and shutdown — live in `211b2a2`, 27 October 2026
 
 A Postgres session ending (restart, failover, terminated backend) made the gateway exit, because neither the pool nor a client inside a transaction had an `error` listener. Both now log and recover; a broken client is discarded. Shutdown now stops intake, waits for running Telegram handlers, then closes HTTP and the database within an 8 s deadline, and reports what was left. Reproduced and verified on a local Postgres 16. See [journal 125](journey/125-db-drops-and-shutdown.md) and issue #329.
 
-# Caddy root redirect — branch `fix-caddy-root-redirect`, 27 October 2026
+# Caddy root redirect — merged in `cd45085`, host install pending, 27 October 2026
 
 The site root returned an empty `200` instead of redirecting to the Mini App, because `redir /miniapp/ 302` parses `/miniapp/` as a path matcher. That empty response also skipped the security headers and leaked `Server: Caddy`. Both Caddyfiles now use `redir * /miniapp/ 302`, tested on Caddy 2.6.2. Caddy is a host service, so the live host needs the one-line operator install in [journal 124](journey/124-caddy-root-redirect.md).
 

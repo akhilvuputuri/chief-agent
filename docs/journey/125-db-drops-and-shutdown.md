@@ -1,7 +1,7 @@
 # 125 — What happens when Postgres drops a connection, or the gateway is told to stop?
 
 Work date: 2026-10-27. Written: 2026-10-27.
-Status: proposed in branch `hardening-db-shutdown` ([#329](https://github.com/akhilvuputuri/chief-agent/issues/329) items 1 and 2). Not released.
+Status: released in `211b2a2` ([#329](https://github.com/akhilvuputuri/chief-agent/issues/329) items 1 and 2). The new shutdown ran cleanly on its first production stop. A real Postgres restart in production has not been observed.
 
 ## User-visible problem and preceding iteration
 
@@ -59,6 +59,15 @@ No incident is recorded. Dependency research for #329 found two latent failure p
 ## Verification and outcome
 
 Unit tests and the local Postgres reproduction pass. Not released; behaviour in production on a real restart or deploy is not yet observed. After release, the next deploy's container stop should log `gateway.stopped`.
+
+### Release closure — 2026-10-27
+
+- **PR:** [PR 331](https://github.com/akhilvuputuri/chief-agent/pull/331) merged as `211b2a2add939647e1e4a46e34932d839eca2430` (version unchanged, 0.3.103) from the independently approved head `f105ad8`.
+- **Release:** `checks` passed on `main` (11:13–11:18 UTC). The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/40495096407) deployed it at 11:22 UTC; no migration. CloudWatch:
+  - `gateway.stopping` from the old release `cd45085` at 11:22:50, then `gateway.started` for `211b2a2` at 11:22:54;
+  - no warn or error lines from 11:07 to 11:27.
+- **First production stop (measured, CloudWatch):** the next release ([PR 332](https://github.com/akhilvuputuri/chief-agent/pull/332)) stopped `211b2a2`. It logged `gateway.stopping` at 11:54:03.605 and `gateway.stopped` at 11:54:03.765 UTC, so the stop was complete in 160 ms, with no `gateway.stop_incomplete`. The new release logged `gateway.started` at 11:54:07.
+- **Not yet observed:** a Postgres restart or terminated session in production (`db.idle_client_error` / `db.client_error`), and a stop with handlers still running.
 
 ## Follow-up and next iteration
 

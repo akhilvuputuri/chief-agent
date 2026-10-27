@@ -1,7 +1,7 @@
 # 126 — Can a corrupt response hang a fetch, and what do fetch failures leave behind?
 
 Work date: 2026-10-27. Written: 2026-10-27.
-Status: proposed in branch `hardening-fetch` ([#329](https://github.com/akhilvuputuri/chief-agent/issues/329) items 3–5). Not released.
+Status: released in `9ab96c2` ([#329](https://github.com/akhilvuputuri/chief-agent/issues/329) items 3–5). The gateway now runs Node v22.23.4. The Pi image still runs its old Node until it is republished.
 
 ## User-visible problem and preceding iteration
 
@@ -46,7 +46,7 @@ No incident is recorded. Follows [journal 125](125-db-drops-and-shutdown.md), wh
   - the Singapore test did not test cancellation and passed on the old code;
   - the safety contract did not mention `causeCategory`.
 
-  It confirmed by testing: the hang on 22.22.0 and the fix on 22.23.4; that the cause-code and body-cancel tests fail on the base code; and `errorFields` behaviour for real DNS, socket and mid-body failures. Re-review of `ae90de6`: **APPROVE**. It confirmed all four new tests fail on the base code (the endless stream at the 30 s test timeout) and pass on the head in about 118 ms. Its one Low finding was that the repository's log reader did not select `nodeVersion` or `causeCategory`. Fixed in the next commit, which adds them, and the journal 125 shutdown fields, to `scripts/cloudwatch-logs.mjs`. Re-review pending.
+  It confirmed by testing: the hang on 22.22.0 and the fix on 22.23.4; that the cause-code and body-cancel tests fail on the base code; and `errorFields` behaviour for real DNS, socket and mid-body failures. Re-review of `ae90de6`: **APPROVE**. It confirmed all four new tests fail on the base code (the endless stream at the 30 s test timeout) and pass on the head in about 118 ms. Its one Low finding was that the repository's log reader did not select `nodeVersion` or `causeCategory`. Fixed in the next commit, which adds them, and the journal 125 shutdown fields, to `scripts/cloudwatch-logs.mjs`. Re-review of `30537c4`: **APPROVE**, no findings. Devin found no issues.
 
 ## Verification and outcome
 
@@ -54,6 +54,13 @@ The tests above pass, and the hang was reproduced and shown fixed on Node 22.23.
 
 - **Pi image:** `config/coding-pi.json` pins it by digest, so the new Pi `Dockerfile` takes effect only after the image is republished (`pi-coding-image` workflow, run by hand) and the digest is updated in a reviewed change. Until then, Pi jobs keep their current Node.
 - **Gateway and browser images:** the next release builds the gateway on `node:22.23.4-bookworm-slim`. Verify it with `npm run logs:cloudwatch -- heartbeat`, which now shows `nodeVersion` and, for journal 125, the shutdown fields; the shared field list also shows `causeCategory`. The gathering-browser images are rebuilt only through their operator procedure.
+
+### Release closure — 2026-10-27
+
+- **PR:** [PR 332](https://github.com/akhilvuputuri/chief-agent/pull/332) merged as `9ab96c2754370d170b60357b1faa0702df6a2b2b` (version unchanged, 0.3.103) from the independently approved head `30537c4`.
+- **Release:** `checks` passed on `main` (11:44–11:48 UTC), and the [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/40498941212) deployed it at 11:54 UTC.
+- **Node (measured, CloudWatch `heartbeat`):** `gateway.started` for `9ab96c2` at 11:54:07 logged `nodeVersion: v22.23.4`. So the host pulled the pinned base image, and the corrupt-gzip fix (undici 6.29.1) is live in the gateway. No warn or error lines from 11:37 to 12:07.
+- **Not yet done:** the Pi image is still the digest pinned in `config/coding-pi.json`, so it keeps its old Node until it is republished and the digest is updated. The gathering-browser images change only through their operator procedure.
 
 ## Follow-up and next iteration
 
