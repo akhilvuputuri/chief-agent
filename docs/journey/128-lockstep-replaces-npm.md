@@ -122,7 +122,7 @@ Local verification on macOS with lockstep 0.1.0:
 
 The full CI result for the cut-over PR is recorded on the PR.
 
-Not yet done: Docker image builds with the published release binary, rebuilt worker images, and a production release.
+The PR's CI built every Dockerfile with the published v0.1.0 binary: the gateway, browser, coding and Pi worker images and the standalone Pi image. It passed their smoke checks, with all 11 checks green on `7babddd`. Not yet done: published worker images, their digests, and a production release.
 
 ### Release closure — pending
 
@@ -134,7 +134,15 @@ Pending steps:
 4. Release Chief.
 5. Record the release and the CI, host-build and coding-job timings against the baseline in issue #330.
 
-Coding jobs on the old worker images report `npm run …` and will be refused by the exact merge gate until the digests are updated.
+Transition, traced by the independent review. The gate fails closed throughout, so nothing merges with checks that did not run:
+
+- **Between this merge and the digest release, old images:**
+  - They report `npm run …`, which the exact gate refuses.
+  - Against the new main they also fail outright: Chief's `check` script now calls `lockstep`, which those images lack.
+  - Accepting both command names (option b) would only help jobs on a pre-merge base, so it is not worth it.
+- **After the digest release:** jobs still pinned to a pre-merge base fail on the new images, because their scripts call npm.
+- **Candidates that already finished:** any with stored `npm run` checks that are waiting for a Merge card are refused, with a reviewer-proof message.
+- **Plan:** before merging, finish or cancel the open coding jobs. Merge, publish the images, update the digests, then restart any job that is still needed.
 
 ## Follow-up and next iteration
 

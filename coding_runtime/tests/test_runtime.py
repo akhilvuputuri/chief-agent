@@ -600,6 +600,16 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(captured[0]["reasoning"], {"enabled": True, "effort": "high"})
 
+    async def test_commands_keep_the_package_store_outside_the_checkout(self):
+        r = await self.w.command(
+            "node", ["-e", "console.log(process.env.LOCKSTEP_STORE)"]
+        )
+        store = r.text().strip().splitlines()[-1]
+        self.assertTrue(Path(store).is_absolute(), store)
+        self.assertFalse(
+            Path(store).resolve().is_relative_to(self.w.root.resolve()), store
+        )
+
     async def test_worker_candidate_actual_git_lockstep_checks_fresh_review(self):
         package = {
             "name": "fixture",

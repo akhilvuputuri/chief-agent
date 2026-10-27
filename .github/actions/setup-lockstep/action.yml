@@ -15,8 +15,17 @@ runs:
         node tools/install-lockstep.mjs --dir "$dir"
         echo "$dir" >> "$GITHUB_PATH"
         echo "LOCKSTEP_STORE=$RUNNER_TEMP/lockstep-store" >> "$GITHUB_ENV"
-        node_bin=$(dirname "$(command -v node)")
-        rm -f "$node_bin/npm" "$node_bin/npx" "$node_bin/corepack"
+        # Remove every npm on the PATH (setup-node's and the runner image's).
+        for tool in npm npx corepack; do
+          for found in $(type -ap "$tool"); do
+            sudo rm -f "$found"
+          done
+        done
+        hash -r
+        if command -v npm || command -v npx; then
+          echo "npm is still on the PATH" >&2
+          exit 1
+        fi
         "$dir/lockstep" --version
     - uses: actions/cache@v4
       with:

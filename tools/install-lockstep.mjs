@@ -22,8 +22,14 @@ import { fileURLToPath } from "node:url";
 const args = process.argv.slice(2);
 const option = (name, fallback) => {
   const i = args.indexOf(name);
-  return i >= 0 && args[i + 1] ? args[i + 1] : fallback;
+  if (i < 0) return fallback;
+  if (!args[i + 1] || args[i + 1].startsWith("--")) {
+    console.error(`lockstep: ${name} needs a value`);
+    process.exit(2);
+  }
+  return args[i + 1];
 };
+const MAX_BYTES = 64 * 1024 * 1024;
 const here = dirname(fileURLToPath(import.meta.url));
 const pinPath = resolve(option("--pin", join(here, "lockstep.json")));
 const dir = resolve(option("--dir", join(homedir(), ".local", "bin")));
@@ -50,7 +56,10 @@ for (let attempt = 1; ; attempt++) {
   try {
     const response = await fetch(asset.url, { redirect: "follow" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (Number(response.headers.get("content-length") || 0) > MAX_BYTES)
+      throw new Error("download is too large");
     body = Buffer.from(await response.arrayBuffer());
+    if (body.length > MAX_BYTES) throw new Error("download is too large");
     break;
   } catch (error) {
     if (attempt === 3) {

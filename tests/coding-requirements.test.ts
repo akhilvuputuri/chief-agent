@@ -20,7 +20,7 @@ import {
   stat,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { ensureUser, type Database } from "../src/db.js";
 import { requirementScope } from "../src/coding/requirements.js";
@@ -104,6 +104,12 @@ test("required dependency installation keeps the package store outside the captu
   ]);
   const installed = await w.command("lockstep", ["ci", "--ignore-scripts"]);
   assert.equal(installed.exitCode, 0, installed.output);
+  // Commands get a package store outside the checkout.
+  const store = (
+    await w.command("node", ["-e", "console.log(process.env.LOCKSTEP_STORE)"])
+  ).output.trim();
+  assert(isAbsolute(store), store);
+  assert(!store.startsWith(root), store);
   const entries = await readdir(root);
   assert(!entries.includes("lockstep-store") && !entries.includes(".cache"));
   assert.equal((await w.snapshot("plan", "summary")).files.length, 0);

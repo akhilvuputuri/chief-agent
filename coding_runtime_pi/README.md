@@ -41,7 +41,7 @@ Tasks are signed atomic JSON records; Pi sessions are separate private JSONL fil
 
 ## Container
 
-Build from this directory with `docker build -t pi-runtime .`. It installs a Linux process guard, disables Node's inspector activation and runs as the non-root node user. The command executor strips environment, applies explicit time/output limits, terminates process groups and reaps detached descendants through the guard. The native guard must load before any credential/bootstrap input is read.
+Build from the repository root with `docker build --build-context lockstep=tools -t pi-runtime coding_runtime_pi`; the named context supplies the pinned, checksum-verified lockstep (without it the build fails, because `lockstep` is not an image). It installs a Linux process guard, disables Node's inspector activation and runs as the non-root node user. The command executor strips environment, applies explicit time/output limits, terminates process groups and reaps detached descendants through the guard. The native guard must load before any credential/bootstrap input is read.
 
 Source must be treated as untrusted: the container is the host boundary and must receive no unrelated private data. The guard prevents same-UID commands reading the runtime's initial environment/memory through proc. Persistent metadata signatures prevent a command from forging an approval record without the private signing key; they do not make local execution a host filesystem sandbox.
 

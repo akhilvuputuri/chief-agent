@@ -20,7 +20,7 @@ export function hardStopMergePath(path: string) {
  */
 export function protectedMergePath(path: string) {
   return (
-    /^(?:\.github|db|deploy|scripts|config|evals|coding_runtime|plugins)(?:\/|$)/.test(
+    /^(?:\.github|db|deploy|scripts|config|evals|coding_runtime|coding_runtime_pi|plugins|tools)(?:\/|$)/.test(
       path,
     ) ||
     /^(?:AGENTS\.md|REVIEW\.md|compose(?:\..+)?\.ya?ml|Dockerfile(?:\..+)?|package(?:-lock)?\.json)$/.test(
