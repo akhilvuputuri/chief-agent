@@ -110,6 +110,7 @@ async function fixture(model: ModelAdapter, stableTools = false) {
     "005_work",
     "006_runtime",
     "008_costs",
+    "010_memory",
     "012_message_storage",
     "013_conversation_control",
     "014_checkpoint_steering",

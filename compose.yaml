@@ -47,6 +47,8 @@ services:
         "-f",
         "/migrations/009_calendar_approval.sql",
         "-f",
+        "/migrations/010_memory.sql",
+        "-f",
         "/migrations/011_canvases.sql",
         "-f",
         "/migrations/012_message_storage.sql",

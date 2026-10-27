@@ -665,6 +665,8 @@ export interface AgentRequest {
   afterTool?: (operation: string) => void;
   modelSignal?: AbortSignal;
   memories: { key: string; value: string }[];
+  /** Facts and lessons learned from completed work, within the selection budget. */
+  learned?: import("./memory.js").LearnedItem[];
   runtime?: {
     context: string;
     tools?: import("./model.js").ToolDefinition[];

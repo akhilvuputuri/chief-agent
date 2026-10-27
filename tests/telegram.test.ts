@@ -29,6 +29,9 @@ test("Telegram handles natural text once and ignores unauthorized users and grou
     await readFile(new URL("../db/006_runtime.sql", import.meta.url), "utf8"),
   );
   await pg.exec(
+    await readFile(new URL("../db/010_memory.sql", import.meta.url), "utf8"),
+  );
+  await pg.exec(
     await readFile(
       new URL("../db/012_message_storage.sql", import.meta.url),
       "utf8",
@@ -119,6 +122,7 @@ test("status responds while a conversation is still running", async () => {
     "005_work",
     "006_runtime",
     "008_costs",
+    "010_memory",
     "012_message_storage",
     "013_conversation_control",
     "014_checkpoint_steering",
@@ -221,6 +225,7 @@ test("photos and PDF documents reach the agent as bounded, owner-scoped attachme
     "005_work",
     "006_runtime",
     "008_costs",
+    "010_memory",
     "012_message_storage",
     "013_conversation_control",
     "014_checkpoint_steering",

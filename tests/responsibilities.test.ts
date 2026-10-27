@@ -8,6 +8,7 @@ import { readConfig } from "../src/config.js";
 import { HistoryStore } from "../src/history.js";
 import { CalendarTools } from "../src/calendar.js";
 import { migratedPGlite } from "./helpers/pglite.js";
+import { MemoryStore } from "../src/memory.js";
 import { ensureUser, type Database } from "../src/db.js";
 import { Responsibilities, attention } from "../src/responsibilities.js";
 import {
@@ -244,6 +245,7 @@ test("U1 real runtime reads one admitted email, applies parcel provenance, resol
     await f.db.query(
       "INSERT INTO memories(user_id,key,value) VALUES('a','unrelated','private unrelated memory')",
     );
+    await new MemoryStore(f.db).importLegacy();
     const task = (await f.db.query("SELECT * FROM work_tasks")).rows[0];
     let index = 0;
     const actions = [

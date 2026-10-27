@@ -34,6 +34,7 @@ import { RuleTools } from "./stock-rules.js";
 import type { SingaporeTools } from "./singapore/tools.js";
 import { isSingaporeAction } from "./singapore/schema.js";
 import type { MailIndex } from "./mail-recall.js";
+import { MemoryStore } from "./memory.js";
 export class JobTools {
   constructor(
     private db: Database,
@@ -418,18 +419,22 @@ export class JobTools {
         )
       ).rows;
     if (a.operation === "memory_list")
-      return (
-        await db.query(
-          "SELECT key,value FROM memories WHERE user_id=$1 ORDER BY key",
-          [user],
-        )
-      ).rows;
+      return (await new MemoryStore(db).active(user)).map((m) => ({
+        key: m.key,
+        value: m.value,
+        ...(m.kind === "fact" ? {} : { kind: m.kind }),
+        ...(m.origin === "owner" ? {} : { origin: m.origin }),
+      }));
     if (a.operation === "memory_set") {
-      await db.query(
-        "INSERT INTO memories(user_id,key,value) VALUES($1,$2,$3) ON CONFLICT(user_id,key) DO UPDATE SET value=$3,updated_at=now()",
-        [user, a.key, a.value],
-      );
-      return { saved: true };
+      const saved = await new MemoryStore(db).write(user, {
+        key: a.key,
+        value: a.value,
+        kind: "fact",
+        origin: "owner",
+        reason: "The owner asked Chief to remember this",
+        source: { runId: run },
+      });
+      return { saved: true, revision: saved.revision };
     }
     // Handled by the agent loop; it never reaches the domain dispatcher.
     if (a.operation === "tools_load") throw new Error("Operation unavailable");

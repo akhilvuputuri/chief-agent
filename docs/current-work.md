@@ -1,3 +1,7 @@
+# Revisioned memory for learning from work — proposed, 28 October 2026
+
+Phase 1 of issue #326. Memories become immutable revisions with provenance (run, task and learner IDs), trust tags for anything learned from untrusted content, and threat flags that flag but never block. Each owner turn records which revisions it had in context. Learned items can be rolled back in bulk by learner run, time window, source or kind, and the rollback is itself a revision. `memories` stays as the projection that job analysis, job alignment and older images read, and the gateway imports existing rows with unknown provenance at startup. The cached prefix is unchanged until something is learned. No learner yet. Migration 010 needs the operator rollout (`scripts/deploy-memory.py`) right after the merge. Branch `feat/learn-from-work`. See [learning from completed work](learning.md) and [journal 129](journey/129-revisioned-memory.md).
+
 # kite replaces npm — cut-over PR open, 28 October 2026
 
 Issue #330. npm is replaced everywhere by [kite](https://github.com/akhilvuputuri/kite), a Rust package manager. It installs, resolves and runs scripts with npm-identical results: the same `node_modules`, `package-lock.json` and `package.json`, checked against npm 10.9.9 on Linux x64, Linux arm64 and macOS.
