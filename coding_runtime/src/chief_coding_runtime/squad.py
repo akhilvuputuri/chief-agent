@@ -309,7 +309,7 @@ class Squad:
             await self.progress(
                 "verifying", "Runtime is verifying the coder's exact candidate."
             )
-            install = await self.workspace.command("npm", ["ci"])
+            install = await self.workspace.command("lockstep", ["ci"])
             if install.exit_code:
                 raise ValueError("Repository dependency installation failed")
             checks = []
@@ -318,11 +318,11 @@ class Squad:
                 if remaining <= 0:
                     raise ValueError("Squad allocation expired")
                 result = await self.workspace.command(
-                    "npm", ["run", script], timeout_seconds=min(600, remaining)
+                    "lockstep", ["run", script], timeout_seconds=min(600, remaining)
                 )
                 checks.append(
                     Check(
-                        command=f"npm run {script}",
+                        command=f"lockstep run {script}",
                         exitCode=result.exit_code,
                         output=result.text()[-4000:],
                     )

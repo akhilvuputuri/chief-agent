@@ -1,6 +1,6 @@
 # Contributing
 
-Use Node 22+ and the lockfile (`npm ci`). Run `npm run check`, `npm run build` and `npm run format:check`. Keep fixtures synthetic; never commit credentials, provider logs or personal conversation data.
+Use Node 22+, the pinned lockstep (`node tools/install-lockstep.mjs`; npm is not used) and the lockfile (`lockstep ci`). Run `lockstep run check`, `lockstep run build` and `lockstep run format:check`. Keep fixtures synthetic; never commit credentials, provider logs or personal conversation data.
 
 The runtime lives in `src`: the model adapter proposes named operations, the conversation loop records observations, and the owner-scoped dispatcher validates and executes actions. New tools need a Zod schema, explicit read/write classification, ownership checks and meaningful tests. Sensitive actions must preserve exact-action approvals. Never derive identity or permissions from model arguments.
 

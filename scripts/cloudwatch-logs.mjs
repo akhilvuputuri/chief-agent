@@ -220,7 +220,7 @@ async function main() {
   }
   if (request.help) {
     console.log(
-      "Usage: npm run logs:cloudwatch -- <query> [--since 1h] [--until now] [--limit 100] [--run ID] [--event NAME]\n",
+      "Usage: lockstep run logs:cloudwatch -- <query> [--since 1h] [--until now] [--limit 100] [--run ID] [--event NAME]\n",
     );
     for (const [name, spec] of Object.entries(QUERIES))
       console.log(`  ${name.padEnd(10)} ${spec.help}`);

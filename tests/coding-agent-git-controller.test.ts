@@ -153,10 +153,10 @@ test("agent tokens are issued only to a running, approved implementation attempt
     question: "",
     checkpoint,
     checks: [
-      "npm ci",
-      "npm run check",
-      "npm run build",
-      "npm run format:check",
+      "lockstep ci",
+      "lockstep run check",
+      "lockstep run build",
+      "lockstep run format:check",
     ].map((command) => ({ command, exitCode: 0, output: "ok" })),
     review: {
       verdict: "APPROVE",

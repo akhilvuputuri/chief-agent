@@ -177,7 +177,7 @@ rows in `stock_alerts` and reset them to `pending` deliberately.
 
 ## Deployment (operator-reviewed migration 018)
 
-1. Independently review the exact PR head and run `npm run check` plus
+1. Independently review the exact PR head and run `lockstep run check` plus
    changed-file formatting. Review `scripts/deploy-watchlist.py` too.
 2. Merge only after approval and CI. The ordinary release refuses the
    DB/Compose change.
@@ -201,7 +201,7 @@ watchlist state or replay uncertain deliveries during recovery.
 
 ## Deployment (operator-reviewed migration 020, monitoring windows)
 
-Same shape as 018/019: independent review of the exact head, `npm run check`,
+Same shape as 018/019: independent review of the exact head, `lockstep run check`,
 `python3 scripts/test-deploy-watch-window.py`, then merge (the ordinary release
 refuses the DB/Compose change). Verify live `RELEASE` is in `BASES` of
 `scripts/deploy-watch-window.py`; if newer, reconcile and re-review the script.

@@ -1008,7 +1008,11 @@ export class CodingController {
         !c.piState.reviewRound ||
         !candidate ||
         candidate.hash !== artifactHash(c) ||
-        ["npm run check", "npm run build", "npm run format:check"].some(
+        [
+          "lockstep run check",
+          "lockstep run build",
+          "lockstep run format:check",
+        ].some(
           (command) =>
             !candidate.checks.some(
               (check) => check.command === command && check.exitCode === 0,
@@ -1201,7 +1205,11 @@ export class CodingController {
         r.review.patchHash !== artifactHash(r.checkpoint) ||
         !r.checkpoint.files.length ||
         !!r.published !== !!(job.settings.agentGit && this.agentGit) ||
-        ["npm run check", "npm run build", "npm run format:check"].some(
+        [
+          "lockstep run check",
+          "lockstep run build",
+          "lockstep run format:check",
+        ].some(
           (cmd) => !r.checks.some((c) => c.command === cmd && c.exitCode === 0),
         ))
     )

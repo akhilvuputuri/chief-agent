@@ -80,9 +80,9 @@ export function assertSquadCheckpoint(job: CodingJob, c: Checkpoint) {
   )
     throw new Error("Squad candidate hash is stale");
   const checked = [
-    "npm run check",
-    "npm run build",
-    "npm run format:check",
+    "lockstep run check",
+    "lockstep run build",
+    "lockstep run format:check",
   ].every((command) =>
     s.checks.some((check) => check.command === command && check.exitCode === 0),
   );

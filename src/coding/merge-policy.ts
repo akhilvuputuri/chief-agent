@@ -44,7 +44,7 @@ export function approvedArtifact(result: Outcome, reviewerModel: string) {
     result.review.patchHash === hash &&
     ["check", "build", "format:check"].every((script) =>
       result.checks.some(
-        (c) => c.command === `npm run ${script}` && c.exitCode === 0,
+        (c) => c.command === `lockstep run ${script}` && c.exitCode === 0,
       ),
     )
   );

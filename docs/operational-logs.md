@@ -46,7 +46,7 @@ The mapping from recorded events to log lines is also in `ops-log.ts`. Content-b
 
 ## Saved queries
 
-`npm run logs:cloudwatch -- <query>` ([scripts/cloudwatch-logs.mjs](../scripts/cloudwatch-logs.mjs)) runs named Logs Insights queries; `--help` lists them. `models` sums tokens and reported cost by event, model and provider; `finishes` counts model calls by finish reason; `context` lists per-call context sizes. In a `stats` clause, never give an aggregate the name of the field it aggregates (`sum(inputTokens) as inputTokens`): Logs Insights then omits the column. The `models` query lost its token sums this way until [journal 118](journey/118-telemetry-gaps.md), and a test now rejects it.
+`lockstep run logs:cloudwatch -- <query>` ([scripts/cloudwatch-logs.mjs](../scripts/cloudwatch-logs.mjs)) runs named Logs Insights queries; `--help` lists them. `models` sums tokens and reported cost by event, model and provider; `finishes` counts model calls by finish reason; `context` lists per-call context sizes. In a `stats` clause, never give an aggregate the name of the field it aggregates (`sum(inputTokens) as inputTokens`): Logs Insights then omits the column. The `models` query lost its token sums this way until [journal 118](journey/118-telemetry-gaps.md), and a test now rejects it.
 
 ## Adding an event
 

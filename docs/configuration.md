@@ -43,7 +43,7 @@ To change a behaviour setting today, edit `config/runtime.json` in a PR. It take
 Locally, a `.env` line that sets a behaviour name, even to an empty value, overrides the file. Delete such lines rather than leaving them empty. `config.loaded` lists them.
 
 ```sh
-AWS_PROFILE=chief-logs npm run logs:cloudwatch -- config --since 2h
+AWS_PROFILE=chief-logs lockstep run logs:cloudwatch -- config --since 2h
 ```
 
 ## Next steps (#143)

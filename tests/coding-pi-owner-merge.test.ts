@@ -61,7 +61,7 @@ async function fixture(
     summary: "Added the fixture entry",
     checkpoint: cp,
     checks: ["check", "build", "format:check"].map((s) => ({
-      command: `npm run ${s}`,
+      command: `lockstep run ${s}`,
       exitCode: 0,
       output: "passed",
     })),
@@ -666,7 +666,7 @@ async function rebasedAttempt(f: Awaited<ReturnType<typeof fixture>>) {
       reviewCandidate: {
         hash,
         checks: ["check", "build", "format:check"].map((s) => ({
-          command: `npm run ${s}`,
+          command: `lockstep run ${s}`,
           exitCode: 0,
           output: "passed",
         })),

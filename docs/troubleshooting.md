@@ -5,7 +5,7 @@ Use this page for an incident reported from Telegram, a cloud coding task, or a 
 ## Sources of truth
 
 1. GitHub `main` is the integrated code and documentation. A branch, PR, candidate section, or package version is not the deployed application.
-2. The exact commit's successful release receipt and the server `RELEASE` value establish what was installed and healthy **at release time**. `npm run release:status -- FULL_SHA` checks the receipt. Use current diagnostics to check whether that is still the running SHA. Startup health does not prove a Telegram or provider workflow succeeds.
+2. The exact commit's successful release receipt and the server `RELEASE` value establish what was installed and healthy **at release time**. `lockstep run release:status -- FULL_SHA` checks the receipt. Use current diagnostics to check whether that is still the running SHA. Startup health does not prove a Telegram or provider workflow succeeds.
 3. Owner-scoped Postgres runs, events, calls, approvals, source records and message history establish what happened in an interaction. A model's reply or a screenshot alone does not prove a tool call, approval, or external write succeeded.
 4. `docs/current-work.md` records the latest verified milestone and open work; `docs/journey/` preserves dated decisions and incidents. Historical reports remain historical even when a later fix shipped. If evidence conflicts, record the discrepancy and update the docs after verifying the live state.
 
@@ -14,10 +14,10 @@ Never put API keys, OAuth tokens, raw mail, private conversation text, attachmen
 ## First pass from any coding environment
 
 1. Record the user's approximate Singapore time, requested action, Telegram result, and whether a button was shown or pressed. Keep private details in the authorized task, not an issue. Identify the relevant source module and existing incident or issue.
-2. Run `npm run doctor:cloud` in the **actual** coding session when GitHub or production evidence is needed. Repository read, Actions read, workflow dispatch, merge and production access are distinct capabilities.
+2. Run `lockstep run doctor:cloud` in the **actual** coding session when GitHub or production evidence is needed. Repository read, Actions read, workflow dispatch, merge and production access are distinct capabilities.
 3. Fetch `main`, identify its SHA, and verify the corresponding release receipt. Do not infer that the running server matches `main` from a passing PR check.
 4. Read the sanitized production logs (see [lightsail.md](lightsail.md#reading-logs)). This needs the private reader identity in your environment, and a missing line is not proof of success.
-   - Run `npm run logs:cloudwatch -- errors --since 2h`.
+   - Run `lockstep run logs:cloudwatch -- errors --since 2h`.
    - Run `run --run <id>` for the run it names.
    - Run `heartbeat` or `host` for restarts and exporter gaps.
 5. If authorized and the repository is private, run the manual `production-diagnostics` Actions workflow and read its completed output. If workflow dispatch is unavailable, the repository owner or the installed Devin GitHub bot can post exactly `/companion diagnose` on a repository issue or PR. Other actors cannot trigger that path. See [cloud-agent workflow](cloud-agent-workflow.md) and [cloud development](cloud-development.md).

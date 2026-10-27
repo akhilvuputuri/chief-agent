@@ -6,7 +6,7 @@
 - **Fetch hygiene and Node 22.23.4 ([journal 126](docs/journey/126-fetch-hygiene-and-node.md)).**
   - The gateway runs Node v22.23.4, which fixes a fetch hang on corrupt gzip bodies.
   - Fetch failures log the cause's code.
-  - `npm run logs:cloudwatch -- heartbeat` shows `nodeVersion` and the shutdown fields.
+  - `lockstep run logs:cloudwatch -- heartbeat` shows `nodeVersion` and the shutdown fields.
 - **Closing #329 ([journal 127](docs/journey/127-closing-dependency-hardening.md)), live in `da2a5ff`:** Upgrade sockets close on every route and at shutdown, one shared bounded body reader, a Postgres session-drop smoke test in CI and a corrupt-gzip regression test. Its first stop through `closeServer()` completed in 162 ms.
 - **Pending:**
   - confirm the next new coding job runs on the Pi image re-pinned to Node 22.23.4 (live in `c4ba246`);
@@ -335,7 +335,7 @@ Responsibilities (issue 131) shipped in [PR 148](https://github.com/akhilvuputur
 
 Current verified topic-routing milestone, 1 October 2026 SGT: [v0.3.30](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.30), deployed `7cdbda24d7e7145f9482eb47819ec822722dc649`. Both independently reviewed stages of issue 137 are released; migration 022 is installed, exact receipts and separate server health matched, and a rolled-back deployed-module reference/ownership/identity smoke passed without retaining fixtures or sending messages. General is the default input surface; News/Markets/Updates organize outbound feeds, and in-topic follow-ups stay there. See [telegram topics](docs/telegram-topics.md) and [journal 53](docs/journey/53-feed-destinations.md). Owner live Telegram acceptance remains separate. Recheck the latest release and server RELEASE before claiming current state.
 
-**Production host, 26 September 2026:** Chief runs on one AWS Lightsail VM in Singapore with the same Compose project and database. The move was verified by per-table content hashes. Sanitized operational logs go to CloudWatch, and local or cloud agents read them with `npm run logs:cloudwatch` and a read-only identity; no SSH is needed. Read [docs/lightsail.md](docs/lightsail.md) and [journal 35](docs/journey/35-lightsail-private-logs.md) for the procedure, the acceptance ledger and the pending owner checks. DigitalOcean references below are historical.
+**Production host, 26 September 2026:** Chief runs on one AWS Lightsail VM in Singapore with the same Compose project and database. The move was verified by per-table content hashes. Sanitized operational logs go to CloudWatch, and local or cloud agents read them with `lockstep run logs:cloudwatch` and a read-only identity; no SSH is needed. Read [docs/lightsail.md](docs/lightsail.md) and [journal 35](docs/journey/35-lightsail-private-logs.md) for the procedure, the acceptance ledger and the pending owner checks. DigitalOcean references below are historical.
 
 Latest verified milestone, 28 September 2026 SGT: [v0.3.28](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.28) at `8f7f7f791377eaf39138def8418cad3b97d3338b`. It adds stock monitoring hours (migration 020, [journal 39](docs/journey/39-watch-monitoring-window.md)) and the daily news bulletin (migration 021, [runbook](docs/news-bulletin.md), [journal 42](docs/journey/42-news-bulletin.md)). Both were installed through reviewed operator rollouts, and both still need owner acceptance. Previous milestone as of 26 September 2026 SGT: [v0.3.27](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.27), deployed `9c7b67cfa19eec1e9d774b93986a922c41221eb5` on the Lightsail host, with an exact-commit release receipt and a matching server `RELEASE` (see [journal 35](docs/journey/35-lightsail-private-logs.md)). The previous milestone, [v0.3.26](https://github.com/akhilvuputuri/chief-agent/releases/tag/v0.3.26) (`f3ab7f1`), was verified on DigitalOcean with a rolled-back stock add/list check. Recheck the latest release and server `RELEASE` before claiming current production state. The larger context ceiling remains temporary; [issue #77](https://github.com/akhilvuputuri/chief-agent/issues/77) and the [context plan](docs/context-management.md) track bounded growth. For an incident, start with the [shared troubleshooting runbook](docs/troubleshooting.md); no agent should need this chat history to know the diagnostic paths or access limits.
 
@@ -369,7 +369,7 @@ The application is a general personal assistant. Telegram text and voice are the
 - Production host (since 26 September 2026): AWS Lightsail `chief-prod`, static IP `52.77.47.24`, `/opt/hermes-companion`, $12/month plan, Singapore. See [Lightsail host and private logs](docs/lightsail.md).
 - Operator SSH: user `ubuntu` with the private ops `lightsail_operator` key and pinned `known_hosts_lightsail`. The ops `ssh_config` defines `chief-lightsail`.
 - Former DigitalOcean host `188.166.246.143`: gateway stopped, kept for rollback until the owner retires it. Its key is the ops `hermes_do`.
-- Production logs: `npm run logs:cloudwatch` with the reader identity (local profile `chief-logs`).
+- Production logs: `lockstep run logs:cloudwatch` with the reader identity (local profile `chief-logs`).
 
 Secrets live only in private environment/operations files and server configuration. Never print or commit their contents. Existing Telegram pairing and Google authorization should be reused. The user authorized merging passing changes and deploying on this server.
 
@@ -392,7 +392,7 @@ Migration `006_runtime.sql` archives old histories, seeds text-only context and 
 
 ## Verification and next work
 
-Run `npm run check`, `npm run build`, `npm run format:check`. `npm run smoke:runtime` makes bounded paid Sol calls against a synthetic PGlite database, never the production user's records. Check deployment status in `docs/verification.md` and server `RELEASE`.
+Run `lockstep run check`, `lockstep run build`, `lockstep run format:check`. `lockstep run smoke:runtime` makes bounded paid Sol calls against a synthetic PGlite database, never the production user's records. Check deployment status in `docs/verification.md` and server `RELEASE`.
 
 Improve from actual daily conversations: context selection, memory retrieval, deduplication, tracing and voice responsiveness. Realtime voice, parallel specialist teams, sandbox execution and runtime self-deployment remain later milestones. The authenticated read-only Mini App and persistent canvases shipped in v0.3.5; see [journal 14](docs/journey/14-persistent-canvases.md) for verification and remaining live acceptance checks.
 

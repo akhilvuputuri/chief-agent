@@ -52,10 +52,10 @@ The coordinator may use its ordinary authorized tools after receiving a report. 
 The operator CLI works without a database or API keys:
 
 ```sh
-npm run plugins -- validate plugins/public-research
-npm run plugins -- export plugins/public-research /tmp/public-research.bundle.json
-npm run plugins -- import /tmp/public-research.bundle.json plugins/research-import
-npm run plugins -- registry plugins
+lockstep run plugins -- validate plugins/public-research
+lockstep run plugins -- export plugins/public-research /tmp/public-research.bundle.json
+lockstep run plugins -- import /tmp/public-research.bundle.json plugins/research-import
+lockstep run plugins -- registry plugins
 ```
 
 Export creates a new JSON bundle and refuses to overwrite a file. Import validates first and writes into a new destination directory; it does not enable the plugin. Review the text, then add the printed content hash and explicit agent/tool grants to the host registry. Do not enable two packages with the same plugin identity. Use a branch/PR, independent review, tests and the standard release pipeline for production changes. No install tool is exposed to the conversational agent.

@@ -3,9 +3,9 @@
 Paired, statistically reported evaluations of small decision models (Jev on OpenRouter, Gemini 3.8 Flash as a small-LLM comparison) against Chief's current behaviour and a simple rule. This is the measurement harness for [issue #127](https://github.com/akhilvuputuri/chief-agent/issues/127). It answers one question per decision: is a decision model suitable here, and what does it gain?
 
 ```sh
-npm run eval:decisions -- continuity            # paid: Jev and Flash, 3 runs per case
-npm run eval:decisions -- routing --runs 3
-npm run eval:decisions -- continuity --backends keep,rule   # free baselines only
+lockstep run eval:decisions -- continuity            # paid: Jev and Flash, 3 runs per case
+lockstep run eval:decisions -- routing --runs 3
+lockstep run eval:decisions -- continuity --backends keep,rule   # free baselines only
 ```
 
 Paid backends need `OPENROUTER_API_KEY` in the environment or `--env-file`. A full run of one decision costs well under $1. Reports are written to `results/<decision>-<time>.json` with every call, and a Markdown table is printed. The fixtures are fictional and synthetic, so reports contain no private data.

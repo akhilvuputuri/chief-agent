@@ -9,8 +9,8 @@ Planning uses a focused investigation pass: after 32 navigation operations or te
 Use Node 22.19.0 or newer. The worker and CI pin 22.23.4 (its bundled undici 6.29.1 fixes a fetch hang on corrupt gzip bodies, journal 126). Install without dependency lifecycle scripts:
 
 ```sh
-npm ci --ignore-scripts
-npm run check
+lockstep ci --ignore-scripts
+lockstep run check
 ```
 
 The development tests inject synthetic providers; they make no model API calls. Real inference requires your own explicitly configured development credentials. Keep keys outside repository files. The CLI reads `PI_RUNTIME_API_KEY` for model access and a separate stable private `PI_RUNTIME_STATE_KEY` (at least 32 characters) for signed task records. Both are removed from process environment before generated commands can run. State recovery requires retaining the signing key.
@@ -18,7 +18,7 @@ The development tests inject synthetic providers; they make no model API calls. 
 ## CLI
 
 ```sh
-node dist/cli.js start /path/to/repository "Fix the selected bug" --check "npm test" --state /private/task-state
+node dist/cli.js start /path/to/repository "Fix the selected bug" --check "lockstep test" --state /private/task-state
 node dist/cli.js run TASK_ID --state /private/task-state
 node dist/cli.js status TASK_ID --state /private/task-state
 node dist/cli.js approve TASK_ID PLAN_REVISION PLAN_HASH --state /private/task-state

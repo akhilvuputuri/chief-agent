@@ -20,7 +20,7 @@ On 22 September a mailbox run failed **before** the model request after 21 tool 
 
 ## Stage 1 measurements — 26 September 2026
 
-- **Offline inventory** (`npm run context:inventory`, repository definitions only, every integration enabled):
+- **Offline inventory** (`lockstep run context:inventory`, repository definitions only, every integration enabled):
   - 70 tool schemas take **38,480 characters**. The largest domains are canvas (4 tools, 8,135), work (7, 3,672), job (8, 3,402), preparation (5, 2,908) and parcel (3, 2,798). `canvas_update` and `canvas_create` are about 3,700 each.
   - The core instructions are 13,463 characters, and the base runtime state 2,544. `TOOL_DESCRIPTION` in `protocol.ts` (3,587 characters) is imported but never sent.
 - **Production, sizes only.** An operator read the stored `context.over_budget` and `context.selected` events for 26 September (20 model attempts; numbers only).
@@ -29,7 +29,7 @@ On 22 September a mailbox run failed **before** the model request after 21 tool 
   - Memories, measured separately as total key and value length in the database, were 2,463 characters.
   - Hypothesis, not yet measured: most of the remaining difference from the offline figures is owner runtime state, the conversation summary and the current message. This assumes production offers the same tools as the all-enabled inventory. The per-call split below settles it.
 - **Tool use over 30 days** (93 runs, about 580 journaled calls): about 40 of the 70 offered tools were called. Most used were `web_search` (124), `job_analyze` (71), `web_read` (50), `job_alignment_input` (42), `finish_turn` (39) and `conversation_search` (34). Canvas tools were called **zero** times, yet their schemas are sent on every call.
-- **Instrumentation:** `context.selected` (one per model attempt) now records the fixed-envelope parts (instructions, memories, runtime context, tool schemas with count, summary, message). The sanitized operational log projects them as numbers only (see [operational logs](operational-logs.md)), so stage 2 can be compared per call with `npm run logs:cloudwatch -- event --event context.selected`.
+- **Instrumentation:** `context.selected` (one per model attempt) now records the fixed-envelope parts (instructions, memories, runtime context, tool schemas with count, summary, message). The sanitized operational log projects them as numbers only (see [operational logs](operational-logs.md)), so stage 2 can be compared per call with `lockstep run logs:cloudwatch -- event --event context.selected`.
 
 These are character counts, not provider tokens. Provider-reported token and cache usage stays in `model.completed`.
 
@@ -62,7 +62,7 @@ On top of the core, it gets the **domains** a request needs, from `src/tool-doma
 
 **What does not change.** Unavailable integrations are neither offered nor loadable. The owner-scoped dispatcher remains the authority: offering a schema grants nothing. Specialists receive the full enabled definitions (`runtime.allTools`), so delegation does not depend on what the coordinator loaded.
 
-Offline effect (`npm run context:inventory`, all integrations enabled, 26 September):
+Offline effect (`lockstep run context:inventory`, all integrations enabled, 26 September):
 
 | First message      | Domains         | Tools | Tool-schema characters |
 | ------------------ | --------------- | ----: | ---------------------: |
@@ -96,7 +96,7 @@ The word cues in stage 2 missed many phrasings (stock tickers, book titles, "has
 
 **Configuration and records.** `config/tool-picker.json` holds the pinned model (`typesafe/jev-1.13-20260917`), thresholds, state limits and domain descriptions. It is bundled into the image and shared with the Python eval. Each decision is recorded as a private `tools.picked` event with per-domain probabilities. The sanitized log carries only the outcome, model, domain count, latency, cost and HTTP status. Cost is recorded in the spending ledger as `openrouter-jev`; a definite HTTP rejection is settled at zero, and accounting failures never change the pick.
 
-**Eval.** `npm run eval:picker` runs 174 synthetic labelled scenarios (101 tuning, 73 held-out) three times against the configured model and fails below 97% recall of needed domains. It is a manual, paid run (about $0.04), not a CI gate. See [evals/picker](../evals/picker/README.md) and [journal 37](journey/37-jev-tool-picker.md) for the measurements.
+**Eval.** `lockstep run eval:picker` runs 174 synthetic labelled scenarios (101 tuning, 73 held-out) three times against the configured model and fails below 97% recall of needed domains. It is a manual, paid run (about $0.04), not a CI gate. See [evals/picker](../evals/picker/README.md) and [journal 37](journey/37-jev-tool-picker.md) for the measurements.
 
 ## Previous-exchange excerpts and the exchange index
 

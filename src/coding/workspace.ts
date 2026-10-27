@@ -47,7 +47,7 @@ export class Workspace {
         env: {
           PATH: process.env.PATH,
           HOME: toolHome,
-          NPM_CONFIG_CACHE: join(toolHome, "npm-cache"),
+          LOCKSTEP_STORE: join(toolHome, "lockstep-store"),
           XDG_CACHE_HOME: join(toolHome, "cache"),
           TMPDIR: "/tmp",
           LANG: "C.UTF-8",

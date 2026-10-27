@@ -10,8 +10,8 @@ This eval measures whether Chief's context pipeline gives the model what it need
 
 ## Modes
 
-- `npm run eval:context` is **context mode** and costs nothing. It captures the first model call's input and checks whether every evidence string is visible in it.
-- `npm run eval:context -- --mode answer` is **answer mode** and is paid. The configured model (default `openai/gpt-6-sol`) answers with the real runtime, including `conversation_search`, `conversation_read` and `observation_read`. Replies are graded like this:
+- `lockstep run eval:context` is **context mode** and costs nothing. It captures the first model call's input and checks whether every evidence string is visible in it.
+- `lockstep run eval:context -- --mode answer` is **answer mode** and is paid. The configured model (default `openai/gpt-6-sol`) answers with the real runtime, including `conversation_search`, `conversation_read` and `observation_read`. Replies are graded like this:
   - **correct:** every `accept` pattern matches and no `reject` pattern does;
   - **hedged:** every `accept` pattern matches but so does a `reject` pattern, which may only be contrast;
   - **confused:** a `reject` pattern matches and the `accept` patterns do not.

@@ -155,10 +155,10 @@ test("Pi review prompt preserves maximum approved context within runtime instruc
     fileCount: 100,
     context,
     checks: [
-      "npm ci",
-      "npm run check",
-      "npm run build",
-      "npm run format:check",
+      "lockstep ci",
+      "lockstep run check",
+      "lockstep run build",
+      "lockstep run format:check",
     ].map((command) => ({ command, exitCode: 0, output: "r".repeat(32000) })),
   });
   assert(

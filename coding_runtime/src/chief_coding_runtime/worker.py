@@ -149,7 +149,7 @@ async def run_worker(
                 "Running the repository's required checks.",
                 f"verify-{round_number}",
             )
-            install = await w.command("npm", ["ci"])
+            install = await w.command("lockstep", ["ci"])
             if install.exit_code != 0:
                 raise ValueError("Repository dependencies could not be installed")
             checks: list[Check] = []
@@ -158,11 +158,11 @@ async def run_worker(
                 if remaining <= 0:
                     raise ValueError("Coding deadline elapsed")
                 check = await w.command(
-                    "npm", ["run", script], timeout_seconds=min(600, remaining)
+                    "lockstep", ["run", script], timeout_seconds=min(600, remaining)
                 )
                 checks.append(
                     Check(
-                        command=f"npm run {script}",
+                        command=f"lockstep run {script}",
                         exitCode=check.exit_code,
                         output=check.text()[-4000:],
                     )

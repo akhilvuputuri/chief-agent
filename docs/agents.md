@@ -169,7 +169,7 @@ Nothing unchecked is passed on as a quote, link or ref. A salvaged finding keeps
 ## Adding an agent
 
 1. Write a package: `plugin.json` with an agent using `findings/v1` (or another contract), and `agents/<id>.md`.
-2. `npm run plugins -- validate <dir>` prints the content hash.
+2. `lockstep run plugins -- validate <dir>` prints the content hash.
 3. Add the package to `plugins/registry.json` with its hash, agent IDs and tool grants, and optionally an alias.
 4. Open a PR for review. No change to the conversation loop is needed; `tests/agents.test.ts` has an example that enables a new agent from registry configuration alone.
 
@@ -177,4 +177,4 @@ Nothing unchecked is passed on as a quote, link or ref. A salvaged finding keeps
 
 - **Traces.** Chief's run records `agent.completed` or `agent.failed` for every `agent_run`, whatever the contract. It also records `agent.started` (findings agents) or `research.started` (research and media) with the child run ID; `runFamily` uses those to find a turn's children. A findings child's run records `agent.child_started`, which holds its type, definition hash, tools, model choice, limits and references; research and media children record `research.child_started`. Child model calls are ordinary `model.started` and `model.completed` events under the child run.
 - **Operational log.** `agent.child_started` logs `agentType`, `model`, `tier` and `effort` for findings agents. `agent.completed` logs `agentType`, `state`, `stopReason` and `approvalCount` for every agent run; `state` is `partial` for a salvaged report. `agent.budget_notice` logs `state` `warning` or `final` for a child running low. Briefs and reports are never logged.
-- **Queries.** Use `npm run logs:cloudwatch -- event --event agent.completed` for outcomes, and `run --run <id>` for a whole delegation.
+- **Queries.** Use `lockstep run logs:cloudwatch -- event --event agent.completed` for outcomes, and `run --run <id>` for a whole delegation.

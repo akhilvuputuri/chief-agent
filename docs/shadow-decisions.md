@@ -38,7 +38,7 @@ Shadow mode has its own switch, `SHADOW_DECISIONS` in `config/runtime.json` (`je
 - **Operational log (no message text):**
 
   ```sh
-  npm run logs:cloudwatch -- decisions --since 24h
+  lockstep run logs:cloudwatch -- decisions --since 24h
   ```
 
   This groups `decision.shadow` lines by consumer, picker, prediction, Jev's own pick, actual agent, match and agreement, with average score, latency, cost, unused domains and mid-turn loads.

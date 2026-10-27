@@ -1,0 +1,25 @@
+name: setup lockstep
+description: >-
+  Node 22.23.4, the lockstep release pinned in tools/lockstep.json (checksum
+  verified) and its package store. npm and npx are removed from the PATH so
+  nothing can fall back to them.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with: { node-version: "22.23.4" }
+    - name: Install lockstep and remove npm
+      shell: bash
+      run: |
+        dir="$RUNNER_TEMP/lockstep-bin"
+        node tools/install-lockstep.mjs --dir "$dir"
+        echo "$dir" >> "$GITHUB_PATH"
+        echo "LOCKSTEP_STORE=$RUNNER_TEMP/lockstep-store" >> "$GITHUB_ENV"
+        node_bin=$(dirname "$(command -v node)")
+        rm -f "$node_bin/npm" "$node_bin/npx" "$node_bin/corepack"
+        "$dir/lockstep" --version
+    - uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/lockstep-store
+        key: lockstep-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/lockstep.json', 'package-lock.json', 'coding_runtime_pi/package-lock.json') }}
+        restore-keys: lockstep-${{ runner.os }}-${{ runner.arch }}-

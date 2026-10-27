@@ -46,11 +46,11 @@ Policies are in [deploy/lightsail/iam](../deploy/lightsail/iam) with `ACCOUNT_ID
 ## Reading logs
 
 ```sh
-npm ci
-AWS_PROFILE=chief-logs npm run logs:cloudwatch -- errors --since 2h
-npm run logs:cloudwatch -- run --run <runId> --since 6h
-npm run logs:cloudwatch -- tools --since 24h
-npm run logs:cloudwatch -- --help
+lockstep ci
+AWS_PROFILE=chief-logs lockstep run logs:cloudwatch -- errors --since 2h
+lockstep run logs:cloudwatch -- run --run <runId> --since 6h
+lockstep run logs:cloudwatch -- tools --since 24h
+lockstep run logs:cloudwatch -- --help
 ```
 
 In Claude Code cloud sessions, the `chief-log-reader-cloud` key is stored as an **API credential** on the cloud environment (claude.ai/code → environment → Edit → API credentials): type **AWS SigV4**, allowed website `logs.ap-southeast-1.amazonaws.com`. The session never sees the key; Claude's proxy signs matching requests. Environment variables are visible to anyone using the environment, so they hold only placeholders: `AWS_ACCESS_KEY_ID=proxy-signed`, `AWS_SECRET_ACCESS_KEY=proxy-signed` and `AWS_REGION=ap-southeast-1`. The SDK needs these to send a request, and the proxy re-signs it. The CLI sends through the proxy named in `HTTPS_PROXY` when one is set, because Node's AWS SDK ignores that variable. Never put the real key in environment variables, a prompt, an issue or a repository file. The CLI uses `ap-southeast-1` and only the two Chief groups. It defaults to one hour and allows at most 24 hours and 500 rows per query. It exits non-zero on access or query failure. Times are given as relative values (`30m`, `2h`) or ISO with an explicit zone. Output shows the window in UTC and Singapore time (UTC+8).
@@ -85,7 +85,7 @@ Only one gateway may run for the bot token. Both hosts must not poll or schedule
 5. **Compare before starting.** Compare restored counts, schema hash and manifests against the final source baseline. Explain any difference before continuing.
 6. **Start the gateway only:** `docker compose -p hermes-companion up -d --no-deps --no-build gateway`. Check loopback health, the Compose health state, one `gateway.started` line in CloudWatch, and that the old gateway is still stopped.
 7. **Origin-dependent settings.** Set the bot's menu button to `<origin>/miniapp/`. The owner updates the Mini App domain in BotFather and the Google OAuth branding URLs (`/about`, `/privacy`, `/terms`) to the new origin. Existing Google refresh tokens do not depend on the host.
-8. **Release path.** Update the repository variable `CHIEF_DEPLOY_HOST` to `52.77.47.24` and the secret `COMPANION_KNOWN_HOSTS` to the verified Lightsail host keys. Run the normal `release` workflow for current `main`, then check its exact-SHA receipt and `npm run release:status`.
+8. **Release path.** Update the repository variable `CHIEF_DEPLOY_HOST` to `52.77.47.24` and the secret `COMPANION_KNOWN_HOSTS` to the verified Lightsail host keys. Run the normal `release` workflow for current `main`, then check its exact-SHA receipt and `lockstep run release:status`.
 9. **Acceptance.** Run the matched checks from the migration ledger: Telegram text and voice, a harmless attachment, Google read-only lookups, Sheets, approvals (fixtures, and a live event only with the owner's approval), memory/skills, canvases through Telegram authentication, schedules, the reader CLI from a fresh cloud task, and reboot recovery.
 
 ## Rollback

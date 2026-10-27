@@ -1,12 +1,17 @@
 FROM node:22.23.4-bookworm-slim AS build
+# lockstep replaces npm (pinned and checksum-verified in tools/lockstep.json);
+# npm itself is removed so nothing can fall back to it.
+COPY tools/lockstep.json tools/install-lockstep.mjs /opt/lockstep/
+RUN node /opt/lockstep/install-lockstep.mjs --dir /usr/local/bin && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 WORKDIR /app
 COPY package*.json ./
 COPY coding_runtime_pi ./coding_runtime_pi
-RUN npm ci
+RUN lockstep ci
 COPY tsconfig.json ./
 COPY src ./src
-RUN npm run build && npm prune --omit=dev
+RUN lockstep run build && lockstep ci --omit=dev
 FROM node:22.23.4-bookworm-slim
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist

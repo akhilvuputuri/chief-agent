@@ -75,13 +75,13 @@ test("progress is one status message edited in place; a separate notice starts a
   await f.c.progress(j, {
     key: "check",
     stage: "verifying",
-    summary: "Check passed: npm run check",
+    summary: "Check passed: lockstep run check",
   });
   await f.c.deliver(tg.send, options);
   // A burst of progress becomes one message.
   assert.equal(tg.sends.length, 1);
   assert.match(tg.sends[0]!.text, /Implementation started/);
-  assert.match(tg.sends[0]!.text, /Check passed: npm run check/);
+  assert.match(tg.sends[0]!.text, /Check passed: lockstep run check/);
   assert.equal(tg.sends[0]!.approval, undefined);
   await f.c.progress(j, {
     key: "review",
@@ -153,7 +153,7 @@ test("quiet hours hold progress that would start a message, but keep editing the
   // At night the current status message is edited, which does not notify.
   f.advance(untilSingapore(clock(f), 2));
   assert.equal(inQuietHours(clock(f), quietHours), true);
-  await progress("night-edit", "Check passed: npm run check");
+  await progress("night-edit", "Check passed: lockstep run check");
   await f.c.deliver(tg.send, options);
   assert.equal(tg.sends.length, 1);
   assert.equal(tg.edits.length, 1);
@@ -221,7 +221,7 @@ test("status edits keep the outbox rules: no replay after an uncertain edit or a
   assert.equal(tg.sends.length, 1);
   // An edit with an unknown outcome is never replayed.
   tg.failNextEdit(new Error("network reset"));
-  await progress("two", "Check passed: npm run check");
+  await progress("two", "Check passed: lockstep run check");
   await f.c.deliver(tg.send, options);
   assert.equal(
     (await deliveries(f, job.id)).find((e) => e.event_key.endsWith(":two"))
@@ -234,7 +234,7 @@ test("status edits keep the outbox rules: no replay after an uncertain edit or a
   await progress("three", "Review started");
   await f.c.deliver(tg.send, options);
   assert.equal(tg.edits.length, 1);
-  assert.match(tg.edits[0]!.text, /Check passed: npm run check/);
+  assert.match(tg.edits[0]!.text, /Check passed: lockstep run check/);
   assert.match(tg.edits[0]!.text, /Review started/);
   // A restart in the middle of an edit leaves it uncertain, not resent.
   await progress("four", "Review approved");

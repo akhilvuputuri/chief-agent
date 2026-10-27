@@ -1,6 +1,6 @@
 """Live eval of the tool-group picker against Jev on OpenRouter.
 
-Run by hand: npm run eval:picker -- [--runs 3] [--split held-out] ...
+Run by hand: lockstep run eval:picker -- [--runs 3] [--split held-out] ...
 Each call asks all 13 groups; picked groups are scored against the labels.
 """
 
@@ -74,7 +74,7 @@ def api_key(env_file: str) -> str | None:
 
 def schema_sizes() -> dict[str, Any]:
     output = subprocess.run(
-        ["npx", "tsx", "evals/picker/sizes.ts"],
+        ["lockstep", "exec", "tsx", "evals/picker/sizes.ts"],
         cwd=ROOT,
         check=True,
         capture_output=True,

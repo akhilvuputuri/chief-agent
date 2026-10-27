@@ -4,7 +4,7 @@ This is the shared task contract for Devin and other remote coding agents. Read 
 
 ## Start with capabilities and deployment shape
 
-Run `npm run doctor:cloud` from the actual cloud session. Inspect current main and relevant docs. Do not print token values or copy production credentials into the session. Repository write, merge, Actions read and workflow dispatch are different permissions. Do not probe write permissions with POST/PUT requests, even using an invalid ref or already-merged PR. Use documented/read-only permission evidence or leave the capability unknown until the requested real action. A failed API must be reported with its operation and redacted error; never infer that an unattempted merge is forbidden.
+Run `lockstep run doctor:cloud` from the actual cloud session. Inspect current main and relevant docs. Do not print token values or copy production credentials into the session. Repository write, merge, Actions read and workflow dispatch are different permissions. Do not probe write permissions with POST/PUT requests, even using an invalid ref or already-merged PR. Use documented/read-only permission evidence or leave the capability unknown until the requested real action. A failed API must be reported with its operation and redacted error; never infer that an unattempted merge is forbidden.
 
 Before coding, identify whether the task changes app code only or also database/Compose, host scripts, production secrets or OAuth consent. Ordinary app changes use main → checks → release. Other changes require the existing reviewed operator procedure. Surface that prerequisite in the PR before merging; do not remove the deployment guard.
 
@@ -14,7 +14,7 @@ Define concrete acceptance scenarios and a short list of likely failure modes. F
 
 Follow the a-stack `independent-review` and `ship` skills, with the reviewer and merge bindings in AGENTS.md and [REVIEW.md](../REVIEW.md). Chief specifics:
 
-- Run focused regressions, then `npm run check`, `npm run build` and `npm run format:check`.
+- Run focused regressions, then `lockstep run check`, `lockstep run build` and `lockstep run format:check`.
 - The PR must name its deployment prerequisites.
 - Do not claim another vendor's model was used when it was unavailable.
 - Automatic Devin Review on pushes is a second signal only.
@@ -26,16 +26,16 @@ Follow the a-stack `independent-review` and `ship` skills, with the reviewer and
 After merge, get `mergeCommit.oid` from `gh pr view NUMBER --json mergeCommit`. Run:
 
 ```sh
-npm run release:status -- FULL_MERGE_SHA
+lockstep run release:status -- FULL_MERGE_SHA
 ```
 
 This read-only check returns a commit-specific production status and exits zero only for a successful deployment receipt. Pending/unverified is exit 2; failed is 1. Authentication errors are failures, never success. It reports evidence at release time, not a continuous health check. For older commits without receipts, inspect their release logs explicitly; do not treat missing evidence as failure or success.
 
-Watch the corresponding `checks` and `release` runs using `gh run list` and `gh run watch RUN_ID --exit-status`. The release workflow posts a durable result to the merged PR and a `companion/production` commit status, so the result survives a sleeping coding session. A failed/cancelled attempt does not establish which image is now running; read the running release from the logs (`npm run logs:cloudwatch -- releases` or `heartbeat`; every line carries the release SHA) and check the exact-commit receipt with `npm run release:status`. `production-diagnostics` works only while the repository is private. Startup health is not feature acceptance.
+Watch the corresponding `checks` and `release` runs using `gh run list` and `gh run watch RUN_ID --exit-status`. The release workflow posts a durable result to the merged PR and a `companion/production` commit status, so the result survives a sleeping coding session. A failed/cancelled attempt does not establish which image is now running; read the running release from the logs (`lockstep run logs:cloudwatch -- releases` or `heartbeat`; every line carries the release SHA) and check the exact-commit receipt with `lockstep run release:status`. `production-diagnostics` works only while the repository is private. Startup health is not feature acceptance.
 
 If a release is stale, verify that the newer main contains the change and inspect that commit's receipt. If busy, retry after the runtime is idle without cancelling user work. If database/Compose differs, follow the reviewed operator procedure and state that the release is blocked until it runs. Do not repeatedly retry a deterministic migration refusal.
 
-For authorized credentials with Actions write, and only while the repository is private (the workflow is guarded to private repositories and is skipped while it is public; use `npm run logs:cloudwatch` instead):
+For authorized credentials with Actions write, and only while the repository is private (the workflow is guarded to private repositories and is skipped while it is public; use `lockstep run logs:cloudwatch` instead):
 
 ```sh
 gh workflow run diagnostics.yml --ref main

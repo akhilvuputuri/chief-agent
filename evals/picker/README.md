@@ -8,8 +8,8 @@ schema characters that would be sent (and their share of the full tool list),
 run-to-run stability, latency, cost and per-scenario misses.
 
 ```sh
-npm run eval:picker
-npm run eval:picker -- --runs 1 --split held-out
+lockstep run eval:picker
+lockstep run eval:picker -- --runs 1 --split held-out
 ```
 
 Other options: `--concurrency`, `--floor`, `--timeout`, `--seed`, `--out`,
@@ -33,4 +33,4 @@ python3 -m unittest discover -s evals/picker -p 'test_*.py'
 
 `picker.py` is the reference for the request and pick rule; the TypeScript
 runtime must match it (`pick-cases.json`, `request-golden.json`).
-`sizes.ts` prints each group's schema size (`npx tsx evals/picker/sizes.ts`).
+`sizes.ts` prints each group's schema size (`lockstep exec tsx evals/picker/sizes.ts`).

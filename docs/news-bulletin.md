@@ -77,7 +77,7 @@ Other page retrieval in this project goes through hosted providers. Feeds are th
 
 ## Deployment (operator-reviewed migration 021)
 
-The same shape as migration 020: independent review of the exact head, `npm run check` and `python3 scripts/test-deploy-news.py`, then merge (the ordinary release refuses the DB/Compose change). Check that the live `RELEASE` is in `BASES` of `scripts/deploy-news.py`, then run `python3 deploy-news.py ARCHIVE SHA` on the host with the exact main archive. It applies only 021 with the gateway stopped and checks health. The gateway refuses to start without migration 21. The rollout configures nothing; the owner sets up sites and time in Telegram.
+The same shape as migration 020: independent review of the exact head, `lockstep run check` and `python3 scripts/test-deploy-news.py`, then merge (the ordinary release refuses the DB/Compose change). Check that the live `RELEASE` is in `BASES` of `scripts/deploy-news.py`, then run `python3 deploy-news.py ARCHIVE SHA` on the host with the exact main archive. It applies only 021 with the gateway stopped and checks health. The gateway refuses to start without migration 21. The rollout configures nothing; the owner sets up sites and time in Telegram.
 
 ## Save-based learning rollout (no migration)
 
