@@ -1,14 +1,14 @@
 # 123 — Why did every PR wait 26 minutes for checks?
 
 Work date(s): 2026-10-27. Written/revised: 2026-10-27.
-Status: tested, in PR 324. `checks` takes about 3½ to 4½ minutes instead of about 26. Test files run one at a time within each runner, because four at a time crashed one test process with SIGSEGV; the cause is not established (see Verification).
+Status: tested, in PR 324. `checks` takes about 3½ to 5 minutes instead of about 26. Test files run one at a time within each runner, because a test process crashed with SIGSEGV while four ran at a time; the cause is not established (see Verification).
 
 Summary of the improvements:
 
 - **Faster PR checks:** about 26 minutes to 3 min 33 s and 4 min 38 s in the two serial runs (reported, GitHub). Documentation-only PRs still run every job.
 - **Faster tests anywhere they run serially:** all test files took 1,211 s instead of 1,767 s locally (measured). Coding boxes run the same serial `npm run check`; their check of about 14 minutes should fall by a similar share (estimate, not measured in a box).
 - **Less memory:** a close hook that drops its reference stops `node:test` keeping closed databases; `boxes.test.ts` peaks at 1.5 GB instead of 10.4 GB (measured), well inside a coding box's 12 GB.
-- **Not changed:** a release still takes 5 to 6 minutes, because the Lightsail host builds the image itself, so merge to production is now about 10 minutes instead of about 32.
+- **Not changed:** a release still takes 5 to 6 minutes, because the Lightsail host builds the image itself, so merge to production should take about 10 minutes instead of about 32 (estimate: about 4 minutes of checks plus the 5 to 6 minute release reported before this change; not yet measured).
 - **Same coverage:** every command of `npm run format:check`, `npm run check` and `npm run build` still runs, including Pi's tests against the root lockfile, and the required `test` check keeps its name.
 
 ## User-visible problem and preceding iteration
