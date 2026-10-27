@@ -106,7 +106,7 @@ async function main() {
     if (m.text.trim().length < 80) continue;
     const written = await ask(
       c.OPENROUTER_API_KEY,
-      `Here is an email the owner received in the last month.\n\nFrom: ${m.from}\nSubject: ${m.subject}\nDate: ${m.date}\n\n${m.text.slice(0, 1200)}\n\nWrite one question the owner might ask an assistant to find this email weeks later, half-remembering what it was about. Describe its content in everyday words. Do not use the sender's name or organisation, the subject's words, or distinctive phrases from the email. If the email is an automated notice with nothing a person would look for again, answer {"skip": true}. Otherwise answer {"question": "..."}.`,
+      `Here is an email the owner received in the last year.\n\nFrom: ${m.from}\nSubject: ${m.subject}\nDate: ${m.date}\n\n${m.text.slice(0, 1200)}\n\nWrite one question the owner might ask an assistant to find this email weeks later, half-remembering what it was about. Describe its content in everyday words. Do not use the sender's name or organisation, the subject's words, or distinctive phrases from the email. If the email is an automated notice with nothing a person would look for again, answer {"skip": true}. Otherwise answer {"question": "..."}.`,
     );
     cost += written.cost;
     const q = z
@@ -121,7 +121,7 @@ async function main() {
     if (subject.length >= 2 || sender.length) continue;
     const planned = await ask(
       c.OPENROUTER_API_KEY,
-      `You search the owner's Gmail for one email. The email arrived in the last month. Request: "${question}"\n\nWrite up to three Gmail search queries, most promising first. Anchor on the strongest clue with operators such as from:, subject:, quoted phrases, OR, -term, newer_than:, has:attachment, in:anywhere. Answer {"queries": ["..."]}.`,
+      `You search the owner's Gmail for one email. The email arrived in the last year. Request: "${question}"\n\nWrite up to three Gmail search queries, most promising first. Anchor on the strongest clue with operators such as from:, subject:, quoted phrases, OR, -term, newer_than:, has:attachment, in:anywhere. Answer {"queries": ["..."]}.`,
     );
     cost += planned.cost;
     const queries = z

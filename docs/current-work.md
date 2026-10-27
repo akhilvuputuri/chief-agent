@@ -14,9 +14,9 @@ The site root returned an empty `200` instead of redirecting to the Mini App, be
 
 Tests restore each PGlite database from a migrated snapshot instead of booting Postgres and replaying every migration, and a close hook stops `node:test` from keeping closed databases in memory. `checks` runs as parallel jobs, with six test shards behind one `test` job. The first GitHub run, with test files four at a time in three shards, took 4 min 20 s instead of about 26 minutes, but one test process crashed with SIGSEGV. The owner chose serial test files within each runner, the process model `main` ran green; serial runs took 3 min 33 s and 4 min 38 s on GitHub, and all test files take 1,211 s instead of 1,767 s locally. Released in `8ea6263`; merge to production took about 11 minutes. [Journal 123](journey/123-faster-checks.md).
 
-# Email memory MVP — branch `feature/mail-recall`, 25 October 2026
+# Email memory MVP — live in `d98f912`, 25 October 2026
 
-The email agent gets `gmail_recall`: an in-memory meaning index over the primary mailbox's Primary mail from the last 30 days, built with OpenRouter embeddings after each start. It is for emails the owner half-remembers by content. Not released or measured; the operator-run retrieval eval decides whether it stays. See [mail recall](mail-recall.md) and [journal 120](journey/120-email-memory-mvp.md).
+The email agent has `gmail_recall`: an in-memory meaning index over the primary mailbox's Primary mail, built with OpenRouter embeddings after each start, for emails the owner half-remembers by content. Live with a 30-day window in `d98f912` (PR 320); the follow-up widens it to 12 months. The operator-run retrieval eval decides whether it stays. See [mail recall](mail-recall.md) and [journal 120](journey/120-email-memory-mvp.md).
 
 # Fewer coding notices — live in `3130950`, 23 October 2026
 

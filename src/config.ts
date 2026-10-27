@@ -71,7 +71,7 @@ const schema = z.object({
   // every available domain on every call, so the cached tool list never changes (journal 107).
   TOOL_PICKER: z.enum(["jev", "off", "all"]).default("all"),
   // Email memory MVP (docs/mail-recall.md): an in-memory meaning index over the primary
-  // mailbox's last 30 days of Primary mail, offered to the email agent as gmail_recall.
+  // mailbox's last 12 months of Primary mail, offered to the email agent as gmail_recall.
   MAIL_INDEX: z.enum(["on", "off"]).default("on"),
   // Shadow decisions (#127): Jev predicts beside each turn without changing it. Separate
   // from TOOL_PICKER so the picker can be turned off while measurement continues.

@@ -1,6 +1,6 @@
 # Email memory (mail recall) — MVP
 
-Status (25 October 2026): implemented on `feature/mail-recall`, not released. See [journal 120](journey/120-email-memory-mvp.md) for the question it tests and its results.
+Status (25 October 2026): released with a 30-day window in `d98f912` ([PR 320](https://github.com/akhilvuputuri/chief-agent/pull/320)); the window becomes 12 months in the follow-up PR. See [journal 120](journey/120-email-memory-mvp.md) for the question it tests and its results.
 
 ## What it does
 
@@ -11,7 +11,7 @@ This is retrieval-augmented generation: the host retrieves the relevant emails, 
 ## Scope
 
 - **Mailbox:** the primary account only.
-- **Mail:** `category:primary -in:sent -in:chats -in:spam -in:trash`, received in the last 30 days, at most 3,000 messages. Older mail leaves the index as it ages past 30 days.
+- **Mail:** `category:primary -in:sent -in:chats -in:spam -in:trash`, received in the last 12 months, at most 3,000 messages. Older mail leaves the index as it ages past 12 months. The first release used 30 days: 119 messages and 65,925 embedding tokens, built in 40 seconds. That fits in one prompt, so the window was widened to a size where retrieval is needed.
 - **Text:** the plain-text part, or the HTML part as display text (`indexBody` in `src/gmail.ts`). Quoted earlier messages are dropped (`withoutQuotes`). Attachments are not read.
 - `gmail_search` stays the tool for exact senders, subjects, dates, older or archived mail and the second account.
 
