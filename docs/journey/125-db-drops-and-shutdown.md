@@ -44,9 +44,17 @@ No incident is recorded. Dependency research for #329 found two latent failure p
 
 - `src/db.ts`: `connect()` adds a pool `error` listener that logs `db.idle_client_error`.
 - `src/db-transaction.ts`: `withClientTransaction()` attaches a client `error` listener for the checkout (logging `db.client_error`), removes it before release, and releases with the error when the session failed or `ROLLBACK` failed. `transaction()` and `withResponsibilityOwner()` both use it.
-- `src/gateway-stop.ts`: `stopGateway()`. `src/main.ts` calls it on SIGINT/SIGTERM and logs `gateway.stopped`, or `gateway.stop_incomplete` with `handlersLeft`, `httpClosed` and `databaseClosed` (added to the ops-log field allow-list).
-- Tests: `tests/db-hardening.test.ts`. They cover commit and release, a session ending mid-transaction, `ROLLBACK` failure, a healthy rollback, responsibility reservations, the pool listener, shutdown ordering, a hung HTTP close at the deadline, and a failing close step.
-- Independent review: pending.
+- `src/gateway-stop.ts`: `stopGateway()`. Handlers may use the deadline only up to the last 1.5 s, which is kept for closing HTTP and the database. A step that throws, even synchronously, is reported as not closed, and later steps still run. `src/main.ts` calls it on SIGINT/SIGTERM:
+  - It logs `gateway.stopped`, or `gateway.stop_incomplete` with `handlersLeft`, `httpClosed` and `databaseClosed` (added to the ops-log field allow-list and to [operational logs](../operational-logs.md)).
+  - After a complete stop, an unref'd 1 s timer exits the process, so another open handle cannot hold it until SIGKILL.
+  - `runner` is declared before the handler is registered, so a signal during `bot.init()` stops cleanly instead of throwing.
+- Tests: `tests/db-hardening.test.ts` (11). They cover commit and release, a session ending mid-transaction, `ROLLBACK` failure, a healthy rollback, responsibility reservations, the pool listener, shutdown ordering, a hung HTTP close at the deadline, a handler that outlasts the deadline, synchronous throws, and a failing close step.
+- Independent review (Opus 5.5) of `767dae9`: **APPROVE**. The reviewer:
+  - confirmed 5 of the original tests fail on the base code;
+  - reproduced both crashes and the recovery on Postgres 16;
+  - added cases: a session killed inside a transaction, SQL and deferred-constraint errors keeping healthy clients, two concurrent reservations still serialized by `FOR UPDATE`, and no listener leak.
+
+  Its low findings, all addressed in the next commit: a slow handler could consume the whole deadline; a signal during startup reached `runner` before it existed; a complete stop had no exit deadline; the event catalog lacked the new events. Re-review pending.
 
 ## Verification and outcome
 

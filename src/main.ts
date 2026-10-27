@@ -47,7 +47,7 @@ import {
   saveKeyboard,
 } from "./news.js";
 import { PublicFeedFetcher } from "./news-feed.js";
-import { run as runTelegram } from "@grammyjs/runner";
+import { run as runTelegram, type RunnerHandle } from "@grammyjs/runner";
 import { CustomAgent } from "./custom-agent.js";
 import { OpenRouter } from "./model.js";
 import { resolveMainModel, resolvePriceCeilings } from "./model-policy.js";
@@ -1320,6 +1320,8 @@ scheduleTimer.unref();
 await app.listen({ host: "0.0.0.0", port: c.PORT });
 // Failures are logged by the index and retried on the next gmail_recall.
 void mailIndex?.start();
+// Assigned after bot.init(); a signal during startup finds no runner yet.
+let runner: RunnerHandle | undefined;
 for (const signal of ["SIGINT", "SIGTERM"])
   process.once(signal, () => {
     opsLog("gateway.stopping", "info");
@@ -1332,12 +1334,18 @@ for (const signal of ["SIGINT", "SIGTERM"])
       shutdown.abort();
       assistant.shutdown();
       const result = await stopGateway({
-        stopIntake: () => runner.stop() ?? Promise.resolve(),
-        handlersRunning: () => runner.size(),
+        stopIntake: async () => runner?.stop(),
+        handlersRunning: () => runner?.size() ?? 0,
         closeHttp: () => app.close(),
         closeDatabase: () => db.end(),
       });
-      if (result.complete) return opsLog("gateway.stopped", "info");
+      if (result.complete) {
+        opsLog("gateway.stopped", "info");
+        // Another open handle (an MCP client, a box connection) must not hold
+        // the process until SIGKILL once everything owned here has closed.
+        setTimeout(() => process.exit(0), 1000).unref();
+        return;
+      }
       opsLog("gateway.stop_incomplete", "warn", {
         handlersLeft: result.handlersLeft,
         httpClosed: result.httpClosed,
@@ -1347,7 +1355,7 @@ for (const signal of ["SIGINT", "SIGTERM"])
     })();
   });
 await bot.init();
-const runner = runTelegram(bot, {
+runner = runTelegram(bot, {
   runner: {
     silent: true,
     fetch: { allowed_updates: ["message", "callback_query"] },

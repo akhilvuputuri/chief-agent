@@ -195,3 +195,44 @@ test("a failing close step is reported as not closed", async () => {
   assert.equal(result.complete, false);
   assert.equal(result.databaseClosed, false);
 });
+
+test("a handler that outlasts the deadline still leaves time to close HTTP and the database", async () => {
+  const result = await stopGateway(
+    {
+      stopIntake: async () => {},
+      handlersRunning: () => 1,
+      closeHttp: () => new Promise<void>((r) => setTimeout(r, 20)),
+      closeDatabase: () => new Promise<void>((r) => setTimeout(r, 20)),
+    },
+    400,
+    10,
+  );
+  assert.deepEqual(result, {
+    complete: false,
+    handlersLeft: 1,
+    httpClosed: true,
+    databaseClosed: true,
+  });
+});
+
+test("a step that throws synchronously is reported, and later steps still run", async () => {
+  let databaseClosed = false;
+  const result = await stopGateway(
+    {
+      stopIntake: () => {
+        throw new ReferenceError("runner is not ready");
+      },
+      handlersRunning: () => 0,
+      closeHttp: () => {
+        throw new Error("close failed");
+      },
+      closeDatabase: async () => {
+        databaseClosed = true;
+      },
+    },
+    500,
+  );
+  assert.equal(result.httpClosed, false);
+  assert.equal(result.complete, false);
+  assert.equal(databaseClosed, true);
+});
