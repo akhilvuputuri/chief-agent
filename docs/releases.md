@@ -1,3 +1,12 @@
+## Deployed `d7df9aa` (untagged) — the nightly learner (#326 phase 2)
+
+- **What merged.** [PR 340](https://github.com/akhilvuputuri/chief-agent/pull/340) merged as `d7df9aa9dceace29174b907d0ef342ed3f9faaa0` (version unchanged, 0.3.107). Once a night from 03:30 Singapore, Chief labels the owner's finished work tasks and runs one bounded `standard`-tier review with four learning tools; the host checks every proposal (a fact must quote and be stated by the owner's own words) and applies accepted items with provenance and trust tags. Telegram intake now marks forwarded messages as someone else's words, and no forwarded text is parsed as a command, control or approval. `LEARNING` in `config/runtime.json` switches the learner off. No migration.
+- **Review.** Independent review (Claude Opus 5.5) requested changes three times: on `c77d295` (a quote did not have to support the fact; attached PDF text counted as the owner's words; unknown operations were not tagged untrusted), on `64c8d44` (forwarded messages counted as the owner's words; negation and short words passed the quote check) and on a pre-existing gap it found on `f59dc11` (a forwarded `/approve`, `/status` or plain "yes" was parsed as the owner's). It approved `44f00fa`, the rebase onto phase 1 (`c5e345f`, code identical) and a docs fix (`fa9e0d4`, merged tree identical). Hosted CI and Devin passed on `fa9e0d4`.
+- **Release.** The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/40721152167) deployed the exact commit at 16:04 UTC on 28 October; `gateway.started` logged it on Node v22.23.4, with no error lines.
+- **Pending:** the first night's run from 19:30 UTC (03:30 Singapore): `learner.finished` counts, its charges in `provider_charges`, and what it wrote (`memory_revisions` with `origin='learned'`). A fake model drove every test, so real proposal quality is unmeasured.
+
+[Journal 130](journey/130-nightly-learner.md#release-closure--2026-10-28).
+
 ## Deployed `e6f75f7` (untagged) — revisioned memory for learning from work (#326 phase 1)
 
 - **What merged.** [PR 338](https://github.com/akhilvuputuri/chief-agent/pull/338) merged as `e6f75f7352452f0e7543706584569628b75e4ad8` (version unchanged, 0.3.107). Memories become immutable revisions with provenance, trust tags and threat flags; each owner turn records what it had in context; learned items can be rolled back in bulk; `memories` stays as the projection of the owner's explicit facts. Migration 010 with its Compose line and `scripts/deploy-memory.py`.

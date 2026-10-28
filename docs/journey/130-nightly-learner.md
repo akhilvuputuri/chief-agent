@@ -1,7 +1,7 @@
 # 130 — Can Chief learn from finished work without being asked?
 
 Work date(s): 2026-10-28. Written/revised: 2026-10-28.
-Status: proposed (phase 2 of issue #326, PR #340); not merged or deployed. Phase 1 is live in `e6f75f7`; this needs no migration.
+Status: released in `d7df9aa` on 28 October 2026. The first nightly run and what it learns are pending.
 
 ## User-visible problem and preceding iteration
 
@@ -42,6 +42,12 @@ Documented rather than changed: items are written one at a time, so a crash can 
 Tested locally on Node 22.23.4 with PGlite, `tests/learning.test.ts` (14 tests, plus a forwarded-message case in `tests/telegram.test.ts`): labelling rules; untrusted kinds; the 03:30 window, one run a night, and a missed night skipped; a run that accepts a quoted fact (tagged untrusted from the task's email and web reads, with message IDs) and a correctly labelled lesson, refuses an unquoted fact, a mislabelled lesson, invalid arguments and an unknown tool, labels each task once and leaves a too-recent task for the next night; no model call without evidence; deferral while the owner is active, capped at three; pre-emption mid-run applying nothing, then a clean retry; retirement limited to learned items; restart recovery and the off switch; and, after review, owner words cut at attachments, quote-to-value binding (an unrelated quote, a changed number), the owner's keys left alone, fail-closed untrusted tags, no starvation by paused tasks, and deferral when the owner arrives during the last call.
 
 Not done: no production run, no measurement of what it learns, cost per run or effect on later turns. A fake model drives the tests, so the quality of real proposals is untested.
+
+### Release closure — 2026-10-28
+
+- [PR 340](https://github.com/akhilvuputuri/chief-agent/pull/340) merged as `d7df9aa`, from approved head `fa9e0d4` (merged tree identical; hosted CI and Devin passed). No migration.
+- The automatic release deployed it at 16:04 UTC; `gateway.started` reported the release on Node v22.23.4 and no error lines followed. No learner run had happened yet; the first window opens at 19:30 UTC. See the [release record](../releases.md).
+- Pending: the first night's `learner.finished` counts, its charges and the items it wrote.
 
 ## Follow-up and next iteration
 
