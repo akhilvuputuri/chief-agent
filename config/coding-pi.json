@@ -1,7 +1,7 @@
 {
   "repository": "akhilvuputuri/chief-agent",
   "branch": "main",
-  "image": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:2fd65df0435207659473420dc061f4bf1151510b42c862ec09d0f3f0db496887",
+  "image": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:34987193b3cb1b710092c8af998407a222da225a8000743b422f85b24beecb8d",
   "model": "deepseek/deepseek-v4.1-flash-1017",
   "leaderModel": "deepseek/deepseek-v4.1-flash-1017",
   "reviewerModel": "google/gemini-4-argon",

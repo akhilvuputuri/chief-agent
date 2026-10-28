@@ -1,7 +1,7 @@
 # 128 — Replacing npm with an owned, npm-identical toolchain
 
 Work dates: 2026-10-27 to 2026-10-28. Written: 2026-10-28.
-Status: cut-over merged (`5dd4639`, PR #339). Its production release failed on the host; Kite 0.1.3 fixes the cause (see Release incident). The worker image digests and the production release are pending.
+Status: live in `0a78485` (Kite 0.1.3, PR #343), after the cut-over's own release failed on the host (see Release incident). The worker image digests are in owner review.
 
 Naming: the tool was published as **lockstep** (v0.1.0) and renamed **Kite** on 28 October 2026, before this cut-over merged. The repository is `akhilvuputuri/kite` (old links redirect), the command is `kite`, and the crate and planned npm/Homebrew package are `kite-pm`. Chief pins Kite 0.1.3, which fixes multi-step image builds on the host (see Release incident). 0.1.2 added incremental installs: `kite install`, `uninstall` and `update` change only the packages that differ from the installed tree, matching `npm install`. Kite's release notes give about 40 ms for a repeated install on a 300-package project, against about 430 ms for npm.
 
@@ -138,9 +138,14 @@ The PR's CI built every Dockerfile with the published v0.1.0 binary: the gateway
 Pending steps:
 
 1. Merge the cut-over PR. Done: `5dd4639`.
-2. Run `coding-image.yml` and `pi-coding-image.yml` on main. Done from `5dd4639`: worker image `sha256:d8cd40d0d78294c8caf3f83befe43393a7a7e1331d5b62ff53a453db411b045e`, Pi worker image `sha256:94c8eef6e591706ddc3092408784faf217553d17449aefcdce03c3da43863d82`. Not yet pinned.
-3. Update the digests in `config/boxes.json`, `config/coding.json` and `config/coding-pi.json`. These are protected paths, so the owner reviews the change.
-4. Release Chief.
+2. Run `coding-image.yml` and `pi-coding-image.yml` on main.
+   - The first images, built from `5dd4639`, contained Kite 0.1.2 and were never pinned: `sha256:d8cd40d0…` and `sha256:94c8eef6…`.
+   - They were rebuilt from `0a78485` with Kite 0.1.3:
+     - worker image `sha256:35d813f58c81eb2d5b43e898cf5dead302ee951484325cf89684620df597f1a6`;
+     - Pi worker image `sha256:34987193b3cb1b710092c8af998407a222da225a8000743b422f85b24beecb8d`.
+   - Anonymous registry checks: each is linux/amd64 and runs as `worker`. Its `/opt/kite/kite.json` layer pins Kite 0.1.3, with the linux-x64 SHA-256 `5d3528db…`.
+3. Update the digests in `config/boxes.json`, `config/coding.json` and `config/coding-pi.json`. These are protected paths, so the owner reviews the change. Pi's previous image (`sha256:2fd65df…`) moves to `previousImages`, so jobs snapshotted on it can still start a box.
+4. Release Chief. The Kite 0.1.3 pin released as `0a78485` (release run 40715214092). Its build and deploy step took 6 min 17 s. The host health record at 15:29 UTC reported that release, with the gateway and Postgres healthy. The digest change releases separately.
 5. Record the release and the CI, host-build and coding-job timings against the baseline in issue #330.
 
 Transition, traced by the independent review. The gate fails closed throughout, so nothing merges with checks that did not run:
@@ -181,18 +186,19 @@ Transition, traced by the independent review. The gate fails closed throughout, 
 
 - accepts times kept to the second;
 - removes a store entry in place when the rename is refused;
+- keeps a replaced package's nested `node_modules` in place under the same condition;
 - adds a CI job that builds a two-step image on the containerd image store with the legacy builder.
 
 **Measured in Kite's CI.** The new job sets the runner's overlay `redirect_dir` to N (the runner's kernel defaults to Y, the host has N) and uses the containerd image store with the legacy builder.
 
-- Under that setup, v0.1.2 failed at the second step with the host's exact error, on the same store entry (`sha512-baa64c4c…`).
+- A control run with the same setup ([run 40705675865](https://github.com/akhilvuputuri/kite/actions/runs/40705675865), a temporary branch) failed v0.1.2 at the second step with the host's exact error, on the same store entry (`/root/.cache/kite/v2/u022/sha512-baa64c4c…` in both).
 - 0.1.3 passed all four steps:
   1. `kite ci`: 303 downloaded;
   2. `kite ci --omit=dev` in the next layer: 0 downloaded;
   3. a damaged lower-layer store entry: 1 downloaded;
   4. `kite install` replacing `express`, whose nested `node_modules` was kept: 1 placed, 0 downloaded.
 
-[Kite v0.1.3](https://github.com/akhilvuputuri/kite/releases/tag/v0.1.3) was released from `3d497bc` through the same checked workflow, and this change pins its checksums. That the host release succeeds with it is still to be confirmed by the release itself.
+[Kite v0.1.3](https://github.com/akhilvuputuri/kite/releases/tag/v0.1.3) was released from `3d497bc` through the same checked workflow, and this change pins its checksums. The host release with it succeeded (see step 4 above).
 
 **Lesson.** CI's image build did not match production's storage driver. Kite's CI now covers it; Chief's own CI still builds with the runner's default storage.
 

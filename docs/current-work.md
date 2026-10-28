@@ -6,18 +6,15 @@ Phase 2 of issue #326, on phase 1 (live in `e6f75f7`); PR #340, proposed. Once a
 
 Phase 1 of issue #326. Memories become immutable revisions with provenance (run, task and learner IDs), trust tags for anything learned from untrusted content, and threat flags that flag but never block. Each owner turn records which revisions it had in context. Learned items can be rolled back in bulk by learner run, time window, source or kind, and the rollback is itself a revision. `memories` stays as the projection that job analysis, job alignment and older images read, and the gateway imports existing rows with unknown provenance at startup. The cached prefix is unchanged until something is learned. No learner yet. Released through the operator rollout of migration 010 on 28 October; the 7 existing memories were imported with unknown provenance. Pending: compare cached tokens on the next owner turns. See [learning from completed work](learning.md) and [journal 129](journey/129-revisioned-memory.md).
 
-# kite replaces npm — cut-over PR open, 28 October 2026
+# Kite replaces npm — live in `0a78485`, worker images in review, 28 October 2026
 
-Issue #330. npm is replaced everywhere by [kite](https://github.com/akhilvuputuri/kite), a Rust package manager. It installs, resolves and runs scripts with npm-identical results: the same `node_modules`, `package-lock.json` and `package.json`, checked against npm 10.9.9 on Linux x64, Linux arm64 and macOS.
+Issue #330. npm is replaced everywhere by [Kite](https://github.com/akhilvuputuri/kite), a Rust package manager. It installs, resolves and runs scripts with npm-identical results: the same `node_modules`, `package-lock.json` and `package.json`, checked against npm 10.9.9 on Linux x64, Linux arm64 and macOS.
 
-`tools/kite.json` pins the release and its SHA-256, and `tools/install-kite.mjs` installs it with only Node. CI, every Dockerfile and the coding runtimes use it, and npm is removed from runners and images.
+`tools/kite.json` pins the release (0.1.3) and its SHA-256, and `tools/install-kite.mjs` installs it with only Node. CI, every Dockerfile and the coding runtimes use it, and npm is removed from runners and images.
 
-Pending:
-
-1. Merge.
-2. Rebuild the worker images.
-3. Update the image digests (owner review).
-4. Release, then measure CI, host-build and coding-job install times.
+- **Release:** the cut-over (`5dd4639`, #339) merged, but its release failed on the host. The host's Docker uses the containerd image store, where Kite 0.1.2 could not reuse its store across build steps. Kite 0.1.3 fixed this, and `0a78485` (#343) released with host health confirmed. The same release deployed #341 and #342.
+- **This change:** pins worker images rebuilt from `0a78485` with Kite 0.1.3. Until it is released, coding jobs run on the old npm images, whose checks fail against main.
+- **Next:** measure CI, host-build and coding-job install times against #330's baseline.
 
 See [journal 128](journey/128-kite-replaces-npm.md).
 
