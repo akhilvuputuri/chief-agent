@@ -84,23 +84,76 @@ export function labelTask(
   return null;
 }
 
-// Operations whose results carry content written by someone other than the owner.
+// Operations whose results carry content written by someone other than the owner, by kind.
 const UNTRUSTED: Array<[RegExp, string]> = [
   [/^(gmail_|mail_)/, "email"],
-  [/^(web_|news_)/, "web"],
-  [/^(source_read|attachment_|media_|observation_read)/, "document"],
-  [/^agent_run$/, "agent_report"],
+  [/^(web_|news_|link_|feed_)/, "web"],
+  [/^(source_read|attachment_|file_|media_|observation_read)/, "document"],
+  [/^(agent_|research_)/, "agent_report"],
   [/^calendar_/, "calendar"],
+  [/^mcp_/, "mcp"],
 ];
+// Operations that only read or change the owner's own records in Chief. Anything else,
+// including a tool added later, counts as external content, so the tag fails safe.
+const INTERNAL =
+  /^(memory_|work_|skill_|canvas_|routine_|schedule_|tools_load$|finish_turn$)/;
 
 export function untrustedSources(operations: string[]) {
   return [
     ...new Set(
-      operations.flatMap((op) =>
-        UNTRUSTED.filter(([re]) => re.test(op)).map(([, kind]) => kind),
-      ),
+      operations.flatMap((op) => {
+        const named = UNTRUSTED.filter(([re]) => re.test(op)).map(
+          ([, kind]) => kind,
+        );
+        return named.length ? named : INTERNAL.test(op) ? [] : ["external"];
+      }),
     ),
   ].sort();
+}
+
+/**
+ * The owner's own words in a stored message. The host appends attachment content (PDF
+ * text, invoice clues, image notes) after a blank line and a bracketed note, so the text
+ * is cut there and the attachment is reported, never treated as the owner's words.
+ */
+export function ownerWords(message: string) {
+  const at = message.indexOf("\n\n[");
+  return at < 0
+    ? { text: message, attached: false }
+    : { text: message.slice(0, at), attached: true };
+}
+
+// Framing words a declarative fact may add that the owner need not have said.
+const FRAMING = new Set(
+  "about also always does from have into like likes often only owner prefer prefers that their they this usually uses want wants with would".split(
+    " ",
+  ),
+);
+// Crude, symmetric stemming: "lives", "live" and "living" all become "liv".
+const stem = (word: string) =>
+  word
+    .replace(/(ies|ing|ed|es|s)$/, (m) => (m === "ies" ? "y" : ""))
+    .replace(/e$/, "");
+const words = (text: string) =>
+  norm(text)
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+
+/**
+ * Whether the quote states the fact: every content word of the value (four letters or
+ * more, not framing) and every number must appear in the quote. A value cannot add
+ * something the owner did not say, such as an account number from an email.
+ */
+export function quoteSupports(quote: string, value: string) {
+  const said = new Set(words(quote).map(stem));
+  const digits = new Set(words(quote).filter((w) => /\d/.test(w)));
+  const content = words(value).filter(
+    (w) => /\d/.test(w) || (w.length >= 4 && !FRAMING.has(w)),
+  );
+  return (
+    content.length > 0 &&
+    content.every((w) => (/\d/.test(w) ? digits.has(w) : said.has(stem(w))))
+  );
 }
 
 interface Evidence {
@@ -110,6 +163,7 @@ interface Evidence {
   request: string;
   steps: Array<{ title: string; status: string; result: string }>;
   operations: Record<string, { success: number; failed: number }>;
+  /** The owner's own words (request and messages, attachments cut off): quote sources. */
   ownerMessages: Array<{ id: string; text: string }>;
   reply: string;
   untrusted: string[];
@@ -165,7 +219,7 @@ const learnTools = {
       taskIds,
     })
     .strict(),
-  learn_finish: z.object({ summary: z.string().max(500) }).strict(),
+  learn_finish: z.object({ summary: z.string().max(500).optional() }).strict(),
 } as const;
 type ToolName = keyof typeof learnTools;
 
@@ -330,7 +384,8 @@ export class Learner {
       const outcome = await spending.run(new Spending(this.db, user, run), () =>
         this.propose(user, evidence),
       );
-      if (outcome.deferred)
+      // Checked again before applying: an owner turn during the last call also defers.
+      if (outcome.deferred || (await this.ownerActive(user)))
         return await finish("deferred", {
           ...counts,
           modelCalls: outcome.modelCalls,
@@ -359,7 +414,10 @@ export class Learner {
   private async gather(user: string, now: Date) {
     const tasks = (
       await this.db.query(
-        `SELECT t.id,t.status,t.pause_reason,t.request,t.delivery_context->>'source' AS source,
+        // A paused task that labelTask would leave for later is excluded here, so a
+        // backlog of them cannot fill the limit and starve finished work.
+        `SELECT * FROM (SELECT t.id,t.status,t.pause_reason,t.request,t.updated_at,
+         t.delivery_context->>'source' AS source,
          EXISTS(SELECT 1 FROM routine_occurrences o WHERE o.task_id=t.id) AS routine,
          (SELECT count(*)::int FROM tool_receipts x WHERE x.user_id=t.user_id AND x.task_id=t.id AND x.status='failed') AS failed,
          (SELECT count(*)::int FROM runtime_calls c JOIN runtime_runs r ON r.id=c.run_id
@@ -367,8 +425,10 @@ export class Learner {
          (SELECT count(*)::int FROM work_steps s WHERE s.task_id=t.id AND s.status='blocked') AS blocked
          FROM work_tasks t WHERE t.user_id=$1 AND t.status IN ('done','paused','cancelled')
          AND t.updated_at<=$2 AND t.updated_at>=$3
-         AND NOT EXISTS (SELECT 1 FROM learning_reviews l WHERE l.user_id=t.user_id AND l.task_id=t.id)
-         ORDER BY t.updated_at LIMIT $4`,
+         AND NOT EXISTS (SELECT 1 FROM learning_reviews l WHERE l.user_id=t.user_id AND l.task_id=t.id)) x
+         WHERE x.status<>'paused' OR ((x.failed>0 OR x.blocked>0)
+         AND coalesce(x.pause_reason,'') NOT IN ('runtime_cutover','restart','interrupted'))
+         ORDER BY x.updated_at LIMIT $4`,
         [
           user,
           new Date(now.getTime() - LEARNING_LIMITS.quietMs),
@@ -445,36 +505,60 @@ export class Learner {
         [user, task],
       )
     ).rows.filter((m) => typeof m.content === "string" && m.content);
+    const asked = ownerWords(request);
+    const said = messages
+      .filter((m) => m.role === "user")
+      .slice(0, 5)
+      .map((m) => ({ id: m.id as string, ...ownerWords(m.content) }));
     const ownerMessages = [
-      { id: `request:${task}`, text: clip(request, 1200) },
-      ...messages
-        .filter((m) => m.role === "user")
-        .slice(0, 5)
-        .map((m) => ({ id: m.id as string, text: clip(m.content, 800) })),
+      { id: `request:${task}`, text: clip(asked.text, 1200) },
+      ...said
+        .filter((m) => m.text.trim() && m.text.trim() !== asked.text.trim())
+        .map((m) => ({ id: m.id, text: clip(m.text, 800) })),
     ];
     const reply = messages.filter((m) => m.role === "assistant").at(-1);
+    const attached = asked.attached || said.some((m) => m.attached);
     const item: Evidence = {
       id: task,
       ...labelled,
-      request: clip(request, 1200),
+      request: ownerMessages[0]!.text,
       steps,
       operations,
       ownerMessages,
       reply: reply ? clip(reply.content, 600) : "",
-      untrusted: untrustedSources(Object.keys(operations)),
+      untrusted: [
+        ...new Set([
+          ...untrustedSources(Object.keys(operations)),
+          ...(attached ? ["document"] : []),
+        ]),
+      ].sort(),
       runIds,
     };
-    // Keep each task within its share of the input.
-    while (
-      JSON.stringify(item).length > LEARNING_LIMITS.taskChars &&
-      item.steps.length > 1
-    )
+    // Keep each task within its share of the input: drop steps, then later owner
+    // messages, then the reply, then shorten the request.
+    const size = () => JSON.stringify(shown(item)).length;
+    while (size() > LEARNING_LIMITS.taskChars && item.steps.length > 1)
       item.steps.pop();
+    while (size() > LEARNING_LIMITS.taskChars && item.ownerMessages.length > 1)
+      item.ownerMessages.pop();
+    if (size() > LEARNING_LIMITS.taskChars) item.reply = "";
+    if (size() > LEARNING_LIMITS.taskChars) {
+      item.request = clip(item.request, 600);
+      item.ownerMessages[0] = { ...item.ownerMessages[0]!, text: item.request };
+      item.steps = item.steps.map((x) => ({
+        ...x,
+        result: clip(x.result, 100),
+      }));
+    }
     return item;
   }
 
   private async propose(user: string, evidence: Evidence[]) {
-    const current = (await this.store.active(user)).map((r) => ({
+    const items = await this.store.active(user);
+    const ownerKeys = new Set(
+      items.filter((r) => r.kind === "fact" && !isLearned(r)).map((r) => r.key),
+    );
+    const current = items.map((r) => ({
       key: r.key,
       kind: r.kind,
       value: clip(r.value!, 300),
@@ -495,10 +579,7 @@ export class Learner {
       {
         role: "user",
         content: JSON.stringify({
-          tasks: evidence.map(({ runIds: _r, ...e }) => ({
-            ...e,
-            ownerMessages: e.ownerMessages.map((m) => m.text),
-          })),
+          tasks: evidence.map(shown),
           current,
         }),
       },
@@ -539,7 +620,13 @@ export class Learner {
             finished = true;
             result = { ok: true };
           } else {
-            const problem = this.check(name, args, evidence, accepted);
+            const problem = this.check(
+              name,
+              args,
+              evidence,
+              accepted,
+              ownerKeys,
+            );
             result = problem ? { refused: problem } : { accepted: true };
             if (!problem) accepted.push({ name, args });
           }
@@ -562,6 +649,7 @@ export class Learner {
     args: any,
     evidence: Evidence[],
     accepted: Array<{ name: ToolName; args: any }>,
+    ownerKeys: Set<string>,
   ): string | undefined {
     const cited = (args.taskIds as string[]).map((id) =>
       evidence.find((e) => e.id === id),
@@ -575,6 +663,11 @@ export class Learner {
       );
       if (!found)
         return "The quote must be the owner's exact words in a cited task";
+      if (!quoteSupports(args.quote, args.value))
+        return "Every content word and number of the value must come from the quote";
+      // Until the owner can see and undo learned changes (phase 3), their own facts stay.
+      if (ownerKeys.has(args.key))
+        return "The owner saved this key themselves; leave it";
     }
     if (name === "learn_lesson" && tasks.some((t) => t.label !== args.outcome))
       return `A ${args.outcome} lesson must cite only ${args.outcome} tasks`;
@@ -682,6 +775,15 @@ export class Learner {
         [user, l.id, learnerRun, l.label, l.reasons],
       );
   }
+}
+
+/** One task as the model sees it: the request once, then the owner's other messages. */
+function shown(e: Evidence) {
+  const { runIds: _runIds, ownerMessages, ...rest } = e;
+  return {
+    ...rest,
+    ownerMessages: ownerMessages.slice(1).map((m) => m.text),
+  };
 }
 
 function keyOf(name: ToolName, args: any) {

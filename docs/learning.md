@@ -92,7 +92,7 @@ Each run looks at up to 20 of the owner's work tasks that are `done`, `paused` o
 - **success:** `done` with no failed receipt and no uncertain or interrupted call. Done already requires each step's proof.
 - **pitfall:** `done` after failed receipts (recovered), or `paused` with failed receipts or blocked steps.
 - **skipped:** cancelled, any uncertain write, a routine occurrence, or a task not started by the owner (a responsibility investigation or a gathering).
-- A paused task with neither, or one paused by a restart or cutover, is not labelled and is looked at again later.
+- A paused task with neither, or one paused by a restart or cutover, is not labelled and is looked at again later. Such tasks are excluded before the 20-task limit, so a backlog of them cannot crowd out finished work. Any failed receipt, even a failed read, makes a done task a pitfall: the label errs towards strict.
 
 A labelled task is recorded in `learning_reviews` once the run completes, so it is learned from at most once. A run with nothing but skipped tasks makes no model call.
 
@@ -102,17 +102,26 @@ The learner calls the `standard` tier (resolved from `config/model-policy.json`,
 
 It is offered four tools and nothing else: `learn_fact`, `learn_lesson`, `learn_retire` and `learn_finish`. The instructions adopt Hermes's capture rules (declarative facts, a general rule plus one clause of why, no dates, task numbers, quoted email or web text, transient failures, negative claims about tools or unresolved attempts) and default to saving nothing.
 
+### Owner words and untrusted content
+
+The host appends attachment content to the owner's stored message after a blank line and a bracketed note (`[Attached PDF: …]`, `[Attached invoice PDF: …]`, `[Attached image: …]`). The learner cuts the request and each owner message there, so attached text is never treated as the owner's words, and tags the task `document`. Untrusted kinds come from the task's operations: email, web (web, news, links, feeds), document, agent report (agents, research), calendar and MCP. Any other operation not on a short list of owner-internal ones (memory, work, skills, canvases, routines, schedules) counts as `external`, so a new tool fails safe.
+
+Each task shown to the model is held to 4,000 characters: steps are dropped first, then later owner messages, then the reply, then the request and step results are shortened.
+
 ### Host checks
 
 Every proposal is checked before it is accepted, and a refusal is returned to the model with its reason:
 
 - Cited task IDs must be ones it was shown.
-- A fact needs a quote of the owner's own words from a cited task's request or messages (whitespace, quote marks, dashes and case normalized), so a fact cannot come from email or web text.
-- A lesson's outcome must match the label of every task it cites.
+- A fact needs a quote of the owner's own words from a cited task (whitespace, quote marks, dashes and case normalized), and the quote must state the fact: every content word of the value (four letters or more, other than a few framing words such as "prefers" or "usually", compared after crude stemming) and every number must appear in the quote. A fact therefore cannot add an account number or a claim from email, web or attached text.
+- A fact may not use a key that holds one of the owner's own facts. Until phase 3 lets the owner see and undo learned changes, their own facts stay as they are.
+- A lesson's outcome must match the label of every task it cites. Lessons are not quote-checked; they carry their tasks' untrusted tags instead, so they can be rolled back by source.
 - One key once per run.
-- `learn_retire` applies only to learned items; the owner's own facts are left alone.
+- `learn_retire` applies only to learned items.
 
-Accepted items are applied together after the run ends, through `MemoryStore`, with `origin: learned`, the learner run, the cited task, run and owner-message IDs and the prompt version as provenance, and the union of the cited tasks' untrusted kinds, which makes them `untrusted`. An item identical to the current value is not rewritten. If the owner starts a turn during the run, it stops before the next model call and applies nothing and labels nothing, so the next tick starts over.
+Accepted items are applied after the run ends, through `MemoryStore`, with `origin: learned`, the learner run, the cited task, run and owner-message IDs and the prompt version as provenance, and the union of the cited tasks' untrusted kinds, which makes them `untrusted`. An item identical to the current value is not rewritten. Owner activity is checked before each model call and again before applying: if the owner started a turn, the run is deferred and applies nothing and labels nothing, so the next tick starts over. Items are written one at a time; a crash part-way leaves the written ones (rollback by learner run removes them), the run is marked failed at the next start, and its tasks are reviewed again the next night, where unchanged values are not rewritten.
+
+While a run is calling the model, its `runtime_runs` row is `running`, so the release and rollout guards that wait for idle (`scripts/cloud-release.py`, the `deploy-*.py` scripts) and the coding automation's idle check wait for it too, for at most ten calls.
 
 ### Telemetry
 

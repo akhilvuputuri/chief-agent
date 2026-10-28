@@ -1342,7 +1342,13 @@ const learnerTimer = setInterval(() => {
   if (learning) return;
   learning = true;
   void (async () => {
-    for (const user of allowed) await learner.tick(user);
+    // One owner's failure never skips the others.
+    for (const user of allowed)
+      await learner
+        .tick(user)
+        .catch((error) =>
+          opsLog("learner.tick_failed", "error", errorFields(error)),
+        );
   })()
     .catch((error) =>
       opsLog("learner.tick_failed", "error", errorFields(error)),
