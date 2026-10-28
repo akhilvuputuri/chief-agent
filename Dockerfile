@@ -1,15 +1,15 @@
 FROM node:22.23.4-bookworm-slim AS build
-# lockstep replaces npm (pinned and checksum-verified in tools/lockstep.json);
+# kite replaces npm (pinned and checksum-verified in tools/kite.json);
 # npm itself is removed so nothing can fall back to it.
-COPY tools/lockstep.json tools/install-lockstep.mjs /opt/lockstep/
-RUN node /opt/lockstep/install-lockstep.mjs --dir /usr/local/bin && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
+COPY tools/kite.json tools/install-kite.mjs /opt/kite/
+RUN node /opt/kite/install-kite.mjs --dir /usr/local/bin && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 WORKDIR /app
 COPY package*.json ./
 COPY coding_runtime_pi ./coding_runtime_pi
-RUN lockstep ci
+RUN kite ci
 COPY tsconfig.json ./
 COPY src ./src
-RUN lockstep run build && lockstep ci --omit=dev
+RUN kite run build && kite ci --omit=dev
 FROM node:22.23.4-bookworm-slim
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 WORKDIR /app

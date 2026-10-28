@@ -1,6 +1,6 @@
 /**
  * Owner-facing wording for the Pi worker's progress lines. The worker reports internal
- * labels such as "Pi build: Running build" or "Pi check: lockstep run check: 0"; the host
+ * labels such as "Pi build: Running build" or "Pi check: kite run check: 0"; the host
  * stores and shows plain English instead. Deterministic, so a retried report matches.
  */
 const phases: Record<string, string> = {

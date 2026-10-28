@@ -3,16 +3,16 @@ FROM python:3.12-slim-bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev git ripgrep ca-certificates util-linux && rm -rf /var/lib/apt/lists/* && groupadd -g 1000 worker && useradd -m -u 1000 -g 1000 worker
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/include/node /usr/local/include/node
-# Node without npm: installs use the pinned, checksum-verified lockstep.
-COPY tools/lockstep.json tools/install-lockstep.mjs /opt/lockstep/
-RUN node /opt/lockstep/install-lockstep.mjs --dir /usr/local/bin
+# Node without npm: installs use the pinned, checksum-verified kite.
+COPY tools/kite.json tools/install-kite.mjs /opt/kite/
+RUN node /opt/kite/install-kite.mjs --dir /usr/local/bin
 WORKDIR /opt/chief-worker
 COPY package*.json ./
 COPY coding_runtime_pi ./coding_runtime_pi
-RUN lockstep ci --ignore-scripts
+RUN kite ci --ignore-scripts
 COPY tsconfig*.json ./
 COPY src ./src
-RUN lockstep run build && mkdir -p /opt/pi-runtime && gcc -shared -fPIC -I/usr/local/include/node coding_runtime_pi/native/process.c -o /opt/pi-runtime/process-boundary.node
+RUN kite run build && mkdir -p /opt/pi-runtime && gcc -shared -fPIC -I/usr/local/include/node coding_runtime_pi/native/process.c -o /opt/pi-runtime/process-boundary.node
 COPY coding_runtime/requirements-dev.txt /opt/pi-runtime/requirements-dev.txt
 RUN pip install --no-cache-dir --require-hashes -r /opt/pi-runtime/requirements-dev.txt
 USER worker

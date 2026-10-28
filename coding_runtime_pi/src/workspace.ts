@@ -50,7 +50,7 @@ export function localExecutor(
         env: {
           PATH: process.env.PATH,
           HOME: home,
-          LOCKSTEP_STORE: `${home}/lockstep-store`,
+          KITE_STORE: `${home}/kite-store`,
           XDG_CACHE_HOME: `${home}/cache`,
           TMPDIR: home,
           LANG: "C.UTF-8",

@@ -1,6 +1,6 @@
-name: setup lockstep
+name: setup kite
 description: >-
-  Node 22.23.4, the lockstep release pinned in tools/lockstep.json (checksum
+  Node 22.23.4, the kite release pinned in tools/kite.json (checksum
   verified) and its package store. npm and npx are removed from the PATH so
   nothing can fall back to them.
 runs:
@@ -8,13 +8,13 @@ runs:
   steps:
     - uses: actions/setup-node@v4
       with: { node-version: "22.23.4" }
-    - name: Install lockstep and remove npm
+    - name: Install kite and remove npm
       shell: bash
       run: |
-        dir="$RUNNER_TEMP/lockstep-bin"
-        node tools/install-lockstep.mjs --dir "$dir"
+        dir="$RUNNER_TEMP/kite-bin"
+        node tools/install-kite.mjs --dir "$dir"
         echo "$dir" >> "$GITHUB_PATH"
-        echo "LOCKSTEP_STORE=$RUNNER_TEMP/lockstep-store" >> "$GITHUB_ENV"
+        echo "KITE_STORE=$RUNNER_TEMP/kite-store" >> "$GITHUB_ENV"
         # Remove every npm on the PATH (setup-node's and the runner image's).
         for tool in npm npx corepack; do
           for found in $(type -ap "$tool"); do
@@ -26,9 +26,9 @@ runs:
           echo "npm is still on the PATH" >&2
           exit 1
         fi
-        "$dir/lockstep" --version
+        "$dir/kite" --version
     - uses: actions/cache@v4
       with:
-        path: ${{ runner.temp }}/lockstep-store
-        key: lockstep-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/lockstep.json', 'package-lock.json', 'coding_runtime_pi/package-lock.json') }}
-        restore-keys: lockstep-${{ runner.os }}-${{ runner.arch }}-
+        path: ${{ runner.temp }}/kite-store
+        key: kite-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/kite.json', 'package-lock.json', 'coding_runtime_pi/package-lock.json') }}
+        restore-keys: kite-${{ runner.os }}-${{ runner.arch }}-

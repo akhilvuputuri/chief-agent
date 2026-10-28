@@ -50,7 +50,7 @@ If `config/reasoning-effort.json` cannot be read, the gateway logs `effort.confi
 Example: how often each effort was applied, and how often a turn escalated.
 
 ```sh
-AWS_PROFILE=chief-logs lockstep run logs:cloudwatch -- event --event effort.decided --since 24h
+AWS_PROFILE=chief-logs kite run logs:cloudwatch -- event --event effort.decided --since 24h
 ```
 
 ## What would change the policy

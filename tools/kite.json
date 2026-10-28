@@ -2,15 +2,15 @@
   "version": "0.1.0",
   "assets": {
     "darwin-arm64": {
-      "url": "https://github.com/akhilvuputuri/lockstep/releases/download/v0.1.0/lockstep-darwin-arm64",
+      "url": "https://github.com/akhilvuputuri/kite/releases/download/v0.1.0/kite-darwin-arm64",
       "sha256": "05a6a89f668e93750cac31d51ba52cac984c5e6fa8af9462ece4149472e65ed5"
     },
     "linux-arm64": {
-      "url": "https://github.com/akhilvuputuri/lockstep/releases/download/v0.1.0/lockstep-linux-arm64",
+      "url": "https://github.com/akhilvuputuri/kite/releases/download/v0.1.0/kite-linux-arm64",
       "sha256": "e240bc1fffea83d736a4e92450bbbdebc90eccd58e8e3adcb9f1f4cb259c1913"
     },
     "linux-x64": {
-      "url": "https://github.com/akhilvuputuri/lockstep/releases/download/v0.1.0/lockstep-linux-x64",
+      "url": "https://github.com/akhilvuputuri/kite/releases/download/v0.1.0/kite-linux-x64",
       "sha256": "545a314bf9aa44eb9974198df84ae0fce3a9a4c306b06cfe28ba09096c4225f8"
     }
   }

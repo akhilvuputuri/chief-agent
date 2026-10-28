@@ -56,7 +56,7 @@ class Workspace:
         return {
             "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
             "HOME": str(self.home),
-            "LOCKSTEP_STORE": str(self.home / "lockstep-store"),
+            "KITE_STORE": str(self.home / "kite-store"),
             "XDG_CACHE_HOME": str(self.home / "cache"),
             "TMPDIR": tempfile.gettempdir(),
             "LANG": "C.UTF-8",

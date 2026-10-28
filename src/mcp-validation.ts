@@ -17,7 +17,7 @@ export async function validateMcpSchema(
     Buffer.byteLength(JSON.stringify(data)) > 220000
   )
     throw failure();
-  // lockstep test builds first; focused source tests use the same compiled worker as production.
+  // kite test builds first; focused source tests use the same compiled worker as production.
   const url = new URL(
     import.meta.url.endsWith(".ts")
       ? "../dist/mcp-validator-worker.js"

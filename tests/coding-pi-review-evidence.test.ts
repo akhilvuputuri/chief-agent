@@ -24,7 +24,7 @@ test("Pi reviewer is directed to the exact changed-path inventory and complete d
     fileCount: 3,
     plan: "Fix addition only",
     context: "Preserve all unrelated behavior",
-    checks: [{ command: "lockstep run check", exitCode: 0, output: "passed" }],
+    checks: [{ command: "kite run check", exitCode: 0, output: "passed" }],
   });
   assert.match(prompt, /candidate_inventory/);
   assert.match(prompt, /candidate_diff/);

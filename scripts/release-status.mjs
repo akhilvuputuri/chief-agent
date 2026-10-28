@@ -85,7 +85,7 @@ if (
   try {
     const [sha, ...extra] = process.argv.slice(2);
     if (!/^[a-f0-9]{40}$/.test(sha ?? "") || extra.length)
-      throw new Error("Usage: lockstep run release:status -- FULL_COMMIT_SHA");
+      throw new Error("Usage: kite run release:status -- FULL_COMMIT_SHA");
     const statuses = api(
       `repos/${repo}/commits/${sha}/statuses?per_page=100`,
     ).flat();

@@ -30,7 +30,7 @@ The coding module ([coding.md](coding.md)) already contains a box system: the `S
   - The global `coding_one_active_worker` index also counts host-side `publishing`.
   - `tick()` interleaves reconciliation with requirements approval, publication and merge automation.
   - Approval policy runs inside worker authentication, token issue and heartbeats.
-  - `save` and `finish` hard-code the lockstep checks.
+  - `save` and `finish` hard-code the kite checks.
   - `coding_events` is at once the outbox, the session store, the approval log and the automation state.
   - Workers strict-parse the whole `codingSettings` blob, so a schema change needs a new image.
 - **CodeBuild is batch-shaped.** A build cannot stop with its disk kept, so a warm workspace cannot outlive a build.
@@ -186,7 +186,7 @@ Reuse saves boot time and the image pull. It never lets one task's state influen
 
    The worktree of a previous task is never trusted.
 
-4. installs dependencies with `lockstep ci` into the fresh container. An optional package cache is populated only by the agent, verified by lockfile integrity hashes and mounted read-only (a later optimisation, measured before adoption).
+4. installs dependencies with `kite ci` into the fresh container. An optional package cache is populated only by the agent, verified by lockfile integrity hashes and mounted read-only (a later optimisation, measured before adoption).
 
 **Proposed default: a box is reused only within the rounds that follow implementation approval** (implementation, feedback repairs and rebases of the same job). The read-only planning box is not reused for implementation. The remaining risk is that a kernel or container escape in one round persists into later rounds of the same job. Today every attempt starts on a fresh machine.
 
@@ -342,7 +342,7 @@ The smallest move that puts coding on EC2 without weakening anything. Coding alr
 - **The worker is unchanged.** The `coding` profile's task program (`src/boxes/coding-task.ts`) runs `pi-worker.js` as a child:
   - It turns the task payload into the worker's environment: `CODING_JOB_ID`, `CODING_ATTEMPT_ID`, `CODING_JOB_TOKEN` and `CODING_ORIGIN`, plus `PATH`, `HOME` and `TMPDIR`.
   - It keeps the worker's output off the task protocol and reports only the exit.
-  - `TMPDIR` points at the box disk (`/workspace/tmp`), because the clones, `lockstep ci` and tests do not fit the 512 MB `/tmp` tmpfs.
+  - `TMPDIR` points at the box disk (`/workspace/tmp`), because the clones, `kite ci` and tests do not fit the 512 MB `/tmp` tmpfs.
 - **The task program's own boundary.** It holds the attempt token while repository commands run as the same user in the same container. Before it reads the task, it therefore:
   - requires `--disable-sigusr1`, so no inspector can be attached;
   - calls the worker image's native lockdown, which makes it non-dumpable (so `/proc` cannot read its memory) and a subreaper.

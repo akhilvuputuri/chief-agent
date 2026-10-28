@@ -53,7 +53,7 @@ The stock watchlist ([issue #46](https://github.com/akhilvuputuri/chief-agent/is
 
 ## Deployment (operator-reviewed migration 017)
 
-1. Independently review exact PR head and run `lockstep run check` plus changed-file formatting. Review `scripts/deploy-routines.py` too.
+1. Independently review exact PR head and run `kite run check` plus changed-file formatting. Review `scripts/deploy-routines.py` too.
 2. Merge only after approval and CI. Ordinary release refuses the DB/Compose change.
 3. Verify live RELEASE is one of the script's reviewed baselines: `dd2be311e4cbfaecd75eca64bb0bcb730abfab76` or its Gmail documentation/version closure `62e531c70b2397b22293988b9c078eef9bca25f4`. If newer, reconcile and re-review the operator script; do not bypass the guard.
 4. Transfer a Git archive of the exact reviewed main SHA and the reviewed operator script using the existing local operations connection. Run `python3 deploy-routines.py ARCHIVE SHA` on the host. It validates historical migrations/Compose, locks releases, builds before stopping, refuses active work/input, applies only 017 and checks health. No secrets are copied into development.

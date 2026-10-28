@@ -4,10 +4,10 @@ Run before improving the runtime, then repeat unchanged cases after each focused
 
 ## Run
 
-- `lockstep run eval`: offline context-retention probe, no network or credentials required.
-- `lockstep run eval -- --live`: real Sol medium with controlled web responses and an isolated in-memory Postgres-compatible database per case.
-- `lockstep run eval -- --live --case=missing-evidence`: run one case.
-- `lockstep run eval:compare -- BEFORE/report.json AFTER/report.json`: compare matched fixtures, graders and settings.
+- `kite run eval`: offline context-retention probe, no network or credentials required.
+- `kite run eval -- --live`: real Sol medium with controlled web responses and an isolated in-memory Postgres-compatible database per case.
+- `kite run eval -- --live --case=missing-evidence`: run one case.
+- `kite run eval:compare -- BEFORE/report.json AFTER/report.json`: compare matched fixtures, graders and settings.
 
 Live mode requires a private OPENROUTER_API_KEY. It never uses DATABASE_URL or starts Telegram, Google or speech providers. Only inference contacts an external service. Price ceilings remain $2/M input and $10/M output. Across the invocation, the runner admits requests against a $2 ceiling using a conservative input-byte/output-token upper estimate; returned cost replaces that reservation when known. Failed/unknown calls keep the reservation. This accounting is not a billing guarantee or statement. Each case also has model-call and runtime budgets. No automatic background worker runs; an unfinished case is recorded as unfinished.
 

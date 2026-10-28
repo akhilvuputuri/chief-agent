@@ -2,11 +2,7 @@
   "version": 3,
   "source": "9abd9d0b0d5042a89e773db463cf78f00e52539b",
   "scope": "Disposable acceptance candidates only; these benchmark changes are not authorized for merging into the product by this manifest.",
-  "checks": [
-    "lockstep run check",
-    "lockstep run build",
-    "lockstep run format:check"
-  ],
+  "checks": ["kite run check", "kite run build", "kite run format:check"],
   "workloads": [
     {
       "id": "runtime-neutral-approval",

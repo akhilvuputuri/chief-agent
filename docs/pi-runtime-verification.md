@@ -12,7 +12,7 @@ Preserve valid per-call token budgets within the existing job maximum, including
 
 ## Gate 3: real repository baseline and frozen oracles
 
-Pin target source to the public Chief repository at the baseline above. Measure unmodified `lockstep ci`, `lockstep run check`, `lockstep run build` and `lockstep run format:check` in the actual worker environment before paid coding. Do not rename syntax checks as build/format acceptance. A check that exceeds the harness command deadline exposes a runtime gap; do not weaken the check to obtain a passing run.
+Pin target source to the public Chief repository at the baseline above. Measure unmodified `kite ci`, `kite run check`, `kite run build` and `kite run format:check` in the actual worker environment before paid coding. Do not rename syntax checks as build/format acceptance. A check that exceeds the harness command deadline exposes a runtime gap; do not weaken the check to obtain a passing run.
 
 Prepare three isolated workloads with explicit requirements and external acceptance oracles: a narrow existing defect, a change spanning multiple application modules, and a larger coherent change that forces context maintenance. Freeze concrete task definitions, permitted paths and independent tests before paid runs. Require baseline failure for the target behavior and baseline success for unrelated checks. Do not use padding to stand in for semantic complexity or alter goals after a failed attempt without creating a separately identified workload revision.
 

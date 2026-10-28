@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 const [beforePath, afterPath] = process.argv.slice(2);
 if (!beforePath || !afterPath)
   throw new Error(
-    "Usage: lockstep run eval:compare -- BEFORE/report.json AFTER/report.json",
+    "Usage: kite run eval:compare -- BEFORE/report.json AFTER/report.json",
   );
 const before = JSON.parse(await readFile(beforePath, "utf8")),
   after = JSON.parse(await readFile(afterPath, "utf8"));

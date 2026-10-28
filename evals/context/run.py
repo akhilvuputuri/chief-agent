@@ -9,9 +9,9 @@ Replays synthetic multi-topic conversations through the real context pipeline
   - searched: the model called conversation_search/conversation_read/observation_read.
 
 Usage:
-  lockstep run eval:context                      # context mode, free
-  lockstep run eval:context -- --mode answer     # real model answers (~$0.02-0.05 per probe)
-  lockstep run eval:context -- --probe wedding-mixup/3
+  kite run eval:context                      # context mode, free
+  kite run eval:context -- --mode answer     # real model answers (~$0.02-0.05 per probe)
+  kite run eval:context -- --probe wedding-mixup/3
 """
 from __future__ import annotations
 
@@ -118,7 +118,7 @@ def main() -> int:
             print("answer mode needs OPENROUTER_API_KEY (environment or --env-file)", file=sys.stderr)
             return 2
         env["OPENROUTER_API_KEY"] = key
-    command = ["lockstep", "exec", "tsx", "evals/context/replay.ts", "--mode", args.mode, "--out", str(out / "rows.jsonl")]
+    command = ["kite", "exec", "tsx", "evals/context/replay.ts", "--mode", args.mode, "--out", str(out / "rows.jsonl")]
     for flag in ("probe", "fixtures", "model"):
         if getattr(args, flag):
             command += [f"--{flag}", getattr(args, flag)]

@@ -175,7 +175,7 @@ One agent, **Merlion** (`singapore/merlion`, alias `merlion`), holds all twelve 
 
 1. **Code release (automatic):** host client, tools, plugin, picker entry, eval fixtures and tests. No migration and no Compose change. In production, data.gov.sg tools then run at the anonymous pace, and DataMall tools stay hidden.
 2. **Key rollout (operator):** `DATAGOVSG_API_KEY` and `LTA_DATAMALL_ACCOUNT_KEY` are added to the gateway environment list in `compose.yaml` and to the production `.env`, through the reviewed operator procedure ([cloud development](cloud-development.md)). The keys live only in the production environment, never in the repository, logs or PRs.
-3. **Picker eval:** `config/tool-picker.json` gains the `singapore` domain, so `lockstep run eval:picker` is run by hand and recorded in the journal.
+3. **Picker eval:** `config/tool-picker.json` gains the `singapore` domain, so `kite run eval:picker` is run by hand and recorded in the journal.
 
 ### Key rollout procedure
 

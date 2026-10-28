@@ -63,7 +63,7 @@ import {
   requirementBrief,
 } from "./helpers/coding-fixture.js";
 test("required dependency installation keeps the package store outside the captured checkout", async () => {
-  const root = await mkdtemp(join(tmpdir(), "chief-lockstep-home-"));
+  const root = await mkdtemp(join(tmpdir(), "chief-kite-home-"));
   const signal = new AbortController().signal,
     w = new Workspace(root, signal);
   // A local package inside the repository needs no registry access.
@@ -86,7 +86,7 @@ test("required dependency installation keeps the package store outside the captu
       dependencies: { "chief-fixture-dep": "file:vendor/dep" },
     }),
   );
-  const locked = await w.command("lockstep", [
+  const locked = await w.command("kite", [
     "install",
     "--lockfile-only",
     "--ignore-scripts",
@@ -102,16 +102,16 @@ test("required dependency installation keeps the package store outside the captu
     "-m",
     "fixture",
   ]);
-  const installed = await w.command("lockstep", ["ci", "--ignore-scripts"]);
+  const installed = await w.command("kite", ["ci", "--ignore-scripts"]);
   assert.equal(installed.exitCode, 0, installed.output);
   // Commands get a package store outside the checkout.
   const store = (
-    await w.command("node", ["-e", "console.log(process.env.LOCKSTEP_STORE)"])
+    await w.command("node", ["-e", "console.log(process.env.KITE_STORE)"])
   ).output.trim();
   assert(isAbsolute(store), store);
   assert(!store.startsWith(root), store);
   const entries = await readdir(root);
-  assert(!entries.includes("lockstep-store") && !entries.includes(".cache"));
+  assert(!entries.includes("kite-store") && !entries.includes(".cache"));
   assert.equal((await w.snapshot("plan", "summary")).files.length, 0);
 });
 test("lease-release failure cannot permanently disable controller ticks", async (t) => {

@@ -291,7 +291,7 @@ test("host rejects planning delegation, skipped verification and forged/stale re
       candidateVersion: 1,
       candidateHash: artifactHash(initial),
       checks: ["check", "build", "format:check"].map((name) => ({
-        command: `lockstep run ${name}`,
+        command: `kite run ${name}`,
         exitCode: 0,
         output: "passed",
       })),
@@ -339,7 +339,7 @@ test("stale squad completion cannot rewind a newer acknowledged checkpoint", asy
   const hash = artifactHash(cp),
     scope = squadScope(job, plan);
   const checks = ["check", "build", "format:check"].map((name) => ({
-    command: `lockstep run ${name}`,
+    command: `kite run ${name}`,
     exitCode: 0,
     output: "passed",
   }));

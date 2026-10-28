@@ -12,19 +12,19 @@ Use Node 22 for Chief, Python 3.12+, Git and ripgrep (`rg`) for this package. In
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install --require-hashes -r coding_runtime/requirements-dev.txt
-lockstep ci
-lockstep run check
-lockstep run build
-lockstep run format:check
+kite ci
+kite run check
+kite run build
+kite run format:check
 ```
 
-`lockstep run check:coding` runs Ruff, strict mypy and offline unittest scenarios against the source package. Python tests include a real local Git/lockstep candidate and review, process cancellation, acknowledgement recovery, wire bounds, reasoning continuation and cross-language artifact identity. No external model or production credentials are needed. To install independently, use `python -m pip install --no-deps --no-build-isolation ./coding_runtime` after installing the hash-locked dependencies. Re-resolve locks deliberately with `uv pip compile` from the checked-in inputs; keep runtime, development and build locks in sync.
+`kite run check:coding` runs Ruff, strict mypy and offline unittest scenarios against the source package. Python tests include a real local Git/kite candidate and review, process cancellation, acknowledgement recovery, wire bounds, reasoning continuation and cross-language artifact identity. No external model or production credentials are needed. To install independently, use `python -m pip install --no-deps --no-build-isolation ./coding_runtime` after installing the hash-locked dependencies. Re-resolve locks deliberately with `uv pip compile` from the checked-in inputs; keep runtime, development and build locks in sync.
 
 ## Contract and sandbox
 
 Assignments use `protocolVersion: 1` and the typed models in `protocol.py`. Worker endpoints are assignment, heartbeat, progress, checkpoint, finish and model; all writes are attempt-fenced. The worker requires an immutable root-owned package, Linux UID 1000 and `python -I`. The trusted launcher uses `setpriv`, drops all capabilities and sets no-new-privileges. Before loading credentials or repository code, ctypes sets Linux dumpability to zero. Commands receive a stripped environment and separate process groups. Linux subreaper adoption also terminates/reaps descendants that detach into new sessions. Repository commands are serialized; a separately owned output transport prevents inherited pipes from blocking timeout or cancellation. CI executes the same launcher and proves a same-UID command cannot read its parent environment.
 
-The image includes Node and the pinned lockstep (no npm) because Chief's target repository checks require them, plus the locked Python check dependencies so those scripts can validate Python changes. Target tests run in child processes; the worker's isolated interpreter does not import checkout code. Source commands cannot choose provisioning settings or publish remotely through host credentials.
+The image includes Node and the pinned kite (no npm) because Chief's target repository checks require them, plus the locked Python check dependencies so those scripts can validate Python changes. Target tests run in child processes; the worker's isolated interpreter does not import checkout code. Source commands cannot choose provisioning settings or publish remotely through host credentials.
 
 See [the host lifecycle and activation runbook](../docs/coding.md). The default remains off. Existing Node-pinned jobs retain their launcher; switch the host runtime and image digest together after the Python image is published and independently verified. There is no migration, automatic task resumption or paid sandbox activation in this refactor.
 

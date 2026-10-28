@@ -602,7 +602,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_commands_keep_the_package_store_outside_the_checkout(self):
         r = await self.w.command(
-            "node", ["-e", "console.log(process.env.LOCKSTEP_STORE)"]
+            "node", ["-e", "console.log(process.env.KITE_STORE)"]
         )
         store = r.text().strip().splitlines()[-1]
         self.assertTrue(Path(store).is_absolute(), store)
@@ -610,7 +610,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
             Path(store).resolve().is_relative_to(self.w.root.resolve()), store
         )
 
-    async def test_worker_candidate_actual_git_lockstep_checks_fresh_review(self):
+    async def test_worker_candidate_actual_git_kite_checks_fresh_review(self):
         package = {
             "name": "fixture",
             "version": "1.0.0",
@@ -621,7 +621,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         }
         await self.w.write("package.json", json.dumps(package))
         r = await self.w.command(
-            "lockstep", ["install", "--lockfile-only", "--ignore-scripts"]
+            "kite", ["install", "--lockfile-only", "--ignore-scripts"]
         )
         self.assertEqual(r.exit_code, 0, r.text())
         await self.w.git("add", "-A")

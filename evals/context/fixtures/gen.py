@@ -114,7 +114,7 @@ def main():
     print("\n".join(rows))
     # Match the repository's formatting so format:check passes after regeneration.
     import subprocess
-    subprocess.run(["lockstep", "exec", "prettier", "--write", str(HERE / "*.json")], cwd=HERE.parents[2], check=False, capture_output=True)
+    subprocess.run(["kite", "exec", "prettier", "--write", str(HERE / "*.json")], cwd=HERE.parents[2], check=False, capture_output=True)
 
 
 if __name__ == "__main__":

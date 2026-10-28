@@ -27,12 +27,12 @@ try {
       { mode: 0o600 },
     );
     console.log(
-      `Open https://t.me/${bot.username}?start=${code} and press Start. Then run lockstep run pair:finish within 15 minutes.`,
+      `Open https://t.me/${bot.username}?start=${code} and press Start. Then run kite run pair:finish within 15 minutes.`,
     );
   } else {
     const pairing = JSON.parse(await readFile(pairPath, "utf8"));
     if (pairing.expires < Date.now())
-      throw new Error("Pairing expired; run lockstep run pair again.");
+      throw new Error("Pairing expired; run kite run pair again.");
     const updates = await api("getUpdates");
     const matches = new Set(
       updates

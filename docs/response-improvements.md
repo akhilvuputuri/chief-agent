@@ -20,7 +20,7 @@ Existing explicit memories are key/value facts and preferences in Postgres; rece
 
 ## Verification
 
-Use `lockstep run check`, formatting and build checks. New deterministic checks cover compact inventory size, all 22 identities, owner/task isolation, resumed-task retrieval, preserved source identifiers and successful read-step proof. Existing tests retain authorization and write-proof checks. No further paid eval is needed for this focused checkpoint; end-to-end improvement in real conversation remains to be observed, not asserted.
+Use `kite run check`, formatting and build checks. New deterministic checks cover compact inventory size, all 22 identities, owner/task isolation, resumed-task retrieval, preserved source identifiers and successful read-step proof. Existing tests retain authorization and write-proof checks. No further paid eval is needed for this focused checkpoint; end-to-end improvement in real conversation remains to be observed, not asserted.
 
 ## Release verification
 

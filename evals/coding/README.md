@@ -20,12 +20,12 @@ All ten selected tasks are **development** cases. Publicly committed gold source
 Use the repository's Python development environment (including locked Pydantic dependencies), Node 22 and Git. No keys or `.env` are needed.
 
 ```sh
-lockstep run eval:coding -- list
-lockstep run eval:coding -- validate
-lockstep run eval:coding -- prepare chief-format-surrogate /tmp/chief-format-task
+kite run eval:coding -- list
+kite run eval:coding -- validate
+kite run eval:coding -- prepare chief-format-surrogate /tmp/chief-format-task
 ```
 
-`validate` runs only reviewed bundled sources and their fixed mutations on the local machine. For each task it proves: broken target fails, broken regression checks pass, reference repair passes both groups. This is **fixture validation**, not an agent score. `lockstep test` includes the offline fixture and grading-boundary tests.
+`validate` runs only reviewed bundled sources and their fixed mutations on the local machine. For each task it proves: broken target fails, broken regression checks pass, reference repair passes both groups. This is **fixture validation**, not an agent score. `kite test` includes the offline fixture and grading-boundary tests.
 
 `prepare` requires a nonexistent output directory and never overwrites a workspace. Give only that exported directory to the coding agent in a disposable sandbox. Do not point the agent at `evals/coding`, the full Chief Git history, the frozen upstream commit, the reference source or these grader files. Disable repository/network lookup during the trial; otherwise the original public solution is readily available. The exporter itself does not provision or enforce the agent's sandbox.
 
@@ -59,7 +59,7 @@ Only the case's one editable source path is accepted; evaluator tests and extra 
 Start Docker and explicitly pull the digest in `run.py` once with `docker pull --platform=linux/amd64 IMAGE`; grading never pulls automatically. This is the existing amd64 worker image with Node, Python and Pydantic. Apple Silicon requires Docker amd64 emulation. It contains a worker entrypoint, but the grader overrides it and never starts that worker.
 
 ```sh
-lockstep run eval:coding -- grade predictions.jsonl config.json eval-results/coding-trial-1.json
+kite run eval:coding -- grade predictions.jsonl config.json eval-results/coding-trial-1.json
 ```
 
 Create the output parent directory first. Reports cannot overwrite an existing result. Each assertion group runs in a fresh non-root, network-disabled, read-only container, without credentials or a Docker socket. Only a temporary candidate directory and trusted graders are mounted read-only. Memory, CPU, processes and wall time are bounded; the runner attempts forced cleanup even after a CLI timeout. Only reviewed bundled fixture validation can run locally: there is no local-candidate execution flag. Treat the trusted grader source/host and Docker engine as trusted. Containers and ordinary test assertions do not make arbitrary adversarial code perfectly safe or prove immunity to test gaming.
@@ -83,7 +83,7 @@ Public candidates use [SWE-bench's official prediction format and Docker evaluat
 
 ## Experiments and next boundary
 
-The live squad still assumes Chief's repository and fixed lockstep checks. This pack does **not** wire the live leader/coder/reviewer loop into a benchmark mode. Do not submit these tasks through production coding: it could publish changes, exposes upstream history, and does not isolate evaluator artifacts. A separate disposable inference adapter must use the existing Python loop/OpenRouter adapter, model/tool/time allocations and provider price filters; it must never use production publication credentials. Supply case-specific visible checks, keep gold/grader material outside the agent workspace, and retain bounded call/tool traces and actual usage. Public tasks additionally need their own install/test recipes.
+The live squad still assumes Chief's repository and fixed kite checks. This pack does **not** wire the live leader/coder/reviewer loop into a benchmark mode. Do not submit these tasks through production coding: it could publish changes, exposes upstream history, and does not isolate evaluator artifacts. A separate disposable inference adapter must use the existing Python loop/OpenRouter adapter, model/tool/time allocations and provider price filters; it must never use production publication credentials. Supply case-specific visible checks, keep gold/grader material outside the agent workspace, and retain bounded call/tool traces and actual usage. Public tasks additionally need their own install/test recipes.
 
 Start with the same model assignments and repeated trials on this pack. Change one factor at a time: tools/context handling with models fixed; then coder/reviewer assignments with harness fixed. Compare resolved/total, per-case regressions, infrastructure failures, timeouts, actual usage and wall time. Three trials per configuration are a reasonable initial diagnostic, not statistical proof. Later compare the squad against a single-agent baseline at matched allocations, and independently measure reviewer false approvals/rejections using known good/bad candidates. Operational cancellation/resume/permissions tests remain a separate suite, not extra coding successes.
 
