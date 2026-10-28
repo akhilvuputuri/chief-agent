@@ -1,6 +1,6 @@
 # 120 — Does a meaning index find emails that Gmail search misses?
 
-Work date(s): 2026-10-25. Written/revised: 2026-10-25.
+Work date(s): 2026-10-25 to 2026-10-27. Written/revised: 2026-10-27.
 Status: released with a 12-month window and quota-paced builds. Retrieval eval measured at 30 days and 12 months; owner-written questions and live use pending.
 
 ## User-visible problem and preceding iteration
@@ -133,7 +133,7 @@ Estimates from the 30-day build, to be checked against the first 12-month `mail_
   - Same eval as the 30-day run, with two guards added. A malformed model reply now counts as no answer, and a question whose Gmail query plan is malformed or empty is skipped.
   - A first unguarded run crashed at question 19 on a malformed reply.
   - The guarded copy was streamed into the container. The same guards are in `src/mail-recall-eval.ts` from this PR.
-  - In the 30-day run a malformed plan would have counted as a keyword miss. Whether that happened can't be checked, so that run's keyword figure may be slightly low.
+  - In the 30-day run a well-formed but invalid or empty plan would have counted as a keyword miss; malformed JSON would have crashed that run, and it completed. Whether that happened can't be checked, so that run's keyword figure may be slightly low.
 - **Results:**
 
 | Condition                           | 30 days (119 messages) | 12 months (1,409 messages) | 95% Wilson interval, 12 months |
@@ -147,7 +147,7 @@ Estimates from the 30-day build, to be checked against the first 12-month `mail_
 - **Ranks:** `gmail_recall` ranked its finds 1st 8 times, 2nd and 3rd twice each, 5th twice, and 6th and 8th once each. Eight random messages out of 1,409 would include the target about 0.6% of the time.
 - **Cost:** about $0.40 in model calls.
 - **Reading:**
-  - In the larger pool, meaning search is not better than keyword search on its own, so the 30-day result reflected a small pool.
+  - In the larger pool, meaning search is not better than keyword search on its own, so the 30-day result likely reflected the small pool; the two runs used different questions, so this is an inference.
   - The two methods fail on different emails, and using both is the measured gain.
   - The email agent's instructions and the tool description now say to use both for content questions instead of `gmail_recall` first.
 - **Limits:** synthetic, keyword-avoiding questions; 30 per run; a retrieval score, not a check of the agent's answers.
@@ -159,5 +159,5 @@ Estimates from the 30-day build, to be checked against the first 12-month `mail_
 - Then try re-ranking the top results and smaller chunks, compared offline in a Python eval over a private export.
 - Check a few real half-remembered requests in Telegram.
 - If recall clearly helps, persist the index (additive migration), sync in the background, and consider the second account and attachments.
-- Deleted or moved mail stays in the index until it is 30 days old (Devin Review on #320). The agent's `gmail_thread` check keeps it out of answers, but it can take a result slot. Reconcile indexed IDs against Gmail if the eval or live use shows it matters.
+- Deleted or moved mail stays in the index until it is 12 months old (Devin Review on #320). The agent's `gmail_thread` check keeps it out of answers, but it can take a result slot. Reconcile indexed IDs against Gmail if the eval or live use shows it matters.
 - If it does not help, turn `MAIL_INDEX` off and record why.
