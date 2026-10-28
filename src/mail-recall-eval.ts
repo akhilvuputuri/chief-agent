@@ -148,7 +148,7 @@ async function main() {
     const keywordIds = new Set<string>();
     const keywordLists: string[][] = [];
     // Gmail's own headers and short snippet for each hit, so a re-ranker has some text for
-    // hits outside the index (archived or other categories).
+    // hits outside the index (other categories, or older than the window).
     const keywordMeta: Record<string, Record<string, string | undefined>> = {};
     for (const [i, query] of (queries.success
       ? queries.data.queries

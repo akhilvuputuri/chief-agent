@@ -28,6 +28,7 @@ ssh -F "$OPS/ssh_config" chief-lightsail \
   - the question;
   - the target message;
   - each planned Gmail query's results in Gmail's order;
+  - each Gmail hit's sender, subject, date and 120-character snippet, as Gmail search returns them;
   - every chunk's meaning-search score.
 - **Then:** every indexed chunk with its message headers.
 
@@ -70,7 +71,7 @@ python3 -m pip install sentence-transformers
 kite run eval:mail-recall -- EXPORT.jsonl --rerank BAAI/bge-reranker-v2-m3
 ```
 
-The model downloads once and runs on the local machine, so email text never leaves it. Each indexed candidate is scored on its headers plus its best-matching chunk. A Gmail hit outside the index, such as archived or non-Primary mail, has only Gmail's headers and its 120-character snippet, so it is scored on those.
+The model downloads once and runs on the local machine, so email text never leaves it. Each indexed candidate is scored on its headers plus its best-matching chunk. A Gmail hit outside the index, such as mail in other categories or older than 12 months, has only Gmail's headers and its 120-character snippet, so it is scored on those.
 
 ## Limits
 
