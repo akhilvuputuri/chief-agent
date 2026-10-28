@@ -1,6 +1,6 @@
-# OpenTelemetry trace export — in review, 29 October 2026
+# OpenTelemetry trace export — live in `7ba6831`, 28 October 2026 (UTC)
 
-Issue #323 phase 1, Chief's half. With `OTEL_EXPORTER_OTLP_ENDPOINT` set, Chief sends each run, model call and tool call as an OTLP span following the GenAI semantic conventions: metadata only, never awaited by a turn, dropped if the collector is down. The receiving side is [agentwatch](https://github.com/akhilvuputuri/agentwatch), a separate local trace viewer. Production sets no endpoint, so a release changes nothing there. Pending: review, release, then a decision on where a collector runs for production data. See [tracing](tracing.md) and [journal 131](journey/131-otel-trace-export.md).
+Issue #323 phase 1, Chief's half. With `OTEL_EXPORTER_OTLP_ENDPOINT` set, Chief sends each run, model call and tool call as an OTLP span following the GenAI semantic conventions: metadata only, never awaited by a turn, dropped if the collector is down. The receiving side is [agentwatch](https://github.com/akhilvuputuri/agentwatch), a separate local trace viewer. Production sets no endpoint, so export is off there. Released in `7ba6831` (PR 347) with startup health passing. Pending: a decision on where a collector runs for production data. See [tracing](tracing.md) and [journal 131](journey/131-otel-trace-export.md).
 
 # Nightly learner — live in `d7df9aa`, 28 October 2026
 
