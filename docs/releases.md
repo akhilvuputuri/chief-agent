@@ -1,3 +1,13 @@
+## Deployed `e6f75f7` (untagged) — revisioned memory for learning from work (#326 phase 1)
+
+- **What merged.** [PR 338](https://github.com/akhilvuputuri/chief-agent/pull/338) merged as `e6f75f7352452f0e7543706584569628b75e4ad8` (version unchanged, 0.3.107). Memories become immutable revisions with provenance, trust tags and threat flags; each owner turn records what it had in context; learned items can be rolled back in bulk; `memories` stays as the projection of the owner's explicit facts. Migration 010 with its Compose line and `scripts/deploy-memory.py`.
+- **Review.** Independent review (Claude Opus 5.5) requested changes on `16d55da`: undoing two learner runs one after the other could leave an undone value active, and a restored learned value could lose its labels. Fixed with the `memory_undone` ledger; approved `bd7fee2`, then the baseline pin and the rebase onto the Kite main (`211b9fd`, merged tree identical). Hosted CI and Devin passed on `211b9fd`.
+- **Operator rollout.** Live and `main` were both `0a78485`, healthy and idle, with 7 memories for 1 owner and no memory tables. The archive and script hashes matched on the host. `deploy-memory.py` reported `{"deployed": "e6f75f7…", "healthy": true, "migration": 10}` at 15:42 UTC on 28 October. Separate checks: `RELEASE`, health, marker 10, 7 `legacy` revisions with trust `unknown` and heads matching every `memories` row, `memory.imported` with `importedCount: 7`, `projectedCount: 0`, and `gateway.started` on Node v22.23.4.
+- **Automatic release.** Its first run tried to take the release lock at 15:40 while the rollout held it and stopped with `[Errno 11] Resource temporarily unavailable`; the [re-run](https://github.com/akhilvuputuri/chief-agent/actions/runs/40718375876) succeeded as a no-op at 15:43:58 UTC.
+- **Pending:** the cached-token counts and `memory.selected` events of the next owner turns, compared with the days before; the prefix should be unchanged until the learner (phase 2) writes something.
+
+[Journal 129](journey/129-revisioned-memory.md#release-closure--2026-10-28).
+
 ## Deployed `1ff88d2` (untagged) — mail index reads within Gmail's quota
 
 - **What merged.** [PR 336](https://github.com/akhilvuputuri/chief-agent/pull/336) merged as `1ff88d24d3c05333df673bebb15a279f602f7981` (version 0.3.105). Index reads are paced at about two a second; a Gmail quota refusal pauses reading for a minute instead of abandoning messages; a cut-short top-up keeps what it read.

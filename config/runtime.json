@@ -12,6 +12,7 @@
     "MEDIA_MODEL": "",
     "TOOL_PICKER": "all",
     "MAIL_INDEX": "on",
+    "LEARNING": "on",
     "SHADOW_DECISIONS": "jev",
     "EFFORT_PICKER": "jev",
     "TELEGRAM_TOPICS": "auto",

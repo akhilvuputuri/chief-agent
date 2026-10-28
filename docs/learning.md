@@ -2,7 +2,7 @@
 
 Issue [#326](https://github.com/akhilvuputuri/chief-agent/issues/326). Chief should get better with use without the owner asking it to remember things. A background learner reviews completed work items, labels their outcomes, and writes reusable facts, lessons and skills. There are no approvals in v1 (owner decision, 27 October 2026). Safety comes from provenance, immutable revisions, flags, measurement and bulk rollback instead of gates.
 
-Status: phase 1 (revisioned memory) proposed in branch `feat/learn-from-work`; later phases not started. See [journal 129](journey/129-revisioned-memory.md).
+Status: phase 1 (revisioned memory) live in `e6f75f7` since 28 October 2026, after the operator rollout of migration 010; phase 2 (the nightly learner) in PR #340; phases 3 and 4 not started. See journals [129](journey/129-revisioned-memory.md) and [130](journey/130-nightly-learner.md).
 
 ## Decisions
 
@@ -76,3 +76,53 @@ The release guard refuses any `db/` or `compose.yaml` change that an operator ro
 3. The automatic release for the same commit then succeeds as a no-op.
 
 `python3 scripts/test-deploy-memory.py` runs the rollout offline.
+
+## Phase 2: the nightly learner
+
+[`src/learning.ts`](../src/learning.ts). No new tables: it writes the `learner_runs`, `learning_reviews` and memory tables from migration 010.
+
+### Schedule and switch
+
+The gateway ticks the learner every 10 minutes for each allowed owner. A night's run may start from 03:30 Singapore for six hours; a night missed while the gateway was down is skipped rather than run in the afternoon. While the owner has an input queued or running, or a run of their own is running, the attempt is recorded as `deferred` and retried on the next tick, at most three times a night. `LEARNING` in [config/runtime.json](../config/runtime.json) is `on`; setting it to `off` there stops the learner through an ordinary reviewed release. A run left `running` by a restart is marked `failed` at startup.
+
+### Labelling
+
+Each run looks at up to 20 of the owner's work tasks that are `done`, `paused` or `cancelled`, unchanged for at least 24 hours, at most 14 days old and not yet in `learning_reviews`:
+
+- **success:** `done` with no failed receipt and no uncertain or interrupted call. Done already requires each step's proof.
+- **pitfall:** `done` after failed receipts (recovered), or `paused` with failed receipts or blocked steps.
+- **skipped:** cancelled, any uncertain write, a routine occurrence, or a task not started by the owner (a responsibility investigation or a gathering).
+- A paused task with neither, or one paused by a restart or cutover, is not labelled and is looked at again later. Such tasks are excluded before the 20-task limit, so a backlog of them cannot crowd out finished work. Any failed receipt, even a failed read, makes a done task a pitfall: the label errs towards strict.
+
+A labelled task is recorded in `learning_reviews` once the run completes, so it is learned from at most once. A run with nothing but skipped tasks makes no model call.
+
+### The model run
+
+The learner calls the `standard` tier (resolved from `config/model-policy.json`, Claude Opus 5.5 today) at most 10 times, with its own run ID so its charges in `provider_charges` stay separate from owner turns, and its own prompt-cache key. Its input is, per labelled task: the label and reasons, the request, step titles, statuses and short results, receipt counts per operation, up to five owner messages, Chief's last reply, and the kinds of untrusted content the task read (email, web, document, agent report, calendar, from its operations). It also sees the current memory items, marked when learned. Each task is held to about 4,000 characters.
+
+It is offered four tools and nothing else: `learn_fact`, `learn_lesson`, `learn_retire` and `learn_finish`. The instructions adopt Hermes's capture rules (declarative facts, a general rule plus one clause of why, no dates, task numbers, quoted email or web text, transient failures, negative claims about tools or unresolved attempts) and default to saving nothing.
+
+### Owner words and untrusted content
+
+The host appends attachment content to the owner's stored message after a blank line and a bracketed note (`[Attached PDF: …]`, `[Attached invoice PDF: …]`, `[Attached image: …]`). The learner cuts the request and each owner message there, so attached text is never treated as the owner's words, and tags the task `document`. Telegram intake also treats a forwarded message as someone else's words in every command check, so a forwarded `/approve`, `/status`, `/library` or plain "yes" to a brief is never a command, control or approval; it reaches the conversation as data. A message that starts with a host note holds none of the owner's words: Telegram intake now puts `[Forwarded message: written by someone else, not the owner. …]` before the text of a forwarded message (which also tells Chief), and a shared location starts with `[Shared location: …]`. Text the owner writes with a blank line before a `[` is cut too; that loses some of their words but errs safe. Untrusted kinds come from the task's operations: email, web (web, news, links, feeds), document, agent report (agents, research), calendar and MCP. Any other operation not on a short list of owner-internal ones (memory, work, skills, canvases, routines, schedules, items, preparation, conversation) counts as `external`, so a new tool fails safe.
+
+Each task shown to the model is held to 4,000 characters: steps are dropped first, then later owner messages, then the reply, then the request and step results are shortened.
+
+### Host checks
+
+Every proposal is checked before it is accepted, and a refusal is returned to the model with its reason:
+
+- Cited task IDs must be ones it was shown.
+- A fact needs a quote of the owner's own words from a cited task (whitespace, quote marks, dashes and case normalized), and the quote must state the fact: every word of the value other than function words (articles, prepositions, pronouns, auxiliaries) and a few framing words such as "prefers" or "usually", compared after crude stemming, and every number must appear in the quote, and either both or neither are negated ("not", "no", "never", "without", "n't"). A fact therefore cannot add an account number, a name or a claim from email, web, forwarded or attached text, or add or drop a negation. The check compares words, not meaning: it does not stop a value that recombines the owner's own words ("Love early flights" from "I hate early flights but love aisle seats") or changes a pronoun or modal verb.
+- A fact may not use a key that holds one of the owner's own facts, checked when proposed and again when applied. Until phase 3 lets the owner see and undo learned changes, their own facts stay as they are.
+- A lesson's outcome must match the label of every task it cites. Lessons are not quote-checked; they carry their tasks' untrusted tags instead, so they can be rolled back by source.
+- One key once per run.
+- `learn_retire` applies only to learned items.
+
+Accepted items are applied after the run ends, through `MemoryStore`, with `origin: learned`, the learner run, the cited task, run and owner-message IDs and the prompt version as provenance, and the union of the cited tasks' untrusted kinds, which makes them `untrusted`. An item identical to the current value is not rewritten. Owner activity is checked before each model call and again before applying: if the owner started a turn, the run is deferred and applies nothing and labels nothing, so the next tick starts over. Items are written one at a time; a crash part-way leaves the written ones (rollback by learner run removes them), the run is marked failed at the next start, and its tasks are reviewed again the next night, where unchanged values are not rewritten.
+
+While a run is calling the model, its `runtime_runs` row is `running`, so the release and rollout guards that wait for idle (`scripts/cloud-release.py`, the `deploy-*.py` scripts) and the coding automation's idle check wait for it too, for at most ten calls.
+
+### Telemetry
+
+`learner.finished` logs the state and counts (tasks reviewed, successes, pitfalls, facts, lessons, retirements, refusals, flagged, model calls). `learner.failed` and `learner.item_refused` log the error class only.
