@@ -203,6 +203,30 @@ Transition, traced by the independent review. The gate fails closed throughout, 
 
 **Lesson.** CI's image build did not match production's storage driver. Kite's CI now covers it; Chief's own CI still builds with the runner's default storage.
 
+### Host build time — 28 October
+
+**Measured in production.** The release step (build and deploy on the host) took 279 s and 353 s for the last two npm releases, and 377 s and 400 s for the first two Kite releases (`0a78485`, `d77a23a`).
+
+**Measured on a host-like runner** (containerd image store, legacy builder, `redirect_dir=N`, 2 CPUs, 1.8 GB). A source-only rebuild, the usual release:
+
+| Build | Build-and-prune step | Whole rebuild |
+| --- | --- | --- |
+| npm (`45bd6ed`): `npm run build && npm prune --omit=dev` | 35.1 s | 68.5 s |
+| Kite (`d77a23a`): `kite run build && kite ci --omit=dev` | 45.5 s | 78.1 s |
+| Kite, this change: `kite run build && kite install --omit=dev` | 37.1 s | 70.7 s |
+
+The cold install steps were about equal: `npm ci` took 25.8 s and `kite ci` 24.1 s. Both are dominated by committing the layer.
+
+**Cause.** `npm prune --omit=dev` only deletes the dev packages. `kite ci --omit=dev` is a clean install: it deletes `node_modules` and places all 298 packages again. On overlayfs, linking each file from the store in the layer below copies it, so the step rewrites the tree and Docker commits all of it.
+
+**Change.** `kite install --omit=dev` prunes like npm.
+
+- Kite's summary shows 0 placed, and the prune took 0.10 s.
+- Kite's install-parity harness, run locally, gives byte-identical results to npm 10.9.2's `npm install --omit=dev` for both lockfiles.
+- The image is the same: 734 MB, 231 top-level entries in `node_modules`, no `typescript` or `tsx`, and `pg`, `grammy`, `zod` and `fastify` resolve.
+
+Not yet measured: the production release time with this change.
+
 ## Follow-up and next iteration
 
 - kite R1–R6 (Low; listed on kite PR 1).
