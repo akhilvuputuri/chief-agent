@@ -1,7 +1,7 @@
 # 131 — Can Chief's runs be viewed as standard traces without risking a turn?
 
-Work date: 2026-10-29. Written: 2026-10-29.
-Status: in review. Chief exports runs, model calls and tool calls as OTLP traces when an endpoint is set; production sets none. Not released.
+Work date: 2026-10-29 (Singapore; 28 October UTC). Written: 2026-10-29.
+Status: released in `7ba6831`. Chief exports runs, model calls and tool calls as OTLP traces when an endpoint is set; production sets none, so export is off there.
 
 ## User-visible problem and preceding iteration
 
@@ -40,7 +40,11 @@ Independent review (Opus 5.5) of `6fa316d` approved, with findings fixed in the 
 
 ## Verification and outcome
 
-Exporter tests pass locally. Remaining before release: independent review, the full `kite run check`, and CI on the PR head. After release nothing changes in production, because no endpoint is configured.
+`tests/otel.test.ts` passes 7/7. The full local `kite run check` on `909a400` passed 1,349 of 1,351 tests; the failure was the corrupt-gzip test, which needs Node 22.23.4 ([journal 126](126-fetch-hygiene-and-node.md)) while the laptop had 22.15. Hosted CI, on Node 22.23.4, passed every job on `909a400`.
+
+### Release closure — 2026-10-28
+
+[PR 347](https://github.com/akhilvuputuri/chief-agent/pull/347) merged at the reviewed head `909a400` as `7ba68314ddd4617f305c6d8471fac0a2a1c6ade2`. The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/40745519047) deployed that commit at 18:35 UTC and reported `{"deployed": "7ba6831…", "healthy": true}`. No endpoint is configured in production, so no spans leave the host; that the export works is shown only by the tests and the synthetic run above.
 
 ## Follow-up and next iteration
 

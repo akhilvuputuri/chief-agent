@@ -1,3 +1,12 @@
+## Deployed `7ba6831` (untagged) — OpenTelemetry trace export (#323 phase 1, Chief's half)
+
+- **What merged.** [PR 347](https://github.com/akhilvuputuri/chief-agent/pull/347) merged as `7ba68314ddd4617f305c6d8471fac0a2a1c6ade2` (version unchanged, 0.3.107). With `OTEL_EXPORTER_OTLP_ENDPOINT` set, Chief exports runs, model calls and tool calls as OTLP GenAI spans (metadata only, never awaited by a turn). Production sets no endpoint, so export is off there.
+- **Review.** Independent review (Claude Opus 5.5) approved `6fa316d` with fixes to make: provider HTTP failures exported `error.type=_OTHER`; a turn failing before `Execution.finish` left no run span; not every hook caught its own errors; the shutdown flush could exceed Docker's grace period. Fixed in `909a400`, which the delta review approved. Hosted CI passed on that head.
+- **Release.** The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/40745519047) deployed the exact commit at 18:35 UTC on 28 October and startup health passed.
+- **Pending:** nothing runs in production until an endpoint is configured, which needs an owner decision on where the collector runs. The local full check passed except the corrupt-gzip test, which needs Node 22.23.4 (the laptop had 22.15; CI passed it).
+
+[Journal 131](journey/131-otel-trace-export.md#release-closure--2026-10-28).
+
 ## Deployed `d7df9aa` (untagged) — the nightly learner (#326 phase 2)
 
 - **What merged.** [PR 340](https://github.com/akhilvuputuri/chief-agent/pull/340) merged as `d7df9aa9dceace29174b907d0ef342ed3f9faaa0` (version unchanged, 0.3.107). Once a night from 03:30 Singapore, Chief labels the owner's finished work tasks and runs one bounded `standard`-tier review with four learning tools; the host checks every proposal (a fact must quote the owner's own words, and the quote must state it) and applies accepted items with provenance and trust tags. Telegram intake now marks forwarded messages as someone else's words, and no forwarded text is parsed as a command, control or approval. `LEARNING` in `config/runtime.json` switches the learner off. No migration.
