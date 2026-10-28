@@ -96,7 +96,18 @@ def build(questions, chunks, rerank_model=None, rerank_base="rrf(dense,keyword)"
                 m = chunk_message.get(chunk_id)
                 if m in candidates and score > best.get(m, (-2.0, ""))[0]:
                     best[m] = (score, chunk_text[chunk_id])
-            pairs = [(q["question"], (header.get(m, "") + "\n\n" + best.get(m, (0, ""))[1])[:2000]) for m in candidates]
+            meta = q.get("keywordMeta", {})
+
+            def passage(m):
+                if m in best:
+                    return header[m] + "\n\n" + best[m][1]
+                if m in header:  # indexed after this question was scored
+                    return header[m] + "\n\n" + text[m][0]
+                # Outside the index: Gmail's headers and short snippet are all there is.
+                g = meta.get(m, {})
+                return f"From: {g.get('from') or ''}\nSubject: {g.get('subject') or ''}\nDate: {g.get('date') or ''}\n\n{g.get('snippet') or ''}"
+
+            pairs = [(q["question"], passage(m)[:2000]) for m in candidates]
             scores = rerank_model.predict(pairs) if pairs else []
             order = sorted(range(len(candidates)), key=lambda i: -float(scores[i]))
             lists["rerank"] = [candidates[i] for i in order]

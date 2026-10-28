@@ -246,7 +246,9 @@ export class MailIndex {
     });
   }
   /** Every chunk and its message headers without vectors, for the operator-run export. */
-  exportChunks() {
+  exportChunks(user: string) {
+    if (user !== this.owner)
+      throw new Error("Gmail is not connected for this user");
     const ids = this.chunkIds();
     return this.entries.map(({ vector, ...e }, i) => ({
       chunkId: ids[i]!,

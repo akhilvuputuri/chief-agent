@@ -70,7 +70,7 @@ python3 -m pip install sentence-transformers
 kite run eval:mail-recall -- EXPORT.jsonl --rerank BAAI/bge-reranker-v2-m3
 ```
 
-The model downloads once and runs on the local machine, so email text never leaves it. Each candidate is scored on its headers plus its best-matching chunk.
+The model downloads once and runs on the local machine, so email text never leaves it. Each indexed candidate is scored on its headers plus its best-matching chunk. A Gmail hit outside the index, such as archived or non-Primary mail, has only Gmail's headers and its 120-character snippet, so it is scored on those.
 
 ## Limits
 

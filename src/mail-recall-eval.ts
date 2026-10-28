@@ -147,6 +147,9 @@ async function main() {
     if (!queries.success || !queries.data.queries.length) continue;
     const keywordIds = new Set<string>();
     const keywordLists: string[][] = [];
+    // Gmail's own headers and short snippet for each hit, so a re-ranker has some text for
+    // hits outside the index (archived or other categories).
+    const keywordMeta: Record<string, Record<string, string | undefined>> = {};
     for (const [i, query] of (queries.success
       ? queries.data.queries
       : []
@@ -158,8 +161,16 @@ async function main() {
           query,
           undefined,
           `mail-eval-${totals.questions}-${i}`,
-        )) as { results?: { id?: string }[] };
+        )) as { results?: Record<string, string | undefined>[] };
         const ids = (result.results ?? []).flatMap((r) => (r.id ? [r.id] : []));
+        for (const r of result.results ?? [])
+          if (r.id)
+            keywordMeta[r.id] ??= {
+              from: r.from,
+              subject: r.subject,
+              date: r.date,
+              snippet: r.snippet,
+            };
         keywordLists.push(ids);
         for (const id of ids) keywordIds.add(id);
       } catch {
@@ -191,6 +202,7 @@ async function main() {
           ? {
               type: "question",
               keywordLists,
+              keywordMeta,
               dense: await index.scoreChunks(owner, question),
             }
           : {}),
@@ -198,7 +210,7 @@ async function main() {
     );
   }
   if (exporting)
-    for (const chunk of index.exportChunks())
+    for (const chunk of index.exportChunks(owner))
       console.log(JSON.stringify({ type: "chunk", ...chunk }));
   console.log(
     JSON.stringify({

@@ -158,6 +158,9 @@ test("recall finds an email by what it was about, owner-scoped", async () => {
   const projected = projectObservation("gmail_recall", found).result;
   assert.match(projected.warning, /Untrusted email content/);
   await assert.rejects(index.recall("intruder", "deposit"), /not connected/);
+  assert.throws(() => index.exportChunks("intruder"), /not connected/);
+  await assert.rejects(index.scoreChunks("intruder", "x"), /not connected/);
+  assert.equal(index.exportChunks("owner").length, 3);
 });
 
 test("new mail is topped up on recall and old mail leaves the window", async () => {

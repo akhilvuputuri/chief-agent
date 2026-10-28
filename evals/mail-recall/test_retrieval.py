@@ -169,6 +169,25 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(captured["m1"].count("OVERLAPWORD"), 1)
         self.assertTrue(captured["m1"].endswith("tail words"))
 
+    def test_reranker_sees_gmail_text_for_hits_outside_the_index(self):
+        seen = []
+
+        class Record:
+            def predict(self, pairs):
+                seen.extend(pairs)
+                return [0.0] * len(pairs)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "export.jsonl"
+            dataset(path)
+            questions, chunks = run.load(path)
+        questions[0]["keywordLists"] = [["archived", "m1"]]
+        questions[0]["keywordMeta"] = {"archived": {"from": "Courier", "subject": "Delivery", "date": "d", "snippet": "your couch is delayed"}}
+        run.build(questions, chunks, Record(), "rrf(dense,keyword)", 30)
+        passages = {p for _, p in seen}
+        self.assertIn("From: Courier\nSubject: Delivery\nDate: d\n\nyour couch is delayed", passages)
+        self.assertTrue(any("sofa arrived late" in p for p in passages))
+
     def test_missing_export_rows_are_refused(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "plain.jsonl"
