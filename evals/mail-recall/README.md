@@ -34,8 +34,8 @@ ssh -F "$OPS/ssh_config" chief-lightsail \
 ## 2. Compare methods (anywhere, offline)
 
 ```sh
-npm run eval:mail-recall -- "$OPS/mail-recall/2026-10-28-export.jsonl"
-npm run eval:mail-recall -- "$OPS/mail-recall/2026-10-28-export.jsonl" --json
+kite run eval:mail-recall -- "$OPS/mail-recall/2026-10-28-export.jsonl"
+kite run eval:mail-recall -- "$OPS/mail-recall/2026-10-28-export.jsonl" --json
 ```
 
 **Conditions:**
@@ -62,7 +62,7 @@ The union of the keyword list and `gmail_recall`'s top 8, which is what the agen
 
 ```sh
 python3 -m pip install sentence-transformers
-npm run eval:mail-recall -- EXPORT.jsonl --rerank BAAI/bge-reranker-v2-m3
+kite run eval:mail-recall -- EXPORT.jsonl --rerank BAAI/bge-reranker-v2-m3
 ```
 
 The model downloads once and runs on the local machine, so email text never leaves it. Each candidate is scored on its headers plus its best-matching chunk.
@@ -76,4 +76,4 @@ The model downloads once and runs on the local machine, so email text never leav
 
 ## Tests
 
-`python3 -m unittest discover -s evals/mail-recall -p 'test_*.py'` uses synthetic data only and runs in `npm test`.
+`python3 -m unittest discover -s evals/mail-recall -p 'test_*.py'` uses synthetic data only and runs in `kite test`.
