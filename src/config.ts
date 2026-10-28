@@ -73,6 +73,8 @@ const schema = z.object({
   // Email memory MVP (docs/mail-recall.md): an in-memory meaning index over the primary
   // mailbox's last 12 months of Primary mail, offered to the email agent as gmail_recall.
   MAIL_INDEX: z.enum(["on", "off"]).default("on"),
+  /** The nightly learner (docs/learning.md); "off" in config/runtime.json stops it. */
+  LEARNING: z.enum(["on", "off"]).default("on"),
   // Shadow decisions (#127): Jev predicts beside each turn without changing it. Separate
   // from TOOL_PICKER so the picker can be turned off while measurement continues.
   SHADOW_DECISIONS: z.enum(["jev", "off"]).default("jev"),
@@ -171,6 +173,7 @@ export const RUNTIME_SETTINGS = [
   "MEDIA_MODEL",
   "TOOL_PICKER",
   "MAIL_INDEX",
+  "LEARNING",
   "SHADOW_DECISIONS",
   "EFFORT_PICKER",
   "TELEGRAM_TOPICS",

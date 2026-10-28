@@ -138,6 +138,15 @@ const fields: Record<string, Shape> = {
   flaggedCount: "count",
   importedCount: "count",
   projectedCount: "count",
+  /** learner.finished (docs/learning.md). Counts only. */
+  reviewedCount: "count",
+  successCount: "count",
+  pitfallCount: "count",
+  factCount: "count",
+  lessonCount: "count",
+  retiredCount: "count",
+  refusedCount: "count",
+  modelCalls: "count",
 };
 
 // Written as null rather than omitted: an unknown charge stays visibly unknown.
@@ -426,6 +435,22 @@ const projections: Record<string, Projection> = {
   "route.first_call": (run, d) => [
     "info",
     { runId: run, operation: d.operation, kind: d.reason },
+  ],
+  "learner.finished": (run, d) => [
+    d.state === "failed" ? "warn" : "info",
+    {
+      runId: run,
+      kind: d.state,
+      reviewedCount: d.reviewed,
+      successCount: d.success,
+      pitfallCount: d.pitfall,
+      factCount: d.facts,
+      lessonCount: d.lessons,
+      retiredCount: d.retired,
+      refusedCount: d.refused,
+      flaggedCount: d.flagged,
+      modelCalls: d.modelCalls,
+    },
   ],
   "memory.selected": (run, d) => [
     d.flagged ? "warn" : "info",

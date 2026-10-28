@@ -50,7 +50,11 @@ import { PublicFeedFetcher } from "./news-feed.js";
 import { run as runTelegram, type RunnerHandle } from "@grammyjs/runner";
 import { CustomAgent } from "./custom-agent.js";
 import { OpenRouter } from "./model.js";
-import { resolveMainModel, resolvePriceCeilings } from "./model-policy.js";
+import {
+  resolveAgentModel,
+  resolveMainModel,
+  resolvePriceCeilings,
+} from "./model-policy.js";
 import { recoverRuntime } from "./execution.js";
 import { TelegramViews } from "./telegram-views.js";
 import type { Delivery } from "./answer.js";
@@ -86,6 +90,7 @@ import { ShadowDecisions } from "./shadow.js";
 import { EffortPicker } from "./effort.js";
 import { closeServer, server } from "./server.js";
 import { stopGateway } from "./gateway-stop.js";
+import { Learner } from "./learning.js";
 import { MemoryStore } from "./memory.js";
 import {
   telegram,
@@ -1318,6 +1323,35 @@ const workTimer = setInterval(() => {
     .catch((error) => opsLog("work.tick_failed", "error", errorFields(error)));
 }, 15000);
 workTimer.unref();
+// The nightly learner (docs/learning.md): one bounded run per owner a night, from 03:30
+// Singapore, deferred while the owner is active. LEARNING in config/runtime.json turns it off.
+const learnerModel = resolveAgentModel("standard", mainModel).model;
+const learner = new Learner(db, {
+  model: new OpenRouter(
+    c.OPENROUTER_API_KEY,
+    learnerModel,
+    priceCeilings.input,
+    priceCeilings.output,
+  ),
+  modelName: learnerModel,
+  enabled: c.LEARNING === "on",
+});
+await learner.recover();
+let learning = false;
+const learnerTimer = setInterval(() => {
+  if (learning) return;
+  learning = true;
+  void (async () => {
+    for (const user of allowed) await learner.tick(user);
+  })()
+    .catch((error) =>
+      opsLog("learner.tick_failed", "error", errorFields(error)),
+    )
+    .finally(() => {
+      learning = false;
+    });
+}, 10 * 60_000);
+learnerTimer.unref();
 const gatheringTimer = gathering?.browsers
   ? setInterval(() => {
       void gathering?.browsers
@@ -1349,6 +1383,7 @@ for (const signal of ["SIGINT", "SIGTERM"])
       clearInterval(scheduleTimer);
       clearInterval(gatheringTimer);
       clearInterval(workTimer);
+      clearInterval(learnerTimer);
       clearInterval(routineTimer);
       if (boxTimer) clearInterval(boxTimer);
       shutdown.abort();
