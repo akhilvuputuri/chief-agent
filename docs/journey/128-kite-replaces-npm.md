@@ -3,7 +3,7 @@
 Work dates: 2026-10-27 to 2026-10-28. Written: 2026-10-28.
 Status: tested; cut-over PR open. The worker image digests and the production release are pending (see Follow-up).
 
-Naming: the tool was published as **lockstep** (v0.1.0) and renamed **Kite** on 28 October 2026, before this cut-over merged. The repository is `akhilvuputuri/kite` (old links redirect), the command is `kite`, and the crate and planned npm/Homebrew package are `kite-pm`. Chief pins Kite 0.1.2. It is the second release under the new name, after 0.1.1, and adds incremental installs: `kite install`, `uninstall` and `update` change only the packages that differ from the installed tree, matching `npm install`. A repeated install takes about 40 ms against about 430 ms for npm (measured locally on Chief's root lockfile).
+Naming: the tool was published as **lockstep** (v0.1.0) and renamed **Kite** on 28 October 2026, before this cut-over merged. The repository is `akhilvuputuri/kite` (old links redirect), the command is `kite`, and the crate and planned npm/Homebrew package are `kite-pm`. Chief pins Kite 0.1.2. It is the second release under the new name, after 0.1.1, and adds incremental installs: `kite install`, `uninstall` and `update` change only the packages that differ from the installed tree, matching `npm install`. Kite's release notes give about 40 ms for a repeated install on a 300-package project, against about 430 ms for npm.
 
 ## User-visible problem and preceding iteration
 
@@ -114,13 +114,20 @@ Chief (this PR):
 
 v0.1.0 (released as lockstep, [notes](https://github.com/akhilvuputuri/kite/releases/tag/v0.1.0)) was published from `1911afd`, on main with green CI. The release workflow built each binary twice, required both builds to be byte-identical, re-ran npm parity on the exact binaries (Chief root and Pi, with and without `--omit=dev`, plus a fresh resolve), and published SHA-256 checksums. Kite 0.1.1 (the rename) and 0.1.2 ([notes](https://github.com/akhilvuputuri/kite/releases/tag/v0.1.2), from `8c39dc0`) were released through the same workflow. 0.1.2 adds incremental-install parity scenarios to Kite's CI: no-op, add, uninstall, update, deleted packages, tool caches and link changes, all byte-identical to npm. `tools/kite.json` pins the 0.1.2 checksums, and the installer refuses a mismatched binary (tested).
 
-Local verification on macOS with the 0.1.0 binary, before the rename:
+Local verification on macOS with the 0.1.0 binary, before the rename (the commands were then `lockstep ci` and `lockstep run`):
 
-- `kite ci` passed in 1.6 s, with install scripts;
-- `kite run format:check` and `kite run typecheck` passed;
-- `kite run build` passed;
+- `lockstep ci` passed in 1.6 s, with install scripts;
+- `lockstep run format:check` and `lockstep run typecheck` passed;
+- `lockstep run build` passed;
 - the 9 changed coding test files passed (97 tests);
-- the Python runtime and squad tests passed (40 tests, including real `kite ci` and `kite run` checks in the worker).
+- the Python runtime and squad tests passed (40 tests, including real `lockstep ci` and `lockstep run` checks in the worker).
+
+Local verification on macOS with the pinned 0.1.2 binary, after the rename:
+
+- `tools/install-kite.mjs` fetched the binary and verified its checksum, and the installer tests passed (3);
+- `kite ci` took 0.94 s with a warm store and install scripts, and a repeated `kite install` took 0.02 s (306 packages);
+- `kite run format:check`, `kite run typecheck` and `kite run build` passed;
+- `kite run check:coding` passed: ruff, mypy and 62 Python runtime tests, including real `kite ci` and `kite run` checks in the worker.
 
 The full CI result for the cut-over PR is recorded on the PR.
 

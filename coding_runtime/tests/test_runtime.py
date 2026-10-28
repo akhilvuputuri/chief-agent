@@ -601,9 +601,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured[0]["reasoning"], {"enabled": True, "effort": "high"})
 
     async def test_commands_keep_the_package_store_outside_the_checkout(self):
-        r = await self.w.command(
-            "node", ["-e", "console.log(process.env.KITE_STORE)"]
-        )
+        r = await self.w.command("node", ["-e", "console.log(process.env.KITE_STORE)"])
         store = r.text().strip().splitlines()[-1]
         self.assertTrue(Path(store).is_absolute(), store)
         self.assertFalse(
