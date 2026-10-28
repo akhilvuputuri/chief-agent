@@ -17,9 +17,9 @@ import time
 
 LIVE = pathlib.Path('/opt/hermes-companion')
 LOCK = pathlib.Path('/var/lock/companion-release.lock')
-# Baseline: the exact-commit release receipt for main 45bd6ed (verify before rollout).
+# Baseline: the exact-commit release receipt for main 0a78485 (verify before rollout).
 # Reconcile with the live RELEASE immediately before rollout; never rewrite RELEASE to match.
-BASE = '45bd6ed6320f48d8af512b1c290b145ebda6f572'
+BASE = '0a784859e62f4526c898dea6b55135042907ffc9'
 BASES = {BASE}
 IMAGE = 'hermes-companion-gateway'
 MIGRATION = '010_memory.sql'
