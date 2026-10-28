@@ -207,13 +207,13 @@ Transition, traced by the independent review. The gate fails closed throughout, 
 
 **Measured in production.** The release step (build and deploy on the host) took 279 s and 353 s for the last two npm releases, and 377 s and 400 s for the first two Kite releases (`0a78485`, `d77a23a`).
 
-**Measured on a host-like runner** (containerd image store, legacy builder, `redirect_dir=N`, 2 CPUs, 1.8 GB). A source-only rebuild, the usual release:
+**Measured on a host-like runner** (containerd image store, legacy builder, `redirect_dir=N`, 2 CPUs, 1.8 GB), one sample each. A source-only rebuild, the usual release. The npm row is from Kite workflow run 40735700257; the two Kite rows ran side by side in run 40736453818:
 
-| Build | Build-and-prune step | Whole rebuild |
-| --- | --- | --- |
-| npm (`45bd6ed`): `npm run build && npm prune --omit=dev` | 35.1 s | 68.5 s |
-| Kite (`d77a23a`): `kite run build && kite ci --omit=dev` | 45.5 s | 78.1 s |
-| Kite, this change: `kite run build && kite install --omit=dev` | 37.1 s | 70.7 s |
+| Build                                                          | Build-and-prune step | Whole rebuild |
+| -------------------------------------------------------------- | -------------------- | ------------- |
+| npm (`45bd6ed`): `npm run build && npm prune --omit=dev`       | 35.1 s               | 68.5 s        |
+| Kite (`d77a23a`): `kite run build && kite ci --omit=dev`       | 46.0 s               | 79.5 s        |
+| Kite, this change: `kite run build && kite install --omit=dev` | 37.1 s               | 70.7 s        |
 
 The cold install steps were about equal: `npm ci` took 25.8 s and `kite ci` 24.1 s. Both are dominated by committing the layer.
 
