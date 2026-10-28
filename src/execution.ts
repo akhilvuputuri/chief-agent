@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
 import { event } from "./db.js";
 import { opsLog, projectEvent } from "./ops-log.js";
+import * as otel from "./otel.js";
 import { action } from "./protocol.js";
 import type { Message } from "./model.js";
 export type StopReason =
@@ -139,6 +140,7 @@ export class Execution {
       runId: this.run,
       parentRunId: this.parent?.run,
     });
+    otel.runStarted(this.run, this.parent?.run);
     await this.attach();
   }
   async attach(_force = false) {
@@ -292,6 +294,7 @@ export class Execution {
         data.model ?? null,
       ]);
     await event(this.db, this.user, this.run, type, scrubTrace(data));
+    otel.runEvent(this.run, type, data, this.task);
   }
   async beginCall(callId: string, operation: string, args: unknown) {
     const id = randomUUID();
@@ -315,6 +318,12 @@ export class Execution {
       operation: logOperation(operation),
       write: !readOperations.has(operation),
     });
+    otel.callStarted(
+      this.run,
+      id,
+      logOperation(operation),
+      !readOperations.has(operation),
+    );
     return id;
   }
   async endCall(id: string, result: unknown, state = "success") {
@@ -335,6 +344,7 @@ export class Execution {
       latencyMs: call ? Date.now() - call.started : undefined,
       errorCode: typeof code === "string" ? code : undefined,
     });
+    otel.callFinished(id, state, typeof code === "string" ? code : undefined);
   }
   /** Whether a run (a delegated child of this owner) had a write refused for an earlier uncertain write. */
   async writesBlockedIn(run: string) {
