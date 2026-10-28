@@ -1,3 +1,11 @@
+## Deployed `1ff88d2` (untagged) — mail index reads within Gmail's quota
+
+- **What merged.** [PR 336](https://github.com/akhilvuputuri/chief-agent/pull/336) merged as `1ff88d24d3c05333df673bebb15a279f602f7981` (version 0.3.105). Index reads are paced at about two a second; a Gmail quota refusal pauses reading for a minute instead of abandoning messages; a cut-short top-up keeps what it read.
+- **Review.** Independent review (Claude Opus 5.5) approved after one should-fix. Devin's non-quota-403 finding is accepted and documented. Hosted CI passed.
+- **Release.** Live at 16:50 UTC on 27 October ([release](https://github.com/akhilvuputuri/chief-agent/actions/runs/40544135098)). The next release's build (`45bd6ed`) indexed 1,408 messages with none left out, against 384 left out before the fix.
+
+[Journal 120](journey/120-email-memory-mvp.md#quota-fix-release--2026-10-27).
+
 ## Deployed `da2a5ff` (untagged) — closing the dependency hardening (#329)
 
 - **What merged.** [PR 335](https://github.com/akhilvuputuri/chief-agent/pull/335) merged as `da2a5ff752e5501f313c51c8904b2df21540631d` (version unchanged, 0.3.104).
