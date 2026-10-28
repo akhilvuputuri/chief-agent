@@ -131,7 +131,7 @@ Local verification on macOS with the pinned 0.1.2 binary, after the rename:
 
 The full CI result for the cut-over PR is recorded on the PR.
 
-The PR's CI built every Dockerfile with the published v0.1.0 binary: the gateway, browser, coding and Pi worker images and the standalone Pi image. It passed their smoke checks, with all 11 checks green on `7babddd`. Not yet done: published worker images, their digests, and a production release.
+The PR's CI built every Dockerfile with the published v0.1.0 binary: the gateway, browser, coding and Pi worker images and the standalone Pi image. It passed their smoke checks, with all 11 checks green on `7babddd`. The worker images, their digests and the production release came later; see Release closure.
 
 ### Release closure — pending
 
@@ -145,6 +145,7 @@ Pending steps:
      - Pi worker image `sha256:34987193b3cb1b710092c8af998407a222da225a8000743b422f85b24beecb8d`.
    - Anonymous registry checks: each is linux/amd64 and runs as `worker`. Its `/opt/kite/kite.json` layer pins Kite 0.1.3, with the linux-x64 SHA-256 `5d3528db…`.
 3. Update the digests in `config/boxes.json`, `config/coding.json` and `config/coding-pi.json`. These are protected paths, so the owner reviews the change. Pi's previous image (`sha256:2fd65df…`) moves to `previousImages`, so jobs snapshotted on it can still start a box.
+   No coding job has run on the new images yet. CI built them and the registry checks inspected them, but the first real job will be the first acceptance.
 4. Release Chief. The Kite 0.1.3 pin released as `0a78485` (release run 40715214092). Its build and deploy step took 6 min 17 s. The host health record at 15:29 UTC reported that release, with the gateway and Postgres healthy. The digest change releases separately.
 5. Record the release and the CI, host-build and coding-job timings against the baseline in issue #330.
 

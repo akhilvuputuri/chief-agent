@@ -13,7 +13,8 @@ Issue #330. npm is replaced everywhere by [Kite](https://github.com/akhilvuputur
 `tools/kite.json` pins the release (0.1.3) and its SHA-256, and `tools/install-kite.mjs` installs it with only Node. CI, every Dockerfile and the coding runtimes use it, and npm is removed from runners and images.
 
 - **Release:** the cut-over (`5dd4639`, #339) merged, but its release failed on the host. The host's Docker uses the containerd image store, where Kite 0.1.2 could not reuse its store across build steps. Kite 0.1.3 fixed this, and `0a78485` (#343) released with host health confirmed. The same release deployed #341 and #342.
-- **This change:** pins worker images rebuilt from `0a78485` with Kite 0.1.3. Until it is released, coding jobs run on the old npm images, whose checks fail against main.
+- **This change:** pins worker images rebuilt from `0a78485` with Kite 0.1.3. Until it is released, new coding jobs start on the old npm images. Their checks are expected to fail against main, because main's scripts call `kite` and those images lack it. This follows from the code; no job has been run to confirm it.
+- **Not yet done:** no coding job has run on the new images. The first real job will be their acceptance.
 - **Next:** measure CI, host-build and coding-job install times against #330's baseline.
 
 See [journal 128](journey/128-kite-replaces-npm.md).
