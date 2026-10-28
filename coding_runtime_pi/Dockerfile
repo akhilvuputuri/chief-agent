@@ -10,7 +10,7 @@ RUN kite ci --ignore-scripts
 COPY tsconfig.json ./
 COPY src ./src
 COPY native ./native
-RUN kite run build && gcc -shared -fPIC -I/usr/local/include/node native/process.c -o process-boundary.node && kite ci --omit=dev --ignore-scripts
+RUN kite run build && gcc -shared -fPIC -I/usr/local/include/node native/process.c -o process-boundary.node && kite install --omit=dev --ignore-scripts
 FROM node:22.23.4-bookworm-slim
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 RUN apt-get update && apt-get install -y --no-install-recommends git ripgrep util-linux && rm -rf /var/lib/apt/lists/*
