@@ -10,7 +10,7 @@ import {
   quoteSupports,
   untrustedSources,
 } from "../src/learning.js";
-import { documentMessage } from "../src/attachments.js";
+import { documentMessage, forwardedMessage } from "../src/attachments.js";
 import { MemoryStore } from "../src/memory.js";
 import type { Generation, ModelAdapter } from "../src/model.js";
 import { closeAfter, migratedPGlite } from "./helpers/pglite.js";
@@ -217,6 +217,15 @@ test("owner words stop where the host appended an attachment", () => {
     text: "Book my flight",
     attached: false,
   });
+  // A forwarded message or a shared location holds none of the owner's words.
+  assert.deepEqual(
+    ownerWords(forwardedMessage("I prefer refunds paid to account 4410-2231")),
+    { text: "", attached: true },
+  );
+  assert.deepEqual(ownerWords("[Shared location: Cafe Tan]"), {
+    text: "",
+    attached: true,
+  });
 });
 
 test("a quote supports a fact only when the fact adds nothing the owner did not say", () => {
@@ -234,6 +243,27 @@ test("a quote supports a fact only when the fact adds nothing the owner did not 
   assert.ok(!quoteSupports("I prefer aisle seats", "Prefers window seats"));
   // Framing words alone state nothing.
   assert.ok(!quoteSupports("I usually prefer that", "Usually prefers that"));
+  // Negation must match, and short words count.
+  assert.ok(
+    !quoteSupports(
+      "I want aisle seats on long flights",
+      "Does not want aisle seats",
+    ),
+  );
+  assert.ok(
+    !quoteSupports(
+      "I want aisle seats on long flights",
+      "Wants no aisle seats",
+    ),
+  );
+  assert.ok(!quoteSupports("I don't eat beef", "Eats beef"));
+  assert.ok(quoteSupports("I don't eat beef", "Does not eat beef"));
+  assert.ok(
+    !quoteSupports(
+      "Please send the report to my boss",
+      "Sends OTP and PIN to Tan",
+    ),
+  );
 });
 
 test("a night's run starts from 03:30 Singapore, once, and not outside its window", async (t) => {

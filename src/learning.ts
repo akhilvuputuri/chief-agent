@@ -96,7 +96,7 @@ const UNTRUSTED: Array<[RegExp, string]> = [
 // Operations that only read or change the owner's own records in Chief. Anything else,
 // including a tool added later, counts as external content, so the tag fails safe.
 const INTERNAL =
-  /^(memory_|work_|skill_|canvas_|routine_|schedule_|tools_load$|finish_turn$)/;
+  /^(memory_|work_|skill_|canvas_|routine_|schedule_|item_|prep_|conversation_|tools_load$|finish_turn$)/;
 
 export function untrustedSources(operations: string[]) {
   return [
@@ -114,21 +114,30 @@ export function untrustedSources(operations: string[]) {
 /**
  * The owner's own words in a stored message. The host appends attachment content (PDF
  * text, invoice clues, image notes) after a blank line and a bracketed note, so the text
- * is cut there and the attachment is reported, never treated as the owner's words.
+ * is cut there. A message that starts with a host note (a forwarded message, a shared
+ * location) holds none of the owner's words. Either way the content is reported, never
+ * treated as the owner's.
  */
 export function ownerWords(message: string) {
+  if (message.trimStart().startsWith("[")) return { text: "", attached: true };
   const at = message.indexOf("\n\n[");
   return at < 0
     ? { text: message, attached: false }
     : { text: message.slice(0, at), attached: true };
 }
 
-// Framing words a declarative fact may add that the owner need not have said.
+// Words a declarative fact may add that the owner need not have said: function words and
+// framing such as "prefers". Every other word, however short, must come from the quote.
 const FRAMING = new Set(
-  "about also always does from have into like likes often only owner prefer prefers that their they this usually uses want wants with would".split(
-    " ",
-  ),
+  (
+    "a an the to of in on at for by from with into about as and or but so if than then " +
+    "is are was were be been am do does did has have had can could will would should " +
+    "i me my mine we our you your he him his she her it its they them their this that these those " +
+    "owner owners prefer prefers like likes want wants usually always often also only uses"
+  ).split(" "),
 );
+// Negation flips a statement, so it must be present in both or neither.
+const NEGATION = new Set(["not", "no", "never", "without", "nor", "none"]);
 // Crude, symmetric stemming: "lives", "live" and "living" all become "liv".
 const stem = (word: string) =>
   word
@@ -136,20 +145,25 @@ const stem = (word: string) =>
     .replace(/e$/, "");
 const words = (text: string) =>
   norm(text)
+    .replace(/n['’]t\b/g, " not")
+    .replace(/\bcannot\b/g, "can not")
     .split(/[^a-z0-9]+/)
     .filter(Boolean);
 
 /**
- * Whether the quote states the fact: every content word of the value (four letters or
- * more, not framing) and every number must appear in the quote. A value cannot add
- * something the owner did not say, such as an account number from an email.
+ * Whether the quote states the fact: every word of the value other than function and
+ * framing words, and every number, must appear in the quote, and either both or neither
+ * are negated. A value cannot add something the owner did not say, such as an account
+ * number or a name, or invert what they said.
  */
 export function quoteSupports(quote: string, value: string) {
-  const said = new Set(words(quote).map(stem));
-  const digits = new Set(words(quote).filter((w) => /\d/.test(w)));
-  const content = words(value).filter(
-    (w) => /\d/.test(w) || (w.length >= 4 && !FRAMING.has(w)),
-  );
+  const quoted = words(quote);
+  const stated = words(value);
+  const negated = (list: string[]) => list.some((w) => NEGATION.has(w));
+  if (negated(quoted) !== negated(stated)) return false;
+  const said = new Set(quoted.map(stem));
+  const digits = new Set(quoted.filter((w) => /\d/.test(w)));
+  const content = stated.filter((w) => !FRAMING.has(w) && !NEGATION.has(w));
   return (
     content.length > 0 &&
     content.every((w) => (/\d/.test(w) ? digits.has(w) : said.has(stem(w))))
@@ -732,7 +746,11 @@ export class Learner {
           written.retired++;
           continue;
         }
-        if (existing?.value === args.value) {
+        // The owner may have saved this key during the run; their fact stays.
+        if (
+          existing?.value === args.value ||
+          (name === "learn_fact" && existing && !isLearned(existing))
+        ) {
           written.unchanged++;
           continue;
         }

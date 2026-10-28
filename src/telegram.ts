@@ -50,6 +50,7 @@ import {
   describeBytes,
   documentMessage,
   extractPdfText,
+  forwardedMessage,
   hasText,
   imageMessage,
   limits,
@@ -902,11 +903,16 @@ export function telegram(
     if (!claimed.rows.length) return;
     const file = classifyInbound(ctx.message);
     const needsPreparation = !!(file || ctx.message.voice || !ctx.message.text);
+    const forwarded = ctx.message.forward_origin !== undefined;
+    const received =
+      ctx.message.text ??
+      ctx.message.caption ??
+      "[attachment awaiting extraction]";
     const inputId = await assistant.recordInput(
       user,
-      ctx.message.text ??
-        ctx.message.caption ??
-        "[attachment awaiting extraction]",
+      forwarded && (ctx.message.text ?? ctx.message.caption)
+        ? forwardedMessage(received)
+        : received,
       {
         updateId: ctx.update.update_id,
         messageId: ctx.message.message_id,
@@ -1093,6 +1099,7 @@ export function telegram(
           );
           return;
         }
+        if (forwarded) message = forwardedMessage(message);
         await assistant.prepareInput(user, inputId, message, images);
         await event(db, user, inputId, "telegram.input_ready", {
           inputId,
