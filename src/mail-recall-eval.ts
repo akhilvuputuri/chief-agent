@@ -163,14 +163,13 @@ async function main() {
           `mail-eval-${totals.questions}-${i}`,
         )) as { results?: Record<string, string | undefined>[] };
         const ids = (result.results ?? []).flatMap((r) => (r.id ? [r.id] : []));
+        // A hit whose metadata fetch failed arrives ID-only; a later search may fill it in.
         for (const r of result.results ?? [])
-          if (r.id)
-            keywordMeta[r.id] ??= {
-              from: r.from,
-              subject: r.subject,
-              date: r.date,
-              snippet: r.snippet,
-            };
+          if (r.id) {
+            const meta = (keywordMeta[r.id] ??= {});
+            for (const field of ["from", "subject", "date", "snippet"])
+              meta[field] ||= r[field];
+          }
         keywordLists.push(ids);
         for (const id of ids) keywordIds.add(id);
       } catch {
