@@ -129,6 +129,29 @@ test("Telegram handles natural text once and ignores unauthorized users and grou
       )
     ).rows[0]!.message;
     assert.match(stored, /^\[Forwarded message:[^\]]*\]\n\nI prefer refunds/);
+    // A forwarded command is never a command: it reaches the conversation as data.
+    for (const [id, text] of [
+      [5, "/status"],
+      [6, `/approve ${"0".repeat(8)}-0000-4000-8000-${"0".repeat(12)}`],
+    ] as const) {
+      const command = update(id);
+      command.message.text = text;
+      command.message.forward_origin = {
+        type: "hidden_user",
+        sender_user_name: "A seller",
+        date: 0,
+      };
+      await bot.handleUpdate(command);
+    }
+    assert.equal(turns, 4);
+    assert.match(
+      replies[2]!,
+      /^Understood: \[Forwarded message:[^\]]*\]\n\n\/status$/,
+    );
+    assert.match(
+      replies[3]!,
+      /^Understood: \[Forwarded message:[^\]]*\]\n\n\/approve /,
+    );
   } finally {
     await pg.close();
   }

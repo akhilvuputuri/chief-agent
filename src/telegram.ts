@@ -492,10 +492,14 @@ export function telegram(
   bot.on("message", async (ctx) => {
     if (!allowedChat(ctx.from?.id, ctx.chat.type, ids)) return;
     const user = String(ctx.from.id);
+    // Only text the owner typed can be a command, control or approval. A forwarded message
+    // is someone else's words, so it only ever reaches the conversation, marked as such.
+    const typed =
+      ctx.message.forward_origin === undefined ? ctx.message.text : undefined;
     // A plain affirmation is authority only when replying to the exact delivered brief.
     const requirementReply =
       /^(yes|approve|approved|go ahead|no|not yet)[.!]?$/i.exec(
-        (ctx.message.text ?? "").trim(),
+        (typed ?? "").trim(),
       );
     if (
       assistant.tools?.coding &&
@@ -564,7 +568,7 @@ export function telegram(
     // Phase 1: the topic only decides where replies go; the conversation is shared.
     let thread = threadOf(ctx.message) ?? topics.cachedThread(user, "main");
     const here = { id: String(ctx.chat.id), thread };
-    if (/^\/invoices(?:@\w+)?$/i.test(ctx.message.text ?? "")) {
+    if (/^\/invoices(?:@\w+)?$/i.test(typed ?? "")) {
       await ensureUser(db, user);
       const claimed = await db.query(
         "INSERT INTO inbound_updates(update_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING update_id",
@@ -592,7 +596,7 @@ export function telegram(
     // Controls never wait behind reasoning, transcription, or speech delivery.
     const control =
       /^\/(status|continue|cancel|workcancel)(?: ([0-9a-f-]{36}))?$/i.exec(
-        ctx.message.text ?? "",
+        typed ?? "",
       );
     if (control) {
       await ensureUser(db, user);
@@ -638,7 +642,7 @@ export function telegram(
       }
       return;
     }
-    const command = ctx.message.text;
+    const command = typed;
     const library =
       /^\/library(?: (link|revoke|pending|code)(?: (\d{8}))?)?$/i.exec(
         command ?? "",
