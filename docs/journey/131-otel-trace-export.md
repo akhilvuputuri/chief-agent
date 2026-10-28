@@ -1,6 +1,6 @@
 # 131 — Can Chief's runs be viewed as standard traces without risking a turn?
 
-Work date: 2026-10-29. Written: 2026-10-29.
+Work date: 2026-10-29 (Singapore; 28 October UTC). Written: 2026-10-29.
 Status: released in `7ba6831`. Chief exports runs, model calls and tool calls as OTLP traces when an endpoint is set; production sets none, so export is off there.
 
 ## User-visible problem and preceding iteration
