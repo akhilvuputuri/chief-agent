@@ -1,7 +1,7 @@
 # 130 — Can Chief learn from finished work without being asked?
 
 Work date(s): 2026-10-28. Written/revised: 2026-10-28.
-Status: proposed (phase 2 of issue #326, branch `feat/learner`, stacked on PR #338); not merged or deployed. It ships after phase 1's operator rollout.
+Status: proposed (phase 2 of issue #326, PR #340); not merged or deployed. Phase 1 is live in `e6f75f7`; this needs no migration.
 
 ## User-visible problem and preceding iteration
 

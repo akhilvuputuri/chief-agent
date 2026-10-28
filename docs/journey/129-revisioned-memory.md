@@ -1,7 +1,7 @@
 # 129 — Can memory be safe to write without approvals?
 
 Work date(s): 2026-10-28. Written/revised: 2026-10-28.
-Status: proposed (phase 1 of issue #326, branch `feat/learn-from-work`); not merged or deployed. Needs independent review, then the operator rollout of migration 010.
+Status: released in `e6f75f7` through the operator rollout of migration 010 on 28 October 2026. The cached-prefix check on later owner turns is pending.
 
 ## User-visible problem and preceding iteration
 
@@ -45,6 +45,13 @@ Non-blocking findings fixed in the same revision: responsibility investigations 
 Tested locally on Node 22.23.4 with PGlite: `tests/memory.test.ts` (16 tests) covers revisions and provenance through `memory_set`, the kind guard, the learned-over-owner conflict flag and untrusted tagging, threat flags, rollback by run (restore, retire, a later owner revision left alone, idempotent repeat, two runs undone in either order), a restored value keeping its labels through chained rollbacks, a learner retirement undone by source, an end-only window, guards as validation errors, an older image writing over a learned head, rollback by source and kind, owner scoping, the selection budget and order, legacy import including rows an older image changed, and an end-to-end turn whose prefix is unchanged until a learned item exists. `python3 scripts/test-deploy-memory.py` passes.
 
 Not done: production rollout, any learner, any measurement. The prefix is expected to be byte-identical for existing owners until phase 2 writes a learned item; that is tested in the end-to-end test, not yet observed in production cache counts.
+
+### Release closure — 2026-10-28
+
+- [PR 338](https://github.com/akhilvuputuri/chief-agent/pull/338) merged as `e6f75f7`, from approved head `211b9fd` (merged tree identical; hosted CI and Devin passed).
+- Operator rollout with `scripts/deploy-memory.py`, baseline `0a78485` (the live release at merge): deployed, healthy, migration 10. The 7 existing memories became `legacy` revisions with trust `unknown`, every head matching its `memories` row; `memory.imported` logged 7 imported and 0 projected.
+- The automatic release first collided with the rollout's release lock (`EAGAIN`) and succeeded as a no-op on re-run. See the [release record](../releases.md).
+- Pending: compare cached tokens and `memory.selected` on the next owner turns with earlier days.
 
 ## Follow-up and next iteration
 

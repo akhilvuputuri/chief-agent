@@ -2,7 +2,7 @@
 
 Issue [#326](https://github.com/akhilvuputuri/chief-agent/issues/326). Chief should get better with use without the owner asking it to remember things. A background learner reviews completed work items, labels their outcomes, and writes reusable facts, lessons and skills. There are no approvals in v1 (owner decision, 27 October 2026). Safety comes from provenance, immutable revisions, flags, measurement and bulk rollback instead of gates.
 
-Status: phase 1 (revisioned memory, PR #338) approved and waiting for its operator rollout; phase 2 (the nightly learner) proposed in branch `feat/learner`, stacked on it; phases 3 and 4 not started. See journals [129](journey/129-revisioned-memory.md) and [130](journey/130-nightly-learner.md).
+Status: phase 1 (revisioned memory) live in `e6f75f7` since 28 October 2026, after the operator rollout of migration 010; phase 2 (the nightly learner) in PR #340; phases 3 and 4 not started. See journals [129](journey/129-revisioned-memory.md) and [130](journey/130-nightly-learner.md).
 
 ## Decisions
 

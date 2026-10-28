@@ -1,9 +1,9 @@
-# Learning from completed work (#326) — phase 1 proposed, 28 October 2026
+# Learning from completed work (#326) — phase 1 live in `e6f75f7`, 28 October 2026
 
 - **Owner decisions (28 October):** the recommended defaults for the issue's open questions: a 24-hour success window with no reaction required, a nightly learner run at 03:30 Singapore on the `standard` tier with fixed allocations and no dollar cap, and the first cut-back analysis four weeks after it goes live. Recorded in [learning from completed work](docs/learning.md#decisions).
-- **Phase 1, revisioned memory ([journal 129](docs/journey/129-revisioned-memory.md)):** migration 010, `src/memory.ts`, per-run context records, bulk rollback and legacy import. Branch `feat/learn-from-work`, not merged.
-- **Pending:** independent review; merge with `scripts/deploy-memory.py`'s `BASE` set to the live release; run the operator rollout immediately after the merge (every automatic release is refused until it runs); check `memory.imported` and cached-token counts after it.
-- **Phase 2, the nightly learner ([journal 130](docs/journey/130-nightly-learner.md)):** branch `feat/learner`, stacked on #338, proposed. Ships after phase 1's rollout; then check the first night's `learner.finished` counts, charges and what it wrote.
+- **Phase 1, revisioned memory ([journal 129](docs/journey/129-revisioned-memory.md)):** live in `e6f75f7` after the operator rollout of migration 010 on 28 October; 7 memories imported as legacy revisions. [Release record](docs/releases.md).
+- **Pending:** compare cached tokens and `memory.selected` on the next owner turns with earlier days.
+- **Phase 2, the nightly learner ([journal 130](docs/journey/130-nightly-learner.md)):** PR #340, proposed; needs no migration; then check the first night's `learner.finished` counts, charges and what it wrote.
 
 # Dependency hardening (#329, closed) — live in `211b2a2`, `9ab96c2`, `c4ba246` and `da2a5ff`, 27 October 2026
 
