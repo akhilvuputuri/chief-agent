@@ -1,17 +1,17 @@
 {
-  "version": "0.1.2",
+  "version": "0.1.3",
   "assets": {
     "darwin-arm64": {
-      "url": "https://github.com/akhilvuputuri/kite/releases/download/v0.1.2/kite-darwin-arm64",
-      "sha256": "befafe53315ac57dce858e3a2a1af8098eb0f094b7dbb01fc6e425ebaded47d3"
+      "url": "https://github.com/akhilvuputuri/kite/releases/download/v0.1.3/kite-darwin-arm64",
+      "sha256": "bedff78dd31857e14186605f30b907bdc6bdfe11da89898b12cce161094d8c38"
     },
     "linux-arm64": {
-      "url": "https://github.com/akhilvuputuri/kite/releases/download/v0.1.2/kite-linux-arm64",
-      "sha256": "68be32a719ecbe7001d9668337ef5e03deed2e876f21f0bce8b098ee03422163"
+      "url": "https://github.com/akhilvuputuri/kite/releases/download/v0.1.3/kite-linux-arm64",
+      "sha256": "832b0c84b79a51f78ba99f93acf7b0f17385f1df1e8763ee985762b4dcef45b4"
     },
     "linux-x64": {
-      "url": "https://github.com/akhilvuputuri/kite/releases/download/v0.1.2/kite-linux-x64",
-      "sha256": "f21b037fba5282dc4f85e1fffb9cbd561cc284955bca0e5fbf84002597fc9c59"
+      "url": "https://github.com/akhilvuputuri/kite/releases/download/v0.1.3/kite-linux-x64",
+      "sha256": "5d3528dbff730d0ef1467f54bb90d4be7b174aadf36943f44f234dacf3244837"
     }
   }
 }
