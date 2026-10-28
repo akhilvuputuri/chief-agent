@@ -321,7 +321,7 @@ const finishNames = new Set([
   "content_filter",
   "error",
 ]);
-function finishName(value: unknown) {
+export function finishName(value: unknown) {
   if (typeof value !== "string" || !value) return undefined;
   return finishNames.has(value) ? value : "other";
 }
@@ -343,7 +343,7 @@ const providerSlugs: Record<string, string> = {
   OpenAI: "openai",
   Azure: "azure",
 };
-function providerName(value: unknown) {
+export function providerName(value: unknown) {
   if (typeof value !== "string" || !value) return undefined;
   return Object.hasOwn(providerSlugs, value) ? providerSlugs[value] : "other";
 }

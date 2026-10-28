@@ -92,6 +92,7 @@ import { closeServer, server } from "./server.js";
 import { stopGateway } from "./gateway-stop.js";
 import { Learner } from "./learning.js";
 import { MemoryStore } from "./memory.js";
+import { startTracing, stopTracing, tracesEndpoint } from "./otel.js";
 import {
   telegram,
   sendCalendarApprovals,
@@ -103,6 +104,26 @@ import {
 const startupError = (code: string, message: string) =>
   Object.assign(new Error(message), { code });
 const c = readConfig();
+// OpenTelemetry trace export (issue #323): off unless an OTLP endpoint is set.
+// A malformed endpoint disables export with a warning; telemetry never stops the gateway.
+let tracesUrl: string | undefined;
+try {
+  tracesUrl = tracesEndpoint();
+} catch {
+  opsLog("trace.export_disabled", "warn", {
+    errorCode: "OTEL_ENDPOINT_INVALID",
+  });
+}
+if (tracesUrl) {
+  const release = process.env.RELEASE_SHA;
+  startTracing({
+    endpoint: tracesUrl,
+    ...(release && /^[0-9a-f]{40}$/.test(release)
+      ? { serviceVersion: release }
+      : {}),
+  });
+  opsLog("trace.export_enabled", "info");
+}
 const mainModel = resolveMainModel(c.AGENT_MODEL);
 const priceCeilings = resolvePriceCeilings({
   input: c.OPENROUTER_MAX_INPUT_PRICE,
@@ -1400,6 +1421,9 @@ for (const signal of ["SIGINT", "SIGTERM"])
         closeHttp: () => closeServer(app),
         closeDatabase: () => db.end(),
       });
+      // Spans from turns that just finished; bounded so a down collector cannot delay exit
+      // past the container's stop grace period.
+      await stopTracing(300);
       if (result.complete) {
         opsLog("gateway.stopped", "info");
         // Another open handle (an MCP client, a box connection) must not hold

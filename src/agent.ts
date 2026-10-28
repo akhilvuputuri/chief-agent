@@ -54,6 +54,7 @@ import {
 import type { JobTools } from "./tools.js";
 import { emptySelection, MemoryStore } from "./memory.js";
 import { runFamily } from "./run-family.js";
+import * as otel from "./otel.js";
 import { recordPickerCheck, type ShadowDecisions } from "./shadow.js";
 import {
   shouldEscalate,
@@ -1446,6 +1447,8 @@ export class Assistant {
           [consumedIds, user],
         );
       await event(this.db, user, run, "turn.failed");
+      // Ends the run span when the failure came before Execution.finish (a no-op after it).
+      otel.runEvent(run, "runtime.stopped", { stopReason: "failed" });
       if (taskId)
         await this.db.query(
           "UPDATE work_tasks SET status='paused',lease=NULL,pause_reason=$3,updated_at=now() WHERE id=$1 AND user_id=$2 AND status NOT IN ('done','cancelled')",
