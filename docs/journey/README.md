@@ -136,7 +136,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 28 October | [128 — kite replaces npm](128-kite-replaces-npm.md): can npm be removed without changing a single installed byte? | Cut-over merged; first release failed on the host's containerd image store, fixed in Kite 0.1.3; worker image digests and release pending |
 | 27 October | [127 — Closing the dependency hardening](127-closing-dependency-hardening.md): what was left of #329, and can it close? | Released in `da2a5ff`, #329 closed: Upgrade sockets close on every route and at shutdown, one shared bounded body reader, a Postgres session-drop smoke test in CI, a corrupt-gzip regression test; pool timeouts declined |
 | 28 October | [129 — Revisioned memory](129-revisioned-memory.md): can memory be safe to write without approvals? | Released in `e6f75f7` with the operator rollout of migration 010: issue #326 phase 1. Immutable revisions with provenance, trust tags and threat flags, per-run context records, bulk rollback and a legacy import |
-| 28 October | [130 — Nightly learner](130-nightly-learner.md): can Chief learn from finished work without being asked? | Proposed (not released): issue #326 phase 2. Labels finished tasks, runs one bounded model review a night with learning tools only, checks every proposal on the host and applies accepted items with provenance |
+| 28 October | [130 — Nightly learner](130-nightly-learner.md): can Chief learn from finished work without being asked? | Released in `d7df9aa`: issue #326 phase 2. Labels finished tasks, runs one bounded model review a night with learning tools only, checks every proposal on the host and applies accepted items with provenance |
 
 ## Coding-agent learning path
 
