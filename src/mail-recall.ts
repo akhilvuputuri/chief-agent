@@ -235,6 +235,37 @@ export class MailIndex {
   get messages() {
     return this.indexed.size;
   }
+  /** Stable chunk IDs (message ID and chunk number) in index order. */
+  private chunkIds() {
+    const seen = new Map<string, number>();
+    return this.entries.map((e) => {
+      const n = seen.get(e.messageId) ?? 0;
+      seen.set(e.messageId, n + 1);
+      return `${e.messageId}:${n}`;
+    });
+  }
+  /** Every chunk and its message headers without vectors, for the operator-run export. */
+  exportChunks() {
+    const ids = this.chunkIds();
+    return this.entries.map(({ vector, ...e }, i) => ({
+      chunkId: ids[i]!,
+      ...e,
+    }));
+  }
+  /** Each chunk's cosine score against a query, by chunk ID, for the operator-run export. */
+  async scoreChunks(user: string, query: string) {
+    if (user !== this.owner)
+      throw new Error("Gmail is not connected for this user");
+    const [q] = await this.embedder.embed([query.slice(0, 2000)]);
+    const ids = this.chunkIds();
+    const scores: Record<string, number> = {};
+    this.entries.forEach((e, i) => {
+      let score = 0;
+      for (let d = 0; d < DIMENSIONS; d++) score += e.vector[d]! * q![d]!;
+      scores[ids[i]!] = Math.round(score * 10000) / 10000;
+    });
+    return scores;
+  }
   /** One entry per indexed message (its first chunk), for the operator-run eval. */
   sample() {
     const first = new Map<string, Entry>();
