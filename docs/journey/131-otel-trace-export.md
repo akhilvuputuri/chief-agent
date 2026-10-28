@@ -13,6 +13,7 @@ The first phase of #323 builds the receiving side as a separate project, agentwa
 
 - Tested: `tests/otel.test.ts` drives real `Execution` objects on PGlite through a root run, a child agent, a completed and a failed model call and two tool calls, then compares the exported spans with the `events` rows. Input, output, cache-read and cache-write tokens and cost equal the recorded `usage`; the model span's duration equals the recorded `latencyMs`; the tree is root run → child run → model call, and root run → tool call; all spans share the root run's ID as trace ID.
 - Tested: the exported bytes contain none of the planted private strings (tool arguments, a tool error message, a tool result, OpenRouter provider display text).
+- Tested: nested children (root → research → researcher) share one trace with correct parents; a failed turn's run span is closed with an error.
 - Tested: with the collector throwing, the exporter drops the batch, does not throw, and logs one `trace.export_dropped`; with a collector that never answers, shutdown returns after its deadline.
 - Measured on a laptop, synthetic: the same flow with real `fetch` against a running agentwatch (`f528234`) produced one complete trace with 5 spans, 2 model calls, 1 tool call, 40,001 input tokens, 36,000 cached and $0.10, matching the inputs, and drew the expected tree in its UI.
 - Not measured: anything on production traffic. Export stays off there until a collector exists on or next to the host, which is a separate decision.
@@ -27,7 +28,15 @@ The first phase of #323 builds the receiving side as a separate project, agentwa
 
 ## Implementation and review
 
-[src/otel.ts](../../src/otel.ts) holds the exporter and the span assembly; [src/execution.ts](../../src/execution.ts) calls `runStarted`, `runEvent`, `callStarted` and `callFinished`; [src/main.ts](../../src/main.ts) starts export when `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` or `OTEL_EXPORTER_OTLP_ENDPOINT` is set and flushes for at most 1 second at shutdown. `finishName` and `providerName` in `ops-log.ts` are now exported so spans use the same fixed names as the log. Design: [tracing](../tracing.md).
+[src/otel.ts](../../src/otel.ts) holds the exporter and the span assembly; [src/execution.ts](../../src/execution.ts) calls `runStarted`, `runEvent`, `callStarted` and `callFinished`; [src/main.ts](../../src/main.ts) starts export when `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` or `OTEL_EXPORTER_OTLP_ENDPOINT` is set and flushes for at most 300 ms at shutdown. `finishName` and `providerName` in `ops-log.ts` are now exported so spans use the same fixed names as the log. Design: [tracing](../tracing.md).
+
+Independent review (Opus 5.5) of `6fa316d` approved, with findings fixed in the next commit:
+
+- Provider HTTP failures exported `error.type=_OTHER`, because `errorCode` is a number and `httpStatus` was ignored. Now the code or status is used as a string (tested with HTTP 429).
+- A turn that failed before `Execution.finish` (the catch in `Assistant.turn`) never ended its run span, leaving its model and tool spans as orphans. That path now ends it with an error.
+- Only `runEvent` caught its own errors; all exported hooks do now.
+- With export on, the 1-second shutdown flush could push a stop past Docker's 10-second grace; it is 300 ms.
+- Smaller items: status left unset on success; a full batch is flushed on the next event-loop turn instead of on the caller's stack; pending drop counts are reported at shutdown; a malformed endpoint now disables export with a warning instead of stopping the gateway; the no-endpoint test now asserts that nothing is sent; nested children and the research label are tested.
 
 ## Verification and outcome
 

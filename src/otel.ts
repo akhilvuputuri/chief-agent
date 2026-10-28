@@ -31,7 +31,6 @@ export interface ExportSpan {
 // OTLP span kinds and status codes.
 export const SpanKind = { internal: 1, client: 3 } as const;
 type SpanKind = (typeof SpanKind)[keyof typeof SpanKind];
-const STATUS_OK = 1;
 const STATUS_ERROR = 2;
 
 export interface ExporterOptions {
@@ -76,7 +75,9 @@ export class OtlpExporter {
       return;
     }
     this.queue.push(span);
-    if (this.queue.length >= this.batchSize) void this.flush();
+    // Deferred so encoding a batch never runs on the caller's (a turn's) stack.
+    if (this.queue.length === this.batchSize)
+      setImmediate(() => void this.flush());
   }
 
   /** Sends what is queued, one batch at a time. Resolves when the queue is empty or a send fails. */
@@ -111,9 +112,10 @@ export class OtlpExporter {
     }
   }
 
-  private report() {
+  private report(force = false) {
+    if (!this.failed && !this.dropped) return;
     const now = Date.now();
-    if (now - this.lastReport < 60_000) return;
+    if (!force && now - this.lastReport < 60_000) return;
     this.lastReport = now;
     opsLog("trace.export_dropped", "warn", {
       failedCount: this.failed,
@@ -135,6 +137,7 @@ export class OtlpExporter {
       }),
     ]);
     clearTimeout(timer);
+    this.report(true);
   }
 
   /** Spans waiting to be sent, for tests. */
@@ -166,7 +169,8 @@ export function encode(spans: ExportSpan[], serviceVersion?: string) {
               startTimeUnixNano: String(span.startNs),
               endTimeUnixNano: String(span.endNs),
               attributes: keyValues(span.attributes),
-              status: { code: span.error ? STATUS_ERROR : STATUS_OK },
+              // Unset unless the span failed, as instrumentation should leave it.
+              ...(span.error ? { status: { code: STATUS_ERROR } } : {}),
             })),
           },
         ],
@@ -276,6 +280,14 @@ function traceIdFor(run: string) {
 
 export function runStarted(run: string, parentRun?: string) {
   if (!exporter) return;
+  try {
+    startRun(run, parentRun);
+  } catch {
+    /* Tracing is not the action ledger. */
+  }
+}
+
+function startRun(run: string, parentRun?: string) {
   const parent = parentRun ? runs.get(parentRun) : undefined;
   remember(runs, run, {
     traceId: parent?.traceId ?? traceIdFor(parentRun ?? run),
@@ -427,7 +439,11 @@ export function callStarted(
   write: boolean,
 ) {
   if (!exporter) return;
-  remember(calls, callId, { run, operation, write, startNs: nowNs() });
+  try {
+    remember(calls, callId, { run, operation, write, startNs: nowNs() });
+  } catch {
+    /* Tracing is not the action ledger. */
+  }
 }
 
 export function callFinished(
@@ -435,6 +451,15 @@ export function callFinished(
   state: string,
   errorCode?: string,
 ) {
+  if (!exporter) return;
+  try {
+    finishCall(callId, state, errorCode);
+  } catch {
+    /* Tracing is not the action ledger. */
+  }
+}
+
+function finishCall(callId: string, state: string, errorCode?: string) {
   if (!exporter) return;
   const call = calls.get(callId);
   calls.delete(callId);
@@ -486,12 +511,18 @@ const finiteCount = (v: unknown) => {
 
 function failureType(data: Record<string, unknown>) {
   const diagnostics = data.diagnostics as Record<string, unknown> | undefined;
-  if (diagnostics)
+  if (diagnostics) {
+    // The semantic conventions use the HTTP status code, as a string, when that is all there is.
+    const numeric = [diagnostics.errorCode, diagnostics.httpStatus].find(
+      (v) => typeof v === "number" && Number.isInteger(v),
+    );
     return (
       codeValue(diagnostics.failureCode) ??
       codeValue(diagnostics.errorCode) ??
+      (numeric === undefined ? undefined : String(numeric)) ??
       "_OTHER"
     );
+  }
   if (data.contextSizes) return "context_limit";
   const name =
     typeof data.error === "string" ? data.error.split(":")[0] : undefined;

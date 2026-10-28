@@ -105,11 +105,14 @@ const startupError = (code: string, message: string) =>
   Object.assign(new Error(message), { code });
 const c = readConfig();
 // OpenTelemetry trace export (issue #323): off unless an OTLP endpoint is set.
+// A malformed endpoint disables export with a warning; telemetry never stops the gateway.
 let tracesUrl: string | undefined;
 try {
   tracesUrl = tracesEndpoint();
-} catch (error) {
-  throw startupError("OTEL_ENDPOINT_INVALID", String(error));
+} catch {
+  opsLog("trace.export_disabled", "warn", {
+    errorCode: "OTEL_ENDPOINT_INVALID",
+  });
 }
 if (tracesUrl) {
   const release = process.env.RELEASE_SHA;
@@ -1418,8 +1421,9 @@ for (const signal of ["SIGINT", "SIGTERM"])
         closeHttp: () => closeServer(app),
         closeDatabase: () => db.end(),
       });
-      // Spans from turns that just finished; bounded so a down collector cannot delay exit.
-      await stopTracing(1000);
+      // Spans from turns that just finished; bounded so a down collector cannot delay exit
+      // past the container's stop grace period.
+      await stopTracing(300);
       if (result.complete) {
         opsLog("gateway.stopped", "info");
         // Another open handle (an MCP client, a box connection) must not hold

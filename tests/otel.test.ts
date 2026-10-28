@@ -9,8 +9,10 @@ import {
   OtlpExporter,
   SpanKind,
   encode,
+  runEvent,
   startTracing,
   stopTracing,
+  tracingEnabled,
   tracesEndpoint,
   type ExportSpan,
 } from "../src/otel.js";
@@ -24,7 +26,7 @@ type OtlpSpan = {
   startTimeUnixNano: string;
   endTimeUnixNano: string;
   attributes: { key: string; value: Record<string, unknown> }[];
-  status: { code: number };
+  status?: { code: number };
 };
 
 function collector() {
@@ -122,7 +124,7 @@ test("the exporter batches, drops overflow and never throws when the collector i
     const exporter = new OtlpExporter({
       endpoint: "http://collector/v1/traces",
       batchSize: 2,
-      maxQueue: 3,
+      maxQueue: 10,
       intervalMs: 60_000,
       fetch: ok.post,
     });
@@ -149,9 +151,11 @@ test("the exporter batches, drops overflow and never throws when the collector i
     const reports = lines
       .map((line) => JSON.parse(line))
       .filter((entry) => entry.event === "trace.export_dropped");
-    // Reported at most once a minute: the first overflow, with its counts.
-    assert.equal(reports.length, 1);
+    // Reported at most once a minute, and once more at shutdown for what built up since.
+    assert.equal(reports.length, 2);
     assert.equal(reports[0].abortedCount, 1);
+    assert.equal(reports[1].abortedCount, 1);
+    assert.equal(reports[1].failedCount, 2);
   } finally {
     setOpsSink(restore);
   }
@@ -324,7 +328,7 @@ test("runs, model calls and tool calls become a span tree that matches the event
     const failure = spans.find(
       (s) => attr(s, "chief.invocation_id") === failed,
     )!;
-    assert.equal(failure.status.code, 2);
+    assert.equal(failure.status?.code, 2);
     assert.equal(attr(failure, "error.type"), "disconnected");
     assert.equal(attr(failure, "chief.upstream_provider"), "other");
     assert.equal(attr(failure, "gen_ai.usage.input_tokens"), undefined);
@@ -344,12 +348,20 @@ test("runs, model calls and tool calls become a span tree that matches the event
   }
 });
 
-test("with no endpoint, hooks record nothing", async () => {
+test("with export stopped, hooks record and send nothing", async () => {
   const pg = await migratedPGlite();
   const db = pg as unknown as Database;
   await db.query("INSERT INTO users(id) VALUES('owner')");
   const restore = setOpsSink(() => undefined);
+  const sink = collector();
+  startTracing({
+    endpoint: "http://collector/v1/traces",
+    intervalMs: 60_000,
+    fetch: sink.post,
+  });
+  await stopTracing(0);
   try {
+    assert.equal(tracingEnabled(), false);
     const run = new Execution(
       db,
       "owner",
@@ -360,7 +372,91 @@ test("with no endpoint, hooks record nothing", async () => {
     const call = await run.beginCall("c", "web_search", {});
     await run.endCall(call, {});
     await run.finish("answer");
+    assert.deepEqual(sink.bodies, []);
   } finally {
+    setOpsSink(restore);
+    await pg.close();
+  }
+});
+
+test("nested children, HTTP failures and turns that fail before finishing", async () => {
+  const pg = await migratedPGlite();
+  const db = pg as unknown as Database;
+  await db.query("INSERT INTO users(id) VALUES('owner')");
+  const sink = collector();
+  const restore = setOpsSink(() => undefined);
+  startTracing({
+    endpoint: "http://collector/v1/traces",
+    intervalMs: 60_000,
+    fetch: sink.post,
+  });
+  try {
+    const rootId = randomUUID();
+    const root = new Execution(
+      db,
+      "owner",
+      rootId,
+      new AbortController().signal,
+    );
+    await root.start();
+    const limits = { ms: 120000, models: 8, tools: 20 };
+    const research = new Execution(
+      db,
+      "owner",
+      randomUUID(),
+      root.signal,
+      limits,
+      root,
+    );
+    await research.start();
+    await research.trace("research.child_started", { parentRunId: rootId });
+    const nested = new Execution(
+      db,
+      "owner",
+      randomUUID(),
+      root.signal,
+      limits,
+      research,
+    );
+    await nested.start();
+    await nested.trace("agent.child_started", {
+      parentRunId: research.run,
+      type: "public-research/researcher",
+    });
+    const invocation = randomUUID();
+    await nested.trace("model.started", {
+      invocationId: invocation,
+      model: "m/x",
+    });
+    await nested.trace("model.failed", {
+      invocationId: invocation,
+      model: "m/x",
+      diagnostics: { httpStatus: 429 },
+      transient: true,
+      latencyMs: 5,
+    });
+    await nested.finish("failed");
+    await research.finish("answer");
+    // The turn's catch path stops the root run without Execution.finish.
+    runEvent(rootId, "runtime.stopped", { stopReason: "failed" });
+    await stopTracing(1000);
+
+    const spans = sink.spans();
+    const named = (name: string) => spans.find((s) => s.name === name)!;
+    const rootSpan = named("invoke_agent chief");
+    const researchSpan = named("invoke_agent research");
+    const nestedSpan = named("invoke_agent public-research/researcher");
+    const model = named("chat m/x");
+    assert.equal(researchSpan.parentSpanId, rootSpan.spanId);
+    assert.equal(nestedSpan.parentSpanId, researchSpan.spanId);
+    assert.equal(model.parentSpanId, nestedSpan.spanId);
+    assert.ok(spans.every((s) => s.traceId === rootSpan.traceId));
+    assert.equal(attr(model, "error.type"), "429");
+    assert.deepEqual(rootSpan.status, { code: 2 });
+    // Successful spans leave the status unset.
+    assert.equal(researchSpan.status, undefined);
+  } finally {
+    await stopTracing(0);
     setOpsSink(restore);
     await pg.close();
   }
