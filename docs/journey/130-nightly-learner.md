@@ -46,7 +46,7 @@ Not done: no production run, no measurement of what it learns, cost per run or e
 ### Release closure — 2026-10-28
 
 - [PR 340](https://github.com/akhilvuputuri/chief-agent/pull/340) merged as `d7df9aa`, from approved head `fa9e0d4` (merged tree identical; hosted CI and Devin passed). No migration.
-- The automatic release deployed it at 16:04 UTC; `gateway.started` reported the release on Node v22.23.4, and the gateway's container log had no `error`-level line in the 30 minutes after it started. No learner run had happened yet; the first window opens at 19:30 UTC. See the [release record](../releases.md).
+- The automatic release deployed it at 16:04 UTC; `gateway.started` reported the release on Node v22.23.4, and the gateway's container log had no `error`- or `warn`-level line from its start at 16:03:49 to 16:06:35 UTC. No learner run had happened yet; the first window opens at 19:30 UTC. See the [release record](../releases.md).
 - Pending: the first night's `learner.finished` counts, its charges and the items it wrote.
 
 ## Follow-up and next iteration
