@@ -47,6 +47,9 @@ before(async () => {
     await readFile(new URL("../db/006_runtime.sql", import.meta.url), "utf8"),
   );
   await pg.exec(
+    await readFile(new URL("../db/010_memory.sql", import.meta.url), "utf8"),
+  );
+  await pg.exec(
     await readFile(
       new URL("../db/012_message_storage.sql", import.meta.url),
       "utf8",

@@ -132,6 +132,12 @@ const fields: Record<string, Shape> = {
   handlersLeft: "count",
   httpClosed: "bool",
   databaseClosed: "bool",
+  /** Memory selection and import (docs/learning.md). Counts only, never content. */
+  explicitCount: "count",
+  learnedCount: "count",
+  flaggedCount: "count",
+  importedCount: "count",
+  projectedCount: "count",
 };
 
 // Written as null rather than omitted: an unknown charge stays visibly unknown.
@@ -420,6 +426,17 @@ const projections: Record<string, Projection> = {
   "route.first_call": (run, d) => [
     "info",
     { runId: run, operation: d.operation, kind: d.reason },
+  ],
+  "memory.selected": (run, d) => [
+    d.flagged ? "warn" : "info",
+    {
+      runId: run,
+      explicitCount: d.explicit,
+      learnedCount: d.learned,
+      omittedCount: d.omitted,
+      flaggedCount: d.flagged,
+      memoriesChars: d.chars,
+    },
   ],
   // Sizes only, no content: lets the fixed envelope be measured per model call.
   "context.selected": (run, d) => [

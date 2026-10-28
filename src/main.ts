@@ -86,6 +86,7 @@ import { ShadowDecisions } from "./shadow.js";
 import { EffortPicker } from "./effort.js";
 import { closeServer, server } from "./server.js";
 import { stopGateway } from "./gateway-stop.js";
+import { MemoryStore } from "./memory.js";
 import {
   telegram,
   sendCalendarApprovals,
@@ -166,6 +167,22 @@ if (
     "STARTUP_MIGRATION_029",
     "Stock rules migration 029 must be applied with the gateway stopped",
   );
+if (
+  !(await db.query("SELECT 1 FROM runtime_migrations WHERE version=10")).rows
+    .length
+)
+  throw startupError(
+    "STARTUP_MIGRATION_010",
+    "Memory migration 010 must be applied with the gateway stopped",
+  );
+// Revisions take over from the memories table: import what they do not hold yet, which
+// is every row on the first start and any row an older image wrote after a rollback.
+const memoryImport = await new MemoryStore(db).importLegacy();
+if (memoryImport.imported || memoryImport.projected)
+  opsLog("memory.imported", "info", {
+    importedCount: memoryImport.imported,
+    projectedCount: memoryImport.projected,
+  });
 await recoverRuntime(db);
 // Library account features need migration 016; without the key they stay off even if tables exist.
 const libraryReady = await libraryMigrated(db);

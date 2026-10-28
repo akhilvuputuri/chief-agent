@@ -15,6 +15,7 @@ test("an owner's messages share one provider cache key while runs keep their own
     "005_work",
     "006_runtime",
     "008_costs",
+    "010_memory",
     "012_message_storage",
     "013_conversation_control",
     "014_checkpoint_steering",

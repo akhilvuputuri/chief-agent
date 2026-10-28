@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { migratedPGlite } from "./helpers/pglite.js";
+import { MemoryStore } from "../src/memory.js";
 import { Assistant } from "../src/agent.js";
 import { CustomAgent } from "../src/custom-agent.js";
 import { JobTools } from "../src/tools.js";
@@ -68,6 +69,7 @@ async function fixture(model: ModelAdapter, models = 40) {
     "005_work",
     "006_runtime",
     "008_costs",
+    "010_memory",
     "012_message_storage",
     "013_conversation_control",
     "014_checkpoint_steering",
@@ -127,6 +129,7 @@ test("research isolates context, returns sourced targets and correlates traces/c
     await f.db.query(
       "INSERT INTO memories(user_id,key,value) VALUES('owner','profile','PRIVATE PROFILE')",
     );
+    await new MemoryStore(f.db).importLegacy();
     assert.equal(
       await f.assistant.respond("owner", "Research the supported platform"),
       "The source says Linux is supported.",

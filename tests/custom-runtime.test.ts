@@ -3,6 +3,7 @@ import { boundedBytes } from "../src/providers.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { migratedPGlite } from "./helpers/pglite.js";
+import { MemoryStore } from "../src/memory.js";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { Assistant } from "../src/agent.js";
@@ -31,6 +32,7 @@ async function fixture(
     "005_work",
     "006_runtime",
     "008_costs",
+    "010_memory",
     "012_message_storage",
     "013_conversation_control",
     "014_checkpoint_steering",
@@ -892,6 +894,8 @@ test("follow-up retrieves the exact saved answer after its large tool group leav
       "INSERT INTO memories(user_id,key,value) VALUES('owner','context',$1),('owner','background',$1)",
       ["known ".repeat(500)],
     );
+    // Rows written outside the store reach turns through the startup import.
+    await new MemoryStore(f.db).importLegacy();
     await f.assistant.respond("owner", "Give the details");
     // The immediately preceding exchange is protected. This question retrieves an older answer.
     await f.assistant.respond("owner", "Thanks");
