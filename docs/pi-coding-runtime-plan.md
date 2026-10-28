@@ -26,7 +26,7 @@ Chief ─> preserved legacy path ─> existing Python runtime
 
 The independent package owns execution and returns results. Chief owns its user interface, owner authorization and delivery. Pi owns the agent loop, tools and normal session/context mechanics. Model credentials and provider policy belong to an explicitly configured trusted boundary, outside generated commands.
 
-Start under `coding_runtime_pi/` with a separate package manifest, lockfile, TypeScript build, tests, README and Dockerfile. No parent workspace dependency, Chief import, required root npm install or inherited environment file. This directory is a staging location, not an architectural dependency. It must work after copying to an empty directory or new repository. Creating a remote repository is not needed to prove this.
+Start under `coding_runtime_pi/` with a separate package manifest, lockfile, TypeScript build, tests, README and Dockerfile. No parent workspace dependency, Chief import, required root kite install or inherited environment file. This directory is a staging location, not an architectural dependency. It must work after copying to an empty directory or new repository. Creating a remote repository is not needed to prove this.
 
 ## First product contract
 

@@ -66,7 +66,7 @@ async function fixture(t: TestContext) {
     summary: "Reviewed",
     checkpoint: cp,
     checks: ["check", "build", "format:check"].map((s) => ({
-      command: `npm run ${s}`,
+      command: `kite run ${s}`,
       exitCode: 0,
       output: "passed",
     })),

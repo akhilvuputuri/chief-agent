@@ -117,7 +117,7 @@ Telegram /portfolio ─┐                           ┌─ portfolio_read / por
   - `portfolio_read` returns current holdings per selected account. It labels freshness (`fresh` | `stale` | `disconnected` | `never_synced`), the last attempt outcome, and whether each position is monitorable (supported US MIC and type, already watched, at capacity) with the reason. It says which figures are broker-reported and which are computed.
   - `portfolio_status` returns connection health.
   - Both go in `readOperations`.
-  - A new `core/portfolio` agent avoids the `agentCatalogue` gotcha, and a new `portfolio_` tool domain prevents core leakage. Changing `config/tool-picker.json` needs the documented paid `npm run eval:picker` (about $0.04), which runs only with owner approval.
+  - A new `core/portfolio` agent avoids the `agentCatalogue` gotcha, and a new `portfolio_` tool domain prevents core leakage. Changing `config/tool-picker.json` needs the documented paid `kite run eval:picker` (about $0.04), which runs only with owner approval.
   - Connect, disconnect and manual refresh are Telegram host commands, not model tools.
 - **Sync.**
   - Runs on the existing 15-second routine timer, with a configurable cadence (default every 4 hours, plus `/portfolio refresh`) and per-connection backoff like the watchlist's.

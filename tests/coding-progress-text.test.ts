@@ -16,9 +16,9 @@ test("the worker's internal progress labels are shown to the owner in plain word
     ["Pi build: cancelled", "Implementation cancelled"],
     ["Pi build: ready", "Implementation ready"],
     ["Pi learn: Running learn", "Learning started"],
-    ["Pi check: npm ci: 0", "Check passed: npm ci"],
-    ["Pi check: npm run check: 1", "Check failed: npm run check (exit 1)"],
-    ["Pi check: npm run build", "Check: npm run build"],
+    ["Pi check: kite ci: 0", "Check passed: kite ci"],
+    ["Pi check: kite run check: 1", "Check failed: kite run check (exit 1)"],
+    ["Pi check: kite run build", "Check: kite run build"],
     [
       "Pi plan: Requesting one structured final report",
       "Planning: Requesting one structured final report",
@@ -36,10 +36,10 @@ test("progress is stored in owner wording, and a retried report still matches", 
   const report = {
     key: "pi:task:1",
     stage: "implementing",
-    summary: "Pi check: npm run check: 0",
+    summary: "Pi check: kite run check: 0",
   };
   assert.deepEqual(await f.c.progress(j, report), { accepted: true });
-  assert.equal((await f.row(job.id)).summary, "Check passed: npm run check");
+  assert.equal((await f.row(job.id)).summary, "Check passed: kite run check");
   // The same report again is an idempotent retry, not a key conflict.
   assert.deepEqual(await f.c.progress(j, report), { accepted: true });
   const event = (
@@ -48,7 +48,7 @@ test("progress is stored in owner wording, and a retried report still matches", 
       [job.id, `${j.attempt_id}:pi:task:1`],
     )
   ).rows[0].payload;
-  assert.equal(event.summary, "Check passed: npm run check");
+  assert.equal(event.summary, "Check passed: kite run check");
 });
 
 test("a retry of a progress report stored before the owner wording still matches", async (t) => {

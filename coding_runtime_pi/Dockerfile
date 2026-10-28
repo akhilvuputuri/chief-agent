@@ -1,13 +1,18 @@
 FROM node:22.23.4-bookworm-slim AS build
 RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev git ripgrep util-linux && rm -rf /var/lib/apt/lists/*
+# kite comes from the repository's single pin: build with
+# `docker build --build-context kite=tools coding_runtime_pi`.
+COPY --from=kite kite.json install-kite.mjs /opt/kite/
+RUN node /opt/kite/install-kite.mjs --dir /usr/local/bin && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 WORKDIR /opt/pi-runtime
 COPY package*.json ./
-RUN npm ci --ignore-scripts
+RUN kite ci --ignore-scripts
 COPY tsconfig.json ./
 COPY src ./src
 COPY native ./native
-RUN npm run build && gcc -shared -fPIC -I/usr/local/include/node native/process.c -o process-boundary.node && npm prune --omit=dev --ignore-scripts
+RUN kite run build && gcc -shared -fPIC -I/usr/local/include/node native/process.c -o process-boundary.node && kite ci --omit=dev --ignore-scripts
 FROM node:22.23.4-bookworm-slim
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 RUN apt-get update && apt-get install -y --no-install-recommends git ripgrep util-linux && rm -rf /var/lib/apt/lists/*
 WORKDIR /opt/pi-runtime
 COPY --from=build /opt/pi-runtime ./

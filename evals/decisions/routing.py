@@ -95,7 +95,7 @@ def rule(case: dict[str, Any]) -> dict[str, Any]:
         cases = json.loads((Path(__file__).parent / "fixtures" / FIXTURES).read_text(encoding="utf-8"))
         messages = [c["message"] for c in cases]
         out = subprocess.run(
-            ["npx", "tsx", "evals/decisions/cues.ts"],
+            ["kite", "exec", "tsx", "evals/decisions/cues.ts"],
             cwd=ROOT, input=json.dumps(messages), capture_output=True, text=True, check=True,
         ).stdout
         _cues.update(zip(messages, json.loads(out.strip().splitlines()[-1])))

@@ -198,18 +198,18 @@ export async function runWorker(
         `verify-${round}`,
       );
       const checks: Outcome["checks"] = [];
-      const install = await w.command("npm", ["ci"], false, 120000);
+      const install = await w.command("kite", ["ci"], false, 120000);
       if (install.exitCode !== 0)
         throw new Error("Repository dependencies could not be installed");
       for (const script of ["check", "build", "format:check"]) {
         const r = await w.command(
-          "npm",
+          "kite",
           ["run", script],
           false,
           Math.min(600000, Math.max(1, Date.parse(a.deadline) - Date.now())),
         );
         checks.push({
-          command: `npm run ${script}`,
+          command: `kite run ${script}`,
           exitCode: r.exitCode,
           output: r.output.slice(-8000),
         });

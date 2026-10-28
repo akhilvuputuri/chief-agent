@@ -10,12 +10,15 @@ Install Git, Node 22 and GitHub CLI. Authenticate GitHub using your own authoriz
 gh repo clone akhilvuputuri/chief-agent
 cd chief-agent
 git fetch origin
-npm ci
-npm run doctor:cloud
-npm run check
-npm run build
-npm run format:check
+node tools/install-kite.mjs   # installs the pinned kite into ~/.local/bin after a checksum check
+kite ci
+kite run doctor:cloud
+kite run check
+kite run build
+kite run format:check
 ```
+
+Chief uses [kite](https://github.com/akhilvuputuri/kite) instead of npm: it installs, resolves and runs scripts with npm-identical results, and npm is not used anywhere in the project. `tools/kite.json` pins the release and its SHA-256 per platform; `tools/install-kite.mjs` needs only Node. Make sure `~/.local/bin` is on `PATH`. Add or upgrade dependencies with `kite install <pkg>@<range>` and `kite update <pkg>`.
 
 Read AGENTS.md and docs/current-work.md. The historical local folder may be named hermes-companion; that name is not a required path. Most checks use PGlite and mocked providers, so neither Docker nor .env is needed for them. Docker is needed for running the full local stack.
 
@@ -35,7 +38,7 @@ git show origin/main:docs/portable-development.md
 git show origin/main:docs/cloud-development.md
 ```
 
-In Chief, deployment is established by an exact successful release receipt (`npm run release:status -- SHA`) and production diagnostics, not by main. For deliberately resumed checkpoint work, compare its behavior with current main and label the difference.
+In Chief, deployment is established by an exact successful release receipt (`kite run release:status -- SHA`) and production diagnostics, not by main. For deliberately resumed checkpoint work, compare its behavior with current main and label the difference.
 
 ## Credentials and optional local integration tests
 
@@ -55,7 +58,7 @@ Follow the a-stack `independent-review` and `ship` skills with the AGENTS.md bin
 - For database or Compose changes, follow a reviewed operator migration procedure. Do not bypass the guard.
 - For shipped milestones, follow releases.md for tags and notes.
 
-Any machine or cloud task with the private log-reader identity can read sanitized production logs with `npm run logs:cloudwatch` ([lightsail.md](lightsail.md#reading-logs)). The bounded production-diagnostics workflow runs only while the repository is private. Full private trace inspection is still unfinished. Run doctor:cloud in the actual environment; a local success does not prove another agent has permission.
+Any machine or cloud task with the private log-reader identity can read sanitized production logs with `kite run logs:cloudwatch` ([lightsail.md](lightsail.md#reading-logs)). The bounded production-diagnostics workflow runs only while the repository is private. Full private trace inspection is still unfinished. Run doctor:cloud in the actual environment; a local success does not prove another agent has permission.
 
 ## Remaining operator-only work
 
@@ -63,10 +66,10 @@ Database/Compose migration, account consent, production secret rotation, server 
 
 ## Test databases and parallel tests
 
-Test files run one at a time (`npm run test:ts`; set `TEST_SHARD=1/6` to run one shard, as CI does). A test process crashed with SIGSEGV in CI while files ran in parallel, so parallelism comes from CI shards on separate runners ([journal 123](journey/123-faster-checks.md)). Create test databases with `migratedPGlite()` from `tests/helpers/pglite.ts`, or `migratedPGlite([...])` for a partial schema, rather than `new PGlite()` plus a migration loop: it restores each database from a snapshot made once per test process. Close a database registered in a hook with `closeAfter(t, pg)`, not `t.after(() => pg.close())`, which keeps the closed database's memory reachable for the rest of the file. See [journal 123](journey/123-faster-checks.md).
+Test files run one at a time (`kite run test:ts`; set `TEST_SHARD=1/6` to run one shard, as CI does). A test process crashed with SIGSEGV in CI while files ran in parallel, so parallelism comes from CI shards on separate runners ([journal 123](journey/123-faster-checks.md)). Create test databases with `migratedPGlite()` from `tests/helpers/pglite.ts`, or `migratedPGlite([...])` for a partial schema, rather than `new PGlite()` plus a migration loop: it restores each database from a snapshot made once per test process. Close a database registered in a hook with `closeAfter(t, pg)`, not `t.after(() => pg.close())`, which keeps the closed database's memory reachable for the rest of the file. See [journal 123](journey/123-faster-checks.md).
 
 ## Python coding-worker checks
 
 Repository navigation checks require Git and ripgrep (`rg`) on the development machine. Install ripgrep with the platform package manager (`brew install ripgrep` on macOS or `sudo apt-get install ripgrep` on Ubuntu). CI/manual-check workflows declare this dependency; the trusted worker image already contains it.
 
-Chief's control service remains Node 22/TypeScript. Coding execution is a Python 3.12+ package in `coding_runtime/`; combined `npm run check` also verifies it. Create/activate a development virtual environment and install `coding_runtime/requirements-dev.txt` with `python -m pip install --require-hashes -r coding_runtime/requirements-dev.txt` before running those checks. Do not install production credentials. See [package development](../coding_runtime/README.md). CI and manual releases install the same locked dependencies; automatic releases use the passing exact-main CI result.
+Chief's control service remains Node 22/TypeScript. Coding execution is a Python 3.12+ package in `coding_runtime/`; combined `kite run check` also verifies it. Create/activate a development virtual environment and install `coding_runtime/requirements-dev.txt` with `python -m pip install --require-hashes -r coding_runtime/requirements-dev.txt` before running those checks. Do not install production credentials. See [package development](../coding_runtime/README.md). CI and manual releases install the same locked dependencies; automatic releases use the passing exact-main CI result.

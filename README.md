@@ -57,19 +57,20 @@ GitHub `main` is the source of truth for integrated code. The last successful `r
 
 ## Local setup
 
-Requires Node 22+ and Docker Compose.
+Requires Node 22+ and Docker Compose. Dependencies are managed with the pinned [kite](https://github.com/akhilvuputuri/kite) (no npm).
 
 ```sh
-npm ci
-npm run setup
+node tools/install-kite.mjs   # checksum-verified, into ~/.local/bin
+kite ci
+kite run setup
 # Fill in the private .env file locally; never commit provider credentials.
 docker compose up -d postgres
 docker compose run --rm migrate
-npm run check:env
-npm run dev
+kite run check:env
+kite run dev
 ```
 
-Use the local Postgres URL from `.env.example`. Pair your Telegram user using `npm run pair` and `npm run pair:finish` if setting up a new bot. Existing installations keep their current allowlist. Run only one Telegram poller per bot token.
+Use the local Postgres URL from `.env.example`. Pair your Telegram user using `kite run pair` and `kite run pair:finish` if setting up a new bot. Existing installations keep their current allowlist. Run only one Telegram poller per bot token.
 
 For the full container stack:
 
@@ -95,11 +96,11 @@ Source quotes, applicability labels and receipts validate recorded support and e
 ## Verification
 
 ```sh
-npm run check
-npm run build
-npm run format:check
+kite run check
+kite run build
+kite run format:check
 # Optional: paid, bounded Sol smoke test against synthetic in-memory data.
-npm run smoke:runtime
+kite run smoke:runtime
 ```
 
 Tests cover the actual request body, conversation/tool/observation loop, ownership, approval replay and expiry, evidence checks, budgets, cancellation, recovery, context boundaries, schedules, Telegram and provider contracts. They do not claim semantic correctness or production-scale reliability. [Verification record](docs/verification.md) documents live checks.
@@ -114,11 +115,11 @@ The initial prototype used [Nous Research Hermes Agent](https://github.com/NousR
 
 ## Evaluations and development
 
-See [evaluation guide](docs/evals/guide.md) and [development process](docs/development-process.md). `npm run eval` is an offline diagnostic; `npm run eval -- --live` runs bounded paid model scenarios in isolated synthetic databases. Production runtime fixes are evaluated separately from the tooling.
+See [evaluation guide](docs/evals/guide.md) and [development process](docs/development-process.md). `kite run eval` is an offline diagnostic; `kite run eval -- --live` runs bounded paid model scenarios in isolated synthetic databases. Production runtime fixes are evaluated separately from the tooling.
 
 ## Developing from Codex cloud
 
-Use the connected `akhilvuputuri/chief-agent` environment and read [AGENTS.md](AGENTS.md). The [cloud development guide](docs/cloud-development.md) covers testing, PRs, automatic production releases after passing main checks, bounded diagnostics and operational limits. Live credentials remain on the production host (AWS Lightsail). Sanitized operational logs are readable through `npm run logs:cloudwatch` with a scoped reader identity; see [docs/lightsail.md](docs/lightsail.md).
+Use the connected `akhilvuputuri/chief-agent` environment and read [AGENTS.md](AGENTS.md). The [cloud development guide](docs/cloud-development.md) covers testing, PRs, automatic production releases after passing main checks, bounded diagnostics and operational limits. Live credentials remain on the production host (AWS Lightsail). Sanitized operational logs are readable through `kite run logs:cloudwatch` with a scoped reader identity; see [docs/lightsail.md](docs/lightsail.md).
 
 ## Engineering journey
 

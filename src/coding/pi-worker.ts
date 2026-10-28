@@ -426,10 +426,10 @@ export async function runPiWorker(
       objective: assignment.objective,
       instructions: assignment.context,
       checks: [
-        "npm ci",
-        "npm run check",
-        "npm run build",
-        "npm run format:check",
+        "kite ci",
+        "kite run check",
+        "kite run build",
+        "kite run format:check",
       ],
       limits: {
         ...assignment.settings.limits,

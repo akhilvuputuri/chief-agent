@@ -40,7 +40,7 @@ This establishes which run formed a revision and which later run retrieved it. R
 
 ## Development and verification
 
-`npm test` now builds the browser TypeScript entry before running tests; no frontend framework, bundler or extra runtime service is required. Static HTML/CSS are under `web/`; `src/miniapp-ui.ts` emits one browser module. The Docker image includes web assets. `MINIAPP_ORIGIN` is empty by default, disabling public routes and model canvas tools; production uses the configured HTTPS origin without a trailing slash.
+`kite test` now builds the browser TypeScript entry before running tests; no frontend framework, bundler or extra runtime service is required. Static HTML/CSS are under `web/`; `src/miniapp-ui.ts` emits one browser module. The Docker image includes web assets. `MINIAPP_ORIGIN` is empty by default, disabling public routes and model canvas tools; production uses the configured HTTPS origin without a trailing slash.
 
 PGlite/Fastify injection checks cover independent canvases, immutable history, idempotency, concurrent conflicts, owner isolation, exact source ownership, invalid content, duplicate/stale/future/tampered Telegram launches, forged/expired sessions, absent write routes, owner-checked Telegram links, migration reruns and conversation → write → observation → finish envelope. Synthetic browser checks cover phone layout, multiple canvases, historical/latest revisions and saved-role navigation. Tests use no production secrets or paid model calls. A real Telegram launch and model-chosen canvas are separate live acceptance checks.
 

@@ -50,7 +50,7 @@ export function localExecutor(
         env: {
           PATH: process.env.PATH,
           HOME: home,
-          NPM_CONFIG_CACHE: `${home}/npm`,
+          KITE_STORE: `${home}/kite-store`,
           XDG_CACHE_HOME: `${home}/cache`,
           TMPDIR: home,
           LANG: "C.UTF-8",

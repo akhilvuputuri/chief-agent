@@ -53,11 +53,10 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
           test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$RELEASE_SHA"
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup-kite
         # Automatic releases already have a successful exact-SHA main check.
         # A manual release has no such upstream guarantee, so validate it here.
         if: github.event_name == 'workflow_dispatch'
-        with: { node-version: "22.23.4", cache: npm }
       - uses: actions/setup-python@v5
         if: github.event_name == 'workflow_dispatch'
         with: { python-version: "3.12" }
@@ -67,9 +66,9 @@ jobs:
       - if: github.event_name == 'workflow_dispatch'
         run: python -m pip install --require-hashes -r coding_runtime/requirements-dev.txt
       - if: github.event_name == 'workflow_dispatch'
-        run: npm ci
+        run: kite ci
       - if: github.event_name == 'workflow_dispatch'
-        run: npm run format:check && npm run check && npm run build
+        run: kite run format:check && kite run check && kite run build
       - name: Deploy and verify health
         env:
           DEPLOY_KEY: ${{ secrets.COMPANION_DEPLOY_KEY }}

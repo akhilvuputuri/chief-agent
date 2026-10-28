@@ -61,7 +61,7 @@ class SquadTests(unittest.IsolatedAsyncioTestCase):
         }
         await self.base.write("package.json", json.dumps(package))
         install = await self.base.command(
-            "npm", ["install", "--package-lock-only", "--offline", "--ignore-scripts"]
+            "kite", ["install", "--lockfile-only", "--ignore-scripts"]
         )
         self.assertEqual(install.exit_code, 0, install.text())
         await self.base.git("add", "-A")

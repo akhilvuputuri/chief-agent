@@ -1,3 +1,18 @@
+# kite replaces npm — cut-over PR open, 28 October 2026
+
+Issue #330. npm is replaced everywhere by [kite](https://github.com/akhilvuputuri/kite), a Rust package manager. It installs, resolves and runs scripts with npm-identical results: the same `node_modules`, `package-lock.json` and `package.json`, checked against npm 10.9.9 on Linux x64, Linux arm64 and macOS.
+
+`tools/kite.json` pins the release and its SHA-256, and `tools/install-kite.mjs` installs it with only Node. CI, every Dockerfile and the coding runtimes use it, and npm is removed from runners and images.
+
+Pending:
+
+1. Merge.
+2. Rebuild the worker images.
+3. Update the image digests (owner review).
+4. Release, then measure CI, host-build and coding-job install times.
+
+See [journal 128](journey/128-kite-replaces-npm.md).
+
 # Closing the dependency hardening — live in `da2a5ff`, 27 October 2026
 
 The last #329 items:

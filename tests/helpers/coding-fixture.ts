@@ -69,7 +69,7 @@ export const candidate = () => {
     summary: "Fixture complete",
     checkpoint: c,
     checks: ["check", "build", "format:check"].map((s) => ({
-      command: `npm run ${s}`,
+      command: `kite run ${s}`,
       exitCode: 0,
       output: "passed",
     })),

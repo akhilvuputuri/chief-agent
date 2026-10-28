@@ -9,8 +9,8 @@ permissions:
 concurrency:
   group: checks-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-# The jobs below run in parallel and together cover `npm run format:check`, `npm run check`
-# and `npm run build`. Branch protection requires the `test` job, which passes only when
+# The jobs below run in parallel and together cover `kite run format:check`, `kite run check`
+# and `kite run build`. Branch protection requires the `test` job, which passes only when
 # every other job passed; the release workflow requires the whole workflow to succeed.
 jobs:
   static:
@@ -18,11 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: "22.23.4", cache: npm }
-      - run: npm ci
-      - run: npm run format:check
-      - run: npm run typecheck
+      - uses: ./.github/actions/setup-kite
+      - run: kite ci
+      - run: kite run format:check
+      - run: kite run typecheck
   tests:
     name: tests ${{ matrix.shard }}/6
     runs-on: ubuntu-latest
@@ -32,16 +31,15 @@ jobs:
         shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: "22.23.4", cache: npm }
+      - uses: ./.github/actions/setup-kite
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - name: Install repository search dependency
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ripgrep
       - run: python -m pip install --require-hashes -r coding_runtime/requirements-dev.txt
-      - run: npm ci
-      - run: npm run build
-      - run: npm run test:ts
+      - run: kite ci
+      - run: kite run build
+      - run: kite run test:ts
         env:
           TEST_SHARD: ${{ matrix.shard }}/6
   other:
@@ -49,43 +47,41 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: "22.23.4", cache: npm }
+      - uses: ./.github/actions/setup-kite
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - name: Install repository search dependency
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ripgrep
       - run: python -m pip install --require-hashes -r coding_runtime/requirements-dev.txt
-      - run: npm ci
-      - run: npm run build
-      - run: npm run test:other
-      - run: npm run check:coding
+      - run: kite ci
+      - run: kite run build
+      - run: kite run test:other
+      - run: kite run check:coding
   pi:
     name: Pi package and worker boundary
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: "22.23.4", cache: npm }
+      - uses: ./.github/actions/setup-kite
       - name: Install repository search dependency
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ripgrep
-      - run: npm ci
-      - run: npm run build
-      # Before Pi's own `npm ci`: the images install Pi's dependencies from the root lockfile.
-      - run: npm run check:pi
+      - run: kite ci
+      - run: kite run build
+      # Before Pi's own `kite ci`: the images install Pi's dependencies from the root lockfile.
+      - run: kite run check:pi
       - name: Verify Pi package independence and actual Linux worker boundary
         run: |
-          npm --prefix coding_runtime_pi ci --ignore-scripts
-          npm --prefix coding_runtime_pi run check
+          kite --prefix coding_runtime_pi ci --ignore-scripts
+          kite --prefix coding_runtime_pi run check
           docker build -f Dockerfile.coding-pi -t chief-pi:test .
-          docker build -t pi-runtime-standalone:test coding_runtime_pi
+          docker build --build-context kite=tools -t pi-runtime-standalone:test coding_runtime_pi
           node scripts/pi-cli-container-smoke.mjs
           docker run --rm --user root --env CODING_TEST_SECRET=synthetic --entrypoint setpriv chief-pi:test --reuid=1000 --regid=1000 --clear-groups --no-new-privs --bounding-set=-all node --disable-sigusr1 /opt/chief-worker/coding_runtime_pi/dist/security-smoke.js
-          CHIEF_BOX_DOCKER_IMAGE=chief-pi:test npx tsx --test tests/box-docker.test.ts
+          CHIEF_BOX_DOCKER_IMAGE=chief-pi:test kite exec tsx --test tests/box-docker.test.ts
           cp -R coding_runtime_pi /tmp/pi-runtime-independent
           cd /tmp/pi-runtime-independent
-          npm ci --ignore-scripts
-          npm run check
+          kite ci --ignore-scripts
+          kite run check
   images:
     name: sandbox and app images
     runs-on: ubuntu-latest

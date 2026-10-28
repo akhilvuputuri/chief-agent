@@ -10,7 +10,7 @@ import { DockerRunner, type TaskOutput } from "../src/boxes/agent.js";
 
 /**
  * The container runner's trust reset against a real Docker daemon. CI sets
- * CHIEF_BOX_DOCKER_IMAGE (an image with node, run as UID 1000) after `npm run build`.
+ * CHIEF_BOX_DOCKER_IMAGE (an image with node, run as UID 1000) after `kite run build`.
  */
 const image = process.env.CHIEF_BOX_DOCKER_IMAGE;
 const dist = fileURLToPath(new URL("../dist", import.meta.url));
@@ -21,7 +21,7 @@ test(
   async (t) => {
     assert.ok(
       existsSync(join(dist, "boxes/echo-task.js")),
-      "run npm run build first",
+      "run kite run build first",
     );
     const root = await mkdtemp(join(tmpdir(), "box-docker-"));
     t.after(() => rm(root, { recursive: true, force: true }));

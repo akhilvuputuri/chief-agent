@@ -1,6 +1,6 @@
 """Paired evaluation of decision backends on labelled fixtures.
 
-Run: npm run eval:decisions -- continuity [--runs 3] [--backends keep,rule,jev,flash]
+Run: kite run eval:decisions -- continuity [--runs 3] [--backends keep,rule,jev,flash]
 Paid backends (Jev, Flash) call OpenRouter with OPENROUTER_API_KEY.
 
 Method (see README.md):

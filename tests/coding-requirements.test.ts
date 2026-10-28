@@ -20,7 +20,7 @@ import {
   stat,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { ensureUser, type Database } from "../src/db.js";
 import { requirementScope } from "../src/coding/requirements.js";
@@ -62,34 +62,20 @@ import {
   fixture,
   requirementBrief,
 } from "./helpers/coding-fixture.js";
-test("required dependency installation keeps npm caches outside the captured checkout", async () => {
-  const root = await mkdtemp(join(tmpdir(), "chief-npm-home-")),
-    pack = await mkdtemp(join(tmpdir(), "chief-npm-pack-")),
-    dep = await mkdtemp(join(tmpdir(), "chief-npm-dep-"));
+test("required dependency installation keeps the package store outside the captured checkout", async () => {
+  const root = await mkdtemp(join(tmpdir(), "chief-kite-home-"));
   const signal = new AbortController().signal,
-    w = new Workspace(root, signal),
-    d = new Workspace(dep, signal);
-  await d.write(
-    "package.json",
+    w = new Workspace(root, signal);
+  // A local package inside the repository needs no registry access.
+  await w.write(
+    "vendor/dep/package.json",
     JSON.stringify({
       name: "chief-fixture-dep",
       version: "1.0.0",
       main: "index.js",
     }),
   );
-  await d.write("index.js", "module.exports=true;\n");
-  assert.equal(
-    (
-      await d.command("npm", [
-        "pack",
-        "--offline",
-        "--ignore-scripts",
-        "--pack-destination",
-        pack,
-      ])
-    ).exitCode,
-    0,
-  );
+  await w.write("vendor/dep/index.js", "module.exports=true;\n");
   await w.command("git", ["init"]);
   await w.write(".gitignore", "node_modules\n");
   await w.write(
@@ -97,22 +83,15 @@ test("required dependency installation keeps npm caches outside the captured che
     JSON.stringify({
       name: "fixture",
       version: "1.0.0",
-      dependencies: {
-        "chief-fixture-dep": `file:${join(pack, "chief-fixture-dep-1.0.0.tgz")}`,
-      },
+      dependencies: { "chief-fixture-dep": "file:vendor/dep" },
     }),
   );
-  assert.equal(
-    (
-      await w.command("npm", [
-        "install",
-        "--package-lock-only",
-        "--offline",
-        "--ignore-scripts",
-      ])
-    ).exitCode,
-    0,
-  );
+  const locked = await w.command("kite", [
+    "install",
+    "--lockfile-only",
+    "--ignore-scripts",
+  ]);
+  assert.equal(locked.exitCode, 0, locked.output);
   await w.command("git", ["add", "-A"]);
   await w.command("git", [
     "-c",
@@ -123,13 +102,16 @@ test("required dependency installation keeps npm caches outside the captured che
     "-m",
     "fixture",
   ]);
-  const installed = await w.command("npm", [
-    "ci",
-    "--offline",
-    "--ignore-scripts",
-  ]);
+  const installed = await w.command("kite", ["ci", "--ignore-scripts"]);
   assert.equal(installed.exitCode, 0, installed.output);
-  assert(!(await readdir(root)).includes(".npm"));
+  // Commands get a package store outside the checkout.
+  const store = (
+    await w.command("node", ["-e", "console.log(process.env.KITE_STORE)"])
+  ).output.trim();
+  assert(isAbsolute(store), store);
+  assert(!store.startsWith(root), store);
+  const entries = await readdir(root);
+  assert(!entries.includes("kite-store") && !entries.includes(".cache"));
   assert.equal((await w.snapshot("plan", "summary")).files.length, 0);
 });
 test("lease-release failure cannot permanently disable controller ticks", async (t) => {

@@ -23,7 +23,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "tsx --test tests/*.test.ts",
-    "check": "npm run build && npm test",
+    "check": "kite run build && kite test",
     "format:check": "prettier --check src tests README.md package.json tsconfig.json"
   },
   "dependencies": {

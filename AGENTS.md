@@ -15,9 +15,9 @@ Non-negotiable even without the plugin:
 ### Workflow bindings
 
 - **Read first, from `origin/main`:** `docs/current-work.md`, `HANDOVER.md`, `docs/portable-development.md`, `docs/cloud-development.md` and the relevant source. For an incident, start with `docs/troubleshooting.md`. Historical incident reports and deferred candidates describe earlier states. Current code, exact release evidence and verified production diagnostics take precedence.
-- **Checks:** Node 22. `npm ci`, `npm run check`, `npm run build`, `npm run format:check`. Use Prettier on changed files. Tests use PGlite and mocked integrations, so production credentials are unnecessary.
-  - Do not run routinely: `npm run smoke:runtime` (paid) and other paid evals, which remain deferred.
-  - Exception: run `npm run eval:picker` (about $0.04) by hand after changing `config/tool-picker.json`, and record the result in the journal.
+- **Checks:** Node 22 and the pinned kite (`node tools/install-kite.mjs`; never npm). `kite ci`, `kite run check`, `kite run build`, `kite run format:check`. Use Prettier on changed files. Tests use PGlite and mocked integrations, so production credentials are unnecessary.
+  - Do not run routinely: `kite run smoke:runtime` (paid) and other paid evals, which remain deferred.
+  - Exception: run `kite run eval:picker` (about $0.04) by hand after changing `config/tool-picker.json`, and record the result in the journal.
 - **Reviewer:** the most capable model available. That is GPT-6 Astra where available; Opus 5.5 is accepted in Claude sessions. Select it explicitly.
   - Devin Review runs automatically when a PR is ready and on each push. It is a second signal only.
   - The reviewer contract is [REVIEW.md](REVIEW.md).
@@ -26,7 +26,7 @@ Non-negotiable even without the plugin:
   - Never merge the deferred `feature/runtime-evaluations` branch incidentally.
   - If GitHub mutation credentials are unavailable, open the PR through the cloud task UI and report that it needs merging.
 - **Release:** a push or merge to `main` triggers `checks`, then `release`. A pushed feature branch is not live.
-  - Verify with `npm run release:status -- FULL_MERGE_SHA` and the watched release run. Report the deployed SHA, health, tests and limitations.
+  - Verify with `kite run release:status -- FULL_MERGE_SHA` and the watched release run. Report the deployed SHA, health, tests and limitations.
   - Production releases refuse to run during active runtime work, and refuse database or Compose changes. Those need the reviewed operator procedure in [docs/cloud-development.md](docs/cloud-development.md). Never bypass the guard. Retry a busy release when the runtime is idle, and never cancel user runtime work.
   - Versioning: patch component only, including features, unless the owner changes the policy. Tags are immutable and do not trigger deployment. See [docs/releases.md](docs/releases.md).
 - **Records:**
@@ -34,8 +34,8 @@ Non-negotiable even without the plugin:
   - Work index: `docs/current-work.md`. Handover: `HANDOVER.md`. Release notes: `docs/releases.md`.
   - Meaningful coding-harness changes also update [the coding-agent learning guide](docs/journey/coding-agent-lessons.md) in the same PR.
 - **Diagnostics:**
-  - Run `npm run doctor:cloud` early whenever a task needs GitHub or production access.
-  - For runtime failures, first read the sanitized production logs with `npm run logs:cloudwatch`, using the private log-reader identity from your environment ([docs/lightsail.md](docs/lightsail.md#reading-logs)). Never run it in GitHub Actions, because this repository is public.
+  - Run `kite run doctor:cloud` early whenever a task needs GitHub or production access.
+  - For runtime failures, first read the sanitized production logs with `kite run logs:cloudwatch`, using the private log-reader identity from your environment ([docs/lightsail.md](docs/lightsail.md#reading-logs)). Never run it in GitHub Actions, because this repository is public.
   - The `production-diagnostics` workflow is guarded to private repositories.
   - Cloud tasks do not inherit local browser sessions or SSH credentials. See [the cloud-agent workflow](docs/cloud-agent-workflow.md).
 - **Chief's sandboxed coding runtimes** (Pi and the Python squad) follow their host instructions, which take precedence over the general rules in this file where they differ (pinned base, no publication, merge or deploy). They do not need to fetch CORE.md or load workflow skills. The inline rules above, REVIEW.md and the repository docs are sufficient for them.
@@ -47,7 +47,7 @@ Non-negotiable even without the plugin:
 
 `src/telegram.ts` is the client; `agent.ts` manages conversations; `custom-agent.ts` runs the loop; `model.ts` calls OpenRouter. `context.ts`, `record-context.ts`, `execution.ts`, and `work.ts` handle context and durable work. Tools run through owner-scoped `tools.ts` and Zod `protocol.ts`. Read the domain module before changing a tool. `answer.ts` defines optional presentation data; `telegram-views.ts` owns read-only callback state/delivery and `telegram-view-render.ts` reads saved records. Views must never invoke the model or authorize an action. `alignment.ts` manages frozen job-alignment scopes and reports; `agents.ts` runs `agent_run`: Chief coordinates and typed plugin agents (the bundled `plugins/core` domain agents and any enabled package) do domain work, see docs/agents.md; `research.ts` runs isolated read-only specialists; `media.ts` delegates image and document reading to that runner; `attachments.ts` handles Telegram file intake. No production Hermes dependency.
 
-`canvases.ts`/`canvas-schema.ts` own versioned canvas storage and tools. `miniapp.ts`/`miniapp-auth.ts` expose authenticated read-only APIs; `miniapp-ui.ts` is browser code compiled by npm test/build, with static files in web/. Validate owner scope on every read and Telegram initData server-side. Preserve immutable revisions, request-key idempotency and base-revision conflicts. See docs/canvases.md and the reviewed additive deployment procedure in docs/miniapp-deployment.md. Do not add public writes or model-generated executable UI.
+`canvases.ts`/`canvas-schema.ts` own versioned canvas storage and tools. `miniapp.ts`/`miniapp-auth.ts` expose authenticated read-only APIs; `miniapp-ui.ts` is browser code compiled by kite test/build, with static files in web/. Validate owner scope on every read and Telegram initData server-side. Preserve immutable revisions, request-key idempotency and base-revision conflicts. See docs/canvases.md and the reviewed additive deployment procedure in docs/miniapp-deployment.md. Do not add public writes or model-generated executable UI.
 
 Main is an explicit Telegram topic alongside News/Coding/Markets; All remains the client aggregate. Logical `general` destinations map to Main. Persist pending input before any topic-resolution wait. Preserve guarded text/voice/approval sends across Main lookup and fallback, and use `sentThread` rather than intended destination for sent receipts; intentional root fallback must bypass default Main routing. See [journal 65](docs/journey/65-main-conversation-topic.md).
 
