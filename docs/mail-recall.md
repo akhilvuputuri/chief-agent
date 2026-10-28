@@ -49,6 +49,17 @@ While the index is building, or after a failed build, the tool returns `building
 - The index runs only with `MAIL_INDEX=on`, a connected primary Gmail account and an OpenRouter key. Otherwise `gmail_recall` is not offered.
 - `gmail_recall` is a delegated email-agent tool. It is in the host's `OPTIONAL_OPERATIONS` (`src/plugins.ts`), so the email agent stays in the agent catalogue without it. Without that rule, an agent leaves the catalogue when any of its tools is unavailable.
 
+## Measured so far
+
+On synthetic, keyword-avoiding questions, 30 per run:
+
+| Window    | Keyword search | Keyword + `gmail_recall` |
+| --------- | -------------: | -----------------------: |
+| 30 days   |        17 / 30 |                  29 / 30 |
+| 12 months |        14 / 30 |                  23 / 30 |
+
+At 12 months, `gmail_recall` alone matched keyword search (16 / 30); the two find different emails, so the email agent uses both for content questions. Details are in [journal 120](journey/120-email-memory-mvp.md#retrieval-eval-12-month-window).
+
 ## Eval
 
 `node dist/mail-recall-eval.js [questions]` runs inside the production gateway container through the operator connection:

@@ -30,6 +30,15 @@ function content(text: string) {
   );
 }
 
+/** A malformed model reply is treated as no answer, so one bad reply cannot end the run. */
+function parse(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {};
+  }
+}
+
 async function ask(key: string, prompt: string) {
   const response = await fetch(
     "https://openrouter.ai/api/v1/chat/completions",
@@ -55,7 +64,7 @@ async function ask(key: string, prompt: string) {
     usage?: { cost?: number };
   };
   return {
-    value: JSON.parse(body.choices?.[0]?.message?.content ?? "{}") as unknown,
+    value: parse(body.choices?.[0]?.message?.content ?? "{}"),
     cost: body.usage?.cost ?? 0,
   };
 }
@@ -127,6 +136,8 @@ async function main() {
     const queries = z
       .object({ queries: z.array(z.string().min(1).max(500)).max(3) })
       .safeParse(planned.value);
+    // A malformed or empty plan says nothing about keyword search; skip the question.
+    if (!queries.success || !queries.data.queries.length) continue;
     const keywordIds = new Set<string>();
     for (const [i, query] of (queries.success
       ? queries.data.queries

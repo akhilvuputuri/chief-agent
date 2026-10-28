@@ -1,7 +1,7 @@
 # 120 — Does a meaning index find emails that Gmail search misses?
 
 Work date(s): 2026-10-25. Written/revised: 2026-10-25.
-Status: released with a 30-day window in `d98f912`; the 12-month window is in review. Retrieval quality is not yet measured.
+Status: released with a 12-month window and quota-paced builds. Retrieval eval measured at 30 days and 12 months; owner-written questions and live use pending.
 
 ## User-visible problem and preceding iteration
 
@@ -119,9 +119,44 @@ Estimates from the 30-day build, to be checked against the first 12-month `mail_
 - **Fix:** read one message at a time, about two a second. A quota refusal pauses reading for a minute without counting against the message; five consecutive pauses fail the build.
 - **Expected after the fix (estimate):** builds take about 12 minutes for 1,408 messages and leave none out for quota reasons. To be checked against the next `mail_index.built`.
 
+### Quota fix release — 2026-10-27
+
+- **Merged.** [PR 336](https://github.com/akhilvuputuri/chief-agent/pull/336) merged as `1ff88d24d3c05333df673bebb15a279f602f7981`. Independent review (Opus 5.5) approved it after one should-fix: a cut-short top-up discarded its reads. Devin's finding (a non-quota 403 also pauses) is accepted and documented.
+- **Deployed.** Live at 16:50 UTC on 27 October. Another session's release (`45bd6ed`) restarted the gateway 17 minutes later, before that build finished.
+- **Measured on `45bd6ed`,** which contains the fix: `mail_index.built` reported **1,408 messages, 0 left out**, 1,152,424 embedding tokens, 993.6 seconds. Builds are slower than the 12-minute estimate but complete.
+
+## Retrieval eval, 12-month window
+
+**Measured on 27 October 2026 on release `45bd6ed`, against 1,409 indexed messages.**
+
+- **Method:**
+  - Same eval as the 30-day run, with two guards added. A malformed model reply now counts as no answer, and a question whose Gmail query plan is malformed or empty is skipped.
+  - A first unguarded run crashed at question 19 on a malformed reply.
+  - The guarded copy was streamed into the container. The same guards are in `src/mail-recall-eval.ts` from this PR.
+  - In the 30-day run a malformed plan would have counted as a keyword miss. Whether that happened can't be checked, so that run's keyword figure may be slightly low.
+- **Results:**
+
+| Condition                           | 30 days (119 messages) | 12 months (1,409 messages) | 95% Wilson interval, 12 months |
+| ----------------------------------- | ---------------------: | -------------------------: | ------------------------------ |
+| Keyword: up to three Gmail searches |                17 / 30 |                    14 / 30 | 30–64%                         |
+| `gmail_recall` top 8 by itself      |                28 / 30 |                    16 / 30 | 36–70%                         |
+| Keyword plus `gmail_recall`         |                29 / 30 |                    23 / 30 | 59–88%                         |
+
+- **`gmail_recall` alone against keyword:** 9 targets found only by `gmail_recall` and 7 only by keyword; 7 by both and 7 by neither. Exact McNemar p ≈ 0.80, so no difference was detected.
+- **Both against keyword alone:** 9 gained and none lost. Exact McNemar p ≈ 0.004.
+- **Ranks:** `gmail_recall` ranked its finds 1st 8 times, 2nd and 3rd twice each, 5th twice, and 6th and 8th once each. Eight random messages out of 1,409 would include the target about 0.6% of the time.
+- **Cost:** about $0.40 in model calls.
+- **Reading:**
+  - In the larger pool, meaning search is not better than keyword search on its own, so the 30-day result reflected a small pool.
+  - The two methods fail on different emails, and using both is the measured gain.
+  - The email agent's instructions and the tool description now say to use both for content questions instead of `gmail_recall` first.
+- **Limits:** synthetic, keyword-avoiding questions; 30 per run; a retrieval score, not a check of the agent's answers.
+
 ## Follow-up and next iteration
 
-- Run `mail-recall-eval.js` with 30 generated questions and add about 10 owner-written ones. Record keyword and recall rates here as aggregates only.
+- Add about 10 owner-written questions to the eval.
+- Fuse keyword and meaning results inside `gmail_recall` so one call gets both.
+- Then try re-ranking the top results and smaller chunks, compared offline in a Python eval over a private export.
 - Check a few real half-remembered requests in Telegram.
 - If recall clearly helps, persist the index (additive migration), sync in the background, and consider the second account and attachments.
 - Deleted or moved mail stays in the index until it is 30 days old (Devin Review on #320). The agent's `gmail_thread` check keeps it out of answers, but it can take a result slot. Reconcile indexed IDs against Gmail if the eval or live use shows it matters.
