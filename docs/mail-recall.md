@@ -78,6 +78,15 @@ ssh -F "$OPS/ssh_config" chief-lightsail "sudo -n docker exec hermes-companion-g
 - Its output contains private questions and subjects. `docker exec` output goes to the operator's terminal, not the container log. Keep it in the private operations folder. Only the summary line's aggregates belong in the journal.
 - Cost: about two Flash calls per question plus embeddings, well under a dollar for 30 questions (estimate).
 
+## Offline fusion and re-ranking eval
+
+`node dist/mail-recall-eval.js 30 --export` also writes, for each question:
+
+- the ranked Gmail results of each planned query;
+- every chunk's meaning-search score.
+
+It then writes every indexed chunk with its headers. The Python eval in [evals/mail-recall](../evals/mail-recall/README.md) reads that private export offline. It compares keyword, meaning search, BM25, their reciprocal rank fusions and an optional local cross-encoder re-ranker. No model API or credential is needed. The export contains email text and stays in the private operations folder.
+
 ## Not in the MVP
 
 - persistence;

@@ -156,7 +156,7 @@ Estimates from the 30-day build, to be checked against the first 12-month `mail_
 
 - Add about 10 owner-written questions to the eval.
 - Fuse keyword and meaning results inside `gmail_recall` so one call gets both.
-- Then try re-ranking the top results and smaller chunks, compared offline in a Python eval over a private export.
+- Then try re-ranking the top results and smaller chunks, compared offline with the Python eval in `evals/mail-recall` over a private `--export` dataset (added after this entry's results; not yet run).
 - Check a few real half-remembered requests in Telegram.
 - If recall clearly helps, persist the index (additive migration), sync in the background, and consider the second account and attachments.
 - Deleted or moved mail stays in the index until it is 12 months old (Devin Review on #320). The agent's `gmail_thread` check keeps it out of answers, but it can take a result slot. Reconcile indexed IDs against Gmail if the eval or live use shows it matters.

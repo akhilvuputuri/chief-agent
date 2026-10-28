@@ -78,7 +78,14 @@ function shuffle<T>(items: T[]) {
 }
 
 async function main() {
-  const wanted = Number(process.argv[2] ?? 30);
+  const count = process.argv.slice(2).find((a) => !a.startsWith("--"));
+  const wanted = count === undefined ? 30 : Number(count);
+  if (!Number.isInteger(wanted) || wanted < 1 || wanted > 200)
+    throw new Error("The question count must be a whole number from 1 to 200");
+  // --export also writes the dataset evals/mail-recall/run.py reads: every chunk's text and
+  // each question's ranked Gmail results and chunk scores. It contains email text: keep it
+  // in the private operations folder only.
+  const exporting = process.argv.includes("--export");
   const c = readConfig();
   if (
     !c.GMAIL_OWNER_USER_ID ||
@@ -139,6 +146,10 @@ async function main() {
     // A malformed or empty plan says nothing about keyword search; skip the question.
     if (!queries.success || !queries.data.queries.length) continue;
     const keywordIds = new Set<string>();
+    const keywordLists: string[][] = [];
+    // Gmail's own headers and short snippet for each hit, so a re-ranker has some text for
+    // hits outside the index (other categories, or older than the window).
+    const keywordMeta: Record<string, Record<string, string | undefined>> = {};
     for (const [i, query] of (queries.success
       ? queries.data.queries
       : []
@@ -150,10 +161,20 @@ async function main() {
           query,
           undefined,
           `mail-eval-${totals.questions}-${i}`,
-        )) as { results?: { id?: string }[] };
-        for (const r of result.results ?? []) if (r.id) keywordIds.add(r.id);
+        )) as { results?: Record<string, string | undefined>[] };
+        const ids = (result.results ?? []).flatMap((r) => (r.id ? [r.id] : []));
+        // A hit whose metadata fetch failed arrives ID-only; a later search may fill it in.
+        for (const r of result.results ?? [])
+          if (r.id) {
+            const meta = (keywordMeta[r.id] ??= {});
+            for (const field of ["from", "subject", "date", "snippet"])
+              meta[field] ||= r[field];
+          }
+        keywordLists.push(ids);
+        for (const id of ids) keywordIds.add(id);
       } catch {
         /* A failed search finds nothing. */
+        keywordLists.push([]);
       }
     }
     const recalled = await index.recall(owner, question);
@@ -176,9 +197,20 @@ async function main() {
         recall,
         recallRank:
           hits.findIndex((r) => r.messageId === m.messageId) + 1 || null,
+        ...(exporting
+          ? {
+              type: "question",
+              keywordLists,
+              keywordMeta,
+              dense: await index.scoreChunks(owner, question),
+            }
+          : {}),
       }),
     );
   }
+  if (exporting)
+    for (const chunk of index.exportChunks(owner))
+      console.log(JSON.stringify({ type: "chunk", ...chunk }));
   console.log(
     JSON.stringify({
       summary: true,
