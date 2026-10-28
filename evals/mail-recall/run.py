@@ -5,16 +5,19 @@ Reads a private dataset written by `node dist/mail-recall-eval.js N --export` in
 production container. It contains email text: keep it in the private operations folder.
 Nothing here calls a model or a network API; the optional re-ranker runs locally.
 
-Conditions, each a ranked list of messages per question:
-  keyword        Gmail results in the order the agent reads them (today's email agent)
+Conditions, each a ranked list of messages per question, scored at the first --k results:
+  keyword        Gmail results in the order the agent reads them, first k only
   dense          gmail_recall as deployed: best chunk's cosine score
   dense-top2     mean of a message's two best chunk scores
   bm25           local BM25 over each message's indexed text
   rrf(...)       reciprocal rank fusion of the named lists
   rerank         a local cross-encoder re-ranking the top candidates of --rerank-base
 
-The deployed agent sees both the keyword list and gmail_recall's top 8; that union is
-reported as a reference set, not a ranking.
+Reference sets, not rankings, each with its mean size:
+  keyword-all    every Gmail result the agent sees (up to 3 searches x 10): today's email agent
+  union          keyword-all plus gmail_recall's top 8: the agent with both tools
+Comparisons are against keyword-all (today's agent) and dense; a ranked list's first k and a
+reference set of up to 38 messages are different budgets.
 
 Usage:
   python3 evals/mail-recall/run.py DATASET.jsonl [--k 8] [--json]
@@ -29,6 +32,9 @@ from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# Must match CHUNK_OVERLAP in src/mail-recall.ts.
+CHUNK_OVERLAP = 200
+
 from retrieval import (  # noqa: E402
     BM25,
     dense_ranking,
@@ -62,10 +68,12 @@ def build(questions, chunks, rerank_model=None, rerank_base="rrf(dense,keyword)"
     chunk_message = {c["chunkId"]: c["messageId"] for c in chunks}
     text = defaultdict(list)
     header = {}
-    for c in chunks:
+    for c in sorted(chunks, key=lambda c: (c["messageId"], int(c["chunkId"].rsplit(":", 1)[1]))):
         header[c["messageId"]] = f"From: {c['from']}\nSubject: {c['subject']}\nDate: {c['date']}"
-        text[c["messageId"]].append(c["text"])
-    documents = {m: header[m] + "\n\n" + "\n".join(parts) for m, parts in text.items()}
+        # Later chunks repeat the previous chunk's last CHUNK_OVERLAP characters.
+        first = not text[c["messageId"]]
+        text[c["messageId"]].append(c["text"] if first else c["text"][CHUNK_OVERLAP:])
+    documents = {m: header[m] + "\n\n" + "".join(parts) for m, parts in text.items()}
     bm25 = BM25(documents)
     chunk_text = {c["chunkId"]: c["text"] for c in chunks}
     rows = []
@@ -92,11 +100,15 @@ def build(questions, chunks, rerank_model=None, rerank_base="rrf(dense,keyword)"
             scores = rerank_model.predict(pairs) if pairs else []
             order = sorted(range(len(candidates)), key=lambda i: -float(scores[i]))
             lists["rerank"] = [candidates[i] for i in order]
+        union = set(keyword) | set(dense[:8])
         rows.append(
             {
                 "target": q["target"]["messageId"],
                 "ranks": {name: rank_of(q["target"]["messageId"], ranking) for name, ranking in lists.items()},
-                "union8": q["target"]["messageId"] in set(keyword) | set(dense[:8]),
+                "references": {
+                    "keyword-all": (q["target"]["messageId"] in set(keyword), len(keyword)),
+                    "union": (q["target"]["messageId"] in union, len(union)),
+                },
             }
         )
     return rows
@@ -105,7 +117,19 @@ def build(questions, chunks, rerank_model=None, rerank_base="rrf(dense,keyword)"
 def summarise(rows, k: int):
     n = len(rows)
     names = list(rows[0]["ranks"])
-    report = {"questions": n, "k": k, "conditions": {}}
+    report = {"questions": n, "k": k, "references": {}, "conditions": {}}
+    baselines = {
+        "keyword-all": [r["references"]["keyword-all"][0] for r in rows],
+        "dense": [found(r["ranks"]["dense"], k) for r in rows],
+    }
+    for name in ("keyword-all", "union"):
+        hits = [r["references"][name][0] for r in rows]
+        lo, hi = wilson(sum(hits), n)
+        report["references"][name] = {
+            "found": sum(hits),
+            "wilson95": [round(lo, 3), round(hi, 3)],
+            "mean_candidates": round(sum(r["references"][name][1] for r in rows) / n, 1),
+        }
     for name in names:
         hits = [found(r["ranks"][name], k) for r in rows]
         lo, hi = wilson(sum(hits), n)
@@ -116,10 +140,9 @@ def summarise(rows, k: int):
             f"found@{k}_wilson95": [round(lo, 3), round(hi, 3)],
             "mrr@10": round(sum(reciprocal(r["ranks"][name]) for r in rows) / n, 3),
         }
-        for baseline in ("keyword", "dense"):
+        for baseline, base in baselines.items():
             if name == baseline:
                 continue
-            base = [found(r["ranks"][baseline], k) for r in rows]
             only_this, only_base, p = mcnemar(hits, base)
             mean, low, high = paired_bootstrap([float(h) for h in hits], [float(b) for b in base])
             entry[f"vs_{baseline}"] = {
@@ -130,24 +153,26 @@ def summarise(rows, k: int):
                 "diff_95": [round(low, 3), round(high, 3)],
             }
         report["conditions"][name] = entry
-    union = sum(r["union8"] for r in rows)
-    report["reference_union_keyword_plus_dense8"] = union
     return report
 
 
 def table(report) -> str:
     k = report["k"]
-    lines = [f"{report['questions']} questions; found@{k} with 95% Wilson interval; paired McNemar against keyword", ""]
-    lines.append(f"{'condition':26} {'@1':>4} {'@5':>4} {'@'+str(k):>4}  {'95%':>11}  {'MRR':>5}  vs keyword (+/-, p)")
+    lines = [f"{report['questions']} questions", ""]
+    lines.append("reference sets (found anywhere; mean size):")
+    for name, e in report["references"].items():
+        lo, hi = e["wilson95"]
+        lines.append(f"  {name:12} {e['found']:>4}  {lo:.2f}-{hi:.2f}  mean {e['mean_candidates']} messages")
+    lines.append("")
+    lines.append(f"ranked lists, first {k} (paired McNemar against keyword-all, today's agent):")
+    lines.append(f"{'condition':26} {'@1':>4} {'@5':>4} {'@'+str(k):>4}  {'95%':>11}  {'MRR':>5}  vs keyword-all (+/-, p)")
     for name, e in report["conditions"].items():
         lo, hi = e[f"found@{k}_wilson95"]
-        vs = e.get("vs_keyword")
+        vs = e.get("vs_keyword-all")
         versus = f"+{vs['only_this']}/-{vs['only_baseline']}, p={vs['mcnemar_p']}" if vs else ""
         lines.append(
             f"{name:26} {e['found@1']:>4} {e['found@5']:>4} {e[f'found@{k}']:>4}  {lo:.2f}-{hi:.2f}  {e['mrr@10']:>5}  {versus}"
         )
-    lines.append("")
-    lines.append(f"reference: keyword list plus gmail_recall top 8, as the agent sees them: {report['reference_union_keyword_plus_dense8']}")
     return "\n".join(lines)
 
 

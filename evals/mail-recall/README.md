@@ -40,23 +40,28 @@ kite run eval:mail-recall -- "$OPS/mail-recall/2026-10-28-export.jsonl" --json
 
 **Conditions:**
 
-| Name         | Ranking                                                                                                  |
-| ------------ | -------------------------------------------------------------------------------------------------------- |
-| `keyword`    | Gmail results in the order the agent reads them: query by query, Gmail's order within each               |
-| `dense`      | `gmail_recall` as deployed: a message scores as its best chunk                                           |
-| `dense-top2` | mean of a message's two best chunks                                                                      |
-| `bm25`       | Okapi BM25 over each message's indexed text                                                              |
-| `rrf(...)`   | reciprocal rank fusion (k = 60) of the named lists                                                       |
-| `rerank`     | a local cross-encoder re-ranking the top `--rerank-depth` (30) of `--rerank-base` (`rrf(dense,keyword)`) |
+| Name         | Ranking                                                                                                       |
+| ------------ | ------------------------------------------------------------------------------------------------------------- |
+| `keyword`    | Gmail results in the order the agent reads them (query by query, Gmail's order within each), first `--k` only |
+| `dense`      | `gmail_recall` as deployed: a message scores as its best chunk                                                |
+| `dense-top2` | mean of a message's two best chunks                                                                           |
+| `bm25`       | Okapi BM25 over each message's indexed text                                                                   |
+| `rrf(...)`   | reciprocal rank fusion (k = 60) of the named lists                                                            |
+| `rerank`     | a local cross-encoder re-ranking the top `--rerank-depth` (30) of `--rerank-base` (`rrf(dense,keyword)`)      |
 
 **Reported for each condition:**
 
 - found at ranks 1, 5 and `--k` (8), the deployed result count;
 - a Wilson 95% interval;
 - MRR@10;
-- exact McNemar tests and paired bootstrap differences against `keyword` and `dense`.
+- exact McNemar tests and paired bootstrap differences against `keyword-all` and `dense`.
 
-The union of the keyword list and `gmail_recall`'s top 8, which is what the agent sees today, is reported as a reference set.
+Two reference sets are reported with their mean size. They count the target anywhere, not in the first `--k`:
+
+- `keyword-all`: every Gmail result the agent sees, up to 3 searches × 10. This is today's email agent, and the comparisons are made against it.
+- `union`: `keyword-all` plus `gmail_recall`'s top 8. This is the agent with both tools.
+
+A ranked list's first 8 and a reference set of up to 38 messages are different budgets; read the comparisons with that in mind.
 
 ## Optional re-ranker
 

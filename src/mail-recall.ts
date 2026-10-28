@@ -19,6 +19,7 @@ export const EMBEDDING_MODEL = "openai/text-embedding-3-small";
 const DIMENSIONS = 512;
 const MAX_MESSAGES = 3000;
 const CHUNK_CHARS = 1500;
+// evals/mail-recall/run.py mirrors this to de-duplicate overlapping chunk text.
 const CHUNK_OVERLAP = 200;
 const MAX_CHUNKS = 6;
 /** Messages per fetch-and-embed group are EMBED_BATCH / MAX_CHUNKS, so one request holds a group. */
@@ -262,7 +263,7 @@ export class MailIndex {
     this.entries.forEach((e, i) => {
       let score = 0;
       for (let d = 0; d < DIMENSIONS; d++) score += e.vector[d]! * q![d]!;
-      scores[ids[i]!] = Math.round(score * 10000) / 10000;
+      scores[ids[i]!] = Math.round(score * 1e6) / 1e6;
     });
     return scores;
   }

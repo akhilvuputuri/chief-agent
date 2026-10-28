@@ -109,9 +109,12 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(report["questions"], 1)
         self.assertEqual(conditions["dense"]["found@1"], 1)
         self.assertEqual(conditions["keyword"]["found@1"], 0)
-        self.assertEqual(conditions["dense"]["vs_keyword"]["only_this"], 1)
+        # The agent sees m1 in its keyword results, so today's agent finds it too.
+        self.assertEqual(report["references"]["keyword-all"]["found"], 1)
+        self.assertEqual(report["references"]["keyword-all"]["mean_candidates"], 3)
+        self.assertEqual(conditions["dense"]["vs_keyword-all"]["only_this"], 0)
         self.assertIn("rrf(dense,keyword,bm25)", conditions)
-        self.assertEqual(report["reference_union_keyword_plus_dense8"], 1)
+        self.assertEqual(report["references"]["union"]["found"], 1)
 
     def test_reranker_reorders_the_candidates(self):
         class Reverse:
@@ -128,6 +131,43 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(rows[0]["ranks"]["rrf(dense,keyword)"], 2)
         self.assertEqual(rows[0]["ranks"]["rerank"], 2)
         self.assertEqual(rows[0]["ranks"]["dense"], 1)
+
+    def test_keyword_all_counts_results_beyond_the_first_k(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "export.jsonl"
+            dataset(path)
+            questions, chunks = run.load(path)
+        filler = [f"x{i}" for i in range(21)]
+        questions[0]["keywordLists"] = [filler[:10], filler[10:], ["m1"]]
+        questions[0]["dense"] = {"m1:0": 0.1, "m2:0": 0.9, "m3:0": 0.8}
+        report = run.summarise(run.build(questions, chunks), 8)
+        self.assertEqual(report["conditions"]["keyword"]["found@8"], 0)
+        self.assertEqual(report["references"]["keyword-all"]["found"], 1)
+        self.assertEqual(report["references"]["keyword-all"]["mean_candidates"], 22)
+
+    def test_overlapping_chunk_text_is_indexed_once(self):
+        first = "a" * 1300 + "OVERLAPWORD" + "b" * 189
+        second = first[1300:] + " tail words"
+        chunks = [
+            {"chunkId": "m1:0", "messageId": "m1", "from": "f", "subject": "s", "date": "d", "text": first},
+            {"chunkId": "m1:1", "messageId": "m1", "from": "f", "subject": "s", "date": "d", "text": second},
+        ]
+        questions = [{"question": "overlapword", "target": {"messageId": "m1"}, "keywordLists": [[]], "dense": {"m1:0": 0.5}}]
+        captured = {}
+        original = run.BM25
+
+        class Spy(original):
+            def __init__(self, docs, *a, **k):
+                captured.update(docs)
+                super().__init__(docs, *a, **k)
+
+        run.BM25 = Spy
+        try:
+            run.build(questions, chunks)
+        finally:
+            run.BM25 = original
+        self.assertEqual(captured["m1"].count("OVERLAPWORD"), 1)
+        self.assertTrue(captured["m1"].endswith("tail words"))
 
     def test_missing_export_rows_are_refused(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -78,7 +78,10 @@ function shuffle<T>(items: T[]) {
 }
 
 async function main() {
-  const wanted = Number(process.argv[2] ?? 30);
+  const count = process.argv.slice(2).find((a) => !a.startsWith("--"));
+  const wanted = count === undefined ? 30 : Number(count);
+  if (!Number.isInteger(wanted) || wanted < 1 || wanted > 200)
+    throw new Error("The question count must be a whole number from 1 to 200");
   // --export also writes the dataset evals/mail-recall/run.py reads: every chunk's text and
   // each question's ranked Gmail results and chunk scores. It contains email text: keep it
   // in the private operations folder only.
