@@ -1,7 +1,7 @@
 # 120 — Does a meaning index find emails that Gmail search misses?
 
-Work date(s): 2026-10-25 to 2026-10-27. Written/revised: 2026-10-27.
-Status: released with a 12-month window and quota-paced builds. Retrieval eval measured at 30 days and 12 months; owner-written questions and live use pending.
+Work date(s): 2026-10-25 to 2026-10-29. Written/revised: 2026-10-29.
+Status: released with a 12-month window, quota-paced builds, fused meaning and keyword search, and a persisted index (migration 033). Owner-written questions and live use pending.
 
 ## User-visible problem and preceding iteration
 
@@ -187,7 +187,7 @@ Estimates from the 30-day build, to be checked against the first 12-month `mail_
   - retrieval only, not the agent's answers;
   - the re-rankers were small local models scoring headers plus each message's best chunk.
 
-## Persisting the index — in review
+## Persisting the index
 
 - **Problem (measured):** the index lived in gateway memory, so every release rebuilt it. On 28 October four rebuilds in one day each read about 1,412 messages and took about 17 minutes (`mail_index.built` latencies from 1,003 to 1,051 seconds). During each rebuild `gmail_recall` gave keyword results only, and each one used Gmail quota and about 1.15M embedding tokens.
 - **Change:**
@@ -196,7 +196,25 @@ Estimates from the 30-day build, to be checked against the first 12-month `mail_
   - It then lists the 12-month window once, indexing what is missing and removing mail no longer listed. This also closes the earlier follow-up about deleted mail lingering.
   - Writes are best-effort and repaired by the next start's listing.
   - The rollout follows the reviewed `deploy-*.py` pattern (`scripts/deploy-mail-index.py`).
-- **Expected (estimate):** after the first post-rollout build, a restart loads about 1,412 messages and 2,780 vectors in seconds, then lists about 15 Gmail pages. To be checked against `mail_index.loaded` after the rollout.
+- **Expected (estimate):** after the first post-rollout build, a restart loads about 1,412 messages and 2,780 vectors in seconds, then lists about 15 Gmail pages.
+
+### Release closure — 2026-10-29
+
+- **Merged.** [PR 362](https://github.com/akhilvuputuri/chief-agent/pull/362) merged as `e99ee8d69b0c32153ed2b7976a8bd1ab4636731a`.
+  - Independent review (Opus 5.5) approved `c3e9b25`, then the delta `5b3e2a1`: doc fixes, a merge of main and `BASE` pinned to the live `b431444`.
+  - Hosted CI passed, and Devin had no findings.
+- **Operator rollout.**
+  - Live and the `BASE` were both `b431444` and healthy, with no release in flight.
+  - The archive's pax commit matched the merge SHA, and the uploaded script's SHA-256 matched the merged file.
+  - `deploy-mail-index.py` reported `{"deployed": "e99ee8d…", "healthy": true, "migration": 33}`.
+  - Separate checks: `RELEASE`, health, marker 33, the three tables, the stored configuration, and `gateway.started` on `e99ee8d` at 15:16:30 UTC.
+  - Another session's commit (`1e23975`, coding config and docs only) merged just before ours. Its release stopped at the current-main guard, so its changes went live through our rollout.
+- **Measured** (`mail_index.*` events, read-only database counts):
+  - **15:16:** the first build started from an empty store and saved as it went.
+  - **15:22:** another session's release (`7cb57be`) restarted the gateway mid-build. The new start's `mail_index.loaded` reported **450 messages in 99 ms**, so recall could answer from them at once.
+  - **15:34:** the catch-up finished. `mail_index.built` reported **1,413 messages, none left out**, 808,910 embedding tokens and 738.7 s. That is about 30% fewer tokens than a full build (~1.15M), consistent with the 450 loaded messages not being embedded again (450 of 1,413 is 32%).
+  - **Database:** 1,413 messages and 2,784 chunk vectors (8,024 kB, about 8 MB). No `persist_failed`, `catch_up_failed` or `failed` events.
+- **Not yet observed:** a restart that loads the complete index. The next release will show it in `mail_index.loaded`.
 
 ## Follow-up and next iteration
 
