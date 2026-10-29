@@ -145,8 +145,8 @@ export function withJev(
  * the owner's whole history, which can be another thread's, or end in a proactive message
  * (a reminder or a job result, stored as a reply to the last turn); so its answer counts only
  * when the owner is answering the latest exchange here and the last turn Jev saw is that
- * exchange: the same request and the same reply. When the reply cannot be compared (a long
- * answer replaced by its saved-details pointer), Jev is not used.
+ * exchange: the same request and the same reply. The caller passes the answer itself
+ * (`lastAnswerHere`), since a structured answer is followed by a saved-details pointer.
  */
 export function jevSawExchange(
   replyTarget: { runId: string } | null | undefined,

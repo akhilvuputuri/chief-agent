@@ -74,3 +74,40 @@ test("conversation state builds the exchange index from stored rows with observa
     await pg.close();
   }
 });
+
+test("the latest answer for feedback skips the saved-details pointer; the prompt's reply does not", async () => {
+  const pg = await migratedPGlite();
+  const db = pg as unknown as Database;
+  try {
+    await ensureUser(db, "owner");
+    const history = new HistoryStore(db);
+    const id = randomUUID();
+    await db.query(
+      "INSERT INTO runtime_runs(id,user_id,state) VALUES($1,'owner','stopped')",
+      [id],
+    );
+    await history.append(
+      "owner",
+      null,
+      0,
+      [
+        { role: "user", content: "rain later?" },
+        { role: "assistant", content: "No rain expected; 31°C." },
+        { role: "assistant", content: "[Saved answer details: sources]" },
+      ],
+      id,
+    );
+    await db.query(
+      "INSERT INTO conversation_contexts(user_id,run_id) VALUES('owner',$1)",
+      [id],
+    );
+    const state = await conversationState(db, "owner");
+    assert.equal(
+      state.lastExchangeHere?.reply,
+      "[Saved answer details: sources]",
+    );
+    assert.equal(state.lastAnswerHere, "No rain expected; 31°C.");
+  } finally {
+    await pg.close();
+  }
+});

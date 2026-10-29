@@ -663,6 +663,7 @@ export class Assistant {
             previousId: undefined,
             replyTarget: null,
             interruptedJob: null,
+            lastAnswerHere: null,
           }
         : await conversationState(this.db, user, inputId);
       if (!background) {
@@ -736,7 +737,13 @@ export class Assistant {
         const target = conversation.replyTarget;
         const last = conversation.lastExchangeHere;
         const previous = target?.runId ?? last?.runId;
-        const latest = jevSawExchange(target, last, previousTurns.at(-1));
+        // The answer itself, not the saved-details pointer that can follow it.
+        const answer = conversation.lastAnswerHere ?? last?.reply;
+        const latest = jevSawExchange(
+          target,
+          last ? { ...last, reply: answer } : last,
+          previousTurns.at(-1),
+        );
         const apply = this.effort?.config.redirect?.apply;
         if (previous && previous !== run && otel.tracingEnabled())
           void Promise.resolve(latest ? effortDecided : undefined)
@@ -752,7 +759,7 @@ export class Assistant {
                           target.runId === last?.runId ? last?.request : null,
                           target.text,
                         )
-                      : redirectOf(message, last?.request, last?.reply),
+                      : redirectOf(message, last?.request, answer),
                     decision?.redirect,
                     apply,
                   ),

@@ -22,7 +22,8 @@ export async function conversationState(
     await db.query(
       `SELECT x.run_id,x.pending_reply,
     (SELECT left(c.payload->>'content',1500) FROM conversation_messages m JOIN message_contents c USING(user_id,hash) WHERE m.user_id=x.user_id AND m.run_id=x.run_id AND c.payload->>'role'='user' ORDER BY m.ordinal DESC LIMIT 1) AS request,
-    (SELECT left(c.payload->>'content',2000) FROM conversation_messages m JOIN message_contents c USING(user_id,hash) WHERE m.user_id=x.user_id AND m.run_id=x.run_id AND m.delivery_state IN ('sent','recorded') AND c.payload->>'role'='assistant' AND NOT(c.payload ? 'tool_calls') ORDER BY m.ordinal DESC LIMIT 1) AS reply
+    (SELECT left(c.payload->>'content',2000) FROM conversation_messages m JOIN message_contents c USING(user_id,hash) WHERE m.user_id=x.user_id AND m.run_id=x.run_id AND m.delivery_state IN ('sent','recorded') AND c.payload->>'role'='assistant' AND NOT(c.payload ? 'tool_calls') ORDER BY m.ordinal DESC LIMIT 1) AS reply,
+    (SELECT left(c.payload->>'content',2000) FROM conversation_messages m JOIN message_contents c USING(user_id,hash) WHERE m.user_id=x.user_id AND m.run_id=x.run_id AND m.delivery_state IN ('sent','recorded') AND c.payload->>'role'='assistant' AND NOT(c.payload ? 'tool_calls') AND c.payload->>'content' NOT LIKE '[Saved answer details:%' ORDER BY m.ordinal DESC LIMIT 1) AS answer
     FROM conversation_contexts x WHERE x.user_id=$1 AND
       COALESCE((SELECT (i.metadata->>'threadId')::bigint FROM conversation_inputs i WHERE i.user_id=x.user_id AND i.run_id=x.run_id ORDER BY i.ordinal LIMIT 1),0)=$2
       AND NOT EXISTS(SELECT 1 FROM conversation_messages m WHERE m.user_id=x.user_id AND m.run_id=x.run_id AND m.delivery_state='pending') ORDER BY x.id DESC LIMIT 1`,
@@ -94,6 +95,9 @@ export async function conversationState(
   ).rows[0];
   return {
     feedAnchor: input?.metadata?.anchor ?? null,
+    // The latest exchange's answer itself, skipping the saved-details pointer that follows a
+    // structured answer: for implicit feedback only (#323), never shown to the model.
+    lastAnswerHere: (latestHere?.answer as string | null | undefined) ?? null,
     lastExchangeHere: latestHere
       ? {
           runId: latestHere.run_id,
