@@ -5,7 +5,7 @@ Issue #323. Chief now exports every turn's trace to an agentwatch service on its
 A read-only measurement of the redirect rules on 142 real follow-ups found 8 of 8 flags correct, but only about half of the real redirects caught. Pending:
 
 - the first real traces;
-- a pull-based backfill of history from Postgres (the owner's option C, next);
+- ~~a backfill of history from Postgres~~ done: 313 runs from 6 September are in agentwatch with content (journal 134);
 - a possible Jev redirect question (paid, needs approval).
 
 See [journal 134](journey/134-agentwatch-on-the-host.md).
