@@ -1,6 +1,6 @@
 # 120 — Does a meaning index find emails that Gmail search misses?
 
-Work date(s): 2026-10-25 to 2026-10-27. Written/revised: 2026-10-29.
+Work date(s): 2026-10-25 to 2026-10-29. Written/revised: 2026-10-29.
 Status: released with a 12-month window, quota-paced builds, fused meaning and keyword search, and a persisted index (migration 033). Owner-written questions and live use pending.
 
 ## User-visible problem and preceding iteration
