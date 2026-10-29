@@ -749,3 +749,303 @@ test("an owner turn during the last call defers the run and applies nothing", as
   assert.equal((await learner(db, adapter).tick("owner"))?.state, "deferred");
   assert.deepEqual(await new MemoryStore(db).active("owner"), []);
 });
+
+test("turn labels: answered and uncorrected is success, a correction or recovered failure is pitfall", async () => {
+  const { labelTurn, isCorrection } = await import("../src/learning.js");
+  const base = {
+    stopReason: "answer",
+    failedCalls: 0,
+    uncertainCalls: 0,
+    ownerChars: 40,
+    calls: 1,
+    corrected: false,
+  };
+  assert.equal(labelTurn(base).label, "success");
+  assert.deepEqual(labelTurn({ ...base, corrected: true }).reasons, [
+    "turn",
+    "owner_corrected",
+  ]);
+  assert.equal(labelTurn({ ...base, failedCalls: 1 }).label, "pitfall");
+  assert.deepEqual(
+    labelTurn({ ...base, stopReason: "awaiting_user" }).reasons,
+    ["turn", "awaiting_user"],
+  );
+  assert.equal(labelTurn({ ...base, uncertainCalls: 1 }).label, "skipped");
+  assert.deepEqual(labelTurn({ ...base, ownerChars: 6, calls: 0 }).reasons, [
+    "turn",
+    "trivial",
+  ]);
+  for (const text of [
+    "No, keep it to three bullets",
+    "That's wrong, it was Tuesday",
+    "Actually I meant the other flight",
+    "try again with prices",
+  ])
+    assert.ok(isCorrection(text), text);
+  for (const text of ["Nice, thanks", "Now book it", "Notes for later please"])
+    assert.ok(!isCorrection(text), text);
+  // A "no" to Chief's own question answers it; it does not correct the answer.
+  assert.ok(!isCorrection("no", true));
+  assert.ok(!isCorrection("No thanks", true));
+  assert.ok(isCorrection("That's wrong", true));
+});
+
+async function turn(
+  db: Database,
+  o: {
+    says: string;
+    reply: string;
+    at: Date;
+    stop?: string;
+    task?: string;
+    calls?: Array<[string, string]>;
+  },
+) {
+  const run = randomUUID();
+  await db.query(
+    "INSERT INTO runtime_runs(id,user_id,task_id,state,stop_reason,started_at) VALUES($1,'owner',NULL,'stopped',$2,$3)",
+    [run, o.stop ?? "answer", o.at],
+  );
+  await db.query(
+    "INSERT INTO work_turns(run_id,user_id,request,task_id,background) VALUES($1,'owner',$2,$3,false)",
+    [run, o.says, o.task ?? null],
+  );
+  await db.query(
+    "INSERT INTO conversation_inputs(id,user_id,run_id,message,state,received_at) VALUES($1,'owner',$2,$3,'completed',$4)",
+    [randomUUID(), run, o.says, o.at],
+  );
+  for (const [operation, state] of o.calls ?? [])
+    await db.query(
+      "INSERT INTO runtime_calls(id,run_id,call_id,operation,arguments,is_write,state) VALUES($1,$2,$3,$4,'{}',false,$5)",
+      [randomUUID(), run, randomUUID(), operation, state],
+    );
+  const payload = { role: "assistant", content: o.reply };
+  const hash = createHash("sha256")
+    .update(JSON.stringify(payload) + ++ordinal)
+    .digest("hex");
+  await db.query(
+    "INSERT INTO message_contents(user_id,hash,payload,characters) VALUES('owner',$1,$2::jsonb,$3)",
+    [hash, JSON.stringify(payload), o.reply.length],
+  );
+  await db.query(
+    "INSERT INTO conversation_messages(user_id,ordinal,hash,run_id) VALUES('owner',$1,$2,$3)",
+    [ordinal, hash, run],
+  );
+  return run;
+}
+
+test("ordinary conversation turns are labelled, a correction becomes owner evidence, and turns with a task are left to the task", async (t) => {
+  const db = await setup(t);
+  const at = (hoursAgo: number) =>
+    new Date(NIGHT.getTime() - hoursAgo * 3600_000);
+  const sorted = await turn(db, {
+    says: "Find flights to Tokyo; I always want options sorted by price, cheapest first",
+    reply: "Here are three options, cheapest first.",
+    at: at(50),
+    calls: [["web_search", "success"]],
+  });
+  const summary = await turn(db, {
+    says: "Summarise this week's news for me",
+    reply: "Here is a long summary of the week.",
+    at: at(40),
+  });
+  const correction = await turn(db, {
+    says: "No, keep it to three bullets",
+    reply: "Three bullets: one, two, three.",
+    at: at(39),
+  });
+  const thanks = await turn(db, {
+    says: "thanks",
+    reply: "Anytime.",
+    at: at(38),
+  });
+  const asked = await turn(db, {
+    says: "Plan my Saturday around the farmers market",
+    reply: "Here's a plan. Want me to remember that you like the market?",
+    at: at(30),
+  });
+  await turn(db, { says: "no", reply: "Okay.", at: at(29.9) });
+  const question = await turn(db, {
+    says: "Book a table for dinner somewhere nice",
+    reply: "Which day?",
+    at: at(28),
+    stop: "awaiting_user",
+  });
+  const tracked = randomUUID();
+  await db.query(
+    "INSERT INTO work_tasks(id,user_id,objective,request,status,updated_at) VALUES($1,'owner','o','r','active',now())",
+    [tracked],
+  );
+  const withTask = await turn(db, {
+    says: "Research three laptops in detail",
+    reply: "Started.",
+    at: at(27),
+    task: tracked,
+  });
+  const recent = await turn(db, {
+    says: "What's the weather tomorrow?",
+    reply: "Sunny.",
+    at: at(2),
+  });
+  const { adapter, inputs } = model((input, n) => {
+    if (n > 1) return [["learn_finish", {}]];
+    const items = JSON.parse(input.messages[1].content).tasks;
+    const byId = Object.fromEntries(items.map((x: any) => [x.id, x]));
+    assert.deepEqual(
+      [byId[sorted].kind, byId[sorted].label, byId[sorted].untrusted],
+      ["turn", "success", ["web"]],
+    );
+    assert.deepEqual(
+      [byId[summary].label, byId[summary].reasons],
+      ["pitfall", ["turn", "owner_corrected"]],
+    );
+    assert.deepEqual(byId[summary].ownerMessages, [
+      "No, keep it to three bullets",
+    ]);
+    assert.equal(byId[asked].label, "success");
+    for (const id of [thanks, question, withTask, recent])
+      assert.equal(byId[id], undefined);
+    return [
+      [
+        "learn_fact",
+        {
+          key: "flight_sorting",
+          value: "Wants flight options sorted by price, cheapest first",
+          quote:
+            "Find flights to Tokyo; I always want options sorted by price, cheapest first",
+          taskIds: [sorted],
+          reason: "Stated by the owner",
+        },
+      ],
+      [
+        "learn_lesson",
+        {
+          domain: "news",
+          slug: "short-summaries",
+          outcome: "pitfall",
+          value:
+            "Keep weekly news summaries to three bullets, because the owner asked to shorten a long one.",
+          taskIds: [summary],
+          reason: "Owner correction",
+        },
+      ],
+    ];
+  });
+  const result: any = await learner(db, adapter).tick("owner");
+  assert.deepEqual(
+    [result.state, result.facts, result.lessons, result.refused],
+    ["completed", 1, 1, 0],
+  );
+  assert.equal(inputs.length, 2);
+  const store = new MemoryStore(db);
+  const [fact] = await store.history("owner", "flight_sorting");
+  assert.deepEqual(
+    [
+      fact!.source.turnRunIds,
+      fact!.source.taskIds,
+      fact!.trust,
+      fact!.untrusted_sources,
+    ],
+    [[sorted], [], "untrusted", ["web"]],
+  );
+  const reviews = Object.fromEntries(
+    (await db.query("SELECT task_id,label FROM learning_reviews")).rows.map(
+      (r) => [r.task_id, r.label],
+    ),
+  );
+  assert.equal(reviews[sorted], "success");
+  assert.equal(reviews[summary], "pitfall");
+  assert.equal(reviews[thanks], "skipped");
+  assert.equal(reviews[question], "skipped");
+  assert.equal(reviews[correction], "success");
+  assert.equal(reviews[withTask], undefined);
+  assert.equal(reviews[recent], undefined);
+  // The next night reviews only the turn that was too recent, never one already labelled.
+  const again = model(() => [["learn_finish", {}]]);
+  await learner(db, again.adapter, new Date(NIGHT.getTime() + DAY)).tick(
+    "owner",
+  );
+  assert.deepEqual(
+    JSON.parse(again.inputs[0].messages[1].content).tasks.map((x: any) => x.id),
+    [recent],
+  );
+});
+
+test("acknowledgements and new requests are not corrections, and plain corrections are", async () => {
+  const { isCorrection } = await import("../src/learning.js");
+  for (const text of [
+    "No worries, thanks!",
+    "No problem",
+    "No thanks, that's all",
+    "Nope, all good",
+    "No, that's great",
+    "Actually that's perfect",
+    "Actually, can you also book a hotel?",
+    "Not right now",
+    "I said thanks",
+    "Nice, thanks",
+    "Now book it",
+  ])
+    assert.ok(!isCorrection(text), text);
+  for (const text of [
+    "No, keep it to three bullets",
+    "That isn't what I asked",
+    "Hmm, that's not right",
+    "The date is wrong",
+    "It should be Tuesday, not Monday",
+    "You've got it wrong",
+    "Actually I meant the other flight",
+    "try again with prices",
+  ])
+    assert.ok(isCorrection(text), text);
+  // After Chief's own question, only a plain statement that the answer was wrong counts.
+  assert.ok(!isCorrection("No", true));
+  assert.ok(!isCorrection("Nope", true));
+  assert.ok(isCorrection("No, that's wrong", true));
+});
+
+test("a turn that only finished is trivial, and a delegated agent's reads tag the turn", async (t) => {
+  const db = await setup(t);
+  const at = (hoursAgo: number) =>
+    new Date(NIGHT.getTime() - hoursAgo * 3600_000);
+  const thanks = await turn(db, {
+    says: "thanks",
+    reply: "Anytime.",
+    at: at(40),
+    calls: [["finish_turn", "success"]],
+  });
+  const mail = await turn(db, {
+    says: "What did the landlord say about the lease renewal?",
+    reply: "They offered to renew at the same rent.",
+    at: at(30),
+    calls: [["agent_run", "success"]],
+  });
+  const child = randomUUID();
+  await db.query(
+    "INSERT INTO runtime_runs(id,user_id,state,stop_reason) VALUES($1,'owner','stopped','answer')",
+    [child],
+  );
+  await db.query(
+    "INSERT INTO events(run_id,user_id,type,data) VALUES($1,'owner','agent.started',$2::jsonb)",
+    [mail, JSON.stringify({ childRunId: child })],
+  );
+  await db.query(
+    "INSERT INTO runtime_calls(id,run_id,call_id,operation,arguments,is_write,state) VALUES($1,$2,'c','gmail_read','{}',false,'success')",
+    [randomUUID(), child],
+  );
+  const { adapter, inputs } = model(() => [["learn_finish", {}]]);
+  await learner(db, adapter).tick("owner");
+  const items = JSON.parse(inputs[0].messages[1].content).tasks;
+  assert.deepEqual(
+    items.map((x: any) => [x.id, x.untrusted]),
+    [[mail, ["agent_report", "email"]]],
+  );
+  assert.equal(
+    (
+      await db.query("SELECT label FROM learning_reviews WHERE task_id=$1", [
+        thanks,
+      ])
+    ).rows[0].label,
+    "skipped",
+  );
+});
