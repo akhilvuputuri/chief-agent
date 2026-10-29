@@ -1,6 +1,6 @@
 # 120 — Does a meaning index find emails that Gmail search misses?
 
-Work date(s): 2026-10-25 to 2026-10-27. Written/revised: 2026-10-27.
+Work date(s): 2026-10-25 to 2026-10-27. Written/revised: 2026-10-29.
 Status: released with a 12-month window, quota-paced builds, fused meaning and keyword search, and a persisted index (migration 033). Owner-written questions and live use pending.
 
 ## User-visible problem and preceding iteration
@@ -211,9 +211,9 @@ Estimates from the 30-day build, to be checked against the first 12-month `mail_
   - Another session's commit (`1e23975`, coding config and docs only) merged just before ours. Its release stopped at the current-main guard, so its changes went live through our rollout.
 - **Measured** (`mail_index.*` events, read-only database counts):
   - **15:16:** the first build started from an empty store and saved as it went.
-  - **15:22:** another session's release (`7cb57be`) restarted the gateway mid-build. The new start's `mail_index.loaded` reported **450 messages in 99 ms**, and recall answered from them at once.
-  - **15:34:** the catch-up finished. `mail_index.built` reported **1,413 messages, none left out**, 808,910 embedding tokens and 738.7 s. That is about 30% fewer tokens than a full build (~1.15M), because the 450 loaded messages were not embedded again.
-  - **Database:** 1,413 messages and 2,784 chunk vectors (8.0 MB). No `persist_failed`, `catch_up_failed` or `failed` events.
+  - **15:22:** another session's release (`7cb57be`) restarted the gateway mid-build. The new start's `mail_index.loaded` reported **450 messages in 99 ms**, so recall could answer from them at once.
+  - **15:34:** the catch-up finished. `mail_index.built` reported **1,413 messages, none left out**, 808,910 embedding tokens and 738.7 s. That is about 30% fewer tokens than a full build (~1.15M), consistent with the 450 loaded messages not being embedded again (450 of 1,413 is 32%).
+  - **Database:** 1,413 messages and 2,784 chunk vectors (8,024 kB, about 8 MB). No `persist_failed`, `catch_up_failed` or `failed` events.
 - **Not yet observed:** a restart that loads the complete index. The next release will show it in `mail_index.loaded`.
 
 ## Follow-up and next iteration

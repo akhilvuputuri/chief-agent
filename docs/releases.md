@@ -12,7 +12,7 @@
 - **Measured.**
   - When another release restarted the gateway mid-build, the new start loaded 450 saved messages in 99 ms.
   - The build then completed with 1,413 messages and none left out (808,910 tokens, 739 s).
-  - The database holds 1,413 messages and 2,784 vectors (8.0 MB).
+  - The database holds 1,413 messages and 2,784 vectors (8,024 kB, about 8 MB).
 
 [Journal 120](journey/120-email-memory-mvp.md#release-closure--2026-10-29).
 
