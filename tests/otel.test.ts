@@ -11,6 +11,8 @@ import {
   encode,
   encodeEvaluations,
   logsEndpoint,
+  modelContent,
+  runContent,
   runConversation,
   runEvent,
   turnFeedback,
@@ -652,4 +654,147 @@ test("without a logs endpoint, feedback is not sent", async () => {
   assert.equal(exporter.pending, 0);
   await exporter.shutdown(100);
   assert.deepEqual(sink.logs, []);
+});
+
+async function contentTurn(captureContent: boolean) {
+  const pg = await migratedPGlite();
+  const db = pg as unknown as Database;
+  await db.query("INSERT INTO users(id) VALUES('owner')");
+  const sink = collector();
+  const restore = setOpsSink(() => undefined);
+  startTracing({
+    endpoint: "http://collector/v1/traces",
+    intervalMs: 60_000,
+    fetch: sink.post,
+    captureContent,
+  });
+  try {
+    const root = new Execution(
+      db,
+      "owner",
+      randomUUID(),
+      new AbortController().signal,
+    );
+    await root.start();
+    runContent(root.run, "book a table for 2, key sk-abcdefghijklmnopqrstu");
+    const invocation = randomUUID();
+    await root.trace("model.started", {
+      invocationId: invocation,
+      model: "m/x",
+    });
+    modelContent(
+      invocation,
+      [
+        { role: "system", content: "You are Chief." },
+        { role: "user", content: "book a table for 2" },
+      ],
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: "c1",
+            type: "function",
+            function: { name: "web_search", arguments: '{"query":"tables"}' },
+          },
+        ],
+      },
+    );
+    await root.trace("model.completed", {
+      invocationId: invocation,
+      model: "m/x",
+      requestedModel: "m/x",
+      usage: { prompt_tokens: 10, completion_tokens: 2 },
+      latencyMs: 5,
+    });
+    const call = await root.beginCall("c1", "web_search", { query: "tables" });
+    await root.endCall(call, { results: ["Olive Bistro, 7pm"] });
+    await root.finish("answer");
+    await stopTracing(1000);
+    return sink;
+  } finally {
+    setOpsSink(restore);
+    await pg.close();
+  }
+}
+
+test("with content capture, spans carry messages, tool arguments and results", async () => {
+  const sink = await contentTurn(true);
+  const spans = sink.spans();
+  const named = (name: string) => spans.find((s) => s.name === name)!;
+  const root = named("invoke_agent chief");
+  const model = named("chat m/x");
+  const tool = named("execute_tool web_search");
+  const json = (span: OtlpSpan, key: string) =>
+    JSON.parse(attr(span, key) as string) as unknown;
+  assert.deepEqual(json(root, "gen_ai.input.messages"), [
+    {
+      role: "user",
+      parts: [
+        {
+          type: "text",
+          content: "book a table for 2, key [REDACTED_CREDENTIAL]",
+        },
+      ],
+    },
+  ]);
+  // The root's output is the run's last model output.
+  assert.deepEqual(
+    json(root, "gen_ai.output.messages"),
+    json(model, "gen_ai.output.messages"),
+  );
+  assert.deepEqual(json(model, "gen_ai.input.messages"), [
+    { role: "system", parts: [{ type: "text", content: "You are Chief." }] },
+    { role: "user", parts: [{ type: "text", content: "book a table for 2" }] },
+  ]);
+  assert.equal(attr(tool, "gen_ai.tool.call.arguments"), '{"query":"tables"}');
+  assert.equal(
+    attr(tool, "gen_ai.tool.call.result"),
+    '{"results":["Olive Bistro, 7pm"]}',
+  );
+  assert.ok(!sink.bodies.join("").includes("sk-abcdefghij"));
+});
+
+test("without content capture, no message, argument or result leaves", async () => {
+  const sink = await contentTurn(false);
+  const bytes = sink.bodies.join("");
+  for (const text of [
+    "book a table",
+    "You are Chief",
+    "Olive Bistro",
+    "tables",
+  ])
+    assert.ok(!bytes.includes(text), text);
+  for (const span of sink.spans())
+    for (const key of [
+      "gen_ai.input.messages",
+      "gen_ai.output.messages",
+      "gen_ai.tool.call.arguments",
+      "gen_ai.tool.call.result",
+    ])
+      assert.equal(attr(span, key), undefined);
+});
+
+test("large spans are sent in batches under the byte limit, and the queue is bounded", async () => {
+  const sink = collector();
+  const exporter = new OtlpExporter({
+    endpoint: "http://collector/v1/traces",
+    intervalMs: 60_000,
+    fetch: sink.post,
+    maxBatchBytes: 50_000,
+    maxQueueBytes: 200_000,
+  });
+  const big = (n: number): ExportSpan => ({
+    ...sample(n),
+    attributes: { "gen_ai.input.messages": "x".repeat(30_000) },
+  });
+  for (let n = 1; n <= 10; n++) exporter.enqueue(big(n));
+  // About 30 KB each: six fit under 200 KB, the rest are dropped.
+  assert.equal(exporter.pending, 6);
+  await exporter.flush();
+  assert.equal(sink.bodies.length, 6);
+  assert.ok(sink.bodies.every((b) => b.length < 60_000));
+  exporter.enqueue(big(11)); // room again once sent
+  assert.equal(exporter.pending, 1);
+  await exporter.shutdown(100);
 });

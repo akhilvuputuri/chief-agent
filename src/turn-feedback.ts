@@ -24,6 +24,11 @@ const SHORT_RETRY = new RegExp(
   "i",
 );
 const SHORT_WORDS = 8;
+// "Add haircut again", "try to add again": a short request that ends in "again" asks to
+// repeat something that did not work. Not a question ("what time again?").
+const AGAIN =
+  /^(?!\s*(?:what|when|where|who|which|why|how)\b)[^?]*\bagain[\s.!]*$/i;
+const AGAIN_WORDS = 5;
 const UNCAPTIONED = /^The user sent this \w+ without a caption\.$/;
 // A request for another attempt anywhere in the opening.
 const ATTEMPT =
@@ -102,7 +107,11 @@ export function redirectOf(
       !isCorrection(opening.replace(new RegExp(ATTEMPT.source, "gi"), " "))
     )
       return null;
-  } else if (RETRY.test(opening) || (short && SHORT_RETRY.test(text)))
+  } else if (
+    RETRY.test(opening) ||
+    (short && SHORT_RETRY.test(text)) ||
+    (text.split(/\s+/).length <= AGAIN_WORDS && AGAIN.test(text))
+  )
     return "retry";
   if (isCorrection(text, (previousReply ?? "").trim().endsWith("?")))
     return "correction";

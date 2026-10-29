@@ -45,7 +45,7 @@ The owner does not rate answers. When one is not what they wanted, their next me
 - **Which turn.** The turn whose message the owner replied to in Telegram, else the last delivered exchange in the same thread (`conversationState` in [src/conversation-state.ts](../src/conversation-state.ts)). When the owner replies to an older message, the last exchange's turn loses its chance to be scored, so "first message only" holds.
 - **Value.** `true` with `gen_ai.evaluation.score.label` set to `retry`, `correction` or `rephrase`, or `false` with no label. A turn the owner never answered gets no score, so the share of `true` is over answered turns only. A message with none of the owner's words (a forward, a photo without a caption) says nothing about the answer, so the turn before it gets no score; the forward's own turn becomes the one the next message is compared with.
 - **Detection** ([src/turn-feedback.ts](../src/turn-feedback.ts)), in order, on the owner's own words (`ownerWords`, so attached quotes and forwards are ignored). There is no model call.
-  - _Retry_: the message opens, after at most a short lead-in such as "hmm," or "no,", with a request for another attempt ("try again", "retry", "regenerate", "redo it", "start over", "try a different approach", "do something else"), or the whole message is a short form such as "again", "another one" or "something different, please".
+  - _Retry_: the message opens, after at most a short lead-in such as "hmm," or "no,", with a request for another attempt ("try again", "retry", "regenerate", "redo it", "start over", "try a different approach", "do something else"), or the whole message is a short form such as "again", "another one" or "something different, please", or a request of at most five words ending in "again" that is not a question ("add haircut again").
   - _Not a redirect_: a request for another attempt anywhere in the opening, together with a time or an extension ("try again tomorrow", "do it again next week", "redo it for Friday too"). It asks for a later or further attempt and rejects nothing, so it is neither a retry nor a correction, unless the rest of the message is a correction ("that's wrong, try again for Friday"). "Too" counts as an extension only at the end of the message, so "try again, that's too long" is a retry.
   - _Correction_: otherwise, the nightly learner's `isCorrection`, unchanged. A plain "no" after a reply that asked a question is an answer, not a correction; "redo" anywhere counts as one.
   - _Rephrase_: at least four content words in each message and at least 70% of their union shared with the previous request, unless exactly one word was swapped for another or only dates, days, times and numbers changed ("today" to "tomorrow"): those are new requests on the same subject. A reply to an older message is compared with the request only when it is the last exchange.
@@ -56,9 +56,25 @@ The owner does not rate answers. When one is not what they wanted, their next me
 
 Its words never leave the process: only the fixed name, the boolean and a fixed label.
 
+## Message content
+
+Off by default. With `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true` (the variable the OpenTelemetry GenAI instrumentations use) and export on, spans also carry what was said, in the conventions' message format (a role and typed parts: `text`, `tool_call`, `tool_call_response`, and `image` as a placeholder):
+
+| Span                                 | Attributes                                                                                                                                                                                              |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `invoke_agent chief` (a turn's root) | `gen_ai.input.messages`: the owner's message as given to the turn (including attached context); `gen_ai.output.messages`: the run's last model output                                                   |
+| `chat <model>`                       | `gen_ai.input.messages`: the messages sent (system prompt, history, tool results); `gen_ai.output.messages`: the reply, with any tool calls; `chief.content.truncated` when older messages were dropped |
+| `execute_tool <operation>`           | `gen_ai.tool.call.arguments`, `gen_ai.tool.call.result` as JSON text                                                                                                                                    |
+
+Code: [src/otel-content.ts](../src/otel-content.ts). Every text is scrubbed with the event journal's credential rules (`scrubTrace`: API keys, GitHub and Telegram tokens, bearer values, JWTs, and values under credential-named keys) and capped: 32,000 characters per text part, argument or result, and 128,000 characters per message list, keeping the newest messages. Images are never sent. The gateway logs `contentCaptured` in `trace.export_enabled`.
+
+Content makes spans large, so the exporter batches by size as well as count (about 4 MB a request) and bounds its queue at 32 MB of text as well as 4,096 spans; beyond either, spans are dropped and counted in `trace.export_dropped`. Serializing a model call's messages happens on the turn's stack when content is on, a few milliseconds for a long context.
+
+Where the content goes is the endpoint's business: in production it is the agentwatch service next to the gateway, which keeps traces for 90 days ([journal 134](journey/134-agentwatch-on-the-host.md)).
+
 ## What leaves the process
 
-Spans carry the same kind of values as the [operational log](operational-logs.md): IDs, model names that pass the model-name shape, fixed provider slugs (`providerName` in `ops-log.ts`), token counts, cost, durations, fixed finish reasons, host-defined tool names (`logOperation`, so a model-invented tool name becomes `unknown`), stop reasons and error codes that pass the code shape. Feedback evaluations carry only a fixed name, a boolean and a fixed label. Never prompts, replies, tool arguments or results, error messages or OpenRouter's provider display text. The integration test checks the exported bytes for planted private strings.
+Spans carry the same kind of values as the [operational log](operational-logs.md): IDs, model names that pass the model-name shape, fixed provider slugs (`providerName` in `ops-log.ts`), token counts, cost, durations, fixed finish reasons, host-defined tool names (`logOperation`, so a model-invented tool name becomes `unknown`), stop reasons and error codes that pass the code shape. Feedback evaluations carry only a fixed name, a boolean and a fixed label. Unless message content is switched on (above), never prompts, replies, tool arguments or results, error messages or OpenRouter's provider display text. The integration test checks the exported bytes for planted private strings.
 
 ## Failure behaviour
 

@@ -92,6 +92,7 @@ import { closeServer, server } from "./server.js";
 import { stopGateway } from "./gateway-stop.js";
 import { Learner } from "./learning.js";
 import { MemoryStore } from "./memory.js";
+import { captureRequested } from "./otel-content.js";
 import {
   logsEndpoint,
   startTracing,
@@ -130,14 +131,17 @@ try {
 }
 if (tracesUrl) {
   const release = process.env.RELEASE_SHA;
+  // Message content only with the standard opt-in variable (docs/tracing.md).
+  const captureContent = captureRequested();
   startTracing({
     endpoint: tracesUrl,
+    captureContent,
     ...(logsUrl ? { logsEndpoint: logsUrl } : {}),
     ...(release && /^[0-9a-f]{40}$/.test(release)
       ? { serviceVersion: release }
       : {}),
   });
-  opsLog("trace.export_enabled", "info");
+  opsLog("trace.export_enabled", "info", { contentCaptured: captureContent });
 }
 const mainModel = resolveMainModel(c.AGENT_MODEL);
 const priceCeilings = resolvePriceCeilings({

@@ -102,6 +102,6 @@ No endpoint is configured in production, so `turnFeedback` and `runConversation`
 
 ## Follow-up and next iteration
 
-- Measure the rules on real messages before trusting the rate. The cheapest test is a read-only count over recent `conversation_inputs` that reports only aggregates per rule, plus the owner reading a handful of flagged pairs on the laptop. Both need owner approval.
+- ~~Measure the rules on real messages before trusting the rate.~~ Done in [journal 134](134-agentwatch-on-the-host.md): precision 8 of 8, recall about one half.
 - An LLM judge on sampled traces in agentwatch (#323 step 3, agentwatch side) needs message content, which Chief's spans deliberately omit. Whether to export content to a local collector is the owner's decision.
 - Production export still waits on where a collector runs ([journal 131](131-otel-trace-export.md#follow-up-and-next-iteration)).
