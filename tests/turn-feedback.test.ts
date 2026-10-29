@@ -183,7 +183,11 @@ test("Jev's opinion counts only where the rules found nothing", () => {
 });
 
 test("Jev's answer counts only for the exchange it was shown", () => {
-  const last = { runId: "a", request: "Show me the rain movement" };
+  const last = {
+    runId: "a",
+    request: "Show me the rain movement",
+    reply: "No rain.",
+  };
   const shown = { user: "Show me the rain movement ", assistant: "No rain." };
   assert.equal(jevSawExchange(null, last, shown), true);
   assert.equal(jevSawExchange({ runId: "a" }, last, shown), true);
@@ -196,4 +200,18 @@ test("Jev's answer counts only for the exchange it was shown", () => {
   assert.equal(jevSawExchange(null, last, { ...shown, assistant: "" }), false);
   assert.equal(jevSawExchange(null, null, shown), false);
   assert.equal(jevSawExchange(null, last, undefined), false);
+  // A reminder delivered after the exchange is what Jev saw as the reply.
+  assert.equal(
+    jevSawExchange(null, last, { ...shown, assistant: "Reminder: call mum" }),
+    false,
+  );
+  // A long answer stored as its saved-details pointer cannot be compared.
+  assert.equal(
+    jevSawExchange(
+      null,
+      { ...last, reply: "[Saved answer details: x]" },
+      shown,
+    ),
+    false,
+  );
 });

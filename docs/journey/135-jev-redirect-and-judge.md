@@ -45,7 +45,7 @@ Status: in review. Jev's redirect question is code-complete; the judge waits for
 Independent review (Opus 5.5) of `b65e4f7` found nothing blocking. Its should-fix findings were addressed in the next commit:
 
 - **The two-question request shape was unverified.** If the provider had rejected it, every message would have fallen back to medium effort. It is now measured above.
-- **Jev is shown the last turns of the owner's whole history,** so across threads, or after a proactive message, it could judge a different exchange from the one scored. `jevSawExchange` now requires the last turn Jev saw to be this thread's latest exchange, with a reply.
+- **Jev is shown the last turns of the owner's whole history,** so across threads, or after a proactive message, it could judge a different exchange from the one scored. `jevSawExchange` now requires the last turn Jev saw to be this thread's latest exchange: the same request and, after a second review, the same reply, so a reminder or job result delivered since doesn't count.
 - **The wiring decision was untested.** It is now a tested pure function.
 
 Smaller fixes:
