@@ -40,6 +40,25 @@
 - **Pending:** the first real turn's trace.
 
 [Journal 134](journey/134-agentwatch-on-the-host.md#release-closure--2026-10-29).
+## Releases pull the CI-built gateway image (29 October 2026)
+
+- **What merged.**
+  - [PR 350](https://github.com/akhilvuputuri/chief-agent/pull/350) (`e2ffacb`): `checks` publishes `ghcr.io/akhilvuputuri/chief-agent-gateway:<sha>` with a build-provenance attestation, and the release handler accepts `deploy <sha> sha256:<digest>`.
+  - [PR 352](https://github.com/akhilvuputuri/chief-agent/pull/352) (`845595e`): the image build transpiles with esbuild, and the Dockerfile has 24 instructions instead of 27.
+  - [PR 353](https://github.com/akhilvuputuri/chief-agent/pull/353) (`aca8cec`): `release` requires the attestation check and sends the verified digest. A manual release can set `host_build` instead.
+  - Independent review (Claude Opus 5.5) approved each exact head.
+- **Operator step.** `install-release-handler.sh` installed the handler (SHA-256 `76fb4833…98a9f`) and docker-buildx 0.30.1 on the host. Docker was not restarted.
+- **First pull release.** `b431444` (release run 40897824539):
+  - The attestation check took 6 s.
+  - The deploy step took **51 s**, against 370–400 s for the last host builds.
+  - Read-only checks on the host:
+    - the gateway runs the pulled image, with revision label and `RELEASE_SHA` both `b431444`;
+    - the image's digest `de3dc421…` is the one verified;
+    - `:rollback` is kept;
+    - no digest-named image records are left;
+    - agentwatch is untouched;
+    - disk is at 46%.
+- **Note.** Main also included #360's Compose change, so releases waited for its operator rollout (`deploy-agentwatch.py`, `6e90db7`) before this pull could run.
 
 ## Coding limits raised (29 October 2026)
 

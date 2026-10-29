@@ -1,7 +1,7 @@
 # 132 — Can a release stop building on the production host?
 
 Work dates: 28–29 October 2026. Written: 29 October 2026.
-Status: the CI-built image, the handler change (#350) and the transpiled build (#352) are merged. Deploying by digest needs the operator install of the handler, then this switch-over in `release`.
+Status: released. Since `b431444` (29 October 2026), releases pull the CI-built gateway image by digest. The first pull release step took 51 s, against 370–400 s for host builds.
 
 ## User-visible problem and preceding iteration
 
@@ -74,17 +74,27 @@ Running TypeScript directly with Node's type stripping was rejected for now. It 
 - **Two earlier attempts** for `260c94c` and `e2ffacb` were refused by the existing guard because main had moved on. That is expected.
 - **Transpiled build (#352):** CI's image job built the gateway image with `build:image` and passed its smoke checks.
 
-**Pending:**
+**Operator install** (29 October, through CloudShell):
 
-- the operator install;
-- the switch-over;
-- a measured pull release;
-- the digest-record check above.
+- `install-release-handler.sh` exited 0 with the handler at SHA-256 `76fb4833…98a9f`.
+- docker-buildx 0.30.1 was the only package installed.
+- needrestart deferred every restart, docker.service included, and reported no containers needing a restart.
 
-### Release closure — pending
+### Release closure — 29 October 2026
+
+- **What merged:** #353 (`aca8cec`) switched `release` to deploy by digest.
+- **Blocked first:** the first attempt was refused because #360 had changed `compose.yaml`. It went through after that change's operator rollout (`6e90db7`).
+- **First pull release:** `b431444` (release run 40897824539):
+  - The attestation check took 6 s.
+  - `deploy b431444 sha256:de3dc421…` succeeded.
+  - The whole release step took **51 s**, against 370, 377 and 400 s for the last three host builds.
+- **Host, read-only over SSH:**
+  - The gateway runs the pulled image, with revision label and `RELEASE_SHA` both `b431444`.
+  - `:latest` and `:b431444…` are digest `de3dc421…`, and `:rollback` is kept.
+  - **No `chief-agent-gateway@sha256` records are left**, so the expected containerd prune behaviour is confirmed and the handler's `docker rmi` of the digest record works.
+  - agentwatch and the other services are untouched, and disk is at 46%.
+- **Not measured:** how long the publish job takes when only the source layer changes. The first publish took 94 s cold; a later one took 34 s.
 
 ## Follow-up and next iteration
 
-- Switch `release` to `deploy <sha> <digest>` once the handler is installed, keeping a manual `host_build` input for the fallback.
-- Fewer Dockerfile instructions, and transpiling in the image build.
 - Consider whether the host should verify the attestation itself, in addition to the release workflow.

@@ -9,6 +9,15 @@ A read-only measurement of the redirect rules on 142 real follow-ups found 8 of 
 - a possible Jev redirect question (paid, needs approval).
 
 See [journal 134](journey/134-agentwatch-on-the-host.md).
+# Releases pull the CI-built image — live since `b431444`, 29 October 2026
+
+`checks` builds the gateway image on main and publishes it with a provenance attestation. `release` verifies the attestation and sends the digest, and the host pulls that exact image instead of building it. The release step fell from 370–400 s to 51 s.
+
+- The image build transpiles with esbuild; CI's `typecheck` gates every release.
+- A manual release can still build on the host: `gh workflow run deploy.yml --ref main -f host_build=true`.
+- Local sessions reach the host with `ssh chief-prod`, an operator key on the owner's Mac.
+
+See [journal 132](journey/132-ci-built-gateway-image.md).
 
 # Implicit redirect feedback — live in `bc4c5c0`, 29 October 2026
 
