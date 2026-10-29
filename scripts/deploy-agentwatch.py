@@ -9,6 +9,7 @@ import fcntl
 import json
 import pathlib
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -107,8 +108,9 @@ def healthy():
 
 
 def agentwatch_healthy():
-    # The image's HEALTHCHECK first runs about 30 s after start; allow roughly 90 s.
-    for _ in range(45):
+    # The image's HEALTHCHECK probes every 30 s after a 60 s start period (sooner on Docker
+    # 25+, which probes every 5 s while starting); allow about 150 s.
+    for _ in range(75):
         try:
             state = run(['docker', 'inspect', '--format', '{{.State.Health.Status}}',
                          AGENTWATCH_CONTAINER], text=True).stdout.strip()
@@ -120,6 +122,24 @@ def agentwatch_healthy():
             pass
         time.sleep(2)
     return False
+
+
+def agentwatch_ingests():
+    """Sends one labelled span and reads it back: the database is writable as configured
+    (read-only root, no capabilities), which the health check alone does not show."""
+    trace = secrets.token_hex(16)
+    now = str(time.time_ns())
+    body = json.dumps({'resourceSpans': [{
+        'resource': {'attributes': [
+            {'key': 'service.name', 'value': {'stringValue': 'chief-rollout-check'}}]},
+        'scopeSpans': [{'spans': [{
+            'traceId': trace, 'spanId': secrets.token_hex(8), 'name': 'rollout check',
+            'kind': 1, 'startTimeUnixNano': now, 'endTimeUnixNano': now}]}]}]})
+    run(['curl', '--fail', '--silent', '--max-time', '5', '-X', 'POST',
+         '-H', 'content-type: application/json', '--data-binary', body,
+         'http://127.0.0.1:4318/v1/traces'])
+    run(['curl', '--fail', '--silent', '--max-time', '5',
+         'http://127.0.0.1:4318/api/traces/' + trace])
 
 
 def remove_agentwatch():
@@ -294,6 +314,7 @@ def main():
                 compose('up', '-d', '--no-deps', 'agentwatch')
                 if not agentwatch_healthy():
                     raise RuntimeError('agentwatch failed startup health')
+                agentwatch_ingests()
                 # Work may have started meanwhile; recreating the gateway would cut it off.
                 if busy():
                     raise Busy()

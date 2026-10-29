@@ -62,7 +62,7 @@ class AgentwatchRolloutTests(unittest.TestCase):
     def scenario(self, *, running=0, pending=0, baseline=None, requested_sha=SHA,
                  archive_sha=SHA, changes=None, unsafe=None, health=None, digest=PINNED,
                  build_failure=False, pull_failure=False, agentwatch_state='healthy',
-                 agentwatch_curl_failure=False, reach_failure=False, publish_failure=False,
+                 agentwatch_curl_failure=False, ingest_failure=False, reach_failure=False, publish_failure=False,
                  late_running=0, late_pending=0, expected_error=None):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -121,6 +121,8 @@ class AgentwatchRolloutTests(unittest.TestCase):
                 if args[:2] == ['docker', 'inspect']:
                     return subprocess.CompletedProcess(args, 0, stdout=agentwatch_state + '\n')
                 if args[0] == 'curl' and agentwatch_curl_failure:
+                    raise subprocess.CalledProcessError(22, args)
+                if args[0] == 'curl' and '/v1/traces' in args[-1] and ingest_failure:
                     raise subprocess.CalledProcessError(22, args)
                 if args[:3] == ['docker', 'rm', '-f']:
                     containers.discard(args[3])
@@ -294,6 +296,12 @@ class AgentwatchRolloutTests(unittest.TestCase):
                 self.assertNotIn(STOP, commands)
                 self.assertNotIn(UP_GATEWAY, commands)
                 self.assertIn(REMOVE, commands)
+
+    def test_agentwatch_that_cannot_store_a_span_rolls_back_without_touching_gateway(self):
+        commands = self.scenario(ingest_failure=True, health=[True, True],
+                                 expected_error='agentwatch did not start; gateway untouched')
+        self.assertNotIn(STOP, commands)
+        self.assertIn(REMOVE, commands)
 
     def test_work_started_while_agentwatch_started_leaves_gateway_untouched(self):
         for args in [{'late_running': 1}, {'late_pending': 1}]:
