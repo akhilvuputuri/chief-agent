@@ -395,10 +395,15 @@ export class JobTools {
     }
     if (a.operation === "gmail_recall") {
       if (!this.mailRecall) throw new Error("The mail index is not enabled");
-      const keyword =
-        a.keywords && this.gmail
+      const keyword = !a.keywords
+        ? undefined
+        : this.gmail
           ? await keywordSearch(this.gmail, user, run, a.keywords)
-          : undefined;
+          : {
+              lists: [],
+              failed: a.keywords.length,
+              reasons: ["Gmail is not configured"],
+            };
       return this.mailRecall.recall(user, a.query, a.limit, keyword);
     }
     if (a.operation === "job_save")

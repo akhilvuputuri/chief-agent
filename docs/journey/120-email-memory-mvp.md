@@ -190,6 +190,7 @@ Estimates from the 30-day build, to be checked against the first 12-month `mail_
 ## Follow-up and next iteration
 
 - Add about 10 owner-written questions to the eval.
+- Watch whether the fused top 8 misses keyword hits that the separate lists showed (about 15 messages). The evidence is one export whose keyword queries the eval's model wrote. If it does, have the agent ask for `limit` 10.
 - Then try re-ranking the top results and smaller chunks, compared offline with the Python eval in `evals/mail-recall` over a private `--export` dataset (added after this entry's results; not yet run).
 - Check a few real half-remembered requests in Telegram.
 - If recall clearly helps, persist the index (additive migration), sync in the background, and consider the second account and attachments.

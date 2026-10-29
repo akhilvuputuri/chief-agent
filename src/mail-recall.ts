@@ -194,8 +194,24 @@ export type KeywordHit = {
   subject?: string;
   date?: string;
   snippet?: string;
+  /** gmail_search's note on a row whose details it could not fetch. */
+  detail?: string;
 };
-export type KeywordResults = { lists: KeywordHit[][]; failed: number };
+export type KeywordResults = {
+  lists: KeywordHit[][];
+  failed: number;
+  /** Why searches failed, in words the agent can act on; never raw error text. */
+  reasons?: string[];
+};
+
+/** A short, fixed reason for a failed keyword search. */
+function failureReason(error: unknown) {
+  const message = String((error as Error)?.message ?? error);
+  if (/budget/i.test(message)) return "the turn's Gmail request budget is used";
+  if (/\((403|429)\)/.test(message))
+    return "Gmail refused the request (quota or permission)";
+  return "Gmail search failed";
+}
 /** Reciprocal rank fusion constant, as in evals/mail-recall/retrieval.py. */
 const RRF_K = 60;
 
@@ -229,6 +245,7 @@ export async function keywordSearch(
   queries: string[],
 ): Promise<KeywordResults> {
   const lists: KeywordHit[][] = [];
+  const reasons: string[] = [];
   let failed = 0;
   for (const query of queries) {
     try {
@@ -252,16 +269,19 @@ export async function keywordSearch(
                   subject: text(r.subject),
                   date: text(r.date),
                   snippet: text(r.snippet),
+                  detail: text(r.detail),
                 },
               ]
             : [],
         ),
       );
-    } catch {
+    } catch (error) {
       failed += 1;
+      const reason = failureReason(error);
+      if (!reasons.includes(reason)) reasons.push(reason);
     }
   }
-  return { lists, failed };
+  return { lists, failed, reasons };
 }
 
 export type MailIndexState = "idle" | "building" | "ready" | "failed";
@@ -518,10 +538,17 @@ export class MailIndex {
     const count = Math.max(1, Math.min(limit, 10));
     const keywordIds = keyword ? keywordRanking(keyword.lists) : [];
     const hits = new Map<string, KeywordHit>();
+    // A row can come back ID-only in one search and complete in another: keep every field found.
     for (const list of keyword?.lists ?? [])
-      for (const hit of list) if (!hits.has(hit.id)) hits.set(hit.id, hit);
+      for (const hit of list) {
+        const kept = hits.get(hit.id) ?? { id: hit.id, threadId: hit.threadId };
+        for (const field of ["from", "subject", "date", "snippet"] as const)
+          kept[field] ||= hit[field];
+        kept.detail ??= hit.detail;
+        hits.set(hit.id, kept);
+      }
     const failedNote = keyword?.failed
-      ? `${keyword.failed} of ${keyword.failed + keyword.lists.length} keyword searches failed; these results lean on what remained.`
+      ? `${keyword.failed} of ${keyword.failed + keyword.lists.length} keyword searches failed (${(keyword.reasons ?? ["Gmail search failed"]).join("; ")}); these results lean on what remained.`
       : undefined;
     if (this.state !== "ready") {
       const status = this.state === "failed" ? "unavailable" : "building";
@@ -628,6 +655,10 @@ export class MailIndex {
       meaningRank: meaningRank ?? null,
       keywordRank: keywordRank ?? null,
       excerpt: clean(e ? e.text : hit?.snippet).slice(0, EXCERPT),
+      // Gmail could not fetch this hit's details; say so instead of showing blanks.
+      ...(!e && !hit?.from && !hit?.subject && hit?.detail
+        ? { detail: clean(hit.detail) }
+        : {}),
     };
   }
   /** Drops trailing results until the result fits below the projection limit. */

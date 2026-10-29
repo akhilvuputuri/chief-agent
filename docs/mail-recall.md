@@ -65,9 +65,9 @@ On synthetic, keyword-avoiding questions, 30 per run:
 | 30 days   |        17 / 30 |                  29 / 30 |
 | 12 months |        14 / 30 |                  23 / 30 |
 
-At 12 months, `gmail_recall` alone matched keyword search (16 / 30); the two find different emails, so the email agent uses both for content questions.
+At 12 months, `gmail_recall` alone matched keyword search (16 / 30); the two find different emails, so the email agent uses both for content questions. Details are in [journal 120](journey/120-email-memory-mvp.md#retrieval-eval-12-month-window).
 
-Offline on a 29 October export (1,412 messages, 30 new questions), the top 8 of the meaning-plus-keyword fusion found 18 / 30. That equals the agent's previous separate lists (about 15 messages on average), with the best ranking of the methods tried. Local BM25 and the two re-rankers tried did not beat it. Details are in [journal 120](journey/120-email-memory-mvp.md#fusion-and-re-ranking-eval--2026-10-29). Details are in [journal 120](journey/120-email-memory-mvp.md#retrieval-eval-12-month-window).
+Offline on a 29 October export (1,412 messages, 30 new questions), the top 8 of the meaning-plus-keyword fusion found 18 / 30. That equals the agent's previous separate lists (about 15 messages on average), with the best ranking of the methods tried. Local BM25 and the two re-rankers tried did not beat it. Details are in [journal 120](journey/120-email-memory-mvp.md#fusion-and-re-ranking-eval--2026-10-29).
 
 ## Eval
 

@@ -693,7 +693,8 @@ test("keyword searches run on the primary mailbox with the turn's budget", async
             date: "D",
             snippet: "N",
           },
-          { id: "m2", detail: "not retrieved: unavailable" },
+          { id: "m2", threadId: "t2", detail: "not retrieved: unavailable" },
+          { id: "m3", detail: "no thread id" },
         ],
       };
     },
@@ -711,6 +712,7 @@ test("keyword searches run on the primary mailbox with the turn's budget", async
     "primary",
   ]);
   assert.equal(result.failed, 1);
+  assert.deepEqual(result.reasons, ["the turn's Gmail request budget is used"]);
   assert.deepEqual(result.lists, [
     [
       {
@@ -720,6 +722,16 @@ test("keyword searches run on the primary mailbox with the turn's budget", async
         subject: "S",
         date: "D",
         snippet: "N",
+        detail: undefined,
+      },
+      {
+        id: "m2",
+        threadId: "t2",
+        from: undefined,
+        subject: undefined,
+        date: undefined,
+        snippet: undefined,
+        detail: "not retrieved: unavailable",
       },
     ],
   ]);
@@ -740,5 +752,42 @@ test("keyword searches run on the primary mailbox with the turn's budget", async
       query: "q",
       keywords: ["a", "b", "c", "d"],
     }).success,
+  );
+});
+
+test("a keyword hit keeps details any search returned, and says when Gmail had none", async () => {
+  const box = mailbox([
+    { id: "a1", at: NOW - DAY, subject: "s", text: "unrelated body" },
+  ]);
+  const index = new MailIndex(box.gmail, words, "owner", () => NOW, FAST);
+  await index.start();
+  const found = await index.recall("owner", "parcel", 8, {
+    lists: [
+      [
+        { id: "ff1", threadId: "t1", detail: "not retrieved: unavailable" },
+        { id: "gg2", threadId: "t2", detail: "not retrieved: unavailable" },
+      ],
+      [
+        {
+          id: "ff1",
+          threadId: "t1",
+          from: "Courier",
+          subject: "Parcel",
+          snippet: "arriving today",
+        },
+      ],
+    ],
+    failed: 1,
+    reasons: ["Gmail refused the request (quota or permission)"],
+  });
+  const ff1 = found.results.find((r) => r.messageId === "ff1")!;
+  assert.equal(ff1.from, "Courier");
+  assert.equal(ff1.excerpt, "arriving today");
+  assert.ok(!("detail" in ff1));
+  const gg2 = found.results.find((r) => r.messageId === "gg2")!;
+  assert.equal(gg2.detail, "not retrieved: unavailable");
+  assert.match(
+    found.note!,
+    /1 of 3 keyword searches failed \(Gmail refused the request \(quota or permission\)\)/,
   );
 });
