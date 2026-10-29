@@ -55,6 +55,7 @@ import type { JobTools } from "./tools.js";
 import { emptySelection, MemoryStore } from "./memory.js";
 import { runFamily } from "./run-family.js";
 import * as otel from "./otel.js";
+import { redirectOf } from "./turn-feedback.js";
 import { recordPickerCheck, type ShadowDecisions } from "./shadow.js";
 import {
   shouldEscalate,
@@ -664,6 +665,26 @@ export class Assistant {
             interruptedJob: null,
           }
         : await conversationState(this.db, user, inputId);
+      if (!background) {
+        otel.runConversation(run, `thread.${active.threadId ?? 0}`);
+        // Implicit feedback (#323): does this message redirect the answer it follows?
+        const target = conversation.replyTarget;
+        const last = conversation.lastExchangeHere;
+        const previous = target?.runId ?? last?.runId;
+        if (previous && previous !== run)
+          otel.turnFeedback(
+            previous,
+            () =>
+              target
+                ? redirectOf(
+                    message,
+                    target.runId === last?.runId ? last?.request : null,
+                    target.text,
+                  )
+                : redirectOf(message, last?.request, last?.reply),
+            last?.runId,
+          );
+      }
       await event(this.db, user, run, "conversation.routed", {
         lane: background ? "job" : "foreground",
         taskId: current?.id ?? null,

@@ -49,6 +49,6 @@ Independent review (Opus 5.5) of `6fa316d` approved, with findings fixed in the 
 ## Follow-up and next iteration
 
 - Trace Jev decisions, embeddings, coding jobs (`coding_events`) and the learner.
-- Record 👍/👎 reactions as trace scores (#323 phase 4); Telegram reactions are not received today (`allowed_updates` has only messages and callback queries).
+- ~~Record 👍/👎 reactions as trace scores (#323 phase 4).~~ The owner declined to rate answers; the owner's next message is the signal instead ([journal 133](133-implicit-redirect-feedback.md)).
 - Memory lifecycle events for #323 phase 6 need write, retire and rollback events that `MemoryStore` does not emit yet.
 - Decide where a collector runs for production data (a laptop pulling from the host, or a loopback-only service on the host); either needs owner approval.

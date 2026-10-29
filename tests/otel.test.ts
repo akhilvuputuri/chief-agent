@@ -9,7 +9,11 @@ import {
   OtlpExporter,
   SpanKind,
   encode,
+  encodeEvaluations,
+  logsEndpoint,
+  runConversation,
   runEvent,
+  turnFeedback,
   startTracing,
   stopTracing,
   tracingEnabled,
@@ -31,8 +35,9 @@ type OtlpSpan = {
 
 function collector() {
   const bodies: string[] = [];
-  const post = (async (_url: string | URL | Request, init?: RequestInit) => {
-    bodies.push(String(init?.body));
+  const logs: string[] = [];
+  const post = (async (url: string | URL | Request, init?: RequestInit) => {
+    (String(url).endsWith("/v1/logs") ? logs : bodies).push(String(init?.body));
     return new Response("{}", { status: 200 });
   }) as typeof fetch;
   const spans = () =>
@@ -40,10 +45,24 @@ function collector() {
       (body) =>
         JSON.parse(body).resourceSpans[0].scopeSpans[0].spans as OtlpSpan[],
     );
-  return { post, bodies, spans };
+  const evaluations = () =>
+    logs.flatMap(
+      (body) =>
+        JSON.parse(body).resourceLogs[0].scopeLogs[0]
+          .logRecords as OtlpLogRecord[],
+    );
+  return { post, bodies, logs, spans, evaluations };
 }
 
-function attr(span: OtlpSpan, key: string) {
+type OtlpLogRecord = {
+  timeUnixNano: string;
+  eventName: string;
+  traceId: string;
+  spanId: string;
+  attributes: { key: string; value: Record<string, unknown> }[];
+};
+
+function attr(span: OtlpSpan | OtlpLogRecord, key: string) {
   const value = span.attributes.find((a) => a.key === key)?.value;
   if (!value) return undefined;
   if ("intValue" in value) return Number(value.intValue);
@@ -460,4 +479,177 @@ test("nested children, HTTP failures and turns that fail before finishing", asyn
     setOpsSink(restore);
     await pg.close();
   }
+});
+
+test("logsEndpoint follows the logs, base and traces variables", () => {
+  assert.equal(logsEndpoint({}), undefined);
+  assert.equal(
+    logsEndpoint({
+      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "http://a/logs",
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://b",
+    }),
+    "http://a/logs",
+  );
+  assert.equal(
+    logsEndpoint({ OTEL_EXPORTER_OTLP_ENDPOINT: "http://b:4318/" }),
+    "http://b:4318/v1/logs",
+  );
+  assert.equal(
+    logsEndpoint({ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://c/v1/traces" }),
+    "http://c/v1/logs",
+  );
+  // A traces URL with another path says nothing about where logs go.
+  assert.equal(
+    logsEndpoint({ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://c/collect" }),
+    undefined,
+  );
+  assert.throws(() =>
+    logsEndpoint({ OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "http://u:p@a/v1/logs" }),
+  );
+});
+
+test("encodeEvaluations writes gen_ai.evaluation.result log records", () => {
+  const document = encodeEvaluations([
+    {
+      traceId: "a".repeat(32),
+      spanId: "b".repeat(16),
+      timeNs: 1_761_000_000_000_000_000n,
+      name: "user_redirected",
+      value: true,
+      label: "retry",
+    },
+  ]);
+  const record = document.resourceLogs[0]!.scopeLogs[0]!.logRecords[0]!;
+  assert.equal(record.eventName, "gen_ai.evaluation.result");
+  assert.equal(record.traceId, "a".repeat(32));
+  assert.equal(record.spanId, "b".repeat(16));
+  assert.equal(record.timeUnixNano, "1761000000000000000");
+  const typed = record as unknown as OtlpLogRecord;
+  assert.equal(attr(typed, "event.name"), "gen_ai.evaluation.result");
+  assert.equal(attr(typed, "gen_ai.evaluation.name"), "user_redirected");
+  assert.equal(attr(typed, "gen_ai.evaluation.score.value"), true);
+  assert.equal(attr(typed, "gen_ai.evaluation.score.label"), "retry");
+});
+
+test("the owner's next message scores the turn it follows, once", async (t) => {
+  const pg = await migratedPGlite();
+  const db = pg as unknown as Database;
+  await db.query("INSERT INTO users(id) VALUES('owner')");
+  const sink = collector();
+  const restore = setOpsSink(() => undefined);
+  startTracing({
+    endpoint: "http://collector/v1/traces",
+    logsEndpoint: "http://collector/v1/logs",
+    intervalMs: 60_000,
+    fetch: sink.post,
+  });
+  try {
+    const turn = async () => {
+      const run = new Execution(
+        db,
+        "owner",
+        randomUUID(),
+        new AbortController().signal,
+      );
+      await run.start();
+      runConversation(run.run, "thread.7");
+      return run;
+    };
+    const first = await turn();
+    const child = new Execution(
+      db,
+      "owner",
+      randomUUID(),
+      first.signal,
+      { ms: 120000, models: 8, tools: 20 },
+      first,
+    );
+    await child.start();
+    await child.finish("answer");
+    await first.finish("answer");
+    const second = await turn();
+    await second.finish("answer");
+    const third = await turn();
+    await third.finish("answer");
+    const late = await turn();
+    await late.finish("answer");
+    const passed = await turn();
+    await passed.finish("answer");
+    const background = new Execution(
+      db,
+      "owner",
+      randomUUID(),
+      new AbortController().signal,
+    );
+    await background.start(); // no conversation: a job, not a turn
+    await background.finish("answer");
+
+    turnFeedback(first.run, () => undefined); // a forward says nothing; the turn waits
+    turnFeedback(first.run, () => "retry");
+    turnFeedback(first.run, () => null); // a second message about the same turn
+    turnFeedback(child.run, () => "retry"); // child runs are not turns
+    turnFeedback(background.run, () => "retry");
+    turnFeedback(randomUUID(), () => "retry"); // a turn this process never saw
+    turnFeedback(second.run, () => null);
+    turnFeedback(third.run, () => "not a label!"); // unexpected labels never leave
+    // A reply to an older message: `passed` loses its chance to be scored.
+    turnFeedback(randomUUID(), () => "retry", passed.run);
+    turnFeedback(passed.run, () => null);
+    turnFeedback(late.run, () => {
+      throw new Error("never reaches the turn");
+    });
+    t.mock.timers.enable({
+      apis: ["Date"],
+      now: Date.now() + 6 * 3600_000 + 1000,
+    });
+    turnFeedback(late.run, () => "retry"); // past the feedback window
+    t.mock.timers.reset();
+    await stopTracing(1000);
+
+    const roots = sink.spans().filter((s) => s.name === "invoke_agent chief");
+    const rootOf = (run: Execution) =>
+      roots.find((s) => attr(s, "chief.run_id") === run.run)!;
+    assert.equal(attr(rootOf(first), "gen_ai.conversation.id"), "thread.7");
+    const evaluations = sink.evaluations();
+    assert.equal(evaluations.length, 3);
+    const [redirected, kept, unlabelled] = evaluations as [
+      OtlpLogRecord,
+      OtlpLogRecord,
+      OtlpLogRecord,
+    ];
+    assert.equal(redirected.traceId, rootOf(first).traceId);
+    assert.equal(redirected.spanId, rootOf(first).spanId);
+    assert.equal(attr(redirected, "gen_ai.evaluation.name"), "user_redirected");
+    assert.equal(attr(redirected, "gen_ai.evaluation.score.value"), true);
+    assert.equal(attr(redirected, "gen_ai.evaluation.score.label"), "retry");
+    assert.equal(kept.spanId, rootOf(second).spanId);
+    assert.equal(attr(kept, "gen_ai.evaluation.score.value"), false);
+    assert.equal(attr(kept, "gen_ai.evaluation.score.label"), undefined);
+    assert.equal(unlabelled.spanId, rootOf(third).spanId);
+    assert.equal(attr(unlabelled, "gen_ai.evaluation.score.value"), true);
+    assert.equal(attr(unlabelled, "gen_ai.evaluation.score.label"), undefined);
+  } finally {
+    t.mock.timers.reset();
+    setOpsSink(restore);
+    await pg.close();
+  }
+});
+
+test("without a logs endpoint, feedback is not sent", async () => {
+  const sink = collector();
+  const exporter = new OtlpExporter({
+    endpoint: "http://collector/v1/traces",
+    intervalMs: 60_000,
+    fetch: sink.post,
+  });
+  exporter.enqueueEvaluation({
+    traceId: "a".repeat(32),
+    spanId: "b".repeat(16),
+    timeNs: 1n,
+    name: "user_redirected",
+    value: true,
+  });
+  assert.equal(exporter.pending, 0);
+  await exporter.shutdown(100);
+  assert.deepEqual(sink.logs, []);
 });

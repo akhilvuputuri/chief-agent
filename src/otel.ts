@@ -1,6 +1,8 @@
 // OpenTelemetry trace export (issue #323). Runs, model calls and tool calls become
 // OTLP spans following the GenAI semantic conventions, sent as OTLP/HTTP JSON to a
-// local collector such as agentwatch. Off unless an endpoint is configured.
+// local collector such as agentwatch. Off unless an endpoint is configured. Implicit
+// feedback on a turn (the owner redirecting it) is sent as a gen_ai.evaluation.result
+// log record on that turn's trace.
 //
 // Spans carry metadata only: IDs, model and provider names, token counts, cost,
 // latency, fixed outcome names and host-defined tool names. Never prompts, replies,
@@ -33,8 +35,20 @@ export const SpanKind = { internal: 1, client: 3 } as const;
 type SpanKind = (typeof SpanKind)[keyof typeof SpanKind];
 const STATUS_ERROR = 2;
 
+/** A gen_ai.evaluation.result event about a finished span. */
+export interface ExportEvaluation {
+  traceId: string;
+  spanId: string;
+  timeNs: bigint;
+  name: string;
+  value: boolean;
+  label?: string;
+}
+
 export interface ExporterOptions {
   endpoint: string;
+  /** OTLP logs URL for evaluation results; without it they are not sent. */
+  logsEndpoint?: string;
   serviceVersion?: string;
   maxQueue?: number;
   batchSize?: number;
@@ -46,6 +60,7 @@ export interface ExporterOptions {
 /** Batches spans and posts them as OTLP/HTTP JSON. Never throws to callers. */
 export class OtlpExporter {
   private queue: ExportSpan[] = [];
+  private evaluations: ExportEvaluation[] = [];
   private sending?: Promise<void>;
   private timer?: NodeJS.Timeout;
   private dropped = 0;
@@ -80,10 +95,22 @@ export class OtlpExporter {
       setImmediate(() => void this.flush());
   }
 
+  enqueueEvaluation(evaluation: ExportEvaluation) {
+    if (!this.options.logsEndpoint) return;
+    // At most one per owner message, so a small cap is plenty.
+    if (this.evaluations.length >= this.batchSize) {
+      this.dropped++;
+      this.report();
+      return;
+    }
+    this.evaluations.push(evaluation);
+  }
+
   /** Sends what is queued, one batch at a time. Resolves when the queue is empty or a send fails. */
   flush(): Promise<void> {
     if (this.sending) return this.sending;
-    if (!this.queue.length) return Promise.resolve();
+    if (!this.queue.length && !this.evaluations.length)
+      return Promise.resolve();
     this.sending = this.drain().finally(() => {
       this.sending = undefined;
     });
@@ -93,22 +120,40 @@ export class OtlpExporter {
   private async drain() {
     while (this.queue.length) {
       const batch = this.queue.splice(0, this.batchSize);
-      try {
-        const response = await this.post(this.options.endpoint, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(encode(batch, this.options.serviceVersion)),
-          signal: AbortSignal.timeout(this.timeoutMs),
-        });
-        // The body is unused; cancel it so the connection is released.
-        await response.body?.cancel().catch(() => undefined);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      } catch {
-        // Retrying would hold memory for a collector that may stay down; drop the batch.
-        this.failed += batch.length;
+      const body = encode(batch, this.options.serviceVersion);
+      if (!(await this.send(this.options.endpoint, body, batch.length))) {
+        // Evaluations would only fail the same way; drop them with the spans.
+        this.failed += this.evaluations.length;
+        this.evaluations = [];
         this.report();
         return;
       }
+    }
+    // After the spans, so the trace an evaluation names has usually arrived first.
+    if (this.evaluations.length && this.options.logsEndpoint) {
+      const batch = this.evaluations.splice(0);
+      const body = encodeEvaluations(batch, this.options.serviceVersion);
+      if (!(await this.send(this.options.logsEndpoint, body, batch.length)))
+        this.report();
+    }
+  }
+
+  private async send(url: string, document: unknown, count: number) {
+    try {
+      const response = await this.post(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(document),
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+      // The body is unused; cancel it so the connection is released.
+      await response.body?.cancel().catch(() => undefined);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return true;
+    } catch {
+      // Retrying would hold memory for a collector that may stay down; drop the batch.
+      this.failed += count;
+      return false;
     }
   }
 
@@ -140,9 +185,9 @@ export class OtlpExporter {
     this.report(true);
   }
 
-  /** Spans waiting to be sent, for tests. */
+  /** Spans and evaluations waiting to be sent, for tests. */
   get pending() {
-    return this.queue.length;
+    return this.queue.length + this.evaluations.length;
   }
 }
 
@@ -179,6 +224,43 @@ export function encode(spans: ExportSpan[], serviceVersion?: string) {
   };
 }
 
+/** OTLP/JSON logs: one gen_ai.evaluation.result event per evaluation. */
+export function encodeEvaluations(
+  evaluations: ExportEvaluation[],
+  serviceVersion?: string,
+) {
+  return {
+    resourceLogs: [
+      {
+        resource: {
+          attributes: keyValues({
+            "service.name": "chief",
+            "service.version": serviceVersion,
+          }),
+        },
+        scopeLogs: [
+          {
+            scope: { name: "chief" },
+            logRecords: evaluations.map((e) => ({
+              timeUnixNano: String(e.timeNs),
+              eventName: EVALUATION_EVENT,
+              traceId: e.traceId,
+              spanId: e.spanId,
+              attributes: keyValues({
+                // Older receivers read the event name from this attribute.
+                "event.name": EVALUATION_EVENT,
+                "gen_ai.evaluation.name": e.name,
+                "gen_ai.evaluation.score.value": e.value,
+                "gen_ai.evaluation.score.label": e.label,
+              }),
+            })),
+          },
+        ],
+      },
+    ],
+  };
+}
+
 function keyValues(attributes: Attributes) {
   return Object.entries(attributes).flatMap(([key, value]) =>
     value === undefined ? [] : [{ key, value: anyValue(value) }],
@@ -193,6 +275,21 @@ function anyValue(value: AttributeValue): Record<string, unknown> {
   return Number.isInteger(value)
     ? { intValue: String(value) }
     : { doubleValue: value };
+}
+
+/**
+ * Resolves the logs endpoint, used for evaluation results: the logs variable, else the base
+ * URL plus `/v1/logs`, else a traces URL ending in `/v1/traces` with that ending swapped.
+ */
+export function logsEndpoint(env: NodeJS.ProcessEnv = process.env) {
+  const specific = env.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT?.trim();
+  if (specific) return httpUrl(specific);
+  const base = env.OTEL_EXPORTER_OTLP_ENDPOINT?.trim();
+  if (base) return httpUrl(`${base.replace(/\/+$/, "")}/v1/logs`);
+  const traces = env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT?.trim();
+  if (traces && /\/v1\/traces\/?$/.test(traces))
+    return httpUrl(traces.replace(/\/v1\/traces\/?$/, "/v1/logs"));
+  return undefined;
 }
 
 /** Resolves the traces endpoint from the standard OTLP environment variables. */
@@ -222,6 +319,12 @@ interface RunState {
   parentSpanId?: string;
   startNs: bigint;
   agent: string;
+  conversation?: string;
+}
+interface FinishedTurn {
+  traceId: string;
+  spanId: string;
+  endNs: bigint;
 }
 interface CallState {
   run: string;
@@ -240,6 +343,13 @@ let exporter: OtlpExporter | undefined;
 const runs = new Map<string, RunState>();
 const calls = new Map<string, CallState>();
 const models = new Map<string, ModelState>();
+// Recently finished root runs, so the owner's next message can score the turn it follows.
+const finished = new Map<string, FinishedTurn>();
+const MAX_FINISHED = 200;
+/** A message this soon after a turn ended can redirect it; the learner uses the same window. */
+export const FEEDBACK_WINDOW_MS = 6 * 3600_000;
+export const REDIRECT_EVALUATION = "user_redirected";
+const EVALUATION_EVENT = "gen_ai.evaluation.result";
 
 /** Starts exporting to `options.endpoint`. Returns the exporter for shutdown. */
 export function startTracing(options: ExporterOptions) {
@@ -254,6 +364,7 @@ export async function stopTracing(deadlineMs = 1000) {
   runs.clear();
   calls.clear();
   models.clear();
+  finished.clear();
   await current?.shutdown(deadlineMs);
 }
 
@@ -262,8 +373,13 @@ export const tracingEnabled = () => exporter !== undefined;
 const nowNs = () => BigInt(Date.now()) * 1_000_000n;
 const spanId = () => randomBytes(8).toString("hex");
 
-function remember<T>(map: Map<string, T>, key: string, value: T) {
-  if (map.size >= MAX_OPEN) {
+function remember<T>(
+  map: Map<string, T>,
+  key: string,
+  value: T,
+  max = MAX_OPEN,
+) {
+  if (map.size >= max) {
     const oldest = map.keys().next().value;
     if (oldest !== undefined) map.delete(oldest);
   }
@@ -412,6 +528,15 @@ function runStopped(run: string, reason: string, taskId?: string) {
   const state = runs.get(run);
   if (!state || !exporter) return;
   runs.delete(run);
+  const endNs = nowNs();
+  // Only conversation turns: background runs must not evict the turn the owner answers next.
+  if (!state.parentSpanId && state.conversation)
+    remember(
+      finished,
+      run,
+      { traceId: state.traceId, spanId: state.spanId, endNs },
+      MAX_FINISHED,
+    );
   exporter.enqueue({
     traceId: state.traceId,
     spanId: state.spanId,
@@ -419,17 +544,68 @@ function runStopped(run: string, reason: string, taskId?: string) {
     name: `invoke_agent ${state.agent}`,
     kind: SpanKind.internal,
     startNs: state.startNs,
-    endNs: nowNs(),
+    endNs,
     error: reason === "failed",
     attributes: {
       "gen_ai.operation.name": "invoke_agent",
       "gen_ai.agent.name": state.agent,
+      "gen_ai.conversation.id": state.conversation,
       "chief.run_id": run,
       "chief.task_id": taskId,
       "chief.stop_reason": nameValue(reason),
       "error.type": reason === "failed" ? "failed" : undefined,
     },
   });
+}
+
+/** Names the conversation a run belongs to, such as a Telegram thread. */
+export function runConversation(run: string, conversation: string) {
+  if (!exporter) return;
+  try {
+    const state = runs.get(run);
+    const id = codeValue(conversation);
+    if (state && id) state.conversation = id;
+  } catch {
+    /* Tracing is not the action ledger. */
+  }
+}
+
+/**
+ * Records whether the owner's message redirected the turn `previousRun` answered: a
+ * `user_redirected` evaluation on that turn's root span, true with the kind of redirect as
+ * label, or false. `judge` returns the redirect, null for none, or undefined when the
+ * message says nothing about the answer (the turn then waits for the next message). Only
+ * the first message after a turn counts, within the feedback window, and only for a
+ * conversation turn this process exported. `superseded` is a turn this message follows
+ * without answering it (the owner replied to an older message instead): its chance passes.
+ */
+export function turnFeedback(
+  previousRun: string,
+  judge: () => string | null | undefined,
+  superseded?: string,
+) {
+  if (!exporter) return;
+  try {
+    const redirect = judge();
+    if (redirect === undefined) return;
+    if (superseded && superseded !== previousRun) finished.delete(superseded);
+    const turn = finished.get(previousRun);
+    if (!turn) return;
+    finished.delete(previousRun);
+    const now = nowNs();
+    if (now - turn.endNs > BigInt(FEEDBACK_WINDOW_MS) * 1_000_000n) return;
+    const label = redirect === null ? undefined : nameValue(redirect);
+    exporter.enqueueEvaluation({
+      traceId: turn.traceId,
+      spanId: turn.spanId,
+      timeNs: now,
+      name: REDIRECT_EVALUATION,
+      value: redirect !== null,
+      ...(label ? { label } : {}),
+    });
+  } catch {
+    /* Tracing is not the action ledger. */
+  }
 }
 
 export function callStarted(
