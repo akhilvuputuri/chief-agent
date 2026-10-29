@@ -5,6 +5,8 @@
     "moduleResolution": "NodeNext",
     "strict": true,
     "skipLibCheck": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
     "noUncheckedIndexedAccess": true,
     "rootDir": "src",
     "outDir": "dist",
