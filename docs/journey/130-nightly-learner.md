@@ -58,4 +58,4 @@ Not done: no production run, no measurement of what it learns, cost per run or e
 
 ## Follow-up and next iteration
 
-After the phase 1 rollout and this release: check the first night's `learner.finished` counts and charges, and read what it wrote (`memory_revisions` with `origin='learned'`). Phase 3 adds the weekly digest with undo, reaction intake (a 👎 veto) and skills drafted from two independent successes.
+After the phase 1 rollout and this release: check the first night's `learner.finished` counts and charges, and read what it wrote (`memory_revisions` with `origin='learned'`). Phase 3 adds the weekly digest with undo and skills drafted from two independent successes. The owner decided on 29 October not to use reactions or any other manual labelling, so outcomes come only from task proof and corrections in the owner's next message.

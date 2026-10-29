@@ -171,6 +171,11 @@ services:
       TTS_MODEL: ${TTS_MODEL:-tts-1}
       TTS_VOICE: ${TTS_VOICE:-alloy}
       VOICE_REPLIES: ${VOICE_REPLIES:-false}
+      # Trace export to the agentwatch service below (docs/tracing.md). In .env, an empty
+      # CHIEF_TRACE_ENDPOINT turns export off and CHIEF_TRACE_CONTENT=false keeps message
+      # content out; either takes effect when the gateway is recreated.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${CHIEF_TRACE_ENDPOINT-http://agentwatch:4318}
+      OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: ${CHIEF_TRACE_CONTENT:-true}
     ports: ["127.0.0.1:3000:3000"]
     networks: [default, browser-control]
     depends_on:
@@ -245,7 +250,34 @@ services:
       timeout: 3s
       retries: 3
     restart: unless-stopped
+  agentwatch:
+    # Trace viewer for issue #323 (github.com/akhilvuputuri/agentwatch), pinned by digest.
+    # The gateway reaches it as agentwatch:4318; the host publishes it on loopback only, for
+    # an SSH tunnel (docs/lightsail.md). The gateway does not depend on it.
+    image: ghcr.io/akhilvuputuri/agentwatch@sha256:a74e529eb00bc289fc24071029d834c00d4a01b05c887ee08fd319bd3e3bf69f
+    command:
+      [
+        "serve",
+        "--host",
+        "0.0.0.0",
+        "--allow-host",
+        "agentwatch",
+        "--retain-days",
+        "90",
+        "--memory-limit",
+        "256MB",
+      ]
+    volumes: ["agentwatch-data:/data"]
+    ports: ["127.0.0.1:4318:4318"]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 512m
+    stop_grace_period: 15s
+    restart: unless-stopped
 networks:
   browser-control: { internal: true }
 volumes:
   postgres-data:
+  agentwatch-data:

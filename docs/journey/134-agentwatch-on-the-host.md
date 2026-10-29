@@ -86,6 +86,26 @@ Smaller fixes:
 - output messages carry `finish_reason`;
 - the docs say which root output is shown and that the owner's email and calendar content is exported once content is on.
 
+### The host rollout
+
+`compose.yaml` adds the `agentwatch` service. It runs the GHCR image built and smoke-tested from agentwatch `918e8a3` and is pinned by digest `sha256:a74e529e…`. It:
+
+- runs with 90-day retention, DuckDB at 256 MB and a 512 MB container limit;
+- is read-only with no capabilities;
+- is published on the host's loopback only.
+
+The gateway gets `OTEL_EXPORTER_OTLP_ENDPOINT` (`${CHIEF_TRACE_ENDPOINT-http://agentwatch:4318}`) and the content opt-in (`${CHIEF_TRACE_CONTENT:-true}`). An empty endpoint or `false` in `.env` is a kill switch that needs no new rollout, only a gateway recreate.
+
+Because the release guard refuses Compose changes, [scripts/deploy-agentwatch.py](../../scripts/deploy-agentwatch.py) installs it, with the same exact-commit archive checks as the migration rollouts. It refuses any `db/` or release-handler change and any Compose change except the reviewed edits. It:
+
+1. pulls the image before stopping anything;
+2. starts agentwatch while the gateway keeps serving;
+3. checks again that Chief is idle;
+4. recreates the gateway;
+5. checks that the gateway can reach agentwatch.
+
+On failure it restores the gateway first, then removes agentwatch and keeps its volume. Offline tests: `scripts/test-deploy-agentwatch.py` (20 cases). Procedure: [lightsail](../lightsail.md#traces-agentwatch).
+
 ## Verification and outcome
 
 Pending. Next:

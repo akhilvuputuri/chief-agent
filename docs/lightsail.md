@@ -59,6 +59,36 @@ Queries scan data and are billed per GB scanned. The window limits are cost cont
 
 To correlate a report: find the time in Singapore time, then run `errors` for a window around it, then `run --run <id>` for the run it names. A missing line is not proof of success. Check `heartbeat` or `host` for exporter or gateway gaps, and use authorized Postgres inspection for the authoritative record.
 
+## Traces (agentwatch)
+
+The `agentwatch` Compose service ([agentwatch](https://github.com/akhilvuputuri/agentwatch), issue #323) receives the gateway's OpenTelemetry traces, including message content ([tracing](tracing.md#message-content)), and keeps them for 90 days in the `agentwatch-data` volume. The image is pinned by digest in `compose.yaml`. It runs as a non-root user, read-only apart from its volume and `/tmp`, without capabilities, under a 512 MB memory limit, with DuckDB capped at 256 MB. The gateway reaches it as `agentwatch:4318` and does not depend on it: if agentwatch is down, export drops spans and logs `trace.export_dropped` once a minute, and turns are unaffected.
+
+It is published on the host's loopback only, and it has no login. To view it, open a tunnel from the operator machine and browse to <http://localhost:14318> (a local port other than 4318, so it cannot collide with a local agentwatch):
+
+```sh
+ssh -F ../hermes-companion-ops/ssh_config -N -L 14318:127.0.0.1:4318 chief-lightsail
+```
+
+Anyone who can open that tunnel, or has a shell on the host, can read the owner's conversations there, as they could the database. Other containers on the Compose network can reach it too; none of them fetches arbitrary URLs from that network. The traces are not in the nightly encrypted backup, which covers Postgres only; losing the volume loses telemetry, not the action ledger.
+
+Run these on the host as the operator, from `/opt/hermes-companion` so Compose reads its `.env`, and recreate the gateway only when it is idle:
+
+- **Turn export off:** set `CHIEF_TRACE_ENDPOINT=` (empty) in `.env`, then `sudo -n docker compose -p hermes-companion up -d --no-deps --no-build gateway`.
+- **Keep content out:** set `CHIEF_TRACE_CONTENT=false` the same way. An empty `CHIEF_TRACE_CONTENT=` means on. Both take effect only when the gateway is recreated.
+- **Stop agentwatch:** `sudo -n docker compose -p hermes-companion stop agentwatch`; the gateway keeps running.
+- **Delete the traces:** `sudo -n docker compose -p hermes-companion rm -sf agentwatch`, then `sudo -n docker volume rm hermes-companion_agentwatch-data`. The next `up -d agentwatch` starts empty.
+- **Upgrade:** a new digest in `compose.yaml` is a Compose change, so it needs a reviewed operator rollout like [scripts/deploy-agentwatch.py](../scripts/deploy-agentwatch.py).
+
+The first install was [scripts/deploy-agentwatch.py](../scripts/deploy-agentwatch.py), run by the operator with an exact-commit archive, as for migrations. It:
+
+1. builds the candidate gateway and pulls the agentwatch image;
+2. checks health and that no work is running;
+3. starts agentwatch, waits until it is healthy, and sends one span labelled `chief-rollout-check` and reads it back, all while the gateway keeps serving;
+4. checks again that no work started;
+5. recreates the gateway with the export variables and checks that it can reach agentwatch.
+
+On failure it restores the previous gateway and Compose file first, then removes the agentwatch container, keeping its volume. If work starts while agentwatch is starting, it removes agentwatch, leaves the gateway untouched, and asks to retry when idle.
+
 ## Installing or rebuilding the host
 
 Run as the operator from a reviewed source tree. It can be re-run on a live host, for example to upgrade the agent. The base bootstrap (Docker packages, firewall, SSH hardening) runs only on first install. journald and Docker are restarted only when their configuration changed, and a Docker configuration change is refused while containers are running. Ubuntu security updates to `docker.io` through unattended-upgrades can still restart the daemon; the containers' `unless-stopped` policy brings them back, and recovery marks interrupted calls.
@@ -66,6 +96,8 @@ Run as the operator from a reviewed source tree. It can be re-run on a live host
 ```sh
 sudo CWAGENT_VERSION=1.300073.0b1828 deploy/lightsail/install-host.sh
 ```
+
+A rebuilt host also needs `docker compose -p hermes-companion up -d agentwatch` once the application is running; the cutover steps below start only Postgres and the gateway.
 
 The script installs Docker, Compose, Caddy and the ingress routes, journald limits, the Docker log driver, the exporter, host health, logrotate, the CloudWatch agent, and the backup units. It does not start the gateway or write application secrets. It then prints the installed package versions. Separately, the operator:
 
