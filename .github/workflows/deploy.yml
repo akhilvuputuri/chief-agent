@@ -5,6 +5,11 @@ on:
     types: [completed]
     branches: [main]
   workflow_dispatch:
+    inputs:
+      host_build:
+        description: Build the image on the host instead of pulling the CI-built one (fallback)
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -73,13 +78,13 @@ jobs:
         run: kite ci
       - if: github.event_name == 'workflow_dispatch'
         run: kite run format:check && kite run check && kite run build
-      # The checks workflow published this commit's gateway image. Until the host's
-      # release handler accepts a digest, this only proves the lookup and the
-      # provenance check on real releases; it does not change what is deployed.
+      # The checks workflow published this commit's gateway image. Its provenance must
+      # verify, and the host deploys exactly the digest verified here. A manual release
+      # can ask the host to build instead (host_build).
       - name: Find and verify the CI-built gateway image
         id: image
-        continue-on-error: true
-        timeout-minutes: 2
+        if: ${{ !inputs.host_build }}
+        timeout-minutes: 3
         env:
           RELEASE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
           REPO: ${{ github.repository }}
@@ -98,6 +103,8 @@ jobs:
           DEPLOY_KEY: ${{ secrets.COMPANION_DEPLOY_KEY }}
           KNOWN_HOSTS: ${{ secrets.COMPANION_KNOWN_HOSTS }}
           DEPLOY_HOST: ${{ vars.CHIEF_DEPLOY_HOST }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+          HOST_BUILD: ${{ inputs.host_build }}
         run: |
           set -euo pipefail
           test -n "$DEPLOY_KEY"
@@ -109,9 +116,16 @@ jobs:
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/companion ~/.ssh/known_hosts
           trap 'rm -f ~/.ssh/companion' EXIT
-          # The host builds the image with its output captured, so the session is silent for
-          # minutes; keepalives stop the runner's network dropping it as idle.
-          git archive HEAD | ssh -i ~/.ssh/companion -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=20 "root@${DEPLOY_HOST}" "deploy $(git rev-parse HEAD)"
+          # The host pulls the verified digest, or builds when a manual release asks; either
+          # can be silent for minutes, so keepalives stop the runner dropping the session.
+          command="deploy $(git rev-parse HEAD)"
+          if [ -n "$DIGEST" ]; then
+            [[ $DIGEST =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "Invalid image digest" >&2; exit 1; }
+            command="$command $DIGEST"
+          elif [ "$HOST_BUILD" != true ]; then
+            echo "No verified image digest" >&2; exit 1
+          fi
+          git archive HEAD | ssh -i ~/.ssh/companion -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=20 "root@${DEPLOY_HOST}" "$command"
 
   report:
     needs: [announce, deploy]
