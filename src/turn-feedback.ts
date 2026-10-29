@@ -16,19 +16,22 @@ const RETRY = new RegExp(
     String.raw`(?:try (?:it |that )?(?:again|once more)|retry|regenerate|redo(?: it| that| this)?|start over|one more time|do (?:it|that|this) (?:again|differently)|(?:do|try|give me|show me|suggest) (?:something|someone|somewhere) (?:else|different))\b`,
   "i",
 );
-// Shorter requests that are retries only as a whole short message: "again", "another one",
-// "something different". As the start of a longer one they usually ask for something new.
+// Shorter requests that are retries only as the whole message: "again", "another one",
+// "something different, please". Followed by more, they usually ask for something new.
 const SHORT_RETRY = new RegExp(
   LEAD_IN +
-    String.raw`(?:again|(?:something|someone|somewhere) (?:else|different)|(?:a |an )?(?:different|another|other) (?:way|approach|answer|option|one|idea|suggestion)s?)\b`,
+    String.raw`(?:again|(?:something|someone|somewhere) (?:else|different)|(?:a |an )?(?:different|another|other) (?:way|approach|answer|option|one|idea|suggestion)s?)(?:[\s,]+(?:please|pls|then))?[\s.!?]*$`,
   "i",
 );
 const SHORT_WORDS = 8;
 const UNCAPTIONED = /^The user sent this \w+ without a caption\.$/;
+// A request for another attempt anywhere in the opening.
+const ATTEMPT =
+  /\b(try (it |that )?(again|once more)|retry|redo|one more time|start over|do (it|that|this) again)\b/i;
 // "Do it again next week", "redo the calendar for Friday too": a repeat or an extension, not
 // a rejection of the answer.
 const EXTENSION =
-  /\b(next|tomorrow|tonight|weekly|daily|every|too|also|as well|for (mon|tues|wednes|thurs|fri|satur|sun)day|on (mon|tues|wednes|thurs|fri|satur|sun)day)\b/i;
+  /\b(next|later|tomorrow|tonight|weekly|daily|every|too|also|as well|for (mon|tues|wednes|thurs|fri|satur|sun)day|on (mon|tues|wednes|thurs|fri|satur|sun)day)\b/i;
 
 // Function words that say nothing about what was asked.
 const STOP = new Set(
@@ -48,7 +51,8 @@ const contentWords = (text: string) =>
     text
       .toLowerCase()
       .split(/[^\p{L}\p{N}]+/u)
-      .filter((w) => w.length > 1 && !STOP.has(w)),
+      // Single digits count: "a table for 2" and "for 4" are different requests.
+      .filter((w) => (w.length > 1 || /\d/.test(w)) && !STOP.has(w)),
   );
 
 /**
@@ -88,10 +92,12 @@ export function redirectOf(
   if (!text || (words.attached && UNCAPTIONED.test(text))) return undefined;
   const opening = text.slice(0, 160);
   const short = text.split(/\s+/).length <= SHORT_WORDS;
-  if (
-    (RETRY.test(opening) || (short && SHORT_RETRY.test(opening))) &&
-    !EXTENSION.test(text)
-  )
+  if (EXTENSION.test(text)) {
+    // "Thanks, try again tomorrow" or "redo it for next week too" asks for a later or
+    // further attempt and rejects nothing, so it is not a correction either, although the
+    // learner's pattern would call it one.
+    if (ATTEMPT.test(opening)) return null;
+  } else if (RETRY.test(opening) || (short && SHORT_RETRY.test(text)))
     return "retry";
   if (isCorrection(text, (previousReply ?? "").trim().endsWith("?")))
     return "correction";

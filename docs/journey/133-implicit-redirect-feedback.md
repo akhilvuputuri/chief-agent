@@ -58,7 +58,7 @@ Independent review (Opus 5.5) of `275997e` found nothing blocking. Its should-fi
   - "from scratch" was dropped;
   - "retry", "regenerate" and "try once more" were added.
 - **A one-word change counted as a rephrase.** "…Hyderabad tomorrow morning and evening" after "…today…", and "…about orders" after "…about returns", both did. A single swapped word, or a change only in dates, days and numbers, is now a new request. The threshold rose from 60% to 70%.
-- **Forwards and uncaptioned photos scored `false`.** They have none of the owner's words. They now score nothing, and the turn waits for the next message.
+- **Forwards and uncaptioned photos scored `false`.** They have none of the owner's words, so they now score nothing.
 - **A reply to an older message broke "first message only".** The turn before it stayed scorable by the owner's second message. Now the reply passes over it.
 
 Nits fixed:
@@ -67,9 +67,18 @@ Nits fixed:
 - background runs no longer take places in the 200-turn memory;
 - queue overflow is documented under `abortedCount`.
 
+Re-review of `469197c` approved it. Two further should-fix findings were corrected in the next commit:
+
+- **Single digits were dropped before the number rule saw them.** As a result, "a table for 2" after "for 4" counted as a rephrase. Single digits now count as content words.
+- **The extension guard was undone by the correction step.** "Thanks, try again later if it fails" and "Try again tomorrow morning" were labelled `correction` by the learner's pattern. A request for another attempt that comes with a time or an extension now ends as "not a redirect" before the correction step. The learner's own definition is unchanged.
+
+Nits from that round were also addressed. A short retry ("another one") must now be the whole message, so "Another idea: add a reminder…" is no longer a retry. The wording about forwards was corrected: the turn before a forward gets no score, and does not wait.
+
 Recorded as limits, not changed:
 
-- "redo" stays a correction, as in the learner;
+- "redo" without a time or extension stays a correction, as in the learner;
+- a retry verb followed by a new object ("retry the payment for the bill") still counts as a retry;
+- "too long, shorter please" is not detected;
 - interrupted turns are not scored;
 - a reply to an older message is not checked for a rephrase.
 

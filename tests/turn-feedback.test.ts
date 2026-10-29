@@ -31,6 +31,10 @@ test("new requests that mention another or again are not retries", () => {
     "thanks! do it again next week",
     "perfect, do that again for Friday",
     "again the same problem with my laptop, it won't charge at all",
+    "Another idea: add a reminder for mum",
+    "Try again tomorrow morning",
+    "Thanks, try again later if it fails",
+    "redo the calendar for next week too",
   ])
     assert.equal(redirectOf(text, "book a table", "Done."), null, text);
 });
@@ -45,9 +49,9 @@ test("corrections use the learner's definition", () => {
     null,
   );
   assert.equal(redirectOf("no", "remind me", "Reminder set."), "correction");
-  // Shared with the learner as is, which counts any "redo" as a correction.
+  // Shared with the learner as is, which counts "redo" anywhere as a correction.
   assert.equal(
-    redirectOf("redo the calendar for next week too", "x", "Done."),
+    redirectOf("thanks, but redo the summary", "x", "Done."),
     "correction",
   );
 });
@@ -98,6 +102,21 @@ test("asking the same thing in other words is a rephrase", () => {
     ),
     false,
   );
+  for (const [now, before] of [
+    [
+      "weather forecast for Hyderabad on 5 March",
+      "weather forecast for Hyderabad on 4 March",
+    ],
+    [
+      "book a table for 2 at Olive Bistro tonight please",
+      "book a table for 4 at Olive Bistro tonight please",
+    ],
+    [
+      "set a reminder to call mum at 6 pm",
+      "set a reminder to call mum at 7 pm",
+    ],
+  ])
+    assert.equal(isRephrase(now!, before!), false, now);
   // Too short to judge.
   assert.equal(isRephrase("weather tokyo", "weather in tokyo"), false);
 });
