@@ -1,3 +1,21 @@
+## Deployed `bc4c5c0` (untagged) — implicit redirect feedback on traces (#323 phase 4)
+
+- **What merged.** [PR 355](https://github.com/akhilvuputuri/chief-agent/pull/355) merged as `bc4c5c09e077eb22bd32ee2c1f295c6de730e941` (version unchanged). The owner does not rate answers. When trace export is on, the owner's next message after a turn is checked against it with text patterns, with no model call: a retry, a correction (the learner's `isCorrection`) or a rephrase. The result becomes a `user_redirected` `gen_ai.evaluation.result` on that turn's root span: true with a fixed label, or false. Root spans carry `gen_ai.conversation.id` (`thread.<n>`). Only a fixed name, a boolean and a label leave the process. No migration.
+- **Review.** Independent review (Claude Opus 5.5) found nothing blocking on `275997e`, but its should-fix findings drove three more rounds:
+  - **Retries:** ordinary requests counted as retries ("add another one for Tuesday", "do it again next week"), and a follow-up message could exceed the "first message only" rule.
+  - **Rephrases:** a single swapped word or digit counted as a rephrase.
+  - **Corrections:** an over-broad fix then dropped real corrections that mention a time.
+  - **Messages without owner words:** forwards and uncaptioned photos were scored.
+
+  Each counterexample is now a test. The reviewer approved the exact head `8db624b`, on which hosted CI passed.
+
+- **Release.** The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/40845451244) deployed the exact commit at 09:01 UTC on 29 October, and startup health passed.
+- **Pending:**
+  - Nothing runs in production until an endpoint is configured, which needs an owner decision.
+  - How often the rules fire or misfire on real messages is unmeasured.
+
+[Journal 133](journey/133-implicit-redirect-feedback.md#release-closure--2026-10-29).
+
 ## Deployed `260c94c` in `b6e1071`, now `845595e` (untagged) — learning from conversation turns (#326)
 
 - **What merged.** [PR 349](https://github.com/akhilvuputuri/chief-agent/pull/349) merged as `260c94c` (version unchanged). The learner's first night reviewed 7 tasks and skipped all of them (six routines, one cancelled), because most owner requests never become a tracked task. Each run now also labels up to 30 ordinary conversation turns: success when answered and not corrected in the owner's next message within six hours, pitfall when corrected, with the correction kept as quotable owner evidence. Evidence sizes are generous for now (owner's choice): about 8,000 characters a turn and 12,000 a task. Prompt `learner-v2`. No migration.

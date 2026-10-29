@@ -139,7 +139,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 28 October | [130 — Nightly learner](130-nightly-learner.md): can Chief learn from finished work without being asked? | Released in `d7df9aa`: issue #326 phase 2. Labels finished tasks, runs one bounded model review a night with learning tools only, checks every proposal on the host and applies accepted items with provenance |
 | 29 October | [131 — OpenTelemetry trace export](131-otel-trace-export.md): can Chief's runs be viewed as standard traces without risking a turn? | Released in `7ba6831`: issue #323 phase 1, Chief's half. Runs, model calls and tool calls export as OTLP GenAI spans when an endpoint is set; off in production |
 | 29 October | [132 — CI-built gateway image](132-ci-built-gateway-image.md): can a release stop building on the production host? | In review: CI publishes the gateway image; the handler can pull by digest; operator install and switch-over pending |
-| 29 October | [133 — Implicit redirect feedback](133-implicit-redirect-feedback.md): can Chief tell which answers missed without the owner rating them? | In review: issue #323 phase 4. The owner's next message (retry, correction or rephrase) becomes a `user_redirected` score on the earlier turn's trace; text patterns only, export off in production |
+| 29 October | [133 — Implicit redirect feedback](133-implicit-redirect-feedback.md): can Chief tell which answers missed without the owner rating them? | Released in `bc4c5c0`: issue #323 phase 4. The owner's next message (retry, correction or rephrase) becomes a `user_redirected` score on the earlier turn's trace; text patterns only, export off in production |
 
 ## Coding-agent learning path
 
