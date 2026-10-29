@@ -139,3 +139,20 @@ export function withJev(
     ? "pushback"
     : null;
 }
+
+/**
+ * Whether Jev's answer is about the exchange being scored. Jev is shown the latest turns of
+ * the owner's whole history, which can be another thread's, or end in a proactive message;
+ * so its answer counts only when the owner is answering the latest exchange here and that
+ * is also the last turn Jev saw, with a reply.
+ */
+export function jevSawExchange(
+  replyTarget: { runId: string } | null | undefined,
+  lastHere: { runId: string; request?: string | null } | null | undefined,
+  shown: { user: string; assistant: string } | undefined,
+) {
+  if (!lastHere?.request || !shown?.assistant) return false;
+  if (replyTarget && replyTarget.runId !== lastHere.runId) return false;
+  const head = (text: string) => text.trim().slice(0, 200);
+  return head(shown.user) === head(lastHere.request);
+}

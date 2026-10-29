@@ -55,7 +55,7 @@ import type { JobTools } from "./tools.js";
 import { emptySelection, MemoryStore } from "./memory.js";
 import { runFamily } from "./run-family.js";
 import * as otel from "./otel.js";
-import { redirectOf, withJev } from "./turn-feedback.js";
+import { jevSawExchange, redirectOf, withJev } from "./turn-feedback.js";
 import { recordPickerCheck, type ShadowDecisions } from "./shadow.js";
 import {
   shouldEscalate,
@@ -731,12 +731,12 @@ export class Assistant {
           : undefined;
       if (!background) {
         // Implicit feedback (#323): does this message redirect the answer it follows? The
-        // text rules decide; Jev's answer from the effort decision is a second opinion when
-        // the owner is answering the latest exchange, since that is what Jev was shown.
+        // text rules decide; Jev's answer from the effort decision is a second opinion, used
+        // only when the exchange scored is the one Jev was shown.
         const target = conversation.replyTarget;
         const last = conversation.lastExchangeHere;
         const previous = target?.runId ?? last?.runId;
-        const latest = !target || target.runId === last?.runId;
+        const latest = jevSawExchange(target, last, previousTurns.at(-1));
         const apply = this.effort?.config.redirect?.apply;
         if (previous && previous !== run && otel.tracingEnabled())
           void Promise.resolve(latest ? effortDecided : undefined)
