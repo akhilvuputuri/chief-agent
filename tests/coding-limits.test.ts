@@ -49,3 +49,108 @@ test("checkpoints and publishing accept large changes: 1 MB files, 500 files, 10
     /exceeds supported size/,
   );
 });
+
+test("a Pi session entry may be as large as one model request", async (t) => {
+  const { fixture, settings } = await import("./helpers/coding-fixture.js");
+  const f = await fixture(t);
+  const started = await f.start("big-session", "plan");
+  await f.c.tick();
+  let job = await f.row(started.id);
+  await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
+    job.id,
+    JSON.stringify({
+      ...settings,
+      runtime: "pi",
+      squad: false,
+      autoMerge: false,
+    }),
+  ]);
+  job = await f.row(job.id);
+  const scope = "e".repeat(64);
+  // A message carrying a ~1 MB file write: over the old 512 KB entry bound.
+  const big = {
+    type: "message",
+    id: "m1",
+    message: { role: "assistant", content: "x".repeat(1_000_000) },
+  };
+  await f.c.piSessionAppend(job, {
+    scope,
+    after: 0,
+    entries: [{ type: "session", id: "s" }, big],
+  });
+  await assert.rejects(
+    f.c.piSessionAppend(job, {
+      scope,
+      after: 2,
+      entries: [
+        {
+          ...big,
+          id: "m2",
+          message: { role: "assistant", content: "x".repeat(4_200_000) },
+        },
+      ],
+    }),
+    /exceeds supported size/,
+  );
+});
+
+test("large files are published as their own blobs; small ones stay inline", async () => {
+  const { generateKeyPairSync } = await import("node:crypto");
+  const { GitHubPublisher } = await import("../src/coding/github.js");
+  const key = generateKeyPairSync("rsa", { modulusLength: 2048 })
+    .privateKey.export({ type: "pkcs8", format: "pem" })
+    .toString();
+  const calls: { path: string; body?: any }[] = [];
+  const transport: any = async (url: string, options: any) => {
+    const path = new URL(url).pathname;
+    const body = options.body ? JSON.parse(options.body) : undefined;
+    calls.push({ path, body });
+    let data: any;
+    if (path.endsWith("/access_tokens"))
+      data = {
+        token: "t",
+        expires_at: new Date(Date.now() + 3600000).toISOString(),
+      };
+    else if (path.endsWith("/git/commits/" + "a".repeat(40)))
+      data = { tree: { sha: "base-tree" } };
+    else if (path.endsWith("/git/trees/base-tree"))
+      data = { tree: [], truncated: false };
+    else if (path.endsWith("/git/blobs")) data = { sha: "blob-sha" };
+    else if (path.endsWith("/git/trees")) data = { sha: "candidate-tree" };
+    else throw new Error(`Unexpected ${path}`);
+    return new Response(JSON.stringify(data), { status: 200 });
+  };
+  const publisher = new GitHubPublisher(
+    "example/repo",
+    "1",
+    "2",
+    key,
+    { name: "F", email: "f@example.com" },
+    transport,
+  );
+  const tree = await (publisher as any).candidateTree({
+    base_sha: "a".repeat(40),
+    result: {
+      checkpoint: {
+        files: [
+          { path: "docs/big.md", content: "b".repeat(300_000) },
+          { path: "docs/small.md", content: "small\n" },
+        ],
+      },
+    },
+  });
+  assert.equal(tree, "candidate-tree");
+  const blobs = calls.filter((c) => c.path.endsWith("/git/blobs"));
+  assert.equal(blobs.length, 1);
+  assert.equal(blobs[0]!.body.content.length, 300_000);
+  const posted = calls.find(
+    (c) => c.path.endsWith("/git/trees") && c.body,
+  )!.body;
+  assert.deepEqual(
+    posted.tree.map((e: any) => [e.path, e.sha ?? null, e.content ?? null]),
+    [
+      ["docs/big.md", "blob-sha", null],
+      ["docs/small.md", null, "small\n"],
+    ],
+  );
+});

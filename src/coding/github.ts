@@ -29,6 +29,8 @@ export function artifactHash(c: Checkpoint) {
     )
     .digest("hex");
 }
+/** Files larger than this are uploaded as separate blobs when the candidate tree is built. */
+const LARGE_BLOB = 256_000;
 export function validateFiles(files: Checkpoint["files"]) {
   const paths = new Set<string>();
   for (const f of files) {
@@ -144,14 +146,15 @@ export class GitHubPublisher implements RepositoryPublisher {
     method = "GET",
     body?: unknown,
     signal?: AbortSignal,
+    timeoutMs = 20000,
   ) {
     const response = await this.transport(
       `https://api.github.com/repos/${this.repository}/${path}`,
       {
         method,
         signal: signal
-          ? AbortSignal.any([signal, AbortSignal.timeout(20000)])
-          : AbortSignal.timeout(20000),
+          ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+          : AbortSignal.timeout(timeoutMs),
         headers: {
           Authorization: `Bearer ${await this.credential()}`,
           Accept: "application/vnd.github+json",
@@ -226,11 +229,30 @@ export class GitHubPublisher implements RepositoryPublisher {
         throw new Error("Only regular files may be changed");
       if (file.content === null && !prior)
         throw new Error("Cannot delete an absent file");
+      // Large files go up as their own blobs, so one tree request never carries megabytes.
+      const blob =
+        file.content !== null && file.content.length > LARGE_BLOB
+          ? String(
+              (
+                await this.api(
+                  "git/blobs",
+                  "POST",
+                  { content: file.content, encoding: "utf-8" },
+                  signal,
+                  120_000,
+                )
+              ).sha,
+            )
+          : undefined;
       tree.push({
         path: file.path,
         mode: file.mode ?? prior?.mode ?? "100644",
         type: "blob",
-        ...(file.content === null ? { sha: null } : { content: file.content }),
+        ...(file.content === null
+          ? { sha: null }
+          : blob
+            ? { sha: blob }
+            : { content: file.content }),
       });
     }
     if (!tree.length) throw new Error("Candidate has no changes");
@@ -239,6 +261,7 @@ export class GitHubPublisher implements RepositoryPublisher {
       "POST",
       { base_tree: commit.tree.sha, tree },
       signal,
+      120_000,
     );
     return String(created.sha);
   }
