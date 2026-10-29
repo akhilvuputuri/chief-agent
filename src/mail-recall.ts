@@ -329,6 +329,8 @@ export class MailIndex {
   private topping?: Promise<boolean>;
   /** The start-up listing is still indexing; top-ups wait so no message is read twice. */
   private catchingUp = false;
+  /** The last start-up listing failed after a load; its failure was logged instead of a build. */
+  private catchUpFailed = false;
   private persistWarned = false;
   private nextRead = 0;
   private quotaPauses = 0;
@@ -394,9 +396,11 @@ export class MailIndex {
       const started = this.now();
       const tokens = this.embedder.tokens ?? 0;
       this.state = "building";
+      this.catchUpFailed = false;
       this.building = this.backfill().then(
         () => {
           this.state = "ready";
+          if (this.catchUpFailed) return;
           opsLog("mail_index.built", "info", {
             messages: this.indexed.size,
             omittedCount: this.abandoned + this.pending.size,
@@ -486,6 +490,7 @@ export class MailIndex {
     } catch (error) {
       // A loaded index keeps answering; the next start or top-up lists again.
       if (!loaded) throw error;
+      this.catchUpFailed = true;
       opsLog("mail_index.catch_up_failed", "warn", {
         ...errorFields(error),
         ...(error instanceof DependencyError

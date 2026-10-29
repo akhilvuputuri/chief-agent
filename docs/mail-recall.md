@@ -46,7 +46,7 @@ While the index is building, or after a failed build, the tool returns `building
 ## Privacy
 
 - The index sends the text of every message in the window to the embedding provider through OpenRouter, not only the messages the agent reads. The owner accepted this for the MVP on 25 October 2026. The agent's own model calls already send the emails it reads.
-- Chunk text stays in gateway memory only. With migration 033, Postgres stores each indexed message's headers (sender, subject, date), Gmail's 120-character snippet and the chunk vectors, but no email body text. The owner chose this on 29 October 2026. Vectors are derived from the text, so they are not anonymous.
+- Chunk text stays in gateway memory only. With migration 033, Postgres stores each indexed message's headers (sender, subject, date), Gmail's snippet and the chunk vectors. That is no body text beyond Gmail's snippet, which previews the body's first ~120 characters. The owner chose this on 29 October 2026. These rows are also in the database backups. Vectors are derived from the text, so they are not anonymous.
 - Nothing from the index goes to the operational log or the repository.
 - What `gmail_recall` returns to the agent is stored like every other Gmail tool result (`runtime_calls`): the query and up to ten senders, subjects, dates and 300-character excerpts.
 - Results carry the untrusted-content warning, and email text remains data, never instructions.
@@ -101,11 +101,11 @@ It then writes every indexed chunk with its headers. The Python eval in [evals/m
 
 **Tables** (owner-scoped):
 
-| Table                 | Holds                                                                                                                        |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `mail_index_messages` | message and thread IDs, received time, sender, subject, date header and Gmail's snippet                                      |
-| `mail_index_chunks`   | one 512-value little-endian float32 vector per chunk; rows cascade with their message                                        |
-| `mail_index_state`    | the configuration the vectors were built under (embedding model with chunking, dimensions, window) and the last listing time |
+| Table                 | Holds                                                                                                                                                                                             |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mail_index_messages` | message and thread IDs, received time, sender, subject, date header and Gmail's snippet                                                                                                           |
+| `mail_index_chunks`   | one 512-value little-endian float32 vector per chunk; rows cascade with their message                                                                                                             |
+| `mail_index_state`    | the configuration the vectors were built under (embedding model with chunking, dimensions, window); `synced_at`, the last listing time, is informational, since each start lists the whole window |
 
 **On start**, the gateway:
 
@@ -147,6 +147,19 @@ Run the rollout right after the merge, under the release lock with an idle gatew
 `python3 scripts/test-deploy-mail-index.py` runs the rollout offline.
 
 **Rollback:** the previous image ignores the new tables. They can stay, or be dropped in a reviewed operator step.
+
+**Deleting the stored index:** setting `MAIL_INDEX=off` stops using the tables but leaves their rows. To delete the owner's stored index, stop the gateway (or set `MAIL_INDEX=off` and release), then run as the operator:
+
+```sql
+BEGIN;
+DELETE FROM mail_index_messages WHERE user_id = '<owner id>';
+DELETE FROM mail_index_state WHERE user_id = '<owner id>';
+COMMIT;
+```
+
+The chunk rows cascade. With `MAIL_INDEX=on`, the next start rebuilds the index from Gmail.
+
+The build needs the owner's `users` row, which exists once the owner has used Chief.
 
 ## Not in the MVP
 
