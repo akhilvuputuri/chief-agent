@@ -31,6 +31,8 @@ export function artifactHash(c: Checkpoint) {
 }
 /** Files larger than this are uploaded as separate blobs when the candidate tree is built. */
 const LARGE_BLOB = 256_000;
+/** Inline file content allowed in one tree request before further files become blobs. */
+const INLINE_TOTAL = 1_000_000;
 export function validateFiles(files: Checkpoint["files"]) {
   const paths = new Set<string>();
   for (const f of files) {
@@ -223,27 +225,35 @@ export class GitHubPublisher implements RepositoryPublisher {
     if (baseTree.truncated)
       throw new Error("Repository tree exceeds supported size");
     const tree = [];
+    let inline = 0;
     for (const file of j.result.checkpoint.files) {
       const prior = baseTree.tree.find((p: any) => p.path === file.path);
       if (prior && prior.mode !== "100644" && prior.mode !== "100755")
         throw new Error("Only regular files may be changed");
       if (file.content === null && !prior)
         throw new Error("Cannot delete an absent file");
-      // Large files go up as their own blobs, so one tree request never carries megabytes.
-      const blob =
-        file.content !== null && file.content.length > LARGE_BLOB
-          ? String(
-              (
-                await this.api(
-                  "git/blobs",
-                  "POST",
-                  { content: file.content, encoding: "utf-8" },
-                  signal,
-                  120_000,
-                )
-              ).sha,
-            )
-          : undefined;
+      // Large files, and anything once the inline total passes 1 MB, go up as their own
+      // blobs, so one tree request never carries megabytes.
+      const asBlob =
+        file.content !== null &&
+        (file.content.length > LARGE_BLOB ||
+          inline + file.content.length > INLINE_TOTAL);
+      if (file.content !== null && !asBlob) inline += file.content.length;
+      const blob = asBlob
+        ? String(
+            (
+              await this.api(
+                "git/blobs",
+                "POST",
+                { content: file.content, encoding: "utf-8" },
+                signal,
+                120_000,
+              )
+            ).sha,
+          )
+        : undefined;
+      if (blob !== undefined && !/^[a-f0-9]{40}$/.test(blob))
+        throw new Error("GitHub returned no blob identity");
       tree.push({
         path: file.path,
         mode: file.mode ?? prior?.mode ?? "100644",

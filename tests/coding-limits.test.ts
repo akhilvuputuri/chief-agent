@@ -115,7 +115,7 @@ test("large files are published as their own blobs; small ones stay inline", asy
       data = { tree: { sha: "base-tree" } };
     else if (path.endsWith("/git/trees/base-tree"))
       data = { tree: [], truncated: false };
-    else if (path.endsWith("/git/blobs")) data = { sha: "blob-sha" };
+    else if (path.endsWith("/git/blobs")) data = { sha: "b".repeat(40) };
     else if (path.endsWith("/git/trees")) data = { sha: "candidate-tree" };
     else throw new Error(`Unexpected ${path}`);
     return new Response(JSON.stringify(data), { status: 200 });
@@ -149,8 +149,63 @@ test("large files are published as their own blobs; small ones stay inline", asy
   assert.deepEqual(
     posted.tree.map((e: any) => [e.path, e.sha ?? null, e.content ?? null]),
     [
-      ["docs/big.md", "blob-sha", null],
+      ["docs/big.md", "b".repeat(40), null],
       ["docs/small.md", null, "small\n"],
     ],
   );
+});
+
+test("inline content stays under 1 MB per tree request; the rest become blobs", async () => {
+  const { generateKeyPairSync } = await import("node:crypto");
+  const { GitHubPublisher } = await import("../src/coding/github.js");
+  const key = generateKeyPairSync("rsa", { modulusLength: 2048 })
+    .privateKey.export({ type: "pkcs8", format: "pem" })
+    .toString();
+  let tree: any;
+  let blobs = 0;
+  const transport: any = async (url: string, options: any) => {
+    const path = new URL(url).pathname;
+    let data: any;
+    if (path.endsWith("/access_tokens"))
+      data = {
+        token: "t",
+        expires_at: new Date(Date.now() + 3600000).toISOString(),
+      };
+    else if (path.endsWith("/git/commits/" + "a".repeat(40)))
+      data = { tree: { sha: "base-tree" } };
+    else if (path.endsWith("/git/trees/base-tree"))
+      data = { tree: [], truncated: false };
+    else if (path.endsWith("/git/blobs")) {
+      blobs++;
+      data = { sha: "c".repeat(40) };
+    } else if (path.endsWith("/git/trees")) {
+      tree = JSON.parse(options.body).tree;
+      data = { sha: "candidate-tree" };
+    } else throw new Error(`Unexpected ${path}`);
+    return new Response(JSON.stringify(data), { status: 200 });
+  };
+  const publisher = new GitHubPublisher(
+    "example/repo",
+    "1",
+    "2",
+    key,
+    { name: "F", email: "f@example.com" },
+    transport,
+  );
+  await (publisher as any).candidateTree({
+    base_sha: "a".repeat(40),
+    result: {
+      checkpoint: {
+        files: Array.from({ length: 6 }, (_, n) => ({
+          path: `docs/part-${n}.md`,
+          content: "p".repeat(250_000),
+        })),
+      },
+    },
+  });
+  const inline = tree
+    .filter((e: any) => e.content)
+    .reduce((n: number, e: any) => n + e.content.length, 0);
+  assert.ok(inline <= 1_000_000);
+  assert.equal(blobs, 2);
 });
