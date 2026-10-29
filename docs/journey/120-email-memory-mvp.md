@@ -187,6 +187,17 @@ Estimates from the 30-day build, to be checked against the first 12-month `mail_
   - retrieval only, not the agent's answers;
   - the re-rankers were small local models scoring headers plus each message's best chunk.
 
+## Persisting the index — in review
+
+- **Problem (measured):** the index lived in gateway memory, so every release rebuilt it. On 28 October four rebuilds in one day each read about 1,412 messages and took about 17 minutes (`mail_index.built` latencies from 1,003 to 1,051 seconds). During each rebuild `gmail_recall` gave keyword results only, and each one used Gmail quota and about 1.15M embedding tokens.
+- **Change:**
+  - Additive migration 033 persists headers, Gmail's snippet and vectors, with no body text, as the owner chose on 29 October.
+  - A restarted gateway loads the index and answers at once.
+  - It then lists the 12-month window once, indexing what is missing and removing mail no longer listed. This also closes the earlier follow-up about deleted mail lingering.
+  - Writes are best-effort and repaired by the next start's listing.
+  - The rollout follows the reviewed `deploy-*.py` pattern (`scripts/deploy-mail-index.py`).
+- **Expected (estimate):** after the first post-rollout build, a restart loads about 1,412 messages and 2,780 vectors in seconds, then lists about 15 Gmail pages. To be checked against `mail_index.loaded` after the rollout.
+
 ## Follow-up and next iteration
 
 - Add about 10 owner-written questions to the eval.
@@ -194,5 +205,5 @@ Estimates from the 30-day build, to be checked against the first 12-month `mail_
 - Then try re-ranking the top results and smaller chunks, compared offline with the Python eval in `evals/mail-recall` over a private `--export` dataset (added after this entry's results; not yet run).
 - Check a few real half-remembered requests in Telegram.
 - If recall clearly helps, persist the index (additive migration), sync in the background, and consider the second account and attachments.
-- Deleted or moved mail stays in the index until it is 12 months old (Devin Review on #320). The agent's `gmail_thread` check keeps it out of answers, but it can take a result slot. Reconcile indexed IDs against Gmail if the eval or live use shows it matters.
+- Deleted or moved mail stays in the index until it is 12 months old (Devin Review on #320). The persistence change removes it at each start-up listing; between starts it can still take a result slot.
 - If it does not help, turn `MAIL_INDEX` off and record why.

@@ -92,6 +92,8 @@ services:
         "/migrations/031_link_resolution.sql",
         "-f",
         "/migrations/032_boxes.sql",
+        "-f",
+        "/migrations/033_mail_index.sql",
       ]
     depends_on:
       postgres: { condition: service_healthy }
