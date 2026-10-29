@@ -1,6 +1,6 @@
 # Email memory (mail recall) — MVP
 
-Status (29 October 2026): live with a 12-month window, quota-paced builds and fused meaning and keyword search. Persistence (migration 033) is in review. See [journal 120](journey/120-email-memory-mvp.md) for the measurements.
+Status (29 October 2026): live with a 12-month window, quota-paced builds and fused meaning and keyword search. Persistence (migration 033) has been live since `e99ee8d`; a restart loads the index instead of rebuilding it. See [journal 120](journey/120-email-memory-mvp.md) for the measurements.
 
 ## What it does
 
@@ -142,7 +142,7 @@ Run the rollout right after the merge, under the release lock with an idle gatew
    - stops the gateway and applies the migration;
    - checks the version 33 marker;
    - starts the candidate and checks health, restoring the previous image and Compose file on any failure.
-3. The automatic release for the same commit then succeeds as a no-op. The first start after the rollout builds the index once (about 17 minutes) and persists it; later starts load it.
+3. The automatic release that follows is not a no-op under release-by-pull. Its guard now passes, and it pulls and starts the verified CI-built image: one more restart, which loads whatever the index has saved so far. If it reaches the host before the rollout, it refuses the `db/` and Compose change and production stays unchanged. The first start after the rollout builds the index once and saves as it goes; later starts load it.
 
 `python3 scripts/test-deploy-mail-index.py` runs the rollout offline.
 

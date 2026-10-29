@@ -1,3 +1,21 @@
+## Deployed `e99ee8d` (untagged) — persisted mail index (migration 033)
+
+- **What merged.** [PR 362](https://github.com/akhilvuputuri/chief-agent/pull/362) merged as `e99ee8d69b0c32153ed2b7976a8bd1ab4636731a` (version 0.3.109).
+  - The `gmail_recall` index's headers, Gmail snippet and vectors (no body text) persist in Postgres.
+  - A restarted gateway loads the index, then lists the 12-month window once to index what is missing and remove mail no longer listed.
+  - Shipped with migration 033, its Compose line and `scripts/deploy-mail-index.py`.
+- **Review.** Independent review (Claude Opus 5.5) approved `c3e9b25`, then the delta `5b3e2a1` (doc fixes, main merge, `BASE` pinned to the live `b431444`). Hosted CI passed, and Devin had no findings.
+- **Operator rollout.**
+  - Archive and script hashes matched on the host.
+  - `deploy-mail-index.py` reported `{"deployed": "e99ee8d…", "healthy": true, "migration": 33}` at 15:16 UTC on 29 October.
+  - Separate checks: `RELEASE`, health, marker 33, the tables and `gateway.started`.
+- **Measured.**
+  - When another release restarted the gateway mid-build, the new start loaded 450 saved messages in 99 ms.
+  - The build then completed with 1,413 messages and none left out (808,910 tokens, 739 s).
+  - The database holds 1,413 messages and 2,784 vectors (8.0 MB).
+
+[Journal 120](journey/120-email-memory-mvp.md#release-closure--2026-10-29).
+
 ## Coding reviewer moves to Claude Opus 5.5 (29 October 2026)
 
 - **Configuration.** `config/coding-pi.json` and `config/coding.json` change the default coding reviewer from `google/gemini-4-argon` to `anthropic/claude-opus-5.5` ($4/$20 per million tokens, inside the existing price ceilings). It applies to new jobs; a job keeps the models it was created with.
