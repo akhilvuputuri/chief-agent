@@ -4,7 +4,7 @@
   "image": "ghcr.io/akhilvuputuri/chief-agent-coding@sha256:97cee1ae17abf361517fad65cbbe1b6fe80aa1a7c4d656664e799e13b82dfbbf",
   "model": "deepseek/deepseek-v4.1-flash-1017",
   "leaderModel": "deepseek/deepseek-v4.1-flash-1017",
-  "reviewerModel": "google/gemini-4-argon",
+  "reviewerModel": "anthropic/claude-opus-5.5",
   "effort": "high",
   "limits": {
     "ms": 9000000,
