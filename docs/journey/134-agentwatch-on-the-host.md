@@ -25,7 +25,7 @@ The owner asked how meaning could be analysed without the text. Without it, the 
 - 185 owner follow-ups had a previous turn in the same thread; 142 came within six hours.
 - 4 had none of the owner's words.
 - 8 were flagged: 5 corrections, 2 retries and 1 rephrase. All 8 were real redirects on reading.
-- Reading all 134 unflagged follow-ups, about 8 were clear redirects the rules missed, and 3 more were borderline.
+- Reading all 130 unflagged follow-ups (142 less 4 without owner words, less 8 flagged), about 8 were clear redirects the rules missed, and 3 more were borderline.
 - **Estimate:** precision 8/8, recall about one half, so a true redirect rate of about 12–14% against the 6% the rules report.
 - **Limits:** one reader, no second opinion, and a small sample.
 - **Handling:** the extracted text stayed in a private scratch file on the operator's laptop, deleted after this entry. Only aggregates are recorded here.
@@ -65,7 +65,19 @@ The misses were of two kinds:
 
 agentwatch's side is agentwatch#14: the image, published from `main` only after a smoke test, and `--retain-days`.
 
-Independent review: pending.
+Independent review (Opus 5.5) of `59e527d` found nothing blocking. Its should-fix findings were corrected in the next commit:
+
+- **Scrubbing ran after serialising, so key names were lost.** A `password` or `access_token` value under its key went out unchanged, as did Google `ya29.`, `AIza`, AWS and Slack tokens. Content now has its own scrubber, which works by key at any depth, also inside JSON text, and covers those shapes.
+- **The "…again" rule fired on ordinary chat:** "thanks again", "never again", "see you again". It now needs an action verb.
+- **Tool arguments were exported double-encoded** (`{"raw": "…"}`).
+- **"Images are never sent" did not hold** for `data:` URLs in text or base64 in tool results. Both are now replaced.
+- **Size estimates counted characters, not escaped UTF-8 bytes**, and one huge message could exceed its list's cap. Both are fixed.
+- **Held content was bounded by entry count, not size.** It is now at most 32 MB in total.
+
+Smaller fixes:
+
+- output messages carry `finish_reason`;
+- the docs say which root output is shown and that the owner's email and calendar content is exported once content is on.
 
 ## Verification and outcome
 
@@ -78,5 +90,5 @@ Pending. Next:
 
 ## Follow-up and next iteration
 
-- A Jev "does this redirect the previous answer?" question would catch pushback the patterns miss, for about $0.001 a message. It needs the owner's approval.
+- A question to Jev, the classifier Chief already asks about effort and tools on every message: "does this redirect the previous answer?" question would catch pushback the patterns miss, for about $0.001 a message. It needs the owner's approval.
 - A judge on real traces, once content flows (a paid model; the owner picks the model and the daily limit).

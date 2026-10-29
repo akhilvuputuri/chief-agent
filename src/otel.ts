@@ -21,6 +21,7 @@ import {
   chatMessage,
   contentText,
   messagesJson,
+  toolArguments,
   userMessageJson,
 } from "./otel-content.js";
 
@@ -226,11 +227,14 @@ export class OtlpExporter {
   }
 }
 
-/** Roughly the bytes a span adds to a request: its text plus a fixed overhead. */
+/** The bytes a span adds to a request, near enough: its text as escaped UTF-8 plus overhead. */
 function spanBytes(span: ExportSpan) {
   let bytes = 256 + span.name.length;
   for (const value of Object.values(span.attributes))
-    bytes += typeof value === "string" ? value.length + 32 : 32;
+    bytes +=
+      typeof value === "string"
+        ? Buffer.byteLength(JSON.stringify(value)) + 32
+        : 32;
   return bytes;
 }
 
@@ -363,10 +367,6 @@ interface RunState {
   startNs: bigint;
   agent: string;
   conversation?: string;
-  // Captured content (only when the owner opted in): the owner's message and the run's
-  // latest model output, for the root span.
-  input?: string;
-  output?: string;
 }
 interface FinishedTurn {
   traceId: string;
@@ -378,18 +378,39 @@ interface CallState {
   operation: string;
   write: boolean;
   startNs: bigint;
-  args?: string;
 }
 interface ModelState {
   run: string;
   attempt?: number;
-  input?: string;
-  output?: string;
   truncated?: boolean;
 }
 
 // Runs that never stop (a crash, a lost process) must not grow these without bound.
 const MAX_OPEN = 2000;
+// Captured content waiting for its span to end, by `<kind>:<id>`, bounded in total size;
+// the oldest goes first, so a run that never ends cannot hold content for ever.
+const HELD_MAX_CHARS = 32 * 1024 * 1024;
+const held = new Map<string, string>();
+let heldChars = 0;
+function hold(key: string, value: string) {
+  take(key);
+  while (held.size && heldChars + value.length > HELD_MAX_CHARS) {
+    const oldest = held.keys().next().value;
+    if (oldest === undefined) break;
+    take(oldest);
+  }
+  if (value.length > HELD_MAX_CHARS) return;
+  held.set(key, value);
+  heldChars += value.length;
+}
+function take(key: string) {
+  const value = held.get(key);
+  if (value !== undefined) {
+    held.delete(key);
+    heldChars -= value.length;
+  }
+  return value;
+}
 let exporter: OtlpExporter | undefined;
 const runs = new Map<string, RunState>();
 const calls = new Map<string, CallState>();
@@ -418,6 +439,8 @@ export async function stopTracing(deadlineMs = 1000) {
   calls.clear();
   models.clear();
   finished.clear();
+  held.clear();
+  heldChars = 0;
   await current?.shutdown(deadlineMs);
 }
 
@@ -528,7 +551,10 @@ function modelFinished(
     typeof data.invocationId === "string" ? data.invocationId : undefined;
   const started = invocation ? models.get(invocation) : undefined;
   if (invocation) models.delete(invocation);
-  if (started?.output) state.output = started.output;
+  const input = invocation ? take(`model-in:${invocation}`) : undefined;
+  const output = invocation ? take(`model-out:${invocation}`) : undefined;
+  // The run's span shows its latest successful model output.
+  if (output) hold(`run-out:${run}`, output);
   const end = nowNs();
   const latency = finiteCount(data.latencyMs);
   const start =
@@ -577,8 +603,8 @@ function modelFinished(
       "chief.attempt": started?.attempt ?? finiteCount(data.attempt),
       "chief.effort": nameValue(data.effort),
       "chief.invocation_id": invocation,
-      "gen_ai.input.messages": started?.input,
-      "gen_ai.output.messages": started?.output,
+      "gen_ai.input.messages": input,
+      "gen_ai.output.messages": output,
       "chief.content.truncated": started?.truncated || undefined,
     },
   });
@@ -610,8 +636,8 @@ function runStopped(run: string, reason: string, taskId?: string) {
       "gen_ai.operation.name": "invoke_agent",
       "gen_ai.agent.name": state.agent,
       "gen_ai.conversation.id": state.conversation,
-      "gen_ai.input.messages": state.input,
-      "gen_ai.output.messages": state.output,
+      "gen_ai.input.messages": take(`run-in:${run}`),
+      "gen_ai.output.messages": take(`run-out:${run}`),
       "chief.run_id": run,
       "chief.task_id": taskId,
       "chief.stop_reason": nameValue(reason),
@@ -636,8 +662,7 @@ export function runConversation(run: string, conversation: string) {
 export function runContent(run: string, message: string) {
   if (!contentCaptured()) return;
   try {
-    const state = runs.get(run);
-    if (state) state.input = userMessageJson(message);
+    if (runs.has(run)) hold(`run-in:${run}`, userMessageJson(message));
   } catch {
     /* Tracing is not the action ledger. */
   }
@@ -648,15 +673,19 @@ export function modelContent(
   invocationId: string,
   input: ModelMessage[],
   output: ModelMessage,
+  finishReason?: string | null,
 ) {
   if (!contentCaptured()) return;
   try {
     const state = models.get(invocationId);
     if (!state) return;
-    const sent = messagesJson(input.map(chatMessage));
-    state.input = sent.json;
-    state.truncated = sent.truncated;
-    state.output = messagesJson([chatMessage(output)]).json;
+    const sent = messagesJson(input.map((m) => chatMessage(m)));
+    const reply = messagesJson([
+      chatMessage(output, finishName(finishReason) ?? undefined),
+    ]);
+    state.truncated = sent.truncated || reply.truncated;
+    hold(`model-in:${invocationId}`, sent.json);
+    hold(`model-out:${invocationId}`, reply.json);
   } catch {
     /* Tracing is not the action ledger. */
   }
@@ -709,13 +738,9 @@ export function callStarted(
 ) {
   if (!exporter) return;
   try {
-    remember(calls, callId, {
-      run,
-      operation,
-      write,
-      startNs: nowNs(),
-      ...(capture && args !== undefined ? { args: contentText(args) } : {}),
-    });
+    remember(calls, callId, { run, operation, write, startNs: nowNs() });
+    if (capture && args !== undefined)
+      hold(`call-args:${callId}`, toolArguments(args));
   } catch {
     /* Tracing is not the action ledger. */
   }
@@ -765,7 +790,7 @@ function finishCall(
       "error.type": failed
         ? (codeValue(errorCode) ?? nameValue(state))
         : undefined,
-      "gen_ai.tool.call.arguments": call.args,
+      "gen_ai.tool.call.arguments": take(`call-args:${callId}`),
       "gen_ai.tool.call.result":
         capture && result !== undefined ? contentText(result) : undefined,
     },

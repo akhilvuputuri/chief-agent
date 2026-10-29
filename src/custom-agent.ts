@@ -506,7 +506,12 @@ export class CustomAgent implements Agent {
                 ? [messages.length - 1]
                 : [],
             );
-            otel.modelContent(invocationId, input.messages, generation.message);
+            otel.modelContent(
+              invocationId,
+              input.messages,
+              generation.message,
+              generation.finishReason,
+            );
             await execution.trace("model.completed", {
               invocationId,
               model: generation.model ?? model.model,

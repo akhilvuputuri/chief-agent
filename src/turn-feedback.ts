@@ -24,10 +24,11 @@ const SHORT_RETRY = new RegExp(
   "i",
 );
 const SHORT_WORDS = 8;
-// "Add haircut again", "try to add again": a short request that ends in "again" asks to
-// repeat something that did not work. Not a question ("what time again?").
+// "Add haircut again", "try to add again": a short request to repeat an action, which says the
+// last attempt did not work. It must start with an action verb, so "thanks again", "never
+// again" or "I'm sick again" do not count, and it must not be a question.
 const AGAIN =
-  /^(?!\s*(?:what|when|where|who|which|why|how)\b)[^?]*\bagain[\s.!]*$/i;
+  /^\s*(?:(?:please|pls|can you|could you)\s+)?(?:try to\s+)?(?:add|set|create|send|book|remind|schedule|save|check|search|look|do|make|try|update|cancel|move|run|start|get|find|fetch|post|delete|remove|change|edit|retry|redo)\b[^?]*\bagain[\s.!]*$/i;
 const AGAIN_WORDS = 5;
 const UNCAPTIONED = /^The user sent this \w+ without a caption\.$/;
 // A request for another attempt anywhere in the opening.
