@@ -74,6 +74,12 @@ Re-review of `469197c` approved it. Two further should-fix findings were correct
 
 Nits from that round were also addressed. A short retry ("another one") must now be the whole message, so "Another idea: add a reminder…" is no longer a retry. The wording about forwards was corrected: the turn before a forward gets no score, and does not wait.
 
+A third review of `804a5cf` found that the extension guard had become too broad. It dropped real corrections that mention a time: "That's wrong, try again for Friday" and "you missed the meeting tomorrow, try again" both scored no redirect. It also dropped complaints containing "too" ("try again, that's too long"). The next commit applies the reviewer's tested fix:
+
+- an attempt with a time or an extension is still a correction if the rest of the message is one;
+- "too" is an extension only at the end of the message;
+- "try a different approach" is a retry.
+
 Recorded as limits, not changed:
 
 - "redo" without a time or extension stays a correction, as in the learner;

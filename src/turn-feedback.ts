@@ -13,7 +13,7 @@ const LEAD_IN = String.raw`^\s*(?:(?:no|nope|nah|hmm+|ok(?:ay)?|meh|ugh|well|ple
 // Requests for another attempt, whatever follows them.
 const RETRY = new RegExp(
   LEAD_IN +
-    String.raw`(?:try (?:it |that )?(?:again|once more)|retry|regenerate|redo(?: it| that| this)?|start over|one more time|do (?:it|that|this) (?:again|differently)|(?:do|try|give me|show me|suggest) (?:something|someone|somewhere) (?:else|different))\b`,
+    String.raw`(?:try (?:it |that )?(?:again|once more)|retry|regenerate|redo(?: it| that| this)?|start over|try (?:a |an )?(?:different|another|other) (?:way|approach)|one more time|do (?:it|that|this) (?:again|differently)|(?:do|try|give me|show me|suggest) (?:something|someone|somewhere) (?:else|different))\b`,
   "i",
 );
 // Shorter requests that are retries only as the whole message: "again", "another one",
@@ -31,7 +31,7 @@ const ATTEMPT =
 // "Do it again next week", "redo the calendar for Friday too": a repeat or an extension, not
 // a rejection of the answer.
 const EXTENSION =
-  /\b(next|later|tomorrow|tonight|weekly|daily|every|too|also|as well|for (mon|tues|wednes|thurs|fri|satur|sun)day|on (mon|tues|wednes|thurs|fri|satur|sun)day)\b/i;
+  /\b(next|later|tomorrow|tonight|weekly|daily|every|too[.!?]*$|also|as well|for (mon|tues|wednes|thurs|fri|satur|sun)day|on (mon|tues|wednes|thurs|fri|satur|sun)day)\b/i;
 
 // Function words that say nothing about what was asked.
 const STOP = new Set(
@@ -95,8 +95,13 @@ export function redirectOf(
   if (EXTENSION.test(text)) {
     // "Thanks, try again tomorrow" or "redo it for next week too" asks for a later or
     // further attempt and rejects nothing, so it is not a correction either, although the
-    // learner's pattern would call it one.
-    if (ATTEMPT.test(opening)) return null;
+    // learner's pattern would call it one; unless the rest of the message is a correction
+    // ("that's wrong, try again for Friday").
+    if (
+      ATTEMPT.test(opening) &&
+      !isCorrection(opening.replace(new RegExp(ATTEMPT.source, "gi"), " "))
+    )
+      return null;
   } else if (RETRY.test(opening) || (short && SHORT_RETRY.test(text)))
     return "retry";
   if (isCorrection(text, (previousReply ?? "").trim().endsWith("?")))

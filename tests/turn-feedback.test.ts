@@ -17,6 +17,9 @@ test("asking for another attempt or approach is a retry", () => {
     "try once more",
     "redo it",
     "no. start over",
+    "Try a different approach",
+    "try again, that's too long",
+    "redo it, too formal",
   ])
     assert.equal(redirectOf(text, "book a table", "Done."), "retry", text);
 });
@@ -43,6 +46,15 @@ test("corrections use the learner's definition", () => {
   assert.equal(redirectOf("that's wrong, it's on Friday"), "correction");
   assert.equal(redirectOf("No, I meant the other account"), "correction");
   // Acknowledgements never are, and a plain "no" answers a question.
+  // A correction with a time or an extension in it is still one.
+  for (const text of [
+    "That's wrong, try again for Friday",
+    "No, that's wrong. Redo it and also include prices",
+    "you missed the meeting tomorrow, try again",
+    // A retry that does not open the message is the learner's correction.
+    "too long, try again",
+  ])
+    assert.equal(redirectOf(text, "x", "Done."), "correction", text);
   assert.equal(redirectOf("No worries, thanks"), null);
   assert.equal(
     redirectOf("no", "remind me", "Want me to remember that?"),
