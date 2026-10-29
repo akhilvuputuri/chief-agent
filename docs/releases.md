@@ -4,6 +4,25 @@
 - **Paused job.** At the owner's request, the paused job `a30098ba` had its pinned reviewer changed to Opus 5.5 by a guarded one-row production update (paused, unleased, previous reviewer Gemini), with Opus's 1,000,000-token context window added to its snapshot.
 - **Why.** The job finished implementation with every check passing, then paused three times at the same step of review: Google cut the Gemini reply off mid-generation (a 502, then empty replies, with no finish reason). See the [coding-agent lessons](journey/coding-agent-lessons.md).
 
+## Installed `6e90db7` by operator rollout — agentwatch on the host, traces with content (#323)
+
+- **What merged.**
+  - [PR 359](https://github.com/akhilvuputuri/chief-agent/pull/359) merged as `e6abb13` and was released by the workflow. It adds opt-in message content on traces: messages, tool arguments and results, scrubbed and capped.
+  - [PR 360](https://github.com/akhilvuputuri/chief-agent/pull/360) merged as `6e90db7`. It adds the `agentwatch` Compose service (GHCR image pinned by digest, 90-day retention, loopback only) and points the gateway at it with content on. `CHIEF_TRACE_ENDPOINT` and `CHIEF_TRACE_CONTENT` in `.env` are kill switches.
+- **Review.** Independent review (Claude Opus 5.5):
+  - PR 359 took four rounds, including one blocking finding (quadratic base64 scrubbing). It was approved at `6a9fb82`.
+  - PR 360 was judged safe to run at `d284a6b`, after it gained a check that agentwatch can store a span before the gateway is touched.
+  - Hosted CI passed on both heads.
+- **Release.**
+  - The automatic release refused the Compose change, as designed.
+  - The operator ran `scripts/deploy-agentwatch.py` from an exact archive of `6e90db7`, with hashes verified on both sides, at about 15:00 UTC on 29 October.
+  - It reported the deploy healthy with agentwatch up. The gateway logged `trace.export_enabled` with `contentCaptured: true`.
+  - agentwatch is healthy, uses about 50 MB of its 512 MB limit, and is reachable only on `127.0.0.1:4318`, through an SSH tunnel ([lightsail](lightsail.md#traces-agentwatch)).
+- **Since:** the next automatic release, `b431444`, the first to pull the CI-built gateway image, deployed healthy and left agentwatch untouched.
+- **Pending:** the first real turn's trace.
+
+[Journal 134](journey/134-agentwatch-on-the-host.md#release-closure--2026-10-29).
+
 ## Coding limits raised (29 October 2026)
 
 - **Code.** [PR 357](https://github.com/akhilvuputuri/chief-agent/pull/357) merged as `8e53d52`. Exact-head independent review (Claude Opus 5.5) approved it after one blocking fix: Pi session entries had stayed capped at 512 KB.

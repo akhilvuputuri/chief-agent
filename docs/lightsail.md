@@ -97,7 +97,7 @@ Run as the operator from a reviewed source tree. It can be re-run on a live host
 sudo CWAGENT_VERSION=1.300073.0b1828 deploy/lightsail/install-host.sh
 ```
 
-A rebuilt host also needs `docker compose -p hermes-companion up -d agentwatch` once the application is running; the cutover steps below start only Postgres and the gateway.
+A rebuilt host also needs `sudo -n docker compose -p hermes-companion up -d agentwatch`, run from `/opt/hermes-companion`, once the application is running; the cutover steps below start only Postgres and the gateway.
 
 The script installs Docker, Compose, Caddy and the ingress routes, journald limits, the Docker log driver, the exporter, host health, logrotate, the CloudWatch agent, and the backup units. It does not start the gateway or write application secrets. It then prints the installed package versions. Separately, the operator:
 

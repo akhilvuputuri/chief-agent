@@ -1,7 +1,7 @@
 # 134 — Can agentwatch run next to Chief and see what was said?
 
 Work date: 2026-10-29 (Singapore). Written: 2026-10-29.
-Status: in progress. Measurement done; message capture in review; the host deployment follows in its own reviewed rollout.
+Status: released. Message content capture in `e6abb13`; agentwatch running on the host, with export and content on, since the operator rollout of `6e90db7` (29 October, 15:00 UTC).
 
 ## User-visible problem and preceding iteration
 
@@ -104,16 +104,38 @@ Because the release guard refuses Compose changes, [scripts/deploy-agentwatch.py
 4. recreates the gateway;
 5. checks that the gateway can reach agentwatch.
 
-On failure it restores the gateway first, then removes agentwatch and keeps its volume. Offline tests: `scripts/test-deploy-agentwatch.py` (20 cases). Procedure: [lightsail](../lightsail.md#traces-agentwatch).
+On failure it restores the gateway first, then removes agentwatch and keeps its volume. Offline tests: `scripts/test-deploy-agentwatch.py` (21 cases). Procedure: [lightsail](../lightsail.md#traces-agentwatch).
 
 ## Verification and outcome
 
-Pending. Next:
+**Message capture.** [PR 359](https://github.com/akhilvuputuri/chief-agent/pull/359) merged at the approved head `6a9fb82` as `e6abb13`. Review took four rounds: credential keys, the "…again" rule, and argument encoding, then quadratic base64 scrubbing (blocking), then approval. The release workflow deployed it with health passing. It did nothing until the endpoint was set.
 
-- review and CI of this change;
-- the rollout PR (Compose service, gateway variables, operator script);
-- the operator run;
-- a first real trace viewed through an SSH tunnel.
+**Rollout.** [PR 360](https://github.com/akhilvuputuri/chief-agent/pull/360) merged at the approved head `d284a6b` as `6e90db7`. Review asked for:
+
+- a check that agentwatch can store a span before the gateway is touched;
+- a longer health wait;
+- corrected procedures.
+
+The reviewer judged `d284a6b` safe to run. As expected, the automatic release refused the Compose change, and so did one for a later main commit from another session.
+
+The operator then ran `deploy-agentwatch.py` from an exact `git archive` of `6e90db7`. The archive and script SHA-256 matched on the laptop and the host, and the script also matched the reviewed head byte for byte. It printed `{"deployed": "6e90db7…", "healthy": true, "agentwatch": true}` and exited 0.
+
+Checked afterwards, read-only:
+
+- the live `RELEASE` is `6e90db7`;
+- the gateway logged `trace.export_enabled` with `contentCaptured: true`;
+- agentwatch holds the one `chief-rollout-check` span;
+- it is healthy, read-only, published on `127.0.0.1:4318` only, limited to 512 MB and using about 50 MB;
+- the host had about 860 MB available.
+
+**Not yet verified:**
+
+- a real turn's trace, with content, in agentwatch;
+- the next automatic release with agentwatch in Compose (passed afterwards: see the closure).
+
+### Release closure — 2026-10-29
+
+Message capture: `e6abb13` (PR 359), released by the workflow. agentwatch on the host: `6e90db7` (PR 360), installed by the operator rollout at about 15:00 UTC. It uses image `ghcr.io/akhilvuputuri/agentwatch@sha256:a74e529e…` from agentwatch `918e8a3`. The next automatic release, `b431444` (run 40897824539, the first that pulls the CI-built gateway image), deployed healthy in 51 s and left agentwatch running, its image in place. Pending: the first real traces.
 
 ## Follow-up and next iteration
 

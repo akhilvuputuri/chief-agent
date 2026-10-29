@@ -1,3 +1,15 @@
+# agentwatch on the host — live since `6e90db7`, 29 October 2026
+
+Issue #323. Chief now exports every turn's trace to an agentwatch service on its own host, including message content. The content covers the owner's message, the prompts and replies, and tool arguments and results, with credentials scrubbed. Traces are kept 90 days and can be viewed through an SSH tunnel at `localhost:14318` ([lightsail](lightsail.md#traces-agentwatch)). `user_redirected` scores and LLM judges now have real traces to work on. A judge has not been switched on; that is a paid model the owner chooses.
+
+A read-only measurement of the redirect rules on 142 real follow-ups found 8 of 8 flags correct, but only about half of the real redirects caught. Pending:
+
+- the first real traces;
+- a pull-based backfill of history from Postgres (the owner's option C, next);
+- a possible Jev redirect question (paid, needs approval).
+
+See [journal 134](journey/134-agentwatch-on-the-host.md).
+
 # Implicit redirect feedback — live in `bc4c5c0`, 29 October 2026
 
 Issue #323 phase 4, reworked because the owner will not rate answers. With trace export on, the owner's next message after a turn ("try again", "do something else", a correction, or the same request rephrased) becomes a `user_redirected` score on that turn's trace in agentwatch; any other reply scores false. It uses text patterns only, with no model call, and only fixed labels leave the process. Production sets no endpoint, so it is off there. agentwatch can also run LLM judges on sampled traces, but Chief's spans carry no message content. Pending: measure how often the rules fire on real messages (owner approval), and decide on production export and any content export. See [tracing](tracing.md#implicit-feedback) and [journal 133](journey/133-implicit-redirect-feedback.md).
