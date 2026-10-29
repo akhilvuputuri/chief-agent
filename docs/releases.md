@@ -1,3 +1,17 @@
+## Coding limits raised (29 October 2026)
+
+- **Code.** [PR 357](https://github.com/akhilvuputuri/chief-agent/pull/357) merged as `8e53d52`. Exact-head independent review (Claude Opus 5.5) approved it after one blocking fix: Pi session entries had stayed capped at 512 KB.
+  - Coding artifacts may now have 500 files of up to 1 MB each, 10 MB in all.
+  - Uploads may be up to 64 MB, model requests up to 4 MB, and messages and tool arguments up to 1 MB.
+  - Session entries may be up to 4 MB, with 512 MB of session storage per job.
+  - Files over 256 KB, or past 1 MB inline, are published to GitHub as separate blobs.
+  - A Pi attempt may run up to 3 hours, inside a 4-hour box task deadline; the schema allows up to 4 hours, 2,000 model calls and 5,000 tool calls.
+- **Configuration.** [PR 358](https://github.com/akhilvuputuri/chief-agent/pull/358):
+  - re-pins the worker image to `sha256:97cee1ae…`, built from `8e53d52`;
+  - gives new jobs 150 minutes, 1,500 model calls and 4,000 tool calls;
+  - raises the coding box's hard maximum to 6 hours.
+- **Why.** A medium coding job twice hit "Artifact too large": the repository's living docs alone used half of the old 500 KB budget. See the [coding-agent lessons](journey/coding-agent-lessons.md).
+
 ## Deployed `bc4c5c0` (untagged) — implicit redirect feedback on traces (#323 phase 4)
 
 - **What merged.** [PR 355](https://github.com/akhilvuputuri/chief-agent/pull/355) merged as `bc4c5c09e077eb22bd32ee2c1f295c6de730e941` (version unchanged). The owner does not rate answers. When trace export is on, the owner's next message after a turn is checked against it with text patterns, with no model call: a retry, a correction (the learner's `isCorrection`) or a rephrase. The result becomes a `user_redirected` `gen_ai.evaluation.result` on that turn's root span: true with a fixed label, or false. Root spans carry `gen_ai.conversation.id` (`thread.<n>`). Only a fixed name, a boolean and a label leave the process. No migration.
