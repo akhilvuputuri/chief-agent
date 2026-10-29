@@ -92,7 +92,12 @@ import { closeServer, server } from "./server.js";
 import { stopGateway } from "./gateway-stop.js";
 import { Learner } from "./learning.js";
 import { MemoryStore } from "./memory.js";
-import { startTracing, stopTracing, tracesEndpoint } from "./otel.js";
+import {
+  logsEndpoint,
+  startTracing,
+  stopTracing,
+  tracesEndpoint,
+} from "./otel.js";
 import {
   telegram,
   sendCalendarApprovals,
@@ -107,6 +112,7 @@ const c = readConfig();
 // OpenTelemetry trace export (issue #323): off unless an OTLP endpoint is set.
 // A malformed endpoint disables export with a warning; telemetry never stops the gateway.
 let tracesUrl: string | undefined;
+let logsUrl: string | undefined;
 try {
   tracesUrl = tracesEndpoint();
 } catch {
@@ -114,10 +120,19 @@ try {
     errorCode: "OTEL_ENDPOINT_INVALID",
   });
 }
+// Evaluation results (implicit feedback) go to the logs endpoint; a bad one only stops those.
+try {
+  logsUrl = tracesUrl ? logsEndpoint() : undefined;
+} catch {
+  opsLog("trace.export_disabled", "warn", {
+    errorCode: "OTEL_LOGS_ENDPOINT_INVALID",
+  });
+}
 if (tracesUrl) {
   const release = process.env.RELEASE_SHA;
   startTracing({
     endpoint: tracesUrl,
+    ...(logsUrl ? { logsEndpoint: logsUrl } : {}),
     ...(release && /^[0-9a-f]{40}$/.test(release)
       ? { serviceVersion: release }
       : {}),

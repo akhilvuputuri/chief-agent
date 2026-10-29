@@ -1,0 +1,62 @@
+# 133 — Can Chief tell which answers missed without the owner rating them?
+
+Work date: 2026-10-29 (Singapore). Written: 2026-10-29.
+Status: in review. When trace export is on, the owner's next message after a turn becomes a `user_redirected` score on that turn's trace. Production sets no endpoint, so nothing leaves the host there.
+
+## User-visible problem and preceding iteration
+
+Issue #323 phase 4 planned answer-quality scores from Telegram 👍/👎 reactions ([journal 131](131-otel-trace-export.md#follow-up-and-next-iteration)). The owner declined (reported, 29 October): they use Chief as a user and will not rate or classify answers. When an answer misses, they say "try again" or "do something else", correct it, or ask again in other words. Those messages are the signal, and nothing has to change in how the owner talks to Chief.
+
+Chief already detects part of this. The nightly learner ([journal 130](130-nightly-learner.md)) marks a turn `pitfall` when the owner's next message within six hours is a correction (`isCorrection` in `learning.ts`). That runs once a night, only for turns at least a day old, and writes to `learning_reviews`, so it never reaches a trace viewer, and it has no notion of "do something else" or a rephrase.
+
+## Evidence
+
+- Tested: [tests/turn-feedback.test.ts](../../tests/turn-feedback.test.ts) covers:
+  - retry phrases;
+  - corrections, including acknowledgements ("No worries") and a plain "no" answering a reply that asked a question;
+  - a rephrase against a same-subject follow-up that must not count;
+  - attached quotes and forwards being ignored.
+- Tested: [tests/otel.test.ts](../../tests/otel.test.ts) drives real `Execution` runs on PGlite and checks:
+  - the evaluation names the earlier turn's trace ID and root span ID;
+  - only the first message after a turn counts;
+  - child runs, unknown runs and turns older than six hours are not scored;
+  - a label outside the fixed shape is dropped;
+  - the root span carries `gen_ai.conversation.id`;
+  - nothing is sent without a logs endpoint.
+- Measured on a laptop, synthetic: three runs exported with real `fetch` to agentwatch (`11921b4`).
+  - The turn followed by "try again" received `user_redirected` = 1 with label `retry`.
+  - The turn followed by "thanks, that's great" received 0.
+  - The last turn, never answered, received no score.
+  - All three appeared in one session, `thread.0`.
+- Not measured: how often each rule fires on the owner's real messages, or how often it is wrong. The rephrase threshold (60% shared content words, at least four each) is a guess checked only against the test cases.
+
+## Diagnosis and alternatives
+
+- **Text patterns, no model.** Every foreground turn already pays for two Jev decisions (effort and tools). A third question there ("does this redirect the previous answer?") would probably catch rephrases better, but it adds a paid call per message, and no measurement yet says the patterns are not good enough. Reusing `isCorrection` keeps one definition of a correction for the learner and for telemetry.
+- **A score on the earlier turn, not on the current one.** The redirect says something about the answer it follows. `gen_ai.evaluation.result` log records name a trace and span, which is how the GenAI conventions attach an evaluation to finished work, and agentwatch already stores them as scores.
+- **Which earlier turn.** Telegram's reply target when the owner used it, otherwise the last delivered exchange in the same thread. Both come from `conversationState`, which every foreground turn already computes, so detection adds no query.
+- **`false` as well as `true`.** Recording "answered and not redirected" gives the redirect rate a denominator. Turns the owner never answered get nothing, since silence is not approval.
+- **In memory, not in Postgres.** The exporter remembers the last 200 finished root runs. A restart loses them, so the first message after a restart scores nothing. That avoids a migration for telemetry that is off in production.
+
+## Implementation and review
+
+- [src/turn-feedback.ts](../../src/turn-feedback.ts): `redirectOf` and `isRephrase`.
+- [src/otel.ts](../../src/otel.ts):
+  - `turnFeedback` and `runConversation`;
+  - an evaluation queue in `OtlpExporter`, sent to the logs endpoint after the queued spans;
+  - `encodeEvaluations` and `logsEndpoint`.
+- [src/agent.ts](../../src/agent.ts): calls both hooks right after `conversationState`.
+- [src/main.ts](../../src/main.ts): resolves the logs endpoint. If only that endpoint is invalid, spans still export and only feedback is off (`OTEL_LOGS_ENDPOINT_INVALID`).
+- Design: [tracing](../tracing.md#implicit-feedback).
+
+Independent review: pending.
+
+## Verification and outcome
+
+The new and existing tracing tests pass (15/15 across `otel.test.ts` and `turn-feedback.test.ts`); `tsc --noEmit` passes. The full check and hosted CI are recorded on the PR.
+
+## Follow-up and next iteration
+
+- Measure the rules on real messages before trusting the rate. The cheapest test is a read-only count over recent `conversation_inputs` that reports only aggregates per rule, plus the owner reading a handful of flagged pairs on the laptop. Both need owner approval.
+- An LLM judge on sampled traces in agentwatch (#323 step 3, agentwatch side) needs message content, which Chief's spans deliberately omit. Whether to export content to a local collector is the owner's decision.
+- Production export still waits on where a collector runs ([journal 131](131-otel-trace-export.md#follow-up-and-next-iteration)).
