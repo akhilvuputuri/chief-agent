@@ -16,10 +16,9 @@ import time
 
 LIVE = pathlib.Path('/opt/hermes-companion')
 LOCK = pathlib.Path('/var/lock/companion-release.lock')
-# Baseline: the live release when this PR was prepared (e6abb13). Update it to the live
-# RELEASE immediately before merging, get a delta review, and run the rollout right after the
-# merge; never rewrite RELEASE to match.
-BASE = 'e6abb1344f0c9a3d2d29c878a69f55ff2e0f5f8b'
+# Baseline: the live release and main at b431444 when this PR merged (verify before rollout).
+# Reconcile with the live RELEASE immediately before rollout; never rewrite RELEASE to match.
+BASE = 'b431444af66f202b1d6da28f38a6adfd210f03f8'
 BASES = {BASE}
 IMAGE = 'hermes-companion-gateway'
 MIGRATION = '033_mail_index.sql'
