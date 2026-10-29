@@ -217,7 +217,7 @@ export class Workspace {
       throw new Error("Artifact base must be a full commit SHA");
     const quote = (value: string) =>
       "'" + value.replaceAll("'", "'\"'\"'") + "'";
-    const run = async (args: string[], max = 500_000) => {
+    const run = async (args: string[], max = 20_000_000) => {
       const result = await execute(
         ["git", "-c", "core.hooksPath=/dev/null", ...args].map(quote).join(" "),
         signal,
@@ -245,7 +245,7 @@ export class Workspace {
     )
       .split("\0")
       .filter(Boolean);
-    if (names.length > 100) throw new Error("Artifact has too many files");
+    if (names.length > 500) throw new Error("Artifact has too many files");
     const index = names.length
       ? await run(["ls-files", "--stage", "-z", "--", ...names])
       : "";
@@ -269,8 +269,8 @@ export class Workspace {
       }
       if (entry.mode !== "100644" && entry.mode !== "100755")
         throw new Error("Only regular files can be exported");
-      const content = await run(["show", ":" + path], 128_001);
-      if (content.includes("\0") || content.length > 128_000)
+      const content = await run(["show", ":" + path], 1_000_001);
+      if (content.includes("\0") || content.length > 1_000_000)
         throw new Error("Unsupported artifact file");
       const bytes = Buffer.from(content, "utf8");
       const identity = createHash("sha1")
@@ -283,7 +283,7 @@ export class Workspace {
         );
       files.push({ path, content, mode: entry.mode });
     }
-    if (Buffer.byteLength(JSON.stringify(files)) > 500_000)
+    if (Buffer.byteLength(JSON.stringify(files)) > 10_000_000)
       throw new Error("Artifact too large");
     return { base, patch, files, hash: artifactHash(patch, files) };
   }

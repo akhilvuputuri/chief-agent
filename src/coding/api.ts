@@ -15,7 +15,7 @@ import {
 const message = z
   .object({
     role: z.enum(["system", "user", "assistant", "tool"]),
-    content: z.string().max(120000).nullable(),
+    content: z.string().max(1_000_000).nullable(),
     reasoning_details: z.array(z.record(z.unknown())).optional(),
     tool_call_id: z.string().max(200).optional(),
     tool_calls: z
@@ -30,7 +30,7 @@ const message = z
             function: z
               .object({
                 name: z.string().max(100),
-                arguments: z.string().max(180000),
+                arguments: z.string().max(1_000_000),
               })
               .strict(),
           })
@@ -91,9 +91,9 @@ export async function codingApi(
           method,
           url: `/:id/${path}`,
           // Pi report/checkpoint documents plus the existing bounded patch/files.
-          // Worst-case JSON escaping of every allowed string fits within 5 MB.
+          // Worst-case JSON escaping of every allowed string fits within 64 MB.
           bodyLimit:
-            path === "checkpoint" || path === "finish" ? 5_000_000 : 800000,
+            path === "checkpoint" || path === "finish" ? 64_000_000 : 8_000_000,
           // Authenticate the larger artifact routes before parsing their bodies.
           onRequest: async (req, reply) => {
             if (path !== "checkpoint" && path !== "finish") return;
@@ -196,7 +196,7 @@ export async function codingApi(
               if (path === "github-token")
                 return await controller.githubToken(job);
               if (path === "model") {
-                if (Buffer.byteLength(JSON.stringify(req.body)) > 180000) {
+                if (Buffer.byteLength(JSON.stringify(req.body)) > 4_000_000) {
                   await controller
                     .recordRejection(job, {
                       phase: diagnosticPhase,

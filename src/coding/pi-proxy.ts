@@ -3,11 +3,11 @@ import type { CodingController, CodingJob } from "./controller.js";
 import { ModelError } from "../model.js";
 
 const text = z.union([
-  z.string().max(120000),
+  z.string().max(1_000_000),
   z
     .array(z.object({ type: z.literal("text"), text: z.string() }).strict())
     .transform((parts) => parts.map((p) => p.text).join(""))
-    .pipe(z.string().max(120000)),
+    .pipe(z.string().max(1_000_000)),
   z.null(),
 ]);
 const nativeMessage = z
@@ -24,7 +24,7 @@ const nativeMessage = z
             function: z
               .object({
                 name: z.string().max(100),
-                arguments: z.string().max(180000),
+                arguments: z.string().max(1_000_000),
               })
               .strict(),
             index: z.number().int().nonnegative().optional(),
@@ -35,7 +35,7 @@ const nativeMessage = z
       .optional(),
     reasoning_details: z.array(z.record(z.unknown())).optional(),
     // Pi replays this DeepSeek compatibility field even when structured reasoning is present.
-    reasoning_content: z.string().max(120000).optional(),
+    reasoning_content: z.string().max(1_000_000).optional(),
   })
   .strict();
 export const piCompletionRequest = z
@@ -90,7 +90,7 @@ export async function piCompletion(
 ) {
   if (job.settings.runtime !== "pi")
     throw new Error("Native Pi endpoint requires a Pi job");
-  if (Buffer.byteLength(JSON.stringify(raw)) > 180000)
+  if (Buffer.byteLength(JSON.stringify(raw)) > 4_000_000)
     throw new ModelError("Model input exceeds gateway limit", false, {
       failureCode: "context_limit",
     });

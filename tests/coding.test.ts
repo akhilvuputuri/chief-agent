@@ -62,7 +62,7 @@ import {
   fixture,
   requirementBrief,
 } from "./helpers/coding-fixture.js";
-test("two-hour Pi settings use a 100-minute active attempt, inside the box task's two-hour deadline", async (t) => {
+test("two-hour Pi settings get their full two hours, under the three-hour ceiling and four-hour box task deadline", async (t) => {
   const f = await fixture(t),
     job = await f.start("pi-bounded-attempt", "plan");
   const historical = {
@@ -78,14 +78,14 @@ test("two-hour Pi settings use a 100-minute active attempt, inside the box task'
   ]);
   await f.c.tick();
   let current = await f.row(job.id);
-  assert.equal(f.sandboxRequests()[0].timeoutMinutes, 105);
+  assert.equal(f.sandboxRequests()[0].timeoutMinutes, 125);
   assert.deepEqual((await f.c.assignment(current)).settings, historical);
   await f.c.heartbeat(current);
   current = await f.row(job.id);
   assert.equal(
     new Date(current.attempt_deadline).getTime() -
       new Date(current.heartbeat_at).getTime(),
-    6000000,
+    7200000,
   );
   const deadline = new Date(current.attempt_deadline).getTime();
   await f.c.heartbeat(current);
@@ -140,7 +140,7 @@ test("Pi output allowance is captured per job and cannot be changed by caller hi
   assert.equal((await f.row(job.id)).settings.maxOutputTokens, 16000);
 });
 test("expanded coding allocations survive assignment, provisioning, status and checkpoint validation", async (t) => {
-  const limits = { ms: 7200000, models: 1000, tools: 2500 };
+  const limits = { ms: 14_400_000, models: 2000, tools: 5000 };
   const expanded = codingSettings.parse({
     ...settings,
     runtime: "python",
@@ -163,14 +163,14 @@ test("expanded coding allocations survive assignment, provisioning, status and c
   ]);
   await f.c.tick();
   const j = await f.row(job.id);
-  assert.equal(f.sandboxRequests()[0].timeoutMinutes, 125);
+  assert.equal(f.sandboxRequests()[0].timeoutMinutes, 245);
   assert.deepEqual((await f.c.assignment(j)).settings.limits, limits);
   await f.c.heartbeat(j);
   const live = await f.row(job.id);
   assert.equal(
     new Date(live.attempt_deadline).getTime() -
       new Date(live.heartbeat_at).getTime(),
-    7200000,
+    14_400_000,
   );
   assert.deepEqual((await f.c.status("a", job.id)).limits, limits);
   assert.deepEqual((await f.c.status("a"))[0].limits, limits);
@@ -194,7 +194,7 @@ test("expanded coding allocations survive assignment, provisioning, status and c
   await assert.rejects(
     f.c.save(await f.row(job.id), {
       ...cp,
-      squadState: { ...cp.squadState, sequence: 2, toolsUsed: 2501 },
+      squadState: { ...cp.squadState, sequence: 2, toolsUsed: 5001 },
     }),
   );
 });

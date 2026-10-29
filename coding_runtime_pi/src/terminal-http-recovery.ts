@@ -93,7 +93,7 @@ export function terminalHttpRecoveryFetch(options: {
     let body: Record<string, unknown>;
     try {
       const raw = await saved.text();
-      if (Buffer.byteLength(raw) > 180000) return response;
+      if (Buffer.byteLength(raw) > 4_000_000) return response;
       body = JSON.parse(raw);
       if (!body || Array.isArray(body) || typeof body !== "object")
         return response;

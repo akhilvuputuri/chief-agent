@@ -123,7 +123,7 @@ export interface TaskLimits {
 }
 
 const defaultLimits: TaskLimits = {
-  deadlineMs: 2 * 3_600_000,
+  deadlineMs: 4 * 3_600_000,
   graceMs: 10_000,
 };
 

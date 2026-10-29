@@ -69,14 +69,14 @@ export type CodingAction = z.infer<typeof codingAction>;
 export const checkpoint = z
   .object({
     plan: z.string().max(reportLimits.document).default(""),
-    patch: z.string().max(500000).default(""),
+    patch: z.string().max(10_000_000).default(""),
     summary: z.string().max(4000).default(""),
     squadState: squadState.optional(),
     runtimeMemory: runtimeMemory.optional(),
     piState: z
       .object({
         version: z.literal(1),
-        toolsUsed: z.number().int().min(0).max(2500),
+        toolsUsed: z.number().int().min(0).max(5000),
         phase: z.enum(["plan", "build", "review"]).optional(),
         reviewRound: z.number().int().min(1).max(1000).optional(),
         rejectedCandidate: z
@@ -144,12 +144,12 @@ export const checkpoint = z
         z
           .object({
             path: z.string().min(1).max(240),
-            content: z.string().max(128000).nullable(),
+            content: z.string().max(1_000_000).nullable(),
             mode: z.enum(["100644", "100755"]).optional(),
           })
           .strict(),
       )
-      .max(100)
+      .max(500)
       .default([]),
   })
   .strict();
@@ -244,10 +244,10 @@ export const codingSettings = z
     autoRetryTransientOnce: z.boolean().optional(),
     limits: z
       .object({
-        ms: z.number().int().positive().max(7200000),
+        ms: z.number().int().positive().max(14_400_000),
         // Raised from 400 and 1000 when coding moved to EC2 boxes (no 45-minute CodeBuild cap).
-        models: z.number().int().positive().max(1000),
-        tools: z.number().int().positive().max(2500),
+        models: z.number().int().positive().max(2000),
+        tools: z.number().int().positive().max(5000),
       })
       .strict(),
   })

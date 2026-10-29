@@ -47,7 +47,7 @@ export function validateFiles(files: Checkpoint["files"]) {
       );
     paths.add(f.path);
   }
-  if (Buffer.byteLength(JSON.stringify(files)) > 500000)
+  if (Buffer.byteLength(JSON.stringify(files)) > 10_000_000)
     throw new Error("Artifact exceeds supported size");
 }
 export interface RepositoryPublisher {

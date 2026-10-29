@@ -42,3 +42,35 @@ test("snapshots against the pinned base include changes the agent already commit
     /full commit SHA/,
   );
 });
+
+test("a large change exports whole: many large files fit, and only a file over 1 MB is refused", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-large-"));
+  const repo = join(root, "repo");
+  await mkdir(repo);
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" }).trim();
+  git("init", "-q");
+  git("config", "user.name", "Synthetic");
+  git("config", "user.email", "synthetic@example.invalid");
+  await writeFile(join(repo, "seed.txt"), "base\n");
+  git("add", ".");
+  git("commit", "-qm", "base");
+  const base = git("rev-parse", "HEAD");
+  // Four 250 KB documents: each over the old 128 KB file cap, 1 MB over the old 500 KB total.
+  for (const n of [1, 2, 3, 4])
+    await writeFile(
+      join(repo, `doc-${n}.md`),
+      `${"line of text\n".repeat(19_700)}`,
+    );
+  const execute = localExecutor(repo, join(root, "home"), () => {});
+  const signal = new AbortController().signal;
+  const workspace = await new Workspace(repo).initialize();
+  const snapshot = await workspace.snapshot(execute, signal, base);
+  assert.equal(snapshot.files.length, 4);
+  assert.ok(snapshot.files.every((f) => (f.content?.length ?? 0) > 250_000));
+  await writeFile(join(repo, "huge.md"), "x".repeat(1_000_001));
+  await assert.rejects(
+    workspace.snapshot(execute, signal, base),
+    /Unsupported artifact file/,
+  );
+});

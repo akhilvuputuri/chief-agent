@@ -309,3 +309,5 @@ Evidence boundary:
 
 - **Tested:** synthetic outbox and rebase tests.
 - **Not yet measured:** messages per live job after release, and the share of identical rebases.
+
+**Artifact limits sized for a toy change (29 October).** A coding job for a medium feature (classifying shared links into a study-resources store) implemented for 52 minutes, then paused twice with "Artifact too large". The worker exports each changed file whole, and the repository's rules have every change update `docs/current-work.md` and `docs/releases.md`, about 120 KB each. Those two alone took half of the 500 KB budget, and `releases.md` was about to pass the 128 KB per-file cap, which would have failed every job that touched it. At the owner's request, every bound on the path was raised together: files, total size, upload, model request and tool-argument size, and attempt length and call counts. A limit in one link of the chain (worker export, gateway schema, upload size, GitHub publish) would otherwise just move the failure. Lesson: size limits for the coding pipeline against the repository's real files, not against a typical diff.
