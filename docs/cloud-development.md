@@ -13,7 +13,10 @@ Use [the shared cloud-agent workflow](cloud-agent-workflow.md) for the full pref
 1. Work on a feature branch, add focused regression coverage and update relevant docs.
 2. Open a PR, wait for `checks`, and merge the passing change when authorized. The owner has authorized routine merges and releases.
 3. A successful main-branch push check triggers `release`. It revalidates the exact current main SHA before sending its Git archive to the production host named by the repository variable `CHIEF_DEPLOY_HOST`, which is validated as a literal hostname or IPv4 address. Since 26 September 2026 that host is the Lightsail VM. Automatic release relies on that successful main check rather than rerunning the same test/build steps; a manual release dispatch is supported only on main and still runs those checks. PRs receive one check per revision, and superseded PR checks are cancelled. Feature-branch pushes without a PR do not run hosted checks; run local checks before opening a PR.
-4. The server builds a candidate image before touching the running gateway. If runtime work or queued/running conversation input (including attachment preparation) is active, deployment fails with a clear message; retry when idle. Do not cancel user work just to release code.
+4. The server gets a candidate image before touching the running gateway. On main, the `checks` workflow's `publish gateway image` job builds the image with BuildKit and pushes `ghcr.io/akhilvuputuri/chief-agent-gateway:<sha>`, along with a build-provenance attestation. `release` finds that image's digest and verifies the attestation (signed by `ci.yml` on `refs/heads/main` for the exact SHA). This check is advisory until the switch-over, when it becomes required and its verified digest is the one sent to the host.
+   - Once the host runs a handler that accepts a digest ([Release handler](#release-handler)), `release` sends `deploy <sha> <digest>`. The host then pulls that exact image and refuses it unless its revision label and `RELEASE_SHA` match the commit.
+   - Until then, and for a manual release that asks for it, the host builds the image itself.
+   - If runtime work or queued/running conversation input (including attachment preparation) is active, deployment fails with a clear message; retry when idle. Do not cancel user work just to release code.
 5. The gateway is recreated, health is checked, and the previous image is restored if startup health fails. The Postgres container and data volume are not replaced. Only a successful health check updates server RELEASE.
 6. Watch the release workflow. Report the deployed SHA and status. A branch push, PR creation or passing test workflow alone does not mean the Telegram bot is updated.
 
@@ -34,9 +37,19 @@ GitHub access inside Codex tasks varies. Repository connection does not guarante
 
 Production API keys and OAuth refresh tokens stay in `/opt/hermes-companion/.env`. GitHub Actions has a dedicated SSH key and pinned known-host entry, stored as `COMPANION_DEPLOY_KEY` and `COMPANION_KNOWN_HOSTS` repository secrets. These are not Codex environment variables.
 
-The SSH public key is restricted to a root-owned `/usr/local/sbin/companion-cloud-release` entrypoint. Forwarding, PTY and arbitrary SSH commands are disabled. Only `deploy <full SHA>` and `diagnose` are accepted. Deployment authority still permits changing production application code; protect repository write access. PR jobs receive no deployment key. Release dispatch is limited to main, and automatic releases accept only successful push checks from this repository.
+The SSH public key is restricted to a root-owned `/usr/local/sbin/companion-cloud-release` entrypoint. Forwarding, PTY and arbitrary SSH commands are disabled. Only `deploy <full SHA>`, `deploy <full SHA> sha256:<digest>` and `diagnose` are accepted. Deployment authority still permits changing production application code; protect repository write access. PR jobs receive no deployment key. Release dispatch is limited to main, and automatic releases accept only successful push checks from this repository.
 
 The reviewed entrypoint source is `scripts/cloud-release.py`. Editing that file in a PR does NOT replace the trusted server copy. An operator must explicitly install reviewed updates through the existing local operations connection.
+
+### Release handler
+
+After a reviewed change to `scripts/cloud-release.py` has been released (the release copies the source into `/opt/hermes-companion`), the operator installs it, with BuildKit for the fallback host build:
+
+```sh
+sudo /opt/hermes-companion/deploy/lightsail/install-release-handler.sh <sha256 of scripts/cloud-release.py at the reviewed commit>
+```
+
+The script checks the file's SHA-256 and replaces the handler atomically. It installs `docker-buildx` only if that would not change `docker.io`, `containerd` or `runc`, because upgrading those restarts the gateway and Postgres. A fresh host runs the same script after `install-host.sh`.
 
 ## What diagnostics expose
 
