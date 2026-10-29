@@ -742,6 +742,7 @@ export class GmailTools {
       subject: header(m.payload?.headers, "subject", SUBJECT) ?? "",
       date: header(m.payload?.headers, "date", DATE) ?? "",
       text: indexBody(m.payload) || m.snippet || "",
+      snippet: (m.snippet ?? "").slice(0, SNIPPET),
     };
   }
   /** Internal query-scoped monitoring: one bounded IDs-only page, no model or bodies. */

@@ -79,6 +79,7 @@ import { DailySheet } from "./daily-sheet.js";
 import { SheetsTools } from "./sheets.js";
 import { GmailTools } from "./gmail.js";
 import { MailIndex, OpenRouterEmbedder } from "./mail-recall.js";
+import { MailIndexStore } from "./mail-index-store.js";
 import { buildBriefing } from "./daily-briefing.js";
 import { readConfig } from "./config.js";
 import { connect, ensureUser, event } from "./db.js";
@@ -278,6 +279,13 @@ const mailIndex =
         gmail,
         new OpenRouterEmbedder(c.OPENROUTER_API_KEY),
         c.GMAIL_OWNER_USER_ID,
+        undefined,
+        undefined,
+        // Persisted once migration 033 is installed; in memory only before that.
+        (await db.query("SELECT 1 FROM runtime_migrations WHERE version=33"))
+          .rows.length
+          ? new MailIndexStore(db)
+          : undefined,
       )
     : undefined;
 const calendar = new CalendarTools({

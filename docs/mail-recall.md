@@ -1,6 +1,6 @@
 # Email memory (mail recall) — MVP
 
-Status (29 October 2026): live with a 12-month window and quota-paced builds. This change fuses meaning search with Gmail keyword results inside `gmail_recall`. See [journal 120](journey/120-email-memory-mvp.md) for the measurements.
+Status (29 October 2026): live with a 12-month window, quota-paced builds and fused meaning and keyword search. Persistence (migration 033) is in review. See [journal 120](journey/120-email-memory-mvp.md) for the measurements.
 
 ## What it does
 
@@ -34,7 +34,7 @@ This is retrieval-augmented generation: the host retrieves the relevant emails, 
    - The operator eval builds its own index, which reads against the same per-user quota while it runs.
 2. **Chunks.** Each body is split into chunks of 1,500 characters with 200 characters of overlap, at most six per message. Every chunk is prefixed with From, To, Date and Subject, so a chunk alone is findable.
 3. **Embeddings.** OpenRouter's `/embeddings` endpoint with the existing OpenRouter key, model `openai/text-embedding-3-small`, one request per group. Vectors are cut to their first 512 values and re-normalised; text-embedding-3 models are trained to allow that. The query embedding and the top-up are part of the turn and are recorded in its spending ledger as `openrouter-embeddings`. A build, including a rebuild a turn triggers, runs outside any turn: it is not in the ledger, and `mail_index.built` logs its reported prompt tokens instead.
-4. **Storage.** In the gateway's memory only. Nothing is written to Postgres or disk, so there is no migration. The index is rebuilt after every restart.
+4. **Storage.** In gateway memory for search, persisted to Postgres once migration 033 is installed (see [Persistence](#persistence-migration-033)). Without the migration the index lives in memory only and is rebuilt after every restart.
 5. **Top-up on use.** Each `gmail_recall` first lists mail received since the previous listing (`after:`, with an hour of overlap) and queues it, oldest first. It then indexes up to 50 queued messages, within 10 seconds. Queued mail is never dropped: anything left waits for the next call, and the result says some recent mail is not indexed yet.
 6. **Search.** The query is embedded and compared with every chunk (cosine similarity, brute force). Each message scores as its best chunk.
 
@@ -46,7 +46,8 @@ While the index is building, or after a failed build, the tool returns `building
 ## Privacy
 
 - The index sends the text of every message in the window to the embedding provider through OpenRouter, not only the messages the agent reads. The owner accepted this for the MVP on 25 October 2026. The agent's own model calls already send the emails it reads.
-- The index itself (bodies, chunks and vectors) stays in gateway memory. It is never written to Postgres, the operational log or the repository.
+- Chunk text stays in gateway memory only. With migration 033, Postgres stores each indexed message's headers (sender, subject, date), Gmail's snippet and the chunk vectors. That is no body text beyond Gmail's snippet, which previews the body's first ~120 characters. The owner chose this on 29 October 2026. These rows are also in the database backups. Vectors are derived from the text, so they are not anonymous.
+- Nothing from the index goes to the operational log or the repository.
 - What `gmail_recall` returns to the agent is stored like every other Gmail tool result (`runtime_calls`): the query and up to ten senders, subjects, dates and 300-character excerpts.
 - Results carry the untrusted-content warning, and email text remains data, never instructions.
 
@@ -96,13 +97,74 @@ ssh -F "$OPS/ssh_config" chief-lightsail "sudo -n docker exec hermes-companion-g
 
 It then writes every indexed chunk with its headers. The Python eval in [evals/mail-recall](../evals/mail-recall/README.md) reads that private export offline. It compares keyword, meaning search, BM25, their reciprocal rank fusions and an optional local cross-encoder re-ranker. No model API or credential is needed. The export contains email text and stays in the private operations folder.
 
+## Persistence (migration 033)
+
+**Tables** (owner-scoped):
+
+| Table                 | Holds                                                                                                                                                                                             |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mail_index_messages` | message and thread IDs, received time, sender, subject, date header and Gmail's snippet                                                                                                           |
+| `mail_index_chunks`   | one 512-value little-endian float32 vector per chunk; rows cascade with their message                                                                                                             |
+| `mail_index_state`    | the configuration the vectors were built under (embedding model with chunking, dimensions, window); `synced_at`, the last listing time, is informational, since each start lists the whole window |
+
+**On start**, the gateway:
+
+1. loads the stored index, so `gmail_recall` answers at once;
+2. lists the whole 12-month window once, indexes anything missing (for example after a failed save or downtime) and removes indexed messages that are no longer listed, such as deleted mail, mail moved out of Primary, or mail past the cap;
+3. holds top-ups until that listing has finished, so no message is read twice.
+
+**Rebuilds:** an index stored under a different configuration is deleted and rebuilt.
+
+**Writes are best-effort:**
+
+- a failed save is logged once as `mail_index.persist_failed` and repaired by the next start's listing;
+- a failed start-up listing after a successful load is logged as `mail_index.catch_up_failed`, and the loaded index keeps answering.
+
+Other start-up log events: `mail_index.loaded` (message count and duration), then `mail_index.built` when the listing finishes.
+
+**Excerpts:** after a restart, results show Gmail's snippet instead of a chunk excerpt, because chunk text is not stored.
+
+### Deployment
+
+The release guard refuses any `db/` or `compose.yaml` change that an operator rollout has not installed. The rollout PR carries:
+
+- `db/033_mail_index.sql`;
+- its Compose inventory line after `032_boxes.sql`;
+- the reviewed [`scripts/deploy-mail-index.py`](../scripts/deploy-mail-index.py), whose `BASE` must equal the live release when the PR merges.
+
+Run the rollout right after the merge, under the release lock with an idle gateway:
+
+1. Upload the merged `git archive` and the script, and compare the script with the merged file.
+2. Run `sudo python3 deploy-mail-index.py <archive.tar> <merge SHA>`. It:
+   - checks that only migration 033 and its Compose line changed;
+   - builds the candidate;
+   - refuses active runs or queued input;
+   - stops the gateway and applies the migration;
+   - checks the version 33 marker;
+   - starts the candidate and checks health, restoring the previous image and Compose file on any failure.
+3. The automatic release for the same commit then succeeds as a no-op. The first start after the rollout builds the index once (about 17 minutes) and persists it; later starts load it.
+
+`python3 scripts/test-deploy-mail-index.py` runs the rollout offline.
+
+**Rollback:** the previous image ignores the new tables. They can stay, or be dropped in a reviewed operator step.
+
+**Deleting the stored index:** setting `MAIL_INDEX=off` stops using the tables but leaves their rows. To delete the owner's stored index, stop the gateway (or set `MAIL_INDEX=off` and release), then run as the operator:
+
+```sql
+BEGIN;
+DELETE FROM mail_index_messages WHERE user_id = '<owner id>';
+DELETE FROM mail_index_state WHERE user_id = '<owner id>';
+COMMIT;
+```
+
+The chunk rows cascade. With `MAIL_INDEX=on`, the next start rebuilds the index from Gmail.
+
+The build needs the owner's `users` row, which exists once the owner has used Chief.
+
 ## Not in the MVP
 
-- persistence;
-- background sync;
+- background sync (beyond top-up on use and the start-up listing);
 - attachments;
 - the second account;
 - keyword fusion and reranking;
 - long-context and extra-search comparison arms.
-
-Persistence would need an additive migration through the reviewed operator rollout ([operator procedure](cloud-development.md)).
