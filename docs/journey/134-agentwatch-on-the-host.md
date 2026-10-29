@@ -137,6 +137,37 @@ Checked afterwards, read-only:
 
 Message capture: `e6abb13` (PR 359), released by the workflow. agentwatch on the host: `6e90db7` (PR 360), installed by the operator rollout at about 15:00 UTC. It uses image `ghcr.io/akhilvuputuri/agentwatch@sha256:a74e529e…` from agentwatch `918e8a3`. The next automatic release, `b431444` (run 40897824539, the first that pulls the CI-built gateway image), deployed healthy in 51 s and left agentwatch running, its image in place. Pending: the first real traces.
 
+### Backfill of the history — 2026-10-29
+
+[PR 366](https://github.com/akhilvuputuri/chief-agent/pull/366) is the owner's option C, done after the live rollout. It rebuilds runs from before the live start out of Postgres, using the live exporter's own span builders, which it now shares.
+
+Independent review approved the exact head `66a70f0`. Before that, it found three problems, all fixed:
+
+- the query cut tool payloads into text that could no longer be scrubbed by key;
+- scoring differed from live;
+- a redirect could take content off the laptop.
+
+Run on 29 October, after the merge (`f3ea52b`):
+
+- **Read:** the query read rows through the weekly review's read-only path (313 runs from 6 September to the live start at 15:00:16 UTC) into a private file.
+- **Posted:** with `--content`, through the SSH tunnel, in 13 requests (8.8 MB).
+- **Re-run:** a second run left agentwatch's span count unchanged at 2,859 (2,858 backfilled plus the rollout check).
+- **Cleanup:** the extract was deleted.
+
+**Measured, from agentwatch over the backfilled history:**
+
+|                   |                                                                        |
+| ----------------- | ---------------------------------------------------------------------- |
+| Traces            | 231 (child runs join their parent's trace)                             |
+| Model calls       | 1,092, of which 25 failed                                              |
+| Tool calls        | 1,453, of which 187 ended in error                                     |
+| Tokens            | 16.75 M input (6.28 M cache reads, 6.86 M cache writes), 0.33 M output |
+| Reported cost     | $32.16                                                                 |
+| Model latency     | median 5.1 s, p95 14.9 s                                               |
+| `user_redirected` | 129 scored turns, mean 6.2%                                            |
+
+The redirect rate inherits the rules' measured recall of about one half, so the true rate is likely nearer 12%.
+
 ## Follow-up and next iteration
 
 - A question to Jev, the classifier Chief already asks about effort and tools on every message: "does this redirect the previous answer?" question would catch pushback the patterns miss, for about $0.001 a message. It needs the owner's approval.
