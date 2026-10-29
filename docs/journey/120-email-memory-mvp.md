@@ -152,10 +152,44 @@ Estimates from the 30-day build, to be checked against the first 12-month `mail_
   - The email agent's instructions and the tool description now say to use both for content questions instead of `gmail_recall` first.
 - **Limits:** synthetic, keyword-avoiding questions; 30 per run; a retrieval score, not a check of the agent's answers.
 
+## Fusion and re-ranking eval — 2026-10-29
+
+**Measured** with `evals/mail-recall` (offline, standard-library Python) on a private `--export` from release `d77a23a`.
+
+- **Setup:**
+  - 1,412 indexed messages;
+  - 30 new synthetic, keyword-avoiding questions;
+  - the export's run scored keyword 12 / 30 and keyword plus `gmail_recall` 18 / 30.
+- **Reference sets** (target anywhere in the set):
+  - every keyword result the agent sees: 12 / 30, 8.3 messages on average;
+  - plus `gmail_recall`'s top 8: 18 / 30, 15.0 messages on average.
+- **Ranked lists, first 8:**
+
+| Ranking                                                       |  @1 |  @5 |  @8 | MRR@10 | Against all keyword results (only this / only keyword, McNemar p) |
+| ------------------------------------------------------------- | --: | --: | --: | -----: | ----------------------------------------------------------------- |
+| Keyword list                                                  |   6 |   9 |  10 |   0.24 | 0 / 2                                                             |
+| Meaning search (deployed)                                     |   4 |  14 |  14 |   0.27 | 6 / 4, 0.75                                                       |
+| Meaning, mean of best 2 chunks                                |   4 |  13 |  14 |   0.26 | 6 / 4, 0.75                                                       |
+| Local BM25                                                    |   4 |   9 |   9 |   0.19 | 2 / 5, 0.45                                                       |
+| Fusion: meaning + Gmail keyword                               |   6 |  16 |  18 |   0.34 | 6 / 0, 0.03                                                       |
+| Fusion: meaning + BM25                                        |   7 |  11 |  12 |   0.31 | 3 / 3, 1.0                                                        |
+| Fusion: all three                                             |   5 |  13 |  15 |   0.29 | 3 / 0, 0.25                                                       |
+| Re-rank top 30 of meaning + keyword, `ms-marco-MiniLM-L-6-v2` |   9 |  14 |  16 |   0.38 | 5 / 1, 0.22                                                       |
+| Re-rank, `bge-reranker-base`                                  |   5 |  12 |  13 |   0.27 | 4 / 3, 1.0                                                        |
+
+- **Reading:**
+  - In 8 results, the meaning-plus-Gmail-keyword fusion matched what the agent found across two separate lists averaging 15 messages, with the best ranking of the methods tried.
+  - Gmail's own search was a better keyword component than local BM25, and adding BM25 lowered the fusion.
+  - The small re-ranker put more targets first but lost two from the top 8; the larger one did worse.
+- **Change:** `gmail_recall` takes optional `keywords` (one to three Gmail searches) and returns the fused list. The email agent makes one call with both parts for content questions.
+- **Limits:**
+  - 30 synthetic questions from one export, so the intervals are wide;
+  - retrieval only, not the agent's answers;
+  - the re-rankers were small local models scoring headers plus each message's best chunk.
+
 ## Follow-up and next iteration
 
 - Add about 10 owner-written questions to the eval.
-- Fuse keyword and meaning results inside `gmail_recall` so one call gets both.
 - Then try re-ranking the top results and smaller chunks, compared offline with the Python eval in `evals/mail-recall` over a private `--export` dataset (added after this entry's results; not yet run).
 - Check a few real half-remembered requests in Telegram.
 - If recall clearly helps, persist the index (additive migration), sync in the background, and consider the second account and attachments.

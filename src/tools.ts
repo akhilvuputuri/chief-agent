@@ -33,7 +33,7 @@ import type { StockLookup } from "./stock-lookup.js";
 import { RuleTools } from "./stock-rules.js";
 import type { SingaporeTools } from "./singapore/tools.js";
 import { isSingaporeAction } from "./singapore/schema.js";
-import type { MailIndex } from "./mail-recall.js";
+import { keywordSearch, type MailIndex } from "./mail-recall.js";
 import { isLearned, MemoryStore } from "./memory.js";
 export class JobTools {
   constructor(
@@ -395,7 +395,11 @@ export class JobTools {
     }
     if (a.operation === "gmail_recall") {
       if (!this.mailRecall) throw new Error("The mail index is not enabled");
-      return this.mailRecall.recall(user, a.query, a.limit);
+      const keyword =
+        a.keywords && this.gmail
+          ? await keywordSearch(this.gmail, user, run, a.keywords)
+          : undefined;
+      return this.mailRecall.recall(user, a.query, a.limit, keyword);
     }
     if (a.operation === "job_save")
       return (
