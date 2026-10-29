@@ -4,7 +4,9 @@
 - **Phase 1, revisioned memory ([journal 129](docs/journey/129-revisioned-memory.md)):** live in `e6f75f7` after the operator rollout of migration 010 on 28 October; 7 memories imported as legacy revisions. [Release record](docs/releases.md).
 - **Pending:** compare cached tokens and `memory.selected` on the next owner turns with earlier days.
 - **Phase 2, the nightly learner ([journal 130](docs/journey/130-nightly-learner.md)):** live in `d7df9aa` since 16:04 UTC on 28 October. Forwarded Telegram messages are now marked as someone else's words and never parsed as commands or approvals.
-- **Next:** check the first night's `learner.finished` counts, charges and learned items; then phase 3 (weekly digest with undo, reaction intake, learner-drafted skills).
+- **First night (29 October):** 7 tasks reviewed, all skipped (six routines, one cancelled), no model call. Most owner requests never become a tracked task.
+- **Proposed:** learning from ordinary conversation turns (owner's choice), branch `feat/learn-from-turns`, prompt `learner-v2`.
+- **Next:** after it ships, check the next night's counts, charges and learned items; then phase 3 (weekly digest with undo, reaction intake, learner-drafted skills).
 
 # Dependency hardening (#329, closed) — live in `211b2a2`, `9ab96c2`, `c4ba246` and `da2a5ff`, 27 October 2026
 

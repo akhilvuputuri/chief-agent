@@ -94,7 +94,17 @@ Each run looks at up to 20 of the owner's work tasks that are `done`, `paused` o
 - **skipped:** cancelled, any uncertain write, a routine occurrence, or a task not started by the owner (a responsibility investigation or a gathering).
 - A paused task with neither, or one paused by a restart or cutover, is not labelled and is looked at again later. Such tasks are excluded before the 20-task limit, so a backlog of them cannot crowd out finished work. Any failed receipt, even a failed read, makes a done task a pitfall: the label errs towards strict.
 
-A labelled task is recorded in `learning_reviews` once the run completes, so it is learned from at most once. A run with nothing but skipped tasks makes no model call.
+A labelled task or turn is recorded in `learning_reviews` once the run completes, so it is learned from at most once. A run with nothing but skipped tasks makes no model call.
+
+#### Conversation turns
+
+Most of the owner's requests never become a tracked work task: on the first night (29 October) the only finished tasks in 14 days were six routine occurrences and one cancelled task, so nothing could be learned ([journal 130](journey/130-nightly-learner.md#first-night-and-conversation-turns--2026-10-29)). The owner chose to also learn from ordinary conversation turns. After the tasks, each run looks at up to 30 turns: foreground runs answering the owner's own inputs, with no tracked task (those are reviewed as tasks) and not in the background, at least 24 hours and at most 14 days old, oldest first. The run ID is the reviewed ID in `learning_reviews`, whose `task_id` column holds either kind.
+
+- **success:** Chief answered (`stop_reason` `answer`) and the owner's next message within six hours does not correct it.
+- **pitfall:** the next message corrects it (it starts with "no", "not that", "that's wrong", "actually", "I meant", "try again", "redo" and similar), or the turn recovered from failed calls. The correction, cut at any attachment like other owner text, is added to the turn's owner messages, so it can be quoted and is the main evidence for what the owner wants instead. When Chief's reply ended with a question (such as an offer to remember something), only strong cues ("that's wrong", "I meant", "try again") count, so a plain "no" to the offer is not a correction.
+- **skipped:** owner text under 12 characters with no tool call ("thanks", "ok"), a turn that asked the owner something back, was cancelled, interrupted or failed, or left an uncertain write.
+
+Turn evidence is the owner's messages, Chief's last reply, call counts per operation and the untrusted kinds from those operations, held to 2,000 characters a turn. The success signal is weaker than a task's proof, so the instructions treat a single uncorrected turn as weak evidence for a lesson. Facts still need the owner's own quoted words.
 
 ### The model run
 

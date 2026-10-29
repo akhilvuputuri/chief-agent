@@ -49,6 +49,13 @@ Not done: no production run, no measurement of what it learns, cost per run or e
 - The automatic release deployed it at 16:04 UTC; `gateway.started` reported the release on Node v22.23.4, and the gateway's container log had no `error`- or `warn`-level line from its start at 16:03:49 to 16:06:35 UTC. No learner run had happened yet; the first window opens at 19:30 UTC. See the [release record](../releases.md).
 - Pending: the first night's `learner.finished` counts, its charges and the items it wrote.
 
+## First night and conversation turns — 2026-10-29
+
+- **Measured (production, 03:32:54 SGT on 29 October, release `4fd53c0`):** one completed run with prompt `learner-v1`. It reviewed 7 tasks, labelled all 7 `skipped` (six routine occurrences as `not_owner_request`, one `cancelled`) and made no model call, so it learned nothing and was charged nothing. Those 7 were every work task updated in the 14-day window.
+- **Diagnosis:** most owner requests are answered as ordinary turns without `work_start`, so finished work tasks are rare. A learner limited to tasks would almost never fire, the same failure Hermes's docs warn about for session-end learning in one long chat.
+- **Owner decision (29 October):** also learn from ordinary conversation turns, with a weaker success signal (answered, not corrected in the next message within six hours) and the owner's correction as pitfall evidence. Routines stay excluded.
+- **Change (`learner-v2`):** up to 30 turns a night after the tasks; `labelTurn` and `isCorrection` in [`src/learning.ts`](../../src/learning.ts); provenance records `turnRunIds` alongside `taskIds`; design in [learning](../learning.md#conversation-turns). Tested with a fake model in `tests/learning.test.ts` (16 tests): labels, correction cues including a "no" to Chief's own offer, a correction becoming quotable owner evidence, tracked-task turns left to the task, recent turns waiting a night, and no turn reviewed twice. Not yet reviewed or released.
+
 ## Follow-up and next iteration
 
 After the phase 1 rollout and this release: check the first night's `learner.finished` counts and charges, and read what it wrote (`memory_revisions` with `origin='learned'`). Phase 3 adds the weekly digest with undo, reaction intake (a 👎 veto) and skills drafted from two independent successes.

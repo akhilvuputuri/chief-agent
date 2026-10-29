@@ -1,3 +1,7 @@
+# Learning from conversation turns — proposed, 29 October 2026
+
+The learner's first night (03:32 SGT, 29 October) reviewed 7 tasks and skipped all of them: six routine occurrences and one cancelled task were the only finished work in 14 days, because most owner requests are ordinary turns without a tracked task. The owner chose to also learn from those turns: up to 30 a night, labelled success when answered and not corrected in the next message within six hours, and pitfall when the owner corrected it, with the correction kept as the owner's quotable words. Prompt `learner-v2`, no migration. Branch `feat/learn-from-turns`. See [learning](learning.md#conversation-turns) and [journal 130](journey/130-nightly-learner.md#first-night-and-conversation-turns--2026-10-29).
+
 # OpenTelemetry trace export — live in `7ba6831`, 28 October 2026 (UTC)
 
 Issue #323 phase 1, Chief's half. With `OTEL_EXPORTER_OTLP_ENDPOINT` set, Chief sends each run, model call and tool call as an OTLP span following the GenAI semantic conventions: metadata only, never awaited by a turn, dropped if the collector is down. The receiving side is [agentwatch](https://github.com/akhilvuputuri/agentwatch), a separate local trace viewer. Production sets no endpoint, so export is off there. Released in `7ba6831` (PR 347) with startup health passing. Pending: a decision on where a collector runs for production data. See [tracing](tracing.md) and [journal 131](journey/131-otel-trace-export.md).
