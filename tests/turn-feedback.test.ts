@@ -38,6 +38,7 @@ test("new requests that mention another or again are not retries", () => {
     "Try again tomorrow morning",
     "Thanks, try again later if it fails",
     "redo the calendar for next week too",
+    "do that again for mum too!",
   ])
     assert.equal(redirectOf(text, "book a table", "Done."), null, text);
 });

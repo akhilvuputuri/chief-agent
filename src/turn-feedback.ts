@@ -31,7 +31,7 @@ const ATTEMPT =
 // "Do it again next week", "redo the calendar for Friday too": a repeat or an extension, not
 // a rejection of the answer.
 const EXTENSION =
-  /\b(next|later|tomorrow|tonight|weekly|daily|every|too[.!?]*$|also|as well|for (mon|tues|wednes|thurs|fri|satur|sun)day|on (mon|tues|wednes|thurs|fri|satur|sun)day)\b/i;
+  /\b(next|later|tomorrow|tonight|weekly|daily|every|also|as well|for (mon|tues|wednes|thurs|fri|satur|sun)day|on (mon|tues|wednes|thurs|fri|satur|sun)day)\b|\btoo[.!?]*$/i;
 
 // Function words that say nothing about what was asked.
 const STOP = new Set(
