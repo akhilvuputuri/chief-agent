@@ -26,9 +26,10 @@ const SHORT_RETRY = new RegExp(
 const SHORT_WORDS = 8;
 // "Add haircut again", "try to add again": a short request to repeat an action, which says the
 // last attempt did not work. It must start with an action verb, so "thanks again", "never
-// again" or "I'm sick again" do not count, and it must not be a question.
+// again" or "I'm sick again" do not count, and it must not be a question. ("Remind me again"
+// is left out: after a reminder it usually asks for another one.)
 const AGAIN =
-  /^\s*(?:(?:please|pls|can you|could you)\s+)?(?:try to\s+)?(?:add|set|create|send|book|remind|schedule|save|check|search|look|do|make|try|update|cancel|move|run|start|get|find|fetch|post|delete|remove|change|edit|retry|redo)\b[^?]*\bagain[\s.!]*$/i;
+  /^\s*(?:(?:please|pls|can you|could you)\s+)?(?:try to\s+)?(?:add|set|create|send|book|schedule|save|check|search|look|do|make|try|update|cancel|move|run|start|get|find|fetch|post|delete|remove|change|edit|retry|redo)\b[^?]*\bagain[\s.!]*$/i;
 const AGAIN_WORDS = 5;
 const UNCAPTIONED = /^The user sent this \w+ without a caption\.$/;
 // A request for another attempt anywhere in the opening.

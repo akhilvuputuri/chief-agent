@@ -95,7 +95,8 @@ test("provider messages become the conventions' parts, without images or credent
 
 test("long values are cut, and long histories keep their newest messages", () => {
   const long = contentText("word ".repeat(MAX_PART_CHARS / 5 + 100));
-  assert.ok(long.endsWith("[500 characters cut]"));
+  assert.ok(long.endsWith("… [cut]"));
+  assert.equal(long.length, MAX_PART_CHARS + "… [cut]".length);
   // Scrubbed before the cut, so a credential at the cut is still scrubbed.
   const straddling = contentText(
     "word ".repeat((MAX_PART_CHARS - 10) / 5) +
@@ -154,4 +155,16 @@ test("tool arguments are the object the model sent, and one huge message is cut 
   const kept = messagesJson([huge]);
   assert.ok(kept.json.length <= MAX_MESSAGES_CHARS);
   assert.equal(kept.truncated, true);
+});
+
+test("scrubbing stays fast on hostile text and survives deep nesting", () => {
+  // Runs just short of the base64 limit made the old pattern quadratic (seconds per MB).
+  const runs = ("A".repeat(1_999) + " ").repeat(500);
+  const start = performance.now();
+  contentText(runs);
+  contentText({ result: runs.repeat(10) });
+  assert.ok(performance.now() - start < 500, "scrubbing took too long");
+  let deep: unknown = "x";
+  for (let i = 0; i < 20_000; i++) deep = [deep];
+  assert.equal(contentText(deep), "[content omitted]");
 });

@@ -39,11 +39,17 @@ const MORE_TOKENS =
   /\b(?:ya29\.[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{35}|AKIA[0-9A-Z]{16}|xox[abposr]-[A-Za-z0-9-]{10,})\b/g;
 // Inline files and other long base64 runs: never useful in a trace, and often an image.
 const DATA_URL = /data:[a-z]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi;
-const BASE64_RUN = /[A-Za-z0-9+/]{2000,}={0,2}/g;
+// The lookbehind starts a match only at a run's first character; without it, the engine
+// retries from every position of a run just short of the limit (quadratic on long text).
+const BASE64_RUN = /(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{2000,}={0,2}/g;
+// Text is cut to this before scrubbing, so scrubbing costs no more than a cap. The margin
+// lets a credential or data run that straddles the final cut still be recognised.
+const SCRUB_CHARS = MAX_PART_CHARS + 4096;
 const CREDENTIAL_KEY =
   /^(authorization|proxy-authorization|cookie|set-cookie|password|passcode|passwd|secret|client_secret|api[-_]?key|x-api-key|(access|refresh|id|session|auth|bearer)[-_]?token|token)$/i;
 
-function scrubText(text: string) {
+function scrubText(full: string) {
+  const text = full.length > SCRUB_CHARS ? full.slice(0, SCRUB_CHARS) : full;
   return (scrubTrace(text) as string)
     .replace(MORE_TOKENS, "[REDACTED_CREDENTIAL]")
     .replace(DATA_URL, "[data omitted]")
@@ -80,13 +86,19 @@ export function parsed(text: string): unknown {
  * they are serialized; the result is cut to `max` characters, counting what was cut.
  */
 export function contentText(value: unknown, max = MAX_PART_CHARS) {
-  const source = typeof value === "string" ? parsed(value) : value;
-  const scrubbed = scrubContent(source);
-  const text =
-    typeof scrubbed === "string" ? scrubbed : (JSON.stringify(scrubbed) ?? "");
-  return text.length <= max
-    ? text
-    : `${text.slice(0, max)}… [${text.length - max} characters cut]`;
+  let text: string;
+  try {
+    const source = typeof value === "string" ? parsed(value) : value;
+    const scrubbed = scrubContent(source);
+    text =
+      typeof scrubbed === "string"
+        ? scrubbed
+        : (JSON.stringify(scrubbed) ?? "");
+  } catch {
+    // Nested too deeply to walk (RangeError): the span keeps its metadata without it.
+    return "[content omitted]";
+  }
+  return text.length <= max ? text : `${text.slice(0, max)}… [cut]`;
 }
 
 /** Tool-call arguments as the model sent them: the object, when it sent JSON text. */

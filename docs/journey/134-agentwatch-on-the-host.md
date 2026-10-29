@@ -74,6 +74,13 @@ Independent review (Opus 5.5) of `59e527d` found nothing blocking. Its should-fi
 - **Size estimates counted characters, not escaped UTF-8 bytes**, and one huge message could exceed its list's cap. Both are fixed.
 - **Held content was bounded by entry count, not size.** It is now at most 32 MB in total.
 
+Re-review of `3f7e1bf` found one blocking problem. The new base64 pattern backtracked quadratically on runs just under its length limit: 1.6 s per MB, run on the event loop when a tool result arrives. The next commit:
+
+- starts a match only at a run's first character (a lookbehind; about 4 ms per MB);
+- bounds every string before scrubbing;
+- replaces content nested too deeply to walk with a placeholder instead of losing the span;
+- drops "remind me again" from the retry verbs.
+
 Smaller fixes:
 
 - output messages carry `finish_reason`;
