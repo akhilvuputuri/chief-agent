@@ -70,7 +70,7 @@ Running TypeScript directly with Node's type stripping was rejected for now. It 
 
 - **First main publish** (`e2ffacb`, checks run 40808840306): `publish gateway image` succeeded in 94 s, running alongside the tests.
 - **The package is public:** an anonymous GHCR token fetched its manifest (HTTP 200), so the host can pull it without credentials.
-- **First release with the advisory step** (`b6e1071`, release run 40809473729): it found the digest and verified the attestation in 6 s. The host still built the image, which took 390 s.
+- **First release with the advisory step** (`b6e1071`, release run 40809473729): it found the digest and verified the attestation in 6 s. The host still built the image, and the whole release step (upload, guards, build, gateway recreate and health check) took 390 s.
 - **Two earlier attempts** for `260c94c` and `e2ffacb` were refused by the existing guard because main had moved on. That is expected.
 - **Transpiled build (#352):** CI's image job built the gateway image with `build:image` and passed its smoke checks.
 
