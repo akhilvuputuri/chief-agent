@@ -1,7 +1,7 @@
 # 133 — Can Chief tell which answers missed without the owner rating them?
 
 Work date: 2026-10-29 (Singapore). Written: 2026-10-29.
-Status: in review. When trace export is on, the owner's next message after a turn becomes a `user_redirected` score on that turn's trace. Production sets no endpoint, so nothing leaves the host there.
+Status: released in `bc4c5c0`. When trace export is on, the owner's next message after a turn becomes a `user_redirected` score on that turn's trace. Production sets no endpoint, so nothing leaves the host there.
 
 ## User-visible problem and preceding iteration
 
@@ -80,6 +80,8 @@ A third review of `804a5cf` found that the extension guard had become too broad.
 - "too" is an extension only at the end of the message;
 - "try a different approach" is a retry.
 
+A fourth review of `c32ef8f` approved it, with one slip: a final "too" followed by punctuation ("…for mum too!") was not an extension. It was fixed in `8db624b`, which the reviewer approved at that exact commit.
+
 Recorded as limits, not changed:
 
 - "redo" without a time or extension stays a correction, as in the learner;
@@ -91,6 +93,12 @@ Recorded as limits, not changed:
 ## Verification and outcome
 
 `npx tsx --test tests/turn-feedback.test.ts tests/otel.test.ts tests/learning*.test.ts` passes 34 of 34, and `tsc --noEmit` passes. On `275997e`, the full local `kite run check` passed 1,365 of 1,367 tests. The failure was the corrupt-gzip test, which needs Node 22.23.4 ([journal 126](126-fetch-hygiene-and-node.md)); the laptop has 22.15. Hosted CI passed every job on `275997e`. Results for the reviewed fix commit are recorded on the PR.
+
+### Release closure — 2026-10-29
+
+[PR 355](https://github.com/akhilvuputuri/chief-agent/pull/355) merged at the approved head `8db624b` as `bc4c5c09e077eb22bd32ee2c1f295c6de730e941`. Hosted CI passed every job on `8db624b`. The [release workflow](https://github.com/akhilvuputuri/chief-agent/actions/runs/40845451244) deployed that exact commit at 09:01 UTC on 29 October and reported `{"deployed": "bc4c5c0…", "healthy": true}`.
+
+No endpoint is configured in production, so `turnFeedback` and `runConversation` return at once there, and no evaluation leaves the host. That the feedback works is shown only by the tests and the synthetic run above.
 
 ## Follow-up and next iteration
 
