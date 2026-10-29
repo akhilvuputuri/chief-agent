@@ -14,7 +14,7 @@
     "typecheck": "kite run build:pi && tsc --noEmit && tsc -p tsconfig.evals.json",
     "test": "kite run build && kite run test:ts && kite run test:other",
     "test:ts": "tsx --test --test-concurrency=1 ${TEST_SHARD:+--test-shard=$TEST_SHARD} tests/*.test.ts",
-    "test:other": "node --test scripts/*.test.mjs && python3 -m unittest discover -s evals/picker -p 'test_*.py' && python3 -m unittest discover -s evals/context -p 'test_*.py' && python3 -m unittest discover -s evals/decisions -p 'test_*.py' && python3 -m unittest discover -s evals/mail-recall -p 'test_*.py' && python3 -m unittest discover -s evals/coding -p 'test_*.py'",
+    "test:other": "node --test scripts/*.test.mjs && python3 -m unittest discover -s evals/picker -p 'test_*.py' && python3 -m unittest discover -s evals/context -p 'test_*.py' && python3 -m unittest discover -s evals/decisions -p 'test_*.py' && python3 -m unittest discover -s evals/mail-recall -p 'test_*.py' && python3 -m unittest discover -s evals/coding -p 'test_*.py' && for f in scripts/test-*.py; do python3 \"$f\" || exit 1; done",
     "migrate": "tsx src/migrate.ts",
     "check": "kite run typecheck && kite test && kite run check:coding && kite run check:pi",
     "format": "prettier --write .",

@@ -121,3 +121,47 @@ jobs:
         run: |
           echo "$RESULTS"
           for result in $RESULTS; do test "$result" = success; done
+  gateway-image:
+    name: publish gateway image
+    # Main only, alongside the other jobs. The release deploys this exact image by
+    # digest instead of building on the production host, and the release runs
+    # only when the whole workflow, this job included, succeeded.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push the gateway image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          provenance: false
+          tags: ghcr.io/${{ github.repository }}-gateway:${{ github.sha }}
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+          build-args: RELEASE_SHA=${{ github.sha }}
+          cache-from: type=gha,scope=gateway
+          cache-to: type=gha,mode=max,scope=gateway
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/${{ github.repository }}-gateway
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+      - name: Record the image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ghcr.io/${{ github.repository }}-gateway
+        run: |
+          printf 'Gateway image: `%s@%s`\n' "$IMAGE" "$DIGEST" >> "$GITHUB_STEP_SUMMARY"
