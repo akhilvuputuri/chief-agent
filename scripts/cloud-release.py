@@ -43,13 +43,16 @@ def prune(sha):
 def pull_image(sha, digest, candidate):
     """Pulls the CI-built image by digest and refuses one not built from `sha`."""
     ref = REGISTRY_IMAGE+'@'+digest
-    pull = subprocess.run(['docker','pull','--quiet',ref], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    pull = subprocess.run(['docker','pull','--quiet',ref], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     if pull.returncode:
-        raise RuntimeError('Image pull failed; production unchanged.')
+        reason = (pull.stdout or '').strip().splitlines()[-1:] or ['no output']
+        raise RuntimeError('Image pull failed; production unchanged: '+reason[0][:300])
     inspected = subprocess.run(['docker','image','inspect','--format','{{json .Config}}',ref], capture_output=True, text=True)
     try:
         config = json.loads(inspected.stdout) if inspected.returncode == 0 else {}
     except ValueError:
+        config = {}
+    if not isinstance(config, dict):
         config = {}
     labels = config.get('Labels') or {}
     env = config.get('Env') or []
@@ -58,6 +61,9 @@ def pull_image(sha, digest, candidate):
     # Only the candidate tag, as a host build makes; :latest moves after the guards.
     if subprocess.run(['docker','tag',ref,candidate], capture_output=True).returncode:
         raise RuntimeError('Could not tag the pulled image; production unchanged.')
+    # The containerd image store keeps a separate record for the digest name, which
+    # `docker image prune` never removes; the tags now hold the content.
+    subprocess.run(['docker','rmi',ref], capture_output=True)
 
 
 def main():

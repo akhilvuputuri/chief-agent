@@ -54,14 +54,15 @@ Running TypeScript directly with Node's type stripping was rejected for now. It 
 - **`scripts/cloud-release.py`:**
   - It accepts `deploy <sha> sha256:<digest>`.
   - It pulls `chief-agent-gateway@<digest>` and refuses the image unless its revision label and `RELEASE_SHA` equal `<sha>`. It then tags only the candidate; `:latest` moves after the existing guards.
+  - It removes the digest-named image record once tagged. The containerd image store keeps that record separately, and `docker image prune` would never free it.
   - `deploy <sha>` still builds on the host, as the fallback.
   - The Compose and database refusal, the active-work and pending-input guards, rollback, health check, source copy and prune are unchanged.
 - **`deploy/lightsail/install-release-handler.sh`:** the reviewed operator step.
   - It checks the handler's SHA-256 and installs it atomically.
   - It installs `docker-buildx` only if that leaves `docker.io`, `containerd` and `runc` unchanged.
 - **Tests:**
-  - Five new offline handler tests: a digest release pulls and does not build; the work guards still hold; an image from another commit is refused by its revision label or by `RELEASE_SHA`; malformed commands are refused.
-  - CI now runs all 16 `scripts/test-*.py` files (233 tests). Until now none of them ran in CI.
+  - Seven new offline handler tests: a digest release pulls, does not build and drops the digest record after tagging; the work guards still hold; an image from another commit is refused by its revision label or by `RELEASE_SHA`; a failed pull reports its reason; a failed or malformed `inspect` is refused; malformed commands are refused.
+  - CI now runs all 16 `scripts/test-*.py` files (235 tests). Until now none of them ran in CI.
 
 ## Verification and outcome
 

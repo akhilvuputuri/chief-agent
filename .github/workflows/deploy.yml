@@ -79,6 +79,7 @@ jobs:
       - name: Find and verify the CI-built gateway image
         id: image
         continue-on-error: true
+        timeout-minutes: 2
         env:
           RELEASE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
           REPO: ${{ github.repository }}

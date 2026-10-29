@@ -128,22 +128,23 @@ jobs:
     # only when the whole workflow, this job included, succeeded.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    # Actions pinned by commit: this job builds the production image and signs it.
     permissions:
       contents: read
       packages: write
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push the gateway image
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           push: true
@@ -154,7 +155,7 @@ jobs:
           build-args: RELEASE_SHA=${{ github.sha }}
           cache-from: type=gha,scope=gateway
           cache-to: type=gha,mode=max,scope=gateway
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
           subject-name: ghcr.io/${{ github.repository }}-gateway
           subject-digest: ${{ steps.build.outputs.digest }}

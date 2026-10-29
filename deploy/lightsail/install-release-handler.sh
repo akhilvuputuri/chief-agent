@@ -25,7 +25,7 @@ if ! docker buildx version >/dev/null 2>&1; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
   plan=$(apt-get -s install --no-install-recommends docker-buildx)
-  if grep -qE '^Inst (docker\.io|containerd|runc) ' <<<"$plan"; then
+  if grep -qE '^(Inst|Remv) (docker\.io|containerd|runc) ' <<<"$plan"; then
     echo "Installing docker-buildx would change docker.io, containerd or runc; do it in a maintenance window" >&2
     exit 1
   fi

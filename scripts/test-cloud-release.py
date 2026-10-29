@@ -20,13 +20,18 @@ spec.loader.exec_module(release)
 
 
 class ReleaseGuardTests(unittest.TestCase):
-    def scenario(self, *, running=0, pending=0, digest=None, revision=None, release_sha=None, refused=None):
+    def scenario(self, *, running=0, pending=0, digest=None, revision=None, release_sha=None, refused=None,
+                 pull_fails=False, inspect=None):
         sha = 'a' * 40
         command = f'deploy {sha}' + (f' {digest}' if digest else '')
         docker = []
 
         def subprocess_run(args, *a, **kw):
             docker.append(list(args))
+            if args[:2] == ['docker', 'pull'] and pull_fails:
+                return subprocess.CompletedProcess(args, 1, stdout='Pulling\nError response from daemon: unauthorized\n')
+            if args[:3] == ['docker', 'image', 'inspect'] and inspect is not None:
+                return subprocess.CompletedProcess(args, inspect[0], stdout=inspect[1])
             if args[:3] == ['docker', 'image', 'inspect']:
                 config = {'Labels': {'org.opencontainers.image.revision': revision or sha},
                           'Env': ['NODE_VERSION=22', 'RELEASE_SHA=' + (release_sha or sha)]}
@@ -110,6 +115,10 @@ class ReleaseGuardTests(unittest.TestCase):
                     self.assertFalse(built)
                     self.assertEqual(pulled, [['docker', 'pull', '--quiet', release.REGISTRY_IMAGE + '@' + digest]])
                     self.assertIn(['docker', 'tag', release.REGISTRY_IMAGE + '@' + digest, release.IMAGE + ':' + sha], docker)
+                    # The digest-named record goes; the candidate tag keeps the image.
+                    self.assertIn(['docker', 'rmi', release.REGISTRY_IMAGE + '@' + digest], docker)
+                    self.assertLess(docker.index(['docker', 'tag', release.REGISTRY_IMAGE + '@' + digest, release.IMAGE + ':' + sha]),
+                                    docker.index(['docker', 'rmi', release.REGISTRY_IMAGE + '@' + digest]))
                 else:
                     self.assertTrue(built)
                     self.assertEqual(pulled, [])
@@ -138,6 +147,13 @@ class ReleaseGuardTests(unittest.TestCase):
 
     def test_image_with_another_release_sha_is_refused(self):
         self.scenario(digest=self.DIGEST, release_sha='c' * 40, refused='not built from the release commit')
+
+    def test_failed_pull_is_refused_with_its_reason(self):
+        self.scenario(digest=self.DIGEST, pull_fails=True, refused='Image pull failed.*unauthorized')
+
+    def test_failed_or_malformed_inspect_is_refused(self):
+        for inspect in [(1, ''), (0, 'not json'), (0, 'null'), (0, '{"Labels": null, "Env": null}')]:
+            self.scenario(digest=self.DIGEST, inspect=inspect, refused='not built from the release commit')
 
     def test_malformed_commands_are_refused(self):
         for command in [f'deploy {"a" * 40} sha256:{"b" * 63}', f'deploy {"a" * 40} {"b" * 64}',
