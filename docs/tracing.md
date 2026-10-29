@@ -76,18 +76,18 @@ Where the content goes is the endpoint's business: in production it is the agent
 
 ## Backfilling history
 
-Live export to the host's agentwatch started on 29 October 2026 at about 15:00 UTC. Runs from before then (Chief's Postgres keeps them from 6 September 2026) can be rebuilt into agentwatch from the database, in the same shape as live traces. Code: [scripts/trace-backfill.sql](../scripts/trace-backfill.sql) reads the rows, [src/trace-backfill.ts](../src/trace-backfill.ts) turns them into spans and evaluations and posts them. Tests: [tests/trace-backfill.test.ts](../tests/trace-backfill.test.ts), which drives a real `Execution` on PGlite with live export on, runs the query over the same database and checks that the rebuilt spans have the live spans' names, kinds, status, tree, trace IDs and attributes.
+Live export to the host's agentwatch started on 29 October 2026 at 15:00:16 UTC (the gateway's `trace.export_enabled` line), and no run started between then and the first live trace. Runs from before then (Chief's Postgres keeps them from 6 September 2026) can be rebuilt into agentwatch from the database, in the same shape as live traces. Code: [scripts/trace-backfill.sql](../scripts/trace-backfill.sql) reads the rows, [src/trace-backfill.ts](../src/trace-backfill.ts) turns them into spans and evaluations and posts them. Tests: [tests/trace-backfill.test.ts](../tests/trace-backfill.test.ts), which drives a real `Execution` on PGlite with live export on, runs the query over the same database and checks that the rebuilt spans have the live spans' names, kinds, status, tree, trace IDs and attributes.
 
 **What is rebuilt.** The span builders are the live exporter's own (`runSpan`, `modelSpan`, `toolSpan` in `otel.ts`), so names, attributes and error rules are the same.
 
 - One `invoke_agent` span per run started in the window, from `started_at` to its `runtime.stopped` event (else its `turn.failed` event, else `updated_at`), with the stop reason from that event (else `runtime_runs.stop_reason`). Children join their parent's trace through every ancestor in the window; a child whose parent started before the window becomes its own root. A root run that consumed an owner input gets `gen_ai.conversation.id=thread.<threadId or 0>`.
 - One `chat <model>` span per `model.completed` or `model.failed` event, ending when the event was recorded and starting `latencyMs` earlier, with the attempt from its `model.started` event.
 - One `execute_tool` span per finished `runtime_calls` row, from `started_at` to `finished_at`, with the call's current state (a later reconciliation, such as `uncertain` to `failed`, shows). Calls that never finished are skipped, as live export skips them.
-- `user_redirected` evaluations, by the same rules as live: for each root turn with an owner input, the next root turn in the same thread is found; if its first input arrived within 6 hours after this turn stopped, `redirectOf(next message, this turn's input, this turn's last delivered reply)` gives the score (no words of the owner's: no score). Replies to an older message are not followed, as there is no reply target in the rows; the next message in the thread is used.
+- `user_redirected` evaluations, as live scores them where the record allows: a root turn is scored only if it has a saved conversation context with no pending message (as live's `lastExchangeHere`), against its last user message (1,500 characters) and last delivered reply (2,000), by the next root turn's first input in the same thread if it arrived within 6 hours after this turn stopped. A message with none of the owner's words gives no score. Unlike live, a reply to an older message is not followed, and a forward or uncaptioned photo gives no score instead of leaving the turn for the next message; the window is measured to the next input's arrival.
 
 **What is not.** Model spans carry no messages even with `--content`: Chief does not record each call's input and output. A root's output is its last delivered reply (an assistant message without tool calls), not the run's last model output as live. Runs recorded before `model.started` carried `attempt`, or `model.completed` carried `effort`, have no `chief.attempt` or `chief.effort`. Spans carry no `service.version`, since the release that ran them is not recorded per run. Tool arguments and results longer than 40,000 characters are cut by the query before scrubbing, and JSON keys come back in Postgres's `jsonb` order.
 
-**Content** only with `--content`: the root's input (the owner's input messages, joined) and output, tool arguments and results, through the same scrubbing and caps as live ([Message content](#message-content)).
+**Content** only with `--content`: the root's input (the owner's input messages, joined; live records the turn's message as given) and output, tool arguments and results, through the same scrubbing and caps as live ([Message content](#message-content)). The query selects tool payloads whole, so credential-named keys are scrubbed before anything is cut; a payload over 1 MB is replaced by a placeholder rather than cut into text that could no longer be scrubbed by key. The CLI refuses to follow a redirect, so content cannot be sent on from the local port.
 
 **Procedure.** Run by the operator; the query is read-only and the CLI posts only to `localhost` or `127.0.0.1`.
 
@@ -95,7 +95,7 @@ Live export to the host's agentwatch started on 29 October 2026 at about 15:00 U
 
    ```bash
    umask 077
-   { printf '%s\n' "\\set since '2026-09-06T00:00:00Z'" "\\set until '2026-10-29T15:00:00Z'"; cat scripts/trace-backfill.sql; } \
+   { printf '%s\n' "\\set since '2026-09-06T00:00:00Z'" "\\set until '2026-10-29T15:00:16Z'"; cat scripts/trace-backfill.sql; } \
      | ~/Dev/hermes-companion-ops/weekly-review/q.sh > ~/backfill-rows.jsonl
    chmod 600 ~/backfill-rows.jsonl
    ```
@@ -105,14 +105,14 @@ Live export to the host's agentwatch started on 29 October 2026 at about 15:00 U
 2. Check the counts without sending anything; a dry run prints only counts (runs, spans, model calls, tool calls, unfinished calls, evaluations true and false, requests and bytes), never content:
 
    ```bash
-   npx tsx src/trace-backfill.ts ~/backfill-rows.jsonl --dry-run --content --until 2026-10-29T15:00:00Z
+   npx tsx src/trace-backfill.ts ~/backfill-rows.jsonl --dry-run --content --until 2026-10-29T15:00:16Z
    ```
 
 3. Open the tunnel to the host's agentwatch in another terminal, and post:
 
    ```bash
    ssh -F ../hermes-companion-ops/ssh_config -N -L 14318:127.0.0.1:4318 chief-lightsail
-   npx tsx src/trace-backfill.ts ~/backfill-rows.jsonl --endpoint http://localhost:14318 --content --until 2026-10-29T15:00:00Z
+   npx tsx src/trace-backfill.ts ~/backfill-rows.jsonl --endpoint http://localhost:14318 --content --until 2026-10-29T15:00:16Z
    ```
 
    Spans go to `/v1/traces` in requests of at most 256 spans and about 4 MB (the exporter's size estimate), then evaluations to `/v1/logs`. The first failed request stops the run with its HTTP status; rerunning is safe.

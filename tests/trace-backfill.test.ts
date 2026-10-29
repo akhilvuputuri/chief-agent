@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { migratedPGlite } from "./helpers/pglite.js";
@@ -23,7 +25,9 @@ import {
   isoNs,
   main,
   parseRows,
+  post,
   requests,
+  runSpanId,
   runTraceId,
   spanBatches,
   type BackfillRow,
@@ -187,9 +191,21 @@ test("backfilled spans equal what the live exporter sent for the same runs", asy
       "INSERT INTO message_contents(user_id,hash,payload,characters) VALUES('owner',$1,$2::jsonb,10)",
       [hash, JSON.stringify(reply)],
     );
+    const request = { role: "user", content: message };
+    const requestHash = createHash("sha256")
+      .update(JSON.stringify(request))
+      .digest("hex");
     await db.query(
-      "INSERT INTO conversation_messages(user_id,ordinal,hash,run_id,delivery_state) VALUES('owner',1,$1,$2,'sent')",
-      [hash, rootId],
+      "INSERT INTO message_contents(user_id,hash,payload,characters) VALUES('owner',$1,$2::jsonb,10)",
+      [requestHash, JSON.stringify(request)],
+    );
+    await db.query(
+      "INSERT INTO conversation_messages(user_id,ordinal,hash,run_id,delivery_state) VALUES('owner',1,$1,$2,'recorded'),('owner',2,$3,$2,'sent')",
+      [requestHash, rootId, hash],
+    );
+    await db.query(
+      "INSERT INTO conversation_contexts(user_id,run_id) VALUES('owner',$1)",
+      [rootId],
     );
     await root.finish("answer");
     await stopTracing(1000);
@@ -198,6 +214,13 @@ test("backfilled spans equal what the live exporter sent for the same runs", asy
       (row) => JSON.parse(row.j as string) as BackfillRow,
     );
     assert.equal(rows.length, 2);
+    // The exchange live scoring would compare the next message with; children have none.
+    const byRun = new Map(rows.map((r) => [r.run_id, r]));
+    assert.deepEqual(byRun.get(rootId)!.context, {
+      request: message,
+      reply: "Olive Bistro has a table at 7pm.",
+    });
+    assert.equal(byRun.get(child.run)!.context, null);
     const live = sink.spans();
     // Two runs, two model calls, two tool calls.
     assert.equal(live.length, 6);
@@ -290,6 +313,7 @@ function row(id: string, overrides: Partial<BackfillRow> = {}): BackfillRow {
     calls: [],
     inputs: [],
     reply: null,
+    context: null,
     ...overrides,
   };
 }
@@ -372,6 +396,7 @@ test("IDs are derived from Chief's IDs, so a rerun replaces instead of duplicati
       inputs: [
         { message: "hello", thread_id: null, received_at: at(0), ordinal: 1 },
       ],
+      context: { request: "hello", reply: "Hi." },
       model_events: modelEvents("inv-1"),
       calls: [
         {
@@ -380,8 +405,8 @@ test("IDs are derived from Chief's IDs, so a rerun replaces instead of duplicati
           operation: "web_search",
           is_write: false,
           state: "success",
-          arguments: '{"query": "x"}',
-          result: '{"ok": true}',
+          arguments: { query: "x" },
+          result: { ok: true },
           error_code: null,
           started_at: at(0.5),
           finished_at: at(0.6),
@@ -438,6 +463,10 @@ const contentRows = () => [
       },
     ],
     reply: "Logged in to the portal.",
+    context: {
+      request: "log in to the portal",
+      reply: "Logged in to the portal.",
+    },
     model_events: modelEvents("inv-1"),
     calls: [
       {
@@ -446,13 +475,13 @@ const contentRows = () => [
         operation: "web_read",
         is_write: false,
         state: "success",
-        arguments: JSON.stringify({
+        arguments: {
           raw: JSON.stringify({
             url: "https://portal.example",
             login: { user: "owner", password: "hunter2-plain" },
           }),
-        }),
-        result: JSON.stringify({ page: `welcome back, token ${SECRET_KEY}` }),
+        },
+        result: { page: `welcome back, token ${SECRET_KEY}` },
         error_code: null,
         started_at: at(0.5),
         finished_at: at(0.6),
@@ -534,6 +563,7 @@ test("turns are scored by the next owner message in the same thread within 6 hou
       stopped_at: at(startMinutes + 1),
       updated_at: at(startMinutes + 1),
       reply,
+      context: { request: message, reply },
       inputs: [
         {
           message,
@@ -781,4 +811,172 @@ test("rows are read from psql output, and anything else is refused", () => {
     1_793_286_000_000_001_000n,
   );
   assert.equal(isoNs("2026-10-29T23:00:00+08:00"), 1_793_286_000_000_000_000n);
+});
+
+test("the query caps the scored exchange, drops huge payloads and skips turns with pending messages", async () => {
+  const pg = await migratedPGlite();
+  const db = pg as unknown as Database;
+  try {
+    await db.query("INSERT INTO users(id) VALUES('owner')");
+    await db.query("INSERT INTO conversations(user_id) VALUES('owner')");
+    let ordinal = 0;
+    const message = async (run: string, payload: object, state = "sent") => {
+      const text = JSON.stringify(payload);
+      const hash = createHash("sha256").update(text).digest("hex");
+      await db.query(
+        "INSERT INTO message_contents(user_id,hash,payload,characters) VALUES('owner',$1,$2::jsonb,$3) ON CONFLICT DO NOTHING",
+        [hash, text, text.length],
+      );
+      await db.query(
+        "INSERT INTO conversation_messages(user_id,ordinal,hash,run_id,delivery_state) VALUES('owner',$1,$2,$3,$4)",
+        [++ordinal, hash, run, state],
+      );
+    };
+    const turn = async (minutes: number, input: string) => {
+      const id = randomUUID();
+      await db.query(
+        "INSERT INTO runtime_runs(id,user_id,state,stop_reason,started_at,updated_at) VALUES($1,'owner','stopped','answer',$2,$3)",
+        [id, at(minutes), at(minutes + 1)],
+      );
+      await db.query(
+        "INSERT INTO conversation_inputs(id,user_id,run_id,message,metadata,state,received_at) VALUES($1,'owner',$2,$3,'{\"threadId\":7}','completed',$4)",
+        [randomUUID(), id, input, at(minutes)],
+      );
+      await db.query(
+        "INSERT INTO conversation_contexts(user_id,run_id) VALUES('owner',$1)",
+        [id],
+      );
+      return id;
+    };
+    const longRequest = "please find a quiet table near the river ".repeat(80);
+    const longReply = "Booked the table by the window. ".repeat(200);
+    const first = await turn(0, longRequest);
+    await message(first, { role: "user", content: longRequest }, "recorded");
+    await message(first, { role: "assistant", content: longReply });
+    const huge = { page: "x".repeat(1_100_000) };
+    await db.query(
+      "INSERT INTO runtime_calls(id,run_id,call_id,operation,arguments,is_write,state,result,finished_at) VALUES($1,$2,'c1','web_read','{\"url\":\"https://a.example\"}',false,'success',$3::jsonb,now())",
+      [randomUUID(), first, JSON.stringify(huge)],
+    );
+    const second = await turn(10, "try again");
+    await message(second, { role: "user", content: "try again" }, "recorded");
+    // Not yet delivered: live would not use this exchange, so the next message scores nothing.
+    await message(
+      second,
+      { role: "assistant", content: "Retrying." },
+      "pending",
+    );
+    await turn(20, "try again");
+
+    const rows = (await db.query(await sql())).rows.map(
+      (r) => JSON.parse(r.j as string) as BackfillRow,
+    );
+    assert.equal(rows.length, 3);
+    const [a, b, c] = rows as [BackfillRow, BackfillRow, BackfillRow];
+    assert.equal(a.context!.request, longRequest.slice(0, 1500));
+    assert.equal(a.context!.reply, longReply.slice(0, 2000));
+    assert.equal(a.reply, longReply); // the root's output keeps more
+    assert.equal(b.context, null);
+    assert.deepEqual(c.context, { request: null, reply: null });
+    assert.equal(a.calls[0]!.result, "[content omitted: too large]");
+    assert.deepEqual(a.calls[0]!.arguments, { url: "https://a.example" });
+
+    const backfill = buildBackfill(rows, { content: true });
+    const tool = backfill.spans.find(
+      (s) => s.name === "execute_tool web_read",
+    )!;
+    assert.equal(
+      tool.attributes["gen_ai.tool.call.result"],
+      "[content omitted: too large]",
+    );
+    // The first turn is redirected; the second, with a pending message, is not scored.
+    assert.deepEqual(
+      backfill.evaluations.map((e) => [e.spanId, e.value, e.label]),
+      [[runSpanId(first), true, "retry"]],
+    );
+  } finally {
+    await pg.close();
+  }
+});
+
+test("a large result is scrubbed by key before it is cut", () => {
+  const rows = contentRows();
+  rows[0]!.calls[0]!.result = {
+    session: { token: "plain-session-value-1234" },
+    page: "lorem ipsum dolor sit amet ".repeat(2300), // about 62,000 characters
+  };
+  const tool = buildBackfill(rows, { content: true }).spans.find(
+    (s) => s.name === "execute_tool web_read",
+  )!;
+  const result = tool.attributes["gen_ai.tool.call.result"] as string;
+  assert.ok(!result.includes("plain-session-value"), "token exported");
+  assert.ok(result.includes('"token":"[REDACTED_CREDENTIAL]"'));
+  assert.ok(result.endsWith("… [cut]"));
+});
+
+test("a turn without a saved context is not scored; the next is judged by its own context", () => {
+  const turn = (
+    n: number,
+    minutes: number,
+    message: string,
+    context: BackfillRow["context"],
+  ) =>
+    row(uuid(n), {
+      started_at: at(minutes),
+      stopped_at: at(minutes + 1),
+      context,
+      inputs: [{ message, thread_id: 3, received_at: at(minutes), ordinal: n }],
+    });
+  const rows = [
+    turn(1, 0, "what's on today", null),
+    // The input is short; the stored request it is compared with is the full one.
+    turn(2, 10, "try again", {
+      request: "book a table for 2 at Olive Bistro tonight please",
+      reply: "Done.",
+    }),
+    turn(3, 20, "book table for 2 at Olive Bistro tonight", null),
+  ];
+  const { evaluations } = buildBackfill(rows);
+  assert.deepEqual(
+    evaluations.map((e) => [e.spanId, e.value, e.label]),
+    [[runSpanId(uuid(2)), true, "rephrase"]],
+  );
+});
+
+test("a redirect is refused, so content never follows it to another port", async () => {
+  const received: string[] = [];
+  const listen = (server: Server) =>
+    new Promise<number>((resolve) =>
+      server.listen(0, "127.0.0.1", () =>
+        resolve((server.address() as AddressInfo).port),
+      ),
+    );
+  const target = createServer((req, res) => {
+    received.push(req.url ?? "");
+    res.end("{}");
+  });
+  const targetPort = await listen(target);
+  let redirected = 0;
+  const redirector = createServer((req, res) => {
+    redirected++;
+    req.resume();
+    res.writeHead(307, {
+      location: `http://127.0.0.1:${targetPort}${req.url}`,
+    });
+    res.end();
+  });
+  const port = await listen(redirector);
+  try {
+    const urls = backfillEndpoint(`http://127.0.0.1:${port}`);
+    await assert.rejects(
+      post([{ url: urls.traces, body: '{"resourceSpans":[]}' }]),
+    );
+    assert.equal(redirected, 1);
+    assert.deepEqual(received, []);
+  } finally {
+    redirector.closeAllConnections();
+    target.closeAllConnections();
+    await new Promise((r) => redirector.close(r));
+    await new Promise((r) => target.close(r));
+  }
 });

@@ -62,9 +62,9 @@ export interface BackfillRow {
     operation: string;
     is_write: boolean;
     state: string;
-    /** jsonb as text, capped at 40,000 characters by the query. */
-    arguments: string | null;
-    result: string | null;
+    /** The stored jsonb, whole; a payload over 1 MB arrives as a placeholder string. */
+    arguments: unknown;
+    result: unknown;
     error_code: string | null;
     started_at: string;
     finished_at: string | null;
@@ -76,6 +76,8 @@ export interface BackfillRow {
     ordinal: number | string;
   }[];
   reply: string | null;
+  /** What live scoring would compare a follow-up with; null when live would not score. */
+  context?: { request: string | null; reply: string | null } | null;
 }
 
 export interface BackfillStats {
@@ -117,21 +119,13 @@ export function runTraceId(run: string) {
 /** Nanoseconds since the epoch from Postgres JSON timestamps, which carry microseconds. */
 export function isoNs(value: string) {
   const ms = Date.parse(value);
-  if (!Number.isFinite(ms)) throw new Error("Invalid timestamp in rows");
+  if (!Number.isFinite(ms))
+    throw new Error(`Invalid timestamp: ${value.slice(0, 40)}`);
   const fraction = /T[^.]*\.(\d+)/.exec(value)?.[1] ?? "";
   const sub =
     fraction.length > 3 ? BigInt(fraction.slice(3, 9).padEnd(6, "0")) : 0n;
   return BigInt(ms) * 1_000_000n + sub;
 }
-
-const jsonText = (text: string): unknown => {
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    // Cut by the query's 40,000-character cap: scrubbed as plain text.
-    return text;
-  }
-};
 
 // ---------------------------------------------------------------------------
 // Rows to spans and evaluations.
@@ -228,8 +222,7 @@ export function buildBackfill(
         receivedNs: isoNs(first.received_at),
         ordinal: Number(first.ordinal),
         firstMessage: first.message,
-        message,
-        reply: row.reply,
+        context: row.context ?? null,
       });
 
     // Model calls: model.started gives the attempt, the completion or failure the span.
@@ -279,11 +272,11 @@ export function buildBackfill(
           endNs: maxNs(isoNs(call.finished_at), callStart),
           args:
             content && call.arguments !== null
-              ? toolArguments(jsonText(call.arguments))
+              ? toolArguments(call.arguments)
               : undefined,
           result:
             content && call.result !== null
-              ? contentText(jsonText(call.result))
+              ? contentText(call.result)
               : undefined,
         }),
       );
@@ -308,8 +301,7 @@ interface Turn {
   receivedNs: bigint;
   ordinal: number;
   firstMessage: string;
-  message: string;
-  reply: string | null;
+  context: { request: string | null; reply: string | null } | null;
 }
 
 /**
@@ -338,7 +330,13 @@ function turnEvaluations(turns: Turn[]): ExportEvaluation[] {
       const turn = list[i]!;
       const next = list[i + 1]!;
       if (next.receivedNs - turn.endNs > window) continue;
-      const redirect = redirectOf(next.firstMessage, turn.message, turn.reply);
+      // Live scores only a turn with a saved context, against its stored request and reply.
+      if (!turn.context) continue;
+      const redirect = redirectOf(
+        next.firstMessage,
+        turn.context.request,
+        turn.context.reply,
+      );
       if (redirect === undefined) continue;
       evaluations.push({
         traceId: turn.traceId,
@@ -424,6 +422,8 @@ export async function post(
   for (const [index, request] of list.entries()) {
     const response = await send(request.url, {
       method: "POST",
+      // A redirect could carry the owner's content off this machine.
+      redirect: "error",
       headers: { "content-type": "application/json" },
       body: request.body,
       signal: AbortSignal.timeout(60_000),

@@ -50,7 +50,30 @@ SELECT json_build_object(
   'model_events', coalesce(ev.model_events, '[]'::json),
   'calls', coalesce(calls.list, '[]'::json),
   'inputs', coalesce(inputs.list, '[]'::json),
-  'reply', replies.reply
+  'reply', replies.reply,
+  -- What live scoring compares the next owner message with (conversationState's
+  -- lastExchangeHere): only a run with a saved context and no pending message, its last user
+  -- message (1,500 characters) and its last delivered reply (2,000).
+  'context', (
+    SELECT json_build_object(
+      'request', (
+        SELECT left(mc.payload->>'content', 1500)
+        FROM conversation_messages m JOIN message_contents mc USING (user_id, hash)
+        WHERE m.user_id = x.user_id AND m.run_id = x.run_id AND mc.payload->>'role' = 'user'
+        ORDER BY m.ordinal DESC LIMIT 1),
+      'reply', (
+        SELECT left(mc.payload->>'content', 2000)
+        FROM conversation_messages m JOIN message_contents mc USING (user_id, hash)
+        WHERE m.user_id = x.user_id AND m.run_id = x.run_id
+          AND m.delivery_state IN ('sent', 'recorded')
+          AND mc.payload->>'role' = 'assistant' AND NOT (mc.payload ? 'tool_calls')
+        ORDER BY m.ordinal DESC LIMIT 1))
+    FROM conversation_contexts x
+    WHERE x.user_id = r.user_id AND x.run_id = r.id
+      AND NOT EXISTS (SELECT 1 FROM conversation_messages m
+                      WHERE m.user_id = x.user_id AND m.run_id = x.run_id
+                        AND m.delivery_state = 'pending')
+    ORDER BY x.id DESC LIMIT 1)
 )::text AS j
 FROM runs r
 -- One pass over the run's events (index events_run).
@@ -69,7 +92,7 @@ LEFT JOIN LATERAL (
     AND e.type IN ('runtime.stopped', 'turn.failed', 'agent.child_started', 'research.child_started',
                    'model.started', 'model.completed', 'model.failed')
 ) ev ON true
--- Tool calls (index on runtime_calls(run_id, call_id)); payloads capped.
+-- Tool calls (index on runtime_calls(run_id, call_id)).
 LEFT JOIN LATERAL (
   SELECT json_agg(json_build_object(
     'id', c.id,
@@ -77,8 +100,12 @@ LEFT JOIN LATERAL (
     'operation', c.operation,
     'is_write', c.is_write,
     'state', c.state,
-    'arguments', left(c.arguments::text, 40000),
-    'result', left(c.result::text, 40000),
+    -- Whole, so credential-named keys are scrubbed before anything is cut; a payload over
+    -- 1 MB is dropped rather than cut into text that can no longer be scrubbed by key.
+    'arguments', CASE WHEN octet_length(c.arguments::text) > 1000000
+                      THEN to_jsonb('[content omitted: too large]'::text) ELSE c.arguments END,
+    'result', CASE WHEN octet_length(c.result::text) > 1000000
+                   THEN to_jsonb('[content omitted: too large]'::text) ELSE c.result END,
     -- As Execution.endCall reads it: a string error code only.
     'error_code', CASE WHEN jsonb_typeof(c.result->'error'->'code') = 'string'
                        THEN c.result->'error'->>'code' END,
