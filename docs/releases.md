@@ -1,8 +1,8 @@
-## Deployed `260c94c` in `845595e` (untagged) — learning from conversation turns (#326)
+## Deployed `260c94c` in `b6e1071`, now `845595e` (untagged) — learning from conversation turns (#326)
 
 - **What merged.** [PR 349](https://github.com/akhilvuputuri/chief-agent/pull/349) merged as `260c94c` (version unchanged). The learner's first night reviewed 7 tasks and skipped all of them (six routines, one cancelled), because most owner requests never become a tracked task. Each run now also labels up to 30 ordinary conversation turns: success when answered and not corrected in the owner's next message within six hours, pitfall when corrected, with the correction kept as quotable owner evidence. Evidence sizes are generous for now (owner's choice): about 8,000 characters a turn and 12,000 a task. Prompt `learner-v2`. No migration.
 - **Review.** Independent review (Claude Opus 5.5) requested changes on `69e141c`: acknowledgements and new requests counted as corrections, and plain corrections were missed. It approved `c387758` and `076d7e2`, which also mark the correction label as a heuristic in the prompt and bound the current memory list. Hosted CI and Devin passed on `076d7e2`.
-- **Release.** Three later merges from other sessions superseded its own release; it went live inside `845595e` (release at 03:10 UTC on 29 October). The host reported `845595e`, healthy, with no `error`-level line in the gateway's ops log.
+- **Release.** It had no release of its own: later merges from other sessions reached `main` first. It went live in `b6e1071` (0.3.108), whose release succeeded on its third attempt and was recorded at 03:05:25 UTC on 29 October, and is now in `845595e`, recorded at 03:15:08 UTC; neither later commit touched the learner. The host reported `845595e`, healthy, with no `error`-level line in the gateway container's log since it started.
 - **Pending:** the first run with turns, from 19:30 UTC on 29 October (03:30 Singapore on 30 October): counts, charges and what it learned.
 
 [Journal 130](journey/130-nightly-learner.md#first-night-and-conversation-turns--2026-10-29).
