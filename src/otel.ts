@@ -93,8 +93,8 @@ export class OtlpExporter {
   constructor(private readonly options: ExporterOptions) {
     this.maxQueue = options.maxQueue ?? 4096;
     this.maxQueueBytes = options.maxQueueBytes ?? 32 * 1024 * 1024;
-    this.maxBatchBytes = options.maxBatchBytes ?? 4 * 1024 * 1024;
-    this.batchSize = options.batchSize ?? 256;
+    this.maxBatchBytes = options.maxBatchBytes ?? MAX_BATCH_BYTES;
+    this.batchSize = options.batchSize ?? BATCH_SIZE;
     this.timeoutMs = options.timeoutMs ?? 3000;
     this.post = options.fetch ?? fetch;
     this.timer = setInterval(
@@ -145,15 +145,11 @@ export class OtlpExporter {
 
   private async drain() {
     while (this.queue.length) {
-      // Up to batchSize spans and about maxBatchBytes, but always at least one.
-      let count = 0;
-      let bytes = 0;
-      while (count < this.queue.length && count < this.batchSize) {
-        const next = spanBytes(this.queue[count]!);
-        if (count && bytes + next > this.maxBatchBytes) break;
-        bytes += next;
-        count++;
-      }
+      const { count, bytes } = nextBatch(
+        this.queue,
+        this.batchSize,
+        this.maxBatchBytes,
+      );
       const batch = this.queue.splice(0, count);
       this.queuedBytes = Math.max(0, this.queuedBytes - bytes);
       const body = encode(batch, this.options.serviceVersion);
@@ -227,8 +223,12 @@ export class OtlpExporter {
   }
 }
 
+/** Largest request body, roughly, and most spans in one request, unless configured. */
+export const MAX_BATCH_BYTES = 4 * 1024 * 1024;
+export const BATCH_SIZE = 256;
+
 /** The bytes a span adds to a request, near enough: its text as escaped UTF-8 plus overhead. */
-function spanBytes(span: ExportSpan) {
+export function spanBytes(span: ExportSpan) {
   let bytes = 256 + span.name.length;
   for (const value of Object.values(span.attributes))
     bytes +=
@@ -236,6 +236,26 @@ function spanBytes(span: ExportSpan) {
         ? Buffer.byteLength(JSON.stringify(value)) + 32
         : 32;
   return bytes;
+}
+
+/**
+ * How many spans from the head of `spans` make the next request: up to `batchSize` spans and
+ * about `maxBatchBytes`, but always at least one. Returns the count and their estimated bytes.
+ */
+export function nextBatch(
+  spans: ExportSpan[],
+  batchSize = BATCH_SIZE,
+  maxBatchBytes = MAX_BATCH_BYTES,
+) {
+  let count = 0;
+  let bytes = 0;
+  while (count < spans.length && count < batchSize) {
+    const next = spanBytes(spans[count]!);
+    if (count && bytes + next > maxBatchBytes) break;
+    bytes += next;
+    count++;
+  }
+  return { count, bytes };
 }
 
 /** OTLP/JSON: hex IDs, integer enums, 64-bit integers as decimal strings. */
@@ -555,59 +575,20 @@ function modelFinished(
   const output = invocation ? take(`model-out:${invocation}`) : undefined;
   // The run's span shows its latest successful model output.
   if (output) hold(`run-out:${run}`, output);
-  const end = nowNs();
-  const latency = finiteCount(data.latencyMs);
-  const start =
-    latency === undefined ? end : end - BigInt(latency) * 1_000_000n;
-  const requested = modelName(failed ? data.model : data.requestedModel);
-  const served = failed ? undefined : modelName(data.model);
-  const usage = failed
-    ? undefined
-    : (data.usage as Record<string, any> | null | undefined);
-  const diagnostics = data.diagnostics as Record<string, unknown> | undefined;
-  const finish = finishName(
-    failed ? diagnostics?.finishReason : data.finishReason,
+  exporter.enqueue(
+    modelSpan({
+      traceId: state.traceId,
+      spanId: spanId(),
+      parentSpanId: state.spanId,
+      endNs: nowNs(),
+      failed,
+      data,
+      startedAttempt: started?.attempt,
+      input,
+      output,
+      truncated: started?.truncated,
+    }),
   );
-  exporter.enqueue({
-    traceId: state.traceId,
-    spanId: spanId(),
-    parentSpanId: state.spanId,
-    name: `chat ${requested ?? served ?? "unknown"}`,
-    kind: SpanKind.client,
-    startNs: start,
-    endNs: end,
-    error: failed,
-    attributes: {
-      "gen_ai.operation.name": "chat",
-      "gen_ai.provider.name": "openrouter",
-      "gen_ai.request.model": requested ?? served,
-      "gen_ai.response.model": served,
-      "gen_ai.usage.input_tokens": finiteCount(usage?.prompt_tokens),
-      "gen_ai.usage.output_tokens": finiteCount(usage?.completion_tokens),
-      "gen_ai.usage.cache_read.input_tokens": finiteCount(
-        usage?.prompt_tokens_details?.cached_tokens,
-      ),
-      "gen_ai.usage.cache_write.input_tokens": finiteCount(
-        usage?.prompt_tokens_details?.cache_write_tokens,
-      ),
-      "gen_ai.usage.reasoning.output_tokens": finiteCount(
-        usage?.completion_tokens_details?.reasoning_tokens,
-      ),
-      "gen_ai.response.finish_reasons": finish ? [finish] : undefined,
-      "agentwatch.usage.cost_usd": finiteNumber(usage?.cost),
-      "error.type": failed ? failureType(data) : undefined,
-      // OpenRouter's upstream provider, mapped to a fixed slug.
-      "chief.upstream_provider": providerName(
-        failed ? diagnostics?.provider : data.provider,
-      ),
-      "chief.attempt": started?.attempt ?? finiteCount(data.attempt),
-      "chief.effort": nameValue(data.effort),
-      "chief.invocation_id": invocation,
-      "gen_ai.input.messages": input,
-      "gen_ai.output.messages": output,
-      "chief.content.truncated": started?.truncated || undefined,
-    },
-  });
 }
 
 function runStopped(run: string, reason: string, taskId?: string) {
@@ -623,27 +604,22 @@ function runStopped(run: string, reason: string, taskId?: string) {
       { traceId: state.traceId, spanId: state.spanId, endNs },
       MAX_FINISHED,
     );
-  exporter.enqueue({
-    traceId: state.traceId,
-    spanId: state.spanId,
-    ...(state.parentSpanId ? { parentSpanId: state.parentSpanId } : {}),
-    name: `invoke_agent ${state.agent}`,
-    kind: SpanKind.internal,
-    startNs: state.startNs,
-    endNs,
-    error: reason === "failed",
-    attributes: {
-      "gen_ai.operation.name": "invoke_agent",
-      "gen_ai.agent.name": state.agent,
-      "gen_ai.conversation.id": state.conversation,
-      "gen_ai.input.messages": take(`run-in:${run}`),
-      "gen_ai.output.messages": take(`run-out:${run}`),
-      "chief.run_id": run,
-      "chief.task_id": taskId,
-      "chief.stop_reason": nameValue(reason),
-      "error.type": reason === "failed" ? "failed" : undefined,
-    },
-  });
+  exporter.enqueue(
+    runSpan({
+      traceId: state.traceId,
+      spanId: state.spanId,
+      parentSpanId: state.parentSpanId,
+      agent: state.agent,
+      conversation: state.conversation,
+      startNs: state.startNs,
+      endNs,
+      run,
+      taskId,
+      reason,
+      input: take(`run-in:${run}`),
+      output: take(`run-out:${run}`),
+    }),
+  );
 }
 
 /** Names the conversation a run belongs to, such as a Telegram thread. */
@@ -771,30 +747,185 @@ function finishCall(
   calls.delete(callId);
   const run = call ? runs.get(call.run) : undefined;
   if (!call || !run) return;
-  const failed = state !== "success";
-  exporter.enqueue({
-    traceId: run.traceId,
-    spanId: spanId(),
-    parentSpanId: run.spanId,
-    name: `execute_tool ${call.operation}`,
+  exporter.enqueue(
+    toolSpan({
+      traceId: run.traceId,
+      spanId: spanId(),
+      parentSpanId: run.spanId,
+      operation: call.operation,
+      write: call.write,
+      state,
+      errorCode,
+      startNs: call.startNs,
+      endNs: nowNs(),
+      args: take(`call-args:${callId}`),
+      result: capture && result !== undefined ? contentText(result) : undefined,
+    }),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Span builders: the attribute rules for each span kind, shared by the live hooks above
+// and the history backfill (src/trace-backfill.ts), so both produce the same shape.
+// Content arguments are already scrubbed and capped text (src/otel-content.ts).
+
+export interface RunSpanInput {
+  traceId: string;
+  spanId: string;
+  parentSpanId?: string;
+  /** Already a valid agent name: `chief`, `research` or an agentName() result. */
+  agent: string;
+  /** Already a valid conversation ID, such as `thread.0`. */
+  conversation?: string;
+  startNs: bigint;
+  endNs: bigint;
+  run: string;
+  taskId?: string;
+  reason: string;
+  input?: string;
+  output?: string;
+}
+
+/** A run's `invoke_agent` span. */
+export function runSpan(s: RunSpanInput): ExportSpan {
+  return {
+    traceId: s.traceId,
+    spanId: s.spanId,
+    ...(s.parentSpanId ? { parentSpanId: s.parentSpanId } : {}),
+    name: `invoke_agent ${s.agent}`,
     kind: SpanKind.internal,
-    startNs: call.startNs,
-    endNs: nowNs(),
+    startNs: s.startNs,
+    endNs: s.endNs,
+    error: s.reason === "failed",
+    attributes: {
+      "gen_ai.operation.name": "invoke_agent",
+      "gen_ai.agent.name": s.agent,
+      "gen_ai.conversation.id": s.conversation,
+      "gen_ai.input.messages": s.input,
+      "gen_ai.output.messages": s.output,
+      "chief.run_id": s.run,
+      "chief.task_id": s.taskId,
+      "chief.stop_reason": nameValue(s.reason),
+      "error.type": s.reason === "failed" ? "failed" : undefined,
+    },
+  };
+}
+
+export interface ModelSpanInput {
+  traceId: string;
+  spanId: string;
+  parentSpanId: string;
+  /** When model.completed or model.failed was recorded; the span starts latencyMs earlier. */
+  endNs: bigint;
+  failed: boolean;
+  /** The model.completed or model.failed event data. */
+  data: Record<string, unknown>;
+  /** The attempt from the matching model.started event. */
+  startedAttempt?: number;
+  input?: string;
+  output?: string;
+  truncated?: boolean;
+}
+
+/** A model call's `chat <model>` span. */
+export function modelSpan(s: ModelSpanInput): ExportSpan {
+  const { data, failed, endNs: end } = s;
+  const invocation =
+    typeof data.invocationId === "string" ? data.invocationId : undefined;
+  const latency = finiteCount(data.latencyMs);
+  const start =
+    latency === undefined ? end : end - BigInt(latency) * 1_000_000n;
+  const requested = modelName(failed ? data.model : data.requestedModel);
+  const served = failed ? undefined : modelName(data.model);
+  const usage = failed
+    ? undefined
+    : (data.usage as Record<string, any> | null | undefined);
+  const diagnostics = data.diagnostics as Record<string, unknown> | undefined;
+  const finish = finishName(
+    failed ? diagnostics?.finishReason : data.finishReason,
+  );
+  return {
+    traceId: s.traceId,
+    spanId: s.spanId,
+    parentSpanId: s.parentSpanId,
+    name: `chat ${requested ?? served ?? "unknown"}`,
+    kind: SpanKind.client,
+    startNs: start,
+    endNs: end,
+    error: failed,
+    attributes: {
+      "gen_ai.operation.name": "chat",
+      "gen_ai.provider.name": "openrouter",
+      "gen_ai.request.model": requested ?? served,
+      "gen_ai.response.model": served,
+      "gen_ai.usage.input_tokens": finiteCount(usage?.prompt_tokens),
+      "gen_ai.usage.output_tokens": finiteCount(usage?.completion_tokens),
+      "gen_ai.usage.cache_read.input_tokens": finiteCount(
+        usage?.prompt_tokens_details?.cached_tokens,
+      ),
+      "gen_ai.usage.cache_write.input_tokens": finiteCount(
+        usage?.prompt_tokens_details?.cache_write_tokens,
+      ),
+      "gen_ai.usage.reasoning.output_tokens": finiteCount(
+        usage?.completion_tokens_details?.reasoning_tokens,
+      ),
+      "gen_ai.response.finish_reasons": finish ? [finish] : undefined,
+      "agentwatch.usage.cost_usd": finiteNumber(usage?.cost),
+      "error.type": failed ? failureType(data) : undefined,
+      // OpenRouter's upstream provider, mapped to a fixed slug.
+      "chief.upstream_provider": providerName(
+        failed ? diagnostics?.provider : data.provider,
+      ),
+      "chief.attempt": s.startedAttempt ?? finiteCount(data.attempt),
+      "chief.effort": nameValue(data.effort),
+      "chief.invocation_id": invocation,
+      "gen_ai.input.messages": s.input,
+      "gen_ai.output.messages": s.output,
+      "chief.content.truncated": s.truncated || undefined,
+    },
+  };
+}
+
+export interface ToolSpanInput {
+  traceId: string;
+  spanId: string;
+  parentSpanId: string;
+  /** Already a host-defined name (logOperation in src/execution.ts). */
+  operation: string;
+  write: boolean;
+  state: string;
+  errorCode?: string;
+  startNs: bigint;
+  endNs: bigint;
+  args?: string;
+  result?: string;
+}
+
+/** A tool call's `execute_tool <operation>` span. */
+export function toolSpan(s: ToolSpanInput): ExportSpan {
+  const failed = s.state !== "success";
+  return {
+    traceId: s.traceId,
+    spanId: s.spanId,
+    parentSpanId: s.parentSpanId,
+    name: `execute_tool ${s.operation}`,
+    kind: SpanKind.internal,
+    startNs: s.startNs,
+    endNs: s.endNs,
     error: failed,
     attributes: {
       "gen_ai.operation.name": "execute_tool",
-      "gen_ai.tool.name": call.operation,
+      "gen_ai.tool.name": s.operation,
       "gen_ai.tool.type": "function",
-      "chief.tool.write": call.write,
-      "chief.tool.state": nameValue(state),
+      "chief.tool.write": s.write,
+      "chief.tool.state": nameValue(s.state),
       "error.type": failed
-        ? (codeValue(errorCode) ?? nameValue(state))
+        ? (codeValue(s.errorCode) ?? nameValue(s.state))
         : undefined,
-      "gen_ai.tool.call.arguments": take(`call-args:${callId}`),
-      "gen_ai.tool.call.result":
-        capture && result !== undefined ? contentText(result) : undefined,
+      "gen_ai.tool.call.arguments": s.args,
+      "gen_ai.tool.call.result": s.result,
     },
-  });
+  };
 }
 
 // Values that reach a span are host-defined or validated to a narrow shape, like the
@@ -810,7 +941,7 @@ const codeValue = (v: unknown) =>
   typeof v === "string" && CODE.test(v) ? v : undefined;
 const modelName = (v: unknown) =>
   typeof v === "string" && MODEL.test(v) ? v : undefined;
-const agentName = (v: string) => (AGENT.test(v) ? v : "agent");
+export const agentName = (v: string) => (AGENT.test(v) ? v : "agent");
 const finiteNumber = (v: unknown) =>
   typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined;
 const finiteCount = (v: unknown) => {
