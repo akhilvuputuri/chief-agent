@@ -121,3 +121,21 @@ export function redirectOf(
   if (request && isRephrase(text, request)) return "rephrase";
   return null;
 }
+
+/**
+ * The text rules' verdict, with Jev's probability that the message pushes back on the last
+ * reply as a second opinion: when the rules find nothing and Jev is at least `apply` sure,
+ * the message is a `pushback`. The rules' own labels, and "no owner words", stand as they are.
+ */
+export function withJev(
+  rules: Redirect | null | undefined,
+  probability: number | undefined,
+  apply: number | undefined,
+): Redirect | "pushback" | null | undefined {
+  if (rules !== null) return rules;
+  return probability !== undefined &&
+    apply !== undefined &&
+    probability >= apply
+    ? "pushback"
+    : null;
+}

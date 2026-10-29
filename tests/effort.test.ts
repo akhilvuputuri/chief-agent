@@ -611,3 +611,46 @@ test("effort log lines carry the decision, never text", () => {
     setOpsSink(previousSink);
   }
 });
+
+test("the first decision also asks whether the message pushes back on the last reply", async () => {
+  const bodies: any[] = [];
+  const answer = (redirect: unknown) =>
+    new Response(
+      JSON.stringify({
+        answers: {
+          effort: { choice: "medium", probabilities: { medium: 0.9 } },
+          ...(redirect === undefined ? {} : { redirect: { noul: redirect } }),
+        },
+        usage: { cost: 0.00002 },
+      }),
+    );
+  const answers = [0.87654, 2, undefined];
+  let i = 0;
+  const picker = new EffortPicker("key", config, (async (
+    _url: string,
+    init: RequestInit,
+  ) => {
+    bodies.push(JSON.parse(String(init.body)));
+    return answer(answers[i++]);
+  }) as typeof fetch);
+  const asked = await picker.decide({ message: "but it's cloudy?", previous });
+  assert.equal(asked.redirect, 0.8765);
+  assert.equal(bodies[0].questions.redirect.type, "noul");
+  assert.deepEqual(Object.keys(bodies[0].questions.redirect.criteria), [
+    "true",
+    "false",
+  ]);
+  // An answer outside 0..1, or none, gives no probability; effort is unaffected.
+  const bad = await picker.decide({ message: "x", previous });
+  assert.equal(bad.redirect, undefined);
+  assert.equal(bad.applied, "medium");
+  assert.equal(
+    (await picker.decide({ message: "x", previous })).redirect,
+    undefined,
+  );
+  // Not asked without a previous reply, nor on an escalation.
+  await picker.decide({ message: "hi", previous: [] });
+  assert.equal(bodies[3].questions.redirect, undefined);
+  await picker.decide({ message: "x", previous, progress: progress() });
+  assert.equal(bodies[4].questions.redirect, undefined);
+});

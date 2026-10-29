@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isRephrase, redirectOf } from "../src/turn-feedback.js";
+import { isRephrase, redirectOf, withJev } from "../src/turn-feedback.js";
 
 test("asking for another attempt or approach is a retry", () => {
   for (const text of [
@@ -166,4 +166,13 @@ test("only the owner's own words count", () => {
     redirectOf("try again\n\n[Attached image: a.jpg.]", "x", "y"),
     "retry",
   );
+});
+
+test("Jev's opinion counts only where the rules found nothing", () => {
+  assert.equal(withJev(null, 0.9, 0.8), "pushback");
+  assert.equal(withJev(null, 0.79, 0.8), null);
+  assert.equal(withJev(null, undefined, 0.8), null);
+  assert.equal(withJev(null, 0.9, undefined), null);
+  assert.equal(withJev("retry", 0.1, 0.8), "retry");
+  assert.equal(withJev(undefined, 0.99, 0.8), undefined);
 });

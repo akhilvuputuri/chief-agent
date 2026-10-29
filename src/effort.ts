@@ -45,6 +45,16 @@ const schema = z
         periodic: z.boolean(),
       })
       .strict(),
+    // Implicit feedback (#323): asked alongside the first effort question only, whether the
+    // message pushes back on the last reply. `apply` is the lowest probability counted.
+    redirect: z
+      .object({
+        instructions: text,
+        criteria: z.object({ true: text, false: text }).strict(),
+        apply: probability,
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type EffortConfig = z.infer<typeof schema>;
@@ -77,6 +87,8 @@ export type EffortDecision = {
   costUsd: number | null;
   model: string | null;
   error?: string;
+  /** Jev's probability that the message pushes back on the last reply, when asked. */
+  redirect?: number;
 };
 
 const rank = (e: ReasoningEffort) => REASONING_EFFORTS.indexOf(e);
@@ -163,6 +175,11 @@ export class EffortPicker {
             }
           : {}),
       };
+      // Only the message's first decision, and only with a reply to judge.
+      const askRedirect =
+        !input.progress &&
+        this.config.redirect !== undefined &&
+        input.previous.length > 0;
       const response = await this.transport(
         "https://openrouter.ai/api/alpha/decisions",
         {
@@ -181,6 +198,15 @@ export class EffortPicker {
                 instructions: this.config.question.instructions,
                 criteria: this.config.question.criteria,
               },
+              ...(askRedirect
+                ? {
+                    redirect: {
+                      type: "noul",
+                      instructions: this.config.redirect!.instructions,
+                      criteria: this.config.redirect!.criteria,
+                    },
+                  }
+                : {}),
             },
           }),
         },
@@ -212,6 +238,7 @@ export class EffortPicker {
             ? "high"
             : "medium";
       const cost = data?.usage?.cost;
+      const pushback = data?.answers?.redirect?.noul;
       return {
         ok: true,
         choice,
@@ -221,6 +248,12 @@ export class EffortPicker {
         costUsd:
           typeof cost === "number" && Number.isFinite(cost) ? cost : null,
         model: typeof data?.model === "string" ? data.model : null,
+        ...(askRedirect &&
+        typeof pushback === "number" &&
+        pushback >= 0 &&
+        pushback <= 1
+          ? { redirect: Math.round(pushback * 10_000) / 10_000 }
+          : {}),
       };
     } catch (error) {
       return failed(
