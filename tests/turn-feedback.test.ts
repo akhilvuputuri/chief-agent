@@ -18,6 +18,9 @@ test("asking for another attempt or approach is a retry", () => {
     "redo it",
     "no. start over",
     "Try a different approach",
+    // From the owner's real follow-ups (journal 133): repeats after a failure.
+    "Add haircut again",
+    "Try to add again",
     "try again, that's too long",
     "redo it, too formal",
   ])
@@ -35,6 +38,15 @@ test("new requests that mention another or again are not retries", () => {
     "perfect, do that again for Friday",
     "again the same problem with my laptop, it won't charge at all",
     "Another idea: add a reminder for mum",
+    "what time is it again?",
+    "how does this work again",
+    "thanks again",
+    "Thank you again!",
+    "never again",
+    "see you again",
+    "Happy birthday again!",
+    "I'm sick again",
+    "here we go again",
     "Try again tomorrow morning",
     "Thanks, try again later if it fails",
     "redo the calendar for next week too",
@@ -52,7 +64,7 @@ test("corrections use the learner's definition", () => {
     "That's wrong, try again for Friday",
     "No, that's wrong. Redo it and also include prices",
     "you missed the meeting tomorrow, try again",
-    // A retry that does not open the message is the learner's correction.
+    // A retry that does not open the message is the learner's correction; a redirect either way.
     "too long, try again",
   ])
     assert.equal(redirectOf(text, "x", "Done."), "correction", text);

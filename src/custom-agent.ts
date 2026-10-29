@@ -1,5 +1,6 @@
 import { HistoryStore } from "./history.js";
 import { finishSchema, type Answer } from "./answer.js";
+import * as otel from "./otel.js";
 import { jsonSchema } from "./runtime.js";
 import { runAlignment } from "./alignment.js";
 import { randomUUID } from "node:crypto";
@@ -504,6 +505,12 @@ export class CustomAgent implements Agent {
               req.managedDelivery && !generation.message.tool_calls?.length
                 ? [messages.length - 1]
                 : [],
+            );
+            otel.modelContent(
+              invocationId,
+              input.messages,
+              generation.message,
+              generation.finishReason,
             );
             await execution.trace("model.completed", {
               invocationId,

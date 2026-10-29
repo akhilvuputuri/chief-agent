@@ -323,6 +323,7 @@ export class Execution {
       id,
       logOperation(operation),
       !readOperations.has(operation),
+      args,
     );
     return id;
   }
@@ -344,7 +345,12 @@ export class Execution {
       latencyMs: call ? Date.now() - call.started : undefined,
       errorCode: typeof code === "string" ? code : undefined,
     });
-    otel.callFinished(id, state, typeof code === "string" ? code : undefined);
+    otel.callFinished(
+      id,
+      state,
+      typeof code === "string" ? code : undefined,
+      result,
+    );
   }
   /** Whether a run (a delegated child of this owner) had a write refused for an earlier uncertain write. */
   async writesBlockedIn(run: string) {

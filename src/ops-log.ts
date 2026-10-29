@@ -122,6 +122,7 @@ const fields: Record<string, Shape> = {
   failedCount: "count",
   uncertainCount: "count",
   abortedCount: "count",
+  contentCaptured: "bool",
   costUsd: "number",
   transient: "bool",
   approved: "bool",

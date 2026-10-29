@@ -667,6 +667,7 @@ export class Assistant {
         : await conversationState(this.db, user, inputId);
       if (!background) {
         otel.runConversation(run, `thread.${active.threadId ?? 0}`);
+        otel.runContent(run, message);
         // Implicit feedback (#323): does this message redirect the answer it follows?
         const target = conversation.replyTarget;
         const last = conversation.lastExchangeHere;

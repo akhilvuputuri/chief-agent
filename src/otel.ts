@@ -4,16 +4,26 @@
 // feedback on a turn (the owner redirecting it) is sent as a gen_ai.evaluation.result
 // log record on that turn's trace.
 //
-// Spans carry metadata only: IDs, model and provider names, token counts, cost,
-// latency, fixed outcome names and host-defined tool names. Never prompts, replies,
-// tool arguments, tool results or error messages.
+// By default spans carry metadata only: IDs, model and provider names, token counts, cost,
+// latency, fixed outcome names and host-defined tool names. Never prompts, replies, tool
+// arguments, tool results or error messages. Only when the owner opts in to message content
+// (src/otel-content.ts) do spans also carry messages, tool arguments and results, scrubbed
+// and capped.
 //
 // Export never blocks or fails a turn: hooks only record in memory and enqueue, the
 // queue is bounded (overflow is dropped and counted), and sending happens on a timer
 // with a timeout. A collector that is down costs a log line a minute, nothing else.
 
 import { randomBytes } from "node:crypto";
+import type { ModelMessage } from "./model.js";
 import { finishName, opsLog, providerName } from "./ops-log.js";
+import {
+  chatMessage,
+  contentText,
+  messagesJson,
+  toolArguments,
+  userMessageJson,
+} from "./otel-content.js";
 
 type AttributeValue = string | number | boolean | string[];
 type Attributes = Record<string, AttributeValue | undefined>;
@@ -50,7 +60,13 @@ export interface ExporterOptions {
   /** OTLP logs URL for evaluation results; without it they are not sent. */
   logsEndpoint?: string;
   serviceVersion?: string;
+  /** Attach message content (src/otel-content.ts). Off unless the owner opts in. */
+  captureContent?: boolean;
   maxQueue?: number;
+  /** Queued text beyond this is dropped, so captured content cannot grow memory without bound. */
+  maxQueueBytes?: number;
+  /** Largest request body, roughly; a batch stops growing at this size. */
+  maxBatchBytes?: number;
   batchSize?: number;
   intervalMs?: number;
   timeoutMs?: number;
@@ -60,6 +76,7 @@ export interface ExporterOptions {
 /** Batches spans and posts them as OTLP/HTTP JSON. Never throws to callers. */
 export class OtlpExporter {
   private queue: ExportSpan[] = [];
+  private queuedBytes = 0;
   private evaluations: ExportEvaluation[] = [];
   private sending?: Promise<void>;
   private timer?: NodeJS.Timeout;
@@ -67,12 +84,16 @@ export class OtlpExporter {
   private failed = 0;
   private lastReport = 0;
   private readonly maxQueue: number;
+  private readonly maxQueueBytes: number;
+  private readonly maxBatchBytes: number;
   private readonly batchSize: number;
   private readonly timeoutMs: number;
   private readonly post: typeof fetch;
 
   constructor(private readonly options: ExporterOptions) {
     this.maxQueue = options.maxQueue ?? 4096;
+    this.maxQueueBytes = options.maxQueueBytes ?? 32 * 1024 * 1024;
+    this.maxBatchBytes = options.maxBatchBytes ?? 4 * 1024 * 1024;
     this.batchSize = options.batchSize ?? 256;
     this.timeoutMs = options.timeoutMs ?? 3000;
     this.post = options.fetch ?? fetch;
@@ -84,12 +105,17 @@ export class OtlpExporter {
   }
 
   enqueue(span: ExportSpan) {
-    if (this.queue.length >= this.maxQueue) {
+    const bytes = spanBytes(span);
+    if (
+      this.queue.length >= this.maxQueue ||
+      this.queuedBytes + bytes > this.maxQueueBytes
+    ) {
       this.dropped++;
       this.report();
       return;
     }
     this.queue.push(span);
+    this.queuedBytes += bytes;
     // Deferred so encoding a batch never runs on the caller's (a turn's) stack.
     if (this.queue.length === this.batchSize)
       setImmediate(() => void this.flush());
@@ -119,7 +145,17 @@ export class OtlpExporter {
 
   private async drain() {
     while (this.queue.length) {
-      const batch = this.queue.splice(0, this.batchSize);
+      // Up to batchSize spans and about maxBatchBytes, but always at least one.
+      let count = 0;
+      let bytes = 0;
+      while (count < this.queue.length && count < this.batchSize) {
+        const next = spanBytes(this.queue[count]!);
+        if (count && bytes + next > this.maxBatchBytes) break;
+        bytes += next;
+        count++;
+      }
+      const batch = this.queue.splice(0, count);
+      this.queuedBytes = Math.max(0, this.queuedBytes - bytes);
       const body = encode(batch, this.options.serviceVersion);
       if (!(await this.send(this.options.endpoint, body, batch.length))) {
         // Evaluations would only fail the same way; drop them with the spans.
@@ -189,6 +225,17 @@ export class OtlpExporter {
   get pending() {
     return this.queue.length + this.evaluations.length;
   }
+}
+
+/** The bytes a span adds to a request, near enough: its text as escaped UTF-8 plus overhead. */
+function spanBytes(span: ExportSpan) {
+  let bytes = 256 + span.name.length;
+  for (const value of Object.values(span.attributes))
+    bytes +=
+      typeof value === "string"
+        ? Buffer.byteLength(JSON.stringify(value)) + 32
+        : 32;
+  return bytes;
 }
 
 /** OTLP/JSON: hex IDs, integer enums, 64-bit integers as decimal strings. */
@@ -335,10 +382,35 @@ interface CallState {
 interface ModelState {
   run: string;
   attempt?: number;
+  truncated?: boolean;
 }
 
 // Runs that never stop (a crash, a lost process) must not grow these without bound.
 const MAX_OPEN = 2000;
+// Captured content waiting for its span to end, by `<kind>:<id>`, bounded in total size;
+// the oldest goes first, so a run that never ends cannot hold content for ever.
+const HELD_MAX_CHARS = 32 * 1024 * 1024;
+const held = new Map<string, string>();
+let heldChars = 0;
+function hold(key: string, value: string) {
+  take(key);
+  while (held.size && heldChars + value.length > HELD_MAX_CHARS) {
+    const oldest = held.keys().next().value;
+    if (oldest === undefined) break;
+    take(oldest);
+  }
+  if (value.length > HELD_MAX_CHARS) return;
+  held.set(key, value);
+  heldChars += value.length;
+}
+function take(key: string) {
+  const value = held.get(key);
+  if (value !== undefined) {
+    held.delete(key);
+    heldChars -= value.length;
+  }
+  return value;
+}
 let exporter: OtlpExporter | undefined;
 const runs = new Map<string, RunState>();
 const calls = new Map<string, CallState>();
@@ -354,6 +426,7 @@ const EVALUATION_EVENT = "gen_ai.evaluation.result";
 /** Starts exporting to `options.endpoint`. Returns the exporter for shutdown. */
 export function startTracing(options: ExporterOptions) {
   exporter = new OtlpExporter(options);
+  capture = options.captureContent === true;
   return exporter;
 }
 
@@ -361,14 +434,20 @@ export function startTracing(options: ExporterOptions) {
 export async function stopTracing(deadlineMs = 1000) {
   const current = exporter;
   exporter = undefined;
+  capture = false;
   runs.clear();
   calls.clear();
   models.clear();
   finished.clear();
+  held.clear();
+  heldChars = 0;
   await current?.shutdown(deadlineMs);
 }
 
 export const tracingEnabled = () => exporter !== undefined;
+let capture = false;
+/** Whether spans carry message content: only with export on and the owner's opt-in. */
+export const contentCaptured = () => exporter !== undefined && capture;
 
 const nowNs = () => BigInt(Date.now()) * 1_000_000n;
 const spanId = () => randomBytes(8).toString("hex");
@@ -472,6 +551,10 @@ function modelFinished(
     typeof data.invocationId === "string" ? data.invocationId : undefined;
   const started = invocation ? models.get(invocation) : undefined;
   if (invocation) models.delete(invocation);
+  const input = invocation ? take(`model-in:${invocation}`) : undefined;
+  const output = invocation ? take(`model-out:${invocation}`) : undefined;
+  // The run's span shows its latest successful model output.
+  if (output) hold(`run-out:${run}`, output);
   const end = nowNs();
   const latency = finiteCount(data.latencyMs);
   const start =
@@ -520,6 +603,9 @@ function modelFinished(
       "chief.attempt": started?.attempt ?? finiteCount(data.attempt),
       "chief.effort": nameValue(data.effort),
       "chief.invocation_id": invocation,
+      "gen_ai.input.messages": input,
+      "gen_ai.output.messages": output,
+      "chief.content.truncated": started?.truncated || undefined,
     },
   });
 }
@@ -550,6 +636,8 @@ function runStopped(run: string, reason: string, taskId?: string) {
       "gen_ai.operation.name": "invoke_agent",
       "gen_ai.agent.name": state.agent,
       "gen_ai.conversation.id": state.conversation,
+      "gen_ai.input.messages": take(`run-in:${run}`),
+      "gen_ai.output.messages": take(`run-out:${run}`),
       "chief.run_id": run,
       "chief.task_id": taskId,
       "chief.stop_reason": nameValue(reason),
@@ -565,6 +653,39 @@ export function runConversation(run: string, conversation: string) {
     const state = runs.get(run);
     const id = codeValue(conversation);
     if (state && id) state.conversation = id;
+  } catch {
+    /* Tracing is not the action ledger. */
+  }
+}
+
+/** The owner's message for a turn's root span, when content is captured. */
+export function runContent(run: string, message: string) {
+  if (!contentCaptured()) return;
+  try {
+    if (runs.has(run)) hold(`run-in:${run}`, userMessageJson(message));
+  } catch {
+    /* Tracing is not the action ledger. */
+  }
+}
+
+/** A model call's input and output messages, when content is captured. */
+export function modelContent(
+  invocationId: string,
+  input: ModelMessage[],
+  output: ModelMessage,
+  finishReason?: string | null,
+) {
+  if (!contentCaptured()) return;
+  try {
+    const state = models.get(invocationId);
+    if (!state) return;
+    const sent = messagesJson(input.map((m) => chatMessage(m)));
+    const reply = messagesJson([
+      chatMessage(output, finishName(finishReason) ?? undefined),
+    ]);
+    state.truncated = sent.truncated || reply.truncated;
+    hold(`model-in:${invocationId}`, sent.json);
+    hold(`model-out:${invocationId}`, reply.json);
   } catch {
     /* Tracing is not the action ledger. */
   }
@@ -613,10 +734,13 @@ export function callStarted(
   callId: string,
   operation: string,
   write: boolean,
+  args?: unknown,
 ) {
   if (!exporter) return;
   try {
     remember(calls, callId, { run, operation, write, startNs: nowNs() });
+    if (capture && args !== undefined)
+      hold(`call-args:${callId}`, toolArguments(args));
   } catch {
     /* Tracing is not the action ledger. */
   }
@@ -626,16 +750,22 @@ export function callFinished(
   callId: string,
   state: string,
   errorCode?: string,
+  result?: unknown,
 ) {
   if (!exporter) return;
   try {
-    finishCall(callId, state, errorCode);
+    finishCall(callId, state, errorCode, result);
   } catch {
     /* Tracing is not the action ledger. */
   }
 }
 
-function finishCall(callId: string, state: string, errorCode?: string) {
+function finishCall(
+  callId: string,
+  state: string,
+  errorCode?: string,
+  result?: unknown,
+) {
   if (!exporter) return;
   const call = calls.get(callId);
   calls.delete(callId);
@@ -660,6 +790,9 @@ function finishCall(callId: string, state: string, errorCode?: string) {
       "error.type": failed
         ? (codeValue(errorCode) ?? nameValue(state))
         : undefined,
+      "gen_ai.tool.call.arguments": take(`call-args:${callId}`),
+      "gen_ai.tool.call.result":
+        capture && result !== undefined ? contentText(result) : undefined,
     },
   });
 }
