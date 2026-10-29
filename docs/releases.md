@@ -18,7 +18,8 @@
   - The operator ran `scripts/deploy-agentwatch.py` from an exact archive of `6e90db7`, with hashes verified on both sides, at about 15:00 UTC on 29 October.
   - It reported the deploy healthy with agentwatch up. The gateway logged `trace.export_enabled` with `contentCaptured: true`.
   - agentwatch is healthy, uses about 50 MB of its 512 MB limit, and is reachable only on `127.0.0.1:4318`, through an SSH tunnel ([lightsail](lightsail.md#traces-agentwatch)).
-- **Pending:** the first real turn's trace, and the next automatic release (a pull of the CI-built image) with agentwatch in Compose.
+- **Since:** the next automatic release, `b431444`, the first to pull the CI-built gateway image, deployed healthy and left agentwatch untouched.
+- **Pending:** the first real turn's trace.
 
 [Journal 134](journey/134-agentwatch-on-the-host.md#release-closure--2026-10-29).
 

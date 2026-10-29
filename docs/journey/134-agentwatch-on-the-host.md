@@ -131,11 +131,11 @@ Checked afterwards, read-only:
 **Not yet verified:**
 
 - a real turn's trace, with content, in agentwatch;
-- the next automatic release (now a pull of the CI-built image) passing with agentwatch in Compose.
+- the next automatic release with agentwatch in Compose (passed afterwards: see the closure).
 
 ### Release closure — 2026-10-29
 
-Message capture: `e6abb13` (PR 359), released by the workflow. agentwatch on the host: `6e90db7` (PR 360), installed by the operator rollout at about 15:00 UTC. It uses image `ghcr.io/akhilvuputuri/agentwatch@sha256:a74e529e…` from agentwatch `918e8a3`. Pending: the first real traces, and the next automatic release.
+Message capture: `e6abb13` (PR 359), released by the workflow. agentwatch on the host: `6e90db7` (PR 360), installed by the operator rollout at about 15:00 UTC. It uses image `ghcr.io/akhilvuputuri/agentwatch@sha256:a74e529e…` from agentwatch `918e8a3`. The next automatic release, `b431444` (run 40897824539, the first that pulls the CI-built gateway image), deployed healthy in 51 s and left agentwatch running, its image in place. Pending: the first real traces.
 
 ## Follow-up and next iteration
 
