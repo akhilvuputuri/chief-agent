@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import { GmailTools, indexBody } from "../src/gmail.js";
 import {
   chunks,
+  fuse,
+  keywordRanking,
+  keywordSearch,
   MailIndex,
   OpenRouterEmbedder,
   withoutQuotes,
@@ -590,4 +593,201 @@ test("a top-up cut short keeps the messages it already read", async () => {
   // Every message read during the cut-short top-up is indexed, none is read twice.
   assert.equal(index.messages - 1, box.reads.length - reads);
   assert.ok(index.messages > 1);
+});
+
+test("fusion ranks a message both searches return first and keeps keyword-only hits", async () => {
+  assert.equal(
+    fuse([
+      ["a", "b", "c"],
+      ["b", "c", "d"],
+    ])[0],
+    "b",
+  );
+  assert.deepEqual(
+    keywordRanking([
+      [{ id: "x", threadId: "tx" }],
+      [
+        { id: "y", threadId: "ty" },
+        { id: "x", threadId: "tx" },
+      ],
+    ]),
+    ["x", "y"],
+  );
+  const box = mailbox([
+    {
+      id: "a1",
+      at: NOW - DAY,
+      subject: "Order",
+      text: "sorry the sofa delivery was late",
+    },
+    { id: "b2", at: NOW - DAY, subject: "Bank", text: "statement ready" },
+    {
+      id: "c3",
+      at: NOW - DAY,
+      subject: "Lease",
+      text: "deposit is two months rent",
+    },
+  ]);
+  const index = new MailIndex(box.gmail, words, "owner", () => NOW, FAST);
+  await index.start();
+  const found = await index.recall("owner", "late sofa delivery apology", 8, {
+    lists: [
+      [
+        {
+          id: "zz",
+          threadId: "tzz",
+          from: "Courier",
+          subject: "Archived",
+          snippet: "your parcel",
+        },
+        { id: "a1", threadId: "ta1" },
+      ],
+    ],
+    failed: 0,
+  });
+  assert.equal(found.status, "ready");
+  const top = found.results[0]!;
+  assert.equal(top.messageId, "a1");
+  assert.equal(top.meaningRank, 1);
+  assert.equal(top.keywordRank, 2);
+  const outside = found.results.find((r) => r.messageId === "zz")!;
+  assert.equal(outside.meaningRank, null);
+  assert.equal(outside.keywordRank, 1);
+  assert.equal(outside.excerpt, "your parcel");
+  assert.equal(outside.subject, "Archived");
+  assert.ok(!("score" in outside));
+  assert.match(found.guidance!, /meaningRank and keywordRank/);
+  assert.match(found.warning, /Untrusted email content/);
+});
+
+test("keyword results are returned while the index builds, and failures are noted", async () => {
+  const box = mailbox([{ id: "a1", at: NOW, subject: "s", text: "body" }]);
+  const index = new MailIndex(box.gmail, words, "owner", () => NOW, FAST);
+  const early = await index.recall("owner", "anything", 8, {
+    lists: [[{ id: "k1", threadId: "tk1", subject: "Hit" }]],
+    failed: 1,
+  });
+  assert.equal(early.status, "building");
+  assert.deepEqual(
+    early.results.map((r) => [r.messageId, r.keywordRank, r.meaningRank]),
+    [["k1", 1, null]],
+  );
+  assert.match(early.hint!, /keyword results only/);
+  assert.match(early.note!, /1 of 2 keyword searches failed/);
+});
+
+test("keyword searches run on the primary mailbox with the turn's budget", async () => {
+  const calls: unknown[][] = [];
+  const gmail = {
+    async call(...args: unknown[]) {
+      calls.push(args);
+      if (args[2] === "boom")
+        throw new Error("Gmail request budget for this turn is used");
+      return {
+        results: [
+          {
+            id: "m1",
+            threadId: "t1",
+            from: "F",
+            subject: "S",
+            date: "D",
+            snippet: "N",
+          },
+          { id: "m2", threadId: "t2", detail: "not retrieved: unavailable" },
+          { id: "m3", detail: "no thread id" },
+        ],
+      };
+    },
+  };
+  const result = await keywordSearch(gmail as any, "owner", "run-1", [
+    "from:shop",
+    "boom",
+  ]);
+  assert.deepEqual(calls[0], [
+    "owner",
+    "gmail_search",
+    "from:shop",
+    undefined,
+    "run-1",
+    "primary",
+  ]);
+  assert.equal(result.failed, 1);
+  assert.deepEqual(result.reasons, ["the turn's Gmail request budget is used"]);
+  assert.deepEqual(result.lists, [
+    [
+      {
+        id: "m1",
+        threadId: "t1",
+        from: "F",
+        subject: "S",
+        date: "D",
+        snippet: "N",
+        detail: undefined,
+      },
+      {
+        id: "m2",
+        threadId: "t2",
+        from: undefined,
+        subject: undefined,
+        date: undefined,
+        snippet: undefined,
+        detail: "not retrieved: unavailable",
+      },
+    ],
+  ]);
+  assert.ok(
+    action.safeParse({
+      operation: "gmail_recall",
+      query: "q",
+      keywords: ["a", "b", "c"],
+    }).success,
+  );
+  assert.ok(
+    !action.safeParse({ operation: "gmail_recall", query: "q", keywords: [] })
+      .success,
+  );
+  assert.ok(
+    !action.safeParse({
+      operation: "gmail_recall",
+      query: "q",
+      keywords: ["a", "b", "c", "d"],
+    }).success,
+  );
+});
+
+test("a keyword hit keeps details any search returned, and says when Gmail had none", async () => {
+  const box = mailbox([
+    { id: "a1", at: NOW - DAY, subject: "s", text: "unrelated body" },
+  ]);
+  const index = new MailIndex(box.gmail, words, "owner", () => NOW, FAST);
+  await index.start();
+  const found = await index.recall("owner", "parcel", 8, {
+    lists: [
+      [
+        { id: "ff1", threadId: "t1", detail: "not retrieved: unavailable" },
+        { id: "gg2", threadId: "t2", detail: "not retrieved: unavailable" },
+      ],
+      [
+        {
+          id: "ff1",
+          threadId: "t1",
+          from: "Courier",
+          subject: "Parcel",
+          snippet: "arriving today",
+        },
+      ],
+    ],
+    failed: 1,
+    reasons: ["Gmail refused the request (quota or permission)"],
+  });
+  const ff1 = found.results.find((r) => r.messageId === "ff1")!;
+  assert.equal(ff1.from, "Courier");
+  assert.equal(ff1.excerpt, "arriving today");
+  assert.ok(!("detail" in ff1));
+  const gg2 = found.results.find((r) => r.messageId === "gg2")!;
+  assert.equal(gg2.detail, "not retrieved: unavailable");
+  assert.match(
+    found.note!,
+    /1 of 3 keyword searches failed \(Gmail refused the request \(quota or permission\)\)/,
+  );
 });

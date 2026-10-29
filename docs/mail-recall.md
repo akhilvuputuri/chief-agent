@@ -1,10 +1,17 @@
 # Email memory (mail recall) — MVP
 
-Status (25 October 2026): released with a 30-day window in `d98f912` ([PR 320](https://github.com/akhilvuputuri/chief-agent/pull/320)); the window becomes 12 months in the follow-up PR. See [journal 120](journey/120-email-memory-mvp.md) for the question it tests and its results.
+Status (29 October 2026): live with a 12-month window and quota-paced builds. This change fuses meaning search with Gmail keyword results inside `gmail_recall`. See [journal 120](journey/120-email-memory-mvp.md) for the measurements.
 
 ## What it does
 
-The email agent gets one more tool, `gmail_recall(query, limit?)`. It finds emails by what they were about, for requests where the owner half-remembers an email ("the one where they apologised for the late delivery") and Gmail's keyword search needs words the owner does not have. It returns up to ten messages with sender, subject, date, a similarity score and a 300-character excerpt, closest first. The agent confirms a result with `gmail_thread` before reporting it; the closest result is not necessarily a match.
+The email agent gets one more tool, `gmail_recall(query, keywords?, limit?)`. It finds emails the owner half-remembers ("the one where they apologised for the late delivery").
+
+- `query` describes what the email was about, in plain words, for meaning search over the index.
+- `keywords` is one to three Gmail searches for words the email probably contains. They run through the ordinary `gmail_search` path on the primary mailbox and count against the turn's Gmail budget and the agent's three searches.
+- The two rankings are fused with reciprocal rank fusion (k = 60), as `evals/mail-recall` measured.
+- It returns up to ten messages, best first. Each has sender, subject, date, `meaningRank`, `keywordRank` (null when that search did not return it) and an excerpt. A keyword hit outside the index carries Gmail's own headers and snippet.
+- While the index is building, the keyword results are still returned.
+- The agent confirms a result with `gmail_thread` before reporting it; the closest result is not necessarily a match.
 
 This is retrieval-augmented generation: the host retrieves the relevant emails, and the email agent answers from them with message and thread references.
 
@@ -59,6 +66,8 @@ On synthetic, keyword-avoiding questions, 30 per run:
 | 12 months |        14 / 30 |                  23 / 30 |
 
 At 12 months, `gmail_recall` alone matched keyword search (16 / 30); the two find different emails, so the email agent uses both for content questions. Details are in [journal 120](journey/120-email-memory-mvp.md#retrieval-eval-12-month-window).
+
+Offline on a 29 October export (1,412 messages, 30 new questions), the top 8 of the meaning-plus-keyword fusion found 18 / 30. That equals the agent's previous separate lists (about 15 messages on average), with the best ranking of the methods tried. Local BM25 and the two re-rankers tried did not beat it. Details are in [journal 120](journey/120-email-memory-mvp.md#fusion-and-re-ranking-eval--2026-10-29).
 
 ## Eval
 
