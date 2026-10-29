@@ -69,7 +69,7 @@ It is published on the host's loopback only, and it has no login. To view it, op
 ssh -F ../hermes-companion-ops/ssh_config -N -L 14318:127.0.0.1:4318 chief-lightsail
 ```
 
-Anyone who can open that tunnel, or has a shell on the host, can read the owner's conversations there, as they could the database. Other containers on the Compose network can reach it too; none of them fetches arbitrary URLs from that network. The traces are not in the nightly encrypted backup, which covers Postgres only; losing the volume loses telemetry, not the action ledger.
+Anyone who can open that tunnel, or has a shell on the host, can read the owner's conversations there, as they could the database. Other containers on the Compose network can reach it too; none of them fetches arbitrary URLs from that network. It holds the gateway's OpenRouter key for judges, restricted by its judge policy to OpenRouter and 50 calls a day ([tracing](tracing.md#judging-traces)). The traces are not in the nightly encrypted backup, which covers Postgres only; losing the volume loses telemetry, not the action ledger.
 
 Run these on the host as the operator, from `/opt/hermes-companion` so Compose reads its `.env`, and recreate the gateway only when it is idle:
 

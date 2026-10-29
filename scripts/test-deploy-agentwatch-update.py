@@ -28,11 +28,15 @@ LIVE_COMPOSE = ('services:\n  gateway:\n    environment:\n'
                 '  agentwatch:\n'
                 '    # Trace viewer, pinned by digest.\n'
                 '    image: ' + OLD_IMAGE + '\n'
+                '    command:\n      [\n        "serve",\n        "--retain-days",\n        "90",\n      ]\n'
                 '    volumes: ["agentwatch-data:/data"]\n'
                 '    ports: ["127.0.0.1:4318:4318"]\n'
                 '    read_only: true\n'
+                '    tmpfs: [/tmp]\n'
                 '    cap_drop: [ALL]\n'
+                '    security_opt: ["no-new-privileges:true"]\n'
                 '    mem_limit: 512m\n'
+                '    stop_grace_period: 15s\n'
                 '    restart: unless-stopped\n'
                 'networks:\n  browser-control: { internal: true }\n'
                 'volumes:\n  postgres-data:\n  agentwatch-data:\n')
@@ -54,7 +58,6 @@ class AgentwatchUpdateTests(unittest.TestCase):
         staged = (ROOT / 'compose.yaml').read_bytes()
         if staged == shown.stdout:
             self.skipTest('compose.yaml matches origin/main; no agentwatch update pending')
-        # Until the new digest is pinned, stand in a well-formed one for the placeholder.
         self.assertTrue(update.validate_compose(shown.stdout, staged).startswith(REPOSITORY))
 
     def scenario(self, *, live_compose=LIVE_COMPOSE, staged_compose=STAGED_COMPOSE,
@@ -217,18 +220,64 @@ class AgentwatchUpdateTests(unittest.TestCase):
             ({'staged_compose': block('127.0.0.1:4318:4318', '4318:4318')}, 'keep ports'),
             ({'staged_compose': block('    ports: ["127.0.0.1:4318:4318"]\n', '')}, 'keep ports'),
             ({'staged_compose': block('    mem_limit', '    ports: ["0.0.0.0:4319:4318"]\n    mem_limit')}, 'keep ports'),
-            ({'staged_compose': block('    read_only: true\n    cap', '    read_only: false\n    cap')}, 'keep read_only'),
+            ({'staged_compose': block('    read_only: true\n    tmpfs', '    read_only: false\n    tmpfs')}, 'keep read_only'),
             ({'staged_compose': block('    cap_drop: [ALL]\n', '')}, 'keep cap_drop'),
             ({'staged_compose': block('    mem_limit: 512m\n', '')}, 'keep mem_limit'),
-            ({'staged_compose': block('    restart:', '    privileged: true\n    restart:')}, 'weakens its isolation'),
-            ({'staged_compose': block('    restart:', '    network_mode: host\n    restart:')}, 'weakens its isolation'),
-            ({'staged_compose': block('    restart:', '    cap_add: [SYS_ADMIN]\n    restart:')}, 'weakens its isolation'),
+            ({'staged_compose': block('    restart:', '    privileged: true\n    restart:')}, 'outside the reviewed allow-list'),
+            ({'staged_compose': block('    restart:', '    network_mode: host\n    restart:')}, 'outside the reviewed allow-list'),
+            ({'staged_compose': block('    restart:', '    cap_add: [SYS_ADMIN]\n    restart:')}, 'outside the reviewed allow-list'),
             ({'staged_compose': LIVE_COMPOSE}, 'already up to date'),
+            ({'staged_compose': block('    stop_grace_period: 15s\n', '    stop_grace_period: 15s\n' * 2)}, 'repeats a setting'),
+            ({'staged_compose': block('    restart:', '    <<: *gateway\n    restart:')}, 'outside the reviewed allow-list'),
+            ({'staged_compose': block('        "90",\n', '        "${POSTGRES_PASSWORD}",\n')}, 'outside the reviewed allow-list'),
         ]
         for args, message in cases:
             with self.subTest(args=args):
                 commands = self.scenario(**args, expected_error=message)
                 self.assertEqual(commands, [])
+
+    def test_block_settings_outside_the_allow_list_change_nothing(self):
+        volumes = '    volumes: ["agentwatch-data:/data"]\n'
+        environment = '      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}\n'
+        security = '    security_opt: ["no-new-privileges:true"]\n'
+        cases = [
+            (volumes, '    volumes: ["agentwatch-data:/data", "/var/run/docker.sock:/var/run/docker.sock"]\n', 'keep volumes'),
+            (volumes, '    volumes: ["agentwatch-data:/data", "/:/host"]\n', 'keep volumes'),
+            (volumes, '    volumes: ["agentwatch-data:/data", "postgres-data:/postgres"]\n', 'keep volumes'),
+            (volumes, volumes + '    volumes:\n      - /:/host\n', 'keep volumes'),
+            (volumes, '    volumes:\n      - agentwatch-data:/data\n      - /:/host\n', 'keep volumes'),
+            (volumes, volumes + '    volumes_from: [postgres]\n', 'allow-list'),
+            (volumes, volumes + '    env_file: [.env]\n', 'allow-list'),
+            (environment, '      OPENROUTER_API_KEY: ${POSTGRES_PASSWORD}\n', 'reviewed variables'),
+            (environment, '      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-${POSTGRES_PASSWORD}}\n', 'allow-list'),
+            (environment, environment + '      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}\n', 'reviewed variables'),
+            (environment, environment + '      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}\n', 'reviewed variables'),
+            (environment, '      OPENROUTER_API_KEY: sk-literal\n', 'allow-list'),
+            (environment, '      - OPENROUTER_API_KEY=${POSTGRES_PASSWORD}\n', 'allow-list'),
+            (environment, environment * 2, 'repeats a setting'),
+            (volumes, volumes + '    user: root\n', 'allow-list'),
+            (security, '    security_opt: ["no-new-privileges:true", "seccomp:unconfined"]\n', 'keep security_opt'),
+            (security, security + '    security_opt: ["apparmor:unconfined"]\n', 'keep security_opt'),
+            (security, '', 'keep security_opt'),
+            (volumes, volumes + '    networks: [default, browser-control]\n', 'allow-list'),
+            (volumes, volumes + '    networks:\n      - browser-control\n', 'allow-list'),
+            ('    tmpfs: [/tmp]\n', '    tmpfs: [/tmp, /data]\n', 'keep tmpfs'),
+        ]
+        for old, new, message in cases:
+            with self.subTest(new=new):
+                self.assertIn(old, STAGED_COMPOSE)
+                self.assertEqual(self.scenario(staged_compose=STAGED_COMPOSE.replace(old, new),
+                                               expected_error=message), [])
+
+    def test_comment_lines_do_not_end_the_agentwatch_block(self):
+        staged = STAGED_COMPOSE.replace('    restart:', '  # A service-level comment inside the block.\n'
+                                        '# A top-level comment inside the block.\n    restart:')
+        before, block, after = update.split_compose(staged.encode(), 'Staged')
+        self.assertIn(b'    restart: unless-stopped\n', block)
+        self.assertTrue(after.startswith(b'networks:\n'))
+        self.scenario(staged_compose=staged)
+        unreviewed = staged.replace('    restart:', '    user: root\n    restart:')
+        self.scenario(staged_compose=unreviewed, expected_error='allow-list')
 
     def test_validation_accepts_env_only_and_limit_changes(self):
         self.scenario(staged_compose=LIVE_COMPOSE.replace('    mem_limit: 512m', '    mem_limit: 1g'))

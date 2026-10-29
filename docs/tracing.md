@@ -86,7 +86,9 @@ The owner approved one judge on 30 October:
 - **Question:** did the reply do what the owner asked, correctly and completely, given what the tools returned; a `true`/`false` score named `answer_ok`, with a one-sentence explanation.
 - **Limit:** 20 model calls in any 24 hours, failures included; beyond that, turns are recorded `OVER_LIMIT` and never judged later.
 
-Create, change or switch it off through agentwatch's Judges page or API, over the SSH tunnel ([lightsail](lightsail.md#traces-agentwatch)). A judge's verdicts are evidence to read beside `user_redirected`, not ground truth: trace content is untrusted, and whether this judge agrees with the owner has not been measured.
+Create, change or switch it off through agentwatch's Judges page or API, over the SSH tunnel ([lightsail](lightsail.md#traces-agentwatch)). **The key.** agentwatch's API has no login, so whoever can reach it (the SSH tunnel, a shell on the host, another container on the Compose network) could otherwise point a judge at their own server and receive the key, or raise its spending. On the host, agentwatch therefore starts with a judge policy it cannot be talked out of: judges may call only `https://openrouter.ai/api/v1`, use only `OPENROUTER_API_KEY`, and have at most 50 calls a day. Those who can reach agentwatch can already read the host's `.env`, so this is a new route for the key rather than new readers; a separate OpenRouter key with its own credit limit would cap spend and could be revoked alone.
+
+A judge's verdicts are evidence to read beside `user_redirected`, not ground truth: trace content is untrusted, and whether this judge agrees with the owner has not been measured.
 
 ## Backfilling history
 

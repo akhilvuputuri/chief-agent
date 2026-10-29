@@ -31,21 +31,35 @@ LOCK = pathlib.Path('/var/lock/companion-release.lock')
 AGENTWATCH_CONTAINER = 'hermes-companion-agentwatch-1'
 AGENTWATCH_REPOSITORY = 'ghcr.io/akhilvuputuri/agentwatch'
 SERVICE_LINE = re.compile(rb'^  agentwatch:[ \t]*\n', re.M)
-# The next service (two spaces, then a non-space) or top-level key ends the block.
-BLOCK_END = re.compile(rb'^(?:  \S|\S)', re.M)
-KEY_LINE = re.compile(rb'^    ([A-Za-z_][A-Za-z0-9_]*):', re.M)
-IMAGE_LINE = re.compile(rb'^    image: (' + re.escape(AGENTWATCH_REPOSITORY.encode())
-                        + rb'@sha256:[0-9a-f]{64})\n', re.M)
-# The promised safety properties, each exactly once in the agentwatch block.
-REQUIRED_LINES = {
-    b'ports': re.compile(rb'^    ports: \["127\.0\.0\.1:4318:4318"\]\n', re.M),
-    b'read_only': re.compile(rb'^    read_only: true\n', re.M),
-    b'cap_drop': re.compile(rb'^    cap_drop: \[ALL\]\n', re.M),
-    b'mem_limit': re.compile(rb'^    mem_limit: [0-9]+(?:[bkmgBKMG][bB]?)?\n', re.M),
+# Only the next service key or a top-level key ends the block; comments do not.
+BLOCK_END = re.compile(rb'^(?:  [A-Za-z0-9_-]+:|[^\s#])', re.M)
+KEY_LINE = re.compile(rb'    ([A-Za-z0-9_-]+):(.*)')
+COMMENT_LINE = re.compile(rb'[ \t]*(?:#.*)?')
+IMAGE_VALUE = re.compile(rb' ' + re.escape(AGENTWATCH_REPOSITORY.encode()) + rb'@sha256:[0-9a-f]{64}')
+# The promised safety properties: each line exactly as reviewed, exactly once.
+EXACT_VALUES = {
+    b'volumes': b' ["agentwatch-data:/data"]',
+    b'ports': b' ["127.0.0.1:4318:4318"]',
+    b'read_only': b' true',
+    b'tmpfs': b' [/tmp]',
+    b'cap_drop': b' [ALL]',
+    b'security_opt': b' ["no-new-privileges:true"]',
 }
-# Keys that would undo those properties in other ways.
-FORBIDDEN_KEYS = {b'privileged', b'network_mode', b'cap_add', b'pid', b'ipc', b'devices',
-                  b'userns_mode'}
+REQUIRED_KEYS = {b'image', b'mem_limit', *EXACT_VALUES}
+# The only other permitted keys (mem_limit is also required), each with a reviewed value form.
+# Any other service-level key, or repeating any key, is refused.
+OPTIONAL_VALUES = {
+    b'mem_limit': re.compile(rb' [0-9]+(?:[bkmgBKMG][bB]?)?'),
+    b'stop_grace_period': re.compile(rb' [0-9]+(?:ms|s|m|h)'),
+    b'restart': re.compile(rb' (?:unless-stopped|always|on-failure)'),
+    b'command': re.compile(rb'(?: \[(?:"[^"$\\]*"(?:, )?)*\])?'),
+    b'environment': re.compile(rb''),
+}
+# Nested lines: command list items, and environment entries that pass through only the
+# same-named, reviewed host variable (never another one, such as a database password).
+COMMAND_ITEM = re.compile(rb'      [ \t]*(?:\[|\]|"[^"$\\]*",?)')
+ENVIRONMENT_ITEM = re.compile(rb'      ([A-Z][A-Z0-9_]*): \$\{([A-Z][A-Z0-9_]*)(?::-)?\}')
+ALLOWED_ENVIRONMENT = {b'OPENROUTER_API_KEY'}
 MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
 
 
@@ -146,17 +160,45 @@ def split_compose(content, which):
 
 
 def validate_block(block):
-    """Returns the pinned image reference when the block keeps the promised properties."""
-    keys = [match.group(1) for match in KEY_LINE.finditer(block)]
-    images = IMAGE_LINE.findall(block)
-    if keys.count(b'image') != 1 or len(images) != 1:
+    """Returns the pinned image reference when the block uses only the reviewed settings."""
+    keys, environment, image, current = [], [], None, None
+    for line in block.split(b'\n')[1:]:
+        if COMMENT_LINE.fullmatch(line):
+            continue
+        key_line = KEY_LINE.fullmatch(line)
+        if key_line:
+            current, value = key_line.groups()
+            keys.append(current)
+            if current == b'image':
+                if not IMAGE_VALUE.fullmatch(value):
+                    raise RuntimeError('agentwatch image must be pinned by digest from ' + AGENTWATCH_REPOSITORY)
+                image = value.strip()
+            elif current in EXACT_VALUES:
+                if value != EXACT_VALUES[current]:
+                    raise RuntimeError('agentwatch block must keep ' + current.decode() + ' as reviewed')
+            elif current not in OPTIONAL_VALUES:
+                raise RuntimeError('agentwatch block uses a setting outside the reviewed allow-list')
+            elif not OPTIONAL_VALUES[current].fullmatch(value):
+                raise RuntimeError('agentwatch block must keep ' + current.decode() + ' as reviewed')
+            continue
+        if current == b'command' and COMMAND_ITEM.fullmatch(line):
+            continue
+        item = ENVIRONMENT_ITEM.fullmatch(line) if current == b'environment' else None
+        if item:
+            name, reference = item.groups()
+            if name != reference or name not in ALLOWED_ENVIRONMENT:
+                raise RuntimeError('agentwatch environment may only pass through reviewed variables')
+            environment.append(name)
+            continue
+        raise RuntimeError('agentwatch block uses a setting outside the reviewed allow-list')
+    if keys.count(b'image') != 1:
         raise RuntimeError('agentwatch image must be pinned by digest from ' + AGENTWATCH_REPOSITORY)
-    for key, line in REQUIRED_LINES.items():
-        if keys.count(key) != 1 or len(line.findall(block)) != 1:
+    for key in sorted(REQUIRED_KEYS):
+        if keys.count(key) != 1:
             raise RuntimeError('agentwatch block must keep ' + key.decode() + ' as reviewed')
-    if FORBIDDEN_KEYS.intersection(keys):
-        raise RuntimeError('agentwatch block uses a setting that weakens its isolation')
-    return images[0].decode()
+    if len(keys) != len(set(keys)) or len(environment) != len(set(environment)):
+        raise RuntimeError('agentwatch block repeats a setting')
+    return image.decode()
 
 
 def validate_changes(stage):
