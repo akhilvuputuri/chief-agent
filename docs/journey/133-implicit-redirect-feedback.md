@@ -49,11 +49,33 @@ Chief already detects part of this. The nightly learner ([journal 130](130-night
 - [src/main.ts](../../src/main.ts): resolves the logs endpoint. If only that endpoint is invalid, spans still export and only feedback is off (`OTEL_LOGS_ENDPOINT_INVALID`).
 - Design: [tracing](../tracing.md#implicit-feedback).
 
-Independent review: pending.
+Independent review (Opus 5.5) of `275997e` found nothing blocking. Its should-fix findings were corrected in the next commit, with each counterexample added as a test:
+
+- **Retry fired on ordinary requests.** "add another one for Tuesday", "what other options do I have…", "I want to build it from scratch" and "do it again next week" all counted as retries, so the redirect rate would have read high. Now:
+  - a retry must open the message;
+  - "another one" and "again" count only as a short message;
+  - a time or extension word ("next week", "too") rules a retry out;
+  - "from scratch" was dropped;
+  - "retry", "regenerate" and "try once more" were added.
+- **A one-word change counted as a rephrase.** "…Hyderabad tomorrow morning and evening" after "…today…", and "…about orders" after "…about returns", both did. A single swapped word, or a change only in dates, days and numbers, is now a new request. The threshold rose from 60% to 70%.
+- **Forwards and uncaptioned photos scored `false`.** They have none of the owner's words. They now score nothing, and the turn waits for the next message.
+- **A reply to an older message broke "first message only".** The turn before it stayed scorable by the owner's second message. Now the reply passes over it.
+
+Nits fixed:
+
+- detection runs inside `turnFeedback`'s catch, so it cannot fail a turn;
+- background runs no longer take places in the 200-turn memory;
+- queue overflow is documented under `abortedCount`.
+
+Recorded as limits, not changed:
+
+- "redo" stays a correction, as in the learner;
+- interrupted turns are not scored;
+- a reply to an older message is not checked for a rephrase.
 
 ## Verification and outcome
 
-The new and existing tracing tests pass (15/15 across `otel.test.ts` and `turn-feedback.test.ts`); `tsc --noEmit` passes. The full check and hosted CI are recorded on the PR.
+`npx tsx --test tests/turn-feedback.test.ts tests/otel.test.ts tests/learning*.test.ts` passes 34 of 34, and `tsc --noEmit` passes. On `275997e`, the full local `kite run check` passed 1,365 of 1,367 tests. The failure was the corrupt-gzip test, which needs Node 22.23.4 ([journal 126](126-fetch-hygiene-and-node.md)); the laptop has 22.15. Hosted CI passed every job on `275997e`. Results for the reviewed fix commit are recorded on the PR.
 
 ## Follow-up and next iteration
 

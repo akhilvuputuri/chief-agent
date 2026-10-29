@@ -669,17 +669,20 @@ export class Assistant {
         otel.runConversation(run, `thread.${active.threadId ?? 0}`);
         // Implicit feedback (#323): does this message redirect the answer it follows?
         const target = conversation.replyTarget;
-        const previous = target?.runId ?? conversation.lastExchangeHere?.runId;
-        if (previous && previous !== run && otel.tracingEnabled())
+        const last = conversation.lastExchangeHere;
+        const previous = target?.runId ?? last?.runId;
+        if (previous && previous !== run)
           otel.turnFeedback(
             previous,
-            target
-              ? redirectOf(message, null, target.text)
-              : redirectOf(
-                  message,
-                  conversation.lastExchangeHere?.request,
-                  conversation.lastExchangeHere?.reply,
-                ),
+            () =>
+              target
+                ? redirectOf(
+                    message,
+                    target.runId === last?.runId ? last?.request : null,
+                    target.text,
+                  )
+                : redirectOf(message, last?.request, last?.reply),
+            last?.runId,
           );
       }
       await event(this.db, user, run, "conversation.routed", {

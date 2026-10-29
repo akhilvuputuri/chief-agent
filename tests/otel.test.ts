@@ -573,18 +573,36 @@ test("the owner's next message scores the turn it follows, once", async (t) => {
     await third.finish("answer");
     const late = await turn();
     await late.finish("answer");
+    const passed = await turn();
+    await passed.finish("answer");
+    const background = new Execution(
+      db,
+      "owner",
+      randomUUID(),
+      new AbortController().signal,
+    );
+    await background.start(); // no conversation: a job, not a turn
+    await background.finish("answer");
 
-    turnFeedback(first.run, "retry");
-    turnFeedback(first.run, null); // a second message about the same turn
-    turnFeedback(child.run, "retry"); // child runs are not turns
-    turnFeedback(randomUUID(), "retry"); // a turn this process never saw
-    turnFeedback(second.run, null);
-    turnFeedback(third.run, "not a label!"); // unexpected labels never leave
+    turnFeedback(first.run, () => undefined); // a forward says nothing; the turn waits
+    turnFeedback(first.run, () => "retry");
+    turnFeedback(first.run, () => null); // a second message about the same turn
+    turnFeedback(child.run, () => "retry"); // child runs are not turns
+    turnFeedback(background.run, () => "retry");
+    turnFeedback(randomUUID(), () => "retry"); // a turn this process never saw
+    turnFeedback(second.run, () => null);
+    turnFeedback(third.run, () => "not a label!"); // unexpected labels never leave
+    // A reply to an older message: `passed` loses its chance to be scored.
+    turnFeedback(randomUUID(), () => "retry", passed.run);
+    turnFeedback(passed.run, () => null);
+    turnFeedback(late.run, () => {
+      throw new Error("never reaches the turn");
+    });
     t.mock.timers.enable({
       apis: ["Date"],
       now: Date.now() + 6 * 3600_000 + 1000,
     });
-    turnFeedback(late.run, "retry"); // past the feedback window
+    turnFeedback(late.run, () => "retry"); // past the feedback window
     t.mock.timers.reset();
     await stopTracing(1000);
 

@@ -529,7 +529,8 @@ function runStopped(run: string, reason: string, taskId?: string) {
   if (!state || !exporter) return;
   runs.delete(run);
   const endNs = nowNs();
-  if (!state.parentSpanId)
+  // Only conversation turns: background runs must not evict the turn the owner answers next.
+  if (!state.parentSpanId && state.conversation)
     remember(
       finished,
       run,
@@ -572,12 +573,22 @@ export function runConversation(run: string, conversation: string) {
 /**
  * Records whether the owner's message redirected the turn `previousRun` answered: a
  * `user_redirected` evaluation on that turn's root span, true with the kind of redirect as
- * label, or false. Only the first message after a turn counts, within the feedback window,
- * and only for a turn this process exported.
+ * label, or false. `judge` returns the redirect, null for none, or undefined when the
+ * message says nothing about the answer (the turn then waits for the next message). Only
+ * the first message after a turn counts, within the feedback window, and only for a
+ * conversation turn this process exported. `superseded` is a turn this message follows
+ * without answering it (the owner replied to an older message instead): its chance passes.
  */
-export function turnFeedback(previousRun: string, redirect: string | null) {
+export function turnFeedback(
+  previousRun: string,
+  judge: () => string | null | undefined,
+  superseded?: string,
+) {
   if (!exporter) return;
   try {
+    const redirect = judge();
+    if (redirect === undefined) return;
+    if (superseded && superseded !== previousRun) finished.delete(superseded);
     const turn = finished.get(previousRun);
     if (!turn) return;
     finished.delete(previousRun);
