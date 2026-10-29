@@ -13,6 +13,7 @@ import { isLearned, MemoryStore } from "./memory.js";
 import type { Message, ModelAdapter, ToolDefinition } from "./model.js";
 import { opsLog, errorFields } from "./ops-log.js";
 import { normalizeForQuote } from "./quote-match.js";
+import { runFamily } from "./run-family.js";
 import { jsonSchema } from "./runtime.js";
 import { Spending, spending } from "./spending.js";
 
@@ -28,10 +29,15 @@ export const LEARNING_LIMITS = {
   /** Owner text shorter than this with no tool call ("thanks", "ok") is not reviewed. */
   trivialChars: 12,
   modelCalls: 10,
+  // Evidence sizes are generous on purpose (owner, 29 October): measure real nights, then
+  // cut them back. Input is still bounded: 20 tasks and 30 turns at these sizes.
   /** Characters of evidence per task shown to the model. */
-  taskChars: 4000,
+  taskChars: 12000,
   /** Characters of evidence per conversation turn. */
-  turnChars: 2000,
+  turnChars: 8000,
+  /** Characters kept of one owner message, and of Chief's reply. */
+  messageChars: 3000,
+  replyChars: 2000,
   /** A task must have been unchanged this long after it finished (the success window). */
   quietMs: 24 * 3600_000,
   /** Older finished tasks are not reviewed. */
@@ -47,18 +53,28 @@ const SCHEDULE_UTC_MINUTES = (3 * 60 + 30 - 8 * 60 + 1440) % 1440;
 
 export type Label = "success" | "pitfall" | "skipped";
 
-// The start of an owner message that corrects the answer before it.
-const CORRECTION =
-  /^\s*(no\b|nope\b|not (that|what|quite|right)\b|that'?s (wrong|not|incorrect|not what)\b|wrong\b|incorrect\b|actually\b|i meant\b|i said\b|you (got it wrong|misunderstood|forgot|missed)\b|try again\b|(please )?redo\b)/i;
-
-// After Chief asks something ("Want me to remember that?"), a plain "no" answers it; only
-// these still mark the answer as wrong.
+// Owner messages that start like a correction but acknowledge or move on: "No worries",
+// "No thanks, that's all", "Actually that's perfect", "Actually, can you also…".
+const ACKNOWLEDGEMENT =
+  /^\s*(no (worries|problem|prob|need|rush|thanks|thank you)\b|no,? (that'?s|it'?s|this is|all) (great|fine|perfect|good|all|it|ok|okay)\b|nope,? (all good|that'?s (all|it|fine)|nothing)\b|not (right )?now\b|not yet\b|not today\b|actually,? (that'?s|it'?s|this is|that was) (great|perfect|fine|good|helpful|right)\b|actually,? (can|could|would|will) you\b|actually,? (also|one more)\b|i said (thanks|thank you)\b)/i;
+// A plain statement that the answer was wrong, anywhere in the message's opening.
 const STRONG_CORRECTION =
-  /^\s*(that'?s (wrong|incorrect|not what)\b|wrong\b|incorrect\b|i meant\b|you (got it wrong|misunderstood|forgot|missed)\b|try again\b|(please )?redo\b)/i;
+  /\b(that'?s (wrong|incorrect|not (right|correct|what i))|(that|this|it) (is|was)(n'?t| not) (right|correct|what i)|isn'?t what i|not what i (asked|meant|wanted|said)|is wrong|was wrong|are wrong|incorrect|should (be|have been)\b.*\bnot\b|you'?(ve)? (got it wrong|misunderstood|forgot|missed|misread)|you got (it|that) wrong|i meant\b|i asked for\b|try again\b|(please )?redo\b)/i;
+// An opening that usually means "that answer was not it" when not an acknowledgement.
+const CORRECTION_OPENING =
+  /^\s*(no\b|nope\b|not (that|this|what|quite|right)\b|wrong\b|hmm,? (no|not)\b|actually\b)/i;
 
-/** Whether the owner's next message corrects the answer, given how the answer ended. */
-export const isCorrection = (text: string, replyAsked = false) =>
-  (replyAsked ? STRONG_CORRECTION : CORRECTION).test(text);
+/**
+ * Whether the owner's next message corrects the answer. Acknowledgements never do. After a
+ * reply that asked something (such as an offer to remember), a plain "no" answers it, so
+ * only a plain statement that the answer was wrong counts.
+ */
+export function isCorrection(text: string, replyAsked = false) {
+  const opening = text.slice(0, 160);
+  if (ACKNOWLEDGEMENT.test(opening)) return false;
+  if (STRONG_CORRECTION.test(opening)) return true;
+  return !replyAsked && CORRECTION_OPENING.test(opening);
+}
 
 export interface TurnFacts {
   stopReason: string | null;
@@ -543,7 +559,8 @@ export class Learner {
     const runs = (
       await this.db.query(
         `SELECT r.id,r.stop_reason,r.started_at,
-         (SELECT count(*)::int FROM runtime_calls c WHERE c.run_id=r.id) AS calls,
+         (SELECT count(*)::int FROM runtime_calls c WHERE c.run_id=r.id
+          AND c.operation NOT IN ('finish_turn','tools_load')) AS calls,
          (SELECT count(*)::int FROM runtime_calls c WHERE c.run_id=r.id AND c.state='failed') AS failed,
          (SELECT count(*)::int FROM runtime_calls c WHERE c.run_id=r.id AND c.state IN ('uncertain','interrupted')) AS uncertain
          FROM runtime_runs r JOIN work_turns w ON w.run_id=r.id AND w.user_id=r.user_id
@@ -634,15 +651,34 @@ export class Learner {
         if (c.state === "success" || c.state === "failed")
           operations[c.operation]![c.state as "success" | "failed"] += c.n;
       }
+      // What delegated agents read counts too: an email agent's gmail_read tags the turn email.
+      const delegated = (
+        await this.db.query(
+          `SELECT DISTINCT c.operation FROM runtime_calls c
+           WHERE c.run_id IN ${runFamily("$2")} AND c.run_id<>$2::uuid`,
+          [user, r.id],
+        )
+      ).rows.map((c) => c.operation as string);
       const ownerMessages = [
-        { id: inputs[0]!.id, text: clip(inputs[0]!.text, 1200) },
+        {
+          id: inputs[0]!.id,
+          text: clip(inputs[0]!.text, LEARNING_LIMITS.messageChars),
+        },
         ...inputs
           .slice(1)
           .filter((i) => i.text.trim())
-          .map((i) => ({ id: i.id, text: clip(i.text, 800) })),
+          .map((i) => ({
+            id: i.id,
+            text: clip(i.text, LEARNING_LIMITS.messageChars),
+          })),
         // A correction is the owner's own words about this answer.
         ...(corrected
-          ? [{ id: followUp!.id, text: clip(followUp!.text, 800) }]
+          ? [
+              {
+                id: followUp!.id,
+                text: clip(followUp!.text, LEARNING_LIMITS.messageChars),
+              },
+            ]
           : []),
       ];
       const attached =
@@ -656,10 +692,10 @@ export class Learner {
         steps: [],
         operations,
         ownerMessages,
-        reply: reply ? clip(reply, 600) : "",
+        reply: reply ? clip(reply, LEARNING_LIMITS.replyChars) : "",
         untrusted: [
           ...new Set([
-            ...untrustedSources(Object.keys(operations)),
+            ...untrustedSources([...Object.keys(operations), ...delegated]),
             ...(attached ? ["document"] : []),
           ]),
         ].sort(),
@@ -673,11 +709,11 @@ export class Learner {
       )
         item.ownerMessages.splice(1, 1);
       if (size() > LEARNING_LIMITS.turnChars)
-        item.reply = clip(item.reply, 200);
+        item.reply = clip(item.reply, 600);
       if (size() > LEARNING_LIMITS.turnChars)
         item.ownerMessages = item.ownerMessages.map((m) => ({
           ...m,
-          text: clip(m.text, 600),
+          text: clip(m.text, 1500),
         }));
       item.request = item.ownerMessages[0]!.text;
       result.push({ id: r.id, ...labelled, evidence: item });
@@ -697,9 +733,9 @@ export class Learner {
         [task],
       )
     ).rows.map((s) => ({
-      title: clip(s.title, 120),
+      title: clip(s.title, 200),
       status: s.status,
-      result: clip(s.result, 300),
+      result: clip(s.result, 1000),
     }));
     const operations: Evidence["operations"] = {};
     for (const r of (
@@ -734,10 +770,16 @@ export class Learner {
       .slice(0, 5)
       .map((m) => ({ id: m.id as string, ...ownerWords(m.content) }));
     const ownerMessages = [
-      { id: `request:${task}`, text: clip(asked.text, 1200) },
+      {
+        id: `request:${task}`,
+        text: clip(asked.text, LEARNING_LIMITS.messageChars),
+      },
       ...said
         .filter((m) => m.text.trim() && m.text.trim() !== asked.text.trim())
-        .map((m) => ({ id: m.id, text: clip(m.text, 800) })),
+        .map((m) => ({
+          id: m.id,
+          text: clip(m.text, LEARNING_LIMITS.messageChars),
+        })),
     ];
     const reply = messages.filter((m) => m.role === "assistant").at(-1);
     const attached = asked.attached || said.some((m) => m.attached);
@@ -749,7 +791,7 @@ export class Learner {
       steps,
       operations,
       ownerMessages,
-      reply: reply ? clip(reply.content, 600) : "",
+      reply: reply ? clip(reply.content, LEARNING_LIMITS.replyChars) : "",
       untrusted: [
         ...new Set([
           ...untrustedSources(Object.keys(operations)),
@@ -767,11 +809,11 @@ export class Learner {
       item.ownerMessages.pop();
     if (size() > LEARNING_LIMITS.taskChars) item.reply = "";
     if (size() > LEARNING_LIMITS.taskChars) {
-      item.request = clip(item.request, 600);
+      item.request = clip(item.request, 1500);
       item.ownerMessages[0] = { ...item.ownerMessages[0]!, text: item.request };
       item.steps = item.steps.map((x) => ({
         ...x,
-        result: clip(x.result, 100),
+        result: clip(x.result, 300),
       }));
     }
     return item;
@@ -785,7 +827,7 @@ export class Learner {
     const current = items.map((r) => ({
       key: r.key,
       kind: r.kind,
-      value: clip(r.value!, 300),
+      value: clip(r.value!, 600),
       ...(isLearned(r) ? { learned: true } : {}),
     }));
     const tools: ToolDefinition[] = Object.entries(learnTools).map(

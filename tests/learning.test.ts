@@ -970,3 +970,82 @@ test("ordinary conversation turns are labelled, a correction becomes owner evide
     [recent],
   );
 });
+
+test("acknowledgements and new requests are not corrections, and plain corrections are", async () => {
+  const { isCorrection } = await import("../src/learning.js");
+  for (const text of [
+    "No worries, thanks!",
+    "No problem",
+    "No thanks, that's all",
+    "Nope, all good",
+    "No, that's great",
+    "Actually that's perfect",
+    "Actually, can you also book a hotel?",
+    "Not right now",
+    "I said thanks",
+    "Nice, thanks",
+    "Now book it",
+  ])
+    assert.ok(!isCorrection(text), text);
+  for (const text of [
+    "No, keep it to three bullets",
+    "That isn't what I asked",
+    "Hmm, that's not right",
+    "The date is wrong",
+    "It should be Tuesday, not Monday",
+    "You've got it wrong",
+    "Actually I meant the other flight",
+    "try again with prices",
+  ])
+    assert.ok(isCorrection(text), text);
+  // After Chief's own question, only a plain statement that the answer was wrong counts.
+  assert.ok(!isCorrection("No", true));
+  assert.ok(!isCorrection("Nope", true));
+  assert.ok(isCorrection("No, that's wrong", true));
+});
+
+test("a turn that only finished is trivial, and a delegated agent's reads tag the turn", async (t) => {
+  const db = await setup(t);
+  const at = (hoursAgo: number) =>
+    new Date(NIGHT.getTime() - hoursAgo * 3600_000);
+  const thanks = await turn(db, {
+    says: "thanks",
+    reply: "Anytime.",
+    at: at(40),
+    calls: [["finish_turn", "success"]],
+  });
+  const mail = await turn(db, {
+    says: "What did the landlord say about the lease renewal?",
+    reply: "They offered to renew at the same rent.",
+    at: at(30),
+    calls: [["agent_run", "success"]],
+  });
+  const child = randomUUID();
+  await db.query(
+    "INSERT INTO runtime_runs(id,user_id,state,stop_reason) VALUES($1,'owner','stopped','answer')",
+    [child],
+  );
+  await db.query(
+    "INSERT INTO events(run_id,user_id,type,data) VALUES($1,'owner','agent.started',$2::jsonb)",
+    [mail, JSON.stringify({ childRunId: child })],
+  );
+  await db.query(
+    "INSERT INTO runtime_calls(id,run_id,call_id,operation,arguments,is_write,state) VALUES($1,$2,'c','gmail_read','{}',false,'success')",
+    [randomUUID(), child],
+  );
+  const { adapter, inputs } = model(() => [["learn_finish", {}]]);
+  await learner(db, adapter).tick("owner");
+  const items = JSON.parse(inputs[0].messages[1].content).tasks;
+  assert.deepEqual(
+    items.map((x: any) => [x.id, x.untrusted]),
+    [[mail, ["agent_report", "email"]]],
+  );
+  assert.equal(
+    (
+      await db.query("SELECT label FROM learning_reviews WHERE task_id=$1", [
+        thanks,
+      ])
+    ).rows[0].label,
+    "skipped",
+  );
+});
