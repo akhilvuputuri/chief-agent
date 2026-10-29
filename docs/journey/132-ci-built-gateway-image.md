@@ -1,7 +1,7 @@
 # 132 — Can a release stop building on the production host?
 
 Work dates: 28–29 October 2026. Written: 29 October 2026.
-Status: released. Since `b431444` (29 October 2026), releases pull the CI-built gateway image by digest. The first pull release step took 51 s, against 370–400 s for host builds.
+Status: released. Since `b431444` (29 October 2026), releases pull the CI-built gateway image by digest. The first pull release step took 51 s, against 248–420 s (median 333 s) for the seven host builds after #352.
 
 ## User-visible problem and preceding iteration
 
@@ -83,15 +83,15 @@ Running TypeScript directly with Node's type stripping was rejected for now. It 
 ### Release closure — 29 October 2026
 
 - **What merged:** #353 (`aca8cec`) switched `release` to deploy by digest.
-- **Blocked first:** the first attempt was refused because #360 had changed `compose.yaml`. It went through after that change's operator rollout (`6e90db7`).
+- **Blocked first:** the first attempt, run 40895733642 attempt 1, reached the host and was refused with "Database or Compose change requires a reviewed migration/deployment procedure", because #360 had changed `compose.yaml`. Its rerun and the `6e90db7` release were then superseded. `b431444` passed the Compose guard because the `6e90db7` operator rollout had already synced `compose.yaml`.
 - **First pull release:** `b431444` (release run 40897824539):
   - The attestation check took 6 s.
   - `deploy b431444 sha256:de3dc421…` succeeded.
-  - The whole release step took **51 s**, against 370, 377 and 400 s for the last three host builds.
+  - The whole release step took **51 s**. The seven host builds after #352 took 248, 333, 420, 385, 322, 296 and 397 s (median 333 s); before #352 they took 370–400 s.
 - **Host, read-only over SSH:**
   - The gateway runs the pulled image, with revision label and `RELEASE_SHA` both `b431444`.
   - `:latest` and `:b431444…` are digest `de3dc421…`, and `:rollback` is kept.
-  - **No `chief-agent-gateway@sha256` records are left**, so the expected containerd prune behaviour is confirmed and the handler's `docker rmi` of the digest record works.
+  - **No `chief-agent-gateway@sha256` records are left.** That is consistent with the handler's `docker rmi` of the digest record working. Whether `docker image prune` alone would have left them was not tested.
   - agentwatch and the other services are untouched, and disk is at 46%.
 - **Not measured:** how long the publish job takes when only the source layer changes. The first publish took 94 s cold; a later one took 34 s.
 
