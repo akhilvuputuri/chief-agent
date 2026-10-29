@@ -1,6 +1,6 @@
-# Learning from conversation turns — proposed, 29 October 2026
+# Learning from conversation turns — live since `b6e1071`, 29 October 2026
 
-The learner's first night (03:32 SGT, 29 October) reviewed 7 tasks and skipped all of them: six routine occurrences and one cancelled task were the only finished work in 14 days, because most owner requests are ordinary turns without a tracked task. The owner chose to also learn from those turns: up to 30 a night, labelled success when answered and not corrected in the next message within six hours, and pitfall when the owner corrected it, with the correction kept as the owner's quotable words. Prompt `learner-v2`, no migration. Branch `feat/learn-from-turns`. See [learning](learning.md#conversation-turns) and [journal 130](journey/130-nightly-learner.md#first-night-and-conversation-turns--2026-10-29).
+The learner's first night (03:32 SGT, 29 October) reviewed 7 tasks and skipped all of them: six routine occurrences and one cancelled task were the only finished work in 14 days, because most owner requests are ordinary turns without a tracked task. The owner chose to also learn from those turns: up to 30 a night, labelled success when answered and not corrected in the next message within six hours, and pitfall when the owner corrected it, with the correction kept as the owner's quotable words. Prompt `learner-v2`, no migration; merged as `260c94c`, live since `b6e1071` (now `845595e`). Pending: the first run with turns, 03:30 Singapore on 30 October. See [learning](learning.md#conversation-turns) and [journal 130](journey/130-nightly-learner.md#first-night-and-conversation-turns--2026-10-29).
 
 # OpenTelemetry trace export — live in `7ba6831`, 28 October 2026 (UTC)
 
