@@ -50,12 +50,13 @@ export class PiSessions {
     for (const [offset, entry] of input.entries.entries()) {
       const index = input.after + offset;
       const body = JSON.stringify(entry);
-      if (Buffer.byteLength(body) > 512000)
+      // One entry is one message, which must fit in one model request (4 MB).
+      if (Buffer.byteLength(body) > 4_100_000)
         throw new Error("Session entry exceeds supported size");
       const hash = createHash("sha256").update(body).digest("hex");
       if (
         index >= count &&
-        used + newlyStored + Buffer.byteLength(body) > 64_000_000
+        used + newlyStored + Buffer.byteLength(body) > 512_000_000
       )
         throw new Error(
           "Private session storage allowance exhausted; inspect retained state",

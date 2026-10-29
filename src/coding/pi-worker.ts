@@ -338,7 +338,7 @@ export async function runPiWorker(
         reasoning: config.effort,
         requestIdField: "runtime_call_id",
         requestPurposeField: "runtime_purpose",
-        maxRequestBytes: 179000,
+        maxRequestBytes: 3_990_000,
         terminalHttpRecovery: { attemptId: assignment.attemptId },
       }),
       executor: (task) =>

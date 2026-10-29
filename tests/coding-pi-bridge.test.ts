@@ -251,7 +251,7 @@ test("Pi compatible model facade preserves role pins, journal replay and native 
     409,
   );
   assert.equal(f.modelCalls(), 1);
-  for (const value of [42, "x".repeat(120001)]) {
+  for (const value of [42, "x".repeat(1_000_001)]) {
     const rejected = await app.inject({
       method: "POST",
       url,

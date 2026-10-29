@@ -35,9 +35,9 @@ export const loopMemory = z
       .array(z.string().regex(/^[a-f0-9]{64}$/))
       .max(16)
       .default([]),
-    modelCalls: z.number().int().nonnegative().max(1000).default(0),
-    toolsUsed: z.number().int().nonnegative().max(2500).default(0),
-    compactions: z.number().int().nonnegative().max(1000).default(0),
+    modelCalls: z.number().int().nonnegative().max(2000).default(0),
+    toolsUsed: z.number().int().nonnegative().max(5000).default(0),
+    compactions: z.number().int().nonnegative().max(2000).default(0),
     nudges: z.number().int().nonnegative().max(1000).default(0),
     resets: z.number().int().nonnegative().max(400).default(0),
     loopLevel: z.number().int().min(0).max(2).default(0),

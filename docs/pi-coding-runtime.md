@@ -63,7 +63,7 @@ Local Docker verification is unavailable while the Mac is locked and Docker Desk
 
 Before opening a reviewer session, the bridge reconstructs the saved candidate in a fresh base checkout and requires its snapshot/base to match the checked artifact identity. A host-generated `candidate_inventory` lists every added, modified or deleted path, and `candidate_diff` contains the complete canonical diff. Both are immutable paged task evidence; long plans remain a separate required document. They are rebuilt for each repaired candidate and restored with the same identity for explicit review recovery. The reviewer reads all required pages and can inspect current source, without write or general-shell tools.
 
-Evidence accepts the existing 500,000-character patch bound rather than truncating to the separate 32,000-character model-report bound. Four-document and 4,000-code-unit page limits remain; model output, request-byte, time/tool/model allocations and price filters remain unchanged. This supplies a missing review input. It does not by itself establish faster review or successful paid acceptance.
+Evidence accepts the artifact's patch bound (10,000,000 characters since 29 October 2026; it was 500,000) rather than truncating to the separate 32,000-character model-report bound. Four-document and 4,000-code-unit page limits remain; model output, request-byte, time/tool/model allocations and price filters remain unchanged. This supplies a missing review input. It does not by itself establish faster review or successful paid acceptance.
 
 ## Candidate: terminal provider recovery
 

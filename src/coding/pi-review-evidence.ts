@@ -32,7 +32,7 @@ export async function piReviewEvidence(
     "git -c core.hooksPath=/dev/null diff --cached --no-ext-diff --no-textconv --no-renames --name-status -z",
     signal,
     120000,
-    128000,
+    1_000_000,
   );
   if (inventory.exitCode !== 0 || inventory.truncated)
     throw new Error("Complete review change inventory is unavailable");

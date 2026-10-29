@@ -144,11 +144,11 @@ export class CodingController {
   private delivering = false;
   private activeMs(job: CodingJob) {
     // Per-attempt operational ceiling. Pi attempts run in EC2 boxes, whose task deadline is
-    // two hours; 100 minutes leaves room for the worker's start inside it. (It was 40
-    // minutes under CodeBuild's 45-minute cap.) Legacy runtimes keep their allocation.
+    // four hours; three hours leaves ample room for the worker's start inside it. (It was
+    // 40 minutes under CodeBuild's 45-minute cap.) Legacy runtimes keep their allocation.
     return Math.min(
       job.settings.limits.ms,
-      job.settings.runtime === "pi" ? 6_000_000 : job.settings.limits.ms,
+      job.settings.runtime === "pi" ? 10_800_000 : job.settings.limits.ms,
     );
   }
   private automation?: CodingAutomation;
