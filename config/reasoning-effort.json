@@ -25,5 +25,13 @@
     "every": 3,
     "onFailure": true,
     "periodic": false
+  },
+  "redirect": {
+    "instructions": "Does `latest_user_message` push back on the assistant's last reply in `previous_turns`: say it was wrong or not what was wanted, doubt or question it, ask for it again or differently, or repeat a request or constraint the reply ignored?",
+    "criteria": {
+      "true": "The owner is unhappy with or correcting the last reply: a correction, a doubt (\"but it's cloudy?\"), a retry or a different approach, asking why it stopped or failed, or restating something it ignored.",
+      "false": "A new request, a follow-up that builds on the reply or extends it to a new case (\"and tomorrow?\"), thanks or acknowledgement, an answer to a question the assistant asked, or a message unrelated to the last reply."
+    },
+    "apply": 0.5
   }
 }

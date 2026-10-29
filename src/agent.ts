@@ -55,7 +55,7 @@ import type { JobTools } from "./tools.js";
 import { emptySelection, MemoryStore } from "./memory.js";
 import { runFamily } from "./run-family.js";
 import * as otel from "./otel.js";
-import { redirectOf } from "./turn-feedback.js";
+import { jevSawExchange, redirectOf, withJev } from "./turn-feedback.js";
 import { recordPickerCheck, type ShadowDecisions } from "./shadow.js";
 import {
   shouldEscalate,
@@ -663,28 +663,12 @@ export class Assistant {
             previousId: undefined,
             replyTarget: null,
             interruptedJob: null,
+            lastAnswerHere: null,
           }
         : await conversationState(this.db, user, inputId);
       if (!background) {
         otel.runConversation(run, `thread.${active.threadId ?? 0}`);
         otel.runContent(run, message);
-        // Implicit feedback (#323): does this message redirect the answer it follows?
-        const target = conversation.replyTarget;
-        const last = conversation.lastExchangeHere;
-        const previous = target?.runId ?? last?.runId;
-        if (previous && previous !== run)
-          otel.turnFeedback(
-            previous,
-            () =>
-              target
-                ? redirectOf(
-                    message,
-                    target.runId === last?.runId ? last?.request : null,
-                    target.text,
-                  )
-                : redirectOf(message, last?.request, last?.reply),
-            last?.runId,
-          );
       }
       await event(this.db, user, run, "conversation.routed", {
         lane: background ? "job" : "foreground",
@@ -746,6 +730,44 @@ export class Assistant {
               new Spending(this.db, user, run),
             )
           : undefined;
+      if (!background) {
+        // Implicit feedback (#323): does this message redirect the answer it follows? The
+        // text rules decide; Jev's answer from the effort decision is a second opinion, used
+        // only when the exchange scored is the one Jev was shown.
+        const target = conversation.replyTarget;
+        const last = conversation.lastExchangeHere;
+        const previous = target?.runId ?? last?.runId;
+        // The answer itself, not the saved-details pointer that can follow it.
+        const answer = conversation.lastAnswerHere ?? last?.reply;
+        const latest = jevSawExchange(
+          target,
+          last ? { ...last, reply: answer } : last,
+          previousTurns.at(-1),
+        );
+        const apply = this.effort?.config.redirect?.apply;
+        if (previous && previous !== run && otel.tracingEnabled())
+          void Promise.resolve(latest ? effortDecided : undefined)
+            .catch(() => undefined)
+            .then((decision) =>
+              otel.turnFeedback(
+                previous,
+                () =>
+                  withJev(
+                    target
+                      ? redirectOf(
+                          message,
+                          target.runId === last?.runId ? last?.request : null,
+                          target.text,
+                        )
+                      : redirectOf(message, last?.request, answer),
+                    decision?.redirect,
+                    apply,
+                  ),
+                last?.runId,
+                decision?.redirect,
+              ),
+            );
+      }
       // Foreground messages ask the picker; background job steps, a missing
       // picker or a picker failure use the deterministic cues.
       const pick = async (text: string, earlier = previousTurns) => {

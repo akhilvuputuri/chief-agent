@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isRephrase, redirectOf } from "../src/turn-feedback.js";
+import {
+  isRephrase,
+  jevSawExchange,
+  redirectOf,
+  withJev,
+} from "../src/turn-feedback.js";
 
 test("asking for another attempt or approach is a retry", () => {
   for (const text of [
@@ -165,5 +170,48 @@ test("only the owner's own words count", () => {
   assert.equal(
     redirectOf("try again\n\n[Attached image: a.jpg.]", "x", "y"),
     "retry",
+  );
+});
+
+test("Jev's opinion counts only where the rules found nothing", () => {
+  assert.equal(withJev(null, 0.9, 0.8), "pushback");
+  assert.equal(withJev(null, 0.79, 0.8), null);
+  assert.equal(withJev(null, undefined, 0.8), null);
+  assert.equal(withJev(null, 0.9, undefined), null);
+  assert.equal(withJev("retry", 0.1, 0.8), "retry");
+  assert.equal(withJev(undefined, 0.99, 0.8), undefined);
+});
+
+test("Jev's answer counts only for the exchange it was shown", () => {
+  const last = {
+    runId: "a",
+    request: "Show me the rain movement",
+    reply: "No rain.",
+  };
+  const shown = { user: "Show me the rain movement ", assistant: "No rain." };
+  assert.equal(jevSawExchange(null, last, shown), true);
+  assert.equal(jevSawExchange({ runId: "a" }, last, shown), true);
+  // A reply to an older message, another thread's last turn, no reply, nothing here.
+  assert.equal(jevSawExchange({ runId: "old" }, last, shown), false);
+  assert.equal(
+    jevSawExchange(null, last, { user: "topic B question", assistant: "x" }),
+    false,
+  );
+  assert.equal(jevSawExchange(null, last, { ...shown, assistant: "" }), false);
+  assert.equal(jevSawExchange(null, null, shown), false);
+  assert.equal(jevSawExchange(null, last, undefined), false);
+  // A reminder delivered after the exchange is what Jev saw as the reply.
+  assert.equal(
+    jevSawExchange(null, last, { ...shown, assistant: "Reminder: call mum" }),
+    false,
+  );
+  // A long answer stored as its saved-details pointer cannot be compared.
+  assert.equal(
+    jevSawExchange(
+      null,
+      { ...last, reply: "[Saved answer details: x]" },
+      shown,
+    ),
+    false,
   );
 });

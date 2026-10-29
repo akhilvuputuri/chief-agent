@@ -592,7 +592,7 @@ test("the owner's next message scores the turn it follows, once", async (t) => {
     turnFeedback(child.run, () => "retry"); // child runs are not turns
     turnFeedback(background.run, () => "retry");
     turnFeedback(randomUUID(), () => "retry"); // a turn this process never saw
-    turnFeedback(second.run, () => null);
+    turnFeedback(second.run, () => null, undefined, 0.25);
     turnFeedback(third.run, () => "not a label!"); // unexpected labels never leave
     // A reply to an older message: `passed` loses its chance to be scored.
     turnFeedback(randomUUID(), () => "retry", passed.run);
@@ -612,7 +612,9 @@ test("the owner's next message scores the turn it follows, once", async (t) => {
     const rootOf = (run: Execution) =>
       roots.find((s) => attr(s, "chief.run_id") === run.run)!;
     assert.equal(attr(rootOf(first), "gen_ai.conversation.id"), "thread.7");
-    const evaluations = sink.evaluations();
+    const evaluations = sink
+      .evaluations()
+      .filter((e) => attr(e, "gen_ai.evaluation.name") === "user_redirected");
     assert.equal(evaluations.length, 3);
     const [redirected, kept, unlabelled] = evaluations as [
       OtlpLogRecord,
@@ -626,6 +628,14 @@ test("the owner's next message scores the turn it follows, once", async (t) => {
     assert.equal(attr(redirected, "gen_ai.evaluation.score.label"), "retry");
     assert.equal(kept.spanId, rootOf(second).spanId);
     assert.equal(attr(kept, "gen_ai.evaluation.score.value"), false);
+    // Jev's probability is recorded beside the score, as a number.
+    const jev = sink
+      .evaluations()
+      .find(
+        (e) => attr(e, "gen_ai.evaluation.name") === "jev_redirect_probability",
+      )!;
+    assert.equal(jev.spanId, rootOf(second).spanId);
+    assert.equal(attr(jev, "gen_ai.evaluation.score.value"), 0.25);
     assert.equal(attr(kept, "gen_ai.evaluation.score.label"), undefined);
     assert.equal(unlabelled.spanId, rootOf(third).spanId);
     assert.equal(attr(unlabelled, "gen_ai.evaluation.score.value"), true);

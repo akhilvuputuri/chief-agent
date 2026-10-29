@@ -51,7 +51,8 @@ export interface ExportEvaluation {
   spanId: string;
   timeNs: bigint;
   name: string;
-  value: boolean;
+  /** A boolean result, or a number such as a probability. */
+  value: boolean | number;
   label?: string;
 }
 
@@ -441,6 +442,7 @@ const MAX_FINISHED = 200;
 /** A message this soon after a turn ended can redirect it; the learner uses the same window. */
 export const FEEDBACK_WINDOW_MS = 6 * 3600_000;
 export const REDIRECT_EVALUATION = "user_redirected";
+export const JEV_REDIRECT_EVALUATION = "jev_redirect_probability";
 const EVALUATION_EVENT = "gen_ai.evaluation.result";
 
 /** Starts exporting to `options.endpoint`. Returns the exporter for shutdown. */
@@ -680,6 +682,8 @@ export function turnFeedback(
   previousRun: string,
   judge: () => string | null | undefined,
   superseded?: string,
+  /** Jev's probability that the message pushes back, recorded beside the score. */
+  probability?: number,
 ) {
   if (!exporter) return;
   try {
@@ -700,6 +704,14 @@ export function turnFeedback(
       value: redirect !== null,
       ...(label ? { label } : {}),
     });
+    if (typeof probability === "number" && probability >= 0 && probability <= 1)
+      exporter.enqueueEvaluation({
+        traceId: turn.traceId,
+        spanId: turn.spanId,
+        timeNs: now,
+        name: JEV_REDIRECT_EVALUATION,
+        value: probability,
+      });
   } catch {
     /* Tracing is not the action ledger. */
   }

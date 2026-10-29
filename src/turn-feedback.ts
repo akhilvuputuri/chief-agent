@@ -121,3 +121,46 @@ export function redirectOf(
   if (request && isRephrase(text, request)) return "rephrase";
   return null;
 }
+
+/**
+ * The text rules' verdict, with Jev's probability that the message pushes back on the last
+ * reply as a second opinion: when the rules find nothing and Jev is at least `apply` sure,
+ * the message is a `pushback`. The rules' own labels, and "no owner words", stand as they are.
+ */
+export function withJev(
+  rules: Redirect | null | undefined,
+  probability: number | undefined,
+  apply: number | undefined,
+): Redirect | "pushback" | null | undefined {
+  if (rules !== null) return rules;
+  return probability !== undefined &&
+    apply !== undefined &&
+    probability >= apply
+    ? "pushback"
+    : null;
+}
+
+/**
+ * Whether Jev's answer is about the exchange being scored. Jev is shown the latest turns of
+ * the owner's whole history, which can be another thread's, or end in a proactive message
+ * (a reminder or a job result, stored as a reply to the last turn); so its answer counts only
+ * when the owner is answering the latest exchange here and the last turn Jev saw is that
+ * exchange: the same request and the same reply. The caller passes the answer itself
+ * (`lastAnswerHere`), since a structured answer is followed by a saved-details pointer.
+ */
+export function jevSawExchange(
+  replyTarget: { runId: string } | null | undefined,
+  lastHere:
+    | { runId: string; request?: string | null; reply?: string | null }
+    | null
+    | undefined,
+  shown: { user: string; assistant: string } | undefined,
+) {
+  if (!lastHere?.request || !lastHere.reply || !shown?.assistant) return false;
+  if (replyTarget && replyTarget.runId !== lastHere.runId) return false;
+  const head = (text: string) => text.trim().slice(0, 200);
+  return (
+    head(shown.user) === head(lastHere.request) &&
+    head(shown.assistant) === head(lastHere.reply)
+  );
+}

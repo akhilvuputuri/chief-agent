@@ -53,6 +53,10 @@ Example: how often each effort was applied, and how often a turn escalated.
 AWS_PROFILE=chief-logs kite run logs:cloudwatch -- event --event effort.decided --since 24h
 ```
 
+## Redirect question
+
+The first effort decision for a foreground message that follows a previous turn also asks Jev a yes/no question (`redirect` in `config/reasoning-effort.json`, type `noul`): does the message push back on the assistant's last reply? It shares the request, the state (the message and the last two turns) and the charge with the effort question; escalations do not ask it. A missing or invalid answer leaves the effort decision as it was. The probability is used only for implicit feedback on traces ([tracing](tracing.md#implicit-feedback)), never for the turn itself.
+
 ## What would change the policy
 
 - Replies at `low` that the owner corrects, or that need a second attempt.
