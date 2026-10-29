@@ -1,7 +1,7 @@
 # 132 — Can a release stop building on the production host?
 
 Work dates: 28–29 October 2026. Written: 29 October 2026.
-Status: the CI-built image and the handler change are in review. Deployment by digest needs the operator install, then a follow-up switch in `release`.
+Status: the CI-built image, the handler change (#350) and the transpiled build (#352) are merged. Deploying by digest needs the operator install of the handler, then this switch-over in `release`.
 
 ## User-visible problem and preceding iteration
 
@@ -54,7 +54,7 @@ Running TypeScript directly with Node's type stripping was rejected for now. It 
 - **`scripts/cloud-release.py`:**
   - It accepts `deploy <sha> sha256:<digest>`.
   - It pulls `chief-agent-gateway@<digest>` and refuses the image unless its revision label and `RELEASE_SHA` equal `<sha>`. It then tags only the candidate; `:latest` moves after the existing guards.
-  - It removes the digest-named image record once tagged. The containerd image store keeps that record separately, and `docker image prune` would never free it.
+  - It removes the digest-named image record once tagged. On the containerd image store that record is expected to stay separate, and `docker image prune` is not expected to free it (reading of moby's source, not yet checked on the host). Check after the first pull: `docker images --digests` should show no leftover `chief-agent-gateway@sha256:` record.
   - `deploy <sha>` still builds on the host, as the fallback.
   - The Compose and database refusal, the active-work and pending-input guards, rollback, health check, source copy and prune are unchanged.
 - **`deploy/lightsail/install-release-handler.sh`:** the reviewed operator step.
@@ -66,13 +66,20 @@ Running TypeScript directly with Node's type stripping was rejected for now. It 
 
 ## Verification and outcome
 
-Pending:
+**Measured:**
 
-- the first main publish;
-- a release where the advisory lookup and attestation check succeed;
+- **First main publish** (`e2ffacb`, checks run 40808840306): `publish gateway image` succeeded in 94 s, running alongside the tests.
+- **The package is public:** an anonymous GHCR token fetched its manifest (HTTP 200), so the host can pull it without credentials.
+- **First release with the advisory step** (`b6e1071`, release run 40809473729): it found the digest and verified the attestation in 6 s. The host still built the image, and the whole release step (upload, guards, build, gateway recreate and health check) took 390 s.
+- **Two earlier attempts** for `260c94c` and `e2ffacb` were refused by the existing guard because main had moved on. That is expected.
+- **Transpiled build (#352):** CI's image job built the gateway image with `build:image` and passed its smoke checks.
+
+**Pending:**
+
 - the operator install;
 - the switch-over;
-- a measured release.
+- a measured pull release;
+- the digest-record check above.
 
 ### Release closure — pending
 
