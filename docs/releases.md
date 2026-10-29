@@ -1,3 +1,9 @@
+## Coding reviewer moves to Claude Opus 5.5 (29 October 2026)
+
+- **Configuration.** `config/coding-pi.json` and `config/coding.json` change the default coding reviewer from `google/gemini-4-argon` to `anthropic/claude-opus-5.5` ($4/$20 per million tokens, inside the existing price ceilings). It applies to new jobs; a job keeps the models it was created with.
+- **Paused job.** At the owner's request, the paused job `a30098ba` had its pinned reviewer changed to Opus 5.5 by a guarded one-row production update (paused, unleased, previous reviewer Gemini), with Opus's 1,000,000-token context window added to its snapshot.
+- **Why.** The job finished implementation with every check passing, then paused three times at the same step of review: Google cut the Gemini reply off mid-generation (a 502, then empty replies, with no finish reason). See the [coding-agent lessons](journey/coding-agent-lessons.md).
+
 ## Coding limits raised (29 October 2026)
 
 - **Code.** [PR 357](https://github.com/akhilvuputuri/chief-agent/pull/357) merged as `8e53d52`. Exact-head independent review (Claude Opus 5.5) approved it after one blocking fix: Pi session entries had stayed capped at 512 KB.
