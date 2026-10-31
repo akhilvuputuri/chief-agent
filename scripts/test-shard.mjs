@@ -53,9 +53,14 @@ if (
     const weights = JSON.parse(readFileSync("tests/test-weights.json", "utf8"));
     files = assignShards(files, weights, count)[index - 1];
   }
-  const child = spawn("tsx", ["--test", "--test-concurrency=1", ...files], {
-    stdio: "inherit",
-  });
+  // Serial unless asked: coding boxes run this too, and only CI has measured parallel files
+  // for the SIGSEGV in journal 123 (journal 141).
+  const concurrency = process.env.TEST_CONCURRENCY ?? "1";
+  const child = spawn(
+    "tsx",
+    ["--test", `--test-concurrency=${concurrency}`, ...files],
+    { stdio: "inherit" },
+  );
   child.on("error", (error) => {
     console.error(error);
     process.exit(1);

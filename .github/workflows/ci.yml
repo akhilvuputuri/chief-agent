@@ -68,6 +68,8 @@ jobs:
       - run: kite run test:ts
         env:
           TEST_SHARD: ${{ matrix.shard }}/6
+          # Owner's decision, journal 141. A SIGSEGV here is the crash from journal 123.
+          TEST_CONCURRENCY: "4"
   other:
     name: scripts, evals and Python runtime
     needs: changes
