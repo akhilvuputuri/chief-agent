@@ -11,7 +11,7 @@ Two nights of learning from turns reviewed 55 turns, saved nothing and refused o
 Boxes start launching as soon as they are requested, and report how long each boot stage takes. CI test shards are balanced by recorded time; three runs on the final weights took 180–183 s, against 211–287 s across the last 13 runs on main.
 
 - **Next:** after the next coding job, read `kite run logs:cloudwatch -- boot --since 24h`. Those timings decide whether a baked machine image is worth building.
-- **Next limit on CI:** the test shards, now the Pi job is split ([journal 139](journey/139-ci-audit-pi-split.md)). Whether test files run in parallel again is the owner's decision.
+- **CI:** test files run four at a time, by the owner's decision. Record any SIGSEGV in a test job in [journal 141](journey/141-parallel-test-files.md) rather than only rerunning it.
 
 See [journal 137](journey/137-box-startup-time.md) and [journal 138](journey/138-faster-ci-checks.md).
 
