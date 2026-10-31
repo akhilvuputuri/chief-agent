@@ -1,7 +1,7 @@
 # 140 — Can a docs-only pull request skip the code jobs without weakening the gate?
 
 Work dates: 1 November 2026. Written: 1 November 2026.
-Status: on [PR 387](https://github.com/akhilvuputuri/chief-agent/pull/387). A forced docs-only run took 49 s. No real docs-only PR has run on it yet.
+Status: released in `d728e91` ([PR 387](https://github.com/akhilvuputuri/chief-agent/pull/387)). A forced docs-only run took 49 s. No real docs-only PR has run on it yet.
 
 ## User-visible problem and preceding iteration
 
@@ -32,9 +32,9 @@ Measured with this PR's classifier, 16 of the 60 merged PRs before PR 386 change
 
 **Measured, run 41225660019, with a temporary commit forcing `docs_only=true`:** 49 s. `what changed`, `format and types` and `test` passed, and all code jobs were skipped. That commit is not in the merged code, so this proves the skip path and the gate on GitHub, but not the decision on a real docs-only diff.
 
-### Release closure
+### Release closure — 1 November 2026
 
-Pending.
+Merged as `d728e91`. Independent review (Claude Opus 5.5) requested changes once, on trimmed paths and a journal figure, and approved the merged head `fbaee10`. `checks` on main ran every job and passed (run 41226490004), and the automatic release (run 41226732326) succeeded with a healthy gateway. Nothing changes in production.
 
 ## Follow-up and next iteration
 

@@ -1,3 +1,10 @@
+## Docs-only checks (1 November 2026)
+
+- **What merged.** [PR 387](https://github.com/akhilvuputuri/chief-agent/pull/387) (`d728e91`): a docs-only pull request skips the jobs that build and run code. `format and types` and the required `test` gate still run, and main still runs everything. CI configuration only.
+- **Review.** Independent review (Claude Opus 5.5) requested changes once and approved the merged head `fbaee10`.
+- **Release.** `checks` on main passed (run 41226490004). The automatic release (run 41226732326) succeeded, and the host reports `d728e91` with a healthy gateway.
+- **Not changed.** TypeScript 7 is deferred, and test files stay serial until the owner decides. See [journal 140](journey/140-docs-only-checks.md).
+
 ## Pi CI job split (1 November 2026)
 
 - **What merged.** [PR 386](https://github.com/akhilvuputuri/chief-agent/pull/386) (`9fdbca7`): the Pi job is now `Pi package` and `Pi worker boundary`, and a flaky token assertion is fixed. CI configuration and one test only.
