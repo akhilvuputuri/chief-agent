@@ -496,7 +496,7 @@ if (c.BOXES_RUNTIME === "on") {
   // cadence hit almost a full period late.
   boxes.onRequested = () =>
     void boxes
-      ?.tick()
+      ?.wake()
       .catch((error) =>
         opsLog("boxes.tick_failed", "error", errorFields(error)),
       );

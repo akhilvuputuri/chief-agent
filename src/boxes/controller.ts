@@ -3,6 +3,7 @@ import type { Database } from "../db.js";
 import { transaction } from "../db-transaction.js";
 import { opsLog } from "../ops-log.js";
 import { ToolValidationError } from "../tool-errors.js";
+import type { BootStageName } from "./boot-stages.js";
 import type { BoxProvider } from "./provider.js";
 import {
   bootstrapSecret,
@@ -550,7 +551,7 @@ export class BoxController {
             wasBooting,
           ],
         );
-        return { box, credential, epoch };
+        return { box, credential, epoch, rotated: true as const };
       }
       if (this.retired(box, presented))
         return { refused: true as const, retired: box };
@@ -564,7 +565,9 @@ export class BoxController {
       });
     if ("refused" in result) throw new BoxCredentialRefused();
     const fresh = (await this.load(boxId))!;
-    if (body.bootStages && result.epoch === 1) this.logBoot(before, body, now);
+    // Not on a retried hello, which returns the same credential and would log twice.
+    if (body.bootStages && "rotated" in result && result.epoch === 1)
+      this.logBoot(before, body.bootStages, now);
     return {
       protocol: 1,
       credential: result.credential,
@@ -573,21 +576,25 @@ export class BoxController {
     };
   }
 
-  /** One line per new box: seconds from launch to each boot stage and to the first hello. */
+  /** One line per new box: milliseconds from launch to each boot stage and the hello. */
   private logBoot(
     box: Box,
-    body: { bootStages?: { stage: string; atMs: number }[] },
+    stages: { stage: BootStageName; atMs: number }[],
     now: Date,
   ) {
     const launched = box.launch_started_at?.getTime();
     if (!launched) return;
+    const offsets = new Map(stages.map((s) => [s.stage, s.atMs - launched]));
     opsLog("box.boot", "info", {
-      profile: box.profile,
-      image: box.image.slice(-8),
+      boxProfile: box.profile,
+      imageSuffix: box.image.slice(-8),
       helloMs: now.getTime() - launched,
-      stagesMs: Object.fromEntries(
-        (body.bootStages ?? []).map((s) => [s.stage, s.atMs - launched]),
-      ),
+      scriptStartedMs: offsets.get("script_started"),
+      dockerInstalledMs: offsets.get("docker_installed"),
+      dockerStartedMs: offsets.get("docker_started"),
+      imagePulledMs: offsets.get("image_pulled"),
+      agentCopiedMs: offsets.get("agent_copied"),
+      agentStartingMs: offsets.get("agent_starting"),
     });
   }
 
@@ -797,57 +804,63 @@ export class BoxController {
 
   /** One reconciler pass: each live box is claimed with a lease and moved one step. */
   async tick() {
-    if (this.ticking) {
-      this.tickAgain = true;
-      return;
-    }
+    if (this.ticking) return;
     this.ticking = true;
     try {
-      const now = this.clock();
-      const seen: string[] = [];
-      for (let i = 0; i < 50; i++) {
-        const lease = randomUUID();
-        // Least recently reconciled first, so no box is starved when there are many.
-        const box = (
-          await this.db.query(
-            `UPDATE boxes SET lease=$1,lease_until=$2,reconciled_at=$3 WHERE id=(SELECT id FROM boxes
-               WHERE state NOT IN ('terminated','held') AND (lease IS NULL OR lease_until<$3) AND NOT (id = ANY($4::uuid[]))
-               ORDER BY reconciled_at NULLS FIRST,arrival LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *`,
-            // Longer than a worst-case pass: three provider calls at their time bound.
-            [
-              lease,
-              new Date(
-                now.getTime() + 4 * this.timings.providerCallMs + 60_000,
-              ),
-              now,
-              seen,
-            ],
-          )
-        ).rows[0] as Box | undefined;
-        if (!box) break;
-        seen.push(box.id);
-        try {
-          await this.reconcile(box, now);
-        } catch {
-          // Provider errors are retried on the next tick; nothing is assumed to have happened.
-        } finally {
-          await this.db.query(
-            "UPDATE boxes SET lease=NULL,lease_until=NULL WHERE id=$1 AND lease=$2",
-            [box.id, lease],
-          );
-        }
-      }
-      if (now.getTime() - this.lastSweep >= this.timings.sweepMs) {
-        this.lastSweep = now.getTime();
-        await this.sweep().catch(() => {});
-      }
+      do {
+        this.tickAgain = false;
+        await this.pass();
+      } while (this.tickAgain);
     } finally {
       this.ticking = false;
     }
-    // A box requested during this pass was probably missed; do not leave it for the timer.
-    if (this.tickAgain) {
-      this.tickAgain = false;
-      await this.tick();
+  }
+
+  /**
+   * Reconciles now, for a box that was just requested. If a pass is running it may already
+   * be past its last claim, so another pass follows it.
+   */
+  async wake() {
+    if (this.ticking) this.tickAgain = true;
+    else await this.tick();
+  }
+
+  private async pass() {
+    const now = this.clock();
+    const seen: string[] = [];
+    for (let i = 0; i < 50; i++) {
+      const lease = randomUUID();
+      // Least recently reconciled first, so no box is starved when there are many.
+      const box = (
+        await this.db.query(
+          `UPDATE boxes SET lease=$1,lease_until=$2,reconciled_at=$3 WHERE id=(SELECT id FROM boxes
+               WHERE state NOT IN ('terminated','held') AND (lease IS NULL OR lease_until<$3) AND NOT (id = ANY($4::uuid[]))
+               ORDER BY reconciled_at NULLS FIRST,arrival LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *`,
+          // Longer than a worst-case pass: three provider calls at their time bound.
+          [
+            lease,
+            new Date(now.getTime() + 4 * this.timings.providerCallMs + 60_000),
+            now,
+            seen,
+          ],
+        )
+      ).rows[0] as Box | undefined;
+      if (!box) break;
+      seen.push(box.id);
+      try {
+        await this.reconcile(box, now);
+      } catch {
+        // Provider errors are retried on the next tick; nothing is assumed to have happened.
+      } finally {
+        await this.db.query(
+          "UPDATE boxes SET lease=NULL,lease_until=NULL WHERE id=$1 AND lease=$2",
+          [box.id, lease],
+        );
+      }
+    }
+    if (now.getTime() - this.lastSweep >= this.timings.sweepMs) {
+      this.lastSweep = now.getTime();
+      await this.sweep().catch(() => {});
     }
   }
 

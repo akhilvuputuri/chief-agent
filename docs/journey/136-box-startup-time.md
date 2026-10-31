@@ -34,7 +34,7 @@ Every coding job waits for a fresh EC2 box before any work starts. [Journal 132]
   - The agent runs from a bare copy of `dist/boxes` with no `node_modules`, so the stage names live in a dependency-free module.
 - **Check durations:** the Pi runtime reports `kite ci: 0 in 1.4s`, so job progress shows how long each check took, including Kite's install. Progress text still accepts the older format from workers on older images.
 
-The agent and Pi runtime changes need a rebuilt worker image and a digest pin. The launch wake-up takes effect with the gateway release.
+A new agent's first hello is refused by a gateway older than this change, so the gateway releases first, and a gateway rollback would strand only boxes mid-boot. The agent and Pi runtime changes need a rebuilt worker image and a digest pin. The launch wake-up takes effect with the gateway release.
 
 ## Verification and outcome
 

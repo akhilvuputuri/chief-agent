@@ -13,6 +13,7 @@ import { FakeBoxProvider } from "../src/boxes/provider.js";
 import { boxApi } from "../src/boxes/api.js";
 import { server } from "../src/server.js";
 import type { BoxConfig } from "../src/boxes/schema.js";
+import { setOpsSink } from "../src/ops-log.js";
 import { ToolValidationError } from "../src/tool-errors.js";
 
 const image = `ghcr.io/example/box@sha256:${"a".repeat(64)}`;
@@ -1286,17 +1287,70 @@ test("a requested box wakes the reconciler instead of waiting for the timer", as
   assert.equal(wakes, 1);
 });
 
-test("a tick asked for during a tick runs right after it", async (t) => {
+test("a wake-up during a pass launches a box requested after the pass's last claim", async (t) => {
   const f = await fixture(t);
+  let late: string | undefined;
+  // The sweep runs after a pass has claimed everything, so a box requested here is missed.
+  const internals = f.boxes as unknown as { sweep: () => Promise<void> };
+  internals.sweep = async () => {
+    internals.sweep = async () => {};
+    late = (
+      await f.boxes.spawn("owner", {
+        requestKey: "late",
+        profile: "echo",
+        subject: "coding:late",
+      })
+    ).id;
+    await f.boxes.wake();
+  };
+  await f.boxes.tick();
+  assert.notEqual((await f.row(late!)).state, "requested");
+});
+
+test("a timer tick during a pass does not queue another pass", async (t) => {
+  const f = await fixture(t);
+  let passes = 0;
+  const internals = f.boxes as unknown as { pass: () => Promise<void> };
+  const pass = internals.pass.bind(f.boxes);
+  internals.pass = async () => {
+    passes++;
+    await f.boxes.tick();
+    await pass();
+  };
+  await f.boxes.tick();
+  assert.equal(passes, 1);
+});
+
+test("box.boot logs each stage's offset once, not again on a retried hello", async (t) => {
+  const f = await fixture(t);
+  const logs: Record<string, unknown>[] = [];
+  const previous = setOpsSink((line) => logs.push(JSON.parse(line)));
+  t.after(() => setOpsSink(previous));
   const box = await f.boxes.spawn("owner", {
-    requestKey: "during",
+    requestKey: "boot-log",
     profile: "echo",
-    subject: "coding:during",
+    subject: "coding:boot-log",
   });
-  // The second call lands while the first is running, as a wake-up during a timer pass would.
-  await Promise.all([f.boxes.tick(), f.boxes.tick()]);
-  assert.notEqual((await f.row(box.id)).state, "requested");
-  assert.equal((f.boxes as unknown as { tickAgain: boolean }).tickAgain, false);
+  await f.boxes.tick();
+  const launched = (await f.row(box.id)).launch_started_at!.getTime();
+  const hello = {
+    protocol: 1,
+    credential: f.secretOf(box.id),
+    bootStages: [
+      { stage: "script_started", atMs: launched + 20_000 },
+      { stage: "image_pulled", atMs: launched + 70_000 },
+    ],
+  };
+  await f.boxes.hello(box.id, hello);
+  await f.boxes.hello(box.id, hello);
+  const lines = logs.filter((l) => l.event === "box.boot");
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0]!.boxProfile, "echo");
+  assert.equal(lines[0]!.scriptStartedMs, 20_000);
+  assert.equal(lines[0]!.imagePulledMs, 70_000);
+  assert.equal(typeof lines[0]!.helloMs, "number");
+  assert.equal(typeof lines[0]!.imageSuffix, "string");
+  assert.equal(lines[0]!.dropped, undefined);
 });
 
 test("the first hello accepts boot stages, and bad ones are refused", async (t) => {
