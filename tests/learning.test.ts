@@ -1163,3 +1163,77 @@ test("a pre-empted run keeps its record even though it applies nothing", async (
   assert.ok(types.includes("learner.proposal"));
   assert.ok(!types.includes("learner.applied"));
 });
+
+test("an emoji at a clip boundary or a NUL from the model cannot fail a run or lose its record", async (t) => {
+  const db = await setup(t);
+  const id = await turn(db, {
+    says: "Plan my weekend around the farmers market please",
+    reply:
+      "x".repeat(LEARNING_LIMITS.replyChars - 2) + "😀 and more text after it",
+    at: new Date(NIGHT.getTime() - 40 * 3600_000),
+  });
+  const adapter: ModelAdapter = {
+    generate: async () => ({
+      message: {
+        role: "assistant",
+        content: "thinking\u0000 aloud \ud83d",
+        tool_calls: [
+          {
+            id: randomUUID(),
+            type: "function" as const,
+            function: { name: "learn_finish", arguments: "{}" },
+          },
+        ],
+      },
+    }),
+  };
+  const result: any = await learner(db, adapter).tick("owner");
+  assert.equal(result.state, "completed");
+  const rows = (
+    await db.query(
+      "SELECT type,data FROM events WHERE type IN ('learner.input','learner.model_call') ORDER BY id",
+    )
+  ).rows;
+  assert.deepEqual(
+    rows.map((r) => r.type),
+    ["learner.input", "learner.model_call"],
+  );
+  assert.equal(rows[0].data.items[0].id, id);
+  assert.equal(rows[1].data.content, "thinking aloud \ufffd");
+});
+
+test("a failed record never affects learning: the item is written and the run completes", async (t) => {
+  const db = await setup(t);
+  const id = await task(db, { ownerSays: ["I prefer window seats always"] });
+  const failing: Database = {
+    query: (text, values) =>
+      text.startsWith("INSERT INTO events") &&
+      /^learner\.(input|model_call|proposal|applied)$/.test(String(values?.[2]))
+        ? Promise.reject(new Error("insert refused"))
+        : db.query(text, values),
+    transaction: (db as any).transaction?.bind(db),
+  } as Database;
+  const { adapter } = model(() => [
+    [
+      "learn_fact",
+      {
+        key: "seat_preference",
+        value: "Prefers window seats",
+        quote: "I prefer window seats",
+        taskIds: [id],
+        reason: "Stated",
+      },
+    ],
+    ["learn_finish", {}],
+  ]);
+  const result: any = await learner(failing, adapter).tick("owner");
+  assert.deepEqual([result.state, result.facts], ["completed", 1]);
+  assert.equal(
+    (await new MemoryStore(db).active("owner"))[0]?.value,
+    "Prefers window seats",
+  );
+  assert.equal(
+    (await db.query("SELECT count(*)::int n FROM learning_reviews")).rows[0].n,
+    1,
+  );
+});

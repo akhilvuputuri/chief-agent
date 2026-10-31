@@ -260,8 +260,30 @@ interface Evidence {
 // Whitespace, quote marks and dashes normalized, case ignored (quote-match.ts).
 const norm = (text: string) => normalizeForQuote(text).text.toLowerCase();
 
-const clip = (text: string, max: number) =>
-  text.length > max ? text.slice(0, max - 1) + "…" : text;
+// Never cuts through a surrogate pair: half an emoji is invalid in jsonb.
+const clip = (text: string, max: number) => {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max - 1);
+  const last = cut.charCodeAt(cut.length - 1);
+  return (last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut) + "…";
+};
+
+// Text Postgres jsonb accepts: no NUL and no lone surrogates.
+function storable(value: unknown): unknown {
+  if (typeof value === "string")
+    return value
+      .replace(/\u0000/g, "")
+      .replace(
+        /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g,
+        "\ufffd",
+      );
+  if (Array.isArray(value)) return value.map(storable);
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value).map(([k, v]) => [k, storable(v)]),
+    );
+  return value;
+}
 
 const factKey = z.string().regex(/^[a-z_]{1,50}$/);
 const taskIds = z.array(z.string().uuid()).min(1).max(10);
@@ -824,15 +846,30 @@ export class Learner {
 
   /**
    * A private record of what the learner read, said and was told. Event types the ops-log
-   * projection does not list stay in Postgres and are never shipped off the host.
+   * projection does not list stay in Postgres and are never shipped off the host. Best
+   * effort: the memory tables are the ledger, so a failed record never affects learning.
    */
-  private trace(
+  private async trace(
     user: string,
     run: string,
     type: string,
     data: Record<string, unknown>,
   ) {
-    return event(this.db, user, run, type, scrubTrace(data));
+    try {
+      await event(
+        this.db,
+        user,
+        run,
+        type,
+        storable(scrubTrace(data)) as Record<string, unknown>,
+      );
+    } catch (error) {
+      opsLog("learner.trace_failed", "warn", {
+        runId: run,
+        kind: type,
+        ...errorFields(error),
+      });
+    }
   }
 
   private async propose(
