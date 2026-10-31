@@ -94,6 +94,7 @@ import { stopGateway } from "./gateway-stop.js";
 import { Learner } from "./learning.js";
 import { MemoryStore } from "./memory.js";
 import { captureRequested } from "./otel-content.js";
+import { AlertRelay, alertsBase } from "./trace-alerts.js";
 import {
   logsEndpoint,
   startTracing,
@@ -1414,6 +1415,14 @@ const gatheringTimer = gathering?.browsers
     }, 10000)
   : undefined;
 gatheringTimer?.unref();
+// Alerts from agentwatch's monitors (docs/tracing.md#monitors-and-alerts), only with export on.
+if (tracesUrl) {
+  const owners = c.TELEGRAM_ALLOWED_USER_IDS.split(",");
+  const relay = new AlertRelay(alertsBase(tracesUrl), async (text) => {
+    for (const user of owners) await bot.api.sendMessage(user, text);
+  });
+  setInterval(() => void relay.poll(), 60_000).unref();
+}
 const scheduleTimer = setInterval(() => {
   void worker
     .tick()

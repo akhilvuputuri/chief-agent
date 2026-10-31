@@ -90,6 +90,23 @@ Create, change or switch it off through agentwatch's Judges page or API, over th
 
 A judge's verdicts are evidence to read beside `user_redirected`, not ground truth: trace content is untrusted, and whether this judge agrees with the owner has not been measured.
 
+## Monitors and alerts
+
+agentwatch watches metrics over a trailing window and raises an alert when one crosses its limit, and again when it recovers ([agentwatch's design notes](https://github.com/akhilvuputuri/agentwatch/blob/main/docs/design.md#monitors-and-alerts)). A rate fires only when its 95% Wilson bound clears the limit, so a few failures at low volume do not alert.
+
+[src/trace-alerts.ts](../src/trace-alerts.ts) delivers them: with export on, the gateway asks agentwatch for undelivered alerts every minute, over the same private network as trace export, sends each to the owner on Telegram, then marks it delivered. So delivery is at least once, at most five alerts a minute. There is no inbound route or shared secret, and agentwatch never holds the Telegram token. Alerts carry only a monitor's name and numbers. If agentwatch is down, the gateway logs `trace.alerts_failed` at most once an hour; turns are unaffected.
+
+The monitors on the host are created through agentwatch's Alerts page or API, over the SSH tunnel. Their limits come from the backfilled history, 6 September to 29 October ([journal 136](journey/136-monitors-and-alerts.md)):
+
+| Monitor            | Metric, window                             | Fires      | History                          |
+| ------------------ | ------------------------------------------ | ---------- | -------------------------------- |
+| Daily cost         | `cost_usd`, 24 h                           | above $5   | busiest day $3.39, median $0.26  |
+| Model errors       | `model_error_rate`, 6 h, at least 10 calls | above 15%  | 2.3% overall                     |
+| Tool errors        | `tool_error_rate`, 24 h, at least 20 calls | above 30%  | 12.8% overall                    |
+| Slow model calls   | `model_p95_ms`, 6 h, at least 10 calls     | above 60 s | worst day 35 s                   |
+| Redirected answers | `user_redirected`, 7 days, at least 10     | above 30%  | 6% as detected, likely about 12% |
+| Judged answers     | `answer_ok`, 7 days, at least 10           | below 60%  | none yet                         |
+
 ## Backfilling history
 
 Live export to the host's agentwatch started on 29 October 2026 at 15:00:16 UTC (the gateway's `trace.export_enabled` line), and no run started between then and the first live trace. Runs from before then (Chief's Postgres keeps them from 6 September 2026) can be rebuilt into agentwatch from the database, in the same shape as live traces. Code: [scripts/trace-backfill.sql](../scripts/trace-backfill.sql) reads the rows, [src/trace-backfill.ts](../src/trace-backfill.ts) turns them into spans and evaluations and posts them. Tests: [tests/trace-backfill.test.ts](../tests/trace-backfill.test.ts), which drives a real `Execution` on PGlite with live export on, runs the query over the same database and checks that the rebuilt spans have the live spans' names, kinds, status, tree, trace IDs and attributes.
