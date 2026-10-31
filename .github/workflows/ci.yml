@@ -63,7 +63,24 @@ jobs:
       - run: kite run test:other
       - run: kite run check:coding
   pi:
-    name: Pi package and worker boundary
+    name: Pi package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-kite
+      - uses: ./.github/actions/setup-ripgrep
+      - run: kite ci
+      # Before any install in coding_runtime_pi: Dockerfile.coding-pi uses the root lockfile, so test Pi against it.
+      - run: kite run check:pi
+      - name: Verify Pi package independence
+        run: |
+          cp -R coding_runtime_pi /tmp/pi-runtime-independent
+          # Pi's own lockfile, with no parent node_modules to fall back on.
+          cd /tmp/pi-runtime-independent
+          kite ci --ignore-scripts
+          kite run check
+  pi-worker:
+    name: Pi worker boundary
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -71,9 +88,7 @@ jobs:
       - uses: ./.github/actions/setup-ripgrep
       - run: kite ci
       - run: kite run build
-      # Before Pi's own `kite ci`: the images install Pi's dependencies from the root lockfile.
-      - run: kite run check:pi
-      - name: Verify Pi package independence and actual Linux worker boundary
+      - name: Verify actual Linux worker boundary
         run: |
           kite --prefix coding_runtime_pi ci --ignore-scripts
           docker build -f Dockerfile.coding-pi -t chief-pi:test .
@@ -81,11 +96,6 @@ jobs:
           node scripts/pi-cli-container-smoke.mjs
           docker run --rm --user root --env CODING_TEST_SECRET=synthetic --entrypoint setpriv chief-pi:test --reuid=1000 --regid=1000 --clear-groups --no-new-privs --bounding-set=-all node --disable-sigusr1 /opt/chief-worker/coding_runtime_pi/dist/security-smoke.js
           CHIEF_BOX_DOCKER_IMAGE=chief-pi:test kite exec tsx --test tests/box-docker.test.ts
-          cp -R coding_runtime_pi /tmp/pi-runtime-independent
-          # Pi's own lockfile, with no parent node_modules to fall back on.
-          cd /tmp/pi-runtime-independent
-          kite ci --ignore-scripts
-          kite run check
   images:
     name: sandbox and app images
     runs-on: ubuntu-latest
@@ -115,7 +125,7 @@ jobs:
           docker run --rm --network=container:gathering-pg-proof --read-only --cap-drop=ALL --security-opt=no-new-privileges --memory=384m --pids-limit=96 --env GATHERING_TEST_DATABASE_URL=postgresql://synthetic:synthetic-only@127.0.0.1:5432/gathering_test --mount type=bind,source="$PWD/db",target=/app/db,readonly --mount type=bind,source="$PWD/scripts/gathering-postgres-smoke.mjs",target=/app/scripts/gathering-postgres-smoke.mjs,readonly --entrypoint node chief-gathering-app:test /app/scripts/gathering-postgres-smoke.mjs
           docker run --rm --network=container:gathering-pg-proof --read-only --cap-drop=ALL --security-opt=no-new-privileges --memory=384m --pids-limit=96 --env DB_DROP_TEST_DATABASE_URL=postgresql://synthetic:synthetic-only@127.0.0.1:5432/gathering_test --mount type=bind,source="$PWD/scripts/db-drop-postgres-smoke.mjs",target=/app/scripts/db-drop-postgres-smoke.mjs,readonly --entrypoint node chief-gathering-app:test /app/scripts/db-drop-postgres-smoke.mjs
   test:
-    needs: [static, tests, other, pi, images]
+    needs: [static, tests, other, pi, pi-worker, images]
     if: always()
     runs-on: ubuntu-latest
     steps:
