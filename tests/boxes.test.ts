@@ -13,6 +13,7 @@ import { FakeBoxProvider } from "../src/boxes/provider.js";
 import { boxApi } from "../src/boxes/api.js";
 import { server } from "../src/server.js";
 import type { BoxConfig } from "../src/boxes/schema.js";
+import { setOpsSink } from "../src/ops-log.js";
 import { ToolValidationError } from "../src/tool-errors.js";
 
 const image = `ghcr.io/example/box@sha256:${"a".repeat(64)}`;
@@ -1270,4 +1271,113 @@ test("a notice the transport definitely refused is retried later", async (t) => 
     sent.push(text);
   });
   assert.equal(sent.length, 1);
+});
+
+test("a requested box wakes the reconciler instead of waiting for the timer", async (t) => {
+  const f = await fixture(t);
+  let wakes = 0;
+  f.boxes.onRequested = () => {
+    wakes++;
+  };
+  await f.boxes.spawn("owner", {
+    requestKey: "wake",
+    profile: "echo",
+    subject: "coding:wake",
+  });
+  assert.equal(wakes, 1);
+});
+
+test("a wake-up during a pass launches a box requested after the pass's last claim", async (t) => {
+  const f = await fixture(t);
+  let late: string | undefined;
+  // The sweep runs after a pass has claimed everything, so a box requested here is missed.
+  const internals = f.boxes as unknown as { sweep: () => Promise<void> };
+  internals.sweep = async () => {
+    internals.sweep = async () => {};
+    late = (
+      await f.boxes.spawn("owner", {
+        requestKey: "late",
+        profile: "echo",
+        subject: "coding:late",
+      })
+    ).id;
+    await f.boxes.wake();
+  };
+  await f.boxes.tick();
+  assert.notEqual((await f.row(late!)).state, "requested");
+});
+
+test("a timer tick during a pass does not queue another pass", async (t) => {
+  const f = await fixture(t);
+  let passes = 0;
+  const internals = f.boxes as unknown as { pass: () => Promise<void> };
+  const pass = internals.pass.bind(f.boxes);
+  internals.pass = async () => {
+    passes++;
+    await f.boxes.tick();
+    await pass();
+  };
+  await f.boxes.tick();
+  assert.equal(passes, 1);
+});
+
+test("box.boot logs each stage's offset once, not again on a retried hello", async (t) => {
+  const f = await fixture(t);
+  const logs: Record<string, unknown>[] = [];
+  const previous = setOpsSink((line) => logs.push(JSON.parse(line)));
+  t.after(() => setOpsSink(previous));
+  const box = await f.boxes.spawn("owner", {
+    requestKey: "boot-log",
+    profile: "echo",
+    subject: "coding:boot-log",
+  });
+  await f.boxes.tick();
+  const launched = (await f.row(box.id)).launch_started_at!.getTime();
+  const hello = {
+    protocol: 1,
+    credential: f.secretOf(box.id),
+    bootStages: [
+      { stage: "script_started", atMs: launched + 20_000 },
+      { stage: "image_pulled", atMs: launched + 70_000 },
+    ],
+  };
+  await f.boxes.hello(box.id, hello);
+  await f.boxes.hello(box.id, hello);
+  const lines = logs.filter((l) => l.event === "box.boot");
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0]!.boxProfile, "echo");
+  assert.equal(lines[0]!.scriptStartedMs, 20_000);
+  assert.equal(lines[0]!.imagePulledMs, 70_000);
+  assert.equal(typeof lines[0]!.helloMs, "number");
+  assert.equal(typeof lines[0]!.imageSuffix, "string");
+  assert.equal(lines[0]!.dropped, undefined);
+});
+
+test("the first hello accepts boot stages, and bad ones are refused", async (t) => {
+  const f = await fixture(t);
+  const box = await f.boxes.spawn("owner", {
+    requestKey: "stages",
+    profile: "echo",
+    subject: "coding:stages",
+  });
+  await f.boxes.tick();
+  const credential = f.secretOf(box.id);
+  for (const bootStages of [
+    [{ stage: "unknown_stage", atMs: 1_800_000_000_000 }],
+    [{ stage: "image_pulled", atMs: -1 }],
+    [{ stage: "image_pulled", atMs: 1_800_000_000_000, text: "extra" }],
+    Array.from({ length: 7 }, () => ({
+      stage: "image_pulled",
+      atMs: 1_800_000_000_000,
+    })),
+  ])
+    await assert.rejects(
+      f.boxes.hello(box.id, { protocol: 1, credential, bootStages }),
+    );
+  const hello = await f.boxes.hello(box.id, {
+    protocol: 1,
+    credential,
+    bootStages: [{ stage: "image_pulled", atMs: 1_800_000_000_000 }],
+  });
+  assert.equal(hello.epoch, 1);
 });

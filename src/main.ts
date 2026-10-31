@@ -492,6 +492,14 @@ if (c.BOXES_RUNTIME === "on") {
     (user) => c.TELEGRAM_ALLOWED_USER_IDS.split(",").includes(user),
   );
   await boxes.recoverNotices();
+  // Otherwise a new box waits for the next timer tick, which jobs created on the same 15 s
+  // cadence hit almost a full period late.
+  boxes.onRequested = () =>
+    void boxes
+      ?.wake()
+      .catch((error) =>
+        opsLog("boxes.tick_failed", "error", errorFields(error)),
+      );
 }
 let coding: CodingController | undefined;
 const codingQuietHours = parseQuietHours(c.CODING_QUIET_HOURS);

@@ -97,6 +97,12 @@ export const QUERIES = {
     query: () =>
       `filter event = "decision.shadow" | stats count(*) as lines, avg(score) as avgScore, avg(latencyMs) as avgMs, sum(costUsd) as reportedUsd, avg(unusedCount) as avgUnused, sum(loadedLaterCount) as loadsLater, avg(recalled) as avgRecalled by kind, picker, state, choice, agentType, matched, agree, interrupted`,
   },
+  boot: {
+    group: "runtime",
+    help: "coding box boot stages: milliseconds from launch to each stage and the first hello",
+    query: () =>
+      `fields @timestamp, boxProfile, imageSuffix, scriptStartedMs, dockerInstalledMs, dockerStartedMs, imagePulledMs, agentCopiedMs, agentStartingMs, helloMs | filter event = "box.boot" | sort @timestamp desc`,
+  },
   schedules: {
     group: "runtime",
     help: "routine, reminder/briefing and background work passes",

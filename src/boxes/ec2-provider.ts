@@ -126,22 +126,29 @@ export function boxUserData(
         ]
       : []),
     "CHIEF_BOX_IDENTITY=ec2",
+    "CHIEF_BOX_BOOT_STAGES=/var/lib/chief-box/boot-stages",
   ].join("\n");
   return `#!/bin/bash
 set -euo pipefail
 umask 077
 install -d -m 0700 /etc/chief-box /var/lib/chief-box
+stage() { printf '%s %s\\n' "$1" "$(date +%s%3N)" >> /var/lib/chief-box/boot-stages || true; }
+stage script_started
 cat > /etc/chief-box/env <<'CHIEF_BOX_ENV'
 ${env}
 CHIEF_BOX_ENV
 dnf install -y docker
+stage docker_installed
 systemctl enable --now docker
+stage docker_started
 docker pull '${request.image}'
+stage image_pulled
 cid=$(docker create '${request.image}')
 install -d -m 0755 /opt/chief-box
 docker cp "$cid:/opt/chief-worker/dist/boxes" /opt/chief-box/boxes
 docker cp "$cid:/usr/local/bin/node" /opt/chief-box/node
 docker rm "$cid"
+stage agent_copied
 printf '{"type":"module"}\\n' > /opt/chief-box/package.json
 cat > /opt/chief-box/firewall.sh <<'CHIEF_BOX_FIREWALL'
 #!/bin/bash
@@ -174,6 +181,7 @@ OOMScoreAdjust=-900
 WantedBy=multi-user.target
 CHIEF_BOX_UNIT
 systemctl daemon-reload
+stage agent_starting
 systemctl enable --now chief-box-agent
 `;
 }
