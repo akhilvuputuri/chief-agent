@@ -1,7 +1,7 @@
 # 136 — Can Chief tell the owner when something goes wrong, without crying wolf at low volume?
 
 Work date: 2026-10-31 (Singapore). Written: 2026-10-31.
-Status: in progress. agentwatch's monitors are merged (agentwatch#17, `3bfb6c3`); this PR pins that image and adds Telegram delivery. The image reaches the host through an operator update.
+Status: released. agentwatch's monitors on the host since the operator update of `b2fece4`, Telegram delivery in the same commit, six monitors created (31 October). No monitor has fired on real conditions yet.
 
 ## User-visible problem and preceding iteration
 
@@ -54,8 +54,26 @@ Review of this PR's first head (`facadde`) found nothing blocking and these to f
 - **Wording.** Singular units, scores as percentages, and alerts older than ten minutes say when they were raised.
 - **The rollback claim.** The update script cannot restore an older image across a schema change, and [lightsail](../lightsail.md#traces-agentwatch) now says so.
 
+### Release closure — 2026-10-31
+
+[PR 374](https://github.com/akhilvuputuri/chief-agent/pull/374) merged at the approved head `d4d0cd1` as `b2fece4`; agentwatch#17 merged as `3bfb6c3`. The operator ran `deploy-agentwatch-update.py` from an exact archive, with hashes matching on both sides and the Compose change a single line. It reported the image `sha256:c49ddba3…` healthy after upgrading the database to schema 9, and the gateway stayed up during it. The automatic release of `b2fece4` then deployed the relay. The judge survived the upgrade.
+
+All six monitors were created and evaluated OK, with no alert firing:
+
+| Monitor            | First evaluation          |
+| ------------------ | ------------------------- |
+| Daily cost         | $0.72 over 24 h           |
+| Model errors       | 0% of 9                   |
+| Tool errors        | 9.1% of 11                |
+| Slow model calls   | too few samples (9 of 10) |
+| Redirected answers | 15.8% of 19 over 7 days   |
+| Judged answers     | no scores yet             |
+
+Real delivery was tested once with a labelled monitor (limit $0.01). It fired, Telegram accepted the message, and the alert was marked delivered within two minutes. Deleting the monitor sent a resolved alert within a minute. The test covered the path up to Telegram's acceptance; the owner seeing the message on a phone is the last check.
+
+**Still unverified:** `answer_ok` had not judged a real turn on its own by this point, because no conversation turn had happened since it was switched on. No monitor has fired on real conditions.
+
 ## Follow-up and next iteration
 
-- The operator update to the new image, then creating the six monitors.
 - Replay the limits over the history to see how often they would have fired.
 - Investigate the parcel tool failures.

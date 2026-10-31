@@ -1,3 +1,7 @@
+# Monitors and Telegram alerts — live in `b2fece4`, 31 October 2026
+
+Issue #323. agentwatch watches six metrics (daily cost, model errors, tool errors, slow model calls, redirected answers, judged answers) with limits set from two months of history. A rate fires only when its 95% Wilson bound clears the limit, and a firing monitor resolves only after an hour of staying good. The gateway delivers alerts to the owner on Telegram. Pending: the first real alert, replaying the limits over the history, and the parcel tool failures the history showed (`parcel_list` failed 48 of 50 calls). See [tracing](tracing.md#monitors-and-alerts) and [journal 136](journey/136-monitors-and-alerts.md).
+
 # A judge and Jev's redirect question — live, 31 October 2026
 
 Issue #323. Each conversation turn is now judged by `answer_ok` in agentwatch (`openai/gpt-6.1-sol`, at most 20 calls a day, about $0.002 each on a short turn). Each follow-up message is also checked by Jev for pushback on the last reply, for about $0.00003, in the effort decision's request. agentwatch's key can reach only OpenRouter, by a server policy its API cannot change. Pending: whether either agrees with the owner, and tuning Jev's 0.5 threshold from recorded probabilities. See [journal 135](journey/135-jev-redirect-and-judge.md).

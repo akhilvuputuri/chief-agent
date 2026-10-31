@@ -1,3 +1,12 @@
+## Installed `b2fece4` by operator update and release — monitors and Telegram alerts (#323)
+
+- **What merged.** [PR 374](https://github.com/akhilvuputuri/chief-agent/pull/374) merged as `b2fece4`: the gateway polls agentwatch for undelivered alerts every minute and sends them to the owner on Telegram; `compose.yaml` pins the image from agentwatch `3bfb6c3` (agentwatch#17), which adds monitors and upgrades its database to schema 9. No inbound route or shared secret.
+- **Review.** Independent review (Claude Opus 5.5) requested changes on agentwatch#17 (non-rate monitors could flap, 17 alerts in 20 minutes; now a cooldown, 1 alert). On PR 374 it found repeat messages and a queue one unreadable alert could block, both fixed. Both approved at their exact heads, and hosted CI passed.
+- **Release.** The operator ran `deploy-agentwatch-update.py` on 31 October; the gateway was untouched. The automatic release of `b2fece4` then deployed the relay at about 09:10 UTC. Six monitors were created, all OK. A labelled test alert was accepted by Telegram and marked delivered, as was its resolved message.
+- **Pending:** the first real alert; `answer_ok`'s first real turn; replaying the limits over the history; the parcel tool failures found in the history (`parcel_list` 48 of 50).
+
+[Journal 136](journey/136-monitors-and-alerts.md#release-closure--2026-10-31).
+
 ## Installed `de00871` by operator update, and released `a8fd80c` — a judge and Jev's redirect question (#323)
 
 - **What merged.**
