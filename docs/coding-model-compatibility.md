@@ -1,6 +1,6 @@
 # Coding model selection and compatibility
 
-Chief supports separate planner (internally `leader`), coder and reviewer choices. An explicit owner request changes one role through `coding_model_set`; `coding_models` reads current preferences and the eligible live OpenRouter catalog. Roles are owner-scoped and changes apply to new jobs only. Existing jobs retain their model/image/settings snapshot, including approved scope and explicit recovery. The main Chief model is separate.
+Chief supports separate planner (internally `leader`), coder and reviewer choices. An explicit owner request changes one role through `coding_model_set`; `coding_models` reads current preferences and the eligible live OpenRouter catalog. Roles are owner-scoped and changes apply to new jobs only. Existing jobs keep their snapshot unless the owner changes a stopped job through `coding_job_update`, which leaves the approval of its requirements in place. The main Chief model is separate.
 
 Examples of owner requests:
 

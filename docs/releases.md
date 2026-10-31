@@ -1,3 +1,9 @@
+## An approval covers the spec, not who carries it out (31 October 2026)
+
+- **Code.** Requirement approval now hashes only the job, objective, context and plan. Earlier approvals stay valid. The new `coding_job_update` changes the models or limits of a stopped job on the owner's request. No worker image, database or Compose change.
+- **Why.** Editing a paused job's reviewer invalidated its approval. See [journal 136](journey/136-approval-covers-the-spec.md).
+- **Deployment.** Not yet recorded as live; update this entry on release.
+
 ## Installed `de00871` by operator update, and released `a8fd80c` — a judge and Jev's redirect question (#323)
 
 - **What merged.**
@@ -30,7 +36,7 @@
 ## Coding reviewer moves to Claude Opus 5.5 (29 October 2026)
 
 - **Configuration.** `config/coding-pi.json` and `config/coding.json` change the default coding reviewer from `google/gemini-4-argon` to `anthropic/claude-opus-5.5` ($4/$20 per million tokens, inside the existing price ceilings). It applies to new jobs; a job keeps the models it was created with.
-- **Paused job.** At the owner's request, the paused job `a30098ba` had its pinned reviewer changed to Opus 5.5 by a guarded one-row production update (paused, unleased, previous reviewer Gemini), with Opus's 1,000,000-token context window added to its snapshot.
+- **Paused job.** At the owner's request, the paused job `a30098ba` had its pinned reviewer changed to Opus 5.5 by a guarded one-row production update (paused, unleased, previous reviewer Gemini), with Opus's 1,000,000-token context window added to its snapshot. **This broke the job:** its approval hashed the settings, so a resume on 31 October was refused with "Requirements must be confirmed before implementation". See [journal 136](journey/136-approval-covers-the-spec.md).
 - **Why.** The job finished implementation with every check passing, then paused three times at the same step of review: Google cut the Gemini reply off mid-generation (a 502, then empty replies, with no finish reason). See the [coding-agent lessons](journey/coding-agent-lessons.md).
 
 ## Installed `6e90db7` by operator rollout — agentwatch on the host, traces with content (#323)

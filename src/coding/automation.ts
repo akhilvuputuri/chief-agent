@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Database } from "../db.js";
 import type { CodingJob } from "./controller.js";
 import { artifactHash } from "./github.js";
-import { requirementScope } from "./requirements.js";
+import { requirementScope, requirementScopes } from "./requirements.js";
 import {
   MergeRefused,
   approvedArtifact,
@@ -138,8 +138,8 @@ export class CodingAutomation {
     // Carry over only an approval the owner actually gave for this exact scope.
     const approved = (
       await this.db.query(
-        "SELECT 1 FROM coding_events WHERE job_id=$1 AND payload->>'decision'='approved' AND payload->>'approvedScope'=$2 LIMIT 1",
-        [j.id, requirementScope(j)],
+        "SELECT 1 FROM coding_events WHERE job_id=$1 AND payload->>'decision'='approved' AND payload->>'approvedScope'=ANY($2::text[]) LIMIT 1",
+        [j.id, requirementScopes(j)],
       )
     ).rows.length;
     if (!approved) {
@@ -161,7 +161,7 @@ export class CodingAutomation {
         ? { reviewRound: cp.piState.reviewRound }
         : {}),
     };
-    const scope = requirementScope({ ...j, base_sha: main, checkpoint: cp });
+    const scope = requirementScope({ ...j, checkpoint: cp });
     const message = `Rebase onto current main ${main}: approved plan carried over (owner policy, 17 October 2026)`;
     const changed = await this.db.query(
       `WITH changed AS (UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',base_sha=$5,summary='Main moved; re-applying the approved change on current main before checks, review and the Merge card',checkpoint=$3::jsonb,result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,cleanup='none',model_busy=false,publication_started=false,updated_at=now() WHERE id=$1 AND lease=$2 AND stage=$9 AND lease_until>now() AND state='pr_ready' AND revision=$4 RETURNING id,revision),
@@ -238,7 +238,7 @@ export class CodingAutomation {
         `merge-approval:${j.revision}:${d.head}:${randomUUID()}`,
         JSON.stringify({
           summary: `**Ready to merge**\nCoder's own summary (not verified by Chief): ${summary}${warning}`,
-          question: `${cards.length ? "The PR state changed or the earlier card lapsed, so please confirm again. " : ""}Exact-head CI and Devin passed, ${d.handled.length} review comment(s) were handled, and the independent ${j.settings.reviewerModel} review approved the final candidate. Merge this PR? Chief will merge only head ${d.head.slice(0, 12)} and then watch the release.`,
+          question: `${cards.length ? "The PR state changed or the earlier card lapsed, so please confirm again. " : ""}Exact-head CI and Devin passed, ${d.handled.length} review comment(s) were handled, and the independent ${j.settings.reviewerModel} review approved the final candidate (coder: ${j.settings.model}). Merge this PR? Chief will merge only head ${d.head.slice(0, 12)} and then watch the release.`,
           url: (j as any).pr_url,
           merge: { revision: j.revision, head: d.head, tree: d.tree },
         }),

@@ -321,3 +321,5 @@ Evidence boundary:
 - **Measured:** three failed reviewer calls on one job, and the OpenRouter metadata of one of them.
 - **Hypothesis:** content in this review step that Google's endpoint cannot complete.
 - **Not yet measured:** an Opus 5.5 review on a Pi job.
+
+**An approval is about the spec (31 October).** Switching a paused job's reviewer by editing its settings invalidated the owner's approval, because the approval hashed the whole settings block. The owner's point: a plan is a spec, and any agent can implement it. The approval now covers only the objective, context and plan, and a stopped job's models and limits can change on request ([journal 136](136-approval-covers-the-spec.md)). Lesson: before editing stored state directly, find everything derived from it. And bind an approval to what the person actually read, not to everything nearby.
