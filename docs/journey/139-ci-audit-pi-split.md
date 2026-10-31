@@ -17,7 +17,7 @@ Status: Pi job split on [PR 386](https://github.com/akhilvuputuri/chief-agent/pu
 | `actions/checkout`       | median 2 s           | median 1 s           |
 | `setup-kite`             | median 2 s, p90 5 s  | median 3 s, p90 6 s  |
 
-**Measured, two runs after journal 138's final weights:** `kite run test:ts` used 59.9% of all runner seconds. The Pi job took 152–172 s, of which one Docker and independence step took a median of 98 s.
+**Measured, two runs after journal 138's final weights (41215085273, 41214790029):** `kite run test:ts` used 59.9% of all runner seconds. The Pi job took 133 and 172 s, of which one Docker and independence step took 83 and 112 s.
 
 **Measured locally, on a 10-core Mac:**
 
@@ -43,9 +43,11 @@ Status: Pi job split on [PR 386](https://github.com/akhilvuputuri/chief-agent/pu
 
 ## Verification and outcome
 
-**Measured, split job, first run (41224227641):** wall time 164 s, against 193–195 s on the same day's earlier PR runs. `Pi worker boundary` took 119 s and `Pi package` 91 s, against 152–184 s for the old job. Both ran the expected tests: one in `box-docker`, and 109 in each Pi test run.
+**Measured, split job, two runs (41224227641, 41224599934):** wall time 164 and 168 s. `Pi worker boundary` took 119 and 122 s, and `Pi package` 91 and 95 s. Both ran the expected tests: one in `box-docker`, and 109 in each Pi test run.
 
-**Flaky test found by that run, cause proven.** `tests 3/6` failed on an assertion that the sealed token box does not contain `r1`. The test box is 59 bytes of ciphertext, so two chosen bytes appear by chance about 1 run in 1,100 (58 positions in 65,536). It now looks for `"r1"` and `"a1"` with their quotes, as they appear in the sealed JSON, which still catches an unsealed box.
+**Measured, serial runs before the split, all at journal 138's final weights:** PR runs took 172 s (41222337689), 209 s (41222503360), 212 s (41214790029) and 326 s (41222961479); the old Pi job took 150, 201, 172 and 209 s. Journal 138's three final-weights runs took 180–183 s. So the split saves about 12–19 s against journal 138's figures, and the slowest test shard (157–169 s) now sets wall time. The 326 s run's excess is not explained by its jobs, and its cause is not established.
+
+**Flaky test found by the first run, cause by elimination.** `tests 3/6` failed on an assertion that the sealed token box does not contain `r1`. The sealed test box is 59 bytes, so two chosen bytes appear by chance about 1 run in 1,100 (57–58 positions in 65,536). The failing box was not captured, but the log shows that assertion and the box is random on each run. It now looks for `"r1"` and `"a1"` with their quotes, as they appear in the sealed JSON, which still catches an unsealed box.
 
 **Measured, parallel test files, on Node 22.23.4 and six shards:**
 
@@ -54,13 +56,13 @@ Status: Pi job split on [PR 386](https://github.com/akhilvuputuri/chief-agent/pu
 | 41221113728, 2 runs | 12         | 12     | 0       | 54–88 s                 |
 | 41222890620, 3 runs | 90         | 90     | 0       | 49–93 s, median 82–86 s |
 
-Serial `test:ts` took a median of 126 s. Journal 123's crash was on Node 22.19.0 with three shards: one crash in two runs, or one in six shard jobs.
+Serial `test:ts` took a median of 126 s. Journal 123's crash was on Node 22.19.0 with three shards: one crash in two whole-suite runs, against none in 17 whole-suite runs here. Those shard jobs held twice as many files, so per-job rates are not comparable. These runs covered GitHub runners only, not coding boxes.
 
 - 0 in 102 shard jobs bounds the rate at about 3% per shard job, or about 16% per six-shard run, at 95% confidence.
 - The cause of the original crash is still not established, so journal 123's condition is only partly met. The decision is the owner's.
 
 ## Follow-up and next iteration
 
-- **Owner's decision:** four test files at a time. Hypothesis: test jobs of 69–108 s and a wall time near 130 s.
+- **Owner's decision:** four test files at a time. Hypothesis: a wall time near 130 s, set by `Pi worker boundary`. Test jobs took 69–108 s on the first two runs and up to 116 s in the stress runs.
 - **Next:** TypeScript 7 for type checks, and skipping the heavy jobs on docs-only PRs (15 of the last 60 merged PRs).
 - **Local setup:** `tests/fetch-hygiene.test.ts` timed out on Node 22.14 and passes on 22.23.4, the version in `.nvmrc`.
