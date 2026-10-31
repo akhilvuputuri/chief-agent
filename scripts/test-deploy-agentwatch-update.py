@@ -40,9 +40,13 @@ LIVE_COMPOSE = ('services:\n  gateway:\n    environment:\n'
                 '    restart: unless-stopped\n'
                 'networks:\n  browser-control: { internal: true }\n'
                 'volumes:\n  postgres-data:\n  agentwatch-data:\n')
+JUDGE_POLICY = ('        "--judge-endpoint",\n        "https://openrouter.ai/api/v1",\n'
+                '        "--judge-key-env",\n        "OPENROUTER_API_KEY",\n'
+                '        "--judge-max-daily",\n        "50",\n')
 STAGED_COMPOSE = LIVE_COMPOSE.replace(
     '    image: ' + OLD_IMAGE + '\n',
-    '    image: ' + NEW_IMAGE + '\n    environment:\n      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}\n')
+    '    image: ' + NEW_IMAGE + '\n    environment:\n      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}\n'
+).replace('        "90",\n', '        "90",\n' + JUDGE_POLICY)
 UP = ('compose', 'up', '-d', '--no-deps', 'agentwatch')
 IMAGE_ID = ('docker', 'inspect', '--format', '{{.Image}}', update.AGENTWATCH_CONTAINER)
 HEALTH = ('docker', 'inspect', '--format', '{{.State.Health.Status}}', update.AGENTWATCH_CONTAINER)
@@ -281,6 +285,57 @@ class AgentwatchUpdateTests(unittest.TestCase):
 
     def test_validation_accepts_env_only_and_limit_changes(self):
         self.scenario(staged_compose=LIVE_COMPOSE.replace('    mem_limit: 512m', '    mem_limit: 1g'))
+
+    def test_command_must_keep_the_host_guard_and_the_judge_policy(self):
+        def refused(compose, reason):
+            before, block, _ = update.split_compose(compose.encode(), 'Staged')
+            with self.assertRaisesRegex(RuntimeError, reason):
+                update.validate_block(block)
+        refused(STAGED_COMPOSE.replace('"90",\n', '"90",\n        "--allow-host",\n        "*",\n'),
+                'must not allow any host')
+        refused(LIVE_COMPOSE.replace('"90",\n', '"90",\n        "--allow-host",\n        "*",\n'),
+                'must not allow any host')
+        refused(STAGED_COMPOSE.replace(JUDGE_POLICY, ''), 'pin --judge-endpoint')
+        refused(STAGED_COMPOSE.replace('https://openrouter.ai/api/v1', 'https://evil.example/v1'),
+                'pin --judge-endpoint')
+        refused(STAGED_COMPOSE.replace('"90",\n', '"90",\n        "--judge-endpoint",\n        "https://evil.example/v1",\n'),
+                'repeats an argument')
+        refused(STAGED_COMPOSE.replace('        "--judge-key-env",\n        "OPENROUTER_API_KEY",\n', ''),
+                'pin --judge-key-env')
+        refused(STAGED_COMPOSE.replace('"50"', '"51"'), 'cap --judge-max-daily')
+        refused(STAGED_COMPOSE.replace('        "--judge-max-daily",\n        "50",\n', ''),
+                'cap --judge-max-daily')
+        # The server's parser also takes --flag=value and abbreviations; none get through.
+        for extra, reason in (
+            ('--allow-host=*', 'flag and value pairs'),
+            ('--allow=*', 'flag and value pairs'),
+        ):
+            refused(STAGED_COMPOSE.replace('"90",\n', '"90",\n        "' + extra + '",\n'), reason)
+        for flag, value in (
+            ('--judge-endpoint=https://evil.example/v1', 'x'),
+            ('--judge-end', 'https://evil.example/v1'),
+            ('--judge-e=https://evil.example/v1', 'x'),
+            ('--judge-key-env=OTHER_API_KEY', 'x'),
+            ('--judge-k', 'OTHER_API_KEY'),
+            ('--judge-max-daily=10000', 'x'),
+            ('--judge-max', '10000'),
+            ('--db', '/tmp/x'),
+            ('--retain-days', '--demo'),
+        ):
+            refused(STAGED_COMPOSE.replace('"90",\n', '"90",\n        "' + flag + '",\n        "' + value + '",\n'),
+                    'outside the reviewed allow-list')
+        refused(STAGED_COMPOSE.replace('"serve"', '"demo"'), 'flag and value pairs')
+        refused(STAGED_COMPOSE.replace('"50"', '"50",\n        "--judge-max-daily",\n        "9"'), 'repeats an argument')
+        refused(STAGED_COMPOSE.replace('"90",\n', '"90",\n        "--allow-host",\n        "*.example",\n'),
+                'must not allow any host')
+        # Without the key, no judge can call anything, so no policy is needed.
+        _, block, _ = update.split_compose(LIVE_COMPOSE.encode(), 'Staged')
+        self.assertEqual(update.validate_block(block), OLD_IMAGE)
+        # The one-line form is read too.
+        one_line = STAGED_COMPOSE.replace(
+            '    command:\n      [\n        "serve",\n        "--retain-days",\n        "90",\n' + JUDGE_POLICY + '      ]\n',
+            '    command: ["serve", "--allow-host", "*"]\n')
+        refused(one_line, 'must not allow any host')
 
     def test_pull_and_preflight_failures_change_nothing(self):
         for args, message in [({'pull_failure': True}, 'agentwatch image pull failed; nothing changed'),

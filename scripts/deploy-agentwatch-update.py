@@ -60,6 +60,14 @@ OPTIONAL_VALUES = {
 COMMAND_ITEM = re.compile(rb'      [ \t]*(?:\[|\]|"[^"$\\]*",?)')
 ENVIRONMENT_ITEM = re.compile(rb'      ([A-Z][A-Z0-9_]*): \$\{([A-Z][A-Z0-9_]*)(?::-)?\}')
 ALLOWED_ENVIRONMENT = {b'OPENROUTER_API_KEY'}
+COMMAND_VALUE = re.compile(rb'"([^"$\\]*)"')
+# With the key in its environment, agentwatch must start with the judge policy that keeps the
+# key on OpenRouter and caps its spending; its API has no login and cannot change these.
+JUDGE_ENDPOINT = b'https://openrouter.ai/api/v1'
+JUDGE_KEY_ENV = b'OPENROUTER_API_KEY'
+MAX_JUDGE_DAILY = 50
+COMMAND_FLAGS = {b'--host', b'--allow-host', b'--retain-days', b'--memory-limit',
+                 b'--judge-endpoint', b'--judge-key-env', b'--judge-max-daily'}
 MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
 
 
@@ -159,9 +167,39 @@ def split_compose(content, which):
     return content[:start], content[start:end], content[end:]
 
 
+def validate_command(command, environment):
+    """Allows only `serve` and exact flag/value pairs, since the server's parser also takes
+    `--flag=value` and abbreviations; refuses anything that would undo the Host guard or,
+    with a key, the judge policy."""
+    if not command:
+        arguments = []
+    elif command[0] != b'serve' or len(command) % 2 != 1:
+        raise RuntimeError('agentwatch command must be serve with flag and value pairs')
+    else:
+        arguments = list(zip(command[1::2], command[2::2]))
+    values = {}
+    for flag, value in arguments:
+        if flag not in COMMAND_FLAGS or not value or value.startswith(b'-'):
+            raise RuntimeError('agentwatch command uses an argument outside the reviewed allow-list')
+        if b'*' in value:
+            raise RuntimeError('agentwatch command must not allow any host')
+        values.setdefault(flag, []).append(value)
+    if any(len(found) > 1 for flag, found in values.items() if flag != b'--allow-host'):
+        raise RuntimeError('agentwatch command repeats an argument')
+    if b'OPENROUTER_API_KEY' not in environment:
+        return
+    if values.get(b'--judge-endpoint') != [JUDGE_ENDPOINT]:
+        raise RuntimeError('agentwatch with a key must pin --judge-endpoint to OpenRouter')
+    if values.get(b'--judge-key-env') != [JUDGE_KEY_ENV]:
+        raise RuntimeError('agentwatch with a key must pin --judge-key-env')
+    daily = values.get(b'--judge-max-daily', [b''])[0]
+    if not daily.isdigit() or not 1 <= int(daily) <= MAX_JUDGE_DAILY:
+        raise RuntimeError('agentwatch with a key must cap --judge-max-daily at ' + str(MAX_JUDGE_DAILY))
+
+
 def validate_block(block):
     """Returns the pinned image reference when the block uses only the reviewed settings."""
-    keys, environment, image, current = [], [], None, None
+    keys, environment, command, image, current = [], [], [], None, None
     for line in block.split(b'\n')[1:]:
         if COMMENT_LINE.fullmatch(line):
             continue
@@ -169,6 +207,8 @@ def validate_block(block):
         if key_line:
             current, value = key_line.groups()
             keys.append(current)
+            if current == b'command':
+                command.extend(COMMAND_VALUE.findall(value))
             if current == b'image':
                 if not IMAGE_VALUE.fullmatch(value):
                     raise RuntimeError('agentwatch image must be pinned by digest from ' + AGENTWATCH_REPOSITORY)
@@ -182,6 +222,7 @@ def validate_block(block):
                 raise RuntimeError('agentwatch block must keep ' + current.decode() + ' as reviewed')
             continue
         if current == b'command' and COMMAND_ITEM.fullmatch(line):
+            command.extend(COMMAND_VALUE.findall(line))
             continue
         item = ENVIRONMENT_ITEM.fullmatch(line) if current == b'environment' else None
         if item:
@@ -198,6 +239,7 @@ def validate_block(block):
             raise RuntimeError('agentwatch block must keep ' + key.decode() + ' as reviewed')
     if len(keys) != len(set(keys)) or len(environment) != len(set(environment)):
         raise RuntimeError('agentwatch block repeats a setting')
+    validate_command(command, environment)
     return image.decode()
 
 
