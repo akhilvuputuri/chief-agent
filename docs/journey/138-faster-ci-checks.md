@@ -34,7 +34,7 @@ Status: released in `9973a81`. Three runs on the final weights took 180–183 s,
 
 ## Verification and outcome
 
-**Measured,** against the last 13 completed runs on main. The first two columns ran on earlier weights; the rest ran on the final weights (41189881282, 41213257878, then 41213831727, main's 41214164533, and PR 381's run).
+**Measured,** against the last 13 completed runs on main. "First" (41189881282) and "Second" (41213257878) ran on earlier weights. "Final" (41213831727), main at `9973a81` (41214164533) and PR 381's run used the final weights.
 
 | Measure                                   | Main, 13 runs | First | Second | Final | Main at `9973a81` | PR 381       |
 | ----------------------------------------- | ------------- | ----- | ------ | ----- | ----------------- | ------------ |
