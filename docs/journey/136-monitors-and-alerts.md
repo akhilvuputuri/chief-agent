@@ -27,7 +27,7 @@ Status: in progress. agentwatch's monitors are merged (agentwatch#17, `3bfb6c3`)
 
 ## Diagnosis and alternatives
 
-- **Polling rather than a webhook.** A webhook needs an inbound route on the gateway and a shared secret, or agentwatch would need the Telegram token. Having the gateway poll undelivered alerts needs neither: agentwatch stores no URL or secret, and its API, which has no login, cannot be used to send data anywhere.
+- **Polling rather than a webhook.** A webhook needs an inbound route on the gateway and a shared secret, or agentwatch would need the Telegram token. Having the gateway poll undelivered alerts needs neither: agentwatch stores no URL or secret for alerts, so its API, which has no login, cannot be used to send them anywhere.
 - **A statistical bound for rates.** Chief makes few calls, so one failure of three is 33%. A rate fires only when its 95% Wilson lower bound clears the limit, and recovers when the rate itself is back. Totals such as cost compare the value directly.
 - **Limits from history.** Each limit sits above the busiest or worst day seen, or at about twice the baseline or more.
 
@@ -47,8 +47,15 @@ Independent review (Opus 5.5) of agentwatch#17 requested changes:
 
 Known and left: server downtime counts as good time for a firing monitor, so it can resolve early after an outage.
 
+Review of this PR's first head (`facadde`) found nothing blocking and these to fix, all done:
+
+- **Repeat messages.** A failed delivered mark, or a second owner who could not be reached, would have re-sent the same alert every minute indefinitely. The relay now remembers who has each alert, retries only what is missing, and after five polls stops waiting for an unreachable owner if another owner has it.
+- **A stuck queue.** One unreadable alert would have blocked all later ones, with only an hourly log line to show for it. It is now reported as unreadable and marked. Failures carry `errorCode`.
+- **Wording.** Singular units, scores as percentages, and alerts older than ten minutes say when they were raised.
+- **The rollback claim.** The update script cannot restore an older image across a schema change, and [lightsail](../lightsail.md#traces-agentwatch) now says so.
+
 ## Follow-up and next iteration
 
-- agentwatch's monitors, the operator update to the new image, then creating the six monitors.
+- The operator update to the new image, then creating the six monitors.
 - Replay the limits over the history to see how often they would have fired.
 - Investigate the parcel tool failures.

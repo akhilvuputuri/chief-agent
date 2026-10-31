@@ -76,7 +76,7 @@ test("alert text shows the numbers in the metric's own units", () => {
         window_minutes: 7 * 1440,
       }),
     ),
-    /is 0\.456 over the last 7 days, below the limit of 0\.6/,
+    /is 45\.6% over the last 7 days, below the limit of 60%/,
   );
 });
 
@@ -100,7 +100,8 @@ test("an alert is marked delivered only after it was sent", async () => {
   const { post, marked } = server([alert(), alert({ id: "a2" })]);
   const relay = new AlertRelay(
     "http://agentwatch:4318",
-    async (t) => void sent.push(t),
+    ["o"],
+    async (_o, t) => void sent.push(t),
     post,
   );
   const restore = setOpsSink(() => undefined);
@@ -116,6 +117,7 @@ test("an alert is marked delivered only after it was sent", async () => {
     const failing = server([alert()]);
     const down = new AlertRelay(
       "http://agentwatch:4318",
+      ["o"],
       async () => {
         throw new Error("telegram down");
       },
@@ -135,6 +137,7 @@ test("agentwatch being down, or sending nonsense, costs a log line an hour and n
   try {
     const down = new AlertRelay(
       "http://agentwatch:4318",
+      ["o"],
       async () => assert.fail("nothing to send"),
       (async () => {
         throw new Error("refused");
@@ -152,7 +155,8 @@ test("agentwatch being down, or sending nonsense, costs a log line an hour and n
     const nonsense = server([{ id: "../x", kind: 1 }]);
     const relay = new AlertRelay(
       "http://agentwatch:4318",
-      async (t) => void sent.push(t),
+      ["o"],
+      async (_o, t) => void sent.push(t),
       nonsense.post,
     );
     assert.equal(await relay.poll(), 0);
@@ -173,7 +177,8 @@ test("at most five alerts a poll, and polls do not overlap", async () => {
   try {
     const relay = new AlertRelay(
       "http://agentwatch:4318",
-      async (t) => {
+      ["o"],
+      async (_o, t) => {
         await gate;
         sent.push(t);
       },
@@ -187,6 +192,119 @@ test("at most five alerts a poll, and polls do not overlap", async () => {
   } finally {
     setOpsSink(restore);
   }
+});
+
+test("a retry repeats nothing to whoever already has the alert", async () => {
+  const restore = setOpsSink(() => undefined);
+  try {
+    // The mark fails: the owner gets it once, and only the mark is retried.
+    const sent: string[] = [];
+    const marking = server([alert()], true);
+    const relay = new AlertRelay(
+      "http://agentwatch:4318",
+      ["o"],
+      async (_o, t) => void sent.push(t),
+      marking.post,
+    );
+    await relay.poll();
+    await relay.poll();
+    assert.equal(sent.length, 1);
+    assert.equal(marking.marked.length, 2);
+
+    // A second owner who cannot be reached: the first gets one copy, and after a few polls
+    // the alert stops holding up the queue.
+    const got: string[] = [];
+    const partial = server([alert()]);
+    const two = new AlertRelay(
+      "http://agentwatch:4318",
+      ["first", "gone"],
+      async (owner) => {
+        if (owner === "gone") throw new Error("bot was never started");
+        got.push(owner);
+      },
+      partial.post,
+    );
+    for (let i = 0; i < 4; i++) await two.poll();
+    assert.deepEqual(got, ["first"]);
+    assert.deepEqual(partial.marked, []);
+    assert.equal(await two.poll(), 1);
+    assert.equal(partial.marked.length, 1);
+
+    // Reaching nobody, it keeps waiting however long Telegram is down.
+    const none = server([alert()]);
+    const down = new AlertRelay(
+      "http://agentwatch:4318",
+      ["o"],
+      async () => {
+        throw new Error("down");
+      },
+      none.post,
+    );
+    for (let i = 0; i < 8; i++) await down.poll();
+    assert.deepEqual(none.marked, []);
+  } finally {
+    setOpsSink(restore);
+  }
+});
+
+test("an unreadable alert is reported and cannot block the ones after it", async () => {
+  const lines: string[] = [];
+  const restore = setOpsSink((line) => void lines.push(line));
+  try {
+    const sent: string[] = [];
+    const { post, marked } = server([
+      { id: "bad", value: "NaN" },
+      { id: "../no-id" },
+      alert({ id: "good" }),
+    ]);
+    const relay = new AlertRelay(
+      "http://agentwatch:4318",
+      ["o"],
+      async (_o, t) => void sent.push(t),
+      post,
+    );
+    assert.equal(await relay.poll(), 2);
+    assert.match(sent[0]!, /could not read/);
+    assert.match(sent[1]!, /^Alert: Tool errors/);
+    assert.deepEqual(marked, [
+      "http://agentwatch:4318/api/alerts/bad/delivered",
+      "http://agentwatch:4318/api/alerts/good/delivered",
+    ]);
+    assert.ok(lines.some((l) => l.includes("ALERT_INVALID")));
+  } finally {
+    setOpsSink(restore);
+  }
+});
+
+test("wording: singular units, a score as a percentage, and when a late alert was raised", () => {
+  const now = 2_000_000_000_000;
+  assert.match(
+    alertText(alert({ samples: 1, window_minutes: 1 }), now),
+    /over the last 1 minute, above .* \(1 sample\)/,
+  );
+  assert.match(
+    alertText(
+      alert({
+        metric: "score_mean",
+        comparison: "below",
+        threshold: 0.6,
+        value: 0.456,
+      }),
+      now,
+    ),
+    /is 45\.6% .*below the limit of 60%/,
+  );
+  const at = (minutes: number) =>
+    String(BigInt(now - minutes * 60_000) * 1_000_000n);
+  assert.doesNotMatch(alertText(alert({ created_ns: at(2) }), now), /raised/);
+  assert.match(
+    alertText(alert({ created_ns: at(45) }), now),
+    /raised 45 minutes ago/,
+  );
+  assert.match(
+    alertText(alert({ created_ns: at(300) }), now),
+    /raised 5 hours ago/,
+  );
 });
 
 test("the base URL comes from the traces endpoint", () => {
