@@ -1,7 +1,7 @@
 # 137 — Where does a coding box's startup time go?
 
 Work dates: 31 October 2026. Written: 31 October 2026.
-Status: in review. Removes the launch wait and adds the timings; no box has reported stages yet.
+Status: the launch wake-up is live in `304d691`. This change pins the worker image that reports the timings; no box has reported stages yet.
 
 ## User-visible problem and preceding iteration
 
@@ -38,7 +38,11 @@ A new agent's first hello is refused by a gateway older than this change, so the
 
 ## Verification and outcome
 
-Pending: CI, then a real box's `box.boot` line and a job's `kite ci` duration.
+- **CI:** all 12 checks passed on `c01e5ff`, including the first run of these tests.
+- **Gateway release:** `304d691` released on 31 October (release run 41190356901).
+- **Worker image:** `pi-coding-worker-image` run 41212849572 built `sha256:a5bdecece9afc80a2044370191649dcb5c8c56ce2d460fbe2971300bb46ce782` from `304d691`. Anonymous registry checks: the manifest hash matches, it is linux/amd64 and 331 MB, and it runs as `worker`. Its layers contain Kite 0.1.3, `dist/boxes/boot-stages.js`, an agent that reads `CHIEF_BOX_BOOT_STAGES`, and a Pi runtime that times checks.
+
+Pending: a real box's `box.boot` line, a job's `kite ci` duration, and whether boxes now skip the 15 s wait.
 
 Local tests could not run. On 31 October macOS's `syspolicyd` held newly placed binaries at first launch: a fresh `esbuild --version` was still blocked after 100 s, and an existing copy of the same version ran immediately. CI runs the tests on Linux. The cause of the hold is inferred from `syspolicyd` at about 100% CPU; it is not proven.
 
