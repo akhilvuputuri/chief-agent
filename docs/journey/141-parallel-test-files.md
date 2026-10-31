@@ -1,7 +1,7 @@
 # 141 — Can CI run test files four at a time despite an unexplained crash?
 
 Work dates: 1 November 2026. Written: 1 November 2026.
-Status: on [PR 389](https://github.com/akhilvuputuri/chief-agent/pull/389). CI only; coding boxes stay serial. The original crash remains unexplained.
+Status: released in `a02cbd8` ([PR 389](https://github.com/akhilvuputuri/chief-agent/pull/389)). CI only; coding boxes stay serial. The original crash remains unexplained.
 
 ## User-visible problem and preceding iteration
 
@@ -27,12 +27,17 @@ Journal 123's condition for retrying asked for a cause or fix as well as repeate
 
 ## Verification and outcome
 
-**Measured, run 41227010626 on this change:** wall time 137 s, against 164–168 s with the Pi split alone. `test:ts` took 59–86 s and the test jobs 79–107 s. `scripts, evals and Python runtime` (119 s) and `Pi worker boundary` (118 s) now set wall time. The shards ran 1,428 tests: 1,427 passed, 0 failed, 1 skipped.
+**Measured, run 41227010626 on this change:** wall time 138 s, against 164–168 s with the Pi split alone. `test:ts` took 59–86 s and the test jobs 79–107 s. `scripts, evals and Python runtime` (119 s) and `Pi worker boundary` (118 s) now set wall time. The shards ran 1,428 tests: 1,427 passed, 0 failed, 1 skipped.
 
 **Measured, first real docs-only PR ([PR 388](https://github.com/akhilvuputuri/chief-agent/pull/388), run 41226844802):** 70 s with every code job skipped, which proves [journal 140](140-docs-only-checks.md)'s decision on a real diff.
+
+### Release closure — 1 November 2026
+
+Merged as `a02cbd8`. Independent review (Claude Opus 5.5) approved the merged head `e7a74c3`, whose CI took 136 s (run 41227270155). `checks` on main passed in 151 s with the gateway image (run 41227670597). The automatic release (run 41227879255) succeeded with a healthy gateway. Release run 41227899983 failed at "Verify current main" as designed: it was for `d5ac1a3`, already superseded. Nothing changes in production.
 
 ## Follow-up and next iteration
 
 - **Watch for it:** a test job that fails with a process killed by SIGSEGV and no assertion failure. Record each one here, with its run, file and Node version, as well as rerunning it. Set `TEST_CONCURRENCY` back to 1 in `ci.yml` if they recur.
+- **Timing tests:** a few tests assert absolute wall-clock limits, such as `tests/otel-content.test.ts` under 500 ms. They passed in all 114 parallel shard jobs, but contention could make them flaky, and that failure would look different from a SIGSEGV.
 - **Weights:** test durations in parallel runs carry contention, so refresh `tests/test-weights.json` only if shards drift clearly apart.
 - **Coding boxes:** measure before enabling it there, since journal 123 expected them to gain the most.

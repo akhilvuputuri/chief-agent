@@ -1,7 +1,7 @@
 # 140 — Can a docs-only pull request skip the code jobs without weakening the gate?
 
 Work dates: 1 November 2026. Written: 1 November 2026.
-Status: released in `d728e91` ([PR 387](https://github.com/akhilvuputuri/chief-agent/pull/387)). A forced docs-only run took 49 s. No real docs-only PR has run on it yet.
+Status: released in `d728e91` ([PR 387](https://github.com/akhilvuputuri/chief-agent/pull/387)). A forced docs-only run took 49 s. The first real docs-only PR took 70 s.
 
 ## User-visible problem and preceding iteration
 
@@ -38,5 +38,5 @@ Merged as `d728e91`. Independent review (Claude Opus 5.5) requested changes once
 
 ## Follow-up and next iteration
 
-- The first real docs-only PR after this merges proves the decision on a real diff, and should finish in about 50 s.
-- **Owner's decision, still open:** parallel test files ([journal 139](139-ci-audit-pi-split.md)).
+- **Measured:** [PR 388](https://github.com/akhilvuputuri/chief-agent/pull/388), the first real docs-only PR, took 70 s with every code job skipped (run 41226844802).
+- **Parallel test files:** the owner chose them for CI; see [journal 141](141-parallel-test-files.md).
