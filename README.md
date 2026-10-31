@@ -60,6 +60,7 @@ are optional. One deployment serves one owner. Chief installs and runs with
 ```sh
 node tools/install-kite.mjs  # installs kite into ~/.local/bin
 kite ci
+kite run build
 kite run setup              # then add your two keys to .env
 kite run pair               # open the link it prints and press Start
 kite run pair:finish
