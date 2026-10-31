@@ -61,7 +61,8 @@ are optional. One deployment serves one owner. Chief installs and runs with
 node tools/install-kite.mjs  # installs kite into ~/.local/bin
 kite ci
 kite run setup              # then add your two keys to .env
-kite run pair && kite run pair:finish
+kite run pair               # open the link it prints and press Start
+kite run pair:finish
 docker compose up -d postgres && docker compose run --rm migrate
 kite run dev
 ```
