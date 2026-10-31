@@ -53,6 +53,16 @@ Smaller fixes:
 - the docs no longer promise "within 1.5 s";
 - the question's false case now names follow-ups that extend the reply to a new case.
 
+### The judge's setup
+
+Running the judge on the host needs agentwatch to hold an OpenRouter key and a newer image, which is a Compose change, so it goes through a reviewed operator rollout ([PR 370](https://github.com/akhilvuputuri/chief-agent/pull/370)).
+
+- **agentwatch#15:** judges can be limited to conversation traces (`sessions_only`), so Chief's background jobs are never judged, and they ask OpenRouter to report each call's cost.
+- **agentwatch#16:** a review of PR 370 found that agentwatch's API has no login, so anyone who could reach it could have pointed a judge at their own server and received the key. agentwatch now starts with a judge policy its API cannot change: here, `https://openrouter.ai/api/v1` only, `OPENROUTER_API_KEY` only, and at most 50 calls a day. A pinned key without a pinned endpoint is refused.
+- **[scripts/deploy-agentwatch-update.py](../../scripts/deploy-agentwatch-update.py):** a reusable rollout for agentwatch-only Compose changes. It allows only a fixed set of keys in the agentwatch block, pins its safety settings exactly, recreates only agentwatch, and never touches the gateway or `RELEASE`.
+
+The judge itself (`answer_ok`, `openai/gpt-6.1-sol`, conversations only, 20 calls a day) is created through the API after the rollout ([tracing](../tracing.md#judging-traces)).
+
 ## Follow-up and next iteration
 
 - The judge: agentwatch#15 (conversations-only judges, OpenRouter cost), a rollout giving agentwatch the OpenRouter key and the new image, then a judge created through the API.

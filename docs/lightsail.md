@@ -69,7 +69,7 @@ It is published on the host's loopback only, and it has no login. To view it, op
 ssh -F ../hermes-companion-ops/ssh_config -N -L 14318:127.0.0.1:4318 chief-lightsail
 ```
 
-Anyone who can open that tunnel, or has a shell on the host, can read the owner's conversations there, as they could the database. Other containers on the Compose network can reach it too; none of them fetches arbitrary URLs from that network. The traces are not in the nightly encrypted backup, which covers Postgres only; losing the volume loses telemetry, not the action ledger.
+Anyone who can open that tunnel, or has a shell on the host, can read the owner's conversations there, as they could the database. Other containers on the Compose network can reach it too; none of them fetches arbitrary URLs from that network. It holds the gateway's OpenRouter key for judges, restricted by its judge policy to OpenRouter and 50 calls a day ([tracing](tracing.md#judging-traces)). The traces are not in the nightly encrypted backup, which covers Postgres only; losing the volume loses telemetry, not the action ledger.
 
 Run these on the host as the operator, from `/opt/hermes-companion` so Compose reads its `.env`, and recreate the gateway only when it is idle:
 
@@ -77,7 +77,7 @@ Run these on the host as the operator, from `/opt/hermes-companion` so Compose r
 - **Keep content out:** set `CHIEF_TRACE_CONTENT=false` the same way. An empty `CHIEF_TRACE_CONTENT=` means on. Both take effect only when the gateway is recreated.
 - **Stop agentwatch:** `sudo -n docker compose -p hermes-companion stop agentwatch`; the gateway keeps running.
 - **Delete the traces:** `sudo -n docker compose -p hermes-companion rm -sf agentwatch`, then `sudo -n docker volume rm hermes-companion_agentwatch-data`. The next `up -d agentwatch` starts empty.
-- **Upgrade:** a new digest in `compose.yaml` is a Compose change, so it needs a reviewed operator rollout like [scripts/deploy-agentwatch.py](../scripts/deploy-agentwatch.py).
+- **Upgrade or reconfigure agentwatch:** a new digest or setting in its `compose.yaml` block is a Compose change. [scripts/deploy-agentwatch-update.py](../scripts/deploy-agentwatch-update.py) installs it: it refuses any change outside the agentwatch block, or a block that loses its digest pin, loopback-only port, read-only root, `cap_drop: [ALL]` or memory limit. It pulls the image first, recreates only agentwatch, checks health and a labelled test span, and restores the previous agentwatch on failure. It never touches the gateway or `RELEASE`. The next automatic release then proceeds as usual, because the live Compose file matches main again. Run it like the first install, from an exact archive of the reviewed main commit.
 
 The first install was [scripts/deploy-agentwatch.py](../scripts/deploy-agentwatch.py), run by the operator with an exact-commit archive, as for migrations. It:
 

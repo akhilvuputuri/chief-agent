@@ -254,7 +254,11 @@ services:
     # Trace viewer for issue #323 (github.com/akhilvuputuri/agentwatch), pinned by digest.
     # The gateway reaches it as agentwatch:4318; the host publishes it on loopback only, for
     # an SSH tunnel (docs/lightsail.md). The gateway does not depend on it.
-    image: ghcr.io/akhilvuputuri/agentwatch@sha256:a74e529eb00bc289fc24071029d834c00d4a01b05c887ee08fd319bd3e3bf69f
+    image: ghcr.io/akhilvuputuri/agentwatch@sha256:1d5aeed0d600ad1862c0a78a55e0b3941769c8a8ba6f70aaae74329fa2b117b8
+    # The OpenRouter key for LLM judges (docs/tracing.md#judging-traces): read only when a
+    # switched-on judge calls a model; empty, judges pause and say why.
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
     command:
       [
         "serve",
@@ -266,6 +270,12 @@ services:
         "90",
         "--memory-limit",
         "256MB",
+        "--judge-endpoint",
+        "https://openrouter.ai/api/v1",
+        "--judge-key-env",
+        "OPENROUTER_API_KEY",
+        "--judge-max-daily",
+        "50",
       ]
     volumes: ["agentwatch-data:/data"]
     ports: ["127.0.0.1:4318:4318"]
