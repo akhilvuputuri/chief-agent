@@ -93,6 +93,7 @@ Running TypeScript directly with Node's type stripping was rejected for now. It 
   - `:latest` and `:b431444…` are digest `de3dc421…`, and `:rollback` is kept.
   - **No `chief-agent-gateway@sha256` records are left.** That is consistent with the handler's `docker rmi` of the digest record working. Whether `docker image prune` alone would have left them was not tested.
   - agentwatch and the other services are untouched, and disk is at 46%.
+- **Later pull releases** (release workflow, 29 October): `7cb57be` 45 s, `e7ca021` 28 s, `b071f23` 27 s and `a8fd80c` 26 s for the same step. All five pull releases so far took 26–51 s.
 - **Not measured:** how long the publish job takes when only the source layer changes. The first publish took 94 s cold; a later one took 34 s.
 
 ## Follow-up and next iteration

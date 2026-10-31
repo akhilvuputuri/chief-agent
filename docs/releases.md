@@ -40,6 +40,7 @@
 - **Pending:** the first real turn's trace.
 
 [Journal 134](journey/134-agentwatch-on-the-host.md#release-closure--2026-10-29).
+
 ## Releases pull the CI-built gateway image (29 October 2026)
 
 - **What merged.**
@@ -58,6 +59,7 @@
     - no digest-named image records are left;
     - agentwatch is untouched;
     - disk is at 46%.
+- **Later pull releases.** `7cb57be`, `e7ca021`, `b071f23` and `a8fd80c` took 45, 28, 27 and 26 s for the same step.
 - **Note.** Main also included #360's Compose change, so releases waited for its operator rollout (`deploy-agentwatch.py`, `6e90db7`) before this pull could run.
 
 ## Coding limits raised (29 October 2026)
