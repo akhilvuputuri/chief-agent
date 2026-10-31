@@ -1301,6 +1301,8 @@ test("a reworded fact is accepted and flagged, but it cannot add a number or neg
   assert.deepEqual([result.facts, result.flagged], [1, 1]);
   const [saved] = await new MemoryStore(db).history("owner", "seating");
   assert.deepEqual(saved!.flags, ["paraphrased"]);
+  // Normal under "save, prune later": it does not turn every owner turn into a warning.
+  assert.equal((await new MemoryStore(db).select("owner")).flagged, 0);
 });
 
 test("items reviewed under a superseded prompt are mined again, once", async (t) => {

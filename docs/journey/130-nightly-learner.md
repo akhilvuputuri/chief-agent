@@ -17,7 +17,7 @@ Chief remembers only what the owner agrees to save. Issue #326 asks it to learn 
 
 - **Trigger on finished tasks, nightly, rather than after each turn.** Owner volume is low, a nightly batch changes the cached prefix at most once a day, and the 24-hour quiet window needs time to pass anyway. The alternative, a fork after every reply like Hermes, would mostly see unfinished work.
 - **A small dedicated loop, not the coordinator runtime.** The learner needs four tools and no domain access. Running it through the coordinator would mean scoping out about 54 tools and their context; a separate loop cannot call them at all. It reuses the model adapter, `Spending` and the run ledger, so its cost is still recorded per run.
-- **Facts need the owner's own words, and the words must state the fact.** The host checks the quote against the owner's text in the cited task, with attachment content cut off, and requires every content word and number of the value to appear in it, so a fact cannot be lifted from an email, web page or attached document even if the model is misled. Lessons are not quote-checked; they carry the tasks' untrusted tags instead, and are rolled back by source if needed.
+- **Facts need the owner's own words, and the words must state the fact.** The host checks the quote against the owner's text in the cited task, with attachment content cut off, and requires every content word and number of the value to appear in it, so a fact cannot be lifted from an email, web page or attached document even if the model is misled. ([Saving more](#saving-more--2026-11-01) later loosened this at the owner's request: up to half a reworded fact's words may come from outside the quote.) Lessons are not quote-checked; they carry the tasks' untrusted tags instead, and are rolled back by source if needed.
 - **Apply after the run, all or nothing on pre-emption.** A run the owner interrupts applies nothing and labels nothing, so it starts over cleanly instead of leaving half a batch.
 
 ## Implementation and review
@@ -84,7 +84,7 @@ The turn backlog is cleared. Of the 55 turns, one pitfall came from an owner cor
 - Learned items reach the prompt up to 12,000 characters instead of 4,000, or they would never reach Chief.
 - Up to 60 turns a night instead of 30, and items reviewed under the earlier prompts are mined again once.
 
-**Accepted risk.** More mediocre or wrong items reach Chief's prompt until they are pruned, and more prompt text means more cached input on each turn. A fake model drives the tests (24 in `tests/learning.test.ts`), so what real nights save is unmeasured. Not yet released.
+**Accepted risk.** More mediocre or wrong items reach Chief's prompt until they are pruned, and more prompt text means more cached input and can leave less room for older history on each turn. A fake model drives the tests (24 in `tests/learning.test.ts`), so what real nights save is unmeasured. Not yet released.
 
 ## Follow-up and next iteration
 
