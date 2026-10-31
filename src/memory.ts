@@ -24,6 +24,8 @@ export interface MemoryWrite {
   learnerRun?: string;
   /** Kinds of untrusted content the learning run read (email, web, document, agent_report). */
   untrustedSources?: string[];
+  /** Host flags to add to the threat scan's, such as a fact reworded beyond its quote. */
+  flags?: string[];
   outcome?: "success" | "pitfall";
   domain?: string;
 }
@@ -86,7 +88,7 @@ export const emptySelection: MemorySelection = {
 };
 
 /** Characters of learned facts and lessons offered to one run. Owner facts are not capped. */
-export const LEARNED_BUDGET_CHARS = 4000;
+export const LEARNED_BUDGET_CHARS = 12000;
 
 // Flag, never block: a flagged item is applied and listed first in the digest.
 const THREATS: Array<[string, RegExp]> = [
@@ -149,7 +151,7 @@ export class MemoryStore {
         throw new ToolValidationError(
           `Memory ${w.key} is a ${head.kind}, not a ${w.kind}`,
         );
-      const flags = scanThreats(w.value);
+      const flags = [...scanThreats(w.value), ...(w.flags ?? [])];
       // Newer evidence wins as a new revision; a learned change to an owner's fact is
       // flagged for the digest.
       if (
@@ -400,11 +402,13 @@ export class MemoryStore {
       selected: [...selected],
       omitted,
       // Learned items only, rescanned on load so a pattern added later also flags older
-      // ones. The owner's own facts are theirs to word as they like.
+      // ones. The owner's own facts are theirs to word as they like. A reworded fact is
+      // normal under "save, prune later": findable by its flag, but not a warning.
       flagged: candidates.filter(
         (r) =>
           selected.has(r.id) &&
-          (r.flags.length > 0 || scanThreats(r.value!).length > 0),
+          (r.flags.some((f) => f !== "paraphrased") ||
+            scanThreats(r.value!).length > 0),
       ).length,
       chars: JSON.stringify(explicit).length + chars,
     };

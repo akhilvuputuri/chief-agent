@@ -17,7 +17,7 @@ Chief remembers only what the owner agrees to save. Issue #326 asks it to learn 
 
 - **Trigger on finished tasks, nightly, rather than after each turn.** Owner volume is low, a nightly batch changes the cached prefix at most once a day, and the 24-hour quiet window needs time to pass anyway. The alternative, a fork after every reply like Hermes, would mostly see unfinished work.
 - **A small dedicated loop, not the coordinator runtime.** The learner needs four tools and no domain access. Running it through the coordinator would mean scoping out about 54 tools and their context; a separate loop cannot call them at all. It reuses the model adapter, `Spending` and the run ledger, so its cost is still recorded per run.
-- **Facts need the owner's own words, and the words must state the fact.** The host checks the quote against the owner's text in the cited task, with attachment content cut off, and requires every content word and number of the value to appear in it, so a fact cannot be lifted from an email, web page or attached document even if the model is misled. Lessons are not quote-checked; they carry the tasks' untrusted tags instead, and are rolled back by source if needed.
+- **Facts need the owner's own words, and the words must state the fact.** The host checks the quote against the owner's text in the cited task, with attachment content cut off, and requires every content word and number of the value to appear in it, so a fact cannot be lifted from an email, web page or attached document even if the model is misled. ([Saving more](#saving-more--2026-11-01) later loosened this at the owner's request: up to half a reworded fact's words may come from outside the quote.) Lessons are not quote-checked; they carry the tasks' untrusted tags instead, and are rolled back by source if needed.
 - **Apply after the run, all or nothing on pre-emption.** A run the owner interrupts applies nothing and labels nothing, so it starts over cleanly instead of leaving half a batch.
 
 ## Implementation and review
@@ -72,6 +72,19 @@ The turn backlog is cleared. Of the 55 turns, one pitfall came from an owner cor
 **Change.** Each run now records `learner.input`, `learner.model_call`, `learner.proposal` and `learner.applied` privately in `events` ([learning](../learning.md#telemetry-and-the-private-record)). Behaviour is unchanged. Writes stay on: a proposal to pause them with a shadow mode was the implementer's overreach, and the owner rejected it, since the no-approvals decision stands and only the record was missing. Tested in `tests/learning.test.ts` (22 tests): the record's contents, credential scrubbing, the verdict on each proposal, the outcome of each accepted item, nothing reaching the ops log, a pre-empted run keeping its record, and neither text the database refuses nor a failed insert affecting learning. Independent review of `c233481` (Claude Opus 5.5) requested changes: half an emoji at a clip boundary made the first record fail the whole run, every night, and a failed record could fail a run after it had written an item. The record is now best effort and made storable first, and clipping no longer splits a surrogate pair. Trace export is not connected. Not yet released.
 
 **Unknown.** Why nothing has been saved: the model may be too cautious, the quote check too strict, or the turns thin. The record lets later nights answer that.
+
+## Saving more — 2026-11-01
+
+**Owner decision.** The goal is that Chief gets better from use, both knowing the owner and doing the work, with nothing asked of the owner. Saving nothing from 55 turns does not serve "accumulate, then cut back", so the learner should save more and the owner will prune later. Pruning goes through a coding session for now; a Telegram tool waits until the core works.
+
+**Change (`learner-v3`).**
+
+- The instructions no longer say most nights nothing is worth saving. They err toward saving, and a lesson may come from one item.
+- A reworded fact is applied and flagged `paraphrased` rather than refused. It still needs a real quote of the owner's own words, no added number or negation, and at least half its content words from the quote.
+- Learned items reach the prompt up to 12,000 characters instead of 4,000, or they would never reach Chief.
+- Up to 60 turns a night instead of 30, and items reviewed under the earlier prompts are mined again once.
+
+**Accepted risk.** More mediocre or wrong items reach Chief's prompt until they are pruned, and more prompt text means more cached input and can leave less room for older history on each turn. A fake model drives the tests (24 in `tests/learning.test.ts`), so what real nights save is unmeasured. Not yet released.
 
 ## Follow-up and next iteration
 

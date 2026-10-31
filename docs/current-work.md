@@ -1,3 +1,7 @@
+# The learner saves more — proposed, 1 November 2026
+
+The owner wants memory to accumulate and will prune it later. Prompt `learner-v3` errs toward saving, a reworded fact is flagged rather than refused (it still needs the owner's quoted words, with no added number or negation), learned items get 12,000 characters of the prompt, and items reviewed under earlier prompts are mined again once. Pruning goes through a coding session for now. Branch `feat/learner-save-more`. See [learning](learning.md#host-checks) and [journal 130](journey/130-nightly-learner.md#saving-more--2026-11-01).
+
 # A private record of what the learner decides — proposed, 31 October 2026
 
 Two nights of learning from turns reviewed 55 turns, saved nothing and refused one proposal a night, and those proposals could not be read: the learner kept only counts. Each run now records its input, model calls, every proposal with the host's verdict, and the final outcome of each item, privately in `events`. Behaviour is unchanged and writes stay on. Branch `feat/learner-trace`. See [learning](learning.md#telemetry-and-the-private-record) and [journal 130](journey/130-nightly-learner.md#no-record-of-what-the-learner-decided--2026-10-31).
