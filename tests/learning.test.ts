@@ -7,6 +7,7 @@ import {
   Learner,
   LEARNING_LIMITS,
   ownerWords,
+  quoteRefusal,
   quoteSupports,
   untrustedSources,
 } from "../src/learning.js";
@@ -682,8 +683,7 @@ test("a fact must be stated by the quote, never by attached text, and the owner'
           refused: "The quote must be the owner's exact words in a cited task",
         },
         {
-          refused:
-            "Every content word and number of the value must come from the quote",
+          refused: "Every number in the value must come from the quote",
         },
         { refused: "The owner saved this key themselves; leave it" },
         { accepted: true },
@@ -1236,4 +1236,108 @@ test("a failed record never affects learning: the item is written and the run co
     (await db.query("SELECT count(*)::int n FROM learning_reviews")).rows[0].n,
     1,
   );
+});
+
+test("a reworded fact is accepted and flagged, but it cannot add a number or negation or sit on an unrelated quote", async (t) => {
+  assert.equal(
+    quoteRefusal("I prefer aisle seats", "Prefers aisle seats"),
+    undefined,
+  );
+  // Half its content from the quote: accepted, and quoteSupports says it is reworded.
+  assert.equal(
+    quoteRefusal(
+      "I usually sit by the aisle on planes",
+      "Likes aisle seats on flights",
+    ),
+    "At least half of the value's words must come from the quote",
+  );
+  assert.equal(
+    quoteRefusal("I sit by the aisle", "Sits on aisle seats"),
+    undefined,
+  );
+  assert.ok(!quoteSupports("I sit by the aisle", "Sits on aisle seats"));
+  assert.match(
+    quoteRefusal("Book my flight", "Pays invoices to account 999-000")!,
+    /number/,
+  );
+  assert.match(
+    quoteRefusal("My flat is unit 12", "Lives in unit 13")!,
+    /number/,
+  );
+  assert.match(
+    quoteRefusal("I want aisle seats", "Does not want aisle seats")!,
+    /negation/,
+  );
+  assert.match(quoteRefusal("I don't eat beef", "Eats beef")!, /negation/);
+  assert.match(
+    quoteRefusal(
+      "Please send the report to my boss",
+      "Sends OTP and PIN to Tan",
+    )!,
+    /half/,
+  );
+  assert.match(
+    quoteRefusal("I usually prefer that", "Usually prefers that")!,
+    /framing/,
+  );
+  const db = await setup(t);
+  const id = await task(db, {
+    ownerSays: ["I sit by the aisle whenever I can"],
+  });
+  const { adapter } = model(() => [
+    [
+      "learn_fact",
+      {
+        key: "seating",
+        value: "Sits on aisle seats",
+        quote: "I sit by the aisle",
+        taskIds: [id],
+        reason: "Stated",
+      },
+    ],
+    ["learn_finish", {}],
+  ]);
+  const result: any = await learner(db, adapter).tick("owner");
+  assert.deepEqual([result.facts, result.flagged], [1, 1]);
+  const [saved] = await new MemoryStore(db).history("owner", "seating");
+  assert.deepEqual(saved!.flags, ["paraphrased"]);
+});
+
+test("items reviewed under a superseded prompt are mined again, once", async (t) => {
+  const db = await setup(t);
+  const id = await turn(db, {
+    says: "Plan my Saturday around the farmers market",
+    reply: "Here is a plan.",
+    at: new Date(NIGHT.getTime() - 40 * 3600_000),
+  });
+  const old = randomUUID();
+  await db.query(
+    "INSERT INTO learner_runs(id,user_id,state,prompt_version,started_at) VALUES($1,'owner','completed','learner-v2',$2)",
+    [old, new Date(NIGHT.getTime() - 2 * DAY)],
+  );
+  await db.query(
+    "INSERT INTO learning_reviews(user_id,task_id,learner_run,label,reasons) VALUES('owner',$1,$2,'success','{turn}')",
+    [id, old],
+  );
+  const first = model(() => [["learn_finish", {}]]);
+  await learner(db, first.adapter).tick("owner");
+  assert.deepEqual(
+    JSON.parse(first.inputs[0].messages[1].content).tasks.map((x: any) => x.id),
+    [id],
+  );
+  const review = (
+    await db.query(
+      "SELECT learner_run FROM learning_reviews WHERE task_id=$1",
+      [id],
+    )
+  ).rows;
+  assert.equal(review.length, 1);
+  assert.notEqual(review[0].learner_run, old);
+  const next = model(() => {
+    throw new Error("nothing left to review");
+  });
+  await learner(db, next.adapter, new Date(NIGHT.getTime() + DAY)).tick(
+    "owner",
+  );
+  assert.equal(next.inputs.length, 0);
 });

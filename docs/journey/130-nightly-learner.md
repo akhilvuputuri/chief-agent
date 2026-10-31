@@ -73,6 +73,19 @@ The turn backlog is cleared. Of the 55 turns, one pitfall came from an owner cor
 
 **Unknown.** Why nothing has been saved: the model may be too cautious, the quote check too strict, or the turns thin. The record lets later nights answer that.
 
+## Saving more — 2026-11-01
+
+**Owner decision.** The goal is that Chief gets better from use, both knowing the owner and doing the work, with nothing asked of the owner. Saving nothing from 55 turns does not serve "accumulate, then cut back", so the learner should save more and the owner will prune later. Pruning goes through a coding session for now; a Telegram tool waits until the core works.
+
+**Change (`learner-v3`).**
+
+- The instructions no longer say most nights nothing is worth saving. They err toward saving, and a lesson may come from one item.
+- A reworded fact is applied and flagged `paraphrased` rather than refused. It still needs a real quote of the owner's own words, no added number or negation, and at least half its content words from the quote.
+- Learned items reach the prompt up to 12,000 characters instead of 4,000, or they would never reach Chief.
+- Up to 60 turns a night instead of 30, and items reviewed under the earlier prompts are mined again once.
+
+**Accepted risk.** More mediocre or wrong items reach Chief's prompt until they are pruned, and more prompt text means more cached input on each turn. A fake model drives the tests (24 in `tests/learning.test.ts`), so what real nights save is unmeasured. Not yet released.
+
 ## Follow-up and next iteration
 
 After the phase 1 rollout and this release: check the first night's `learner.finished` counts and charges, and read what it wrote (`memory_revisions` with `origin='learned'`). Phase 3 adds the weekly digest with undo and skills drafted from two independent successes. The owner decided on 29 October not to use reactions or any other manual labelling, so outcomes come only from task proof and corrections in the owner's next message.
