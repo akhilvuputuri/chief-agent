@@ -73,6 +73,21 @@ const active = ["provisioning", "running"];
 export type PauseCause = "sandbox_stopped" | "heartbeat_lost";
 const hash = (v: unknown) =>
   createHash("sha256").update(canonicalJson(v)).digest("hex");
+/** The identity a Pi worker derives for a phase or session of this job's approved work. */
+const piIdentity = (
+  job: CodingJob,
+  plan: string,
+  intent: string,
+  value: string,
+) =>
+  hash({
+    objective: job.objective,
+    context: job.context,
+    plan,
+    base: job.base_sha,
+    intent,
+    hash: value,
+  });
 /**
  * Progress-only coding notices (`e` a coding_events row, `j` its job), folded into the
  * status message: worker progress, automatic retry/rebase/feedback re-queues, the approved
@@ -331,7 +346,7 @@ export class CodingController {
     if (!this.allowed(user)) throw new Error("Coding owner unavailable");
     const rows = (
       await this.db.query(
-        `SELECT id,revision,objective,mode,state,stage,summary,question,base_sha,pr_url,head_sha,cleanup,publication_started,used_models,settings->'limits' AS limits,settings->>'prWorkflow' AS merge_flow,updated_at,checkpoint->'runtimeMemory' AS runtime_memory,checkpoint->'squadState'->>'phase' AS runtime_phase,(SELECT max(created_at) FROM coding_events e WHERE e.job_id=coding_jobs.id AND e.payload->>'kind' IN ('squad_handoff','checkpoint')) AS checkpoint_at FROM coding_jobs WHERE user_id=$1 ${id ? "AND id=$2" : ""} ORDER BY created_at DESC LIMIT 20`,
+        `SELECT id,revision,objective,mode,state,stage,summary,question,base_sha,pr_url,head_sha,cleanup,publication_started,used_models,settings->'limits' AS limits,settings->>'leaderModel' AS leader_model,settings->>'model' AS coder_model,settings->>'reviewerModel' AS reviewer_model,settings->>'prWorkflow' AS merge_flow,updated_at,checkpoint->'runtimeMemory' AS runtime_memory,checkpoint->'squadState'->>'phase' AS runtime_phase,(SELECT max(created_at) FROM coding_events e WHERE e.job_id=coding_jobs.id AND e.payload->>'kind' IN ('squad_handoff','checkpoint')) AS checkpoint_at FROM coding_jobs WHERE user_id=$1 ${id ? "AND id=$2" : ""} ORDER BY created_at DESC LIMIT 20`,
         id ? [user, id] : [user],
       )
     ).rows;
@@ -783,6 +798,51 @@ export class CodingController {
       );
     return this.status(user, a.id);
   }
+  /** The checkpoint state that restarts the current step, when that step's model changed. */
+  private freshSession(
+    job: CodingJob,
+    next: CodingSettings,
+    requestKey: string,
+  ) {
+    const pi = job.checkpoint.piState;
+    if (!pi?.sessionScope) return undefined;
+    if (pi.phase === "review") {
+      const candidate = pi.reviewCandidate;
+      const round = pi.reviewRound;
+      if (
+        job.settings.reviewerModel === next.reviewerModel ||
+        // A rejected candidate goes to the coder's repair session next, not to a review.
+        (pi.reportDocument?.kind === "review" &&
+          pi.reportDocument.verdict === "REQUEST_CHANGES") ||
+        !candidate ||
+        !round ||
+        round >= 1000
+      )
+        return undefined;
+      // The host binds a review session to its candidate and round, so a fresh one is a new round.
+      const { reportFailure: _earlier, ...kept } = pi;
+      return {
+        ...kept,
+        reviewRound: round + 1,
+        sessionScope: piIdentity(
+          job,
+          job.checkpoint.plan,
+          "review-session",
+          `${candidate.hash}:${round + 1}`,
+        ),
+      };
+    }
+    const changed =
+      pi.phase === "build"
+        ? job.mode === "implement" && job.settings.model !== next.model
+        : pi.phase === "plan" &&
+          job.mode === "plan" &&
+          (job.settings.leaderModel ?? job.settings.model) !==
+            (next.leaderModel ?? next.model);
+    return changed
+      ? { ...pi, sessionScope: hash([pi.sessionScope, requestKey]) }
+      : undefined;
+  }
   /**
    * The owner changes who carries out a stopped job, or how long it may run. The requirements
    * are untouched, so their approval stands. A session under a changed model starts fresh on
@@ -825,9 +885,17 @@ export class CodingController {
       ...(a.reviewerModel ? { reviewerModel: a.reviewerModel } : {}),
       limits: { ...job.settings.limits, ...a.limits },
     };
-    const leader = job.settings.leaderModel ?? job.settings.model;
+    const hasLeader = job.settings.squad || job.settings.runtime === "pi";
     const changes = [
-      ["Planner", leader, next.leaderModel ?? next.model],
+      ...(hasLeader
+        ? [
+            [
+              "Planner",
+              job.settings.leaderModel ?? job.settings.model,
+              next.leaderModel ?? next.model,
+            ],
+          ]
+        : []),
       ["Coder", job.settings.model, next.model],
       ["Reviewer", job.settings.reviewerModel, next.reviewerModel],
       ["Time limit (ms)", job.settings.limits.ms, next.limits.ms],
@@ -836,6 +904,10 @@ export class CodingController {
     ].filter(([, from, to]) => from !== to);
     if (!changes.length)
       throw new ToolValidationError("The job already has these settings");
+    if ((job.checkpoint.piState?.toolsUsed ?? 0) > next.limits.tools)
+      throw new ToolValidationError(
+        "The tool-call limit is below what this job has already used",
+      );
     for (const model of [a.leaderModel, a.coderModel, a.reviewerModel]) {
       if (!model) continue;
       if (!this.catalog) throw new Error("Coding model catalog unavailable");
@@ -862,31 +934,16 @@ export class CodingController {
           Object.entries(windows).filter(([id]) => current.includes(id)),
         ),
       });
-    const pi = job.checkpoint.piState;
-    const activeModel = (s: CodingSettings) =>
-      pi?.phase === "review"
-        ? s.reviewerModel
-        : pi?.phase === "plan"
-          ? (s.leaderModel ?? s.model)
-          : s.model;
-    const restarted =
-      !!pi?.sessionScope && activeModel(job.settings) !== activeModel(next);
-    const checkpoint = restarted
-      ? {
-          ...job.checkpoint,
-          piState: {
-            ...pi,
-            sessionScope: createHash("sha256")
-              .update(`${pi.sessionScope}:${a.requestKey}`)
-              .digest("hex"),
-          },
-        }
+    const piState = this.freshSession(job, next, a.requestKey);
+    const restarted = !!piState;
+    const checkpoint = piState
+      ? { ...job.checkpoint, piState }
       : job.checkpoint;
     const approved =
       job.mode === "implement" && (await this.requirements.approved(job));
     const updated = await this.db.query(
       `WITH changed AS (
-        UPDATE coding_jobs SET settings=$4::jsonb,checkpoint=$5::jsonb,updated_at=now()
+        UPDATE coding_jobs SET settings=$4::jsonb,checkpoint=$5::jsonb
         WHERE id=$1 AND user_id=$2 AND revision=$3 AND ${RESTARTABLE} AND settings=$6::jsonb AND checkpoint=$7::jsonb RETURNING id
       ), carried AS (
         -- Earlier approvals hashed the settings, so carry one to the scope that does not.
@@ -1169,18 +1226,7 @@ export class CodingController {
           "Review recovery requires the exact checked Pi candidate",
         );
       const identity = (intent: string, value: string) =>
-        createHash("sha256")
-          .update(
-            canonicalJson({
-              objective: job.objective,
-              context: job.context,
-              plan: c.plan,
-              base: job.base_sha,
-              intent,
-              hash: value,
-            }),
-          )
-          .digest("hex");
+        piIdentity(job, c.plan, intent, value);
       if (
         c.piState.scopeIdentity !== identity("review", candidate.hash) ||
         c.piState.sessionScope !==
@@ -1799,6 +1845,9 @@ export class CodingController {
              AND v.request_key LIKE 'auto-retry:%')
            AND NOT EXISTS(SELECT 1 FROM coding_revisions v WHERE v.job_id=j.id
              AND v.request_key='auto-retry:'||j.attempt_id::text)
+           -- The owner changed this job while it was stopped, and was told it stays stopped.
+           AND NOT EXISTS(SELECT 1 FROM coding_events s WHERE s.job_id=j.id
+             AND s.event_key LIKE 'settings:%' AND s.created_at>=j.updated_at)
            AND (EXISTS(SELECT 1 FROM coding_events e WHERE e.job_id=j.id
                   AND e.event_key=j.attempt_id::text||':paused'
                   AND e.payload->>'cause' IN ('sandbox_stopped','heartbeat_lost'))

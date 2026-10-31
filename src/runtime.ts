@@ -221,7 +221,7 @@ export function runtimeContext(
               coding_models:
                 "Read the owner's coding leader/coder/reviewer model preferences or list eligible models. This operation is read-only; use coding_model_set for an explicit owner-requested change.",
               coding_model_set:
-                "On an explicit owner request, set one coding role to an exact eligible OpenRouter catalog model ID. Changes apply only to new jobs; use coding_job_update to change a paused job. Provider price filters are unchanged. Do not change preferences on your own.",
+                "On an explicit owner request, set one coding role to an exact eligible OpenRouter catalog model ID. Changes apply only to new jobs; use coding_job_update to change a stopped job. Provider price filters are unchanged. Do not change preferences on your own.",
               coding_job_update:
                 "On an explicit owner request, change the leader, coder or reviewer model or the time and call limits of one stopped coding job, using its exact id, baseRevision and a stable requestKey. If the job or the change is unclear, ask the owner once to confirm first; set ownerConfirmed only then. The owner's approval of the requirements still stands, and the job stays stopped until the owner resumes it. Do not change a job on your own.",
               coding_start:

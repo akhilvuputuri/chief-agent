@@ -29,7 +29,7 @@ Alternatives rejected:
 
 - `src/coding/requirements.ts`: the scope is the job, objective, context and plan. `requirementScopes` also accepts the earlier format, so delivered cards and recorded approvals keep working.
 - `src/coding/controller.ts`: `coding_job_update` changes models and limits on a stopped job. It writes the change, a carried approval and an owner notice in one statement, guarded by revision, settings and checkpoint.
-- A model change for the current step gives that step a new session scope, so the worker starts fresh on the same files. This is host-side, so the worker image is unchanged.
+- A model change for the current step gives that step a new session scope, so the worker starts fresh on the same files. A review gets a new round, because the host refuses a review session that does not match its candidate and round. Independent review caught this: the first version invented a scope, and every later checkpoint would have been refused. This is host-side, so the worker image is unchanged.
 - The Merge card now names the coder as well as the reviewer.
 
 Limitations:
@@ -40,5 +40,5 @@ Limitations:
 
 ## Verification and outcome
 
-- **Tested:** `tests/coding-job-update.test.ts` covers the narrowed scope, the earlier format, carrying, session restart, retries, key conflicts and refusals, in CI. `tsc` passes locally. Local test runs stalled while macOS `syspolicyd` was pegged, so the tests' first complete run is CI's.
+- **Tested:** `tests/coding-job-update.test.ts` covers the narrowed scope, the earlier format, carrying, retries, key conflicts and refusals, and runs a real worker through a reviewer switch, in CI. `tsc` passes locally. Local test runs stalled while macOS `syspolicyd` was pegged, so the tests' first complete run is CI's.
 - **Not measured:** a live job update, and an Opus 5.5 review on a Pi job.

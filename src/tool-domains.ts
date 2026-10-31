@@ -57,7 +57,7 @@ export const DOMAIN_SUMMARIES: Record<ToolDomain, string> = {
   jobs: "saved roles, analysis, alignment scopes, preparation and its Sheet",
   work: "durable background tasks: start, revise, steps, evidence, yield, cancel",
   coding:
-    "coding sandbox jobs on the owner's repository: start, reply, resume, cancel, models",
+    "coding sandbox jobs on the owner's repository: start, reply, resume, update, cancel, models",
   research: "isolated public-research specialist and plugin agents",
   media: "specialist reading of attached images and stored documents",
   canvas: "saved Mini App canvases: create, update, read, list",

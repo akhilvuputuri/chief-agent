@@ -161,7 +161,7 @@ export class CodingAutomation {
         ? { reviewRound: cp.piState.reviewRound }
         : {}),
     };
-    const scope = requirementScope({ ...j, base_sha: main, checkpoint: cp });
+    const scope = requirementScope({ ...j, checkpoint: cp });
     const message = `Rebase onto current main ${main}: approved plan carried over (owner policy, 17 October 2026)`;
     const changed = await this.db.query(
       `WITH changed AS (UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',base_sha=$5,summary='Main moved; re-applying the approved change on current main before checks, review and the Merge card',checkpoint=$3::jsonb,result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,cleanup='none',model_busy=false,publication_started=false,updated_at=now() WHERE id=$1 AND lease=$2 AND stage=$9 AND lease_until>now() AND state='pr_ready' AND revision=$4 RETURNING id,revision),

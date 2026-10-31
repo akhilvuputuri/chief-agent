@@ -142,6 +142,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 29 October | [133 — Implicit redirect feedback](133-implicit-redirect-feedback.md): can Chief tell which answers missed without the owner rating them? | Released in `bc4c5c0`: issue #323 phase 4. The owner's next message (retry, correction or rephrase) becomes a `user_redirected` score on the earlier turn's trace; text patterns only, export off in production |
 | 29 October | [134 — agentwatch on the host](134-agentwatch-on-the-host.md): can agentwatch run next to Chief and see what was said? | Released: opt-in message content in `e6abb13`; agentwatch on the host with export and content on since the operator rollout of `6e90db7`. Redirect rules measured on real messages: precision 8/8, recall about half |
 | 30 October | [135 — Jev redirect question and judge](135-jev-redirect-and-judge.md): can Chief catch the pushback its text rules miss, and can a model judge its answers? | Released: Jev's question in `a8fd80c`; the `answer_ok` judge on since the agentwatch update of `de00871`, limited by a server policy to OpenRouter and 50 calls a day. Agreement with the owner unmeasured |
+| 31 October | [136 — What an approval is tied to](136-approval-covers-the-spec.md): must an owner's approval bind who carries out a plan? | Tested on synthetic jobs; release pending. Approval now covers only the objective, context and plan |
 
 ## Coding-agent learning path
 
