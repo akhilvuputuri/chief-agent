@@ -1,4 +1,4 @@
-# 136 — Where does a coding box's startup time go?
+# 137 — Where does a coding box's startup time go?
 
 Work dates: 31 October 2026. Written: 31 October 2026.
 Status: in review. Removes the launch wait and adds the timings; no box has reported stages yet.
