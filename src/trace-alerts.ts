@@ -170,7 +170,8 @@ export class AlertRelay {
           continue;
         }
         const text = valid(alert) ? alertText(alert, this.now()) : UNREADABLE;
-        if (!(await this.deliver(id, text))) continue;
+        // Stop here rather than skip it, so a resolved message cannot overtake its alert.
+        if (!(await this.deliver(id, text))) break;
         const marked = await this.post(
           `${this.base}/api/alerts/${encodeURIComponent(id)}/delivered`,
           {

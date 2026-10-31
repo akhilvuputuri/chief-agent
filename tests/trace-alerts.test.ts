@@ -247,6 +247,35 @@ test("a retry repeats nothing to whoever already has the alert", async () => {
   }
 });
 
+test("a resolved message cannot overtake its alert", async () => {
+  const restore = setOpsSink(() => undefined);
+  try {
+    const sent: string[] = [];
+    let telegramUp = false;
+    const { post } = server([
+      alert({ id: "firing" }),
+      alert({ id: "resolved", kind: "resolved", value: 0.1 }),
+    ]);
+    const relay = new AlertRelay(
+      "http://agentwatch:4318",
+      ["o"],
+      async (_o, t) => {
+        if (!telegramUp && t.startsWith("Alert")) throw new Error("flaky");
+        sent.push(t);
+      },
+      post,
+    );
+    assert.equal(await relay.poll(), 0);
+    assert.deepEqual(sent, []);
+    telegramUp = true;
+    assert.equal(await relay.poll(), 2);
+    assert.match(sent[0]!, /^Alert/);
+    assert.match(sent[1]!, /^Resolved/);
+  } finally {
+    setOpsSink(restore);
+  }
+});
+
 test("an unreadable alert is reported and cannot block the ones after it", async () => {
   const lines: string[] = [];
   const restore = setOpsSink((line) => void lines.push(line));
