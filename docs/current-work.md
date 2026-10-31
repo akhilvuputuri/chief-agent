@@ -10,6 +10,16 @@ A read-only measurement of the redirect rules on 142 real follow-ups found 8 of 
 
 See [journal 134](journey/134-agentwatch-on-the-host.md).
 
+# Releases pull the CI-built image — live since `b431444`, 29 October 2026
+
+`checks` builds the gateway image on main and publishes it with a provenance attestation. `release` verifies the attestation and sends the digest, and the host pulls that exact image instead of building it. The release step fell to 51 s, from 248–420 s (median 333 s) for host builds after #352.
+
+- The image build transpiles with esbuild; CI's `typecheck` gates every release.
+- A manual release can still build on the host: `gh workflow run deploy.yml --ref main -f host_build=true`.
+- Local sessions reach the host with `ssh chief-prod`, an operator key on the owner's Mac.
+
+See [journal 132](journey/132-ci-built-gateway-image.md).
+
 # Implicit redirect feedback — live in `bc4c5c0`, 29 October 2026
 
 Issue #323 phase 4, reworked because the owner will not rate answers. With trace export on, the owner's next message after a turn ("try again", "do something else", a correction, or the same request rephrased) becomes a `user_redirected` score on that turn's trace in agentwatch; any other reply scores false. It uses text patterns only, with no model call, and only fixed labels leave the process. Production sets no endpoint, so it is off there. agentwatch can also run LLM judges on sampled traces, but Chief's spans carry no message content. Pending: measure how often the rules fire on real messages (owner approval), and decide on production export and any content export. See [tracing](tracing.md#implicit-feedback) and [journal 133](journey/133-implicit-redirect-feedback.md).
