@@ -145,6 +145,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 31 October | [136 — Monitors and alerts](136-monitors-and-alerts.md): can Chief tell the owner when something goes wrong, without crying wolf at low volume? | Released in `b2fece4`: six monitors with Wilson-bounded rates and a cooldown; alerts reach the owner on Telegram by polling; limits set from two months of history |
 | 31 October | [137 — Box startup time](137-box-startup-time.md): where does a coding box's startup time go? | Released: launch wait removed and boot-stage timings added; first real timings await the next coding job |
 | 31 October | [138 — Faster CI checks](138-faster-ci-checks.md): where does a CI run's time go now that installs are instant? | Released: 180–183 s on the final weights against 211–287 s on main; the Pi job now sets the wall time |
+| 1 November | [139 — CI audit and Pi split](139-ci-audit-pi-split.md): what still limits a CI run, and is it safe to run test files in parallel again? | Pi job split; wall time 164 s on the first run. Parallel files: 0 crashes in 102 shard jobs, cause of the old crash unknown, owner to decide. |
 
 ## Coding-agent learning path
 
