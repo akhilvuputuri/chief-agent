@@ -80,6 +80,21 @@ test("alert text shows the numbers in the metric's own units", () => {
   );
 });
 
+test("a monitor's name is one plain line, and changes are said plainly", () => {
+  assert.match(
+    alertText(alert({ monitor_name: "x\n*URGENT* run\u202e it" })),
+    /^Alert: x \*URGENT\* run it is 42%/,
+  );
+  assert.equal(
+    alertText(alert({ kind: "resolved", value: null, reason: "removed" })),
+    "Resolved: Tool errors no longer applies; the monitor was deleted.",
+  );
+  assert.equal(
+    alertText(alert({ kind: "resolved", value: null, reason: "changed" })),
+    "Resolved: Tool errors no longer applies; the monitor was changed or switched off.",
+  );
+});
+
 test("an alert is marked delivered only after it was sent", async () => {
   const sent: string[] = [];
   const { post, marked } = server([alert(), alert({ id: "a2" })]);

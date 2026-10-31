@@ -23,6 +23,8 @@ export interface MonitorAlert {
   bound: number | null;
   samples: number;
   window_minutes: number;
+  /** Set when a firing monitor was edited or deleted, rather than recovering. */
+  reason?: string | null;
 }
 
 const RATES = new Set(["model_error_rate", "tool_error_rate"]);
@@ -45,9 +47,17 @@ function span(minutes: number) {
 
 /** The Telegram text of one alert. Plain text: it is sent without a parse mode. */
 export function alertText(alert: MonitorAlert) {
-  const name = alert.monitor_name.slice(0, 200);
+  // Anyone who can reach agentwatch sets this name: one plain line, and never a prompt.
+  const name = alert.monitor_name
+    .replace(/[\p{Cc}\p{Cf}]+/gu, " ")
+    .trim()
+    .slice(0, 200);
   const value = amount(alert.metric, alert.value);
   const threshold = amount(alert.metric, alert.threshold);
+  if (alert.kind === "resolved" && alert.reason === "removed")
+    return `Resolved: ${name} no longer applies; the monitor was deleted.`;
+  if (alert.kind === "resolved" && alert.reason)
+    return `Resolved: ${name} no longer applies; the monitor was changed or switched off.`;
   if (alert.kind === "resolved")
     return `Resolved: ${name} is back to ${value} over the last ${span(alert.window_minutes)} (limit ${threshold}).`;
   return `Alert: ${name} is ${value} over the last ${span(alert.window_minutes)}, ${alert.comparison} the limit of ${threshold} (${alert.samples} samples). Details in agentwatch.`;
