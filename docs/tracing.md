@@ -79,11 +79,11 @@ Where the content goes is the endpoint's business: in production it is the agent
 
 agentwatch can ask a model about each new conversation turn and store its answer as a score ([agentwatch's design notes](https://github.com/akhilvuputuri/agentwatch/blob/main/docs/design.md#llm-judges)). On the host, the `agentwatch` service gets `OPENROUTER_API_KEY` from the host `.env` (the gateway's own key; agentwatch reads it only when a switched-on judge calls a model) and asks OpenRouter to report each call's cost.
 
-The owner approved one judge on 30 October:
+The owner approved one judge on 30 October; it has been on since 31 October:
 
 - **What it judges:** conversation turns only (`sessions_only`): a turn's root carries the owner's message and the final model output; background jobs have no question and are skipped. Every new turn is sampled, from when the judge is switched on; history is not judged.
 - **Model:** `openai/gpt-6.1-sol`, a different family from Chief's main model, so it is not grading its own answers.
-- **Question:** did the reply do what the owner asked, correctly and completely, given what the tools returned; a `true`/`false` score named `answer_ok`, with a one-sentence explanation.
+- **Question:** judging only from the owner's message and the final output, did the assistant do what was asked, correctly and completely; a `true`/`false` score named `answer_ok`, with a one-sentence explanation. It does not see tool results, so it cannot check facts: it is told not to mark an answer wrong for that, and to look for a missed or misread request, an incomplete answer, or a contradiction.
 - **Limit:** 20 model calls in any 24 hours, failures included; beyond that, turns are recorded `OVER_LIMIT` and never judged later.
 
 Create, change or switch it off through agentwatch's Judges page or API, over the SSH tunnel ([lightsail](lightsail.md#traces-agentwatch)). **The key.** agentwatch's API has no login, so whoever can reach it (the SSH tunnel, a shell on the host, another container on the Compose network) could otherwise point a judge at their own server and receive the key, or raise its spending. On the host, agentwatch therefore starts with a judge policy it cannot be talked out of: judges may call only `https://openrouter.ai/api/v1`, use only `OPENROUTER_API_KEY`, and have at most 50 calls a day. Those who can reach agentwatch can already read the host's `.env`, so this is a new route for the key rather than new readers; a separate OpenRouter key with its own credit limit would cap spend and could be revoked alone.

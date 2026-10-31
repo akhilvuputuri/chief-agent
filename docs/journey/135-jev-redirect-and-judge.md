@@ -1,7 +1,7 @@
 # 135 — Can Chief catch the pushback its text rules miss, and can a model judge its answers?
 
 Work date: 2026-10-30 (Singapore). Written: 2026-10-30.
-Status: in review. Jev's redirect question is code-complete; the judge waits for agentwatch's key and a new image through an operator rollout.
+Status: released. Jev's redirect question in `a8fd80c`; the `answer_ok` judge on since the agentwatch update of `de00871` (31 October). Neither has been measured against the owner's own view yet.
 
 ## User-visible problem and preceding iteration
 
@@ -63,7 +63,21 @@ Running the judge on the host needs agentwatch to hold an OpenRouter key and a n
 
 The judge itself (`answer_ok`, `openai/gpt-6.1-sol`, conversations only, 20 calls a day) is created through the API after the rollout ([tracing](../tracing.md#judging-traces)).
 
+### Release closure — 2026-10-31
+
+**Jev.** [PR 369](https://github.com/akhilvuputuri/chief-agent/pull/369) merged at the approved head `ac5d403` as `a8fd80c` after four review rounds. The release workflow deployed it with health passing. At the first check afterwards, two real turns carried `jev_redirect_probability` (mean 0.895), and both counted as redirected. Two turns are no evidence either way.
+
+**agentwatch update.** [PR 370](https://github.com/akhilvuputuri/chief-agent/pull/370) merged at the approved head `3684257` as `de00871`. The reviewer judged it safe to run. The operator ran `deploy-agentwatch-update.py` from an exact archive, with hashes matching on both sides and the merged tree identical to the reviewed head. It printed `{"agentwatch": "…@sha256:1d5aeed0…", "healthy": true}` and exited 0. The gateway stayed up throughout (39 hours of uptime, unchanged).
+
+**The policy, checked live.** The running server refused a judge with another endpoint, another key variable, and a limit over 50, each with its reason.
+
+**The judge.** `answer_ok` was created switched off and tried once on a real turn: HTTP 200, 444 input and 113 output tokens, $0.002 reported. It was then switched on, with no problem reported. At that size the limit of 20 a day is about $0.04 a day; long turns cost more.
+
+**Still unmeasured:** whether the judge or Jev agrees with the owner.
+
+**Known gap:** `deploy-agentwatch-update.py` does not check the `command` arguments, so a later change could drop the judge policy or allow any host and still pass it. Review of main is the guard for now; a follow-up adds the check.
+
 ## Follow-up and next iteration
 
-- The judge: agentwatch#15 (conversations-only judges, OpenRouter cost), a rollout giving agentwatch the OpenRouter key and the new image, then a judge created through the API.
+- Make the update script require the judge policy's arguments and refuse `--allow-host "*"`.
 - After a week of messages, compare `jev_redirect_probability` with the rules' flags and the judge's verdicts, and set the threshold from that.
