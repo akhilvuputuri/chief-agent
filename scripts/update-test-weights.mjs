@@ -75,8 +75,12 @@ if (
     allTestFiles().map((file) => [file, readFileSync(file, "utf8")]),
   );
   const weights = weightsFromLog(readFileSync(0, "utf8"), testTitles(sources));
-  if (Object.keys(weights).length === 0)
-    throw new Error("No test durations found in that log");
+  // A cut-off log would otherwise silently drop files and under-weight the last one.
+  const expected = Object.keys(sources).length;
+  if (Object.keys(weights).length < expected * 0.95)
+    throw new Error(
+      `Only ${Object.keys(weights).length} of ${expected} test files have durations; is that log complete?`,
+    );
   writeFileSync(
     "tests/test-weights.json",
     `${JSON.stringify(weights, null, 2)}\n`,
