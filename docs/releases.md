@@ -1,3 +1,11 @@
+## Box launch wake-up and boot timings; faster CI (31 October 2026)
+
+- **Box startup.** [PR 376](https://github.com/akhilvuputuri/chief-agent/pull/376) (`304d691`): a requested box starts launching at once instead of waiting for the next 15 s timer tick. Boxes report six boot stages, logged as `box.boot`, and Pi checks report how long they took.
+- **Worker image.** [PR 380](https://github.com/akhilvuputuri/chief-agent/pull/380) (`557aa3f`) pins `sha256:a5bdecec…`, built from `304d691`, after the gateway released. Read-only host check: release `557aa3f`, gateway and agentwatch healthy.
+- **CI.** [PR 379](https://github.com/akhilvuputuri/chief-agent/pull/379) (`9973a81`): test shards balanced by recorded time, esbuild in test jobs, pinned ripgrep, pip cache, and one redundant Pi test run removed. Three runs on the final weights took 180–183 s, against 211–287 s across the last 13 runs on main, with all 1,422 tests accounted for.
+- **Review.** Independent review (Claude Opus 5.5) approved each merged head: `c01e5ff` (#376), `7efc111` (#380) and `ff0ca04` (#379).
+- **Not yet observed.** No coding box has launched since, so the shorter launch wait, the boot timings and Kite's install time in a job are unmeasured.
+
 ## Installed `b2fece4` by operator update and release — monitors and Telegram alerts (#323)
 
 - **What merged.** [PR 374](https://github.com/akhilvuputuri/chief-agent/pull/374) merged as `b2fece4`: the gateway polls agentwatch for undelivered alerts every minute and sends them to the owner on Telegram; `compose.yaml` pins the image from agentwatch `3bfb6c3` (agentwatch#17), which adds monitors and upgrades its database to schema 9. No inbound route or shared secret.

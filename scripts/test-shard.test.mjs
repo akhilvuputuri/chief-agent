@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { allTestFiles, assignShards, parseShard } from "./test-shard.mjs";
-import { testTitles, weightsFromLog } from "./update-test-weights.mjs";
+import {
+  assertComplete,
+  testTitles,
+  weightsFromLog,
+} from "./update-test-weights.mjs";
 
 test("every test file lands in exactly one shard, including unrecorded ones", () => {
   const files = allTestFiles();
@@ -94,4 +98,22 @@ test("weights credit templated titles, and a literal title beats a template", ()
     "tests/exact.test.ts": 1,
     "tests/loop.test.ts": 3,
   });
+});
+
+test("a log is refused unless every shard reached its summary", () => {
+  const row = (shard, text) =>
+    `tests ${shard}/2\tstep\t2026-10-31T09:06:38.1Z ${text}`;
+  const finished = (shard) =>
+    [row(shard, "ok 1 - a"), row(shard, "# tests 1")].join("\n");
+  assert.doesNotThrow(() =>
+    assertComplete([finished(1), finished(2)].join("\n")),
+  );
+  // Cut off inside the second shard, the way a truncated log looks.
+  assert.throws(
+    () => assertComplete([finished(1), row(2, "ok 1 - a")].join("\n")),
+    /Only 1 of 2/,
+  );
+  // A whole shard missing, and a log with no shards at all.
+  assert.throws(() => assertComplete(finished(1)), /Only 1 of 2/);
+  assert.throws(() => assertComplete("format\tstep\tnothing"), /Only 0/);
 });
