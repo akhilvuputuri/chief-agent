@@ -33,7 +33,7 @@ _"Every night at 11, research these topics and send me a sourced summary."_
 
 ## Add to it
 
-Ask Chief for what's missing, or wire it in yourself:
+Ask Chief for what's missing, and it builds it on the [Pi](https://github.com/earendil-works/pi) coding runtime. Or wire it in yourself:
 
 | Add              | How                                                                     |
 | ---------------- | ----------------------------------------------------------------------- |
