@@ -1,7 +1,7 @@
 # 136 — Can Chief tell the owner when something goes wrong, without crying wolf at low volume?
 
 Work date: 2026-10-31 (Singapore). Written: 2026-10-31.
-Status: in progress. Telegram delivery is written and tested; agentwatch's monitors are in review, and the image reaches the host through an operator update.
+Status: in progress. agentwatch's monitors are merged (agentwatch#17, `3bfb6c3`); this PR pins that image and adds Telegram delivery. The image reaches the host through an operator update.
 
 ## User-visible problem and preceding iteration
 
@@ -30,6 +30,22 @@ Status: in progress. Telegram delivery is written and tested; agentwatch's monit
 - **Polling rather than a webhook.** A webhook needs an inbound route on the gateway and a shared secret, or agentwatch would need the Telegram token. Having the gateway poll undelivered alerts needs neither: agentwatch stores no URL or secret, and its API, which has no login, cannot be used to send data anywhere.
 - **A statistical bound for rates.** Chief makes few calls, so one failure of three is 33%. A rate fires only when its 95% Wilson lower bound clears the limit, and recovers when the rate itself is back. Totals such as cost compare the value directly.
 - **Limits from history.** Each limit sits above the busiest or worst day seen, or at about twice the baseline or more.
+
+## Implementation and review
+
+- agentwatch#17: monitors, the Wilson rule, the alert state machine, the Alerts page.
+- [src/trace-alerts.ts](../../src/trace-alerts.ts): delivery from [src/main.ts](../../src/main.ts), only with export on.
+- `compose.yaml`: pins the image from agentwatch `3bfb6c3`, installed by [scripts/deploy-agentwatch-update.py](../../scripts/deploy-agentwatch-update.py).
+- Design: [tracing](../tracing.md#monitors-and-alerts).
+
+Independent review (Opus 5.5) of agentwatch#17 requested changes:
+
+- **Flapping (blocking).** Metrics compared by their value alone could flap: a simulated `trace_count` monitor wrote 17 alerts in 20 minutes. Monitors now have a cooldown (60 minutes by default), and the same simulation writes 1.
+- **A low-volume outage was hidden.** 5 failures in 5 calls did not fire under a default of 10 samples. Rates now default to 3, since the bound already guards them.
+- **Edits while firing.** A rename sent a second alert, and an edit that cleared a firing monitor sent nothing. Now a rename sends nothing, and an edit or delete sends a resolved alert with a reason.
+- **Validation.** A rate limit of `5`, meaning 5%, could never fire, and a monitor name could carry newlines and bidi characters into Telegram. Both are refused, and the relay also reduces a name to one plain line.
+
+Known and left: server downtime counts as good time for a firing monitor, so it can resolve early after an outage.
 
 ## Follow-up and next iteration
 
