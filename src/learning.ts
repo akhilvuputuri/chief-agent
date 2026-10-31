@@ -16,6 +16,7 @@ import { normalizeForQuote } from "./quote-match.js";
 import { runFamily } from "./run-family.js";
 import { jsonSchema } from "./runtime.js";
 import { Spending, spending } from "./spending.js";
+import { scrubTrace } from "./trace-scrub.js";
 
 export const LEARNER_PROMPT_VERSION = "learner-v2";
 
@@ -468,7 +469,7 @@ export class Learner {
         return await finish("completed", { ...counts, modelCalls: 0 });
       }
       const outcome = await spending.run(new Spending(this.db, user, run), () =>
-        this.propose(user, evidence),
+        this.propose(user, run, id, evidence),
       );
       // Checked again before applying: an owner turn during the last call also defers.
       if (outcome.deferred || (await this.ownerActive(user)))
@@ -821,7 +822,25 @@ export class Learner {
     return item;
   }
 
-  private async propose(user: string, evidence: Evidence[]) {
+  /**
+   * A private record of what the learner read, said and was told. Event types the ops-log
+   * projection does not list stay in Postgres and are never shipped off the host.
+   */
+  private trace(
+    user: string,
+    run: string,
+    type: string,
+    data: Record<string, unknown>,
+  ) {
+    return event(this.db, user, run, type, scrubTrace(data));
+  }
+
+  private async propose(
+    user: string,
+    run: string,
+    learnerRun: string,
+    evidence: Evidence[],
+  ) {
     const items = await this.store.active(user);
     const ownerKeys = new Set(
       items.filter((r) => r.kind === "fact" && !isLearned(r)).map((r) => r.key),
@@ -867,6 +886,12 @@ export class Learner {
         }),
       },
     ];
+    await this.trace(user, run, "learner.input", {
+      learnerRun,
+      promptVersion: LEARNER_PROMPT_VERSION,
+      items: evidence.map(shown),
+      current,
+    });
     const accepted: Array<{ name: ToolName; args: any }> = [];
     let refused = 0;
     let modelCalls = 0;
@@ -885,6 +910,14 @@ export class Learner {
       modelCalls++;
       messages.push(generation.message);
       const calls = generation.message.tool_calls ?? [];
+      await this.trace(user, run, "learner.model_call", {
+        learnerRun,
+        call: modelCalls,
+        model: generation.model,
+        finishReason: generation.finishReason,
+        content: generation.message.content,
+        toolCalls: calls.map((c) => c.function.name),
+      });
       if (!calls.length) break;
       let finished = false;
       for (const call of calls) {
@@ -915,6 +948,14 @@ export class Learner {
           }
         }
         if ("refused" in result) refused++;
+        await this.trace(user, run, "learner.proposal", {
+          learnerRun,
+          call: modelCalls,
+          tool: call.function.name,
+          // As the model sent it, so a malformed proposal can be read too.
+          arguments: call.function.arguments,
+          verdict: result,
+        });
         messages.push({
           role: "tool",
           tool_call_id: call.id,
@@ -998,10 +1039,21 @@ export class Learner {
       const untrusted = [...new Set(tasks.flatMap((t) => t.untrusted))];
       const key = keyOf(name, args);
       const existing = active.get(key);
+      const outcome = (action: string, extra: Record<string, unknown> = {}) =>
+        this.trace(user, run, "learner.applied", {
+          learnerRun,
+          tool: name,
+          key,
+          action,
+          ...extra,
+        });
       try {
         if (name === "learn_retire") {
           // Only learned items are retired here; the owner's own facts are theirs.
-          if (!existing || !isLearned(existing)) continue;
+          if (!existing || !isLearned(existing)) {
+            await outcome("skipped_not_learned");
+            continue;
+          }
           await this.store.retire(
             user,
             key,
@@ -1014,6 +1066,7 @@ export class Learner {
             source,
           );
           written.retired++;
+          await outcome("retired");
           continue;
         }
         // The owner may have saved this key during the run; their fact stays.
@@ -1022,6 +1075,9 @@ export class Learner {
           (name === "learn_fact" && existing && !isLearned(existing))
         ) {
           written.unchanged++;
+          await outcome(
+            existing?.value === args.value ? "unchanged" : "skipped_owner_fact",
+          );
           continue;
         }
         const saved = await this.store.write(user, {
@@ -1040,8 +1096,12 @@ export class Learner {
         if (saved.flags.length) written.flagged++;
         if (name === "learn_fact") written.facts++;
         else written.lessons++;
+        await outcome("written", { revisionId: saved.id, flags: saved.flags });
       } catch (error) {
         // A kind clash or similar refusal skips the item, never the run.
+        await outcome("failed", {
+          error: error instanceof Error ? error.name : "unknown",
+        });
         opsLog("learner.item_refused", "warn", {
           runId: run,
           ...errorFields(error),

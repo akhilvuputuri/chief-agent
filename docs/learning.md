@@ -133,6 +133,22 @@ Accepted items are applied after the run ends, through `MemoryStore`, with `orig
 
 While a run is calling the model, its `runtime_runs` row is `running`, so the release and rollout guards that wait for idle (`scripts/cloud-release.py`, the `deploy-*.py` scripts) and the coding automation's idle check wait for it too, for at most ten calls.
 
-### Telemetry
+### Telemetry and the private record
 
 `learner.finished` logs the state and counts (tasks reviewed, successes, pitfalls, facts, lessons, retirements, refusals, flagged, model calls). `learner.failed` and `learner.item_refused` log the error class only.
+
+Each run also keeps a private record in the Postgres `events` table, under the run's `runtime_runs` ID, with credentials scrubbed. These event types are not in the ops-log projection, so their text never leaves the host:
+
+- `learner.input`: the items and current memories the model was shown, and the prompt version.
+- `learner.model_call`: each call's model, finish reason, text and the tools it called.
+- `learner.proposal`: each tool call as the model sent it, with the host's verdict and refusal reason.
+- `learner.applied`: what finally happened to each accepted item (`written` with its revision ID, `unchanged`, `skipped_owner_fact`, `skipped_not_learned`, `failed`).
+
+A pre-empted run keeps its record, so a deferred attempt can be read too. Runs before this record existed left counts only. To read the latest run's proposals on the host:
+
+```sql
+SELECT e.type, e.data FROM events e JOIN learner_runs l ON l.run_id = e.run_id
+WHERE l.id = (SELECT id FROM learner_runs ORDER BY started_at DESC LIMIT 1)
+  AND e.type IN ('learner.model_call', 'learner.proposal', 'learner.applied')
+ORDER BY e.id;
+```
