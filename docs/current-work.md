@@ -1,3 +1,7 @@
+# A judge and Jev's redirect question — live, 31 October 2026
+
+Issue #323. Each conversation turn is now judged by `answer_ok` in agentwatch (`openai/gpt-6.1-sol`, at most 20 calls a day, about $0.002 each on a short turn). Each follow-up message is also checked by Jev for pushback on the last reply, for about $0.00003, in the effort decision's request. agentwatch's key can reach only OpenRouter, by a server policy its API cannot change. Pending: whether either agrees with the owner, and tuning Jev's 0.5 threshold from recorded probabilities. See [journal 135](journey/135-jev-redirect-and-judge.md).
+
 # agentwatch on the host — live since `6e90db7`, 29 October 2026
 
 Issue #323. Chief now exports every turn's trace to an agentwatch service on its own host, including message content. The content covers the owner's message, the prompts and replies, and tool arguments and results, with credentials scrubbed. Traces are kept 90 days and can be viewed through an SSH tunnel at `localhost:14318` ([lightsail](lightsail.md#traces-agentwatch)). `user_redirected` scores and LLM judges now have real traces to work on. A judge has not been switched on; that is a paid model the owner chooses.

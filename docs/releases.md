@@ -1,3 +1,14 @@
+## Installed `de00871` by operator update, and released `a8fd80c` — a judge and Jev's redirect question (#323)
+
+- **What merged.**
+  - [PR 369](https://github.com/akhilvuputuri/chief-agent/pull/369) (`a8fd80c`): the first effort decision also asks Jev whether a message pushes back on the last reply; at 0.5 or above, where the text rules found nothing, the earlier turn scores `user_redirected` with label `pushback`, and the raw probability is recorded.
+  - [PR 370](https://github.com/akhilvuputuri/chief-agent/pull/370) (`de00871`): agentwatch moves to the image from agentwatch `8a5efdf`, holds the OpenRouter key, and starts with a judge policy (OpenRouter only, that key only, at most 50 calls a day). `scripts/deploy-agentwatch-update.py` is a reusable rollout for agentwatch-only Compose changes.
+- **Review.** Independent review (Claude Opus 5.5) took four rounds on PR 369, including the discovery that structured answers would have switched Jev off. On PR 370 it found the key exposure the policy now closes, and a too-permissive block check, now an allow-list. Both were approved at their exact heads, and hosted CI passed.
+- **Release.** `a8fd80c` went out through the release workflow. The operator ran the update for `de00871` on 31 October; the gateway was not touched. `answer_ok` (`openai/gpt-6.1-sol`, conversations only, 20 calls a day) was tried on one real turn for $0.002 and switched on.
+- **Pending:** agreement of Jev and the judge with the owner; tuning Jev's threshold from recorded probabilities; a check of `command` arguments in the update script.
+
+[Journal 135](journey/135-jev-redirect-and-judge.md#release-closure--2026-10-31).
+
 ## Deployed `e99ee8d` (untagged) — persisted mail index (migration 033)
 
 - **What merged.** [PR 362](https://github.com/akhilvuputuri/chief-agent/pull/362) merged as `e99ee8d69b0c32153ed2b7976a8bd1ab4636731a` (version 0.3.109).
