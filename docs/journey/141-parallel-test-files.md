@@ -27,7 +27,9 @@ Journal 123's condition for retrying asked for a cause or fix as well as repeate
 
 ## Verification and outcome
 
-Pending.
+**Measured, run 41227010626 on this change:** wall time 137 s, against 164–168 s with the Pi split alone. `test:ts` took 59–86 s and the test jobs 79–107 s. `scripts, evals and Python runtime` (119 s) and `Pi worker boundary` (118 s) now set wall time. The shards ran 1,428 tests: 1,427 passed, 0 failed, 1 skipped.
+
+**Measured, first real docs-only PR ([PR 388](https://github.com/akhilvuputuri/chief-agent/pull/388), run 41226844802):** 70 s with every code job skipped, which proves [journal 140](140-docs-only-checks.md)'s decision on a real diff.
 
 ## Follow-up and next iteration
 
