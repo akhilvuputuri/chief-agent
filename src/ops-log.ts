@@ -123,6 +123,7 @@ const fields: Record<string, Shape> = {
   uncertainCount: "count",
   abortedCount: "count",
   contentCaptured: "bool",
+  deliveredCount: "count",
   costUsd: "number",
   transient: "bool",
   approved: "bool",
