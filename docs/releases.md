@@ -1,3 +1,11 @@
+## Parallel test files in CI (1 November 2026)
+
+- **What merged.** [PR 389](https://github.com/akhilvuputuri/chief-agent/pull/389) (`a02cbd8`): CI test shards run four test files at a time, by the owner's decision. Everywhere else stays serial. CI configuration only.
+- **Result.** `checks` took 136–138 s on the PR and 151 s on main with the gateway image.
+- **Review.** Independent review (Claude Opus 5.5) approved the merged head `e7a74c3`.
+- **Release.** `checks` on main passed (run 41227670597). The automatic release (run 41227879255) succeeded, and the host reports `a02cbd8` with a healthy gateway. A release for the superseded `d5ac1a3` (run 41227899983) was refused at "Verify current main", as designed.
+- **Open risk.** The crash from journal 123 is still unexplained. See [journal 141](journey/141-parallel-test-files.md) for what to watch for.
+
 ## Docs-only checks (1 November 2026)
 
 - **What merged.** [PR 387](https://github.com/akhilvuputuri/chief-agent/pull/387) (`d728e91`): a docs-only pull request skips the jobs that build and run code. `format and types` and the required `test` gate still run, and main still runs everything. CI configuration only.
