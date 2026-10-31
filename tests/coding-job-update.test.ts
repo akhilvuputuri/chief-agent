@@ -280,6 +280,36 @@ test("a report failure stays when the current step's model is unchanged", async 
   assert.equal(piState.sessionScope, session);
 });
 
+test("an inherited time limit does not block a model change", async (t) => {
+  const { f, row, update, id } = await setup(t);
+  const before = await row();
+  await f.db.query("UPDATE coding_jobs SET settings=$2::jsonb WHERE id=$1", [
+    id,
+    JSON.stringify({
+      ...before.settings,
+      limits: { ...before.settings.limits, ms: 14_400_000 },
+    }),
+  ]);
+  await update({ coderModel: opus });
+  assert.equal((await row()).settings.model, opus);
+});
+
+test("squad tool use counts toward the tool-call limit", async (t) => {
+  const { f, row, update, id } = await setup(t);
+  const before = await row();
+  await f.db.query("UPDATE coding_jobs SET checkpoint=$2::jsonb WHERE id=$1", [
+    id,
+    JSON.stringify({
+      plan: before.checkpoint.plan,
+      patch: "",
+      summary: "",
+      files: [],
+      squadState: { toolsUsed: 10 },
+    }),
+  ]);
+  await assert.rejects(update({ limits: { tools: 5 } }), /already used/);
+});
+
 test("a limit is refused when it cannot take effect", async (t) => {
   const { update } = await setup(t);
   await assert.rejects(update({ limits: { tools: 2 } }), /already used/);

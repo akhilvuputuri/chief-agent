@@ -888,7 +888,7 @@ export class CodingController {
       ...(a.reviewerModel ? { reviewerModel: a.reviewerModel } : {}),
       limits: { ...job.settings.limits, ...a.limits },
     };
-    if (job.settings.runtime === "pi" && next.limits.ms > PI_ATTEMPT_MS)
+    if (job.settings.runtime === "pi" && (a.limits?.ms ?? 0) > PI_ATTEMPT_MS)
       throw new ToolValidationError(
         "That time limit is above the most one attempt can run",
       );
@@ -1889,11 +1889,12 @@ export class CodingController {
       `WITH changed AS (
       UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',question='',result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,used_models=0,model_busy=false,publication_started=false,lease=NULL,lease_until=NULL,summary='Retrying once automatically after a transient fault',updated_at=now()
       WHERE id=$1 AND revision=$2 AND state='paused' AND NOT publication_started AND cleanup IN ('none','complete') AND (lease IS NULL OR lease_until<now())
+        AND settings=$5::jsonb
         AND NOT EXISTS(SELECT 1 FROM coding_events s WHERE s.job_id=$1 AND s.event_key LIKE 'settings:%' AND s.created_at>=coding_jobs.updated_at) RETURNING id,revision,mode
     ), revised AS (
       INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$3,$4,mode FROM changed RETURNING job_id
     ) INSERT INTO coding_events(job_id,event_key,payload) SELECT job_id,$3,jsonb_build_object('summary','Retrying once automatically after a transient fault. If it pauses again, it will wait for you.') FROM revised RETURNING job_id`,
-      [j.id, j.revision, key, message],
+      [j.id, j.revision, key, message, JSON.stringify(j.settings)],
     );
     if (retried.rows.length) opsLog("coding.auto_retry", "info", { ref: j.id });
   }
