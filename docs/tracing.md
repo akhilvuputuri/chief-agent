@@ -92,7 +92,7 @@ A judge's verdicts are evidence to read beside `user_redirected`, not ground tru
 
 ## Monitors and alerts
 
-agentwatch watches metrics over a trailing window and raises an alert when one crosses its limit, and again when it recovers ([agentwatch's design notes](https://github.com/akhilvuputuri/agentwatch/blob/main/docs/design.md#monitors-and-alerts)). A rate fires only when its 95% Wilson bound clears the limit, so a few failures at low volume do not alert.
+agentwatch watches metrics over a trailing window and raises an alert when one crosses its limit, and again when it recovers ([agentwatch's design notes](https://github.com/akhilvuputuri/agentwatch/blob/main/docs/design.md#monitors-and-alerts)). A rate fires only when its 95% Wilson bound clears the limit, so a few failures at low volume do not alert. Once firing, a monitor resolves only after staying good for its cooldown (60 minutes by default), so it cannot flap; editing or deleting a firing monitor sends a resolved alert saying so.
 
 [src/trace-alerts.ts](../src/trace-alerts.ts) delivers them: with export on, the gateway asks agentwatch for undelivered alerts every minute, over the same private network as trace export, sends each to the owner on Telegram, then marks it delivered. So delivery is at least once, at most five alerts a minute. There is no inbound route or shared secret, and agentwatch never holds the Telegram token. Alerts carry only a monitor's name and numbers. If agentwatch is down, the gateway logs `trace.alerts_failed` at most once an hour; turns are unaffected.
 
@@ -101,8 +101,8 @@ The monitors on the host are created through agentwatch's Alerts page or API, ov
 | Monitor            | Metric, window                             | Fires      | History                          |
 | ------------------ | ------------------------------------------ | ---------- | -------------------------------- |
 | Daily cost         | `cost_usd`, 24 h                           | above $5   | busiest day $3.39, median $0.26  |
-| Model errors       | `model_error_rate`, 6 h, at least 10 calls | above 15%  | 2.3% overall                     |
-| Tool errors        | `tool_error_rate`, 24 h, at least 20 calls | above 30%  | 12.8% overall                    |
+| Model errors       | `model_error_rate`, 6 h, at least 5 calls  | above 15%  | 2.3% overall                     |
+| Tool errors        | `tool_error_rate`, 24 h, at least 10 calls | above 30%  | 12.8% overall                    |
 | Slow model calls   | `model_p95_ms`, 6 h, at least 10 calls     | above 60 s | worst day 35 s                   |
 | Redirected answers | `user_redirected`, 7 days, at least 10     | above 30%  | 6% as detected, likely about 12% |
 | Judged answers     | `answer_ok`, 7 days, at least 10           | below 60%  | none yet                         |

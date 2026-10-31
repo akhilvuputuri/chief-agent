@@ -49,7 +49,7 @@ function span(minutes: number) {
 export function alertText(alert: MonitorAlert) {
   // Anyone who can reach agentwatch sets this name: one plain line, and never a prompt.
   const name = alert.monitor_name
-    .replace(/[\p{Cc}\p{Cf}]+/gu, " ")
+    .replace(/[\p{Cc}\p{Cf}\s]+/gu, " ")
     .trim()
     .slice(0, 200);
   const value = amount(alert.metric, alert.value);
