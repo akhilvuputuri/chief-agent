@@ -73,6 +73,8 @@ const active = ["provisioning", "running"];
 export type PauseCause = "sandbox_stopped" | "heartbeat_lost";
 const hash = (v: unknown) =>
   createHash("sha256").update(canonicalJson(v)).digest("hex");
+/** The longest one Pi attempt runs, inside the box task's four-hour deadline. */
+const PI_ATTEMPT_MS = 10_800_000;
 /** The identity a Pi worker derives for a phase or session of this job's approved work. */
 const piIdentity = (
   job: CodingJob,
@@ -168,7 +170,7 @@ export class CodingController {
     // 40 minutes under CodeBuild's 45-minute cap.) Legacy runtimes keep their allocation.
     return Math.min(
       job.settings.limits.ms,
-      job.settings.runtime === "pi" ? 10_800_000 : job.settings.limits.ms,
+      job.settings.runtime === "pi" ? PI_ATTEMPT_MS : job.settings.limits.ms,
     );
   }
   private automation?: CodingAutomation;
@@ -806,6 +808,8 @@ export class CodingController {
   ) {
     const pi = job.checkpoint.piState;
     if (!pi?.sessionScope) return undefined;
+    // An earlier report failure would hold the new model to finishing a session it never saw.
+    const { reportFailure: _earlier, ...kept } = pi;
     if (pi.phase === "review") {
       const candidate = pi.reviewCandidate;
       const round = pi.reviewRound;
@@ -820,7 +824,6 @@ export class CodingController {
       )
         return undefined;
       // The host binds a review session to its candidate and round, so a fresh one is a new round.
-      const { reportFailure: _earlier, ...kept } = pi;
       return {
         ...kept,
         reviewRound: round + 1,
@@ -840,7 +843,7 @@ export class CodingController {
           (job.settings.leaderModel ?? job.settings.model) !==
             (next.leaderModel ?? next.model);
     return changed
-      ? { ...pi, sessionScope: hash([pi.sessionScope, requestKey]) }
+      ? { ...kept, sessionScope: hash([pi.sessionScope, requestKey]) }
       : undefined;
   }
   /**
@@ -885,6 +888,10 @@ export class CodingController {
       ...(a.reviewerModel ? { reviewerModel: a.reviewerModel } : {}),
       limits: { ...job.settings.limits, ...a.limits },
     };
+    if (job.settings.runtime === "pi" && next.limits.ms > PI_ATTEMPT_MS)
+      throw new ToolValidationError(
+        "That time limit is above the most one attempt can run",
+      );
     const hasLeader = job.settings.squad || job.settings.runtime === "pi";
     const changes = [
       ...(hasLeader
@@ -904,7 +911,12 @@ export class CodingController {
     ].filter(([, from, to]) => from !== to);
     if (!changes.length)
       throw new ToolValidationError("The job already has these settings");
-    if ((job.checkpoint.piState?.toolsUsed ?? 0) > next.limits.tools)
+    if (
+      Math.max(
+        job.checkpoint.piState?.toolsUsed ?? 0,
+        job.checkpoint.squadState?.toolsUsed ?? 0,
+      ) > next.limits.tools
+    )
       throw new ToolValidationError(
         "The tool-call limit is below what this job has already used",
       );
@@ -1876,7 +1888,8 @@ export class CodingController {
     const retried = await this.db.query(
       `WITH changed AS (
       UPDATE coding_jobs SET revision=revision+1,state='queued',stage='queued',question='',result=NULL,attempt_id=NULL,sandbox_id=NULL,heartbeat_at=NULL,attempt_deadline=NULL,used_models=0,model_busy=false,publication_started=false,lease=NULL,lease_until=NULL,summary='Retrying once automatically after a transient fault',updated_at=now()
-      WHERE id=$1 AND revision=$2 AND state='paused' AND NOT publication_started AND cleanup IN ('none','complete') AND (lease IS NULL OR lease_until<now()) RETURNING id,revision,mode
+      WHERE id=$1 AND revision=$2 AND state='paused' AND NOT publication_started AND cleanup IN ('none','complete') AND (lease IS NULL OR lease_until<now())
+        AND NOT EXISTS(SELECT 1 FROM coding_events s WHERE s.job_id=$1 AND s.event_key LIKE 'settings:%' AND s.created_at>=coding_jobs.updated_at) RETURNING id,revision,mode
     ), revised AS (
       INSERT INTO coding_revisions(job_id,revision,request_key,message,mode) SELECT id,revision,$3,$4,mode FROM changed RETURNING job_id
     ) INSERT INTO coding_events(job_id,event_key,payload) SELECT job_id,$3,jsonb_build_object('summary','Retrying once automatically after a transient fault. If it pauses again, it will wait for you.') FROM revised RETURNING job_id`,

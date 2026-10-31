@@ -240,9 +240,53 @@ test("a transiently paused job the owner changed is not retried automatically", 
   assert.equal((await row()).state, "paused");
 });
 
-test("the tool-call limit cannot go below what the job has used", async (t) => {
+test("a switched coder or reviewer does not inherit a report failure", async (t) => {
+  for (const [phase, field] of [
+    ["build", "coderModel"],
+    ["review", "reviewerModel"],
+  ] as const) {
+    const { f, row, update, id } = await setup(t, phase);
+    const before = await row();
+    await f.db.query(
+      "UPDATE coding_jobs SET checkpoint=$2::jsonb WHERE id=$1",
+      [
+        id,
+        JSON.stringify({
+          ...before.checkpoint,
+          piState: { ...before.checkpoint.piState, reportFailure: "Too long" },
+        }),
+      ],
+    );
+    await update({ [field]: opus });
+    const { piState } = (await row()).checkpoint;
+    assert.equal(piState.reportFailure, undefined);
+    assert.notEqual(piState.sessionScope, session);
+  }
+});
+
+test("a report failure stays when the current step's model is unchanged", async (t) => {
+  const { f, row, update, id } = await setup(t, "build");
+  const before = await row();
+  await f.db.query("UPDATE coding_jobs SET checkpoint=$2::jsonb WHERE id=$1", [
+    id,
+    JSON.stringify({
+      ...before.checkpoint,
+      piState: { ...before.checkpoint.piState, reportFailure: "Too long" },
+    }),
+  ]);
+  await update({ reviewerModel: opus });
+  const { piState } = (await row()).checkpoint;
+  assert.equal(piState.reportFailure, "Too long");
+  assert.equal(piState.sessionScope, session);
+});
+
+test("a limit is refused when it cannot take effect", async (t) => {
   const { update } = await setup(t);
   await assert.rejects(update({ limits: { tools: 2 } }), /already used/);
+  await assert.rejects(
+    update({ limits: { ms: 14_400_000 } }),
+    /most one attempt/,
+  );
 });
 
 test("a job update refuses active jobs, stale revisions, ineligible models and other owners", async (t) => {
