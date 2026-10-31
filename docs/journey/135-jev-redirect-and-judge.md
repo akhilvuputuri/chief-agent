@@ -75,7 +75,7 @@ The judge itself (`answer_ok`, `openai/gpt-6.1-sol`, conversations only, 20 call
 
 **Still unmeasured:** whether the judge or Jev agrees with the owner.
 
-**Closed afterwards:** `deploy-agentwatch-update.py` did not check the `command` arguments, so a later change could have dropped the judge policy or allowed any host and still passed it. It now refuses `*` as an argument and, when agentwatch holds the key, requires the OpenRouter endpoint, the key variable and a daily cap of at most 50.
+**Closed afterwards:** `deploy-agentwatch-update.py` did not check the `command` arguments, so a later change could have dropped the judge policy or allowed any host and still passed it. Its first fix searched for known flags, and review showed the server's parser also takes `--flag=value` and abbreviations, so `--allow-host=*` got through. It now allows only `serve` and exact pairs of reviewed flags and values, refuses `*` in a value and, when agentwatch holds the key, requires the OpenRouter endpoint, the key variable and a daily cap of at most 50.
 
 ## Follow-up and next iteration
 

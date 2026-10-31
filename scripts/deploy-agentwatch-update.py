@@ -66,6 +66,8 @@ COMMAND_VALUE = re.compile(rb'"([^"$\\]*)"')
 JUDGE_ENDPOINT = b'https://openrouter.ai/api/v1'
 JUDGE_KEY_ENV = b'OPENROUTER_API_KEY'
 MAX_JUDGE_DAILY = 50
+COMMAND_FLAGS = {b'--host', b'--allow-host', b'--retain-days', b'--memory-limit',
+                 b'--judge-endpoint', b'--judge-key-env', b'--judge-max-daily'}
 MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
 
 
@@ -166,21 +168,32 @@ def split_compose(content, which):
 
 
 def validate_command(command, environment):
-    """Refuses arguments that would undo the Host guard or, with a key, the judge policy."""
-    if b'*' in command:
-        raise RuntimeError('agentwatch command must not allow any host')
+    """Allows only `serve` and exact flag/value pairs, since the server's parser also takes
+    `--flag=value` and abbreviations; refuses anything that would undo the Host guard or,
+    with a key, the judge policy."""
+    if not command:
+        arguments = []
+    elif command[0] != b'serve' or len(command) % 2 != 1:
+        raise RuntimeError('agentwatch command must be serve with flag and value pairs')
+    else:
+        arguments = list(zip(command[1::2], command[2::2]))
+    values = {}
+    for flag, value in arguments:
+        if flag not in COMMAND_FLAGS or not value or value.startswith(b'-'):
+            raise RuntimeError('agentwatch command uses an argument outside the reviewed allow-list')
+        if b'*' in value:
+            raise RuntimeError('agentwatch command must not allow any host')
+        values.setdefault(flag, []).append(value)
+    if any(len(found) > 1 for flag, found in values.items() if flag != b'--allow-host'):
+        raise RuntimeError('agentwatch command repeats an argument')
     if b'OPENROUTER_API_KEY' not in environment:
         return
-
-    def values(flag):
-        return [command[i + 1] for i, item in enumerate(command[:-1]) if item == flag]
-
-    if values(b'--judge-endpoint') != [JUDGE_ENDPOINT]:
+    if values.get(b'--judge-endpoint') != [JUDGE_ENDPOINT]:
         raise RuntimeError('agentwatch with a key must pin --judge-endpoint to OpenRouter')
-    if values(b'--judge-key-env') != [JUDGE_KEY_ENV]:
+    if values.get(b'--judge-key-env') != [JUDGE_KEY_ENV]:
         raise RuntimeError('agentwatch with a key must pin --judge-key-env')
-    daily = values(b'--judge-max-daily')
-    if (len(daily) != 1 or not daily[0].isdigit() or not 1 <= int(daily[0]) <= MAX_JUDGE_DAILY):
+    daily = values.get(b'--judge-max-daily', [b''])[0]
+    if not daily.isdigit() or not 1 <= int(daily) <= MAX_JUDGE_DAILY:
         raise RuntimeError('agentwatch with a key must cap --judge-max-daily at ' + str(MAX_JUDGE_DAILY))
 
 

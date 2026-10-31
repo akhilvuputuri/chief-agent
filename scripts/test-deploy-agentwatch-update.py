@@ -299,12 +299,35 @@ class AgentwatchUpdateTests(unittest.TestCase):
         refused(STAGED_COMPOSE.replace('https://openrouter.ai/api/v1', 'https://evil.example/v1'),
                 'pin --judge-endpoint')
         refused(STAGED_COMPOSE.replace('"90",\n', '"90",\n        "--judge-endpoint",\n        "https://evil.example/v1",\n'),
-                'pin --judge-endpoint')
+                'repeats an argument')
         refused(STAGED_COMPOSE.replace('        "--judge-key-env",\n        "OPENROUTER_API_KEY",\n', ''),
                 'pin --judge-key-env')
         refused(STAGED_COMPOSE.replace('"50"', '"51"'), 'cap --judge-max-daily')
         refused(STAGED_COMPOSE.replace('        "--judge-max-daily",\n        "50",\n', ''),
                 'cap --judge-max-daily')
+        # The server's parser also takes --flag=value and abbreviations; none get through.
+        for extra, reason in (
+            ('--allow-host=*', 'flag and value pairs'),
+            ('--allow=*', 'flag and value pairs'),
+        ):
+            refused(STAGED_COMPOSE.replace('"90",\n', '"90",\n        "' + extra + '",\n'), reason)
+        for flag, value in (
+            ('--judge-endpoint=https://evil.example/v1', 'x'),
+            ('--judge-end', 'https://evil.example/v1'),
+            ('--judge-e=https://evil.example/v1', 'x'),
+            ('--judge-key-env=OTHER_API_KEY', 'x'),
+            ('--judge-k', 'OTHER_API_KEY'),
+            ('--judge-max-daily=10000', 'x'),
+            ('--judge-max', '10000'),
+            ('--db', '/tmp/x'),
+            ('--retain-days', '--demo'),
+        ):
+            refused(STAGED_COMPOSE.replace('"90",\n', '"90",\n        "' + flag + '",\n        "' + value + '",\n'),
+                    'outside the reviewed allow-list')
+        refused(STAGED_COMPOSE.replace('"serve"', '"demo"'), 'flag and value pairs')
+        refused(STAGED_COMPOSE.replace('"50"', '"50",\n        "--judge-max-daily",\n        "9"'), 'repeats an argument')
+        refused(STAGED_COMPOSE.replace('"90",\n', '"90",\n        "--allow-host",\n        "*.example",\n'),
+                'must not allow any host')
         # Without the key, no judge can call anything, so no policy is needed.
         _, block, _ = update.split_compose(LIVE_COMPOSE.encode(), 'Staged')
         self.assertEqual(update.validate_block(block), OLD_IMAGE)
