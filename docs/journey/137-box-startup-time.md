@@ -30,7 +30,7 @@ Every coding job waits for a fresh EC2 box before any work starts. [Journal 132]
 - **Launch:** `BoxController.onRequested` runs a reconciler pass right after a box is requested. A pass asked for during another pass runs right after it.
 - **Boot stages:** the boot script stamps six stages to `/var/lib/chief-box/boot-stages`, never failing the boot if a stamp fails.
   - The agent sends them once, with its first hello, and only then.
-  - The host validates names and times, then logs `box.boot` with milliseconds since launch for each stage and for the hello. Read it with `kite run logs:cloudwatch -- event --event box.boot`.
+  - The host validates names and times, then logs `box.boot` with milliseconds since launch for each stage and for the hello. Read it with `kite run logs:cloudwatch -- boot`.
   - The agent runs from a bare copy of `dist/boxes` with no `node_modules`, so the stage names live in a dependency-free module.
 - **Check durations:** the Pi runtime reports `kite ci: 0 in 1.4s`, so job progress shows how long each check took, including Kite's install. Progress text still accepts the older format from workers on older images.
 
