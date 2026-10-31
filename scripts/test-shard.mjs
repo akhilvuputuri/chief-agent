@@ -53,7 +53,7 @@ if (
     const weights = JSON.parse(readFileSync("tests/test-weights.json", "utf8"));
     files = assignShards(files, weights, count)[index - 1];
   }
-  const child = spawn("tsx", ["--test", "--test-concurrency=1", ...files], {
+  const child = spawn("tsx", ["--test", "--test-concurrency=4", ...files], {
     stdio: "inherit",
   });
   child.on("error", (error) => {
