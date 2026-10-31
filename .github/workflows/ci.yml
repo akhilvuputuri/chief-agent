@@ -70,7 +70,7 @@ jobs:
       - uses: ./.github/actions/setup-kite
       - uses: ./.github/actions/setup-ripgrep
       - run: kite ci
-      # Before any install in coding_runtime_pi: the images use the root lockfile, so test Pi against it.
+      # Before any install in coding_runtime_pi: Dockerfile.coding-pi uses the root lockfile, so test Pi against it.
       - run: kite run check:pi
       - name: Verify Pi package independence
         run: |

@@ -17,7 +17,7 @@ Status: Pi job split on [PR 386](https://github.com/akhilvuputuri/chief-agent/pu
 | `actions/checkout`       | median 2 s           | median 1 s           |
 | `setup-kite`             | median 2 s, p90 5 s  | median 3 s, p90 6 s  |
 
-**Measured, two runs after journal 138's final weights (41215085273, 41214790029):** `kite run test:ts` used 59.9% of all runner seconds. The Pi job took 133 and 172 s, of which one Docker and independence step took 83 and 112 s.
+**Measured, two runs after journal 138's final weights (41215085273, 41214790029):** `kite run test:ts` used 59.9% of all summed step seconds. The Pi job took 133 and 172 s, of which one Docker and independence step took 83 and 112 s.
 
 **Measured locally, on a 10-core Mac:**
 
@@ -45,7 +45,7 @@ Status: Pi job split on [PR 386](https://github.com/akhilvuputuri/chief-agent/pu
 
 **Measured, split job, two runs (41224227641, 41224599934):** wall time 164 and 168 s. `Pi worker boundary` took 119 and 122 s, and `Pi package` 91 and 95 s. Both ran the expected tests: one in `box-docker`, and 109 in each Pi test run.
 
-**Measured, serial runs before the split, all at journal 138's final weights:** PR runs took 172 s (41222337689), 209 s (41222503360), 212 s (41214790029) and 326 s (41222961479); the old Pi job took 150, 201, 172 and 209 s. Journal 138's three final-weights runs took 180–183 s. So the split saves about 12–19 s against journal 138's figures, and the slowest test shard (157–169 s) now sets wall time. The 326 s run's excess is not explained by its jobs, and its cause is not established.
+**Measured, serial runs before the split, all at journal 138's final weights:** PR runs took 172 s (41222337689), 209 s (41222503360), 212 s (41214790029) and 326 s (41222961479); the old Pi job took 150, 201, 172 and 209 s. Journal 138's three final-weights runs took 180–183 s. So the split saves about 12–19 s against journal 138's figures, and the slowest test shard (154 and 160 s on the split runs) now sets wall time. The 326 s run is not a fair baseline: its jobs waited 15–179 s for a runner. It overlapped this work's 30-shard stress run, which probably caused the queue (hypothesis).
 
 **Flaky test found by the first run, cause by elimination.** `tests 3/6` failed on an assertion that the sealed token box does not contain `r1`. The sealed test box is 59 bytes, so two chosen bytes appear by chance about 1 run in 1,100 (57–58 positions in 65,536). The failing box was not captured, but the log shows that assertion and the box is random on each run. It now looks for `"r1"` and `"a1"` with their quotes, as they appear in the sealed JSON, which still catches an unsealed box.
 
