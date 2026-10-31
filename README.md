@@ -43,10 +43,10 @@ Ask Chief for what's missing, or wire it in yourself:
 
 ## You stay in charge
 
-- **It asks first.** Calendar events, code merges, deletions, and new monitoring wait for your tap.
+- **It asks first.** Calendar events, code merges, role deletions, and standing responsibilities wait for your approval.
 - **Some things it can't do.** It can't send email, and it can't place, change, or cancel a trade.
 - **Every action has limits.** Tasks are bounded, and uncertain writes pause instead of repeating.
-- **You can see what it did.** Every turn is traced in
+- **You can see what it did.** Trace every turn in
   [agentwatch](https://github.com/akhilvuputuri/agentwatch).
 
 [Security model and data handling →](docs/security.md)
@@ -58,10 +58,11 @@ are optional. One deployment serves one owner. Chief installs and runs with
 [Kite](https://github.com/akhilvuputuri/kite), a Rust package manager that replaces npm.
 
 ```sh
-node tools/install-kite.mjs && kite ci
+node tools/install-kite.mjs  # installs kite into ~/.local/bin
+kite ci
 kite run setup              # then add your two keys to .env
-docker compose up -d postgres && docker compose run --rm migrate
 kite run pair && kite run pair:finish
+docker compose up -d postgres && docker compose run --rm migrate
 kite run dev
 ```
 

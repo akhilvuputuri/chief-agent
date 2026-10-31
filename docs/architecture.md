@@ -25,7 +25,7 @@ One Node application owns the Telegram gateway, the coordinator runtime, tools, 
 | `coding/` / `boxes/`                                       | Coding job controller, owner approvals, merge gates and the EC2 box layer                                          |
 | `browser/`                                                 | Isolated browser service and egress policy for invoice gathering                                                   |
 | `telegram.ts` / `telegram-topics.ts` / `telegram-views.ts` | Allowlist, voice, photo/PDF/location intake, topics, commands, views and approval cards                            |
-| `miniapp.ts` / `canvases.ts`                               | Authenticated read-only Mini App and revisioned canvases                                                           |
+| `miniapp.ts` / `canvases.ts`                               | Authenticated Mini App and revisioned canvases                                                                     |
 | `attachments.ts`                                           | File classification and limits, PDF text extraction (unpdf), attachment notes for history                          |
 | `ops-log.ts`                                               | Sanitized operational log lines                                                                                    |
 

@@ -7,7 +7,7 @@ This page records direction, not commitments. The original 0.1–0.5 plan was wr
 - **Reliable daily use.** Durable inbox and Telegram outbox, idempotent mutations, uncertain-write pauses, per-task allowances, history recall and sanitized operational logs ([reliable execution](reliable-execution.md), [authoritative storage](authoritative-storage.md), [operational logs](operational-logs.md)).
 - **Coordinator and agents.** Plugin-defined specialist agents with validated reports, and remote MCP connectors ([agents](agents.md), [plugins](plugins.md), [MCP](mcp.md)).
 - **Domains.** Calendar drafts, parcels, responsibilities, routines, subscriptions and invoice gathering, IBKR holdings and order drafts, stock alerts and rules, the news bulletin, Singapore data and job alignment.
-- **Clients.** Telegram topics, interactive views and the authenticated read-only Mini App with canvases ([telegram views](telegram-views.md), [canvases](canvases.md)).
+- **Clients.** Telegram topics, interactive views and the authenticated Mini App with canvases ([telegram views](telegram-views.md), [canvases](canvases.md)).
 - **Isolated execution.** Owner-controlled invoice browsing in a separate container, and owner-approved coding in disposable EC2 boxes ([gathering](gathering.md), [boxes](boxes.md)).
 
 ## Open directions
