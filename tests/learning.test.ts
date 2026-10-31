@@ -1049,3 +1049,191 @@ test("a turn that only finished is trivial, and a delegated agent's reads tag th
     "skipped",
   );
 });
+
+test("every run records what it read, what the model said and each proposal's verdict and outcome, privately", async (t) => {
+  const { projectEventRecord } = await import("../src/ops-log.js");
+  const db = await setup(t);
+  const id = await task(db, {
+    ownerSays: ["I prefer window seats always, token sk-abcdefghijklmnopqrstu"],
+  });
+  const { adapter } = model(() => [
+    [
+      "learn_fact",
+      {
+        key: "seat_preference",
+        value: "Prefers window seats",
+        quote: "I prefer window seats",
+        taskIds: [id],
+        reason: "Stated",
+      },
+    ],
+    [
+      "learn_fact",
+      {
+        key: "home_city",
+        value: "Lives in Penang",
+        quote: "I live in Penang",
+        taskIds: [id],
+        reason: "Invented",
+      },
+    ],
+    ["learn_fact", { key: "broken" }],
+    ["learn_retire", { key: "style", reason: "stale", taskIds: [id] }],
+    ["learn_finish", {}],
+  ]);
+  const result: any = await learner(db, adapter).tick("owner");
+  const rows = (
+    await db.query(
+      "SELECT type,data FROM events WHERE type LIKE 'learner.%' ORDER BY id",
+    )
+  ).rows;
+  const of = (type: string) =>
+    rows.filter((r) => r.type === type).map((r) => r.data);
+  const [input] = of("learner.input");
+  assert.equal(input.learnerRun, result.learnerRun);
+  assert.equal(input.items[0].id, id);
+  assert.match(JSON.stringify(input.items), /I prefer window seats/);
+  // Credentials are scrubbed from the record like other traces.
+  assert.doesNotMatch(JSON.stringify(rows), /sk-abcdefghijklmnopqrstu/);
+  assert.deepEqual(of("learner.model_call")[0].toolCalls, [
+    "learn_fact",
+    "learn_fact",
+    "learn_fact",
+    "learn_retire",
+    "learn_finish",
+  ]);
+  assert.deepEqual(
+    of("learner.proposal").map((p) => p.verdict),
+    [
+      { accepted: true },
+      { refused: "The quote must be the owner's exact words in a cited task" },
+      { refused: "Invalid arguments" },
+      { accepted: true },
+      { ok: true },
+    ],
+  );
+  // A malformed proposal is kept as the model sent it.
+  assert.match(of("learner.proposal")[2].arguments, /broken/);
+  assert.deepEqual(
+    of("learner.applied").map((a) => [a.key, a.action]),
+    [
+      ["seat_preference", "written"],
+      ["style", "skipped_not_learned"],
+    ],
+  );
+  assert.ok(of("learner.applied")[0].revisionId);
+  // None of this reaches the shipped ops log.
+  for (const type of [
+    "learner.input",
+    "learner.model_call",
+    "learner.proposal",
+    "learner.applied",
+  ])
+    assert.equal(projectEventRecord(type, randomUUID(), { a: 1 }), null, type);
+});
+
+test("a pre-empted run keeps its record even though it applies nothing", async (t) => {
+  const db = await setup(t);
+  const id = await task(db, { ownerSays: ["I prefer window seats always"] });
+  const { adapter } = model(async () => {
+    await db.query(
+      "INSERT INTO conversation_inputs(id,user_id,message) VALUES($1,'owner','hi')",
+      [randomUUID()],
+    );
+    return [
+      [
+        "learn_fact",
+        {
+          key: "seat_preference",
+          value: "Prefers window seats",
+          quote: "I prefer window seats",
+          taskIds: [id],
+          reason: "Stated",
+        },
+      ],
+    ];
+  });
+  assert.equal((await learner(db, adapter).tick("owner"))?.state, "deferred");
+  const types = (
+    await db.query(
+      "SELECT type FROM events WHERE type LIKE 'learner.%' ORDER BY id",
+    )
+  ).rows.map((r) => r.type);
+  assert.ok(types.includes("learner.input"));
+  assert.ok(types.includes("learner.proposal"));
+  assert.ok(!types.includes("learner.applied"));
+});
+
+test("an emoji at a clip boundary or a NUL from the model cannot fail a run or lose its record", async (t) => {
+  const db = await setup(t);
+  const id = await turn(db, {
+    says: "Plan my weekend around the farmers market please",
+    reply:
+      "x".repeat(LEARNING_LIMITS.replyChars - 2) + "😀 and more text after it",
+    at: new Date(NIGHT.getTime() - 40 * 3600_000),
+  });
+  const adapter: ModelAdapter = {
+    generate: async () => ({
+      message: {
+        role: "assistant",
+        content: "thinking\u0000 aloud \ud83d",
+        tool_calls: [
+          {
+            id: randomUUID(),
+            type: "function" as const,
+            function: { name: "learn_finish", arguments: "{}" },
+          },
+        ],
+      },
+    }),
+  };
+  const result: any = await learner(db, adapter).tick("owner");
+  assert.equal(result.state, "completed");
+  const rows = (
+    await db.query(
+      "SELECT type,data FROM events WHERE type IN ('learner.input','learner.model_call') ORDER BY id",
+    )
+  ).rows;
+  assert.deepEqual(
+    rows.map((r) => r.type),
+    ["learner.input", "learner.model_call"],
+  );
+  assert.equal(rows[0].data.items[0].id, id);
+  assert.equal(rows[1].data.content, "thinking aloud \ufffd");
+});
+
+test("a failed record never affects learning: the item is written and the run completes", async (t) => {
+  const db = await setup(t);
+  const id = await task(db, { ownerSays: ["I prefer window seats always"] });
+  const failing: Database = {
+    query: (text, values) =>
+      text.startsWith("INSERT INTO events") &&
+      /^learner\.(input|model_call|proposal|applied)$/.test(String(values?.[2]))
+        ? Promise.reject(new Error("insert refused"))
+        : db.query(text, values),
+    transaction: (db as any).transaction?.bind(db),
+  } as Database;
+  const { adapter } = model(() => [
+    [
+      "learn_fact",
+      {
+        key: "seat_preference",
+        value: "Prefers window seats",
+        quote: "I prefer window seats",
+        taskIds: [id],
+        reason: "Stated",
+      },
+    ],
+    ["learn_finish", {}],
+  ]);
+  const result: any = await learner(failing, adapter).tick("owner");
+  assert.deepEqual([result.state, result.facts], ["completed", 1]);
+  assert.equal(
+    (await new MemoryStore(db).active("owner"))[0]?.value,
+    "Prefers window seats",
+  );
+  assert.equal(
+    (await db.query("SELECT count(*)::int n FROM learning_reviews")).rows[0].n,
+    1,
+  );
+});

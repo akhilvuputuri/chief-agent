@@ -1,3 +1,7 @@
+# A private record of what the learner decides — proposed, 31 October 2026
+
+Two nights of learning from turns reviewed 55 turns, saved nothing and refused one proposal a night, and those proposals could not be read: the learner kept only counts. Each run now records its input, model calls, every proposal with the host's verdict, and the final outcome of each item, privately in `events`. Behaviour is unchanged and writes stay on. Branch `feat/learner-trace`. See [learning](learning.md#telemetry-and-the-private-record) and [journal 130](journey/130-nightly-learner.md#no-record-of-what-the-learner-decided--2026-10-31).
+
 # Faster box startup and CI — live since `9973a81`, 31 October 2026
 
 Boxes start launching as soon as they are requested, and report how long each boot stage takes. CI test shards are balanced by recorded time; three runs on the final weights took 180–183 s, against 211–287 s across the last 13 runs on main.
