@@ -5,7 +5,7 @@ Status: on [PR 387](https://github.com/akhilvuputuri/chief-agent/pull/387). A fo
 
 ## User-visible problem and preceding iteration
 
-[Journal 139](139-ci-audit-pi-split.md) found that 15 of the last 60 merged PRs changed only docs, yet each ran about 165 s of checks that build and test code none of them touched.
+Measured with this PR's classifier, 16 of the 60 merged PRs before PR 386 changed only docs. Each ran the full checks ([journal 139](139-ci-audit-pi-split.md)), about 165 s since the Pi split, building and testing code it did not touch.
 
 ## Evidence
 
@@ -22,7 +22,7 @@ Status: on [PR 387](https://github.com/akhilvuputuri/chief-agent/pull/387). A fo
 
 ## Implementation and review
 
-- **`scripts/docs-only.mjs`** decides from the changed paths. Only `docs/**`, `README.md`, `HANDOVER.md` and `CONTRIBUTING.md` qualify, so anything else, or an empty list, runs everything. `AGENTS.md` and `CLAUDE.md` are excluded because they instruct coding agents.
+- **`scripts/docs-only.mjs`** decides from the changed paths. Only `docs/**`, `README.md`, `HANDOVER.md` and `CONTRIBUTING.md` qualify, so anything else, or an empty list, runs everything. `AGENTS.md` and `CLAUDE.md` are excluded as agent configuration. `HANDOVER.md` and `docs/current-work.md` also guide agents but qualify, because no job tests their content. Paths are not trimmed, so a directory named ` docs` does not qualify.
 - **The `changes` job** compares a PR's merge commit with its first parent, with `--no-renames` so a file moved into `docs/` still counts its old path. Pushes to main always run everything, so the release workflow is unaffected.
 - **The `test` gate** accepts a skipped job only when `docs_only` is true, and always requires `changes` and `format and types` to succeed.
 - **A bug caught before pushing:** the first gate used `test … || { test … && test …; }`. Under `bash -e` that passed a skipped job on a code change when a successful result followed it. It now uses explicit `if` and `exit 1`.

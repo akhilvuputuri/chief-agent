@@ -28,6 +28,8 @@ test("anything else runs every job", () => {
     "evals/README.md",
     "docsy/a.md",
     "docs/../src/main.ts",
+    " docs/evil.ts",
+    " README.md",
   ])
     assert.equal(isDocsOnly(["docs/a.md", path]), false, path);
 });

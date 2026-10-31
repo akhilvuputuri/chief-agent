@@ -4,7 +4,7 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-// AGENTS.md and CLAUDE.md are left out: they instruct coding agents.
+// AGENTS.md and CLAUDE.md are left out: they configure how agents work, not just describe it.
 const ROOT_DOCS = new Set(["README.md", "HANDOVER.md", "CONTRIBUTING.md"]);
 
 function isDoc(path) {
@@ -14,7 +14,7 @@ function isDoc(path) {
 }
 
 export function isDocsOnly(changedPaths) {
-  const paths = changedPaths.map((p) => p.trim()).filter(Boolean);
+  const paths = changedPaths.filter(Boolean);
   return paths.length > 0 && paths.every(isDoc);
 }
 
