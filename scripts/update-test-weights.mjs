@@ -97,6 +97,8 @@ if (
   const log = readFileSync(0, "utf8");
   const weights = weightsFromLog(log, testTitles(sources));
   assertComplete(log);
+  if (Object.keys(weights).length === 0)
+    throw new Error("No test durations found in that log");
   writeFileSync(
     "tests/test-weights.json",
     `${JSON.stringify(weights, null, 2)}\n`,

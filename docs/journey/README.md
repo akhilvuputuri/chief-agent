@@ -144,7 +144,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 30 October | [135 — Jev redirect question and judge](135-jev-redirect-and-judge.md): can Chief catch the pushback its text rules miss, and can a model judge its answers? | Released: Jev's question in `a8fd80c`; the `answer_ok` judge on since the agentwatch update of `de00871`, limited by a server policy to OpenRouter and 50 calls a day. Agreement with the owner unmeasured |
 | 31 October | [136 — Monitors and alerts](136-monitors-and-alerts.md): can Chief tell the owner when something goes wrong, without crying wolf at low volume? | Released in `b2fece4`: six monitors with Wilson-bounded rates and a cooldown; alerts reach the owner on Telegram by polling; limits set from two months of history |
 | 31 October | [137 — Box startup time](137-box-startup-time.md): where does a coding box's startup time go? | Released: launch wait removed and boot-stage timings added; first real timings await the next coding job |
-| 31 October | [138 — Faster CI checks](138-faster-ci-checks.md): where does a CI run's time go now that installs are instant? | Released: first run on final weights took 180 s against 237–287 s on main; the Pi job now sets the wall time |
+| 31 October | [138 — Faster CI checks](138-faster-ci-checks.md): where does a CI run's time go now that installs are instant? | Released: 180–183 s on the final weights against 211–287 s on main; the Pi job now sets the wall time |
 
 ## Coding-agent learning path
 

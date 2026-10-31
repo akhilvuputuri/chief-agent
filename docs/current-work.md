@@ -1,6 +1,6 @@
 # Faster box startup and CI — live since `9973a81`, 31 October 2026
 
-Boxes start launching as soon as they are requested, and report how long each boot stage takes. CI test shards are balanced by recorded time; the first run on the final weights took 180 s against 237–287 s on main.
+Boxes start launching as soon as they are requested, and report how long each boot stage takes. CI test shards are balanced by recorded time; three runs on the final weights took 180–183 s, against 211–287 s across the last 13 runs on main.
 
 - **Next:** after the next coding job, read `kite run logs:cloudwatch -- boot --since 24h`. Those timings decide whether a baked machine image is worth building.
 - **Next limit on CI:** the Pi job.
