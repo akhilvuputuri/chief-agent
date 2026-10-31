@@ -11,8 +11,29 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 # The jobs below run in parallel and together cover `kite run format:check`, `kite run check`
 # and `kite run build`. Branch protection requires the `test` job, which passes only when
-# every other job passed; the release workflow requires the whole workflow to succeed.
+# every other job passed, or was skipped on a docs-only pull request; main always runs
+# everything, and the release workflow requires the whole workflow to succeed.
 jobs:
+  changes:
+    name: what changed
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.check.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A pull request checks out its merge commit; its first parent is the base.
+          fetch-depth: 2
+      - id: check
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            git diff --no-renames --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed"
+            docs_only=$(node scripts/docs-only.mjs < "$RUNNER_TEMP/changed")
+          else
+            docs_only=false
+          fi
+          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+  # Always runs: `format:check` covers the docs too.
   static:
     name: format and types
     runs-on: ubuntu-latest
@@ -24,6 +45,8 @@ jobs:
       - run: kite run typecheck
   tests:
     name: tests ${{ matrix.shard }}/6
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -47,6 +70,8 @@ jobs:
           TEST_SHARD: ${{ matrix.shard }}/6
   other:
     name: scripts, evals and Python runtime
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -64,6 +89,8 @@ jobs:
       - run: kite run check:coding
   pi:
     name: Pi package
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -81,6 +108,8 @@ jobs:
           kite run check
   pi-worker:
     name: Pi worker boundary
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -98,6 +127,8 @@ jobs:
           CHIEF_BOX_DOCKER_IMAGE=chief-pi:test kite exec tsx --test tests/box-docker.test.ts
   images:
     name: sandbox and app images
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -125,16 +156,26 @@ jobs:
           docker run --rm --network=container:gathering-pg-proof --read-only --cap-drop=ALL --security-opt=no-new-privileges --memory=384m --pids-limit=96 --env GATHERING_TEST_DATABASE_URL=postgresql://synthetic:synthetic-only@127.0.0.1:5432/gathering_test --mount type=bind,source="$PWD/db",target=/app/db,readonly --mount type=bind,source="$PWD/scripts/gathering-postgres-smoke.mjs",target=/app/scripts/gathering-postgres-smoke.mjs,readonly --entrypoint node chief-gathering-app:test /app/scripts/gathering-postgres-smoke.mjs
           docker run --rm --network=container:gathering-pg-proof --read-only --cap-drop=ALL --security-opt=no-new-privileges --memory=384m --pids-limit=96 --env DB_DROP_TEST_DATABASE_URL=postgresql://synthetic:synthetic-only@127.0.0.1:5432/gathering_test --mount type=bind,source="$PWD/scripts/db-drop-postgres-smoke.mjs",target=/app/scripts/db-drop-postgres-smoke.mjs,readonly --entrypoint node chief-gathering-app:test /app/scripts/db-drop-postgres-smoke.mjs
   test:
-    needs: [static, tests, other, pi, pi-worker, images]
+    needs: [changes, static, tests, other, pi, pi-worker, images]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Require every check to pass
         env:
+          CHANGES: ${{ needs.changes.result }}
+          STATIC: ${{ needs.static.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
-          echo "$RESULTS"
-          for result in $RESULTS; do test "$result" = success; done
+          echo "$RESULTS (docs only: $DOCS_ONLY)"
+          test "$CHANGES" = success
+          test "$STATIC" = success
+          for result in $RESULTS; do
+            if [ "$result" = success ]; then continue; fi
+            if [ "$DOCS_ONLY" = true ] && [ "$result" = skipped ]; then continue; fi
+            echo "A required job finished as $result" >&2
+            exit 1
+          done
   gateway-image:
     name: publish gateway image
     # Main only, alongside the other jobs. The release deploys this exact image by

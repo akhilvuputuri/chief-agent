@@ -1,7 +1,7 @@
 # 139 — What still limits a CI run, and is it safe to run test files in parallel again?
 
 Work dates: 1 November 2026. Written: 1 November 2026.
-Status: Pi job split on [PR 386](https://github.com/akhilvuputuri/chief-agent/pull/386). Test files stay serial until the owner decides; see the stress run below.
+Status: Pi job split, released in `9fdbca7` ([PR 386](https://github.com/akhilvuputuri/chief-agent/pull/386)). Test files stay serial until the owner decides; see the stress run below.
 
 ## User-visible problem and preceding iteration
 
@@ -61,8 +61,12 @@ Serial `test:ts` took a median of 126 s. Journal 123's crash was on Node 22.19.0
 - 0 in 102 shard jobs bounds the rate at about 3% per shard job, or about 16% per six-shard run, at 95% confidence.
 - The cause of the original crash is still not established, so journal 123's condition is only partly met. The decision is the owner's.
 
+### Release closure — 1 November 2026
+
+Merged as `9fdbca7`. `checks` on main passed in 167 s (run 41225471428), and the automatic release (run 41225693192) succeeded with a healthy gateway. Nothing changes in production.
+
 ## Follow-up and next iteration
 
 - **Owner's decision:** four test files at a time. Hypothesis: a wall time near 130 s, set by `Pi worker boundary`. Test jobs took 69–108 s on the first two runs and up to 116 s in the stress runs.
-- **Next:** TypeScript 7 for type checks, and skipping the heavy jobs on docs-only PRs (15 of the last 60 merged PRs).
+- **Next:** skipping the code jobs on docs-only PRs, and TypeScript 7, deferred; see [journal 140](140-docs-only-checks.md).
 - **Local setup:** `tests/fetch-hygiene.test.ts` timed out on Node 22.14 and passes on 22.23.4, the version in `.nvmrc`.

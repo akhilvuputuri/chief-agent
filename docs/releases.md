@@ -1,3 +1,10 @@
+## Pi CI job split (1 November 2026)
+
+- **What merged.** [PR 386](https://github.com/akhilvuputuri/chief-agent/pull/386) (`9fdbca7`): the Pi job is now `Pi package` and `Pi worker boundary`, and a flaky token assertion is fixed. CI configuration and one test only.
+- **Review.** Independent review (Claude Opus 5.5) requested changes twice on the journal's figures and a workflow comment, and approved the merged head `bf35c81`.
+- **Release.** `checks` on main passed in 167 s (run 41225471428). The automatic release (run 41225693192) succeeded, and the host reports `9fdbca7` with a healthy gateway.
+- **Not changed.** Test files stay serial until the owner decides. See [journal 139](journey/139-ci-audit-pi-split.md).
+
 ## Box launch wake-up and boot timings; faster CI (31 October 2026)
 
 - **Box startup.** [PR 376](https://github.com/akhilvuputuri/chief-agent/pull/376) (`304d691`): a requested box starts launching at once instead of waiting for the next 15 s timer tick. Boxes report six boot stages, logged as `box.boot`, and Pi checks report how long they took.

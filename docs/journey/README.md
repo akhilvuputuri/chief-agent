@@ -146,6 +146,7 @@ For the latest verified release and open work, read [current work](../current-wo
 | 31 October | [137 — Box startup time](137-box-startup-time.md): where does a coding box's startup time go? | Released: launch wait removed and boot-stage timings added; first real timings await the next coding job |
 | 31 October | [138 — Faster CI checks](138-faster-ci-checks.md): where does a CI run's time go now that installs are instant? | Released: 180–183 s on the final weights against 211–287 s on main; the Pi job now sets the wall time |
 | 1 November | [139 — CI audit and Pi split](139-ci-audit-pi-split.md): what still limits a CI run, and is it safe to run test files in parallel again? | Pi job split; wall time 164 and 168 s, about 12–19 s better. Parallel files: 0 crashes in 102 shard jobs, cause of the old crash unknown, owner to decide. |
+| 1 November | [140 — Docs-only checks](140-docs-only-checks.md): can a docs-only pull request skip the code jobs without weakening the gate? | Forced run took 49 s with the gate intact. TypeScript 7 deferred: identical output, but its compiler API is gone. |
 
 ## Coding-agent learning path
 
