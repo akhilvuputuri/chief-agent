@@ -7,6 +7,7 @@ import { codingDiagnostics } from "./diagnostics.js";
 import {
   modelPreferences,
   setModelPreference,
+  assertEligibleModel,
   type CodingCatalog,
 } from "./model-settings.js";
 import { assertSquadCheckpoint } from "./squad-state.js";
@@ -20,7 +21,11 @@ import {
   type StatusAnchor,
   type StatusLine,
 } from "./notices.js";
-import { CodingRequirements, requirementScope } from "./requirements.js";
+import {
+  CodingRequirements,
+  requirementScope,
+  requirementScopes,
+} from "./requirements.js";
 import { CodingMergeApprovals } from "./merge-approvals.js";
 import type { AgentGitHubTokens, AgentToken } from "./agent-github.js";
 import {
@@ -506,6 +511,7 @@ export class CodingController {
         this.priceFilters.output,
       );
     }
+    if (a.operation === "coding_job_update") return this.updateJob(user, a);
     if (a.operation === "coding_models") {
       const preferences = await modelPreferences(this.db, user, this.settings);
       return {
@@ -513,7 +519,7 @@ export class CodingController {
         appliesTo: "new jobs only",
         bounded: true,
         notice:
-          "The catalog shows up to 100 eligible models; setting an exact ID validates the full live catalog. Running jobs retain their model snapshot.",
+          "The catalog shows up to 100 eligible models; setting an exact ID validates the full live catalog. Existing jobs keep their models unless changed with coding_job_update.",
         ...(a.list
           ? {
               models: ((await this.catalog?.()) ?? [])
@@ -775,6 +781,150 @@ export class CodingController {
                   ? "This job already has a PR and continues through its automatic merge workflow; report its stage from coding_status."
                   : "This job already has a draft PR; it predates the owner-merge workflow, so it can only be merged on GitHub or replaced by a new job.",
       );
+    return this.status(user, a.id);
+  }
+  /**
+   * The owner changes who carries out a stopped job, or how long it may run. The requirements
+   * are untouched, so their approval stands. A session under a changed model starts fresh on
+   * the same files, because continuing another model's session is untested.
+   */
+  private async updateJob(
+    user: string,
+    a: Extract<CodingAction, { operation: "coding_job_update" }>,
+  ) {
+    const job = (
+      await this.db.query(
+        "SELECT * FROM coding_jobs WHERE id=$1 AND user_id=$2",
+        [a.id, user],
+      )
+    ).rows[0] as CodingJob | undefined;
+    if (!job) throw new Error("Coding job unavailable");
+    const key = `settings:${a.requestKey}`;
+    const request = hash(a);
+    const prior = (
+      await this.db.query(
+        "SELECT payload FROM coding_events WHERE job_id=$1 AND event_key=$2",
+        [job.id, key],
+      )
+    ).rows[0];
+    if (prior) {
+      if (prior.payload.request !== request)
+        throw new ToolValidationError("Coding update request key conflict");
+      return this.status(user, a.id);
+    }
+    if (job.revision !== a.baseRevision)
+      throw new ToolValidationError(
+        "Coding revision changed; read coding_status and retry with the current revision",
+      );
+    if (a.leaderModel && !job.settings.squad && job.settings.runtime !== "pi")
+      throw new ToolValidationError("This job has no leader model to change");
+    const next = {
+      ...job.settings,
+      ...(a.leaderModel ? { leaderModel: a.leaderModel } : {}),
+      ...(a.coderModel ? { model: a.coderModel } : {}),
+      ...(a.reviewerModel ? { reviewerModel: a.reviewerModel } : {}),
+      limits: { ...job.settings.limits, ...a.limits },
+    };
+    const leader = job.settings.leaderModel ?? job.settings.model;
+    const changes = [
+      ["Planner", leader, next.leaderModel ?? next.model],
+      ["Coder", job.settings.model, next.model],
+      ["Reviewer", job.settings.reviewerModel, next.reviewerModel],
+      ["Time limit (ms)", job.settings.limits.ms, next.limits.ms],
+      ["Model calls", job.settings.limits.models, next.limits.models],
+      ["Tool calls", job.settings.limits.tools, next.limits.tools],
+    ].filter(([, from, to]) => from !== to);
+    if (!changes.length)
+      throw new ToolValidationError("The job already has these settings");
+    for (const model of [a.leaderModel, a.coderModel, a.reviewerModel]) {
+      if (!model) continue;
+      if (!this.catalog) throw new Error("Coding model catalog unavailable");
+      await assertEligibleModel(
+        model,
+        this.catalog,
+        this.priceFilters.input,
+        this.priceFilters.output,
+      );
+    }
+    // Only the job's current models keep a window; the snapshot holds at most three.
+    const windows = {
+      ...job.settings.contextWindows,
+      ...(await this.contextWindows(next)),
+    };
+    const current = [
+      next.leaderModel ?? next.model,
+      next.model,
+      next.reviewerModel,
+    ];
+    if (job.settings.runtime === "pi")
+      Object.assign(next, {
+        contextWindows: Object.fromEntries(
+          Object.entries(windows).filter(([id]) => current.includes(id)),
+        ),
+      });
+    const pi = job.checkpoint.piState;
+    const activeModel = (s: CodingSettings) =>
+      pi?.phase === "review"
+        ? s.reviewerModel
+        : pi?.phase === "plan"
+          ? (s.leaderModel ?? s.model)
+          : s.model;
+    const restarted =
+      !!pi?.sessionScope && activeModel(job.settings) !== activeModel(next);
+    const checkpoint = restarted
+      ? {
+          ...job.checkpoint,
+          piState: {
+            ...pi,
+            sessionScope: createHash("sha256")
+              .update(`${pi.sessionScope}:${a.requestKey}`)
+              .digest("hex"),
+          },
+        }
+      : job.checkpoint;
+    const approved =
+      job.mode === "implement" && (await this.requirements.approved(job));
+    const updated = await this.db.query(
+      `WITH changed AS (
+        UPDATE coding_jobs SET settings=$4::jsonb,checkpoint=$5::jsonb,updated_at=now()
+        WHERE id=$1 AND user_id=$2 AND revision=$3 AND ${RESTARTABLE} AND settings=$6::jsonb AND checkpoint=$7::jsonb RETURNING id
+      ), carried AS (
+        -- Earlier approvals hashed the settings, so carry one to the scope that does not.
+        INSERT INTO coding_events(job_id,event_key,payload,delivery)
+        SELECT id,$8::text,jsonb_build_object('decision','approved','approvedScope',$9::text,'reason','settings_change'),'suppressed'
+        FROM changed WHERE $10::boolean RETURNING job_id
+      ) INSERT INTO coding_events(job_id,event_key,payload)
+        SELECT id,$11::text,$12::jsonb FROM changed RETURNING job_id`,
+      [
+        job.id,
+        user,
+        job.revision,
+        JSON.stringify(next),
+        JSON.stringify(checkpoint),
+        JSON.stringify(job.settings),
+        JSON.stringify(job.checkpoint),
+        `settings-approval:${a.requestKey}`,
+        requirementScope(job),
+        approved,
+        key,
+        JSON.stringify({
+          kind: "settings_change",
+          request,
+          changes: changes.map(([field, from, to]) => ({ field, from, to })),
+          sessionRestarted: restarted,
+          summary: `Job settings changed at your request. ${changes
+            .map(([field, from, to]) => `${field}: ${from} → ${to}`)
+            .join(
+              "; ",
+            )}.${restarted ? " That step restarts in a fresh session; finished work is kept." : ""}${approved ? " Your approval of the requirements still stands." : ""} The job stays stopped until you resume it.`,
+        }),
+      ],
+    );
+    if (!updated.rows.length)
+      throw new ToolValidationError(
+        "Only a stopped job with no pending cleanup or publication can change; inspect status",
+      );
+    opsLog("coding.settings_changed", "info", { ref: job.id });
     return this.status(user, a.id);
   }
   /**
@@ -2042,7 +2192,7 @@ export class CodingController {
               j.mode !== "plan" ||
               j.revision !== req.revision ||
               j.checkpoint.plan !== req.plan ||
-              requirementScope(j) !== req.scope ||
+              !requirementScopes(j).includes(req.scope) ||
               artifactHash(j.checkpoint) !== req.artifact))
         ) {
           await this.db.query(

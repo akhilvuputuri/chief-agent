@@ -31,7 +31,7 @@ Protected paths include database/Compose, workflows/infrastructure/scripts/confi
 
 Tell Chief which leader, coder or reviewer model to use. `coding_models` is read-only for preferences/catalog; `coding_model_set` changes one exact role/model on an authenticated foreground owner request. Restart recovery keeps these read and write forms distinct. Choices are validated through the live OpenRouter catalog for tool/reasoning support and existing provider price filters. Invalid/unavailable/over-filter models leave preferences unchanged. No price ceiling is automatically raised.
 
-Role decisions are append-only owner-scoped events. New jobs capture the preferences; active/approved jobs and automatic repair retain their original snapshot. This changes only coding roles, not Chief's main model. The owned squad policy accepts its configured reviewer; other repository development still requires the most capable independent reviewer.
+Role decisions are append-only owner-scoped events. New jobs capture the preferences; existing jobs and automatic repair keep their models. To change a stopped job, Chief uses `coding_job_update` on the owner's request (see [changing a stopped job](coding.md#changing-a-stopped-job)). This changes only coding roles, not Chief's main model. The owned squad policy accepts its configured reviewer; other repository development still requires the most capable independent reviewer.
 
 ## Pi owner-confirmed merge
 

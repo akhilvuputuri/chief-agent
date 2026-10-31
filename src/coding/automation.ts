@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Database } from "../db.js";
 import type { CodingJob } from "./controller.js";
 import { artifactHash } from "./github.js";
-import { requirementScope } from "./requirements.js";
+import { requirementScope, requirementScopes } from "./requirements.js";
 import {
   MergeRefused,
   approvedArtifact,
@@ -138,8 +138,8 @@ export class CodingAutomation {
     // Carry over only an approval the owner actually gave for this exact scope.
     const approved = (
       await this.db.query(
-        "SELECT 1 FROM coding_events WHERE job_id=$1 AND payload->>'decision'='approved' AND payload->>'approvedScope'=$2 LIMIT 1",
-        [j.id, requirementScope(j)],
+        "SELECT 1 FROM coding_events WHERE job_id=$1 AND payload->>'decision'='approved' AND payload->>'approvedScope'=ANY($2::text[]) LIMIT 1",
+        [j.id, requirementScopes(j)],
       )
     ).rows.length;
     if (!approved) {
@@ -238,7 +238,7 @@ export class CodingAutomation {
         `merge-approval:${j.revision}:${d.head}:${randomUUID()}`,
         JSON.stringify({
           summary: `**Ready to merge**\nCoder's own summary (not verified by Chief): ${summary}${warning}`,
-          question: `${cards.length ? "The PR state changed or the earlier card lapsed, so please confirm again. " : ""}Exact-head CI and Devin passed, ${d.handled.length} review comment(s) were handled, and the independent ${j.settings.reviewerModel} review approved the final candidate. Merge this PR? Chief will merge only head ${d.head.slice(0, 12)} and then watch the release.`,
+          question: `${cards.length ? "The PR state changed or the earlier card lapsed, so please confirm again. " : ""}Exact-head CI and Devin passed, ${d.handled.length} review comment(s) were handled, and the independent ${j.settings.reviewerModel} review approved the final candidate (coder: ${j.settings.model}). Merge this PR? Chief will merge only head ${d.head.slice(0, 12)} and then watch the release.`,
           url: (j as any).pr_url,
           merge: { revision: j.revision, head: d.head, tree: d.tree },
         }),

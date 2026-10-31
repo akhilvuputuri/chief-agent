@@ -55,6 +55,27 @@ export const codingModelSet = z
     model: z.string().min(1).max(120),
   })
   .strict();
+export const codingJobUpdate = z
+  .object({
+    operation: z.literal("coding_job_update"),
+    id,
+    baseRevision: z.number().int().positive(),
+    requestKey: z.string().min(1).max(100),
+    /** Only after the owner asked for this change on this job, and confirmed it if unclear. */
+    ownerConfirmed: z.literal(true),
+    leaderModel: z.string().min(1).max(120).optional(),
+    coderModel: z.string().min(1).max(120).optional(),
+    reviewerModel: z.string().min(1).max(120).optional(),
+    limits: z
+      .object({
+        ms: z.number().int().positive().max(14_400_000).optional(),
+        models: z.number().int().positive().max(2000).optional(),
+        tools: z.number().int().positive().max(5000).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
 export const codingAction = z.discriminatedUnion("operation", [
   codingStart,
   codingStatus,
@@ -63,6 +84,7 @@ export const codingAction = z.discriminatedUnion("operation", [
   codingResume,
   codingModels,
   codingModelSet,
+  codingJobUpdate,
 ]);
 export type CodingAction = z.infer<typeof codingAction>;
 
