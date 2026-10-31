@@ -1271,3 +1271,59 @@ test("a notice the transport definitely refused is retried later", async (t) => 
   });
   assert.equal(sent.length, 1);
 });
+
+test("a requested box wakes the reconciler instead of waiting for the timer", async (t) => {
+  const f = await fixture(t);
+  let wakes = 0;
+  f.boxes.onRequested = () => {
+    wakes++;
+  };
+  await f.boxes.spawn("owner", {
+    requestKey: "wake",
+    profile: "echo",
+    subject: "coding:wake",
+  });
+  assert.equal(wakes, 1);
+});
+
+test("a tick asked for during a tick runs right after it", async (t) => {
+  const f = await fixture(t);
+  const box = await f.boxes.spawn("owner", {
+    requestKey: "during",
+    profile: "echo",
+    subject: "coding:during",
+  });
+  // The second call lands while the first is running, as a wake-up during a timer pass would.
+  await Promise.all([f.boxes.tick(), f.boxes.tick()]);
+  assert.notEqual((await f.row(box.id)).state, "requested");
+  assert.equal((f.boxes as unknown as { tickAgain: boolean }).tickAgain, false);
+});
+
+test("the first hello accepts boot stages, and bad ones are refused", async (t) => {
+  const f = await fixture(t);
+  const box = await f.boxes.spawn("owner", {
+    requestKey: "stages",
+    profile: "echo",
+    subject: "coding:stages",
+  });
+  await f.boxes.tick();
+  const credential = f.secretOf(box.id);
+  for (const bootStages of [
+    [{ stage: "unknown_stage", atMs: 1_800_000_000_000 }],
+    [{ stage: "image_pulled", atMs: -1 }],
+    [{ stage: "image_pulled", atMs: 1_800_000_000_000, text: "extra" }],
+    Array.from({ length: 7 }, () => ({
+      stage: "image_pulled",
+      atMs: 1_800_000_000_000,
+    })),
+  ])
+    await assert.rejects(
+      f.boxes.hello(box.id, { protocol: 1, credential, bootStages }),
+    );
+  const hello = await f.boxes.hello(box.id, {
+    protocol: 1,
+    credential,
+    bootStages: [{ stage: "image_pulled", atMs: 1_800_000_000_000 }],
+  });
+  assert.equal(hello.epoch, 1);
+});

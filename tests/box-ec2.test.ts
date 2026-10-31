@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,6 +20,7 @@ import {
   verdict,
 } from "../src/boxes/iam-check.js";
 import type { LaunchRequest } from "../src/boxes/provider.js";
+import { bootStageNames } from "../src/boxes/boot-stages.js";
 
 const boxId = "11111111-1111-4111-8111-111111111111";
 const image = `ghcr.io/akhilvuputuri/chief-agent-coding@sha256:${"a".repeat(64)}`;
@@ -56,6 +58,31 @@ test("the bootstrap script is valid bash, pins the image and isolates the agent"
     assert.ok(script.includes(line), line);
   // The environment file is written with a quoted heredoc: nothing in it is expanded.
   assert.ok(script.includes("<<'CHIEF_BOX_ENV'"));
+});
+
+test("the bootstrap script stamps each boot stage, in order, as a real shell writes them", () => {
+  const script = boxUserData(request, { launchTemplate: "t" });
+  const stamped = [...script.matchAll(/^stage ([a-z_]+)$/gm)].map((m) => m[1]);
+  assert.deepEqual(stamped, [...bootStageNames]);
+  const definition = /^stage\(\).*$/m
+    .exec(script)![0]
+    .replace("/var/lib/chief-box/boot-stages", '"$OUT"');
+  const dir = mkdtempSync(join(tmpdir(), "chief-boot-stages-"));
+  try {
+    const out = join(dir, "stages");
+    // GNU date's %3N is the box's; the parser test covers the seconds-only form too.
+    const run = spawnSync(
+      "bash",
+      ["-c", `${definition}\nstage script_started\nstage image_pulled`],
+      { env: { ...process.env, OUT: out } },
+    );
+    assert.equal(run.status, 0, String(run.stderr));
+    const lines = readFileSync(out, "utf8").trim().split("\n");
+    assert.equal(lines.length, 2);
+    assert.match(lines[0]!, /^script_started \S+$/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("unsafe launch values are refused before anything reaches EC2", () => {

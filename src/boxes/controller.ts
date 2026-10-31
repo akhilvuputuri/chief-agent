@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Database } from "../db.js";
 import { transaction } from "../db-transaction.js";
+import { opsLog } from "../ops-log.js";
 import { ToolValidationError } from "../tool-errors.js";
 import type { BoxProvider } from "./provider.js";
 import {
@@ -111,6 +112,9 @@ export class BoxController {
   private readonly timings: BoxTimings;
   private lastSweep = 0;
   private ticking = false;
+  private tickAgain = false;
+  /** Called after a box is requested, so it starts launching without waiting for the timer. */
+  onRequested?: () => void;
   constructor(
     readonly db: Database,
     readonly config: BoxConfig,
@@ -285,6 +289,7 @@ export class BoxController {
       throw new ToolValidationError(
         "This request key already started a different box",
       );
+    this.onRequested?.();
     return this.view(box!);
   }
 
@@ -559,12 +564,31 @@ export class BoxController {
       });
     if ("refused" in result) throw new BoxCredentialRefused();
     const fresh = (await this.load(boxId))!;
+    if (body.bootStages && result.epoch === 1) this.logBoot(before, body, now);
     return {
       protocol: 1,
       credential: result.credential,
       epoch: result.epoch,
       remainingMs: this.remaining(fresh, now),
     };
+  }
+
+  /** One line per new box: seconds from launch to each boot stage and to the first hello. */
+  private logBoot(
+    box: Box,
+    body: { bootStages?: { stage: string; atMs: number }[] },
+    now: Date,
+  ) {
+    const launched = box.launch_started_at?.getTime();
+    if (!launched) return;
+    opsLog("box.boot", "info", {
+      profile: box.profile,
+      image: box.image.slice(-8),
+      helloMs: now.getTime() - launched,
+      stagesMs: Object.fromEntries(
+        (body.bootStages ?? []).map((s) => [s.stage, s.atMs - launched]),
+      ),
+    });
   }
 
   /** Retired credentials, including the consumed bootstrap secret, which never expires. */
@@ -773,7 +797,10 @@ export class BoxController {
 
   /** One reconciler pass: each live box is claimed with a lease and moved one step. */
   async tick() {
-    if (this.ticking) return;
+    if (this.ticking) {
+      this.tickAgain = true;
+      return;
+    }
     this.ticking = true;
     try {
       const now = this.clock();
@@ -816,6 +843,11 @@ export class BoxController {
       }
     } finally {
       this.ticking = false;
+    }
+    // A box requested during this pass was probably missed; do not leave it for the timer.
+    if (this.tickAgain) {
+      this.tickAgain = false;
+      await this.tick();
     }
   }
 

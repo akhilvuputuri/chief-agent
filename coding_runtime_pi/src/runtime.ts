@@ -790,7 +790,12 @@ export class CodingRuntime {
             );
             if (remainingMs <= 0)
               throw new Error("Time allocation exhausted before checks");
+            const checkStarted = performance.now();
             const check = await execute!(command, stop.signal, remainingMs);
+            const checkSeconds = (
+              (performance.now() - checkStarted) /
+              1000
+            ).toFixed(1);
             task.checks.push({
               command,
               exitCode: check.exitCode,
@@ -799,7 +804,11 @@ export class CodingRuntime {
                   ? "[Output truncated]\n"
                   : "") + check.output.slice(-7800),
             });
-            await this.event(task, "check", `${command}: ${check.exitCode}`);
+            await this.event(
+              task,
+              "check",
+              `${command}: ${check.exitCode} in ${checkSeconds}s`,
+            );
           }
           task.artifact = await workspace.snapshot(
             execute!,

@@ -12,10 +12,13 @@
  *   CHIEF_BOX_TASK_COMMAND_B64                        base64 JSON command override (docker runner)
  *   CHIEF_BOX_SHUTDOWN=exit|poweroff                  default poweroff
  *   CHIEF_BOX_IDENTITY=ec2                            present the EC2 identity document
+ *   CHIEF_BOX_BOOT_STAGES                             boot script's stage file, reported once
  */
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { BoxAgent, DockerRunner, ProcessRunner, StateStore } from "./agent.js";
+import { parseBootStages } from "./boot-stages.js";
 
 const env = process.env;
 const required = (name: string) => {
@@ -76,6 +79,17 @@ async function ec2Identity() {
 
 const agent = new BoxAgent({
   identity: env.CHIEF_BOX_IDENTITY === "ec2" ? ec2Identity : undefined,
+  bootStages: env.CHIEF_BOX_BOOT_STAGES
+    ? () => {
+        try {
+          return parseBootStages(
+            readFileSync(env.CHIEF_BOX_BOOT_STAGES!, "utf8"),
+          );
+        } catch {
+          return [];
+        }
+      }
+    : undefined,
   origin: required("CHIEF_BOX_ORIGIN"),
   boxId: required("CHIEF_BOX_ID"),
   bootstrap: env.CHIEF_BOX_BOOTSTRAP,
