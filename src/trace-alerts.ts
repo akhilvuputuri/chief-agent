@@ -98,7 +98,13 @@ export class AlertRelay {
         await this.send(alertText(alert));
         const marked = await this.post(
           `${this.base}/api/alerts/${encodeURIComponent(alert.id)}/delivered`,
-          { method: "POST", signal: AbortSignal.timeout(TIMEOUT_MS) },
+          {
+            method: "POST",
+            // agentwatch takes writes only as JSON, which a browser cannot send cross-site.
+            headers: { "content-type": "application/json" },
+            body: "{}",
+            signal: AbortSignal.timeout(TIMEOUT_MS),
+          },
         );
         await marked.body?.cancel().catch(() => undefined);
         if (!marked.ok) throw new Error(`HTTP ${marked.status}`);
