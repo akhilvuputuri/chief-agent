@@ -1,7 +1,7 @@
 # 137 — Where does a coding box's startup time go?
 
 Work dates: 31 October 2026. Written: 31 October 2026.
-Status: the launch wake-up is live in `304d691`. This change pins the worker image that reports the timings; no box has reported stages yet.
+Status: released. The launch wake-up and the boot-stage reporting are live. No box has launched since, so the timings are not yet measured.
 
 ## User-visible problem and preceding iteration
 
@@ -46,7 +46,11 @@ Pending: a real box's `box.boot` line, a job's `kite ci` duration, and whether b
 
 Local tests could not run. On 31 October macOS's `syspolicyd` held newly placed binaries at first launch: a fresh `esbuild --version` was still blocked after 100 s, and an existing copy of the same version ran immediately. CI runs the tests on Linux. The cause of the hold is inferred from `syspolicyd` at about 100% CPU; it is not proven.
 
-### Release closure — pending
+### Release closure — 31 October 2026
+
+- **Gateway:** `304d691` (PR 376), release run 41190356901.
+- **Worker image:** `557aa3f` (PR 380) pins `sha256:a5bdecec…`. Read-only host check: release `557aa3f`, pin `a5bdecec`, gateway and agentwatch healthy.
+- **Not yet observed:** the last coding box was on 29 October, so no box has shown the shorter launch wait, a `box.boot` line or a `kite ci` duration. Read them with `kite run logs:cloudwatch -- boot --since 24h` after the next coding job.
 
 ## Follow-up and next iteration
 

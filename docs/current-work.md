@@ -1,3 +1,12 @@
+# Faster box startup and CI — live since `9973a81`, 31 October 2026
+
+Boxes start launching as soon as they are requested, and report how long each boot stage takes. CI test shards are balanced by recorded time; the first run on the final weights took 180 s against 237–287 s on main.
+
+- **Next:** after the next coding job, read `kite run logs:cloudwatch -- boot --since 24h`. Those timings decide whether a baked machine image is worth building.
+- **Next limit on CI:** the Pi job.
+
+See [journal 137](journey/137-box-startup-time.md) and [journal 138](journey/138-faster-ci-checks.md).
+
 # Monitors and Telegram alerts — live in `b2fece4`, 31 October 2026
 
 Issue #323. agentwatch watches six metrics (daily cost, model errors, tool errors, slow model calls, redirected answers, judged answers) with limits set from two months of history. A rate fires only when its 95% Wilson bound clears the limit, and a firing monitor resolves only after an hour of staying good. The gateway delivers alerts to the owner on Telegram. Pending: the first real alert, replaying the limits over the history, and the parcel tool failures the history showed (`parcel_list` failed 48 of 50 calls). See [tracing](tracing.md#monitors-and-alerts) and [journal 136](journey/136-monitors-and-alerts.md).

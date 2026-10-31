@@ -29,6 +29,26 @@ function ownersOf(title, owners, templates) {
   );
 }
 
+/** A shard's log ends with its summary, so a cut-off log is missing one. */
+export function assertComplete(log) {
+  const shards = new Map();
+  for (const line of log.split("\n")) {
+    const row = /^tests (\d+)\/(\d+)\t[^\t]*\t\S+Z (.*)$/.exec(line);
+    if (!row) continue;
+    const [, index, count, body] = row;
+    shards.set(index, {
+      count: Number(count),
+      done: shards.get(index)?.done || /^# tests \d+/.test(body),
+    });
+  }
+  const expected = [...shards.values()][0]?.count ?? 0;
+  const finished = [...shards.values()].filter((shard) => shard.done).length;
+  if (!expected || shards.size !== expected || finished !== expected)
+    throw new Error(
+      `Only ${finished} of ${expected || "?"} test shards finished in that log; is it complete?`,
+    );
+}
+
 export function weightsFromLog(log, owners) {
   const templates = [...owners]
     .filter(([title]) => title.includes("${"))
@@ -74,13 +94,9 @@ if (
   const sources = Object.fromEntries(
     allTestFiles().map((file) => [file, readFileSync(file, "utf8")]),
   );
-  const weights = weightsFromLog(readFileSync(0, "utf8"), testTitles(sources));
-  // A cut-off log would otherwise silently drop files and under-weight the last one.
-  const expected = Object.keys(sources).length;
-  if (Object.keys(weights).length < expected * 0.95)
-    throw new Error(
-      `Only ${Object.keys(weights).length} of ${expected} test files have durations; is that log complete?`,
-    );
+  const log = readFileSync(0, "utf8");
+  const weights = weightsFromLog(log, testTitles(sources));
+  assertComplete(log);
   writeFileSync(
     "tests/test-weights.json",
     `${JSON.stringify(weights, null, 2)}\n`,

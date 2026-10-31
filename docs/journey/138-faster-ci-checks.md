@@ -1,7 +1,7 @@
 # 138 — Where does a CI run's time go now that installs are instant?
 
 Work dates: 31 October 2026. Written: 31 October 2026.
-Status: in review. The latest CI run took 188 s against 237–270 s on main. That is one sample, and shards are still uneven.
+Status: released in `9973a81`. The first run on the final weights took 180 s, against 237–287 s on main just before it. Single samples, and shards are still uneven.
 
 ## User-visible problem and preceding iteration
 
@@ -34,24 +34,27 @@ Status: in review. The latest CI run took 188 s against 237–270 s on main. Tha
 
 ## Verification and outcome
 
-**Measured, the first two runs on this change** (41189881282 and 41213257878), against three baseline runs on main:
+**Measured, three runs on this change** (41189881282, 41213257878 and 41213831727, the last on the final weights), against runs on main:
 
-| Measure                                   | Main            | First run | Second run |
-| ----------------------------------------- | --------------- | --------- | ---------- |
-| Workflow wall time                        | 265, 237, 270 s | 258 s     | 188 s      |
-| Slowest test shard job                    | 256, 228, 231 s | 165 s     | 165 s      |
-| Pi job                                    | 199, 219, 261 s | 190 s     | 178 s      |
-| `test:ts` across shards                   | 83–182 s        | 70–145 s  | 81–149 s   |
-| Gate job's wait after its last dependency | not measured    | 62 s      | 3 s        |
+| Measure                                   | Main         | First        | Second       | Final weights |
+| ----------------------------------------- | ------------ | ------------ | ------------ | ------------- |
+| Workflow wall time                        | 237–287 s    | 258 s        | 188 s        | 180 s         |
+| Slowest test shard job                    | 220–256 s    | 165 s        | 165 s        | 151 s         |
+| Pi job                                    | 199–261 s    | 190 s        | 178 s        | 171 s         |
+| Test shard jobs, all six                  | not compared | not compared | not compared | 99–151 s      |
+| Gate job's wait after its last dependency | about 3 s    | 62 s         | 3 s          | not measured  |
 
-- **Tests kept:** each run matched main's top-level test titles, with 1 skipped: 1,415 tests on the first run and 1,422 on the second, after main gained tests.
-- **Most of the drop between the two runs is the gate wait disappearing.** Its cause is not established, so 188 s may not hold on every run.
-- **The Pi job is now the slowest,** at 178–190 s, and sets the wall time.
-- **Balance is limited by runner speed (hypothesis).** Shards were planned to be even but took 81–149 s on the second run. On the first run, per-file times within a shard ran a nearly uniform 0.6× or 1.0× of main's, which points to runner speed rather than a bad split.
-- **Weights.** Neither run used the final weights. The first missed templated titles, 57–69 s on the runs checked. The second came from a cut-off log, which dropped two files and under-weighted a third. The final weights come from the complete log of run 41187266188: 140 of 140 files, 711 s, 118–119 s per shard. The updater now refuses a log covering under 95% of test files.
-- **pip:** the first run had no cache to restore; the second restored it.
+- **Tests kept:** on the final-weights run, top-level test titles matched main's exactly (b73e58c): 1,422 tests, 1,421 passed, 0 failed, 1 skipped. The earlier runs also matched.
+- **The first run's 258 s was mostly a 62 s gate wait,** an outlier against about 3 s elsewhere. Its cause is not established.
+- **The Pi job now sets the wall time.**
+- **Balance is limited by runner speed (hypothesis).** Recorded time splits at 118–119 s per shard, but the jobs took 99–151 s. On the first run, per-file times within a shard ran a nearly uniform 0.6× or 1.0× of main's, which points to runner speed rather than a bad split.
+- **Weights.** Only the third run used the final weights, from the complete log of run 41187266188: 140 of 140 files, 711 s. The first two also missed files, apparently because the source log was cut off (inferred from where the entries stop), and the first also missed templated titles (57–69 s on the runs checked).
+- **The updater's check.** It now requires a summary line from every shard, which a cut-off log lacks. An earlier 95% file-count check would not have caught the actual cut, which still credited 138 of 140 files.
+- **pip:** the first run had no cache to restore; later runs restored it.
 
-### Release closure — pending
+### Release closure — 31 October 2026
+
+Merged as `9973a81` ([PR 379](https://github.com/akhilvuputuri/chief-agent/pull/379)). CI configuration only; nothing changes in production.
 
 ## Follow-up and next iteration
 
