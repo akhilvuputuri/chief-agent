@@ -75,9 +75,8 @@ The judge itself (`answer_ok`, `openai/gpt-6.1-sol`, conversations only, 20 call
 
 **Still unmeasured:** whether the judge or Jev agrees with the owner.
 
-**Known gap:** `deploy-agentwatch-update.py` does not check the `command` arguments, so a later change could drop the judge policy or allow any host and still pass it. Review of main is the guard for now; a follow-up adds the check.
+**Closed afterwards:** `deploy-agentwatch-update.py` did not check the `command` arguments, so a later change could have dropped the judge policy or allowed any host and still passed it. It now refuses `*` as an argument and, when agentwatch holds the key, requires the OpenRouter endpoint, the key variable and a daily cap of at most 50.
 
 ## Follow-up and next iteration
 
-- Make the update script require the judge policy's arguments and refuse `--allow-host "*"`.
 - After a week of messages, compare `jev_redirect_probability` with the rules' flags and the judge's verdicts, and set the threshold from that.
