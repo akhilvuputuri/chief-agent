@@ -372,23 +372,34 @@ export class MemoryStore {
         a.key.localeCompare(b.key),
     );
     const learned: Array<LearnedItem & { id: string }> = [];
-    const omitted: string[] = [];
+    const entry = (r: MemoryRevision): LearnedItem => ({
+      key: r.key,
+      kind: r.kind,
+      value: r.value!,
+      ...(r.outcome ? { outcome: r.outcome } : {}),
+      ...(r.domain ? { domain: r.domain } : {}),
+    });
+    const sizeOf = (r: MemoryRevision) => JSON.stringify(entry(r)).length + 1;
+    const taken = new Set<string>();
     let chars = 0;
-    for (const r of candidates) {
-      const item: LearnedItem = {
-        key: r.key,
-        kind: r.kind,
-        value: r.value!,
-        ...(r.outcome ? { outcome: r.outcome } : {}),
-        ...(r.domain ? { domain: r.domain } : {}),
-      };
-      const size = JSON.stringify(item).length + 1;
-      if (chars + size > budget) omitted.push(r.id);
-      else {
-        learned.push({ ...item, id: r.id });
-        chars += size;
+    const take = (r: MemoryRevision) => {
+      learned.push({ ...entry(r), id: r.id });
+      taken.add(r.id);
+      chars += sizeOf(r);
+    };
+    // Each kind has half the budget to itself, so a run of new lessons cannot push out what
+    // Chief knows about the owner, or the reverse. Whatever one leaves goes to either.
+    for (const kind of ["fact", "lesson"] as const) {
+      let used = 0;
+      for (const r of candidates) {
+        if (r.kind !== kind || used + sizeOf(r) > budget / 2) continue;
+        take(r);
+        used += sizeOf(r);
       }
     }
+    for (const r of candidates)
+      if (!taken.has(r.id) && chars + sizeOf(r) <= budget) take(r);
+    const omitted = candidates.filter((r) => !taken.has(r.id)).map((r) => r.id);
     learned.sort((a, b) => a.key.localeCompare(b.key));
     const selected = new Set([
       ...items

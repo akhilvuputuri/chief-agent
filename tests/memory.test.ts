@@ -608,3 +608,35 @@ test("an older image writing a key whose head was learned is imported as the own
   assert.deepEqual([head.origin, head.value], ["legacy", "Penang"]);
   assert.deepEqual(await store.importLegacy(), { imported: 0, projected: 0 });
 });
+
+test("a run of new lessons cannot push learned facts out of the prompt, and unused room is shared", async (t) => {
+  const { db, store } = await setup(t);
+  const run = await learnerRun(db);
+  await learn(store, "home_city", "Lives in Singapore", run);
+  await db.query(
+    "UPDATE memory_revisions SET created_at=now()-interval '30 days' WHERE key='home_city'",
+  );
+  for (let i = 0; i < 5; i++)
+    await store.write("owner", {
+      key: `lesson:work:rule-${i}`,
+      value: "x".repeat(200),
+      kind: "lesson",
+      outcome: "success",
+      domain: "work",
+      origin: "learned",
+      reason: "r",
+      source: {},
+      learnerRun: run,
+    });
+  const tight = await store.select("owner", 500);
+  const keys = tight.learned.map((l) => l.key);
+  assert.ok(keys.includes("home_city"), "the older fact stays");
+  assert.ok(tight.omitted.length > 0, "something was left out");
+  assert.ok(JSON.stringify(tight.learned).length <= 500 + 10);
+  // Room a kind does not use goes to the other: without the fact, one more lesson fits.
+  const count = (selection: { learned: { kind: string }[] }) =>
+    selection.learned.filter((l) => l.kind === "lesson").length;
+  const withFact = count(await store.select("owner", 880));
+  await store.retire("owner", "home_city", { origin: "owner", reason: "r" });
+  assert.equal(count(await store.select("owner", 880)), withFact + 1);
+});

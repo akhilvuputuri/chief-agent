@@ -69,7 +69,7 @@ The turn backlog is cleared. Of the 55 turns, one pitfall came from an owner cor
 
 **The gap.** The owner asked to examine what had been mined. There was nothing to read: for these runs the server held counts in `learner_runs`, two count-only events per run, the same counts in the ops log and tokens and cost per model call, with no saved messages, tool calls or traces. The two refused proposals cannot be recovered, and "refused" also counts malformed calls, so they may not have been real items. An accepted item could also be dropped silently when applied. The cause is the design in this entry: the learner is a small separate loop, which bypasses the run journal and trace export that normal runs use, and provenance was built only for items that get written. Independent review did not catch it, and was not asked to. Learning without approvals rests on being able to inspect what happened, so this undercut the phase's own safety argument.
 
-**Change.** Each run now records `learner.input`, `learner.model_call`, `learner.proposal` and `learner.applied` privately in `events` ([learning](../learning.md#telemetry-and-the-private-record)). Behaviour is unchanged. Writes stay on: a proposal to pause them with a shadow mode was the implementer's overreach, and the owner rejected it, since the no-approvals decision stands and only the record was missing. Tested in `tests/learning.test.ts` (22 tests): the record's contents, credential scrubbing, the verdict on each proposal, the outcome of each accepted item, nothing reaching the ops log, a pre-empted run keeping its record, and neither text the database refuses nor a failed insert affecting learning. Independent review of `c233481` (Claude Opus 5.5) requested changes: half an emoji at a clip boundary made the first record fail the whole run, every night, and a failed record could fail a run after it had written an item. The record is now best effort and made storable first, and clipping no longer splits a surrogate pair. Trace export is not connected. Not yet released.
+**Change.** Each run now records `learner.input`, `learner.model_call`, `learner.proposal` and `learner.applied` privately in `events` ([learning](../learning.md#telemetry-and-the-private-record)). Behaviour is unchanged. Writes stay on: a proposal to pause them with a shadow mode was the implementer's overreach, and the owner rejected it, since the no-approvals decision stands and only the record was missing. Tested in `tests/learning.test.ts` (22 tests): the record's contents, credential scrubbing, the verdict on each proposal, the outcome of each accepted item, nothing reaching the ops log, a pre-empted run keeping its record, and neither text the database refuses nor a failed insert affecting learning. Independent review of `c233481` (Claude Opus 5.5) requested changes: half an emoji at a clip boundary made the first record fail the whole run, every night, and a failed record could fail a run after it had written an item. The record is now best effort and made storable first, and clipping no longer splits a surrogate pair. Trace export is not connected. Released in `ea9943c`.
 
 **Unknown.** Why nothing has been saved: the model may be too cautious, the quote check too strict, or the turns thin. The record lets later nights answer that.
 
@@ -84,7 +84,24 @@ The turn backlog is cleared. Of the 55 turns, one pitfall came from an owner cor
 - Learned items reach the prompt up to 12,000 characters instead of 4,000, or they would never reach Chief.
 - Up to 60 turns a night instead of 30, and items reviewed under the earlier prompts are mined again once.
 
-**Accepted risk.** More mediocre or wrong items reach Chief's prompt until they are pruned, and more prompt text means more cached input and can leave less room for older history on each turn. A fake model drives the tests (24 in `tests/learning.test.ts`), so what real nights save is unmeasured. Not yet released.
+**Accepted risk.** More mediocre or wrong items reach Chief's prompt until they are pruned, and more prompt text means more cached input and can leave less room for older history on each turn. A fake model drives the tests (24 in `tests/learning.test.ts`), so what real nights save was unmeasured at this point. Released in `c54ddcb`.
+
+## First night under the new rules, and pruning — 2026-11-01
+
+**Measured (production, 03:32 SGT on 1 November, `learner-v3`, read from the new private record):** 55 items reviewed (36 success, 4 pitfall, 15 skipped), one model call, $0.17. It saved 1 fact and 5 lessons and refused 5 facts. The model sent everything and finished in the same response, so it never saw the refusals.
+
+**Reading the proposals (owner and implementer judgement, not a measurement):**
+
+- Three refused facts were good. Each was stopped by the negation check because the owner's sentence held an unrelated "no" or "not".
+- Two saved lessons were wrong. The rain format lesson read silence as approval and contradicts the plain rain replies decision ([journal 109](109-plain-rain-replies.md)). The artifact-size lesson told coding jobs not to update the repo's records, a workaround for one error.
+- A third, on cancelling blocking tasks without asking, is doubtful and stays for now.
+- Five of the six saved items are tagged `untrusted`, largely because domain tools count as external. That tag is too broad to help pruning.
+
+**Production edits, approved by the owner.** The two wrong lessons were retired and the three facts added as the owner's own, through `MemoryStore`, in a coding session.
+
+**Change.** The negation check refuses only an added negation; a dropped one is applied and flagged. A response with refusals earns one more turn to correct them. Learned facts and lessons each have half the prompt budget, with unused room shared, after the research found that newest-first selection would let lessons evict facts about the owner. Tested in `tests/learning.test.ts` and `tests/memory.test.ts`. Not yet released.
+
+**Still open.** "Not corrected" was read as approval for a format rule, and nothing checks a lesson against earlier decisions. Hermes's "almost never fires" warning cited above concerns its forget-and-recall loop, not review learning (found in the research on 1 November); Chief's measured task shortage stands independently.
 
 ## Follow-up and next iteration
 
