@@ -1,6 +1,6 @@
 # Recall over conversations and memories
 
-Status (1 November 2026): live in `48d22d1`, indexed in two passes (571 messages, 14 memories, 1.9 MB, nothing skipped). The first evaluation below favours keeping it; it found one fusion fault, which is being fixed. Chief's real use is not measured yet. Step 2 of [issue 326](https://github.com/akhilvuputuri/chief-agent/issues/326); see [journal 143](journey/143-recall-with-pgvector.md).
+Status (1 November 2026): live in `48d22d1`, indexed in two passes (571 messages, 14 memories, 1.9 MB, nothing skipped). The fusion fix from the first evaluation is live in `40e9a6f`. That evaluation favours keeping it. Chief's real use is not measured yet. Step 2 of [issue 326](https://github.com/akhilvuputuri/chief-agent/issues/326); see [journal 143](journey/143-recall-with-pgvector.md).
 
 ## What it does
 
@@ -63,8 +63,8 @@ Measured on 1 November 2026 against production's index, read-only, with `text-em
 | Using the message's own words (18) | 15                    | 15                 | 17           | 17          | 18                   |
 
 - **What it suggests.** Meaning search finds what today's search misses when the wording differs, and costs nothing when it matches.
-- **The fault.** As released, any-word keywords lowered results. A message appearing in both lists, even low in each, scored above the top meaning match alone. Requiring all words fixes it.
-- **Limits.** The operator wrote these questions after reading the target messages, so they are not the owner's own. The reworded sets deliberately avoid the message's words, so they favour meaning search and overstate the gap. The variants were compared on all three sets in one run, so "second sample" is a separate sample and not a blind test of the fix. It is 61 questions with one acceptable target each.
-- **Not measured.** Whether Chief calls the tool when it should, and whether answers improve. Check how often `recall.searched` appears over the coming weeks. If Chief rarely calls it, fix that or remove the tool.
+- **The fault.** As released in `48d22d1`, any-word keywords lowered results. A message appearing in both lists, even low in each, scored above the top meaning match alone. With all words required, results matched meaning search on the reworded sets, without beating it, and found all 18 word-based questions. The first run of that column came from a test variant. Re-running the same 61 questions through the live `40e9a6f` code gave the same 21, 13 and 18.
+- **Limits.** The operator wrote these questions after reading the target messages, so they are not the owner's own. The reworded sets deliberately avoid the message's words, so `conversation_search`, which needs every word, scores close to zero by design and the gap is overstated. The fix was chosen after seeing the fault, on these same questions. The variants were compared on all three sets in one run, so "second sample" is a separate sample and not a blind test of the fix. It is 61 questions with one acceptable target each.
+- **Not measured.** Precision and questions with no answer: every question here has one, and meaning search returns its nearest results even when nothing is relevant, so the noise Chief reads is unknown. Also whether Chief calls the tool when it should, and whether answers improve. Check how often `recall.searched` appears over the coming weeks. If Chief rarely calls it, fix that or remove the tool.
 
-Median search time as released was about 1.4 seconds, mostly the embedding call (27 questions, slowest 2.5 seconds). Search covered 585 sources, with exact search.
+Median search time on `40e9a6f` was about 1.2 seconds (61 questions, slowest 2.1 seconds). The embedding call was not timed separately. Search covered 585 sources, with exact search.

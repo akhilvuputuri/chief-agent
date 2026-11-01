@@ -1,7 +1,7 @@
 # 143 — Can Chief find what the owner half-remembers?
 
 Work date: 2026-11-01. Written: 2026-11-01.
-Status: released in `48d22d1` on 1 November with the operator rollout. A first operator-written evaluation favours keeping it and found one fusion fault. Chief's real use is not measured.
+Status: released in `48d22d1` on 1 November with the operator rollout; fusion fix live in `40e9a6f`. A first operator-written evaluation favours keeping it. Precision and Chief's real use are not measured.
 
 ## User-visible problem and preceding iteration
 
@@ -64,6 +64,6 @@ Final review: Opus 5.5 approved `1af0c48` on 1 November, after CI run 4127298925
 
 ### Evaluation — 2026-11-01
 
-See [recall](../recall.md#evaluation). As released, fusion found fewer than meaning search alone: 14 against 21 of 27 reworded questions. A message with any-word keyword hits in both lists outranked the best meaning match. Requiring all words matched meaning search on both reworded sets (21 and 13 of 16), and found all 18 word-based questions.
+See [recall](../recall.md#evaluation). As released, fusion found fewer than meaning search alone: 14 against 21 of 27 reworded questions. A message with any-word keyword hits in both lists outranked the best meaning match. Requiring all words matched meaning search on both reworded sets (21 and 13 of 16), without beating it, and found all 18 word-based questions. That column came from a test variant. After PR [393](https://github.com/akhilvuputuri/chief-agent/pull/393) was released as `40e9a6f`, the same questions through the live code gave the same counts (measured, 1 November).
 
 This corrects a design choice, not the mail evaluation: mail's keywords come from precise Gmail queries, so its result did not predict this. These are operator-written questions, so they favour meaning search and are not owner acceptance.
