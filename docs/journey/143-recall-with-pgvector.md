@@ -41,5 +41,6 @@ Independent review: pending.
 ## Verification and outcome
 
 - 1,452 TypeScript tests pass locally, and the 18 rollout tests pass.
-- The image has not been built on this laptop, because Docker is not running here. CI is its first real build.
+- The image has not been built on this laptop, because Docker is not running here. Its first real build was in CI on `edd6a13` (1 November), where the Postgres smoke test passed on it. That is a fresh database, not the production volume.
+- CI on `edd6a13` failed 20 script tests: `scripts/gathering-boundaries.test.mjs` applies every migration on a PGlite without `vector`. I had fixed two such tests but not this one or `evals/context/replay.ts`. Both now load it.
 - Pending: review, CI, the owner's go-ahead for the rollout, the backfill, then the [evaluation](../recall.md#evaluation), which decides whether this stays.
