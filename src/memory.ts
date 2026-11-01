@@ -339,9 +339,9 @@ export class MemoryStore {
   }
 
   /**
-   * Keys the owner or a rollback retired, with the wording last removed. The learner must not
-   * bring these back. Its own retirements stay open to newer work, and a rollback that restored
-   * an earlier value leaves the key active and open too.
+   * Retired keys the owner or a rollback took out, with the wording last removed. The learner
+   * must not bring these back. Its own retirements stay open to newer work, and a rollback
+   * that restored an earlier value leaves the key active and open too.
    */
   async removed(user: string): Promise<Array<{ key: string; value: string }>> {
     const { rows } = await this.db.query(
@@ -349,11 +349,24 @@ export class MemoryStore {
          WHERE p.user_id=r.user_id AND p.key=r.key AND p.value IS NOT NULL
          ORDER BY p.revision DESC LIMIT 1) AS value
        FROM memory_heads h JOIN memory_revisions r ON r.id=h.revision_id AND r.user_id=h.user_id
-       WHERE h.user_id=$1 AND r.status='retired' AND r.origin<>'learned') x
+       WHERE h.user_id=$1 AND r.status='retired' AND (r.origin<>'learned' OR EXISTS (
+         SELECT 1 FROM memory_undone u JOIN memory_revisions d ON d.id=u.revision_id AND d.user_id=u.user_id
+         WHERE u.user_id=r.user_id AND d.key=r.key))) x
        WHERE value IS NOT NULL ORDER BY key`,
       [user],
     );
     return rows as Array<{ key: string; value: string }>;
+  }
+
+  /** Every key's latest revision, active or retired: what the host dates older work against. */
+  async heads(user: string): Promise<MemoryRevision[]> {
+    return (
+      await this.db.query(
+        `SELECT ${COLUMNS},h.pinned FROM memory_heads h JOIN memory_revisions r
+         ON r.user_id=h.user_id AND r.id=h.revision_id WHERE h.user_id=$1`,
+        [user],
+      )
+    ).rows;
   }
 
   async history(user: string, key: string): Promise<MemoryRevision[]> {

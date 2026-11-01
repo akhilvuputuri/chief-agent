@@ -131,7 +131,7 @@ Every proposal is checked before it is accepted, and a refusal is returned to th
 - A lesson's outcome must match the label of every task it cites. Lessons are not quote-checked; they carry their tasks' untrusted tags instead, so they can be rolled back by source.
 - One key once per batch.
 - A key the owner or a rollback removed cannot be proposed again; removed keys and their last wording are shown to the model so it does not reword them under another key. Rewording under a new key is still possible, as is a value undone by a rollback that restored an earlier one, because that key stays active. The learner's own retirements stay open to newer work.
-- Work older than the work behind a key's current value cannot change or retire it. The date comes from `source.workDate`, or the revision's date for items written before `learner-v4`.
+- Work older than the work behind a key's latest value or retirement cannot change it. The date comes from `source.workDate`, or the revision's date for items written before `learner-v4`.
 - The model usually proposes everything and finishes in one response, so once a batch, if that response had refusals, it gets another turn with their reasons to correct them.
 - `learn_retire` applies only to learned items.
 

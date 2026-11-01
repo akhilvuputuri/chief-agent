@@ -389,7 +389,7 @@ type ToolName = keyof typeof learnTools;
 interface Known {
   ownerKeys: Set<string>;
   removed: Set<string>;
-  /** The day of the work behind each active key's value. */
+  /** The day of the work behind each key's latest value or retirement. */
   workDates: Map<string, string>;
 }
 
@@ -1011,7 +1011,7 @@ export class Learner {
       ),
       removed: new Set(removed.map((r) => r.key)),
       workDates: new Map(
-        items.map((r) => [
+        (await this.store.heads(user)).map((r) => [
           r.key,
           (r.source as { workDate?: string }).workDate ?? day(r.created_at),
         ]),

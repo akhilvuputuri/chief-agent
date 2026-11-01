@@ -164,6 +164,8 @@ const fields: Record<string, Shape> = {
   retiredCount: "count",
   refusedCount: "count",
   modelCalls: "count",
+  recordedCount: "count",
+  failedBatchCount: "count",
 };
 
 // Written as null rather than omitted: an unknown charge stays visibly unknown.

@@ -13,6 +13,7 @@ import {
 } from "../src/learning.js";
 import { documentMessage, forwardedMessage } from "../src/attachments.js";
 import { MemoryStore } from "../src/memory.js";
+import { projectEventRecord } from "../src/ops-log.js";
 import type { Generation, ModelAdapter } from "../src/model.js";
 import { closeAfter, migratedPGlite } from "./helpers/pglite.js";
 
@@ -1671,4 +1672,86 @@ test("only the owner's and a rollback's removals block a key", async (t) => {
   assert.deepEqual(await store.removed("owner"), [
     { key: "by_owner", value: "Retired by the owner" },
   ]);
+});
+
+test("a rollback's removal blocks the key, even over the learner's own retirement", async (t) => {
+  const db = await setup(t);
+  const store = new MemoryStore(db);
+  const run = randomUUID();
+  await db.query(
+    "INSERT INTO learner_runs(id,user_id,state,prompt_version) VALUES($1,'owner','completed','learner-v4')",
+    [run],
+  );
+  const write = (key: string) =>
+    store.write("owner", {
+      key,
+      value: "A wrong value",
+      kind: "fact",
+      origin: "learned",
+      reason: "seed",
+      source: {},
+      learnerRun: run,
+    });
+  await write("rolled_back");
+  await write("then_retired");
+  await store.retire("owner", "then_retired", {
+    origin: "learned",
+    reason: "stale",
+    learnerRun: run,
+  });
+  await store.rollback("owner", { learnerRun: run }, "wrong");
+  assert.deepEqual(
+    (await store.removed("owner")).map((r) => r.key),
+    ["rolled_back", "then_retired"],
+  );
+});
+
+test("older work cannot restore a key newer work retired", async (t) => {
+  const db = await setup(t);
+  const old = await task(db, {
+    finishedAgo: 30 * DAY,
+    ownerSays: ["I live in Penang these days"],
+  });
+  const store = new MemoryStore(db);
+  await store.write("owner", {
+    key: "home_city",
+    value: "Lives in Singapore",
+    kind: "fact",
+    origin: "learned",
+    reason: "seed",
+    source: {},
+  });
+  await store.retire(
+    "owner",
+    "home_city",
+    { origin: "learned", reason: "stale" },
+    { workDate: "2026-11-20" },
+  );
+  const { adapter } = model(() => [
+    [
+      "learn_fact",
+      {
+        key: "home_city",
+        value: "Lives in Penang",
+        quote: "I live in Penang",
+        taskIds: [old],
+        reason: "Old",
+      },
+    ],
+    ["learn_finish", {}],
+  ]);
+  const result: any = await learner(db, adapter).tick("owner");
+  assert.equal(result.facts, 0);
+});
+
+test("a run's batch counts reach the operational log", () => {
+  const line: any = projectEventRecord("learner.finished", "run", {
+    state: "completed",
+    recorded: 10,
+    failedBatches: 1,
+  });
+  assert.deepEqual(
+    [line.recordedCount, line.failedBatchCount, line.dropped],
+    [10, 1, undefined],
+  );
 });
