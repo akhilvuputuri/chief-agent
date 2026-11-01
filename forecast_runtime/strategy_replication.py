@@ -303,13 +303,16 @@ def scenario_returns(data, kind):
 
 
 def rule_weights(rule, data):
+    """Target weights from the rule's own universe, even if data also holds benchmark prices."""
+    closes = {s: data["close"][s] for s in rule["universe"]}
+    adj = {s: data["adj"][s] for s in rule["universe"]}
     if rule["kind"] == "sma":
-        rows = sma_weights(data["close"], rule["fast"], rule["slow"], rule["cap"])
+        rows = sma_weights(closes, rule["fast"], rule["slow"], rule["cap"])
     else:
-        rows = inverse_vol_weights(data["adj"], rule["lookback"], rule["cap"])
+        rows = inverse_vol_weights(adj, rule["lookback"], rule["cap"])
     if "volTarget" in rule:
         v = rule["volTarget"]
-        total = {s: pct_returns(p) for s, p in data["adj"].items()}
+        total = {s: pct_returns(p) for s, p in adj.items()}
         rows = apply_vol_target(rows, total, data["dates"], v["target"], v["lookback"], v["maxLeverage"])
     return rows
 
@@ -408,7 +411,7 @@ def main():
 
     results = {"latestBar": latest, "settings": {"scenarios": SCENARIOS, "bootstrap": BOOTSTRAP}, "rules": {}}
     for name, rule in RULES.items():
-        symbols_for_rule = sorted(set(rule["universe"] + ["SPY", "IEF"]))
+        symbols_for_rule = sorted(set(rule["universe"] + ["SPY"]))
         published = window(market, symbols_for_rule, rule["start"], PUBLISHED_END)
         out = {"published": rule["published"], "replication": {}, "scenarios": {}}
         for scenario in ("publishedTotal", "publishedPrice"):

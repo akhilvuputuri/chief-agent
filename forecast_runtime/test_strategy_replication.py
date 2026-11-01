@@ -62,13 +62,19 @@ class SimulationTests(unittest.TestCase):
         closes = [100 + i + 5 * math.sin(i / 3) for i in range(60)]
         changed = closes[:40] + [c * 1.5 for c in closes[40:]]
         dates = [f"20{20 + i // 12:02d}-{i % 12 + 1:02d}-15" for i in range(60)]
-        rule = {"kind": "sma", "fast": 3, "slow": 8, "cap": 1.0, "rebalance": "daily"}
+        rule = {"kind": "sma", "universe": ["A"], "fast": 3, "slow": 8, "cap": 1.0, "rebalance": "daily"}
 
         def run(prices):
             data = {"dates": dates, "close": {"A": prices}, "adj": {"A": prices}, "tbill": [0.0] * 60}
             return sr.run_rule(rule, data, NO_COST)["navs"]
 
         self.assertEqual(run(closes)[:40], run(changed)[:40])
+
+    def test_a_rule_never_trades_benchmark_prices_outside_its_universe(self):
+        rising = [100.0 + i for i in range(20)]
+        data = {"close": {"A": rising, "SPY": rising}, "adj": {"A": rising, "SPY": rising}}
+        rule = {"kind": "sma", "universe": ["A"], "fast": 2, "slow": 4, "cap": 1.0}
+        self.assertEqual(sr.rule_weights(rule, data)[-1], {"A": 1.0})
 
     def test_costs_are_charged_on_traded_value(self):
         out = sr.simulate(
