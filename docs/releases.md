@@ -1,3 +1,9 @@
+## Baked coding box image (1 November 2026)
+
+- **Code.** The boot script skips Docker's install and the image pull when already present. `deploy/boxes/box-image.json` adds the weekly image pipeline, and the boxes stack gains the `CodingImage` parameter and permission to launch the baked image. No migration.
+- **Why.** Each box installs Docker and pulls 331 MB on every boot. See [journal 144](journey/144-baked-box-image.md).
+- **Deployment.** Not yet recorded as live; update this entry on release. The AWS stacks are applied by the owner.
+
 ## The learner looks further back (1 November 2026)
 
 - **Code.** Prompt `learner-v4`: 90 days back instead of 14, up to 40 tasks and 100 turns a run, batches of 10 kept as they finish, `learner-v3` items mined again. No migration.

@@ -1,3 +1,7 @@
+# Baked coding box image — proposed, 1 November 2026
+
+The owner chose a baked machine image over a stopped spare box to shorten coding box boots. A weekly Image Builder pipeline bakes Docker and the pinned worker image into Amazon Linux 2023, and the boot script skips what is already present. Boxes stay on stock Amazon Linux until the owner applies the stack and switches `CodingImage`; no timing is measured yet. See [journal 144](journey/144-baked-box-image.md) and [the rollout](../deploy/boxes/README.md#baked-coding-image).
+
 # Recall over conversations and memories — live in `48d22d1`, 1 November 2026
 
 Chief gets `memory_recall`, which searches past messages and memories by meaning and keyword with pgvector in the existing Postgres. Nothing is added to the prompt unless Chief calls it. Released through the operator rollout, which replaced the Postgres image. A first operator-written evaluation favours keeping it: meaning search found 34 of 43 reworded questions. Those questions were written to avoid the message's words, so today's search, which needs every word, finding none is close to guaranteed. It also found a fusion fault, fixed in `40e9a6f`. Precision and whether Chief calls the tool well are not measured. See [recall](recall.md) and [journal 143](journey/143-recall-with-pgvector.md).

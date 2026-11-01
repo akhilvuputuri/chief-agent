@@ -10,7 +10,7 @@ Design: [docs/boxes.md](../../docs/boxes.md). This stack creates no instances. I
   - `InstanceInitiatedShutdownBehavior=terminate`;
   - no instance profile and no key pair;
 - a managed policy attached to the gateway's existing IAM user. The policy:
-  - allows launches only from those templates;
+  - allows launches only from those templates, and only from Amazon's images or this account's images tagged `chief:box-image` for this environment;
   - allows only the listed instance types, required IMDSv2, hop limit 1, default tenancy, on-demand capacity and encrypted gp3 volumes of at most 200 GiB;
   - requires the `chief:box` and `chief:env` tags, and no other tags;
   - allows start, stop and terminate only on this environment's tagged boxes;
@@ -65,6 +65,56 @@ ssh -F <ops>/ssh_config chief-lightsail 'cd /opt/hermes-companion && docker comp
 - **Expected result:** one `PASS … allowed` line for the template launch, and `PASS … refused` for every override (instance type, image, metadata options, key pair, volume, spot, tenancy, instance profile, tags, no template).
 - **Any `FAIL`:** stop and review the policy.
 - **An `INCONCLUSIVE` line:** AWS rejected an override before checking permissions (for example a made-up image or subnet ID), so that case proves nothing either way. These do not fail the check; review each one. The legitimate launch is different: anything other than `allowed` for it is a `FAIL`.
+
+## Baked coding image
+
+Optional, and separate from the boxes stack. `box-image.json` creates a weekly Image Builder pipeline that bakes Docker and the worker image pinned on `main` into the latest Amazon Linux 2023, tests it on an instance launched from the result, publishes it through the SSM parameter `/imagebuilder/chief/boxes/<env>/coding-ami`, and keeps the newest three images. The build role belongs to the build and test instances only: boxes still have no instance profile.
+
+1. Create the pipeline, using the boxes stack's VPC and subnet:
+
+   ```bash
+   aws cloudformation deploy --region ap-southeast-1 --stack-name chief-box-image-prod --template-file deploy/boxes/box-image.json --capabilities CAPABILITY_IAM --parameter-overrides Environment=prod VpcId=vpc-XXXX SubnetId=subnet-XXXX
+   ```
+
+2. Build the first image, and wait until the parameter exists (about 20–40 minutes, estimated):
+
+   ```bash
+   aws imagebuilder start-image-pipeline-execution --region ap-southeast-1 --image-pipeline-arn "$(aws cloudformation describe-stacks --region ap-southeast-1 --stack-name chief-box-image-prod --query "Stacks[0].Outputs[?OutputKey=='PipelineArn'].OutputValue" --output text)"
+   ```
+
+   ```bash
+   aws ssm get-parameter --region ap-southeast-1 --name /imagebuilder/chief/boxes/prod/coding-ami --query Parameter.Value --output text
+   ```
+
+3. Point coding boxes at it. Other parameters keep their values:
+
+   ```bash
+   aws cloudformation deploy --region ap-southeast-1 --stack-name chief-boxes-prod --template-file deploy/boxes/boxes.json --capabilities CAPABILITY_IAM --parameter-overrides CodingImage=resolve:ssm:/imagebuilder/chief/boxes/prod/coding-ami
+   ```
+
+4. Make that version the default. Boxes launch the template's default version, and a stack update does not move it:
+
+   ```bash
+   aws ec2 modify-launch-template --region ap-southeast-1 --launch-template-name chief-box-prod-coding --default-version "$(aws cloudformation describe-stacks --region ap-southeast-1 --stack-name chief-boxes-prod --query "Stacks[0].Outputs[?OutputKey=='CodingLaunchTemplateLatestVersion'].OutputValue" --output text)"
+   ```
+
+5. Confirm that the default version uses it, then rerun the IAM check from [Verify the permissions](#5-verify-the-permissions-no-instance-launches). "Launch from the template" now proves that the controller can launch the baked image:
+
+   ```bash
+   aws ec2 describe-launch-template-versions --region ap-southeast-1 --launch-template-name chief-box-prod-coding --versions '$Default' --query 'LaunchTemplateVersions[0].LaunchTemplateData.ImageId' --output text
+   ```
+
+**To undo:** redeploy the boxes stack with `CodingImage=resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64`, then repeat steps 4 and 5. The boot script works on both images. A bad weekly image is undone the same way until a good one is built.
+
+**A new worker image** needs no rebuild: a box pulls only the layers missing from the baked image. To refresh sooner than weekly, rerun step 2.
+
+**A failed build** keeps the last good image, and nothing alerts on it. Check the state and reason of recent builds here:
+
+```bash
+aws imagebuilder list-image-pipeline-images --region ap-southeast-1 --image-pipeline-arn "$(aws cloudformation describe-stacks --region ap-southeast-1 --stack-name chief-box-image-prod --query "Stacks[0].Outputs[?OutputKey=='PipelineArn'].OutputValue" --output text)" --query 'imageSummaryList[].[dateCreated,state.status,state.reason]' --output table
+```
+
+**Changing the components or the recipe:** Image Builder versions cannot be edited. Raise the component's `Version` and the recipe's `Version` in the same change, or the stack update fails.
 
 ## Rollback
 

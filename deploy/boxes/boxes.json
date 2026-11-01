@@ -17,6 +17,12 @@
       "Type": "String",
       "Description": "The existing IAM user whose keys the gateway uses (the one holding the CodeBuild controller policy)"
     },
+    "CodingImage": {
+      "Type": "String",
+      "Default": "resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64",
+      "AllowedPattern": "^resolve:ssm:(/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64|/imagebuilder/chief/boxes/[a-z][a-z0-9-]{1,30}/coding-ami)$",
+      "Description": "The stock Amazon Linux parameter, or the baked image parameter from deploy/boxes/box-image.json"
+    },
     "CodingInstanceType": { "Type": "String", "Default": "m7i.xlarge" },
     "CodingVolumeGiB": {
       "Type": "Number",
@@ -60,7 +66,7 @@
       "Properties": {
         "LaunchTemplateName": { "Fn::Sub": "chief-box-${Environment}-coding" },
         "LaunchTemplateData": {
-          "ImageId": "resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64",
+          "ImageId": { "Ref": "CodingImage" },
           "InstanceType": { "Ref": "CodingInstanceType" },
           "InstanceInitiatedShutdownBehavior": "terminate",
           "DisableApiTermination": false,
@@ -207,6 +213,18 @@
               "Condition": { "StringEquals": { "ec2:Owner": "amazon" } }
             },
             {
+              "Sid": "LaunchBakedBoxImages",
+              "Effect": "Allow",
+              "Action": "ec2:RunInstances",
+              "Resource": { "Fn::Sub": "arn:aws:ec2:${AWS::Region}::image/*" },
+              "Condition": {
+                "StringEquals": {
+                  "ec2:Owner": { "Ref": "AWS::AccountId" },
+                  "ec2:ResourceTag/chief:box-image": { "Ref": "Environment" }
+                }
+              }
+            },
+            {
               "Sid": "LaunchNetworkFromTemplateOnly",
               "Effect": "Allow",
               "Action": "ec2:RunInstances",
@@ -300,9 +318,14 @@
               "Sid": "ResolveAmazonLinuxImage",
               "Effect": "Allow",
               "Action": "ssm:GetParameters",
-              "Resource": {
-                "Fn::Sub": "arn:aws:ssm:${AWS::Region}::parameter/aws/service/ami-amazon-linux-latest/*"
-              }
+              "Resource": [
+                {
+                  "Fn::Sub": "arn:aws:ssm:${AWS::Region}::parameter/aws/service/ami-amazon-linux-latest/*"
+                },
+                {
+                  "Fn::Sub": "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/imagebuilder/chief/boxes/${Environment}/coding-ami"
+                }
+              ]
             }
           ]
         }
@@ -312,6 +335,9 @@
   "Outputs": {
     "CodingLaunchTemplateName": {
       "Value": { "Fn::Sub": "chief-box-${Environment}-coding" }
+    },
+    "CodingLaunchTemplateLatestVersion": {
+      "Value": { "Fn::GetAtt": ["CodingLaunchTemplate", "LatestVersionNumber"] }
     },
     "EchoLaunchTemplateName": {
       "Value": { "Fn::Sub": "chief-box-${Environment}-echo" }

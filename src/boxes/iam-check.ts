@@ -63,7 +63,7 @@ export function iamCases(template: string, environment: string): IamCase[] {
   return [
     { name: "launch from the template", expect: "allowed", input: base },
     with_("a larger instance type", { InstanceType: "m7i.16xlarge" }),
-    // A Canonical-owned image: anything not owned by Amazon must be refused.
+    // A Canonical-owned image: only Amazon's images and this account's tagged ones are allowed.
     with_("another image", { ImageId: "ami-0dad20bd1b9c8c004" }),
     with_("optional metadata tokens", {
       MetadataOptions: { HttpTokens: "optional" },
