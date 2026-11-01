@@ -272,14 +272,17 @@ export async function recall(
         )
       ).rows as Array<{ type: Hit["type"]; id: string }>)
     : [];
-  // Any word may match, unlike conversation_search: a recalled question rarely has them all.
-  const anyWord = `replace(plainto_tsquery('english',$2)::text,'&','|')::tsquery`;
+  // Fused with meaning, keywords must all match: a hit on one common word would outrank the
+  // best meaning match (docs/recall.md#evaluation). Alone, any word is better than nothing.
+  const words = vector
+    ? `plainto_tsquery('english',$2)`
+    : `replace(plainto_tsquery('english',$2)::text,'&','|')::tsquery`;
   const keywordMessages = (
     await db.query(
       `SELECT 'message' AS type,e.id FROM conversation_messages e JOIN message_contents c USING(user_id,hash)
        WHERE e.user_id=$1 AND ${conversational} AND numnode(plainto_tsquery('english',$2))>0
-       AND c.search @@ ${anyWord}
-       ORDER BY ts_rank(c.search,${anyWord}) DESC,e.ordinal DESC LIMIT ${CANDIDATES}`,
+       AND c.search @@ ${words}
+       ORDER BY ts_rank(c.search,${words}) DESC,e.ordinal DESC LIMIT ${CANDIDATES}`,
       [user, query],
     )
   ).rows as Array<{ type: Hit["type"]; id: string }>;
@@ -287,8 +290,8 @@ export async function recall(
     await db.query(
       `SELECT 'memory' AS type,r.id FROM memory_revisions r
        WHERE r.user_id=$1 AND r.id IN (${ACTIVE_REVISIONS}) AND numnode(plainto_tsquery('english',$2))>0
-       AND to_tsvector('english',r.key||' '||r.value) @@ ${anyWord}
-       ORDER BY ts_rank(to_tsvector('english',r.key||' '||r.value),${anyWord}) DESC,r.id LIMIT ${CANDIDATES}`,
+       AND to_tsvector('english',r.key||' '||r.value) @@ ${words}
+       ORDER BY ts_rank(to_tsvector('english',r.key||' '||r.value),${words}) DESC,r.id LIMIT ${CANDIDATES}`,
       [user, query],
     )
   ).rows as Array<{ type: Hit["type"]; id: string }>;

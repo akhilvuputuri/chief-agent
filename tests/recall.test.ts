@@ -274,7 +274,7 @@ test("search finds by meaning without a shared word, by keyword too, and fuses t
   assert.match(found.note, /not instructions/);
   // Another owner's matching message never appears, by meaning or keyword.
   assert.doesNotMatch(JSON.stringify(found), /Their landlord/);
-  const both: any = await recall(db, "owner", run(), "lease rent", fake);
+  const both: any = await recall(db, "owner", run(), "lease renewal", fake);
   assert.deepEqual(
     [
       both.results[0].id,
@@ -283,6 +283,22 @@ test("search finds by meaning without a shared word, by keyword too, and fuses t
     ],
     [lease, 1, 1],
   );
+});
+
+test("a one-word keyword match does not push out the best meaning match", async (t) => {
+  const db = await setup(t);
+  const fake = embedder();
+  const target = await message(db, "owner", "user", "espresso near the cafe");
+  // Each shares only "morning" with the query, and enough of them to fill the results.
+  for (let i = 0; i < 12; i++)
+    await message(db, "owner", "assistant", `flight seat ${i} this morning`);
+  await new RecallIndex(db, fake).tick("owner");
+  const hybrid = await recall(db, "owner", run(), "morning coffee", fake);
+  assert.equal(hybrid.results[0]!.id, target);
+  // With no embedder, any word still finds something.
+  const keyword = await recall(db, "owner", run(), "morning coffee");
+  assert.equal(keyword.mode, "keyword_only");
+  assert.ok(keyword.results.length > 0);
 });
 
 test("search returns only current memories: a retired or revised one never comes back", async (t) => {

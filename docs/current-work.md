@@ -1,6 +1,6 @@
-# Recall over conversations and memories — proposed, 1 November 2026
+# Recall over conversations and memories — live in `48d22d1`, 1 November 2026
 
-Chief gets `memory_recall`, which searches past messages and memories by meaning and keyword with pgvector in the existing Postgres. Nothing is added to the prompt unless Chief calls it. It replaces the Postgres image, so the rollout restarts the database. No retrieval evaluation yet; that decides whether it stays. See [recall](recall.md) and [journal 143](journey/143-recall-with-pgvector.md).
+Chief gets `memory_recall`, which searches past messages and memories by meaning and keyword with pgvector in the existing Postgres. Nothing is added to the prompt unless Chief calls it. Released through the operator rollout, which replaced the Postgres image. A first operator-written evaluation favours keeping it: meaning search found 34 of 43 reworded questions, where today's search found none. It also found a fusion fault, with the fix in progress. Whether Chief calls the tool well is not measured. See [recall](recall.md) and [journal 143](journey/143-recall-with-pgvector.md).
 
 # Learner refusals and prompt budget — proposed, 1 November 2026
 

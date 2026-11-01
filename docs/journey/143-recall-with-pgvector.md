@@ -1,7 +1,7 @@
 # 143 — Can Chief find what the owner half-remembers?
 
 Work date: 2026-11-01. Written: 2026-11-01.
-Status: tested on synthetic data and in CI; not deployed. No retrieval evaluation yet, so nothing here shows that it answers better.
+Status: released in `48d22d1` on 1 November with the operator rollout. A first operator-written evaluation favours keeping it and found one fusion fault. Chief's real use is not measured.
 
 ## User-visible problem and preceding iteration
 
@@ -51,4 +51,19 @@ Re-review of `06fe7fe` (Opus 5.5, 1 November): changes requested. All the earlie
 - 1,452 TypeScript tests pass locally, and the 18 rollout tests pass.
 - The image has not been built on this laptop, because Docker is not running here. Its first real build was in CI on `edd6a13` (1 November), where the Postgres smoke test passed on it. That is a fresh database, not the production volume.
 - CI on `edd6a13` failed 20 script tests: `scripts/gathering-boundaries.test.mjs` applies every migration on a PGlite without `vector`. I had fixed two such tests but not this one or `evals/context/replay.ts`. Both now load it.
-- Pending: review, CI, the owner's go-ahead for the rollout, the backfill, then the [evaluation](../recall.md#evaluation), which decides whether this stays.
+
+Final review: Opus 5.5 approved `1af0c48` on 1 November, after CI run 41272989257 passed on that head, including the final image loading pgvector and answering a distance query.
+
+### Release closure — 2026-11-01
+
+- PR [392](https://github.com/akhilvuputuri/chief-agent/pull/392), approved head `1af0c48`, merged as `48d22d1` with no diff from that head. The owner gave the go-ahead for the merge and rollout.
+- **Measured:** `scripts/deploy-pgvector.py` exited 0 with migration 34 and `chief-postgres:17-alpine-pgvector-0.8.7`. A fresh backup was written at 06:15:28 UTC. Afterwards the server was 17.11 with pgvector 0.8.7, provider `c`, `en_US.utf8`, and the production data volume read normally.
+- **Release:** the merge's release workflow failed at 06:16:51, then passed on rerun. It restarted the gateway once more, at 06:17:50. Its failure reason is not recorded here because the failed log showed only the exit code.
+- **Backfill (measured):** two passes, 585 sources and 616 vectors, 1.9 MB, no skipped source.
+- Downtime was not measured.
+
+### Evaluation — 2026-11-01
+
+See [recall](../recall.md#evaluation). As released, fusion found fewer than meaning search alone: 14 against 21 of 27 reworded questions. A message with any-word keyword hits in both lists outranked the best meaning match. Requiring all words matched meaning search on both reworded sets (21 and 13 of 16), and found all 18 word-based questions.
+
+This corrects a design choice, not the mail evaluation: mail's keywords come from precise Gmail queries, so its result did not predict this. These are operator-written questions, so they favour meaning search and are not owner acceptance.
