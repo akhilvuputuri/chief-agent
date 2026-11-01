@@ -137,11 +137,11 @@ stage script_started
 cat > /etc/chief-box/env <<'CHIEF_BOX_ENV'
 ${env}
 CHIEF_BOX_ENV
-dnf install -y docker
+command -v docker >/dev/null || dnf install -y docker
 stage docker_installed
 systemctl enable --now docker
 stage docker_started
-docker pull '${request.image}'
+docker image inspect '${request.image}' >/dev/null 2>&1 || docker pull '${request.image}'
 stage image_pulled
 cid=$(docker create '${request.image}')
 install -d -m 0755 /opt/chief-box

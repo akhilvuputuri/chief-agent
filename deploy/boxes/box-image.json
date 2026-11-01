@@ -1,0 +1,258 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Chief coding box image (docs/boxes.md): a weekly Image Builder pipeline that bakes Docker and the pinned worker image into Amazon Linux 2023 and publishes the AMI through an SSM parameter. Boxes use it only once the boxes stack's CodingImage parameter points at that parameter.",
+  "Parameters": {
+    "Environment": {
+      "Type": "String",
+      "Default": "prod",
+      "AllowedPattern": "^[a-z][a-z0-9-]{1,30}$",
+      "Description": "chief:env value; must equal the boxes stack's Environment"
+    },
+    "VpcId": { "Type": "AWS::EC2::VPC::Id" },
+    "SubnetId": {
+      "Type": "AWS::EC2::Subnet::Id",
+      "Description": "A public subnet that assigns public IPs; the boxes stack's subnet qualifies"
+    },
+    "BuildInstanceType": { "Type": "String", "Default": "t3.medium" }
+  },
+  "Resources": {
+    "BuildSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Chief box image builds: no inbound access; outbound HTTPS and HTTP only",
+        "VpcId": { "Ref": "VpcId" },
+        "SecurityGroupEgress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 443,
+            "ToPort": 443,
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 80,
+            "ToPort": 80,
+            "CidrIp": "0.0.0.0/0"
+          }
+        ],
+        "Tags": [{ "Key": "chief:env", "Value": { "Ref": "Environment" } }]
+      }
+    },
+    "BuildRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "Description": "Build and test instances for the Chief box image. Never attached to a box.",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": { "Service": "ec2.amazonaws.com" },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/EC2InstanceProfileForImageBuilder",
+          "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+        ]
+      }
+    },
+    "BuildInstanceProfile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": { "Roles": [{ "Ref": "BuildRole" }] }
+    },
+    "BakeComponent": {
+      "Type": "AWS::ImageBuilder::Component",
+      "Properties": {
+        "Name": { "Fn::Sub": "chief-box-${Environment}-coding-bake" },
+        "Platform": "Linux",
+        "Version": "1.0.0",
+        "Description": "Docker and the worker image pinned on main; no secrets",
+        "Data": {
+          "Fn::Join": [
+            "\n",
+            [
+              "name: chief-box-coding-bake",
+              "schemaVersion: 1.0",
+              "phases:",
+              "  - name: build",
+              "    steps:",
+              "      - name: Bake",
+              "        action: ExecuteBash",
+              "        inputs:",
+              "          commands:",
+              "            - |",
+              "              set -euo pipefail",
+              "              dnf install -y docker",
+              "              systemctl start docker",
+              "              image=$(curl -fsSL https://raw.githubusercontent.com/akhilvuputuri/chief-agent/main/config/boxes.json |",
+              "              python3 -c 'import json,re,sys; i=json.load(sys.stdin)[\"profiles\"][\"coding\"][\"image\"]; sys.exit(\"unsafe image\") if not re.fullmatch(r\"[a-z0-9./_-]+@sha256:[a-f0-9]{64}\",i) else print(i)')",
+              "              docker pull \"$image\"",
+              "              printf '%s\\n' \"$image\" > /etc/chief-box-baked-image",
+              ""
+            ]
+          ]
+        }
+      }
+    },
+    "TestComponent": {
+      "Type": "AWS::ImageBuilder::Component",
+      "Properties": {
+        "Name": { "Fn::Sub": "chief-box-${Environment}-coding-test" },
+        "Platform": "Linux",
+        "Version": "1.0.0",
+        "Description": "An instance launched from the new image has Docker and the worker image",
+        "Data": {
+          "Fn::Join": [
+            "\n",
+            [
+              "name: chief-box-coding-test",
+              "schemaVersion: 1.0",
+              "phases:",
+              "  - name: test",
+              "    steps:",
+              "      - name: BakedImagePresent",
+              "        action: ExecuteBash",
+              "        inputs:",
+              "          commands:",
+              "            - |",
+              "              set -euo pipefail",
+              "              systemctl start docker",
+              "              docker image inspect \"$(cat /etc/chief-box-baked-image)\" > /dev/null",
+              ""
+            ]
+          ]
+        }
+      }
+    },
+    "Recipe": {
+      "Type": "AWS::ImageBuilder::ImageRecipe",
+      "Properties": {
+        "Name": { "Fn::Sub": "chief-box-${Environment}-coding" },
+        "Version": "1.0.0",
+        "ParentImage": "ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64",
+        "Components": [
+          { "ComponentArn": { "Ref": "BakeComponent" } },
+          { "ComponentArn": { "Ref": "TestComponent" } }
+        ],
+        "BlockDeviceMappings": [
+          {
+            "DeviceName": "/dev/xvda",
+            "Ebs": {
+              "VolumeType": "gp3",
+              "VolumeSize": 12,
+              "DeleteOnTermination": true
+            }
+          }
+        ]
+      }
+    },
+    "Infrastructure": {
+      "Type": "AWS::ImageBuilder::InfrastructureConfiguration",
+      "Properties": {
+        "Name": { "Fn::Sub": "chief-box-${Environment}-coding" },
+        "InstanceProfileName": { "Ref": "BuildInstanceProfile" },
+        "InstanceTypes": [{ "Ref": "BuildInstanceType" }],
+        "SubnetId": { "Ref": "SubnetId" },
+        "SecurityGroupIds": [{ "Ref": "BuildSecurityGroup" }],
+        "TerminateInstanceOnFailure": true,
+        "InstanceMetadataOptions": {
+          "HttpTokens": "required",
+          "HttpPutResponseHopLimit": 1
+        }
+      }
+    },
+    "Distribution": {
+      "Type": "AWS::ImageBuilder::DistributionConfiguration",
+      "Properties": {
+        "Name": { "Fn::Sub": "chief-box-${Environment}-coding" },
+        "Distributions": [
+          {
+            "Region": { "Ref": "AWS::Region" },
+            "AmiDistributionConfiguration": {
+              "Name": {
+                "Fn::Sub": "chief-box-${Environment}-coding-{{ imagebuilder:buildDate }}"
+              },
+              "AmiTags": { "chief:box-image": { "Ref": "Environment" } }
+            },
+            "SsmParameterConfigurations": [
+              {
+                "ParameterName": {
+                  "Fn::Sub": "/chief/boxes/${Environment}/coding-ami"
+                },
+                "DataType": "aws:ec2:image"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "Pipeline": {
+      "Type": "AWS::ImageBuilder::ImagePipeline",
+      "Properties": {
+        "Name": { "Fn::Sub": "chief-box-${Environment}-coding" },
+        "Status": "ENABLED",
+        "ImageRecipeArn": { "Ref": "Recipe" },
+        "InfrastructureConfigurationArn": { "Ref": "Infrastructure" },
+        "DistributionConfigurationArn": { "Ref": "Distribution" },
+        "ImageTestsConfiguration": { "ImageTestsEnabled": true },
+        "Schedule": {
+          "ScheduleExpression": "rate(7 days)",
+          "PipelineExecutionStartCondition": "EXPRESSION_MATCH_ONLY"
+        }
+      }
+    },
+    "RetentionRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "Description": "Deletes old Chief box images and their snapshots",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": { "Service": "imagebuilder.amazonaws.com" },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/service-role/EC2ImageBuilderLifecycleExecutionPolicy"
+        ]
+      }
+    },
+    "Retention": {
+      "Type": "AWS::ImageBuilder::LifecyclePolicy",
+      "DependsOn": "Recipe",
+      "Properties": {
+        "Name": { "Fn::Sub": "chief-box-${Environment}-coding" },
+        "ResourceType": "AMI_IMAGE",
+        "ExecutionRole": { "Fn::GetAtt": ["RetentionRole", "Arn"] },
+        "PolicyDetails": [
+          {
+            "Action": {
+              "Type": "DELETE",
+              "IncludeResources": { "Amis": true, "Snapshots": true }
+            },
+            "Filter": { "Type": "COUNT", "Value": 3 }
+          }
+        ],
+        "ResourceSelection": {
+          "Recipes": [
+            {
+              "Name": { "Fn::Sub": "chief-box-${Environment}-coding" },
+              "SemanticVersion": "x.x.x"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "ImageParameter": {
+      "Value": { "Fn::Sub": "/chief/boxes/${Environment}/coding-ami" }
+    },
+    "PipelineArn": { "Value": { "Ref": "Pipeline" } }
+  }
+}

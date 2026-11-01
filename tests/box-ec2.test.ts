@@ -11,6 +11,7 @@ import {
   AP_SOUTHEAST_1_IDENTITY_CERT,
   Ec2BoxProvider,
   boxUserData,
+  launchPatterns,
   runInstancesInput,
 } from "../src/boxes/ec2-provider.js";
 import {
@@ -53,7 +54,9 @@ test("the bootstrap script is valid bash, pins the image and isolates the agent"
     "iptables -I DOCKER-USER -d 169.254.169.254 -j DROP",
     "ExecStart=/opt/chief-box/node /opt/chief-box/boxes/agent-main.js",
     "ExecStartPre=/opt/chief-box/firewall.sh",
-    `docker pull '${image}'`,
+    // A baked image already holds Docker and the worker image; stock Amazon Linux does not.
+    "command -v docker >/dev/null || dnf install -y docker",
+    `docker image inspect '${image}' >/dev/null 2>&1 || docker pull '${image}'`,
   ])
     assert.ok(script.includes(line), line);
   // The environment file is written with a quoted heredoc: nothing in it is expanded.
@@ -464,6 +467,95 @@ test("the CloudFormation template keeps boxes closed and the controller narrow",
   assert.equal(
     tagging.Condition.StringEquals["ec2:CreateAction"],
     "RunInstances",
+  );
+  // Boxes stay on stock Amazon Linux until the owner points CodingImage at the baked image.
+  const stock =
+    "resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64";
+  assert.equal(template.Parameters.CodingImage.Default, stock);
+  const imageChoice = new RegExp(
+    template.Parameters.CodingImage.AllowedPattern,
+  );
+  assert.ok(imageChoice.test(stock));
+  assert.ok(imageChoice.test("resolve:ssm:/chief/boxes/prod/coding-ami"));
+  assert.ok(!imageChoice.test("ami-0dad20bd1b9c8c004"));
+  assert.ok(!imageChoice.test("resolve:ssm:/somewhere/else"));
+  assert.deepEqual(
+    resources.CodingLaunchTemplate.Properties.LaunchTemplateData.ImageId,
+    { Ref: "CodingImage" },
+  );
+  assert.equal(
+    resources.EchoLaunchTemplate.Properties.LaunchTemplateData.ImageId,
+    stock,
+  );
+  const baked = statements.find((s: any) => s.Sid === "LaunchBakedBoxImages");
+  assert.deepEqual(baked.Condition.StringEquals, {
+    "ec2:Owner": { Ref: "AWS::AccountId" },
+    "ec2:ResourceTag/chief:box-image": { Ref: "Environment" },
+  });
+});
+
+test("the box image stack builds from reviewed pins and never reaches a box", async () => {
+  const template = JSON.parse(
+    await readFile(
+      new URL("../deploy/boxes/box-image.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const resources = template.Resources;
+  const lines = (name: string): string[] =>
+    resources[name].Properties.Data["Fn::Join"][1];
+  const bake = lines("BakeComponent").join("\n");
+  assert.ok(bake.length <= 16000);
+  assert.ok(bake.includes("akhilvuputuri/chief-agent/main/config/boxes.json"));
+  assert.ok(!/AWS_|TOKEN|SECRET|PASSWORD/i.test(bake));
+
+  // The digest extraction accepts the reviewed pin and refuses anything else.
+  const extract = /python3 -c '(.+)'\)$/m.exec(bake)![1];
+  const run = (input: string) =>
+    spawnSync("python3", ["-c", extract], { input, encoding: "utf8" });
+  const pinned = run(
+    await readFile(new URL("../config/boxes.json", import.meta.url), "utf8"),
+  );
+  assert.equal(pinned.status, 0, pinned.stderr);
+  assert.match(pinned.stdout.trim(), launchPatterns.image);
+  for (const unsafe of ["ghcr.io/a/b:latest", "a@sha256:abc; reboot"])
+    assert.notEqual(
+      run(JSON.stringify({ profiles: { coding: { image: unsafe } } })).status,
+      0,
+      unsafe,
+    );
+
+  // A test phase alone makes it a test component, which runs on an instance from the new AMI.
+  const test_ = lines("TestComponent").join("\n");
+  assert.ok(/^  - name: test$/m.test(test_));
+  assert.ok(!/^  - name: build$/m.test(test_));
+
+  const distribution = resources.Distribution.Properties.Distributions[0];
+  assert.deepEqual(distribution.SsmParameterConfigurations, [
+    {
+      ParameterName: { "Fn::Sub": "/chief/boxes/${Environment}/coding-ami" },
+      DataType: "aws:ec2:image",
+    },
+  ]);
+  assert.deepEqual(distribution.AmiDistributionConfiguration.AmiTags, {
+    "chief:box-image": { Ref: "Environment" },
+  });
+  assert.equal(
+    distribution.AmiDistributionConfiguration.LaunchPermission,
+    undefined,
+  );
+  assert.equal(
+    resources.Pipeline.Properties.Schedule.PipelineExecutionStartCondition,
+    "EXPRESSION_MATCH_ONLY",
+  );
+  assert.equal(
+    resources.Infrastructure.Properties.InstanceMetadataOptions.HttpTokens,
+    "required",
+  );
+  assert.equal(resources.Infrastructure.Properties.KeyPair, undefined);
+  assert.equal(
+    resources.BuildSecurityGroup.Properties.SecurityGroupIngress,
+    undefined,
   );
 });
 
